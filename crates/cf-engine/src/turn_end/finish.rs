@@ -171,15 +171,6 @@ impl Dispatcher {
             })?;
         // The task may have moved while the window was read.
         let (thread, _, _) = self.finishable(project, number)?;
-        let none = || {
-            refused(
-                "no-answer",
-                format!(
-                    "cannot finish T-{number}: @{} has written no complete answer since its latest message about it; wait for one, or cancel it",
-                    participant.handle
-                ),
-            )
-        };
         let items = observed.items();
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         let start = self
@@ -196,6 +187,24 @@ impl Dispatcher {
         // Where torn-line counts the lines its record lost from (`lost_in_turn`): the paste of
         // the latest message about the task, before any later one (3.0.6-alpha.3's integration B).
         let delivered = self.delivered_at(participant.id, &thread, items)?;
+        let lost = lost_in_turn(record, &observed, delivered);
+        // A line lost in the turn may have been the answer: the refusal says so (Calliope's
+        // P3 (a), T-624).
+        let none = || {
+            let handle = &participant.handle;
+            let because = match lost {
+                Some(line) => format!(
+                    "; a line of @{handle}'s record was lost (record {line}) in the turn, which may have been its answer: send it a message about the task, or cancel it"
+                ),
+                None => "; wait for one, or cancel it".to_owned(),
+            };
+            refused(
+                "no-answer",
+                format!(
+                    "cannot finish T-{number}: @{handle} has written no complete answer since its latest message about it{because}"
+                ),
+            )
+        };
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)
             .ok_or_else(none)?;
@@ -217,11 +226,7 @@ impl Dispatcher {
             ));
         }
         let pending = observed.pending();
-        let words = with_lost(
-            words_of(&run),
-            &participant.handle,
-            lost_in_turn(record, &observed, delivered),
-        );
+        let words = with_lost(words_of(&run), &participant.handle, lost);
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),

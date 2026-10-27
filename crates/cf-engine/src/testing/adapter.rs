@@ -83,6 +83,8 @@ pub struct FakeAgent {
     pub stored: HashMap<String, Vec<String>>,
     /// Those of them that cannot be read: Devin's of a session its store holds no row of.
     pub records_unreadable: Vec<String>,
+    /// The lines each of those records lost, as its last look had them.
+    pub lost_records: HashMap<String, Vec<usize>>,
     /// Why the window has not said which conversation it shows yet.
     pub unnamed: Option<String>,
     /// How often the engine told the window it pressed the interrupt keys.
@@ -640,9 +642,12 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             let shown = agent.shows.clone().unwrap_or_else(|| agent.native.clone());
             let items = std::mem::take(&mut agent.items);
+            let lost = std::mem::take(&mut agent.lost);
             agent.records_settled.insert(shown.clone(), agent.settled);
-            agent.records.insert(shown, items);
+            agent.records.insert(shown.clone(), items);
+            agent.lost_records.insert(shown, lost);
             agent.items = agent.records.get(native).cloned().unwrap_or_default();
+            agent.lost = agent.lost_records.get(native).cloned().unwrap_or_default();
             agent.shows = Some(native.to_owned());
             agent.settled = true;
             agent.pending = Pending::default();
@@ -694,10 +699,6 @@ impl FakeAdapter {
             .map_or(Some(true), |agent| agent.resumable)
     }
 
-    /// What the record of `session` holds (`adapter.record`): the latest
-    /// window's on it, none where no window had it, and whether the turn it
-    /// ends in is over (an agent that was never answered is in one still, as a
-    /// window the app's quit cut).
     /// The lines the record of `session` lost, as its last window's reading had them.
     fn lost_of(&self, session: &str) -> Vec<usize> {
         let agents = self.agents.borrow();
@@ -709,6 +710,10 @@ impl FakeAdapter {
             .unwrap_or_default()
     }
 
+    /// What the record of `session` holds (`adapter.record`): the latest
+    /// window's on it, none where no window had it, and whether the turn it
+    /// ends in is over (an agent that was never answered is in one still, as a
+    /// window the app's quit cut).
     pub(super) fn record_of(&self, session: &str) -> Option<(Vec<Item>, bool)> {
         let agents = self.agents.borrow();
         agents
@@ -881,6 +886,7 @@ impl Asked {
             records_settled: HashMap::new(),
             stored: HashMap::new(),
             records_unreadable: Vec::new(),
+            lost_records: HashMap::new(),
             unnamed: None,
             interrupted: 0,
             stops_when_interrupted: false,

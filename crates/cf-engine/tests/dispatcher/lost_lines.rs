@@ -11,11 +11,15 @@
 //! its task, and its result is the final answer of the turn its job's end wakes, or
 //! the last complete answer `cf task finish` takes: a line lost in the turn may have
 //! been that answer, so either result is marked, ahead of what ConsensFlow says of
-//! the leftovers. Node had no such lines, so none of these is held to a Node trace.
+//! the leftovers, and so is the note that says it goes on in the background. A line
+//! lost in a turn that comes to no result (its final answer, or the record that ends
+//! it, may be the line) is said to the requester once, and Finish's refusal names it
+//! (T-628, Calliope's T-624). Node had no such lines, so none of these is held to a
+//! Node trace.
 
 use cf_engine::testing::Context;
-use cf_harness::records::Pending;
-use cf_ledger::NewTask;
+use cf_harness::records::{Pending, Role};
+use cf_ledger::{NewNote, NewTask};
 
 use crate::fixtures::{given, Tiers};
 
@@ -368,5 +372,252 @@ fn a_task_finished_past_a_line_lost_before_its_turn_has_its_result_unmarked() {
             .iter()
             .any(|result| result.starts_with("Lexing in the background\n\n(ConsensFlow: Finished")),
         "{results:?}"
+    );
+}
+
+/// The notes the chief was told that T-1's turn may have lost its last line.
+fn may_have_lost(tiers: &Tiers<'_>) -> Vec<String> {
+    tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.starts_with("T-1's turn may have lost its last line"))
+        .collect()
+}
+
+/// T-1's turn loses a line and comes to no result: its record says no end of it
+/// (`under_way`), or an end with no complete answer. The chief is told once, and Finish,
+/// refused for want of an answer, names the line.
+fn lost_in_a_turn_that_does_not_end(context: &Context, under_way: bool) {
+    let tiers = working(context);
+    let worker = tiers.assignee(1);
+    if under_way {
+        context.adapter.busy("zeus");
+    } else {
+        // Its record says the turn ended on words that are no complete answer.
+        context
+            .adapter
+            .writes("zeus", "Reading the grammar", "2026-10-26T06:00:00.000Z");
+        context.adapter.with("zeus", |agent| agent.settled = true);
+    }
+    let place = context.adapter.loses_a_line("zeus");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working");
+    let told = may_have_lost(&tiers);
+    assert_eq!(told.len(), 1, "told once: {told:?}");
+    assert!(
+        told[0].contains(&format!(
+            "a line of @{worker}'s record was lost (record {place}) in the turn"
+        )),
+        "{told:?}"
+    );
+    assert!(told[0].contains("cf task finish T-1"), "{told:?}");
+
+    let refused = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        refused,
+        format!(
+            "cannot finish T-1: @{worker} has written no complete answer since its latest message about it; a line of @{worker}'s record was lost (record {place}) in the turn, which may have been its answer: send it a message about the task, or cancel it"
+        )
+    );
+}
+
+#[test]
+fn a_line_lost_in_a_turn_that_has_not_ended_is_told_to_the_chief_once_and_finish_names_it() {
+    lost_in_a_turn_that_does_not_end(&Context::new(), true);
+}
+
+#[test]
+fn a_line_lost_in_a_turn_that_ended_with_no_answer_is_told_to_the_chief_once_and_finish_names_it() {
+    lost_in_a_turn_that_does_not_end(&Context::new(), false);
+}
+
+#[test]
+fn devins_line_lost_in_a_turn_that_has_not_ended_is_told_to_the_chief_once_and_finish_names_it() {
+    let context = Context::new();
+    context.adapter.says_places.set(false);
+    lost_in_a_turn_that_does_not_end(&context, true);
+}
+
+#[test]
+fn a_held_turn_that_lost_a_line_says_so_in_the_note_that_it_goes_on_and_is_not_told_again() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let worker = tiers.assignee(1);
+    let place = context.adapter.loses_a_line("zeus");
+    context
+        .adapter
+        .answer_leaving("zeus", "The build runs", A_JOB);
+    context.pass().unwrap();
+    let held: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.starts_with("T-1 goes on in the background"))
+        .collect();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert!(
+        held[0].ends_with(&marked("The build runs", &worker, place)),
+        "{held:?}"
+    );
+    // The turn its job's end wakes is under way: the line was said.
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(may_have_lost(&tiers), Vec::<String>::new());
+}
+
+#[test]
+fn a_line_lost_before_a_compaction_summary_that_quotes_the_brief_is_still_said_by_the_window() {
+    // The summary restates the brief's paste, and is no paste of it: the turn the window
+    // says it lost a line in is still the brief's.
+    let context = Context::new();
+    let tiers = working(&context);
+    let worker = tiers.assignee(1);
+    let place = context.adapter.loses_a_line("zeus");
+    context.pass().unwrap();
+    let said = Some(format!(
+        "a line of @{worker}'s record was lost (record {place})"
+    ));
+    assert_eq!(reason(&context, &tiers, &worker), said);
+    let brief = context
+        .adapter
+        .agent("zeus")
+        .items
+        .iter()
+        .find(|item| item.role == Role::User)
+        .expect("the brief's paste")
+        .text
+        .to_string();
+    let mut summary = context.adapter.item(Role::User, &brief);
+    summary.compaction = true;
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.push(summary));
+    context.pass().unwrap();
+    assert_eq!(reason(&context, &tiers, &worker), said);
+}
+
+#[test]
+fn devins_note_handed_over_while_its_task_is_held_leaves_the_count_its_lost_lines_are_counted_from()
+{
+    // T-1's turn loses a line and ends with its job running; while it is held, the chief's
+    // ConsensFlow's note about it goes into the window at rest, which is no message the
+    // task's result is taken from. The result the job's end brings is still marked.
+    let context = Context::new();
+    context.adapter.says_places.set(false);
+    let tiers = working(&context);
+    let worker = tiers.assignee(1);
+    let place = context.adapter.loses_a_line("zeus");
+    context
+        .adapter
+        .answer_leaving("zeus", "The build runs", A_JOB);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "held for its job");
+    context
+        .ledger
+        .borrow_mut()
+        .note(
+            tiers.project.id,
+            &NewNote {
+                from: None,
+                to: worker.clone(),
+                task: Some(1),
+                body: "Mind the disk".to_owned(),
+            },
+        )
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(
+        given(&context, "zeus")
+            .iter()
+            .any(|text| text.contains("Mind the disk")),
+        "{:?}",
+        given(&context, "zeus")
+    );
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Build green");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        results(&context, &tiers),
+        [marked("Build green", &worker, place)]
+    );
+}
+
+#[test]
+fn devins_window_begun_afresh_counts_its_lost_lines_from_none_whatever_the_last_conversation_lost()
+{
+    // The host proves no window's program gone, so T-2 goes on in a new conversation.
+    let context = Context::new();
+    context.adapter.says_places.set(false);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let worker = tiers.assignee(1);
+    context.adapter.loses_a_line("zeus");
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+
+    follow_up(&context, &tiers);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert_eq!(
+        context.adapter.prepared().last().unwrap()["resume"],
+        serde_json::Value::Null,
+        "a new conversation"
+    );
+    let place = context.adapter.loses_a_line("zeus");
+    context.adapter.answer("zeus", "Lexer done");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "done");
+    let results = results(&context, &tiers);
+    assert!(
+        results.contains(&marked("Lexer done", &worker, place)),
+        "{results:?}"
+    );
+}
+
+#[test]
+fn devins_window_switched_to_another_conversation_counts_its_lost_lines_afresh() {
+    // T-2 follows T-1 past a line T-1's conversation lost, and the human switches the
+    // window to another conversation, which loses a line: the window says that one.
+    let context = Context::new();
+    context.adapter.says_places.set(false);
+    context.adapter.resumes_records.set(true);
+    let tiers = working(&context);
+    let worker = tiers.assignee(1);
+    context.adapter.loses_a_line("zeus");
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    follow_up(&context, &tiers);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert_eq!(reason(&context, &tiers, &worker), None, "T-2 lost nothing");
+
+    context.adapter.switch_to("zeus", "native-other");
+    context.pass().unwrap();
+    let place = context.adapter.loses_a_line("zeus");
+    context.pass().unwrap();
+    assert_eq!(
+        reason(&context, &tiers, &worker),
+        Some(format!(
+            "a line of @{worker}'s record was lost (record {place})"
+        ))
     );
 }

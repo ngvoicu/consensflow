@@ -160,8 +160,8 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "            lost_in_turn(record, observed, Some(start)),\n"
-replace = "            lost_in_turn(record, observed, Some(start)).filter(|_| false),\n"
+find = "        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);\n"
+replace = "        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost.filter(|_| false));\n"
 
 [[plant]]
 name = "torn line: the window's activity says nothing of a line lost in its turn"
@@ -333,10 +333,8 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '''            lost_in_turn(record, &observed, delivered),
-'''
-replace = '''            lost_in_turn(record, &observed, delivered).filter(|_| false),
-'''
+find = "        let words = with_lost(words_of(&run), &participant.handle, lost);\n"
+replace = "        let words = with_lost(words_of(&run), &participant.handle, lost.filter(|_| false));\n"
 
 [[plant]]
 name = "torn line: a finished task's turn is counted from the start of its record"
@@ -345,10 +343,8 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '''            lost_in_turn(record, &observed, delivered),
-'''
-replace = '''            lost_in_turn(record, &observed, Some(0)),
-'''
+find = "        let lost = lost_in_turn(record, &observed, delivered);\n"
+replace = "        let lost = lost_in_turn(record, &observed, Some(0));\n"
 
 [[plant]]
 name = "torn line: a finished task's result says its lost line after ConsensFlow's word on the leftovers"
@@ -357,11 +353,8 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '''        let words = with_lost(
-            words_of(&run),
-            &participant.handle,
-            lost_in_turn(record, &observed, delivered),
-        );
+find = """
+        let words = with_lost(words_of(&run), &participant.handle, lost);
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
@@ -372,8 +365,8 @@ replace = '''        let body = with_lost(
                 &leftovers(&participant.handle, pending, Some(by), observed.settled),
             ),
             &participant.handle,
-            lost_in_turn(record, &observed, delivered),
-        );'''
+            lost,
+        );"""
 
 [[plant]]
 name = "torn line: a held turn's result its job's end brings forgets the line the turn lost"
@@ -382,18 +375,137 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "            lost_in_turn(record, observed, Some(start)),\n"
-replace = "            lost_in_turn(record, observed, Some(start)).filter(|_| record.held.borrow().told.is_none()),\n"
+find = "        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);\n"
+replace = "        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost.filter(|_| record.held.borrow().told.is_none()));\n"
+
+# Round 5 (T-628, Calliope's re-check T-624): a turn that lost a line and comes to no result
+# is told to its requester once, and Finish's refusal names the line (a); the note that a task
+# goes on in the background says the line (b); the count Devin's turns are counted from is the
+# conversation's own, after a switch (c), a fresh launch and a note that rides in (d); a
+# compaction's summary is no paste for the window's activity (e).
+
+[[plant]]
+name = "torn line: a turn under way that lost a line tells its requester nothing"
+meant = "a_line_lost_in_a_turn_that_has_not_ended_is_told_to_the_chief_once_and_finish_names_it"
+runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = """
-        record.held.borrow_mut().reset();
-        let words = with_lost("""
+        if !observed.settled {
+            self.tell_lost(project, participant, record, &thread, lost)?;"""
 replace = """
-        let words = with_lost("""
+        if !observed.settled {"""
+
+[[plant]]
+name = "torn line: a turn that ended with no answer and lost a line tells its requester nothing"
+meant = "a_line_lost_in_a_turn_that_ended_with_no_answer_is_told_to_the_chief_once_and_finish_names_it"
+runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "        let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));\n"
-replace = "        record.held.borrow_mut().reset();\n        let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));\n"
+find = """
+        else {
+            self.tell_lost(project, participant, record, &thread, lost)?;
+            return Ok(Turn::Open);"""
+replace = """
+        else {
+            return Ok(Turn::Open);"""
+
+[[plant]]
+name = "torn line: a turn that lost a line and comes to no result is told at every pass"
+meant = "a_line_lost_in_a_turn_that_has_not_ended_is_told_to_the_chief_once_and_finish_names_it"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        record.held.borrow_mut().lost_said = Some(line);\n"
+replace = ""
+
+[[plant]]
+name = "torn line: Finish's refusal for want of an answer says nothing of a line lost in the turn"
+meant = "a_line_lost_in_a_turn_that_has_not_ended_is_told_to_the_chief_once_and_finish_names_it"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "            let because = match lost {"
+replace = "            let because = match lost.filter(|_| false) {"
+
+[[plant]]
+name = "torn line: the note that a task goes on in the background says nothing of a line lost in its turn"
+meant = "a_held_turn_that_lost_a_line_says_so_in_the_note_that_it_goes_on_and_is_not_told_again"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                self.tell_it_goes_on(project, participant, &thread, &said, &words)?;"
+replace = "                self.tell_it_goes_on(project, participant, &thread, &said, &words_of(&answers.final_run))?;"
+
+[[plant]]
+name = "torn line: a line the hold's note said is told again when the woken turn is under way"
+meant = "a_held_turn_that_lost_a_line_says_so_in_the_note_that_it_goes_on_and_is_not_told_again"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                held.lost_said = held.lost_said.or(lost);"
+replace = "                let _ = &held.lost_said;"
+
+[[plant]]
+name = "torn line: each look leaves the count of the record's lost lines as it was"
+meant = "devins_message_pasted_into_an_open_window_begins_a_turn_that_has_lost_nothing_yet"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        record.delivery.borrow_mut().lost = observed.lost().len();"
+replace = "        let _ = observed.lost().len();"
+
+[[plant]]
+name = "torn line: a window switched to another conversation counts its turn from the last one's count"
+meant = "devins_window_switched_to_another_conversation_counts_its_lost_lines_afresh"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = "            delivery.lost_before = None;\n"
+replace = ""
+
+[[plant]]
+name = "torn line: a window begun on a new conversation counts its turn from the last conversation's count"
+meant = "devins_window_begun_afresh_counts_its_lost_lines_from_none_whatever_the_last_conversation_lost"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """
+            if !resumed {
+                delivery.lost = 0;
+            }"""
+replace = ""
+
+[[plant]]
+name = "torn line: a note that rides into a member's window during its task moves the count its turn is counted from"
+meant = "devins_note_handed_over_while_its_task_is_held_leaves_the_count_its_lost_lines_are_counted_from"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if self.begins_a_turn(owner, &begun.message)? {"
+replace = "        if self.begins_a_turn(None, &begun.message)? {"
+
+[[plant]]
+name = "torn line: a compaction's summary that quotes the brief is the window's last paste"
+meant = "a_line_lost_before_a_compaction_summary_that_quotes_the_brief_is_still_said_by_the_window"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = """
+        item.role == Role::User
+            && !item.compaction
+            && header_id(&item.text).is_some_and(|id| is_paste_of(&item.text, id, None))"""
+replace = """
+        item.role == Role::User
+            && header_id(&item.text).is_some_and(|id| is_paste_of(&item.text, id, None))"""
