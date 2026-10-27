@@ -207,6 +207,37 @@ pub fn is_paste_of(text: &str, message_id: i64, first: Option<&str>) -> bool {
     paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker))
 }
 
+/// The shape of `text`, an item that holds message `message_id`'s header where
+/// [`is_paste_of`] takes it for no paste (3.0.7 chief-meeting, CMT-23), for the
+/// issue it is filed in: how many times the header is in it, where the first is (in
+/// characters of the text as the window shows it), what comes before it (`before`:
+/// nothing but space, Claude Code's image placeholders, the opening of its wrapper,
+/// or words), and how long the text is. Nothing of its words is kept.
+pub fn header_shape(text: &str, message_id: i64) -> serde_json::Value {
+    let marker = marker_of(message_id);
+    let shown = window_text(text);
+    let at = shown.find(&marker);
+    let head = at.map_or("", |at| &shown[..at]);
+    let before = if at.is_none() {
+        "none"
+    } else if head.trim().is_empty() {
+        "space"
+    } else if after_placeholders(head.trim_start()).is_some_and(|rest| rest.trim().is_empty()) {
+        "image placeholders"
+    } else if after_wrapper_opening(head.trim_start()).is_some_and(|(_, rest)| rest.trim().is_empty())
+    {
+        "wrapper"
+    } else {
+        "words"
+    };
+    serde_json::json!({
+        "markers": shown.matches(&marker).count(),
+        "offset": head.chars().count(),
+        "before": before,
+        "length": shown.chars().count(),
+    })
+}
+
 /// What follows the image placeholders ([`IMAGE`]) that begin `text`: a run of them, one
 /// space between, each with a number; none where `text` does not begin with one.
 fn after_placeholders(text: &str) -> Option<&str> {

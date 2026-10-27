@@ -366,7 +366,41 @@ impl Ledger {
     ) -> Result<MessageView, LedgerError> {
         #[cfg(feature = "test-support")]
         self.watched("retry_delivery", Some(message_id))?;
-        messages::retry_delivery(&mut self.store, message_id, reason, refund)
+        messages::retry_delivery(&mut self.store, message_id, reason, refund, None)
+    }
+
+    /// [`Ledger::retry_delivery`], its `delivery.retried` saying what the engine's look
+    /// read of the window (`look`, CMT-08).
+    pub fn retry_delivery_looked(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+        refund: bool,
+        look: &Value,
+    ) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("retry_delivery", Some(message_id))?;
+        messages::retry_delivery(&mut self.store, message_id, reason, refund, Some(look))
+    }
+
+    /// When message `message_id` was last handed over to its window: none while it
+    /// is not on its way, or not handed over yet.
+    pub fn handed_at(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::handed_at(&self.store, message_id)
+    }
+
+    /// Message `message_id`, on its way, is taken for arrived though its window's
+    /// record shows it only in an item the proof cannot match (3.0.7 chief-meeting,
+    /// CMT-23): never pasted again, `delivery.unproven` keeps `shape`, and `tell` says
+    /// so once.
+    pub fn confirm_unproven(
+        &mut self,
+        message_id: i64,
+        item: &str,
+        shape: &Value,
+        tell: &NewNote,
+    ) -> Result<MessageView, LedgerError> {
+        messages::confirm_unproven(&mut self.store, message_id, item, shape, tell)
     }
 
     /// A task message that arrived, and that its window took back out of its
@@ -421,7 +455,18 @@ impl Ledger {
         message_id: i64,
         reason: &str,
     ) -> Result<(MessageView, GivenUp), LedgerError> {
-        messages::give_up_delivery(&mut self.store, message_id, reason)
+        messages::give_up_delivery(&mut self.store, message_id, reason, None)
+    }
+
+    /// [`Ledger::give_up_delivery`], its `delivery.failed` saying what the engine's
+    /// look read of the window (`look`, CMT-08).
+    pub fn give_up_delivery_looked(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+        look: &Value,
+    ) -> Result<(MessageView, GivenUp), LedgerError> {
+        messages::give_up_delivery(&mut self.store, message_id, reason, Some(look))
     }
 
     /// ConsensFlow paused T-`number` as its window went away (`because`): its

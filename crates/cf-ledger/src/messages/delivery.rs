@@ -15,7 +15,9 @@ use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
 use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
-use super::{known_message, message_task, messages, require_message, settle_answered};
+use super::{
+    known_message, message_task, messages, require_message, settle_answered, NewNote,
+};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
@@ -316,15 +318,61 @@ pub(crate) fn begin_delivery(
          WHERE id = ?",
             [message_id],
         )?;
-        let mut begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
-        if let Some(look) = look {
-            begun["look"] = look.clone();
-        }
-        store.log(message.project_id, "delivery.begun", begun)?;
+        let begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
+        store.log(message.project_id, "delivery.begun", looked(begun, look))?;
         Ok(Begun {
             message: known_message(store, message_id)?,
             carried: carried(store, message_id)?,
         })
+    })
+}
+
+/// An event's `data` with what the engine's look read of the window, where it says
+/// (`look`: the evidence a delivery's begin, retry or failure is classified by, 3.0.7
+/// chief-meeting CMT-08).
+fn looked(mut data: Value, look: Option<&Value>) -> Value {
+    if let Some(look) = look {
+        data["look"] = look.clone();
+    }
+    data
+}
+
+/// When message `message_id` was last handed over to its window, as the ledger
+/// writes a time: none while it is not on its way, or not handed over yet.
+pub(crate) fn handed_at(store: &Store, message_id: i64) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT handed_at FROM message WHERE id = ? AND state = 'delivering'",
+            [message_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// A message on its way whose window's record holds, after its hand-over, a user
+/// item that carries its header but is no paste of it the proof can match (3.0.7
+/// chief-meeting, CMT-23): it is taken for arrived, unproven (`unproven` in its
+/// receipt), never pasted again; `delivery.unproven` keeps the item's shape for
+/// filing, and `tell` says so, once, to whoever can act on it.
+pub(crate) fn confirm_unproven(
+    store: &mut Store,
+    message_id: i64,
+    item: &str,
+    shape: &Value,
+    tell: &NewNote,
+) -> Result<MessageView, LedgerError> {
+    store.write(|store| {
+        let receipt = json!({ "item": item, "unproven": true });
+        let confirmed = confirm_delivery(store, message_id, Some(&receipt))?;
+        store.log(
+            confirmed.project_id,
+            "delivery.unproven",
+            json!({ "message": message_id, "item": item, "shape": shape }),
+        )?;
+        super::note(store, confirmed.project_id, tell)?;
+        Ok(confirmed)
     })
 }
 
@@ -691,6 +739,7 @@ pub(crate) fn retry_delivery(
     message_id: i64,
     reason: &str,
     refund: bool,
+    look: Option<&Value>,
 ) -> Result<MessageView, LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
@@ -735,7 +784,7 @@ pub(crate) fn retry_delivery(
         store.log(
             message.project_id,
             "delivery.retried",
-            json!({ "message": message_id, "reason": reason }),
+            looked(json!({ "message": message_id, "reason": reason }), look),
         )?;
         store.db.execute(
             "UPDATE message SET carried_by = NULL
@@ -765,7 +814,7 @@ pub(crate) fn fail_delivery(
     message_id: i64,
     reason: &str,
 ) -> Result<MessageView, LedgerError> {
-    give_up_delivery(store, message_id, reason).map(|(message, _)| message)
+    give_up_delivery(store, message_id, reason, None).map(|(message, _)| message)
 }
 
 /// What a delivery given up came to ([`give_up_delivery`]), which only the ledger
@@ -794,6 +843,7 @@ pub(crate) fn give_up_delivery(
     store: &mut Store,
     message_id: i64,
     reason: &str,
+    look: Option<&Value>,
 ) -> Result<(MessageView, GivenUp), LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
@@ -819,7 +869,7 @@ pub(crate) fn give_up_delivery(
         store.log(
             message.project_id,
             "delivery.failed",
-            json!({ "message": message_id, "reason": reason }),
+            looked(json!({ "message": message_id, "reason": reason }), look),
         )?;
         if let Some(task) = message_task(store, message_id)? {
             release_carried(store, task.id)?;

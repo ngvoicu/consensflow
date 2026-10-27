@@ -145,6 +145,9 @@ pub(crate) struct DeliveryPart {
     /// What the look that let the message at the head of its queue go read, for the
     /// fresh look before its paste and for its `delivery.begun` (`pacing`).
     pub(crate) paced: Option<crate::pacing::Paced>,
+    /// What the looks read of the window while the message on its way, or the last,
+    /// was on its way (`arrival`), for its retry or failure to say.
+    pub(crate) watched: Option<crate::arrival::Watched>,
 }
 
 /// A paste whose Enter was withheld, left in its window's input box.
@@ -1221,17 +1224,30 @@ impl Dispatcher {
         because: &str,
         retry: bool,
     ) -> Result<(), EngineError> {
+        self.settle_failure_looked(delivering, because, retry, None)
+    }
+
+    /// [`Dispatcher::settle_failure`], its retry or failure saying what the look that
+    /// settled it read of the window (`look`, CMT-08), where one did.
+    pub(crate) fn settle_failure_looked(
+        &self,
+        delivering: Delivering,
+        because: &str,
+        retry: bool,
+        look: Option<&Value>,
+    ) -> Result<(), EngineError> {
         let message = self.seams.ledger.borrow().message(delivering.message)?;
         let Some(message) = message.filter(|found| found.state == "delivering") else {
             return Ok(());
         };
         if retry && message.attempts < i64::from(self.seams.limits.max_attempts) {
-            self.seams
-                .ledger
-                .borrow_mut()
-                .retry_delivery(message.id, because, false)?;
+            let mut ledger = self.seams.ledger.borrow_mut();
+            match look {
+                Some(look) => ledger.retry_delivery_looked(message.id, because, false, look)?,
+                None => ledger.retry_delivery(message.id, because, false)?,
+            };
         } else {
-            self.fail_delivery(&message, because)?;
+            self.fail_delivery(&message, because, look)?;
         }
         self.changed();
         Ok(())
@@ -1249,12 +1265,19 @@ impl Dispatcher {
     /// resume a paused task paused it again: its requester hears why in the note of the
     /// pause (the ledger's), and the human, once, that they did not reach the window.
     /// The ledger says which it did ([`GivenUp`]): no state is read for it.
-    fn fail_delivery(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
-        let (_, given_up) = self
-            .seams
-            .ledger
-            .borrow_mut()
-            .give_up_delivery(message.id, because)?;
+    fn fail_delivery(
+        &self,
+        message: &MessageView,
+        because: &str,
+        look: Option<&Value>,
+    ) -> Result<(), EngineError> {
+        let (_, given_up) = {
+            let mut ledger = self.seams.ledger.borrow_mut();
+            match look {
+                Some(look) => ledger.give_up_delivery_looked(message.id, because, look)?,
+                None => ledger.give_up_delivery(message.id, because)?,
+            }
+        };
         match given_up {
             GivenUp::Failed => {}
             GivenUp::Kept => return self.tell_kept(message, because),

@@ -89,11 +89,13 @@ use std::rc::Rc;
 use cf_base::js;
 use cf_harness::contract::{Input, Observed, Pane};
 use cf_harness::records::{Reading, Role, Settlement};
+use cf_ledger::NewNote;
+use cf_proto::ledger::MessageView;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
 use crate::deliveries::{Delivering, Enter, Uncleared, Unread};
-use crate::delivery_text::is_paste_of;
+use crate::delivery_text::{header_shape, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
@@ -133,6 +135,21 @@ struct Rest {
     /// Since when the paste has been free (`Delivering::free_since`): none while the
     /// harness holds it.
     free: Option<i64>,
+}
+
+/// What the looks at a window read while a message was on its way, for its retry or
+/// failure to say (`look`, 3.0.7 chief-meeting CMT-08, T-760's F5): every retry
+/// classifies itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Watched {
+    message: i64,
+    /// When the last look at it came, on the engine's clock.
+    last: i64,
+    /// The longest time between two looks at it: a loaded machine's.
+    longest_pass: i64,
+    /// How long the window's screen had printed nothing, as the pane host said before
+    /// it was to go again.
+    output_quiet_ms: Option<i64>,
 }
 
 impl Dispatcher {
@@ -205,6 +222,7 @@ impl Dispatcher {
         let Some(delivering) = record.delivery.borrow().delivering.clone() else {
             return Ok(());
         };
+        self.watched(record, &delivering);
         if delivering.launch {
             // A first message waits as long as its window asks one of the questions its
             // harness asks as it starts (its folder's trust, its folder's grants, the
@@ -308,6 +326,11 @@ impl Dispatcher {
         if !self.read_once_more(record, delivering.message).await? {
             return Ok(());
         }
+        // A record that holds the message's header in an item the proof cannot match
+        // has it, unproven: it is never pasted again (CMT-23).
+        if self.arrived_unproven(record, delivering.message)? {
+            return Ok(());
+        }
         record.delivery.borrow_mut().delivering = None;
         // A paste the harness record never showed after the whole window, the
         // window at rest all of it, did not land: sending it again is how it
@@ -336,7 +359,125 @@ impl Dispatcher {
         } else {
             "the harness record never showed it".to_owned()
         };
-        self.settle_failure(delivering, &because, true)
+        let look = self.arrival_look(record, observed, delivering.message, rested);
+        self.settle_failure_looked(delivering, &because, true, Some(&look))
+    }
+
+    /// A look at the window while `delivering` is on its way: the time since the last
+    /// one, or since its hand-over, is a pass, the longest of which its retry says.
+    fn watched(&self, record: &Record, delivering: &Delivering) {
+        let (now, message) = (self.now(), delivering.message);
+        let mut part = record.delivery.borrow_mut();
+        let watched = part
+            .watched
+            .filter(|watched| watched.message == message)
+            .map_or(
+                Watched {
+                    message,
+                    last: now,
+                    longest_pass: now - delivering.since,
+                    output_quiet_ms: None,
+                },
+                |watched| Watched {
+                    last: now,
+                    longest_pass: watched.longest_pass.max(now - watched.last),
+                    ..watched
+                },
+            );
+        part.watched = Some(watched);
+    }
+
+    /// What the looks read of the window as `message` is to go again, which its retry
+    /// or failure says (CMT-08): how many of the record's items hold its header and
+    /// where the first of them has it, the record's last item, how long the window
+    /// rested, the longest pass and how long its screen printed nothing.
+    fn arrival_look(&self, record: &Record, observed: &Observed, message: i64, rested: i64) -> Value {
+        let marker = marker_of(message);
+        let items = observed.items();
+        let holding: Vec<_> = items
+            .iter()
+            .filter(|item| item.text.contains(&marker))
+            .collect();
+        let watched = record
+            .delivery
+            .borrow()
+            .watched
+            .filter(|watched| watched.message == message);
+        json!({
+            "markers": holding.len(),
+            "first": holding.first().map(|item| json!({
+                "role": item.role,
+                "shape": header_shape(&item.text, message),
+            })),
+            "lastItem": items.last().map(|item| &*item.id),
+            "restMs": rested,
+            "longestPassMs": watched.map(|watched| watched.longest_pass),
+            "outputQuietMs": watched.and_then(|watched| watched.output_quiet_ms),
+        })
+    }
+
+    /// Whether `message`, on its way, arrived unproven (3.0.7 chief-meeting, CMT-23): a
+    /// user item its window's record was given after its hand-over holds its header, and
+    /// the proof (`is_paste_of`) does not take it for its paste. It is then taken for
+    /// arrived, never pasted again and never said not to have reached its window: its
+    /// shape is logged for filing (`delivery.unproven`), and whoever can act on it is
+    /// told once. A human who quoted the header there meanwhile is covered by that note.
+    fn arrived_unproven(&self, record: &Record, message: i64) -> Result<bool, EngineError> {
+        let found = {
+            let ledger = self.seams.ledger.borrow();
+            let Some(handed) = ledger.handed_at(message)? else {
+                return Ok(false);
+            };
+            ledger
+                .copied_items_since(record.id, &marker_of(message), &handed)?
+                .into_iter()
+                .next()
+        };
+        let Some((item, text)) = found else {
+            return Ok(false);
+        };
+        let on_its_way = self.seams.ledger.borrow().message(message)?;
+        let Some(on_its_way) = on_its_way.filter(|found| found.state == "delivering") else {
+            return Ok(false);
+        };
+        let tell = self.unproven_note(&on_its_way)?;
+        self.seams.ledger.borrow_mut().confirm_unproven(
+            message,
+            &item,
+            &header_shape(&text, message),
+            &tell,
+        )?;
+        record.delivery.borrow_mut().delivering = None;
+        self.changed();
+        Ok(true)
+    }
+
+    /// The note that says `message` arrived unproven: to its task's requester where
+    /// that is another than its recipient, else to the chief, who for its own window
+    /// is the recipient, and reads it there.
+    fn unproven_note(&self, message: &MessageView) -> Result<NewNote, EngineError> {
+        let requester = match message.task_number {
+            Some(number) => self
+                .seams
+                .ledger
+                .borrow()
+                .task(message.project_id, number)?
+                .map(|thread| thread.task.requester),
+            None => None,
+        };
+        let to = requester
+            .filter(|requester| *requester != message.recipient)
+            .unwrap_or_else(|| "chief".to_owned());
+        Ok(NewNote {
+            from: None,
+            to,
+            task: message.task_number,
+            body: format!(
+                "m-{id}'s arrival couldn't be proven from the record; it was not pasted again. @{who} can read it with `cf inbox read m-{id}`.",
+                id = message.id,
+                who = message.recipient,
+            ),
+        })
     }
 
     /// The conversation the message on its way was pasted into, where the window is on
@@ -686,6 +827,18 @@ impl Dispatcher {
             self.unknown(record, NO_ANSWER);
             return Ok(false);
         };
+        if let Some(watched) = record
+            .delivery
+            .borrow_mut()
+            .watched
+            .as_mut()
+            .filter(|watched| watched.message == message)
+        {
+            watched.output_quiet_ms = snapshot
+                .get("outputQuietMs")
+                .and_then(Value::as_f64)
+                .map(|quiet| quiet as i64);
+        }
         if js::truthy(snapshot.get("pasteInFlight")) {
             self.unknown(record, "its pane host is writing a paste into it still");
             return Ok(false);
