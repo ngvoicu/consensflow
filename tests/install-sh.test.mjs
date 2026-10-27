@@ -1248,23 +1248,25 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
 
     const names = (at) => readdirSync(at.apps).sort()
 
-    test('a removal never crosses a mount point: a volume under a leftover keeps its files, and the leftover says it could not go', async () => {
-      const at = freshCase()
-      fakeApp(at.apps, '3.0.7-alpha.1')
-      const dead = await deadPid()
-      const copy = put(at.apps, `.ConsensFlow.app.installing.${dead}`)
-      const volume = path.join(copy, 'Contents/volume')
-      const detach = attachVolume(volume)
-      try {
-        const ran = await install(at, ['--version', '3.0.7'])
-        assert.equal(ran.status, 0, ran.out)
-        assert.ok(existsSync(path.join(volume, 'keep')), `the volume's file is gone: ${ran.out}`)
-        assert.equal(readFileSync(path.join(volume, 'keep'), 'utf8'), 'mine')
-        assert.match(ran.out, new RegExp(`could not remove ${exact(copy)}`))
-      } finally {
-        detach()
-      }
-    })
+    for (const kind of ['installing', 'previous']) {
+      test(`a removal never crosses a mount point: a volume under a .${kind} keeps its files, and the leftover says it could not go`, async () => {
+        const at = freshCase()
+        fakeApp(at.apps, '3.0.7-alpha.1')
+        const dead = await deadPid()
+        const copy = put(at.apps, `.ConsensFlow.app.${kind}.${dead}`, '3.0.7-alpha.1')
+        const volume = path.join(copy, 'Contents/volume')
+        const detach = attachVolume(volume)
+        try {
+          const ran = await install(at, ['--version', '3.0.7'])
+          assert.equal(ran.status, 0, ran.out)
+          assert.ok(existsSync(path.join(volume, 'keep')), `the volume's file is gone: ${ran.out}`)
+          assert.equal(readFileSync(path.join(volume, 'keep'), 'utf8'), 'mine')
+          assert.match(ran.out, new RegExp(`could not remove ${exact(copy)}`))
+        } finally {
+          detach()
+        }
+      })
+    }
 
     test('a volume mounted at the very name of a leftover is left alone, and its files with it', async () => {
       const at = freshCase()
@@ -1389,11 +1391,16 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       const stale = folderIn(at, `consensflow-install.${dead}.abc123`)
       const detach = attachVolume(path.join(stale, 'volume'))
       const PATH = standIns(at, {
-        hdiutil: `case "$*" in detach*abc123*) echo busy >&2; exit 16 ;; esac\nexec /usr/bin/hdiutil "$@"`,
+        // A volume that is busy: it will not detach unless it is forced.
+        hdiutil: `case "$*" in *-force*abc123*) exec /usr/bin/hdiutil "$@" ;; detach*abc123*) echo busy >&2; exit 16 ;; esac\nexec /usr/bin/hdiutil "$@"`,
       })
       try {
         const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
         assert.equal(ran.status, 0, ran.out)
+        assert.ok(
+          existsSync(path.join(stale, 'volume/keep')),
+          `the volume was forced off: ${ran.out}`,
+        )
         assert.equal(readFileSync(path.join(stale, 'volume/keep'), 'utf8'), 'mine')
         assert.match(
           ran.out,

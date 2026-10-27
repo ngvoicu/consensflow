@@ -4,6 +4,10 @@
 # that call it. The tests that read the workflow and run its steps as written
 # must catch each.
 
+[run]
+# The rule over every workflow: a downloaded binary runs only where the job that built it ran.
+binaries = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "workflow_binaries"]
+
 [[plant]]
 name = "workflow: a hand run on a tag publishes: the job asks only for a tag"
 meant = "is_the_push_of_a_tag_not_a_hand_run_though_it_is_on_a_tag"
@@ -366,3 +370,240 @@ replace = '''
             echo "the publisher downloaded hashes to $got, and the job that built it says ${PUBLISHER_SHA256:-nothing}" >&2
             exit 1
 '''
+
+# --- the rule over downloaded binaries (tools/cf-publish/tests/workflow_binaries.rs): each shape it
+# once did not read (T-831 P3-4, T-840), planted as a job that runs a binary built on another system ---
+#
+# The sign job runs on macOS and downloads the publisher built there; each of these has it download
+# the one built on Linux instead and make it run in a shape the rule did not read. The Windows build
+# is given a download of the Linux publisher and a step that runs it in the shapes of Windows.
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher from a relative folder of the workspace"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          tool="$RUNNER_TEMP/sums-tool/cf-publish"'''
+replace = '''          tool="$GITHUB_WORKSPACE/sums-tool/cf-publish"'''
+
+[[plant]]
+name = "workflow: the sign job makes the Linux publisher run through a variable of the job's env"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''    environment: release
+    permissions:
+      contents: read
+    outputs:
+      sums: ${{ steps.signed.outputs.sums }}'''
+replace = '''    environment: release
+    env:
+      SUMS_TOOL: ${{ runner.temp }}/sums-tool/cf-publish
+    permissions:
+      contents: read
+    outputs:
+      sums: ${{ steps.signed.outputs.sums }}'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          chmod +x "$SUMS_TOOL"'''
+
+[[plant]]
+name = "workflow: the sign job makes the Linux publisher run from the working directory its defaults give"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''    environment: release
+    permissions:
+      contents: read
+    outputs:
+      sums: ${{ steps.signed.outputs.sums }}'''
+replace = '''    environment: release
+    defaults:
+      run:
+        working-directory: ${{ runner.temp }}/sums-tool
+    permissions:
+      contents: read
+    outputs:
+      sums: ${{ steps.signed.outputs.sums }}'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          chmod 755 ./cf-publish'''
+
+[[plant]]
+name = "workflow: the sign job makes the Linux publisher run through eval"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          eval chmod +x "$tool"'''
+
+[[plant]]
+name = "workflow: the sign job makes the Linux publisher run through a shell given a string"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          bash -c "chmod +x $tool"'''
+
+[[plant]]
+name = "workflow: the sign job makes the Linux publisher run through xargs"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          printf '%s\n' "$tool" | xargs chmod +x'''
+
+[[plant]]
+name = "workflow: the sign job makes the Linux publisher run through find -exec"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          find "$RUNNER_TEMP/sums-tool" -type f -exec chmod +x {} +'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher through cmd /c"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: pwsh
+        run: cmd /c "%RUNNER_TEMP%\publisher\cf-publish.exe --version"
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher by a bare name under cmd"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: cmd
+        run: |
+          cd /d %RUNNER_TEMP%\publisher
+          cf-publish.exe --version
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher under the cmd its defaults give"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''    defaults:
+      run:
+        shell: bash'''
+replace = '''    defaults:
+      run:
+        shell: cmd'''
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        run: |
+          cd /d %RUNNER_TEMP%\publisher
+          cf-publish.exe --version
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "workflow: a step whose first key is its shell is read as no step of that shell"
+meant = "a_key_a_step_begins_with_is_read_as_any_other"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/testing/workflow.rs"
+find = '''                .or_else(|| line.strip_prefix(&first))
+'''
+replace = ''''''

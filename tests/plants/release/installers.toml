@@ -16,7 +16,7 @@ verifiers = ["node", "--test", "tests/install-verifiers.test.mjs"]
 ps1 = ["node", "--test", "tests/install-ps1.test.mjs"]
 # The publisher's signed SHA256SUMS: what it publishes, what it checks after, and `cf-publish sums`.
 signed-sums = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "publish_release", "--test", "feeds_check", "--test", "sums_cli"]
-# The one-line installers' own real run, as a faked Windows and a Mac outside CI (what it refuses before it reads).
+# The one-line installers' own real run, as a faked Windows and a Mac outside GitHub Actions (what it refuses before it reads).
 real-install = ["node", "--test", "tests/real-install.test.mjs"]
 # The rule over every workflow: a downloaded binary runs only where the job that built it ran.
 binaries = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "workflow_binaries"]
@@ -248,9 +248,9 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "install/install.sh"
 find = '''    if [ -n "${tmp:-}" ] && [ -d "$tmp" ]; then
-        rm -rf "$tmp"'''
+        rm -rf -x "$tmp"'''
 replace = '''    if false; then
-        rm -rf "$tmp"'''
+        rm -rf -x "$tmp"'''
 
 [[plant]]
 name = "installers: install.sh tries a folder that is not the user's"
@@ -272,7 +272,7 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "install/install.sh"
 find = '''    if [ -n "$previous" ]; then
-        rm -rf "$previous"
+        rm -rf -x "$previous"
         previous=""
     fi'''
 replace = '''    previous=""'''
@@ -1183,7 +1183,7 @@ file = "install/install.sh"
 find = '''        if [ ! -e "$dest" ]; then
             mv "$previous" "$dest"
         elif [ -z "${placed:-}" ]; then
-            rm -rf "$previous"
+            rm -rf -x "$previous"
         fi'''
 replace = '''        mv "$previous" "$dest"'''
 
@@ -1285,8 +1285,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''                "" | 0* | *[!0-9]*) continue ;;'''
-replace = '''                "") continue ;;'''
+find = '''            "" | 0* | *[!0-9]*) exit 1 ;;'''
+replace = '''            "") exit 1 ;;'''
 
 [[plant]]
 name = "installers: install.sh follows a link, or takes a file, for an earlier install's copy"
@@ -1296,7 +1296,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''            if [ -L "$leftover" ] || [ ! -d "$leftover" ]; then'''
+find = '''            if ! plain_folder "$leftover" "$dir"; then'''
 replace = '''            if [ ! -e "$leftover" ]; then'''
 
 [[plant]]
@@ -1307,8 +1307,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''                if [ -n "$problem" ]; then'''
-replace = '''                if false; then'''
+find = '''                problem=$(unsound "$dest" "the ConsensFlow in $dir")'''
+replace = '''                problem='''
 
 [[plant]]
 name = "installers: install.sh deletes the app an earlier install moved aside where nothing is installed"
@@ -1318,8 +1318,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''                if mv "$leftover" "$dest"; then'''
-replace = '''                if rm -rf "$leftover"; then'''
+find = '''                elif mv "$leftover" "$dest"; then'''
+replace = '''                elif rm -rf -x "$leftover"; then'''
 
 [[plant]]
 name = "installers: install.sh holds the installed app to the release's version before it removes the app moved aside"
@@ -1388,7 +1388,7 @@ find = '''  if ((options.upgrade || options.downgrade) && !options['no-open'])''
 replace = '''  if (false)'''
 
 [[plant]]
-name = "installers: the real install on a Mac outside CI takes /Applications"
+name = "installers: the real install on a Mac outside GitHub Actions takes /Applications"
 meant = "the folder to install into is named, and --upgrade and --downgrade run with --no-open"
 runs = ["real-install"]
 platforms = ["macos"]
@@ -1535,3 +1535,305 @@ runs = ["binaries"]
 file = "tools/cf-publish/src/testing/workflow.rs"
 find = '''    (after.is_empty() || after.starts_with('#')).then_some(name)'''
 replace = '''    after.is_empty().then_some(name)'''
+
+# --- T-832 round 2 (T-840): the app moved aside is checked, no removal crosses a volume, the folder a killed run left in TMPDIR and TEMP, the site, and the guard's switch ---
+
+[[plant]]
+name = "installers: install.sh puts back an app moved aside that is not a whole, checked ConsensFlow"
+meant = "a .previous that is not a whole, checked ConsensFlow is not put back where nothing is installed"
+runs = [["node", "--test", "--test-name-pattern", "removed with care", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                problem=$(unsound "$leftover" "the app an earlier install moved aside")'''
+replace = '''                problem='''
+
+[[plant]]
+name = "installers: install.sh takes a folder with no plist for an app that says its version"
+meant = "a .previous that is not a whole, checked ConsensFlow is not put back where nothing is installed"
+runs = [["node", "--test", "--test-name-pattern", "removed with care", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        [0-9]*) (check_app "$1" "$2" "$own") 2>&1 | sed -n '1s/^consensflow: //p' ;;
+        *) echo "it says no version" ;;'''
+replace = '''        *) (check_app "$1" "$2" "$own") 2>&1 | sed -n '1s/^consensflow: //p' ;;'''
+
+[[plant]]
+name = "installers: install.sh removes a copy with rm -rf, across a volume mounted under it"
+meant = "a removal never crosses a mount point: a volume under a .installing keeps its files, and the leftover says it could not go"
+runs = [["node", "--test", "--test-name-pattern", "removed with care", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''            if [ "$kind" = installing ]; then
+                if rm -rf -x "$leftover"; then'''
+replace = '''            if [ "$kind" = installing ]; then
+                if rm -rf "$leftover"; then'''
+
+[[plant]]
+name = "installers: install.sh removes the app moved aside with rm -rf, across a volume mounted under it"
+meant = "a removal never crosses a mount point: a volume under a .previous keeps its files, and the leftover says it could not go"
+runs = [["node", "--test", "--test-name-pattern", "removed with care", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                elif rm -rf -x "$leftover"; then'''
+replace = '''                elif rm -rf "$leftover"; then'''
+
+[[plant]]
+name = "installers: install.sh takes a volume mounted at a leftover's name for the leftover"
+meant = "a volume mounted at the very name of a leftover is left alone, and its files with it"
+runs = [["node", "--test", "--test-name-pattern", "removed with care", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]'''
+replace = '''    [ ! -L "$1" ] && [ -d "$1" ]'''
+
+[[plant]]
+name = "installers: install.sh follows a link for a folder of an earlier run"
+meant = "a dead run's folder is removed, a live install's kept, and what only looks similar, or is a link or a file, is never touched"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]'''
+replace = '''    [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]'''
+
+[[plant]]
+name = "installers: install.sh takes a pid of six digits for a process's"
+meant = "a name that only looks similar is kept, and so is a link, which is never followed"
+runs = [["node", "--test", "--test-name-pattern", "only looks similar", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        [ "${#1}" -le 5 ]'''
+replace = '''        true'''
+
+[[plant]]
+name = "installers: install.sh says a process is an install that is still going on, where it may only be"
+meant = "one a running install made is kept: its process is a shell running install.sh, or one that was given the script on its input"
+runs = [["node", "--test", "--test-name-pattern", "a running install made", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                say "left $leftover alone: process $owner may be an install that is still going on."'''
+replace = '''                say "left $leftover alone: process $owner is an install that is still going on."'''
+
+[[plant]]
+name = "installers: install.sh does not look for what a killed run left in TMPDIR"
+meant = "an install killed between its two moves (the installed app moved aside, nothing in its place) is mended by the next one"
+runs = [["node", "--test", "--test-name-pattern", "killed|temporary folder", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    remove_leftovers
+    remove_stale_runs
+'''
+replace = '''    remove_leftovers
+'''
+
+[[plant]]
+name = "installers: install.sh removes the folder of an install that may still be going on in TMPDIR"
+meant = "a dead run's folder is removed, a live install's kept, and what only looks similar, or is a link or a file, is never touched"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        if install_goes_on "$owner"; then
+            say "left $stale alone: process $owner'''
+replace = '''        if false; then
+            say "left $stale alone: process $owner'''
+
+[[plant]]
+name = "installers: install.sh leaves the DMG of a dead run attached and takes its folder"
+meant = "an install killed before the old app is deleted (the new app in place, the old one beside it) is mended by the next one"
+runs = [["node", "--test", "--test-name-pattern", "killed", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        if mount | grep -qF " on $stale/volume ("; then'''
+replace = '''        if false; then'''
+
+[[plant]]
+name = "installers: install.sh forces the DMG of a dead run off"
+meant = "a dead run's DMG that will not detach keeps its folder, and says so"
+runs = [["node", "--test", "--test-name-pattern", "will not detach", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''            if hdiutil detach -quiet "$stale/volume" >/dev/null 2>&1; then'''
+replace = '''            if hdiutil detach -quiet -force "$stale/volume" >/dev/null 2>&1; then'''
+
+[[plant]]
+name = "installers: install.sh takes the folder of another user in TMPDIR"
+meant = "a folder of another user is left alone"
+runs = [["node", "--test", "--test-name-pattern", "another user", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        if [ "$(stat -f %u "$stale")" != "$(id -u)" ]; then'''
+replace = '''        if false; then'''
+
+[[plant]]
+name = "installers: install.sh takes its own folder for a dead run's"
+meant = "this run's own folder carries its pid, and is never taken for a dead run's"
+runs = [["node", "--test", "--test-name-pattern", "own folder carries", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        [ "$name" != "${tmp##*/}" ] || continue
+'''
+replace = ''''''
+
+[[plant]]
+name = "installers: install.sh makes its folder with no pid in its name"
+meant = "this run's own folder carries its pid, and is never taken for a dead run's"
+runs = [["node", "--test", "--test-name-pattern", "own folder carries", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''consensflow-install.$$.XXXXXX'''
+replace = '''consensflow-install.XXXXXX'''
+
+[[plant]]
+name = "installers: install.sh takes any ending of a name for the six letters and digits of mktemp"
+meant = "a dead run's folder is removed, a live install's kept, and what only looks similar, or is a link or a file, is never touched"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        is_pid "$owner" && is_suffix "$suffix" && [ "$rest" = "$owner.$suffix" ] || continue'''
+replace = '''        is_pid "$owner" || continue'''
+
+# --- install.ps1: the folder a killed run left in TEMP ---
+
+[[plant]]
+name = "installers: install.ps1 does not look for what a killed run left in TEMP"
+meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''        Remove-CfStaleRuns $tmp
+'''
+replace = ''''''
+
+[[plant]]
+name = "installers: install.ps1 takes a PowerShell for no install that may be going on"
+meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''        if (@('powershell', 'pwsh', 'powershell_ise') -contains $process.ProcessName.ToLowerInvariant()) { return $true }'''
+replace = '''        if ($false) { return $true }'''
+
+[[plant]]
+name = "installers: install.ps1 takes any process for an install that may be going on"
+meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''        [bool]($line -and $line.CommandLine -and $line.CommandLine -like '*install.ps1*')'''
+replace = '''        $true'''
+
+[[plant]]
+name = "installers: install.ps1 takes a link for a folder of an earlier run"
+meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {'''
+replace = '''            if (-not $item.PSIsContainer) {'''
+
+[[plant]]
+name = "installers: install.ps1 takes a pid of eleven digits for a process's"
+meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''([1-9][0-9]{0,9})'''
+replace = '''([1-9][0-9]{0,12})'''
+
+[[plant]]
+name = "installers: install.ps1 takes its own folder for a dead run's"
+meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''            if ($item.FullName -eq $own) { continue }
+'''
+replace = ''''''
+
+[[plant]]
+name = "installers: install.ps1 makes its folder with no pid in its name"
+meant = "this run's folder carries its pid, and one killed hard leaves it for the next run to take away"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''('consensflow-install.' + $PID + '.' + [guid]::NewGuid().ToString('N').Substring(0, 12))'''
+replace = '''('consensflow-install.' + [guid]::NewGuid().ToString('N').Substring(0, 12))'''
+
+# --- the site, and the guard's switch ---
+
+[[plant]]
+name = "installers: to-site --check takes an installer that differs for the repository's"
+meant = "refuses a site whose installer is not the repository's, saying which and how to mend it"
+runs = [["node", "--test", "tests/to-site.test.mjs"]]
+
+[[plant.edit]]
+file = "install/to-site.mjs"
+find = '''    return readFileSync(held).equals(readFileSync(script))
+      ? []'''
+replace = '''    return true
+      ? []'''
+
+[[plant]]
+name = "installers: to-site --check takes an installer that is missing for the repository's"
+meant = "refuses a site that holds one of them, or none, and changes nothing"
+runs = [["node", "--test", "tests/to-site.test.mjs"]]
+
+[[plant.edit]]
+file = "install/to-site.mjs"
+find = '''    if (!existsSync(held)) return [`${name} is missing from the site`]'''
+replace = '''    if (!existsSync(held)) return []'''
+
+[[plant]]
+name = "installers: the real install takes CI for GitHub's runner"
+meant = "CI=true, which many tools and developers set, is not a runner of GitHub: the guard holds"
+runs = ["real-install"]
+
+[[plant.edit]]
+file = "install/real-install.mjs"
+find = '''if (!process.env.GITHUB_ACTIONS) {'''
+replace = '''if (!process.env.CI) {'''

@@ -223,11 +223,8 @@ plain_folder() {
 # Why the app at $1 ($2 in the words) is not a whole, checked ConsensFlow of the
 # version it says itself: what check_app refuses with, or nothing where it holds.
 unsound() {
-    own=
-    # PlistBuddy answers "File Doesn't Exist, Will Create" for a file that is not there.
-    if [ -f "$1/Contents/Info.plist" ]; then
-        own=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null || true)
-    fi
+    # A plist that is not there is answered with "File Doesn't Exist, Will Create": no version.
+    own=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null || true)
     case "$own" in
         [0-9]*) (check_app "$1" "$2" "$own") 2>&1 | sed -n '1s/^consensflow: //p' ;;
         *) echo "it says no version" ;;
