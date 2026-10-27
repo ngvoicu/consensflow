@@ -508,6 +508,18 @@ impl Dispatcher {
                 .is_some_and(|quota| quota.level() == Level::Exhausted)
     }
 
+    /// Whether the turn a window's look says a refusal cut short is history: the refusal holds
+    /// a member for no time and is dated before the window opened, so the window was opened
+    /// on a conversation whose last turn it cut, and its words (a Resume's, a Try again's) were
+    /// given at the open. That turn is not the window's own to go on with, nor to fail the task
+    /// for: the look that follows its first turn says (T-841).
+    pub(crate) fn cut_before_open(&self, record: &Record, observed: &Observed) -> bool {
+        observed
+            .quota
+            .as_deref()
+            .is_some_and(|quota| self.older_than_the_window(record, quota))
+    }
+
     /// What a window's harness says of its quota, as of this look. Low is
     /// soft: the current task continues, nothing new comes until the reset it
     /// names (an hour when it names none). It outlives the window, on the

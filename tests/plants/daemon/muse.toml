@@ -1582,23 +1582,8 @@ replace = "    let told = if false && notes[given].0.ends_with(TAIL_MOVED) {"
 # T-841 P1-A: a refusal older than the window holds nothing but stays in the reading.
 
 [[plant]]
-name = "muse: an old refusal holds the reopened window again"
-meant = "a_task_held_for_an_account_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_refusal"
-runs = ["muse-moved"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-        if same_refusal(handled.as_ref(), &quota) || self.older_than_the_window(record, &quota) {
-'''
-replace = '''
-        if same_refusal(handled.as_ref(), &quota) {
-'''
-
-
-[[plant]]
-name = "muse: an old move holds the reopened window again"
-meant = "a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_failed_turn"
+name = "muse: an old refusal holds the window opened after it"
+meant = "a_move_dated_before_the_window_opened_holds_nothing_and_one_after_it_does"
 runs = ["muse-moved"]
 
 [[plant.edit]]
@@ -1628,28 +1613,44 @@ replace = '''
 
 
 [[plant]]
-name = "muse: the reopened window's old failed turn is not the refusal's"
+name = "muse: a refusal older than the window is gone from the look"
+meant = "a_task_held_for_an_account_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_refusal"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        record.delivery.borrow_mut().lost = observed.lost().len();
+'''
+replace = '''
+        let stale = observed.quota.as_deref().is_some_and(|quota| {
+            quota.held_for_the_human() && self.before_open(record, quota.at())
+        });
+        let observed = if stale {
+            Observed {
+                quota: None,
+                ..observed
+            }
+        } else {
+            observed
+        };
+        record.delivery.borrow_mut().lost = observed.lost().len();
+'''
+
+[[plant]]
+name = "muse: a turn cut before the window opened is gone on in place"
 meant = "a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_failed_turn"
 runs = ["muse-moved"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
+file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-        observed.failed
-            && observed
-                .quota
-                .as_deref()
-                .is_some_and(|quota| quota.level() == Level::Exhausted)
+                if !self.cut_before_open(record, &observed) {
 '''
 replace = '''
-        observed.failed
-            && observed
-                .quota
-                .as_deref()
-                .is_some_and(|quota| quota.level() == Level::Exhausted && !quota.held_for_the_human())
+                if true {
 '''
 
-# T-841 P3-1: an alias's flips are no drift, and each way of a change is told once per window.
 
 [[plant]]
 name = "muse: a flip is told every time"

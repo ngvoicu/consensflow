@@ -368,14 +368,16 @@ fn a_task_that_waits_for_a_free_member_is_told_the_model_moved_not_a_billing_ref
 }
 
 /// zeus at work on T-1, its window refused with `held`, dated a minute after it began, and
-/// the task held; then its window goes (a Close, an exit; a daemon restart ends every window
-/// the same way), the human presses Try again now, and the window comes back on its
-/// conversation: its record reads what the one before it ended in (T-841's P1-A).
+/// the task held; then its window goes (an exit, or the daemon's restart, which ends every
+/// window and whose Resume opens them anew with the records and the engine's memory made
+/// afresh), the human presses Try again now, and the window comes back on its conversation: its
+/// record reads what the one before it ended in (T-841's P1-A).
 fn reopened_after_try_again(
     context: &Context,
     held: impl Fn(String) -> Quota,
     failed: bool,
     keeps_reading: bool,
+    restart: bool,
 ) -> (Tiers<'_>, String) {
     context.adapter.resumes_records.set(true);
     context.adapter.rereads_failures.set(true);
@@ -395,20 +397,38 @@ fn reopened_after_try_again(
     assert_eq!(tiers.task(1).task.state, "paused");
     assert!(tiers.out_until("zeus").is_some());
     context.advance(60_000);
-    context.exit("zeus");
-    context.pass().unwrap();
+    let after = if restart {
+        context.ledger.borrow_mut().suspend_for_restart().unwrap();
+        let after = context.make();
+        after.settle_after_restart().unwrap();
+        after.resume_project(tiers.project.id).unwrap();
+        Some(after)
+    } else {
+        context.exit("zeus");
+        context.pass().unwrap();
+        None
+    };
+    let pass = || match &after {
+        Some(after) => after.pass().unwrap(),
+        None => context.pass().unwrap(),
+    };
+    pass();
     context.advance(60_000);
     context.back_from_quota(tiers.project.id, "zeus").unwrap();
     // The words that resume it go into the reopened window; its turn begins, and the record it
     // reads is a turn that got through, not the refusal's (the fake does not write it by itself).
     for _ in 0..12 {
-        context.pass().unwrap();
+        pass();
         if given(context, &zeus)
             .iter()
             .any(|said| said.contains("Resumed:"))
         {
             break;
         }
+    }
+    // Its first looks read what the window before it ended in: the failed turn, and the quota.
+    for _ in 0..3 {
+        pass();
     }
     context.adapter.with(&zeus, |agent| {
         agent.failed = false;
@@ -422,7 +442,7 @@ fn reopened_after_try_again(
     said.at = Some(serde_json::json!(now(context)));
     context.adapter.with(&zeus, |agent| agent.items.push(said));
     for _ in 0..4 {
-        context.pass().unwrap();
+        pass();
     }
     (tiers, zeus)
 }
@@ -457,37 +477,54 @@ fn went_on(context: &Context, tiers: &Tiers<'_>, zeus: &str) {
 #[test]
 fn a_task_held_for_an_account_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_refusal()
 {
-    let context = Context::new();
-    let (tiers, zeus) = reopened_after_try_again(
-        &context,
-        |at| Quota::Unavailable {
-            at: Some(at),
-            because: BECAUSE.to_owned(),
-        },
-        true,
-        false,
-    );
-    went_on(&context, &tiers, &zeus);
+    for restart in [false, true] {
+        let context = Context::new();
+        let (tiers, zeus) = reopened_after_try_again(
+            &context,
+            |at| Quota::Unavailable {
+                at: Some(at),
+                because: BECAUSE.to_owned(),
+            },
+            true,
+            false,
+            restart,
+        );
+        went_on(&context, &tiers, &zeus);
+    }
 }
 
 #[test]
 fn a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_failed_turn(
 ) {
     // Muse's shape: the 402 fails the turn, and the reconfigure follows it.
-    let context = Context::new();
-    let (tiers, zeus) =
-        reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), true, false);
-    went_on(&context, &tiers, &zeus);
+    for restart in [false, true] {
+        let context = Context::new();
+        let (tiers, zeus) = reopened_after_try_again(
+            &context,
+            |at| fell_back(&at).as_quota(),
+            true,
+            false,
+            restart,
+        );
+        went_on(&context, &tiers, &zeus);
+    }
 }
 
 #[test]
 fn a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_move()
 {
     // Claude's `fallback` and Codex's reroute: no failed turn, the window rests on the move.
-    let context = Context::new();
-    let (tiers, zeus) =
-        reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), false, false);
-    went_on(&context, &tiers, &zeus);
+    for restart in [false, true] {
+        let context = Context::new();
+        let (tiers, zeus) = reopened_after_try_again(
+            &context,
+            |at| fell_back(&at).as_quota(),
+            false,
+            false,
+            restart,
+        );
+        went_on(&context, &tiers, &zeus);
+    }
 }
 
 const BECAUSE: &str = "its billing was refused";
@@ -556,19 +593,27 @@ fn a_move_older_than_the_window_does_not_keep_the_requester_from_hearing_the_tas
     // The window was reopened on a conversation whose record goes on reading the move: dated
     // before the window opened, it is history, so the window's own answer is news, and the
     // requester, told the task waits, is told it goes on (T-841: `refused_unhandled`).
-    let context = Context::new();
-    let (tiers, zeus) =
-        reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), false, true);
-    went_on(&context, &tiers, &zeus);
-    let goes_on: Vec<String> = tiers
-        .notes("chief")
-        .into_iter()
-        .filter(|note| note.starts_with("T-1 goes on"))
-        .collect();
-    assert_eq!(
-        goes_on,
-        ["T-1 goes on: the human said its model may go on."],
-        "{:?}",
-        tiers.notes("chief")
-    );
+    // Through a daemon restart too: the engine's memory of what a window acted on is made afresh.
+    for restart in [false, true] {
+        let context = Context::new();
+        let (tiers, zeus) = reopened_after_try_again(
+            &context,
+            |at| fell_back(&at).as_quota(),
+            false,
+            true,
+            restart,
+        );
+        went_on(&context, &tiers, &zeus);
+        let goes_on: Vec<String> = tiers
+            .notes("chief")
+            .into_iter()
+            .filter(|note| note.starts_with("T-1 goes on"))
+            .collect();
+        assert_eq!(
+            goes_on,
+            ["T-1 goes on: the human said its model may go on."],
+            "restart {restart}: {:?}",
+            tiers.notes("chief")
+        );
+    }
 }
