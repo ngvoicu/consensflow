@@ -940,21 +940,22 @@ impl Dispatcher {
                     Some(own) => (own.why.unwrap_or_else(|| because.clone()), own.settling),
                     None => (because.clone(), None),
                 };
-                self.stall(&project, &thread.task, &because, &why, except, is_own)?;
+                let stop = self.stall(&project, &thread.task, &because, &why, except, is_own)?;
                 // Told while the engine's kill of this window waits for its answer, which
-                // decides whether this exit was the kill's (`close_own`), where the pause
-                // is the suspension's: an own exit in a suspended project. An earlier
-                // window's kill, answered late, is no answer of this one's, and a pause
-                // it made in an open project was no suspension's to take back (T-509).
-                let marked = is_own && project.state == "suspended";
-                if let Some(killing) = record
-                    .window
-                    .borrow_mut()
-                    .killing
-                    .iter_mut()
-                    .find(|killing| marked && killing.pane == *pane)
-                {
-                    killing.paused = Some((project.id, thread.task.number));
+                // decides whether this exit was the kill's (`close_own`): the pause of an
+                // own exit, by its stop, which a refusal takes back only while it is that
+                // pause (Calliope's P3-2 of T-510). An earlier window's kill, answered late,
+                // is no answer of this one's (T-509), and a pause made in an open project
+                // holds no mark to take back.
+                if let Some((stop, killing)) = stop.zip(
+                    record
+                        .window
+                        .borrow_mut()
+                        .killing
+                        .iter_mut()
+                        .find(|killing| killing.pane == *pane),
+                ) {
+                    killing.paused = Some((project.id, thread.task.number, stop));
                 }
             } else {
                 let given = match owner {

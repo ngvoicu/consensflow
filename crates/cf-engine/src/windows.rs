@@ -138,18 +138,23 @@ pub(crate) struct Opening {
     pub(crate) conversation: Option<i64>,
 }
 
-/// The engine's own kill of a window, on its way, and the task (its project and
-/// number) whose pause an exit that came before the kill's answer marked as the
+/// The engine's own kill of a window, on its way, and the task (its project, number
+/// and the stop its pause is) whose pause an exit that came before the kill's answer
+/// marked as the
 /// suspension's (the host's close waits for the program to end, and tells the
 /// exit as it ends): the mark stands if the kill was taken, and goes if it was
 /// refused, for that exit was the window's own (`kill_and_settle`). Only that
 /// window's: a give-up goes on while its kill waits, and the record's later window
 /// may be killed meanwhile, whose answer is its own (T-509: the earlier kill, refused
-/// at last, took back the later one's mark).
+/// at last, took back the later one's mark). A kill of the window that is taken ends
+/// every kill of it under way: the engine ended the window, and no other kill's
+/// refusal says otherwise (Calliope's P3-3 of T-510: a give-up's kill and the Close's
+/// each kept an entry, the Close's answer took the give-up's, and its refusal later
+/// took back the Close's mark).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Killing {
     pub(crate) pane: Pane,
-    pub(crate) paused: Option<(i64, i64)>,
+    pub(crate) paused: Option<(i64, i64, i64)>,
 }
 
 /// The chief's window failing to start, tried again ever more slowly: how
@@ -1572,21 +1577,27 @@ impl Dispatcher {
             // with: where it was asking, the human's yes in it is read off the screen now.
             self.bank_yes_before_close(record, pane).await;
             let killed = self.kill(record, pane).await;
+            let taken = matches!(killed, Ok(true));
             let paused = {
                 let mut window = record.window.borrow_mut();
-                let at = window
-                    .killing
-                    .iter()
-                    .position(|killing| killing.pane == *pane);
-                at.and_then(|at| window.killing.remove(at).paused)
+                if taken {
+                    window.killing.retain(|killing| killing.pane != *pane);
+                    None
+                } else {
+                    let at = window
+                        .killing
+                        .iter()
+                        .position(|killing| killing.pane == *pane);
+                    at.and_then(|at| window.killing.remove(at).paused)
+                }
             };
-            if !matches!(killed, Ok(true)) {
+            if !taken {
                 // Refused: an exit that came meanwhile was the window's own.
-                if let Some((project, number)) = paused {
+                if let Some((project, number, stop)) = paused {
                     self.seams
                         .ledger
                         .borrow_mut()
-                        .unmark_pause(project, number)?;
+                        .unmark_pause(project, number, stop)?;
                 }
                 return killed;
             }
