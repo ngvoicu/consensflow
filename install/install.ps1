@@ -51,8 +51,11 @@
 # Errors are thrown, never `exit`: under `irm | iex` an exit would close the
 # PowerShell window it runs in. Everything is inside the script block, run on
 # the last line, so a download cut short runs nothing. It writes only in a
-# folder of its own under TEMP, removed at the end, and where the installer
-# puts the app.
+# folder of its own under TEMP, consensflow-install.<pid>.<12 hex>, removed at
+# the end, and where the installer puts the app. A run that is killed leaves that
+# folder: the next run, before anything else, removes the folder of a run that is
+# gone (never one that may be an install still going on, never a link, never what
+# is not named exactly so), and says what it removed or left.
 
 & {
     $ErrorActionPreference = 'Stop'
@@ -489,9 +492,48 @@ remove everything.
         $null
     }
 
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('consensflow-install.' + [guid]::NewGuid().ToString('N').Substring(0, 12))
+    # Whether the process $process may be an install that goes on: any PowerShell (an
+    # `irm | iex` runs inside one, and names nothing), or a program whose command line
+    # names install.ps1.
+    function Test-CfInstallGoesOn($process) {
+        if (@('powershell', 'pwsh', 'powershell_ise') -contains $process.ProcessName.ToLowerInvariant()) { return $true }
+        $line = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction SilentlyContinue
+        [bool]($line -and $line.CommandLine -and $line.CommandLine -like '*install.ps1*')
+    }
+
+    # Takes away what a run that was killed (no `finally` runs) left in the user's own
+    # temporary folder: its folder, consensflow-install.<pid>.<12 hex>, of a pid no install
+    # runs as (a process that has it is an install only if Test-CfInstallGoesOn says it may
+    # be). Only a real folder, never a link; the folder is deleted without following a link
+    # inside it; this run's own folder ($own) is never one; every one is said in full.
+    function Remove-CfStaleRuns([string]$own) {
+        foreach ($item in Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Force -ErrorAction SilentlyContinue) {
+            if ($item.Name -cnotmatch '\Aconsensflow-install\.([1-9][0-9]{0,9})\.[0-9a-f]{12}\z') { continue }
+            if ($item.FullName -eq $own) { continue }
+            $pidOf = [long]($item.Name -split '\.')[1]
+            $path = $item.FullName
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                Write-Host "consensflow: left $path alone: an install makes a folder there, and this is not one."
+                continue
+            }
+            $process = if ($pidOf -ne $PID -and $pidOf -le [int]::MaxValue) { Get-Process -Id $pidOf -ErrorAction SilentlyContinue } else { $null }
+            if ($process -and (Test-CfInstallGoesOn $process)) {
+                Write-Host "consensflow: left $path alone: process $pidOf may be an install that is still going on."
+                continue
+            }
+            try {
+                [IO.Directory]::Delete($path, $true)
+                Write-Host "consensflow: removed $path, the folder an earlier install worked in (no install runs as process $pidOf)."
+            } catch {
+                Write-Host "consensflow: could not remove ${path}: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('consensflow-install.' + $PID + '.' + [guid]::NewGuid().ToString('N').Substring(0, 12))
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
+        Remove-CfStaleRuns $tmp
         $machine = Get-CfMachineInstall
         if ($machine) {
             $where = if ($machine.InstallLocation) { $machine.InstallLocation.Trim('"') } else { 'Program Files' }

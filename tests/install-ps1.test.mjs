@@ -11,13 +11,16 @@ import { Buffer } from 'node:buffer'
 import { spawn, spawnSync } from 'node:child_process'
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
@@ -138,7 +141,7 @@ for (const [label, shell] of shells) {
       }
     }
 
-    function install(at, args = [], { env = {}, launcher } = {}) {
+    function install(at, args = [], { env = {}, launcher, onStart } = {}) {
       const words = [
         '-NoProfile',
         '-NonInteractive',
@@ -163,6 +166,7 @@ for (const [label, shell] of shells) {
             ...env,
           },
         })
+        onStart?.(child)
         let out = ''
         child.stdout.on('data', (chunk) => {
           out += chunk
@@ -573,6 +577,149 @@ for (const [label, shell] of shells) {
             ran,
             /this PowerShell runs inside the ConsensFlow in .*Run this from Windows Terminal/,
           )
+        })
+      })
+
+      // A run that is killed (TerminateProcess: no `finally` runs) leaves its own folder in the
+      // user's temporary folder: consensflow-install.<pid>.<12 hex>. The next run takes away what
+      // is unmistakably an earlier run's: by exactly such a name, of a pid that no install runs as
+      // (a PowerShell is one that may be, whatever it is doing; so is a process whose command line
+      // names install.ps1), never a link, said in full.
+      describe("what an earlier install left in the user's temporary folder", () => {
+        const children = []
+        after(() => {
+          for (const child of children) child.kill()
+        })
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+        async function waitFor(check, what) {
+          for (let i = 0; i < 300; i++) {
+            if (check()) return
+            await wait(100)
+          }
+          assert.fail(`${what} did not happen in 30 s`)
+        }
+        /** The pid of a process that ran and ended. */
+        async function deadPid() {
+          const child = spawn(process.execPath, ['-e', ''])
+          await new Promise((resolve) => child.on('exit', resolve))
+          return child.pid
+        }
+        /** A process kept running: a PowerShell, or a program that is none. */
+        function running(program, args) {
+          const child = spawn(program, args, { stdio: 'ignore' })
+          children.push(child)
+          return child.pid
+        }
+        const folderIn = (at, name, files = { 'verify.js': 'x' }) => {
+          const folder = path.join(at.tmp, name)
+          mkdirSync(folder)
+          for (const [file, text] of Object.entries(files))
+            writeFileSync(path.join(folder, file), text)
+          return folder
+        }
+        const exact = (words) => words.replaceAll('\\', '\\\\').replaceAll('.', '\\.')
+
+        test("a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed", async () => {
+          publish('3.0.6', { signature: null })
+          const at = freshCase()
+          const hex = '0123456789ab'
+          const dead = await deadPid()
+          const live = running(shell, [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            'Start-Sleep -Seconds 120',
+          ])
+          const other = running(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'])
+          const gone = folderIn(at, `consensflow-install.${dead}.${hex}`)
+          const unrelated = folderIn(at, `consensflow-install.${other}.${hex}`)
+          const kept = folderIn(at, `consensflow-install.${live}.${hex}`)
+          // A junction inside a dead run's folder, to a folder that is someone's: only the junction goes.
+          const elsewhere = mkdtempSync(path.join(work, 'elsewhere-'))
+          writeFileSync(path.join(elsewhere, 'keep'), 'mine')
+          symlinkSync(elsewhere, path.join(gone, 'link'), 'junction')
+          const similar = [
+            `consensflow-install.${dead}.${hex.slice(0, 11)}`,
+            `consensflow-install.${dead}.${hex}c`,
+            `consensflow-install.${dead}.${hex.slice(0, 10)}ag`,
+            `consensflow-install.${dead}.${hex.toUpperCase()}`,
+            `consensflow-install.0${dead}.${hex}`,
+            `consensflow-install.${dead}x.${hex}`,
+            `consensflow-install.99999999999.${hex}`,
+            `consensflow-install.${dead}.${hex}.bak`,
+            `consensflow-install.${dead}`,
+            `consensflow-install.${hex}`,
+            `xconsensflow-install.${dead}.${hex}`,
+          ]
+          for (const name of similar) folderIn(at, name)
+          // A link by the very shape of a dead run's folder, to a folder somewhere else; and a file.
+          symlinkSync(
+            elsewhere,
+            path.join(at.tmp, `consensflow-install.${dead + 1}.${hex}`),
+            'junction',
+          )
+          writeFileSync(path.join(at.tmp, `consensflow-install.${dead + 2}.${hex}`), 'file')
+          const ran = await install(at, ['--version', '3.0.6'])
+          assert.notEqual(ran.status, 0, ran.out)
+          assert.match(ran.out, /nothing was installed/)
+          assert.deepEqual(
+            readdirSync(at.tmp).sort(),
+            [
+              path.basename(kept),
+              ...similar,
+              `consensflow-install.${dead + 1}.${hex}`,
+              `consensflow-install.${dead + 2}.${hex}`,
+            ].sort(),
+            "only a dead run's folder and the pid that is another program's are gone, and this run's own",
+          )
+          assert.equal(readFileSync(path.join(elsewhere, 'keep'), 'utf8'), 'mine')
+          assert.ok(!existsSync(gone) && !existsSync(unrelated))
+          assert.match(ran.out, new RegExp(`removed ${exact(gone)}`))
+          assert.match(ran.out, new RegExp(`removed ${exact(unrelated)}`))
+          assert.match(
+            ran.out,
+            new RegExp(
+              `left ${exact(kept)} alone: process ${live} may be an install that is still going on`,
+            ),
+          )
+          assert.match(
+            ran.out,
+            new RegExp(`left .*consensflow-install\\.${dead + 1}\\.${hex} alone`),
+          )
+        })
+
+        test("this run's folder carries its pid, and one killed hard leaves it for the next run to take away", async () => {
+          publish('3.0.6', { signature: null })
+          const at = freshCase()
+          // A server that takes the connection and never answers: the run hangs on its first download.
+          const sockets = new Set()
+          const hung = net.createServer((socket) => {
+            sockets.add(socket)
+            socket.on('error', () => {})
+          })
+          await new Promise((resolve) => hung.listen(0, '127.0.0.1', resolve))
+          let child
+          const first = install(at, ['--version', '3.0.7'], {
+            env: { CONSENSFLOW_RELEASES_URL: `http://127.0.0.1:${hung.address().port}/releases` },
+            onStart: (started) => {
+              child = started
+            },
+          })
+          try {
+            await waitFor(() => readdirSync(at.tmp).length === 1, 'the run making its folder')
+            const [folder] = readdirSync(at.tmp)
+            assert.match(folder, new RegExp(`^consensflow-install\\.${child.pid}\\.[0-9a-f]{12}$`))
+            child.kill()
+            await first
+            assert.deepEqual(readdirSync(at.tmp), [folder], 'the kill left it')
+            const ran = await install(at, ['--version', '3.0.6'])
+            assert.match(ran.out, new RegExp(`removed ${exact(path.join(at.tmp, folder))}`))
+            assert.deepEqual(readdirSync(at.tmp), [], 'the next run took it away, and its own')
+          } finally {
+            child?.kill()
+            for (const socket of sockets) socket.destroy()
+            await new Promise((resolve) => hung.close(resolve))
+          }
         })
       })
     })
