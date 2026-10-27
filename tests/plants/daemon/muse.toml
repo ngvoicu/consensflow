@@ -1562,4 +1562,12 @@ replace = '''
         .map_err(|_| String::new())?;
 '''
 
+[[plant]]
+name = "muse: a moved hold is told gone on as an account"
+meant = "a_human_who_accepts_the_model_and_presses_try_again_goes_on_though_the_record_still_reads_the_move"
+runs = ["muse-moved"]
 
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = "    let told = if notes[given].0.ends_with(TAIL_MOVED) {"
+replace = "    let told = if false && notes[given].0.ends_with(TAIL_MOVED) {"

@@ -109,6 +109,69 @@ fn the_humans_word_for_that_member_brings_it_back_and_its_task_goes_on() {
 }
 
 #[test]
+fn a_human_who_accepts_the_model_and_presses_try_again_goes_on_though_the_record_still_reads_the_move(
+) {
+    // In production the harness's record goes on reading the move until the model is put back or
+    // the window is relaunched: the hold must not come back at the next look, the words go in once,
+    // and the requester, told it waits, is told it goes on (T-816, Calliope's question).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let zeus = tiers.assignee(1);
+    context.advance(60_000);
+    context
+        .adapter
+        .quota(&zeus, Some(fell_back(&now(&context)).as_quota()));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(tiers.out_until("zeus").is_some());
+    assert_eq!(tiers.task(1).task.state, "paused");
+    // Its turn stopped when the task was held: the window rests, still reading the move.
+    context.adapter.with(&zeus, |agent| agent.settled = true);
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        tiers.out_until("zeus"),
+        None,
+        "the same record does not hold it again"
+    );
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("working", Some(zeus.as_str()))
+    );
+    let resumed = || {
+        given(&context, &zeus)
+            .iter()
+            .filter(|said| said.contains("Resumed:"))
+            .count()
+    };
+    assert_eq!(resumed(), 1);
+    // Its window answers, past the time a refusal is the same wait: the requester is told.
+    context.advance(6 * 60_000);
+    context.adapter.writes(&zeus, "Going on.", &now(&context));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let goes_on: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.starts_with("T-1 goes on"))
+        .collect();
+    assert_eq!(
+        goes_on,
+        ["T-1 goes on: the human said its model may go on."],
+        "{:?}",
+        tiers.notes("chief")
+    );
+    assert_eq!(tiers.out_until("zeus"), None);
+    assert_eq!(resumed(), 1, "once");
+}
+
+#[test]
 fn another_window_of_the_member_that_answers_and_an_allowance_release_no_hold_for_a_move() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);

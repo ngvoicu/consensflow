@@ -55,6 +55,12 @@ fn render(number: i64, handle: &str, until: &str) -> String {
     format!("T-{number} waits with @{handle}: out of quota until {until}{TAIL}")
 }
 
+/// What a requester is told when a task held for its window's moved model goes on: the
+/// human said it may (MUS-24), not that an account has quota again.
+pub(super) fn goes_on_moved(number: i64) -> String {
+    format!("T-{number} goes on: the human said its model may go on.")
+}
+
 /// What a requester is told when the task it was told waits goes on. It is
 /// news, not a word of the wait: a later pause of the task does not withdraw it
 /// (`leave_pause_notes`), or the requester would keep the promise it corrects.
@@ -162,13 +168,19 @@ pub(crate) fn tell_goes_on(store: &mut Store, task: &TaskRow) -> Result<(), Ledg
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let told = goes_on(task.number);
     let given = notes.iter().rposition(|(body, state)| {
         is_hold_note(task.number, body)
             && matches!(state.as_str(), "delivering" | "delivered" | "read")
     });
     let Some(given) = given else {
         return Ok(());
+    };
+    // Said in the words of the hold it corrects: a model that moved is let go on by the human,
+    // not an account that has quota again.
+    let told = if notes[given].0.ends_with(TAIL_MOVED) {
+        goes_on_moved(task.number)
+    } else {
+        goes_on(task.number)
     };
     if notes[given..].iter().any(|(body, _)| *body == told) {
         return Ok(());
@@ -179,7 +191,7 @@ pub(crate) fn tell_goes_on(store: &mut Store, task: &TaskRow) -> Result<(), Ledg
         task.project_id,
         &Sent {
             to: &requester.handle,
-            body: &goes_on(task.number),
+            body: &told,
             task: Some(task.number),
             kind: "note",
             ..Sent::default()
