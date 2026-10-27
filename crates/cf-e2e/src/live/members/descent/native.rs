@@ -65,6 +65,14 @@ impl Held for Number {
             _ => Ok(()),
         }
     }
+
+    fn pause(&self, pause: super::Pause) -> io::Result<()> {
+        let signal = match pause {
+            super::Pause::Stop => crate::process::Signal::Stop,
+            super::Pause::Continue => crate::process::Signal::Continue,
+        };
+        crate::process::signal(self.0, signal)
+    }
 }
 
 /// Windows ends a process through a handle to it ([`win::Handle`]).
@@ -83,6 +91,13 @@ impl Held for win::Handle {
 
     fn end(&self) -> io::Result<()> {
         self.terminate()
+    }
+
+    fn pause(&self, _pause: super::Pause) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Windows has no stop of a process",
+        ))
     }
 }
 

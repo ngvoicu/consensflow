@@ -63,8 +63,8 @@ pub use board::{
 };
 pub use command::{quiet_command, runs_command, shown, LongCommand};
 pub use descent::{
-    descending_from, end_chosen, holding, with_cygwin_parents, Ended, Identity, Machine, Running,
-    ThisMachine,
+    descending_from, end_chosen, holding, pause_chosen, with_cygwin_parents, Ended, Identity,
+    Machine, Pause, Running, ThisMachine,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use plan::{

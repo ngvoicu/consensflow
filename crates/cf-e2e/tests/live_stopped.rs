@@ -4,7 +4,7 @@
 //! and were pasted again). It is opt-in (`cargo xtask live stopped`): it spends the
 //! machine's quota on one Claude Code window, on its cheap model, so it is ignored unless
 //! asked for and is no part of `check` or of CI. Unix only: it stops the window's processes
-//! with `SIGSTOP`.
+//! through the kit's `descent`, which stops a process only while it is still the one chosen.
 //!
 //! A note of forty numbered lines is pasted as the daemon pastes one (`pane.write_paste`,
 //! its Enter after it); at once every process of the window's group is stopped, for
@@ -31,14 +31,15 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::members::{find, member_as, stand_in_worker, Members, Plan, STAND_IN_WORKER};
+use cf_e2e::live::members::{
+    descending_from, find, member_as, pause_chosen, stand_in_worker, Identity, Machine, Members,
+    Pause, Plan, ThisMachine, STAND_IN_WORKER,
+};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window, ANSWER};
 use cf_e2e::live::{self, ask, Harness, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
-use nix::sys::signal::{killpg, Signal};
-use nix::unistd::{getpgid, Pid};
 use serde_json::Value;
 
 /// The stand-in for Claude, which the rig puts first on the `PATH` of its windows.
@@ -126,20 +127,32 @@ fn in_record(window: &Window) -> usize {
         .count()
 }
 
-/// Signals every process of the window's group.
-fn signal(window: &Window, signal: Signal) -> Result<()> {
-    let pid = window
-        .process()
-        .ok_or_else(|| Error::Daemon("the pane host named no process of the window".into()))?
-        .pid;
-    signal_group(pid, signal)
+/// Stops the window's own tree where it is, or lets it go on: its program, and what
+/// descends from it, each only while it is still the process chosen (`descent`).
+fn stall(root: Identity, pause: Pause) -> Result<()> {
+    let all = ThisMachine.processes()?;
+    let mut tree: Vec<_> = all
+        .iter()
+        .filter(|process| process.identity == root)
+        .cloned()
+        .collect();
+    tree.extend(descending_from(&all, root));
+    let paused = pause_chosen(&tree, pause);
+    if paused.ended.is_empty() || !paused.problems().is_empty() {
+        return Err(Error::Daemon(format!(
+            "{pause:?} of the window's tree: {} reached; {:?}",
+            paused.ended.len(),
+            paused.problems()
+        )));
+    }
+    Ok(())
 }
 
-/// Signals every process of the group of `pid`.
-fn signal_group(pid: u32, signal: Signal) -> Result<()> {
-    let group = getpgid(Some(Pid::from_raw(pid as i32)))
-        .map_err(|error| Error::Daemon(format!("no group of {pid}: {error}")))?;
-    killpg(group, signal).map_err(|error| Error::Daemon(format!("{signal} {group}: {error}")))
+/// The window's program, as the pane host named it.
+fn root_of(window: &Window) -> Result<Identity> {
+    window
+        .process()
+        .ok_or_else(|| Error::Daemon("the pane host named no process of the window".into()))
 }
 
 #[test]
@@ -154,7 +167,8 @@ fn a_claude_code_window_stopped_after_a_paste_shows_and_records_it_as_it_shows()
         .ready()
         .map_err(|screen| Error::Daemon(format!("the window did not open: {screen}")))?;
     let pasted = window.paste(&window.given(&note())?)?;
-    signal(&window, Signal::SIGSTOP)?;
+    let root = root_of(&window)?;
+    stall(root, Pause::Stop)?;
     let stopped = Instant::now();
     log.say("claude: pasted, and stopped");
     let mut seen = Vec::new();
@@ -178,7 +192,7 @@ fn a_claude_code_window_stopped_after_a_paste_shows_and_records_it_as_it_shows()
     if let Some(wait) = STOPPED.checked_sub(stopped.elapsed()) {
         sleep(wait);
     }
-    signal(&window, Signal::SIGCONT)?;
+    stall(root, Pause::Continue)?;
     log.say("claude: going on");
     let answered = live::until(ANSWER, LOOK, || {
         let record = window.record()?;
@@ -248,11 +262,11 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
         .and_then(|frame| frame["generation"].as_u64())
         .unwrap_or(1);
     let pane = serde_json::json!({ "id": id, "generation": generation });
-    // The rig keeps the process it read as the host answered; else the host's own word.
-    let pid = members
+    // The rig keeps the process it read as the host answered; else the host's own word, read
+    // now.
+    let root = members
         .rig()
         .window_process(&pane)
-        .map(|identity| identity.pid)
         .or_else(|| {
             members
                 .rig()
@@ -262,6 +276,7 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
                 .find(|frame| frame["id"] == pane["id"])
                 .and_then(|frame| frame["pid"].as_u64())
                 .and_then(|pid| u32::try_from(pid).ok())
+                .and_then(|pid| ThisMachine.identity(pid).ok().flatten())
         })
         .ok_or_else(|| Error::Daemon("the pane host named no process of the chief".into()))?;
     members.give(STAND_IN_WORKER, "Reply with exactly: ONE done.")?;
@@ -289,10 +304,10 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
         members.close()?;
         return Err(Error::Daemon("the result's delivery never began".into()));
     };
-    signal_group(pid, Signal::SIGSTOP)?;
+    stall(root, Pause::Stop)?;
     log.say("claude chief: the result's paste begun, the chief stopped");
     sleep(STOPPED);
-    signal_group(pid, Signal::SIGCONT)?;
+    stall(root, Pause::Continue)?;
     log.say("claude chief: going on");
     let id = begun["data"]["message"].as_i64().unwrap_or_default();
     let settled = find(
