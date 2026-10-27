@@ -31,6 +31,16 @@ const OLD_TAIL: &str = "; it goes on by itself then.";
 const TAIL_UNAVAILABLE: &str =
     ", and nothing resets that; it goes on when the human says the account works again.";
 
+/// How a hold note of a window whose model its harness moved ends: nothing resets that
+/// either, and only the human's word for the member lets it go on (MUS-24).
+const TAIL_MOVED: &str = "; it goes on when the human says it may.";
+
+/// The words of a hold note of a window whose model moved on its own, `because`: the
+/// reader's words say who moved it, from what, to what.
+fn render_moved(number: i64, handle: &str, because: &str) -> String {
+    format!("T-{number} waits with @{handle}: {because}{TAIL_MOVED}")
+}
+
 /// The words of a hold note of an account that is unavailable for `because`
 /// (MUS-23): no time is named, for there is none.
 fn render_unavailable(number: i64, handle: &str, because: &str) -> String {
@@ -58,7 +68,7 @@ pub(super) fn goes_on(number: i64) -> String {
 /// ends so.
 fn is_hold_note(number: i64, body: &str) -> bool {
     body.starts_with(&format!("T-{number} waits with @"))
-        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE]
+        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE, TAIL_MOVED]
             .iter()
             .any(|tail| body.ends_with(tail))
 }
@@ -103,6 +113,29 @@ pub(crate) fn note_hold_unavailable(
         &Sent {
             to,
             body: &render_unavailable(number, handle, because),
+            task: Some(number),
+            kind: "note",
+            ..Sent::default()
+        },
+    )
+}
+
+/// Tells `to` that T-`number` is held with `handle` because its harness moved its window's
+/// model on its own, `because` (MUS-24): no time resets that, and the human's word does.
+pub(crate) fn note_hold_moved(
+    store: &mut Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    handle: &str,
+    because: &str,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            to,
+            body: &render_moved(number, handle, because),
             task: Some(number),
             kind: "note",
             ..Sent::default()

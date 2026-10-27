@@ -39,19 +39,69 @@ const UNKNOWN_RESET_MS: i64 = 60 * 60_000;
 
 /// What a member is marked out until when its account is unavailable (MUS-23): no
 /// reset exists, so nothing resets it, and its held tasks are due at no time of their
-/// own. Only the human's Try again now, or a turn of its account that got through, ends it.
-const NEVER: &str = "9999-12-31T23:59:59.999Z";
+/// own. Only the human's Try again now, or a count of its allowance that is not used up
+/// (Muse's `usage`), or a turn of its account that got through, ends it.
+const NEVER: &str = "9999-12-31T23:59:59.998Z";
 
-/// Whether `until`, a member's time out, is [`NEVER`]: its account is unavailable.
+/// What a member is marked out until when its harness moved its window's model on its own
+/// (MUS-24): the same no time, and later than [`NEVER`], so a member held for both is held
+/// for the move. Only the human's Try again now for that member ends it: no teammate's turn,
+/// no allowance and no other window's answer does, or the engine would paste into a window
+/// on a model nobody chose (T-816). It is the ledger's one record of the kind of hold, which
+/// holds across a restart of the daemon (its schema takes no column for it).
+const MOVED: &str = "9999-12-31T23:59:59.999Z";
+
+/// Whether `until`, a member's time out, is a hold no time ends: [`NEVER`] or [`MOVED`].
 pub(crate) fn never(until: &str) -> bool {
     until.starts_with("9999-")
 }
 
-/// What a window of a member out says it is doing: out of quota until the reset, or,
-/// where the account is unavailable (no reset), why (MUS-23).
-pub(crate) fn out_words(until: &str, unavailable: Option<&str>) -> String {
-    match unavailable {
-        Some(because) => format!("unavailable: {because}"),
+/// Whether `until` is the hold of a member whose model was moved ([`MOVED`]).
+pub(crate) fn moved_hold(until: &str) -> bool {
+    until == MOVED
+}
+
+/// Why a member is held for no time: its account refused for what only its human cures
+/// (MUS-23), or its harness moved its window's model on its own (MUS-24). The words are the
+/// reader's.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Unwell<'a> {
+    Account(&'a str),
+    Moved(&'a str),
+}
+
+impl<'a> Unwell<'a> {
+    /// What a quota held for no time says, where it says one.
+    pub(crate) fn of(quota: Option<&'a Quota>) -> Option<Self> {
+        match quota {
+            Some(Quota::Unavailable { because, .. }) => Some(Unwell::Account(because)),
+            Some(Quota::Moved { because, .. }) => Some(Unwell::Moved(because)),
+            _ => None,
+        }
+    }
+
+    fn because(self) -> &'a str {
+        match self {
+            Unwell::Account(because) | Unwell::Moved(because) => because,
+        }
+    }
+
+    /// The reason the ledger keeps of the member's hold.
+    pub(crate) fn hold(self) -> &'static str {
+        match self {
+            Unwell::Account(_) => "account unavailable",
+            Unwell::Moved(_) => "model moved",
+        }
+    }
+}
+
+/// What a window of a member out says it is doing: out of quota until the reset, or, where
+/// the member is held for no time, why: its account (MUS-23) or its model's move (MUS-24).
+pub(crate) fn out_words(until: &str, unwell: Option<Unwell<'_>>) -> String {
+    match unwell {
+        Some(Unwell::Account(because)) => format!("unavailable: {because}"),
+        Some(Unwell::Moved(because)) => format!("moved: {because}"),
+        None if moved_hold(until) => "model moved on its own".to_owned(),
         None if never(until) => "unavailable".to_owned(),
         None => format!("out of quota until {until}"),
     }
@@ -77,6 +127,9 @@ pub(crate) struct QuotaPart {
     /// The time of the window's last answer that was looked at as news of its
     /// account's quota: each answer is news once.
     pub(crate) answered: Option<String>,
+    /// The drift of the model the human was told of last, by the models and the time its
+    /// record names: each is told once.
+    pub(crate) drift_told: Option<String>,
 }
 
 /// News that an account has quota again.
@@ -101,6 +154,10 @@ pub(crate) enum News<'a> {
 pub(crate) struct SchedulerState {
     waiting_noted: RefCell<HashMap<i64, i64>>,
     out_noted: RefCell<HashSet<(i64, String)>>,
+    /// The members held for no time whose human was told why, each with the time it was
+    /// marked out: apart from `out_noted`, whose mark a member out for a 429 with a message
+    /// waiting already has when a billing refusal arrives (T-816).
+    unwell_noted: RefCell<HashSet<(i64, String)>>,
     /// The participants a window's turn brought back, or left out for a later
     /// limit, each with the reset it was out until: the same limit again is no
     /// news a teammate's turn can undo. In memory, so a restart may bring a chief
@@ -113,9 +170,9 @@ fn same_refusal(handled: Option<&Arc<Quota>>, quota: &Arc<Quota>) -> bool {
     handled.is_some_and(|handled| {
         Arc::ptr_eq(handled, quota)
             || quota.at().is_some_and(|at| handled.at() == Some(at))
-            // An unavailable account says its words and time again as a new object at every
+            // A member held for no time says its words and time again as a new object at every
             // look (a move of the model, MUS-24): equal, it is the one refusal.
-            || (quota.unavailable() && handled == quota)
+            || (quota.held_for_the_human() && handled == quota)
     })
 }
 
@@ -287,7 +344,12 @@ impl Dispatcher {
         }
         if self.out(member.out_until.as_deref()) {
             let until = member.out_until.as_deref().unwrap_or_default();
-            return Some(if never(until) {
+            return Some(if moved_hold(until) {
+                format!(
+                    "@{}'s model moved on its own (it waits for the human's word)",
+                    member.handle
+                )
+            } else if never(until) {
                 format!(
                     "@{}'s account is unavailable (its billing or login was refused)",
                     member.handle
@@ -408,9 +470,13 @@ impl Dispatcher {
     /// Whether a window of a member whose account is unavailable shows the harness's own
     /// count of an allowance, not used up: the refusal that made it unavailable is over, with
     /// no human to say so (Muse's `usage`, MUS-23). A member out for a quota that resets
-    /// waits for its reset, whatever a count in an old record says.
+    /// waits for its reset, whatever a count in an old record says, and one held for its
+    /// model's move waits for the human, whatever its account has (T-816).
     pub(crate) fn shows_an_allowance(&self, owner: &ParticipantView, observed: &Observed) -> bool {
-        owner.out_until.as_deref().is_some_and(never)
+        owner
+            .out_until
+            .as_deref()
+            .is_some_and(|until| never(until) && !moved_hold(until))
             && matches!(
                 observed.quota.as_deref(),
                 Some(Quota::Usage {
@@ -458,6 +524,9 @@ impl Dispatcher {
 
     /// When a quota resets: the time its harness names, or an hour from now.
     pub(crate) fn reset_of(&self, quota: Option<&Quota>) -> String {
+        if quota.is_some_and(Quota::moved) {
+            return MOVED.to_owned();
+        }
         if quota.is_some_and(Quota::unavailable) {
             return NEVER.to_owned();
         }
@@ -466,29 +535,74 @@ impl Dispatcher {
             .map_or_else(|| time::iso(self.now() + UNKNOWN_RESET_MS), str::to_owned)
     }
 
-    /// Why a member's account is unavailable, as a refusal said it: none for a quota that
-    /// resets, and for a refusal that is not shown now.
-    pub(crate) fn unavailable_because(quota: Option<&Quota>) -> Option<&str> {
-        match quota {
-            Some(Quota::Unavailable { because, .. }) => Some(because),
-            _ => None,
-        }
-    }
-
-    /// The human is told that an account is unavailable, once for each time its member
-    /// is marked out, whatever waits for it (MUS-23): nothing is sent to it until their
-    /// word, so they hear it and what to do.
-    pub(crate) fn tell_unavailable(
+    /// The human is told why a member is held for no time, once for each time it is marked
+    /// out, whatever waits for it: its account is unavailable (MUS-23) or its model moved
+    /// on its own (MUS-24). Nothing is sent to it until their word, so they hear it and what
+    /// to do.
+    pub(crate) fn tell_unwell(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
         owner: &ParticipantView,
-        because: &str,
+        unwell: Unwell<'_>,
     ) -> Result<(), EngineError> {
         let mark = (owner.id, owner.out_since.clone().unwrap_or_default());
-        if !self.scheduler.out_noted.borrow_mut().insert(mark) {
+        if !self.scheduler.unwell_noted.borrow_mut().insert(mark) {
             return Ok(());
         }
+        let because = unwell.because();
+        let body = match unwell {
+            Unwell::Account(_) => format!(
+                "@{}'s account is unavailable: {because}. Nothing is sent to it until you say it works again: press Try again now on @{} once it does.",
+                participant.handle, owner.handle
+            ),
+            Unwell::Moved(_) => format!(
+                "@{}: {because}. Nothing is sent to it until you say it may go on: put it back on the model you chose, or accept this one, then press Try again now on @{}.",
+                participant.handle, owner.handle
+            ),
+        };
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body,
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// The human is told, once, that the model a window answers from changed in its harness's
+    /// records with no word of the harness's own for it (Claude Code's drift: an alias
+    /// repointed from under it, a restart on another model, a flip of `opusplan`). Nothing
+    /// is held: only the harness saying it switched holds a window, and a hold for every
+    /// drift would hold every Claude lane on a repoint day (T-816). A drift dated before
+    /// the window opened is history.
+    pub(crate) fn tell_drift(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        let Some(drift) = observed.model_drift() else {
+            return Ok(());
+        };
+        if self.before_open(record, drift.at.as_deref()) {
+            return Ok(());
+        }
+        let key = format!(
+            "{}>{}@{}",
+            drift.from,
+            drift.to,
+            drift.at.as_deref().unwrap_or_default()
+        );
+        if record.quota.borrow().drift_told.as_deref() == Some(key.as_str()) {
+            return Ok(());
+        }
+        record.quota.borrow_mut().drift_told = Some(key);
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
@@ -496,13 +610,40 @@ impl Dispatcher {
                 to: "human".to_owned(),
                 task: None,
                 body: format!(
-                    "@{}'s account is unavailable: {because}. Nothing is sent to it until you say it works again: press Try again now on @{} once it does.",
-                    participant.handle, owner.handle
+                    "@{}'s records name another model: {} before, {} now. Nothing is held: its harness gave no word of its own that it switched (an alias repointed, a restart, or a plan mode that flips). If this is not the model you chose, put it back.",
+                    participant.handle, drift.from, drift.to
                 ),
             },
         )?;
         self.changed();
         Ok(())
+    }
+
+    /// Whether `at`, a time a record names, is before the window of `record` opened: what
+    /// a harness wrote before is history, as a Resume brings it back in a transcript.
+    /// A record that names no time, or a window with no open time, is read as live.
+    pub(crate) fn before_open(&self, record: &Record, at: Option<&str>) -> bool {
+        let opened = record.window.borrow().opened_at;
+        opened
+            .zip(at.and_then(time::parse))
+            .is_some_and(|(opened, at)| at < opened)
+    }
+
+    /// `observed`, but for a refusal held for no time that is older than the window: a
+    /// move of the model or a refusal of the account a Resume read from its transcript is
+    /// history, and holds nothing (T-816). A window with no open time reads as it is.
+    pub(crate) fn since_open(&self, record: &Record, observed: Observed) -> Observed {
+        let stale = observed.quota.as_deref().is_some_and(|quota| {
+            quota.held_for_the_human() && self.before_open(record, quota.at())
+        });
+        if stale {
+            Observed {
+                quota: None,
+                ..observed
+            }
+        } else {
+            observed
+        }
     }
 
     /// News that an account has quota again brings back the others out on it.
@@ -565,6 +706,13 @@ impl Dispatcher {
                 continue;
             }
             let until = other.out_until.clone().unwrap_or_default();
+            // A member held for its model's move comes back at the human's word for that
+            // member alone (`back_from_quota`): no teammate's turn and no Try again now on
+            // another member does, or the engine would paste into a window on a model
+            // nobody chose (T-816).
+            if moved_hold(&until) {
+                continue;
+            }
             let back = match news {
                 News::Human => true,
                 News::Turn {
@@ -718,41 +866,45 @@ impl Dispatcher {
         owner: &ParticipantView,
         until: &str,
         refused_at: Option<i64>,
-        unavailable: Option<&str>,
+        unwell: Option<Unwell<'_>>,
     ) -> Result<(), EngineError> {
         if participant.role == "chief" {
             return Ok(());
         }
         for task in self.active_work(project, participant)? {
             let again = match refused_at {
-                Some(at) if unavailable.is_none() => {
-                    self.refused_its_resume(participant, &task, at)?
-                }
+                Some(at) if unwell.is_none() => self.refused_its_resume(participant, &task, at)?,
                 _ => false,
             };
             self.seams.ledger.borrow_mut().hold_task(
                 project.id,
                 task.number,
                 until,
-                if unavailable.is_some() {
-                    "account unavailable"
-                } else {
-                    "out of quota"
-                },
+                unwell.map_or("out of quota", Unwell::hold),
             )?;
             if refused_at.is_none() {
                 continue;
             }
-            if let Some(because) = unavailable {
+            if let Some(unwell) = unwell {
                 // The requester is told it waits for the human's word, whatever the
-                // refusal answered: the human is told too, once (`tell_unavailable`).
-                self.seams.ledger.borrow_mut().note_hold_unavailable(
-                    project.id,
-                    &task.requester,
-                    task.number,
-                    &participant.handle,
-                    because,
-                )?;
+                // refusal answered: the human is told too, once (`tell_unwell`).
+                let mut ledger = self.seams.ledger.borrow_mut();
+                match unwell {
+                    Unwell::Account(because) => ledger.note_hold_unavailable(
+                        project.id,
+                        &task.requester,
+                        task.number,
+                        &participant.handle,
+                        because,
+                    )?,
+                    Unwell::Moved(because) => ledger.note_hold_moved(
+                        project.id,
+                        &task.requester,
+                        task.number,
+                        &participant.handle,
+                        because,
+                    )?,
+                };
             } else if again {
                 self.tell_the_human_it_may_need_them(project, participant, owner, &task)?;
             } else {

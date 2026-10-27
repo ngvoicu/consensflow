@@ -184,6 +184,10 @@ pub(crate) struct WindowPart {
     pub(crate) token: Option<String>,
     /// A kill is on its way.
     pub(crate) retiring: bool,
+    /// When the engine asked the host to open the window (milliseconds): what the harness's
+    /// record says was written before is history, not the window's (a move of the model, a
+    /// refusal of an account it read from a transcript a Resume brought back, T-816).
+    pub(crate) opened_at: Option<i64>,
     /// The window whose exit is the engine's own (`close_own`): a chief's closes no
     /// project. Only that window's: a close whose kill was never answered leaves it
     /// set, and a later window of the record is no close of the engine's (T-414 P3-8).
@@ -270,6 +274,7 @@ impl Default for WindowPart {
             launch_id: None,
             token: None,
             retiring: false,
+            opened_at: None,
             own_exit: None,
             killing: Vec::new(),
             closed_with: None,
@@ -648,6 +653,7 @@ impl Dispatcher {
         }
         // The host watches a window's process before it answers the open, so
         // an exit can come first, even in the same read: the exit finds it here.
+        let asked_at = self.now();
         record.window.borrow_mut().opening = Some(Opening {
             pane: pane.clone(),
             exited: None,
@@ -745,6 +751,7 @@ impl Dispatcher {
             part.servers = planned.servers;
             part.harness.clone_from(&planned.harness);
             part.pane = Some(pane.clone());
+            part.opened_at = Some(asked_at);
             part.launch_id = Some(launch_id);
             part.token = Some(token);
             part.activity = Activity::of(ActivityState::Starting);
