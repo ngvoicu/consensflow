@@ -35,11 +35,16 @@
 #
 # A run that is killed (SIGKILL, a power cut: no trap runs) leaves in the folder
 # the copy it was making, `.ConsensFlow.app.installing.<pid>`, or the app it had
-# moved aside, `.ConsensFlow.app.previous.<pid>`. The next run, before anything
-# else, removes what is unmistakably an earlier run's: in that folder, by exactly
-# such a name, of a pid that no install is running as. Where nothing is installed
-# any more, the app moved aside is put back; where the installed app is not whole
-# and checked, it is left, and said so. Every one it removes or leaves is said.
+# moved aside, `.ConsensFlow.app.previous.<pid>`; and in TMPDIR its own folder,
+# `consensflow-install.<pid>.<six letters and digits>`, with the DMG still
+# attached. The next run, before anything else, removes what is unmistakably an
+# earlier run's: by exactly such a name, of a pid that no install is running as
+# (a process of that pid is an install only if it is a shell, or its command line
+# names install.sh), never a link and never what is on another volume. Where
+# nothing is installed any more, the app moved aside is put back if it is a whole,
+# checked ConsensFlow, and left, with the reason, if it is not; where the installed
+# app is not whole and checked, the one moved aside is left too. A DMG of a dead
+# run is detached, never forced. Every one it removes, puts back or leaves is said.
 #
 # Everything is inside main, called on the last line, so a download cut short
 # runs nothing. It writes only in a folder of its own under TMPDIR, removed at
@@ -164,11 +169,36 @@ quit_open_app() {
     done
 }
 
-# Whether the process $1 is an install that goes on: a shell running a file
+# Whether $1 is a pid as a process here has one: one to five digits, no leading
+# zero (a Mac's pids stay below 100000), read byte by byte as the C locale reads
+# them, whatever the user's: a digit of another script is none.
+is_pid() {
+    (
+        LC_ALL=C
+        case "$1" in
+            "" | 0* | *[!0-9]*) exit 1 ;;
+        esac
+        [ "${#1}" -le 5 ]
+    )
+}
+
+# Whether $1 is the six letters and digits `mktemp` ends a name with.
+is_suffix() {
+    (
+        LC_ALL=C
+        case "$1" in
+            "" | *[!A-Za-z0-9]*) exit 1 ;;
+        esac
+        [ "${#1}" -eq 6 ]
+    )
+}
+
+# Whether the process $1 may be an install that goes on: a shell running a file
 # named install.sh, a program whose command line names one, or a shell that was
 # given the script on its input (`curl | sh` runs it as `sh -s`, which names
-# nothing). Never this shell: it has staged nothing yet, so a leftover with its
-# pid is an earlier run's, whose pid this one was given again.
+# nothing), so any shell, a Terminal tab's among them, whose pid a dead run had.
+# Never this shell: it has staged nothing yet, so what has its pid is an earlier
+# run's, whose pid this one was given again.
 install_goes_on() {
     [ "$1" != "$$" ] || return 1
     program=$(ps -o comm= -p "$1" 2>/dev/null || true)
@@ -184,58 +214,121 @@ install_goes_on() {
     return 1
 }
 
+# Whether $1 is a folder (never a link) on the volume of the folder $2 it is in:
+# a volume mounted at it makes it another one's.
+plain_folder() {
+    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]
+}
+
+# Why the app at $1 ($2 in the words) is not a whole, checked ConsensFlow of the
+# version it says itself: what check_app refuses with, or nothing where it holds.
+unsound() {
+    own=
+    # PlistBuddy answers "File Doesn't Exist, Will Create" for a file that is not there.
+    if [ -f "$1/Contents/Info.plist" ]; then
+        own=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null || true)
+    fi
+    case "$own" in
+        [0-9]*) (check_app "$1" "$2" "$own") 2>&1 | sed -n '1s/^consensflow: //p' ;;
+        *) echo "it says no version" ;;
+    esac
+}
+
 # Takes away what an earlier run left in $dir if it was stopped where no trap
-# runs, and says each thing it did. A leftover is only a folder (never a link)
-# named exactly .ConsensFlow.app.installing.<pid> or .ConsensFlow.app.previous.<pid>,
-# in $dir itself, whose pid no install runs as: its path is made here from $dir
-# and the name, and nothing else is ever removed. The app moved aside goes first.
+# runs, and says each thing it did. A leftover is only a folder (never a link, never
+# a volume mounted at it) named exactly .ConsensFlow.app.installing.<pid> or
+# .ConsensFlow.app.previous.<pid>, in $dir itself, whose pid no install runs as:
+# its path is made here from $dir and the name, and nothing else is ever removed,
+# nothing on another volume with it (rm -x). The app moved aside goes first.
 remove_leftovers() {
     for kind in previous installing; do
         for found in "$dir"/.ConsensFlow.app."$kind".*; do
             [ -e "$found" ] || [ -L "$found" ] || continue
             name=${found##*/}
             owner=${name#.ConsensFlow.app."$kind".}
-            case "$owner" in
-                "" | 0* | *[!0-9]*) continue ;;
-            esac
+            is_pid "$owner" || continue
             leftover="$dir/.ConsensFlow.app.$kind.$owner"
-            if [ -L "$leftover" ] || [ ! -d "$leftover" ]; then
-                say "left $leftover alone: an install makes a folder there, and this is not one."
+            if ! plain_folder "$leftover" "$dir"; then
+                say "left $leftover alone: an install makes a folder there, on the volume of $dir, and this is not one."
                 continue
             fi
             if install_goes_on "$owner"; then
-                say "left $leftover alone: process $owner is an install that is still going on."
+                say "left $leftover alone: process $owner may be an install that is still going on."
                 continue
             fi
             if [ "$kind" = installing ]; then
-                if rm -rf "$leftover"; then
+                if rm -rf -x "$leftover"; then
                     say "removed $leftover, the copy of the app an earlier install was making (no install runs as process $owner)."
                 else
                     say "could not remove $leftover, the copy of the app an earlier install was making."
                 fi
             elif [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
-                if mv "$leftover" "$dest"; then
+                problem=$(unsound "$leftover" "the app an earlier install moved aside")
+                if [ -n "$problem" ]; then
+                    say "left $leftover alone: it is not a whole, checked ConsensFlow ($problem), so it is not put back as $dest."
+                elif mv "$leftover" "$dest"; then
                     say "put $leftover back as $dest: an earlier install was stopped after it moved that app aside, and nothing was in its place."
                 else
                     say "could not put $leftover back as $dest."
                 fi
             else
                 have=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist" 2>/dev/null || true)
-                if [ -z "$have" ]; then
-                    problem="it says no version"
-                else
-                    # check_app refuses in words, and says nothing where it holds.
-                    problem=$( (check_app "$dest" "the ConsensFlow in $dir" "$have") 2>&1 | sed -n '1s/^consensflow: //p')
-                fi
+                problem=$(unsound "$dest" "the ConsensFlow in $dir")
                 if [ -n "$problem" ]; then
                     say "left $leftover alone: the ConsensFlow in $dest is not a whole, checked app ($problem), and this may be the only whole one."
-                elif rm -rf "$leftover"; then
+                elif rm -rf -x "$leftover"; then
                     say "removed $leftover, the app an earlier install moved aside: $dest is whole, and checked (version $have)."
                 else
                     say "could not remove $leftover, the app an earlier install moved aside."
                 fi
             fi
         done
+    done
+}
+
+# The same for what a killed run left in the user's own temporary folder: its
+# folder consensflow-install.<pid>.<six letters and digits>, which holds the DMG it
+# attached at volume/. The folder of a dead run, made by this user, is taken as the
+# leftovers are, once its DMG is detached (never forced: one that will not detach
+# keeps the folder, and is said). This run's own folder is never one.
+remove_stale_runs() {
+    base=${TMPDIR:-/tmp}
+    base=${base%/}
+    physical=$(cd -P "$base" 2>/dev/null && pwd -P) || return 0
+    for found in "$base"/consensflow-install.*; do
+        [ -e "$found" ] || [ -L "$found" ] || continue
+        name=${found##*/}
+        [ "$name" != "${tmp##*/}" ] || continue
+        rest=${name#consensflow-install.}
+        owner=${rest%%.*}
+        suffix=${rest#*.}
+        is_pid "$owner" && is_suffix "$suffix" && [ "$rest" = "$owner.$suffix" ] || continue
+        stale="$physical/$name"
+        if ! plain_folder "$stale" "$physical"; then
+            say "left $stale alone: an install makes a folder there, on the volume of $physical, and this is not one."
+            continue
+        fi
+        if [ "$(stat -f %u "$stale")" != "$(id -u)" ]; then
+            say "left $stale alone: it is not yours."
+            continue
+        fi
+        if install_goes_on "$owner"; then
+            say "left $stale alone: process $owner may be an install that is still going on."
+            continue
+        fi
+        if mount | grep -qF " on $stale/volume ("; then
+            if hdiutil detach -quiet "$stale/volume" >/dev/null 2>&1; then
+                say "detached $stale/volume, the DMG an earlier install attached (no install runs as process $owner)."
+            else
+                say "could not detach $stale/volume, the DMG an earlier install attached: left $stale alone."
+                continue
+            fi
+        fi
+        if rm -rf -x "$stale"; then
+            say "removed $stale, the folder an earlier install worked in (no install runs as process $owner)."
+        else
+            say "could not remove $stale, the folder an earlier install worked in."
+        fi
     done
 }
 
@@ -250,20 +343,20 @@ cleanup() {
         hdiutil detach -quiet "$mounted" >/dev/null 2>&1 || hdiutil detach -quiet -force "$mounted" >/dev/null 2>&1 || true
     fi
     if [ -n "${stage:-}" ] && [ -e "$stage" ]; then
-        rm -rf "$stage"
+        rm -rf -x "$stage"
     fi
     if [ -n "${placed:-}" ] && [ -e "$dest" ]; then
-        rm -rf "$dest"
+        rm -rf -x "$dest"
     fi
     if [ -n "${previous:-}" ] && [ -e "$previous" ]; then
         if [ ! -e "$dest" ]; then
             mv "$previous" "$dest"
         elif [ -z "${placed:-}" ]; then
-            rm -rf "$previous"
+            rm -rf -x "$previous"
         fi
     fi
     if [ -n "${tmp:-}" ] && [ -d "$tmp" ]; then
-        rm -rf "$tmp"
+        rm -rf -x "$tmp"
     fi
 }
 
@@ -325,11 +418,11 @@ main() {
     if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" != 1 ]; then
         refuse "ConsensFlow for Mac is made for Apple silicon (M1 and later); this Mac has an Intel processor."
     fi
-    for tool in curl shasum od osascript hdiutil codesign ditto awk; do
+    for tool in curl shasum od osascript hdiutil codesign ditto awk stat mount; do
         command -v "$tool" >/dev/null 2>&1 || refuse "this Mac has no $tool, which the install needs."
     done
 
-    tmp=$(mktemp -d "${TMPDIR:-/tmp}/consensflow-install.XXXXXX")
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/consensflow-install.$$.XXXXXX")
     mounted=""
     stage=""
     placed=""
@@ -354,6 +447,7 @@ main() {
     [ -w "$dir" ] || refuse "$dir is not yours to write to. Run this as a user who can, or with CONSENSFLOW_INSTALL_DIR=$HOME/Applications; it never uses sudo itself."
     dest="$dir/ConsensFlow.app"
     remove_leftovers
+    remove_stale_runs
 
     if [ -z "$version" ]; then
         feed="$releases/download/feed-$channel/latest.json"
@@ -445,7 +539,7 @@ main() {
     check_app "$dest" "the app put in $dir"
     placed=""
     if [ -n "$previous" ]; then
-        rm -rf "$previous"
+        rm -rf -x "$previous"
         previous=""
     fi
     say "ConsensFlow $version is installed in $dest. Open it from there or with: open \"$dest\""
