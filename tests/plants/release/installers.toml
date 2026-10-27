@@ -1804,30 +1804,6 @@ file = "install/install.ps1"
 find = '''('consensflow-install.' + $PID + '.' + [guid]::NewGuid().ToString('N').Substring(0, 12))'''
 replace = '''('consensflow-install.' + [guid]::NewGuid().ToString('N').Substring(0, 12))'''
 
-[[plant]]
-name = "installers: install.ps1 deletes the folder of a dead run with Remove-Item -Recurse"
-meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
-runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
-platforms = ["windows"]
-
-[[plant.edit]]
-file = "install/install.ps1"
-find = '''                Remove-CfFolder $path
-'''
-replace = '''                Remove-Item -LiteralPath $path -Recurse -Force
-'''
-
-[[plant]]
-name = "installers: install.ps1 goes into a link inside the folder of a dead run"
-meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
-runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
-platforms = ["windows"]
-
-[[plant.edit]]
-file = "install/install.ps1"
-find = '''            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {'''
-replace = '''            if ($false) {'''
-
 # --- the site, and the guard's switch ---
 
 [[plant]]

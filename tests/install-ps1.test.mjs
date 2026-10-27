@@ -638,6 +638,14 @@ for (const [label, shell] of shells) {
           const elsewhere = mkdtempSync(path.join(work, 'elsewhere-'))
           writeFileSync(path.join(elsewhere, 'keep'), 'mine')
           symlinkSync(elsewhere, path.join(gone, 'link'), 'junction')
+          // And a symbolic link, where this user may make one (it takes a privilege Windows gives some).
+          const aside = mkdtempSync(path.join(work, 'aside-'))
+          writeFileSync(path.join(aside, 'keep'), 'mine')
+          try {
+            symlinkSync(aside, path.join(gone, 'symbolic'), 'dir')
+          } catch {
+            // not allowed here: the junction alone is tried
+          }
           const similar = [
             `consensflow-install.${dead}.${hex.slice(0, 11)}`,
             `consensflow-install.${dead}.${hex}c`,
@@ -674,7 +682,10 @@ for (const [label, shell] of shells) {
             `only a dead run's folder and the pid that is another program's are gone, and this run's own: ${ran.out}`,
           )
           assert.equal(readFileSync(path.join(elsewhere, 'keep'), 'utf8'), 'mine')
+          assert.equal(readFileSync(path.join(aside, 'keep'), 'utf8'), 'mine')
           assert.ok(!existsSync(gone) && !existsSync(unrelated))
+          // The refusal is the release's own: this run's folder was there to download into.
+          assert.match(ran.out, /ConsensFlow 3\.0\.6 has no signed SHA256SUMS/)
           assert.match(ran.out, new RegExp(`removed ${exact(gone)}`))
           assert.match(ran.out, new RegExp(`removed ${exact(unrelated)}`))
           assert.match(
