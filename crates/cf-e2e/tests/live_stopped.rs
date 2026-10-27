@@ -213,12 +213,32 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
         members.close()?;
         return report::conclude(&log, "what each check came to", &checks);
     }
-    let pane = serde_json::json!({ "id": format!("p{}-chief", members.project_id()), "generation": 1 });
+    let id = format!("p{}-chief", members.project_id());
+    let generation = members
+        .rig()
+        .open_frames()
+        .into_iter()
+        .rev()
+        .find(|frame| frame["id"] == id.as_str())
+        .and_then(|frame| frame["generation"].as_u64())
+        .unwrap_or(1);
+    let pane = serde_json::json!({ "id": id, "generation": generation });
+    // The rig keeps the process it read as the host answered; else the host's own word.
     let pid = members
         .rig()
         .window_process(&pane)
-        .ok_or_else(|| Error::Daemon("the pane host named no process of the chief".into()))?
-        .pid;
+        .map(|identity| identity.pid)
+        .or_else(|| {
+            members
+                .rig()
+                .open_frames()
+                .into_iter()
+                .rev()
+                .find(|frame| frame["id"] == pane["id"])
+                .and_then(|frame| frame["pid"].as_u64())
+                .and_then(|pid| u32::try_from(pid).ok())
+        })
+        .ok_or_else(|| Error::Daemon("the pane host named no process of the chief".into()))?;
     members.give(STAND_IN_WORKER, "Reply with exactly: ONE done.")?;
     // Stopped as soon as the daemon begins to hand the result over.
     let result = find(&log, "the result's delivery to begin", Duration::from_secs(300), Duration::from_millis(100), || {
