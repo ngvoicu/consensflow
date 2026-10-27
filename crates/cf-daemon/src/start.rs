@@ -357,7 +357,8 @@ async fn run(
     };
     // The pane host opens, kills and tells of windows, and says what a window's
     // turn left running: one end of the bridge for the engine's every word to it.
-    let host = Rc::new(BridgeHost::new(bridge.clone(), env.clone()));
+    let opening = Duration::from_millis(u64::try_from(limits.open_ms).unwrap_or_default());
+    let host = Rc::new(BridgeHost::new(bridge.clone(), env.clone()).opening_within(opening));
     let computer_use = Rc::new(MachineComputerUse::new(env.clone()));
     let seams = Seams {
         ledger: Rc::clone(&ledger),

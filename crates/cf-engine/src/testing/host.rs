@@ -32,6 +32,9 @@ pub struct FakeHost {
     requests: RefCell<Vec<(String, Value)>>,
     /// The next open is refused.
     pub refuse: Cell<bool>,
+    /// The next open is not answered by its deadline: its window opens all the same,
+    /// as a loaded host's does after the daemon stopped waiting.
+    pub unanswered: Cell<bool>,
     /// A kill is refused: the window stays, and no exit comes.
     pub refuse_kills: Cell<bool>,
     /// Keys (`pane.input`) are refused: they are asked, and none is taken.
@@ -288,6 +291,12 @@ impl FakeHost {
         }
         let pane = open.pane.clone();
         self.opened.borrow_mut().push(open);
+        if self.unanswered.replace(false) {
+            next_turn().await;
+            self.recorder
+                .answered(at, json!({ "ok": false, "error": "deadline" }));
+            return Ok(Opened::Unanswered);
+        }
         let pid = self.pid.get();
         let mut answer = json!({ "ok": true, "id": pane.id, "generation": pane.generation });
         if let Some(pid) = pid {
