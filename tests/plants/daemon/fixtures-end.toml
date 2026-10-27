@@ -24,8 +24,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/fixture.rs"
-find = '''{first}while {OWNER_THERE}; do sleep 0.2; done")'''
-replace = '''{first}while :; do sleep 0.2; done")'''
+find = '''{first}while {OWNER_THERE}; do /bin/sleep 0.2; done")'''
+replace = '''{first}while :; do /bin/sleep 0.2; done")'''
 
 [[plant]]
 name = "fixtures end with their owner: a program that waits to be asked and is not asked loops for ever"
@@ -35,8 +35,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/execute.rs"
-find = '''echo hi; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done'''
-replace = '''echo hi; while true; do sleep 0.05; done'''
+find = '''echo hi; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done'''
+replace = '''echo hi; while true; do /bin/sleep 0.05; done'''
 
 [[plant]]
 name = "fixtures end with their owner: a wait for a file looks no more at its owner"
@@ -46,8 +46,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture/tests/tree.rs"
-find = '''while [ ! -s '{file}' ] && kill -0 $PPID 2>/dev/null; do sleep 0.01; done; echo said'''
-replace = '''while [ ! -s '{file}' ]; do sleep 0.01; done; echo said'''
+find = '''while [ ! -s '{file}' ] && kill -0 $PPID 2>/dev/null; do /bin/sleep 0.01; done; echo said'''
+replace = '''while [ ! -s '{file}' ]; do /bin/sleep 0.01; done; echo said'''
 
 [[plant]]
 name = "fixtures end with their owner: a wait for a program to be another looks no more at its owner"
@@ -57,8 +57,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/turn/tests.rs"
-find = ''' || ! kill -0 $PPID 2>/dev/null; do sleep 0.05; done; printf started'''
-replace = '''; do sleep 0.05; done; printf started'''
+find = ''' || ! kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done; printf started'''
+replace = '''; do /bin/sleep 0.05; done; printf started'''
 
 [[plant]]
 name = "fixtures end with their owner: a writer that writes to a terminal looks no more at its owner"
@@ -68,8 +68,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/output_end/tests.rs"
-find = '''while kill -0 $PPID 2>/dev/null; do printf .; sleep 0.02; done'''
-replace = '''while :; do printf .; sleep 0.02; done'''
+find = '''while kill -0 $PPID 2>/dev/null; do printf .; /bin/sleep 0.02; done'''
+replace = '''while :; do printf .; /bin/sleep 0.02; done'''
 
 [[plant]]
 name = "fixtures end with their owner: a program whose owner is not its parent is given no owner"
@@ -115,7 +115,7 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/group.rs"
-find = '''(while kill -0 $PPID 2>/dev/null; do sleep 0.2; done; kill -KILL $$) & \'''
+find = '''(while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done; kill -KILL $$) & \'''
 replace = '''\'''
 
 [[plant]]
@@ -126,8 +126,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/tests.rs"
-find = ''' && [ $n -lt 1200 ]; do sleep 0.1;'''
-replace = '''; do sleep 0.1;'''
+find = ''' && [ $n -lt 1200 ]; do /bin/sleep 0.1;'''
+replace = '''; do /bin/sleep 0.1;'''
 
 [[plant]]
 name = "fixtures end with their owner: a stand-in ssh that holds the run goes on when the test is gone"
@@ -139,10 +139,10 @@ platforms = ["macos", "linux"]
 file = "tools/xtask/src/windows/run/tests.rs"
 find = '''
 echo started
-while {owner}; do sleep 0.2; done'''
+while {owner}; do /bin/sleep 0.2; done'''
 replace = '''
 echo started
-while :; do sleep 0.2; done'''
+while :; do /bin/sleep 0.2; done'''
 
 [[plant]]
 name = "fixtures end with their owner: a stand-in app's job goes on when the test is gone"
@@ -152,8 +152,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/app/tests.rs"
-find = '''(while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) &'''
-replace = '''(while :; do sleep 0.2; done) &'''
+find = '''(while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done) &'''
+replace = '''(while :; do /bin/sleep 0.2; done) &'''
 
 [[plant]]
 name = "fixtures end with their owner: a stand-in app that does not end with its input goes on when the test is gone"
@@ -163,8 +163,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/cases/tests.rs"
-find = '''while kill -0 $PPID 2>/dev/null; do sleep 0.2; done",'''
-replace = '''while :; do sleep 0.2; done",'''
+find = '''while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done",'''
+replace = '''while :; do /bin/sleep 0.2; done",'''
 
 [[plant]]
 name = "fixtures end with their owner: a sentinel goes on when the test that started it is gone"

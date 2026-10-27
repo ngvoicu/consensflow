@@ -540,7 +540,7 @@ mod tests {
             // Asked to end, it may take its time: it is not forced.
             let child = spawn(
                 &shell(
-                    "trap 'sleep 1; exit 0' TERM; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done",
+                    "trap 'sleep 1; exit 0' TERM; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done",
                 ),
                 None,
                 &system_env(),

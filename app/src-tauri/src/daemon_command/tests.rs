@@ -127,7 +127,7 @@ fn the_login_path_is_read_past_what_login_files_print() {
         "echo 'Now using node v22.9.0 (npm v10.8.3)'; exec /bin/sh -c \"$2\"",
     );
     assert_eq!(
-        login_path_in(&shell, Duration::from_secs(5), &LoginLookup::default()),
+        login_path_in(&shell, LOGIN_PATH_TIMEOUT, &LoginLookup::default()),
         std::env::var("PATH").ok()
     );
 }
@@ -152,7 +152,7 @@ fn the_login_shell_holds_nothing_of_the_apps_but_its_streams() {
         ),
     );
     assert_eq!(
-        login_path_in(&shell, Duration::from_secs(5), &LoginLookup::default()).as_deref(),
+        login_path_in(&shell, LOGIN_PATH_TIMEOUT, &LoginLookup::default()).as_deref(),
         Some("clear")
     );
 }
@@ -304,7 +304,7 @@ fn a_lookup_the_app_has_quit_starts_no_shell() {
         &format!("echo > '{}'; exec /bin/sh -c \"$2\"", started.display()),
     );
     let lookup = LoginLookup::default();
-    assert!(login_path_in(&shell, Duration::from_secs(5), &lookup).is_some());
+    assert!(login_path_in(&shell, LOGIN_PATH_TIMEOUT, &lookup).is_some());
     std::fs::remove_file(&started).expect("the shell ran once");
     lookup.end();
     assert_eq!(login_path_in(&shell, Duration::from_secs(5), &lookup), None);
@@ -641,13 +641,36 @@ fn a_verbatim_windows_path_is_spelled_plainly() {
 
 /// A stand-in for a shell whose interactive rc file runs `rc` before the command it
 /// is given, as zsh runs `.zshrc` for `-i`; started without `-i` it runs the command
-/// alone, as a login shell's `-lc` does.
+/// alone, as a login shell's `-lc` does. Its rc exports [`RC_READ`] first.
 #[cfg(unix)]
 fn shell_with_rc(home: &Path, rc: &str) -> PathBuf {
     login_shell(
         home,
-        &format!("case \"$1\" in *i*) {rc} ;; esac\nexec /bin/sh -c \"$2\""),
+        &format!("case \"$1\" in *i*) export {RC_READ}=1; {rc} ;; esac\nexec /bin/sh -c \"$2\""),
     )
+}
+
+/// What every [`shell_with_rc`] exports: the daemon is given it when the interactive
+/// shell's environment was read.
+#[cfg(unix)]
+const RC_READ: &str = "PARITY_RC_READ";
+
+/// The daemon's command, as the app makes it in `app`'s environment, whose login shell is
+/// a [`shell_with_rc`] that answers, and what the app's log says of it. The shell has the
+/// app's own limit, which one that answers never waits out: how soon a loaded machine
+/// starts a script is not what is tested. And the environment was read, or this fails
+/// saying so: a lookup that read nothing gives the daemon none of the rc, and what a test
+/// says is never taken would hold of nothing (CI, 2026-10-27: a shell the rc's loader
+/// variable ended at its start gave nothing, and only the test's last assertion said so).
+#[cfg(unix)]
+fn the_daemons_on_the_rc(app: &Env) -> (Command, Option<String>) {
+    let (command, said) = the_daemons(app, LOGIN_PATH_TIMEOUT);
+    assert_eq!(
+        given_of(&command, RC_READ).as_deref(),
+        Some("1"),
+        "the interactive shell's environment was not read"
+    );
+    (command, said)
 }
 
 /// What a terminal's shell gives a harness, a member window has (T-540): a
@@ -662,7 +685,7 @@ fn a_variable_only_the_interactive_shell_sets_reaches_the_daemon_as_it_is_and_is
         "export PARITY_ONLY_INTERACTIVE='a value = with = signs\nand a second line'; \
          export LANG=en_GB.UTF-8; export PATH=\"/rc/bin:$PATH\"",
     );
-    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let (command, said) = the_daemons_on_the_rc(&finder(Some(shell.as_path()), &[]));
     assert_eq!(
         given_of(&command, "PARITY_ONLY_INTERACTIVE").as_deref(),
         Some("a value = with = signs\nand a second line")
@@ -684,7 +707,7 @@ fn the_shells_place_depth_last_command_and_terminal_are_not_taken() {
         "cd /; export OLDPWD=/tmp SHLVL=7 TERM=dumb TERM_PROGRAM=iTerm.app TERMINFO=/x \
          PARITY_KEPT=yes",
     );
-    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let (command, _) = the_daemons_on_the_rc(&finder(Some(shell.as_path()), &[]));
     let names: Vec<String> = given(&command).into_iter().map(|(name, _)| name).collect();
     for dropped in [
         "PWD",
@@ -779,6 +802,21 @@ fn a_printed_environment_is_taken_by_its_path_whatever_its_case() {
     assert_eq!(taken(b"SystemRoot=C:\\Windows\0"), None, "no PATH: none");
 }
 
+/// Of what a shell printed, ConsensFlow's own variables, the loader's and a Claude session's
+/// identity are not taken; a harness's home is.
+#[test]
+fn of_a_printed_environment_consensflows_own_the_loaders_and_a_claude_sessions_are_not_taken() {
+    let printed = b"PATH=/rc/bin\0CONSENSFLOW_HOME=/rc/home\0CF_ANYTHING=1\0\
+        DYLD_INSERT_LIBRARIES=/x.dylib\0DYLD_LIBRARY_PATH=/x\0LD_PRELOAD=/x.so\0CLAUDECODE=1\0\
+        CLAUDE_CODE_SESSION_ID=s1\0CLAUDE_CONFIG_DIR=/rc/claude\0";
+    let names: Vec<String> = taken(printed)
+        .expect("taken")
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["PATH", "CLAUDE_CONFIG_DIR"]);
+}
+
 /// The real Windows PowerShell answers what this process has, as a terminal's gives it:
 /// its Path and SystemRoot come back as they are, within the time.
 #[cfg(windows)]
@@ -804,7 +842,12 @@ fn windows_powershell_says_its_environment_in_utf8_between_the_markers() {
 
 /// What the app sets for itself wins over the rc, and the rc over what the app was started
 /// with: ConsensFlow's own variables and the loader's are never taken, nor a Claude
-/// session's identity, while a harness's home is, as in a terminal.
+/// session's identity, while a harness's home is, as in a terminal. The dynamic loader's
+/// of macOS (`DYLD_*`) are held of what a shell printed, below: a shell can show them on
+/// no Mac. With SIP, dyld takes them out of what its own programs are given (`/bin/sh`,
+/// `/usr/bin/env`), and this test held nothing of them; without it, a shell an rc gave a
+/// library that is not there is ended as it starts (`/x.dylib`, on GitHub's runner, taken
+/// to be such a Mac: CI, 2026-10-27).
 #[cfg(unix)]
 #[test]
 fn consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_and_a_harness_home_is(
@@ -812,15 +855,13 @@ fn consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_
     let home = tempfile::tempdir().expect("home");
     let shell = shell_with_rc(
         home.path(),
-        "export CONSENSFLOW_HOME=/rc/home CF_ANYTHING=1 DYLD_INSERT_LIBRARIES=/x.dylib \
-         LD_PRELOAD=/x.so CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=s1 \
-         CLAUDE_CONFIG_DIR=/rc/claude CODEX_HOME=/rc/codex",
+        "export CONSENSFLOW_HOME=/rc/home CF_ANYTHING=1 LD_PRELOAD=/x.so CLAUDECODE=1 \
+         CLAUDE_CODE_SESSION_ID=s1 CLAUDE_CONFIG_DIR=/rc/claude CODEX_HOME=/rc/codex",
     );
-    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let (command, _) = the_daemons_on_the_rc(&finder(Some(shell.as_path()), &[]));
     for never in [
         "CONSENSFLOW_HOME",
         "CF_ANYTHING",
-        "DYLD_INSERT_LIBRARIES",
         "LD_PRELOAD",
         "CLAUDECODE",
         "CLAUDE_CODE_SESSION_ID",
@@ -853,7 +894,7 @@ fn a_harness_home_the_app_was_started_with_is_kept_over_the_rcs() {
         .map(|(name, value)| (name.to_owned(), value.to_owned()))
         .collect();
     vars.push(("CLAUDE_CONFIG_DIR".into(), "/test/claude".into()));
-    let (command, _) = the_daemons(&Env::from_vars(vars), Duration::from_secs(10));
+    let (command, _) = the_daemons_on_the_rc(&Env::from_vars(vars));
     assert_eq!(
         given_of(&command, "CLAUDE_CONFIG_DIR"),
         None,
@@ -880,7 +921,7 @@ fn the_daemon_is_told_the_names_it_was_given_and_never_their_values() {
         home.path(),
         "export PARITY_SECRET=do-not-print LANG=en_GB.UTF-8 PATH=\"/rc/bin:$PATH\"",
     );
-    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let (command, _) = the_daemons_on_the_rc(&finder(Some(shell.as_path()), &[]));
     let said = given_of(&command, TERMINAL_ENV).expect("the names");
     let names: Vec<String> = serde_json::from_str(&said).expect("a list of names");
     assert!(
@@ -954,20 +995,27 @@ fn a_shell_that_hangs_on_every_question_costs_the_start_one_limit() {
 
 /// Login files that are slow, which both questions run, leave the interactive one its
 /// whole limit: the two are asked at once, not one after the other, and the start still
-/// waits one limit at most.
+/// waits one limit at most. Here the login files of each question wait until the other's
+/// have begun: asked at once, both go on at once; asked one after the other, the first
+/// waits out its whole limit. No clock decides it but that limit (a loaded machine
+/// took more than the 1.5 s a sleep left it).
 #[cfg(unix)]
 #[test]
 fn slow_login_files_leave_the_interactive_question_its_whole_limit() {
     let home = tempfile::tempdir().expect("home");
     let shell = login_shell(
         home.path(),
-        "/bin/sleep 2.5\ncase \"$1\" in *i*) export PARITY_ONLY_INTERACTIVE=1 ;; esac\nexec /bin/sh -c \"$2\"",
+        "case \"$1\" in *i*) asked=interactive other=login ;; *) asked=login other=interactive ;; esac\n\
+         : > \"${0%/*}/$asked\"\n\
+         while [ ! -e \"${0%/*}/$other\" ] && kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done\n\
+         case \"$1\" in *i*) export PARITY_ONLY_INTERACTIVE=1 ;; esac\nexec /bin/sh -c \"$2\"",
     );
+    let limit = Duration::from_secs(20);
     let started = Instant::now();
-    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(4));
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), limit);
     assert!(
-        started.elapsed() < Duration::from_millis(5_500),
-        "the start waited {:?}, past its one limit",
+        started.elapsed() < limit,
+        "the start waited {:?}: one question waited out its limit for the other",
         started.elapsed()
     );
     assert_eq!(

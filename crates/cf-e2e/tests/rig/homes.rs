@@ -133,7 +133,7 @@ mod sweeping {
             .args([
                 "-c",
                 &format!(
-                    "while kill -0 {} 2>/dev/null; do sleep 1; done",
+                    "while kill -0 {} 2>/dev/null; do /bin/sleep 1; done",
                     std::process::id()
                 ),
             ])

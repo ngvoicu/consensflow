@@ -326,7 +326,7 @@ mod unix {
             ),
             (
                 "leaves a job that ignores the request",
-                "trap '' TERM HUP; (while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf ready; wait",
+                "trap '' TERM HUP; (while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done) & printf ready; wait",
             ),
         ];
         for (case, script) in cases {

@@ -385,7 +385,7 @@ fn held_whole_a_program_has_ended_when_it_exits_though_what_it_left_holds_its_st
 fn leaves_one_in_a_group_of_its_own(file: &Path) -> Run {
     shell(&format!(
         "perl -e 'setpgrp(0, 0); open my $f, \">\", $ARGV[0]; print $f \"$$\\n\"; close $f; sleep 6' '{file}' >/dev/null 2>&1 & \
-         while [ ! -s '{file}' ] && kill -0 $PPID 2>/dev/null; do sleep 0.01; done; echo said",
+         while [ ! -s '{file}' ] && kill -0 $PPID 2>/dev/null; do /bin/sleep 0.01; done; echo said",
         file = file.display()
     ))
 }
@@ -476,7 +476,7 @@ fn held_whole_streams_still_held_after_its_end_by_what_is_out_of_reach_fail_the_
     let escaped = dir.path().join("escaped");
     let run = shell(&format!(
         "perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my $f, \">\", $ARGV[0]; print $f \"$$\\n\"; close $f; sleep 6' '{escaped}' & \
-         while [ ! -s '{escaped}' ] && kill -0 $PPID 2>/dev/null; do sleep 0.01; done; echo said",
+         while [ ! -s '{escaped}' ] && kill -0 $PPID 2>/dev/null; do /bin/sleep 0.01; done; echo said",
         escaped = escaped.display()
     ));
     let began = Instant::now();
@@ -557,7 +557,7 @@ fn held_whole_a_grandchild_started_at_once_is_in_the_job_and_ends_with_it() {
 fn job_in_a_group_of_its_own(job: &str, pids: &Path, then: &str) -> Run {
     let ready = pids.with_extension("ready");
     shell(&format!(
-        "perl -MPOSIX -e 'POSIX::setpgid(0, 0); exec @ARGV' /bin/sh -c \": > '{ready}'; {job}\" </dev/null >/dev/null 2>&1 & printf '%s %s\\n' \"$$\" \"$!\" > '{pids}'; while [ ! -e '{ready}' ] && kill -0 $PPID 2>/dev/null; do sleep 0.01; done; {then}",
+        "perl -MPOSIX -e 'POSIX::setpgid(0, 0); exec @ARGV' /bin/sh -c \": > '{ready}'; {job}\" </dev/null >/dev/null 2>&1 & printf '%s %s\\n' \"$$\" \"$!\" > '{pids}'; while [ ! -e '{ready}' ] && kill -0 $PPID 2>/dev/null; do /bin/sleep 0.01; done; {then}",
         ready = ready.display(),
         pids = pids.display()
     ))

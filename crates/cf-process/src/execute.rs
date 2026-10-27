@@ -273,7 +273,7 @@ mod tests {
         // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE). The program
         // goes with its owner, should the test be ended on its way (T-686).
         let run = shell(
-            "trap 'echo bye; exit 0' TERM; echo hi; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done",
+            "trap 'echo bye; exit 0' TERM; echo hi; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done",
         );
         let limits = Limits {
             timeout: Duration::from_millis(300),
