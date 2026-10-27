@@ -659,6 +659,10 @@ impl Dispatcher {
         record: &Record,
         owner: &ParticipantView,
     ) -> Result<(), EngineError> {
+        // An unavailable account is told once, whatever waits (`tell_unavailable`).
+        if owner.out_until.as_deref().is_some_and(never) {
+            return Ok(());
+        }
         // What a window opened while out carries as its first message waits in it too.
         let carried = record
             .delivery
@@ -673,15 +677,11 @@ impl Dispatcher {
         let Some(waiting) = waiting else {
             return Ok(());
         };
-        let until = owner.out_until.clone().unwrap_or_default();
-        // An unavailable account is told once, whatever waits (`tell_unavailable`).
-        if never(&until) {
-            return Ok(());
-        }
         let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
         if !self.scheduler.out_noted.borrow_mut().insert(mark) {
             return Ok(());
         }
+        let until = owner.out_until.clone().unwrap_or_default();
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {

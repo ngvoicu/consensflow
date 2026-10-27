@@ -102,12 +102,12 @@ runs = ["quota-wait-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                None => false,
+                _ => false,
             };
             self.seams.ledger.borrow_mut().hold_task(
 '''
 replace = '''
-                None => false,
+                _ => false,
             };
             let far = time::parse(until).is_some_and(|until| until - self.now() > 30 * 60_000);
             let teammate = task.pool.is_some()
@@ -138,8 +138,16 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = "                Some(at) => self.refused_its_resume(participant, &task, at)?,"
-replace = "                Some(at) => self.refused_its_resume(participant, &task, at)? && false,"
+find = '''
+                Some(at) if unavailable.is_none() => {
+                    self.refused_its_resume(participant, &task, at)?
+                }
+'''
+replace = '''
+                Some(at) if unavailable.is_none() => {
+                    self.refused_its_resume(participant, &task, at)? && false
+                }
+'''
 
 [[plant]]
 name = "quota wait: the human is told at every refusal of a task's resume that its account may need them"
@@ -187,8 +195,19 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''            self.give_back(delivering.message, "the harness ran out of quota")?;'''
-replace = '''            self.settle_failure(delivering, "the harness ran out of quota", true)?;'''
+find = '''
+            self.give_back(
+                delivering.message,
+                if unavailable.is_some() {
+                    "its account is unavailable"
+                } else {
+                    "the harness ran out of quota"
+                },
+            )?;
+'''
+replace = '''
+            self.settle_failure(delivering, "the harness ran out of quota", true)?;
+'''
 
 [[plant]]
 name = "quota wait: Anthropic's spent extra usage, a 400 in Pi's words, is a failure"
@@ -213,12 +232,12 @@ runs = ["quota-wait-claude"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/project.rs"
 find = '''
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
-            || spent,
+        || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+        || spent;
 '''
 replace = '''
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
-            || spent && false,
+        || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+        || spent && false;
 '''
 
 [[plant]]
@@ -228,8 +247,8 @@ runs = ["quota-wait-opencode"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = "                || refused_for_quota(&failure)"
-replace = "                || refused_for_quota(&failure) && false"
+find = "            if refusal.is_some() || quota_status(status) || refused_for_quota(&failure) {"
+replace = "            if refusal.is_some() || quota_status(status) || refused_for_quota(&failure) && false {"
 
 [[plant]]
 name = "quota wait: the stand-in Codex answers the brief its usage limit was to cut"
