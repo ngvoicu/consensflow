@@ -8,9 +8,11 @@
 //! and pasted its question into the turn, and the Stop of the live suite was never reached.
 //! The stand-in Devin writes that shape where `FAKE_DEVIN_STAMPS` says so.
 //!
-//! - A turn whose agent says nothing for 20 s before its first word, which only Devin's word
-//!   that it works holds at work, and then works 25 s in silence, past the 30 s the adapter
-//!   holds a prompt for, is at work throughout, and its answer is the task's result.
+//! - A turn whose agent says nothing for 38 s before its first word, which past the 30 s the
+//!   adapter holds a prompt for (`begun_on_the_store`) only Devin's word that it works holds
+//!   at work, and then works 10 s in silence, is at work throughout, and its answer is the
+//!   task's result. (Integration B round 2, T-800: with 20 s, B's store held the rest of the
+//!   turn by its unanswered call, and the case no longer told the wire's word apart.)
 //! - A pause stops a turn whose agent says nothing past those 30 s with Escape, and the
 //!   chief's question goes in after it.
 //! - A window opened again on its conversation, which replays its last turn stamped and
@@ -79,12 +81,12 @@ fn when_of(events: &[Value], kind: &str, matching: impl Fn(&Value) -> bool) -> O
 fn a_devin_turn_stamped_as_devin_3000_11_stamps_it_is_at_work_through_a_silent_stretch_and_its_answer_is_the_result(
 ) -> Outcome {
     let rig = Rig::start(stamped_rig())?;
-    let project = given(&rig, "THINK 20 SLEEP 25 Reply with exactly: T1_DONE")?;
+    let project = given(&rig, "THINK 38 SLEEP 10 Reply with exactly: T1_DONE")?;
     let begun = Instant::now();
     // Every look from a few seconds in to a few seconds before the turn's end finds the
     // window at work: past the adapter's 30 s for a prompt, too.
     let mut seen = Vec::new();
-    while begun.elapsed() < secs(40) {
+    while begun.elapsed() < secs(44) {
         let state = activity(&project)?;
         if begun.elapsed() > secs(3) {
             seen.push((begun.elapsed().as_secs(), state));
