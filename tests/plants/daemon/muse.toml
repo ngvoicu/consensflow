@@ -15,6 +15,14 @@ muse-admin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin:
 muse-records = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "records::tests"]
 muse-env = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::"]
 muse-scrub = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "scrub_muse_session::"]
+muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
+muse-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record_state"]
+muse-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
+muse-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
+muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
+muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
 # The reader: a turn stopped before a word of it, its message put back in the box.
 [[plant]]
@@ -361,7 +369,9 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/record/provisional.rs"
 find = '''
-            Refused::Account(Refusal::Billing) => (unavailable(at, NO_ALLOWANCE), Some(NO_ALLOWANCE)),
+            Refused::Account(Refusal::Billing) => {
+                (unavailable(at, NO_ALLOWANCE), Some(NO_ALLOWANCE))
+            }
 '''
 replace = '''
             Refused::Account(Refusal::Billing) => (
@@ -428,10 +438,11 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/record/provisional.rs"
 find = '''
-    ["api error 429", "usage limit reached"]
+        "api error 429",
+        "usage limit reached",
 '''
 replace = '''
-    ["usage limit reached"]
+        "usage limit reached",
 '''
 
 # Detection: Muse where its installer puts it on macOS and Linux.
@@ -550,4 +561,422 @@ find = '''
 '''
 replace = '''
         if muse_s_own && placed.len() > usize::MAX - 1 {
+'''
+
+# MUS-24: a model Muse moves to on its own is read, never used silently.
+[[plant]]
+name = "muse: a reconfigure after a refusal is no move"
+meant = "a_model_muse_switched_to_after_a_refused_turn_is_a_move_nobody_chose"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        if from == to || restoring || asked {
+'''
+replace = '''
+        if true {
+'''
+
+[[plant]]
+name = "muse: a resume's replay is a move"
+meant = "a_change_nobody_asked_for_is_the_only_one_flagged"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        if from == to || restoring || asked {
+'''
+replace = '''
+        if from == to || asked {
+'''
+
+[[plant]]
+name = "muse: the humans model command is a move"
+meant = "the_humans_own_model_command_is_no_move"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        if from == to || restoring || asked {
+'''
+replace = '''
+        if from == to || restoring {
+'''
+
+[[plant]]
+name = "muse: a clear never moves the model"
+meant = "a_clear_that_lands_on_another_model_with_no_reconfigure_event_is_a_move_too"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        let cleared = field(start, "activation_source").and_then(Value::as_str) == Some("clear");
+'''
+replace = '''
+        let cleared = false;
+'''
+
+[[plant]]
+name = "muse: a move is no account refusal"
+meant = "a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_until_the_human_says"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+                record.quota.clone().or_else(|| {
+                    record
+                        .model_moved
+                        .as_ref()
+                        .map(|moved| Arc::new(moved.as_quota()))
+                }),
+'''
+replace = '''
+                record.quota.clone(),
+'''
+
+# MUS-24 in the other harnesses that switch on their own: Codex's reroute, Claude Code's model change.
+[[plant]]
+name = "muse: codex reroutes to its own model"
+meant = "a_model_codex_rerouted_a_turn_to_is_a_move_nobody_chose"
+runs = ["muse-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+                    if from != to {
+'''
+replace = '''
+                    if true {
+'''
+
+[[plant]]
+name = "muse: claude moves the model it was asked"
+meant = "the_humans_model_command_a_synthetic_message_a_subagent_and_a_relaunch_are_no_move"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+            if from != *model && !asked {
+'''
+replace = '''
+            if from != *model {
+'''
+
+[[plant]]
+name = "muse: claude keeps the model across a relaunch"
+meant = "the_humans_model_command_a_synthetic_message_a_subagent_and_a_relaunch_are_no_move"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            self.model = None;
+'''
+replace = '''
+            self.model_asked = false;
+'''
+
+# MUS-23's class: an account refusal that is no usage limit reads the same in every harness.
+[[plant]]
+name = "muse: a 402 is no billing refusal"
+meant = "tells_a_refusal_no_wait_cures_from_a_limit_that_resets"
+runs = ["muse-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = '''
+        Some(status) if status == BILLING_STATUS => Some(Refusal::Billing),
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "muse: a 402 is a quota again"
+meant = "tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors"
+runs = ["muse-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = '''
+const QUOTA_STATUSES: [f64; 1] = [429.0];
+'''
+replace = '''
+const QUOTA_STATUSES: [f64; 2] = [402.0, 429.0];
+'''
+
+[[plant]]
+name = "muse: pi reads billing as a quota"
+meant = "a_refusal_of_the_accounts_billing_or_login_is_the_account_unavailable_and_no_quota_that_resets"
+runs = ["muse-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+                let refusal = account_refusal(&failure, None);
+'''
+replace = '''
+                let refusal = account_refusal(&failure, None).filter(|_| false);
+'''
+
+[[plant]]
+name = "muse: opencode reads billing as a quota"
+meant = "a_refusal_for_quota_is_read_as_node_read_it"
+runs = ["muse-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = '''
+            let refusal = account_refusal(&failure, status.is_finite().then_some(status));
+'''
+replace = '''
+            let refusal = account_refusal(&failure, status.is_finite().then_some(status))
+                .filter(|_| false);
+'''
+
+[[plant]]
+name = "muse: claude reads billing as no refusal"
+meant = "a_refusal_of_the_accounts_billing_or_login_is_the_account_unavailable_and_no_quota_that_resets"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+            account_refusal(&text, status)
+'''
+replace = '''
+            account_refusal(&text, status).filter(|_| false)
+'''
+
+[[plant]]
+name = "muse: codex reads a refused login as a failure"
+meant = "a_turn_ended_for_a_login_codex_refused_is_the_account_unavailable_and_no_quota_that_resets"
+runs = ["muse-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+        if info == Some("unauthorized") {
+'''
+replace = '''
+        if info == Some("never") {
+'''
+
+# MUS-14: the allowance Muse says ahead of a refusal, and the reset the wire names.
+[[plant]]
+name = "muse: a count at 95 percent is not low"
+meant = "a_paid_account_is_read_by_its_fullest_window_and_that_ones_reset"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/usage.rs"
+find = '''
+const LOW_PERCENT: f64 = 95.0;
+'''
+replace = '''
+const LOW_PERCENT: f64 = 100.0;
+'''
+
+[[plant]]
+name = "muse: a spent week resets with the earlier window"
+meant = "a_paid_account_is_read_by_its_fullest_window_and_that_ones_reset"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/usage.rs"
+find = '''
+            .reduce(f64::max)
+'''
+replace = '''
+            .reduce(f64::min)
+'''
+
+[[plant]]
+name = "muse: no allowance says nothing"
+meant = "an_account_with_no_allowance_is_unavailable_before_any_turn_is_refused"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/usage.rs"
+find = '''
+        let none = answer.get("reason").and_then(Value::as_str) == Some("no_allowance");
+'''
+replace = '''
+        let none = false;
+'''
+
+[[plant]]
+name = "muse: the wire's quota is not read"
+meant = "a_refusal_that_names_its_limit_and_reset_is_exhausted_until_then_and_the_second_wording_is_one"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+            detail.and_then(|detail| wire_quota(detail, at.as_deref()).ok().flatten())
+'''
+replace = '''
+            detail
+                .and_then(|detail| wire_quota(detail, at.as_deref()).ok().flatten())
+                .filter(|_| false)
+'''
+
+# MUS-15: the models Muse lists, never a contributor one by default.
+[[plant]]
+name = "muse: a contributor model can be the default"
+meant = "a_contributor_model_is_never_the_default_though_muse_marks_one"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '''
+            .filter(|model| !model.contributor)
+            .or(twin)
+'''
+replace = '''
+            .or(twin)
+'''
+
+[[plant]]
+name = "muse: the bundled list is the accounts"
+meant = "a_list_a_host_with_no_login_gives_is_muses_bundled_one_and_is_stale"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '''
+        stale: result.get("source").and_then(Value::as_str) != Some("providerCatalog"),
+'''
+replace = '''
+        stale: false,
+'''
+
+[[plant]]
+name = "muse: a hidden model is offered"
+meant = "a_hidden_model_a_contributor_by_description_and_a_list_with_no_model_are_read_as_they_say"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '''
+        .filter(|row| row.get("visibility").and_then(Value::as_str) != Some("hidden"))
+'''
+replace = '''
+        .filter(|_| true)
+'''
+
+[[plant]]
+name = "muse: the host is given no input"
+meant = "the_list_is_asked_of_a_host_after_its_initialize_and_the_host_is_ended"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/msp.rs"
+find = '''
+    let child = processes.spawn(program, Streams::Lines)?;
+'''
+replace = '''
+    let child = processes.spawn(program, Streams::Quiet)?;
+'''
+
+# MUS-23's engine: an unavailable member is held with no reset and told once, until the human or an allowance says.
+[[plant]]
+name = "muse: an unavailable account resets in an hour"
+meant = "holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_human_once"
+runs = ["muse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if quota.is_some_and(Quota::unavailable) {
+            return NEVER.to_owned();
+        }
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "muse: the human is told at every look"
+meant = "holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_human_once"
+runs = ["muse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        let mark = (owner.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "@{}'s account is unavailable:'''
+replace = '''
+        let mark = (owner.id, owner.out_since.clone().unwrap_or_default());
+        let _ = mark;
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "@{}'s account is unavailable:'''
+
+[[plant]]
+name = "muse: the requester is told it waits for a reset"
+meant = "holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_human_once"
+runs = ["muse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if let Some(because) = unavailable {
+                // The requester is told it waits for the human's word, whatever the
+'''
+replace = '''
+            if let (Some(because), true) = (unavailable, false) {
+                // The requester is told it waits for the human's word, whatever the
+'''
+
+[[plant]]
+name = "muse: an allowance shown is no news"
+meant = "an_allowance_the_harness_shows_again_brings_an_unavailable_member_back_a_still_full_one_does_not"
+runs = ["muse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        owner.out_until.as_deref().is_some_and(never)
+            && matches!(
+'''
+replace = '''
+        false
+            && matches!(
+'''
+
+# MUS-23's page: an unavailable account shows no time, and its button says what it waits for.
+[[plant]]
+name = "muse: the page says an unavailable account resets"
+meant = "says an account that refused for its billing or login is unavailable, with no time, and tries it again on the human’s word"
+runs = ["muse-page"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+const unavailable = (participant) => participant.outUntil?.startsWith('9999-') === true
+'''
+replace = '''
+const unavailable = (participant) => participant.outUntil?.startsWith('99999-') === true
 '''

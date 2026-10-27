@@ -568,7 +568,7 @@ impl Dispatcher {
                     returned: Some(returned),
                     ..
                 } => {
-                    if later_limit(&until, returned) && !never(&until) {
+                    if later_limit(&until, returned) {
                         // A later reset is a limit of its own, which no teammate's turn
                         // undoes: the human hears it stays out, once for the limit.
                         if self.tried_anew(other.id, &until) {

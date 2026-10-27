@@ -1242,6 +1242,23 @@ test("shows a tester's test tasks as cards on its row like any task, and a test 
   await expect(waiting.locator('.card-route')).toHaveText('for a standard tester')
 })
 
+test('says an account that refused for its billing or login is unavailable, with no time, and tries it again on the human’s word', async ({
+  page,
+}) => {
+  // MUS-23: nothing resets such an account, so no time is shown and nothing is said to wait for a reset.
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana').participant.outUntil =
+    '9999-12-31T23:59:59.999Z'
+  await open(page, data)
+  const diana = page.locator('tr[data-handle="diana"]')
+  await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  await expect(diana.locator('.row-status')).toHaveText(
+    'Unavailable: its account was refused for billing or login. Press Try again now once it works',
+  )
+  await diana.getByRole('button', { name: 'Try @diana again now, once its account works' }).click()
+  expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
+})
+
 test('names the day of a reset that is not today, and tries a member or the chief out of quota again', async ({
   page,
 }) => {

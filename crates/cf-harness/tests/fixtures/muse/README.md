@@ -56,3 +56,37 @@ What a turn with tools, questions, approvals, compaction, background work or a
 refusal for quota writes is not here: the Mac's Muse login runs no model turn
 (HTTP 402, T-700). The reader reads those from Muse's schema, marked provisional
 (`src/muse/record/provisional.rs`), until MUS-02's live fixtures.
+
+## Recorded by T-705 and T-718 on a Muse that runs turns (2026-10-26), kept for MUS-23, MUS-24
+
+Copied byte for byte from the scrubbed fixtures the testers kept
+(`consensflow-trees/.runs/muse-research/fixtures/`; their paths, ids and Meta's own text are
+placeholders already), after the account paid for Muse (18:57):
+
+- `billing-spark.jsonl`, `billing-wonder.jsonl` (T-705, `billing-spark-tui`,
+  `billing-wonder-tui`): one turn each, `muse-spark-1.3` and `muse-wonder-1.0` at `minimal`
+  with `--contributor-mode off`, **refused with HTTP 402 `billing_error`**: the turn `failed`,
+  nothing answered; then `runtime.model_reconfigure.completed` moves the model to
+  `muse-spark-1.3-contributor` (`previous.source` `startup`, no command of the human's before
+  it), and no turn followed.
+- `clear-before.jsonl`, `clear-after.jsonl` (T-718, `t718/clear-model-change`): a `/clear`.
+  The old session's metadata and configuration name `muse-spark-1.3-contributor`,
+  `command.invoked` records `/clear`; the new session's `session_start.intake_v3`
+  (`activation_source: clear`, `previous_session_stream`) and metadata name `muse-spark-1.3`,
+  and **no `runtime.model_reconfigure.completed` is in either log**. `clear-before` is an
+  excerpt of six records of the old log (its metadata, a configuration, the command, its end).
+- `launch-model-restored.jsonl` (T-705, `question-hook-bypass`): the control. A session
+  resumed with `--model muse-spark-1.3-contributor` on a launch that named it: Muse
+  reconfigures from `muse-spark-1.3` (`previous.source` `replay`, the model the stored session
+  held) to the contributor model the launch asked for. That is the launch's own, not a move.
+- `msp-initialize.json`, `msp-model-list.json`, `msp-model-list-bundled.json`: the answers of one
+  bounded `muse serve --provider meta --no-session-log` (2026-10-27, no model turn), read on a
+  throwaway copy of the config and of the model catalog cache. `msp-model-list.json` is the
+  account's list (`source: providerCatalog`, five models); `msp-model-list-bundled.json` what a
+  host answers where it has no login or no cached catalog (`source: bundledCatalog`, one stale
+  model). `museHome` is a placeholder.
+- `usage-allowance.json`, `usage-no-allowance.json`: `muse usage --json` on the paid account
+  (T-718, 2026-10-26) and on the account with no allowance (T-705): `result` only.
+
+`usage/read` over a bare one-shot of `muse serve` answers `{}` (the schema: omitted while the
+host has observed nothing), so the allowance ahead of a refusal comes from `muse usage --json`.

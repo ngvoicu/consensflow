@@ -410,7 +410,9 @@ export const tryAgain = (participant, action) =>
     'Try again now',
     'quiet-button try-again',
     action,
-    `Try ${laneName(participant)} again now, before its quota resets`,
+    unavailable(participant)
+      ? `Try ${laneName(participant)} again now, once its account works`
+      : `Try ${laneName(participant)} again now, before its quota resets`,
   )
 
 /** A participant's lamp: what its window is doing, at a glance, or that it is out of quota. */
