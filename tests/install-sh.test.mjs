@@ -1151,6 +1151,10 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
         `.ConsensFlow.app.old.${dead}`,
         `.ConsensFlow.app.previous.${dead}-1`,
         `..ConsensFlow.app.installing.${dead}`,
+        // short, so that only what a pid is made of turns them away
+        '.ConsensFlow.app.installing.12x',
+        '.ConsensFlow.app.installing.0123',
+        '.ConsensFlow.app.previous.\u0663\u0664',
         // a pid on a Mac has five digits at most
         '.ConsensFlow.app.installing.123456',
         '.ConsensFlow.app.previous.100000',
@@ -1163,9 +1167,10 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       // install made, and what it points to is never touched.
       const elsewhere = mkdtempSync(path.join(work, 'elsewhere-'))
       writeFileSync(path.join(elsewhere, 'keep'), 'mine')
-      symlinkSync(elsewhere, path.join(at.apps, `.ConsensFlow.app.previous.${dead + 1}`))
+      const [deadLink, deadFile] = [await deadPid(), await deadPid()]
+      symlinkSync(elsewhere, path.join(at.apps, `.ConsensFlow.app.previous.${deadLink}`))
       // A file by that name too.
-      writeFileSync(path.join(at.apps, `.ConsensFlow.app.installing.${dead + 2}`), 'file')
+      writeFileSync(path.join(at.apps, `.ConsensFlow.app.installing.${deadFile}`), 'file')
       const ran = await install(at, ['--version', '3.0.7'], {
         env: { LC_ALL: 'en_US.UTF-8' },
       })
@@ -1176,15 +1181,15 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
         [
           'ConsensFlow.app',
           ...similar,
-          `.ConsensFlow.app.previous.${dead + 1}`,
-          `.ConsensFlow.app.installing.${dead + 2}`,
+          `.ConsensFlow.app.previous.${deadLink}`,
+          `.ConsensFlow.app.installing.${deadFile}`,
         ].sort(),
         "only the dead run's copy is gone",
       )
       assert.equal(readFileSync(path.join(elsewhere, 'keep'), 'utf8'), 'mine')
       assert.match(
         ran.out,
-        new RegExp(`left .*\\.ConsensFlow\\.app\\.previous\\.${dead + 1} alone`),
+        new RegExp(`left .*\\.ConsensFlow\\.app\\.previous\\.${deadLink} alone`),
       )
     })
   })
@@ -1334,6 +1339,8 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
         `consensflow-install.${dead}.abc123.bak`,
         `consensflow-install.0${dead}.abc123`,
         `consensflow-install.${dead}x.abc123`,
+        'consensflow-install.12x.abc123',
+        'consensflow-install.0123.abc123',
         'consensflow-install.123456.abc123',
         'consensflow-install.\u0663\u0664.abc123',
         'consensflow-install.abc123',
@@ -1343,8 +1350,9 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       for (const name of similar) folderIn(at, name)
       const elsewhere = mkdtempSync(path.join(work, 'elsewhere-'))
       writeFileSync(path.join(elsewhere, 'keep'), 'mine')
-      symlinkSync(elsewhere, path.join(at.tmp, `consensflow-install.${dead + 1}.ghi789`))
-      writeFileSync(path.join(at.tmp, `consensflow-install.${dead + 2}.jkl012`), 'file')
+      const [deadLink, deadFile] = [await deadPid(), await deadPid()]
+      symlinkSync(elsewhere, path.join(at.tmp, `consensflow-install.${deadLink}.ghi789`))
+      writeFileSync(path.join(at.tmp, `consensflow-install.${deadFile}.jkl012`), 'file')
       const ran = await install(at, ['--version', '3.0.7'], { env: { LC_ALL: 'en_US.UTF-8' } })
       assert.equal(ran.status, 0, ran.out)
       assert.equal(installedVersion(at), '3.0.7')
@@ -1353,8 +1361,8 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
         [
           path.basename(kept),
           ...similar,
-          `consensflow-install.${dead + 1}.ghi789`,
-          `consensflow-install.${dead + 2}.jkl012`,
+          `consensflow-install.${deadLink}.ghi789`,
+          `consensflow-install.${deadFile}.jkl012`,
         ].sort(),
         "only the dead run's folder is gone, and this run's own",
       )
@@ -1369,7 +1377,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
           `left ${exact(realpathSync(at.tmp))}/${exact(path.basename(kept))} alone: process ${live} may be an install`,
         ),
       )
-      assert.match(ran.out, new RegExp(`left .*consensflow-install\\.${dead + 1}\\.ghi789 alone`))
+      assert.match(ran.out, new RegExp(`left .*consensflow-install\\.${deadLink}\\.ghi789 alone`))
     })
 
     test('a folder of another user is left alone', async () => {
