@@ -352,8 +352,8 @@ runs = ["fm-kit-machine"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = "        held[\"projects\"][&key][\"hasTrustDialogAccepted\"] = serde_json::Value::Bool(true);\n"
-replace = "        let _ = &key;\n"
+find = "    held[\"projects\"][&root][\"hasTrustDialogAccepted\"] = serde_json::Value::Bool(true);\n"
+replace = "    let _ = &root;\n"
 
 [[plant]]
 name = "first message: the owner's own Claude config is seeded too"
