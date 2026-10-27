@@ -44,7 +44,14 @@ fn environment() -> Env {
 fn checkout(scratch: &Path, env: &Env, files: &[(&str, &[u8])]) -> Context {
     let root = scratch.join("tree");
     fs::create_dir_all(&root).unwrap();
-    for (name, bytes) in files {
+    // A `cargo` of the tree's own, which cmd finds before any other: what every run makes sure of
+    // before its command (`PREPARE_STEPS`) is none of these cases' business, unless a case gives
+    // its own.
+    let mut files = files.to_vec();
+    if !files.iter().any(|(name, _)| *name == "cargo.cmd") {
+        files.push(("cargo.cmd", b"@exit /b 0\r\n"));
+    }
+    for (name, bytes) in &files {
         let path = root.join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, bytes).unwrap();
@@ -73,6 +80,7 @@ fn tarball(scratch: &Path, context: &Context, identity: &str, command: &str, id:
         command,
         env: &[],
         node: r"C:\Program Files\nodejs",
+        limits: None,
     });
     let into = scratch.join(id);
     fs::create_dir_all(&into).unwrap();
@@ -81,15 +89,15 @@ fn tarball(scratch: &Path, context: &Context, identity: &str, command: &str, id:
 
 /// What one run came to: the status its last line gave, what it said, how its process
 /// ended, and what its error stream held (as text).
-struct Came {
-    status: Option<i32>,
-    said: String,
-    code: Option<i32>,
-    errors: String,
+pub(super) struct Came {
+    pub(super) status: Option<i32>,
+    pub(super) said: String,
+    pub(super) code: Option<i32>,
+    pub(super) errors: String,
 }
 
 impl Came {
-    fn of(run: Child) -> Self {
+    pub(super) fn of(run: Child) -> Self {
         let done = run.wait_with_output().unwrap();
         let said = String::from_utf8_lossy(&done.stdout).into_owned();
         let status = said.lines().rev().find_map(exit_said);
@@ -223,6 +231,7 @@ fn start_after(
         command: "",
         env: &[],
         node: r"C:\Program Files\nodejs",
+        limits: None,
     });
     let file = scratch.join(format!("run-{id}.ps1"));
     fs::write(&file, format!("{before}{sent}")).unwrap();
@@ -545,14 +554,14 @@ fn a_gate_nobody_opens_ends_its_run_with_97_and_one_that_is_opened_lets_it_go_on
 }
 
 /// A profile with one run's tarball in it, and the scratch the case works in.
-struct Case {
-    scratch: tempfile::TempDir,
-    env: Env,
-    profile: PathBuf,
+pub(super) struct Case {
+    pub(super) scratch: tempfile::TempDir,
+    pub(super) env: Env,
+    pub(super) profile: PathBuf,
 }
 
 impl Case {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let scratch = tempfile::tempdir().unwrap();
         let profile = scratch.path().join("profile");
         fs::create_dir_all(profile.join(SHARED)).unwrap();
@@ -565,7 +574,7 @@ impl Case {
 
     /// One run of `command` on a tree of `files` sent with `identity` (the tree's own
     /// when none is given).
-    fn run(
+    pub(super) fn run(
         &self,
         id: &str,
         files: &[(&str, &[u8])],
@@ -591,7 +600,7 @@ impl Case {
         )
     }
 
-    fn copy(&self) -> PathBuf {
+    pub(super) fn copy(&self) -> PathBuf {
         self.profile.join(SHARED)
     }
 }

@@ -5763,6 +5763,7 @@ dependencies = [
  "cf-process",
  "cf-publish",
  "cf-release",
+ "flate2",
  "memchr",
  "nix",
  "plist",

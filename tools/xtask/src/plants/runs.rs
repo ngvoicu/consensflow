@@ -115,6 +115,14 @@ pub const CF_E2E_PROGRAMS: [[&str; 10]; 2] = [
     ],
 ];
 
+/// How the runner ends the reason of a run that ran no test because a build before it failed.
+const NONE_RAN: &str = ", and no test was run";
+
+/// How many of the last lines of a run are said when its report cannot be read, and how many
+/// characters of them.
+const ENDED_LINES: usize = 6;
+const ENDED_CHARS: usize = 900;
+
 /// The status nextest ends with where the build failed.
 const NEXTEST_BUILD_FAILED: i32 = 101;
 
@@ -251,6 +259,44 @@ impl Ran {
             Reporter::Status => None,
         };
         why.or_else(|| self.unnamed(results))
+    }
+
+    /// Why a run left no report of its tests to read, as a run without the plant is told:
+    /// the report's own words, and how the run ended and the end of what it wrote, the only
+    /// word there is of why its tests did not run (a nextest that ended with 102 in two
+    /// seconds because its `cargo metadata --offline` lacked a crate, zeewin2, T-627: the
+    /// path of its report was only where it would have been). A reason the runner gave itself
+    /// (a build that failed) says why already.
+    pub fn unread(&self) -> Option<String> {
+        let Some(Err(why)) = &self.report else {
+            return None;
+        };
+        let said = format!("no report of its tests could be read: {why}");
+        Some(if why.ends_with(NONE_RAN) {
+            said
+        } else {
+            format!("{said}; {}", self.ended())
+        })
+    }
+
+    /// How the run ended, and the end of what it wrote.
+    fn ended(&self) -> String {
+        let how = match self.code {
+            Some(code) => format!("it ended with {code}"),
+            None => "a signal ended it".to_owned(),
+        };
+        let lines: Vec<&str> = self
+            .output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        let end = lines[lines.len().saturating_sub(ENDED_LINES)..].join(" / ");
+        if end.is_empty() {
+            return format!("{how}, saying nothing");
+        }
+        let end: String = end.chars().take(ENDED_CHARS).collect();
+        format!("{how}, saying (its last lines): {end}")
     }
 
     /// Why the run failed with no failure of a test's own, where its report names no
@@ -570,9 +616,9 @@ impl Execute {
                 hung: false,
                 overflowed: false,
                 output: String::new(),
-                report: Some(Err(
-                    "no build before it named a program it built, and no test was run".to_owned(),
-                )),
+                report: Some(Err(format!(
+                    "no build before it named a program it built{NONE_RAN}"
+                ))),
             })),
         })
     }
@@ -582,7 +628,7 @@ impl Execute {
     fn unbuilt(command: &[String], ran: Ran, why: String) -> Ran {
         Ran {
             command: command.to_vec(),
-            report: Some(Err(format!("{why}, and no test was run"))),
+            report: Some(Err(format!("{why}{NONE_RAN}"))),
             ..ran
         }
     }

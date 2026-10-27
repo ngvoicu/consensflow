@@ -77,6 +77,7 @@ fn matrix(scenarios: &[&str], pairs: Vec<Pair>) -> MatrixOptions {
         pairs,
         claude_model: None,
         pi_model: None,
+        wait: 0,
     }
 }
 

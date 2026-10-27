@@ -876,3 +876,63 @@ fn the_folder_of_nextest_s_store_is_written_with_forward_slashes() {
         "{config}"
     );
 }
+
+/// The memory limit a machine is given for its tests (`RUST_TEST_THREADS`, libtest's) reaches
+/// nextest, which does not read it: a plant table on zeewin ran 12 processes wide, as before the
+/// limit (T-777, P2-3). The command's own `--test-threads` is what the person asked for, and wins.
+#[test]
+fn the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_is_given_unless_the_command_names_its_own(
+) {
+    let with = |threads: &str| Context {
+        root: PathBuf::from("/checkout"),
+        env: Env::from_vars([("RUST_TEST_THREADS", threads)]),
+    };
+    let ran = |command: &[&str], context: &Context| under_nextest_for(command, context).0;
+    assert_eq!(
+        ran(&["cargo", "test", "-p", "x"], &with("4")),
+        ["-p", "x", "--test-threads", "4"]
+    );
+    // Before the `--`, where nextest takes it.
+    assert_eq!(
+        ran(&["cargo", "test", "-p", "x", "--", "--ignored"], &with("3")),
+        ["-p", "x", "--test-threads", "3", "--", "--ignored"]
+    );
+    // The command's own, either way it is written.
+    assert_eq!(
+        ran(
+            &["cargo", "test", "-p", "x", "--", "--test-threads=1"],
+            &with("4")
+        ),
+        ["-p", "x", "--test-threads", "1", "--"]
+    );
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            ran(&["cargo", "xtask", "smoke", "--app", "a.app"], &with("4")),
+            [
+                "-p",
+                "cf-e2e",
+                "--test",
+                "smoke",
+                "--test-threads",
+                "1",
+                "--",
+                "--ignored"
+            ]
+        );
+    }
+    // A variable that is no number of threads is none; and none is as it was.
+    for threads in ["", "many", "0", "-2", "4 "] {
+        assert_eq!(
+            ran(&["cargo", "test", "-p", "x"], &with(threads)),
+            ["-p", "x"],
+            "{threads:?}"
+        );
+    }
+    assert_eq!(
+        ran(
+            &["cargo", "test", "-p", "x"],
+            &checkout(Path::new("/checkout"))
+        ),
+        ["-p", "x"]
+    );
+}

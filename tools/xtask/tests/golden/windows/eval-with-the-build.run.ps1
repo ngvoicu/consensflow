@@ -36,10 +36,21 @@ $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorA
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir
 $ErrorActionPreference = 'Continue'
+$env:CARGO_BUILD_JOBS = '4'
+$env:RUST_TEST_THREADS = '4'
+Write-Output "== limits: CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 (what this machine takes at once)"
 foreach ($step in @('npm ci --no-audit --no-fund', 'npm ci --prefix app --no-audit --no-fund', 'npm --prefix app run bundle:ui', 'cargo xtask stage', 'npm run build:bridge', 'cargo xtask conpty --into app/src-tauri/target/release')) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"
   if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
+}
+foreach ($step in @('cargo fetch --locked --offline >nul 2>&1 || cargo fetch --locked', 'cargo xtask conpty --into app/src-tauri/target/debug', 'cargo xtask conpty --into app/src-tauri/target/release')) {
+  Write-Output "== $step"
+  cmd /c "$step 2>&1"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output "== the run needs what '$step' makes there, and it could not be made (status $LASTEXITCODE): the command is not run on what happens to be on the machine"
+    Exit-Run $LASTEXITCODE
+  }
 }
 Set-Location (Join-Path $dir '.')
 $run = Join-Path $dir '.windows-run.cmd'

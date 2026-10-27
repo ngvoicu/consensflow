@@ -32,9 +32,14 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
 /// xtask run in `cwd` with `args`, finding programs in `path` alone, and the
 /// fake child's instructions in `vars`.
 pub fn xtask(cwd: &Path, path: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
+    // The queue of the Windows runner is a folder every runner on the machine shares, and a run
+    // of these cases that joined it would wait behind the others (and behind a developer's own
+    // runs): each has a folder of its own (T-701).
+    let queues = tempfile::tempdir().unwrap();
     command(env!("CARGO_BIN_EXE_xtask"))
         .current_dir(cwd)
         .env("PATH", path)
+        .env("CF_WINDOWS_QUEUES", queues.path())
         .envs(vars.iter().copied())
         .args(args)
         .output()

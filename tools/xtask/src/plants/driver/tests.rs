@@ -1899,6 +1899,41 @@ fn a_run_without_the_plant_whose_reporter_wrote_no_report_is_no_pass() {
     );
 }
 
+/// A nextest that ended before it wrote its report (zeewin2, T-627, 2026-10-26: its
+/// `cargo metadata --offline` lacked a crate the copy had never fetched, and it ended with 102
+/// in two seconds) leaves no report to read. The plant was NOT RUN with "junit.xml could not be
+/// read: The system cannot find the path specified", as if the laptop's paths were at fault,
+/// and nothing said why nextest never ran: the NOT RUN is told by how the command ended and
+/// what it said.
+#[test]
+fn a_run_without_the_plant_that_ended_before_its_report_is_told_by_how_it_ended_and_what_it_said() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            fails("m::the_test")
+        } else {
+            unreported(
+                102,
+                "error: failed to download `alloc-no-stdlib v2.0.4`\n\nCaused by:\n  attempting to \
+                 make an HTTP request, but --offline was specified\nerror: command `cargo metadata \
+                 --offline` failed with exit code: 101\n",
+            )
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert!(
+        said.contains("; it ended with 102, saying (its last lines): "),
+        "{said}"
+    );
+    assert!(
+        said.contains("attempting to make an HTTP request, but --offline was specified"),
+        "{said}"
+    );
+    assert!(said.contains("failed with exit code: 101"), "{said}");
+}
+
 #[test]
 fn every_run_of_a_plant_is_tried_until_one_catches_it_and_each_that_told_nothing_is_said() {
     let (_folder, context) = checkout();
