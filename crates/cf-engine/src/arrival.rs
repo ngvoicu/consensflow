@@ -147,9 +147,10 @@ pub(crate) struct Watched {
     last: i64,
     /// The longest time between two looks at it: a loaded machine's.
     longest_pass: i64,
-    /// How long the window's screen had printed nothing, as the pane host said before
-    /// it was to go again.
+    /// How long the window's screen had printed nothing, and how long since a paste was
+    /// written into it, as the pane host said before it was to go again.
     output_quiet_ms: Option<i64>,
+    paste_quiet_ms: Option<i64>,
 }
 
 impl Dispatcher {
@@ -372,7 +373,8 @@ impl Dispatcher {
     /// is still there for the window (3.0.7 chief-meeting, CMT-24, T-760's F4: on a loaded
     /// Mac, m-3093 and m-4273 had no record of their paste for 177 s and 196 s, and were
     /// pasted again). It is where the window's screen printed within the last
-    /// [`ENTER_AGAIN_QUIET_MS`] (a window that draws is at work, or taking the paste in), and
+    /// [`ENTER_AGAIN_QUIET_MS`] (a window that draws is at work, or taking the paste in), where
+    /// it has printed nothing since the paste was written (its program never read it), and
     /// where its input box holds it: then an Enter is pressed once more, as the hand-over's
     /// is ([`Dispatcher::enter_again`], whose guards keep the human's own words from going
     /// with it). Either way its rest begins again, and nothing is pasted: a paste goes
@@ -393,14 +395,21 @@ impl Dispatcher {
         let (Some(window), Some(pane)) = (window, pane) else {
             return Ok(false);
         };
-        let printing = record
+        let watched = record
             .delivery
             .borrow()
             .watched
-            .filter(|watched| watched.message == message)
+            .filter(|watched| watched.message == message);
+        let printing = watched
             .and_then(|watched| watched.output_quiet_ms)
             .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);
-        let boxed = if printing {
+        // A screen that has printed nothing since the paste was written into it never
+        // drew it: its program has not read it (stopped, or hung), and has it still to
+        // read, as Claude Code stopped for ninety seconds had (`cargo xtask live stopped`).
+        let undrawn = watched
+            .and_then(|watched| watched.output_quiet_ms.zip(watched.paste_quiet_ms))
+            .is_some_and(|(output, paste)| output >= paste);
+        let boxed = if printing || undrawn {
             None
         } else {
             returning(window.input_box(&*self.seams.host, &pane)).await
@@ -415,7 +424,7 @@ impl Dispatcher {
             return Ok(true);
         }
         let held = boxed == Some(InputBox::Holds);
-        if !(printing || held) {
+        if !(printing || undrawn || held) {
             return Ok(false);
         }
         if held {
@@ -437,6 +446,8 @@ impl Dispatcher {
             "m-{message} was to go again, its record never having shown it: its window {}; it waits once more, and is not pasted again",
             if held {
                 "holds it in its input box, and Enter was pressed once more"
+            } else if undrawn {
+                "has printed nothing since it was written into it, so has not read it"
             } else {
                 "printed on its screen within the last seconds"
             }
@@ -458,6 +469,7 @@ impl Dispatcher {
                     last: now,
                     longest_pass: now - delivering.since,
                     output_quiet_ms: None,
+                    paste_quiet_ms: None,
                 },
                 |watched| Watched {
                     last: now,
@@ -915,10 +927,9 @@ impl Dispatcher {
             .as_mut()
             .filter(|watched| watched.message == message)
         {
-            watched.output_quiet_ms = snapshot
-                .get("outputQuietMs")
-                .and_then(Value::as_f64)
-                .map(|quiet| quiet as i64);
+            let ms = |field: &str| snapshot.get(field).and_then(Value::as_f64).map(|ms| ms as i64);
+            watched.output_quiet_ms = ms("outputQuietMs");
+            watched.paste_quiet_ms = ms("pasteQuietMs");
         }
         if js::truthy(snapshot.get("pasteInFlight")) {
             self.unknown(record, "its pane host is writing a paste into it still");

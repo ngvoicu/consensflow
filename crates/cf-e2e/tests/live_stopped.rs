@@ -14,8 +14,16 @@
 //! and shapes: whether the screen's last lines show the header, a placeholder of a paste
 //! (`[Pasted text #`), and whether the record holds the header yet.
 //!
+//! The second test is the daemon's (`stopped_chief`): a real Claude Code is the chief of a
+//! project on the native daemon, at its own settle and arrival wait, and the stand-in worker's
+//! result is handed to it; as its `delivery.begun` is written, every process of the chief's
+//! window is stopped for ninety seconds, longer than the minute of rest after which a paste
+//! the record never showed went again before 3.0.7. It is held to the paste going once: on
+//! its first attempt, no retry, and in the chief's record once.
+//!
 //! ```text
-//! cargo xtask live stopped
+//! cargo xtask live stopped                   both
+//! cargo xtask live stopped -- stopped_chief  the daemon's alone
 //! ```
 
 #![cfg(unix)]
@@ -23,6 +31,7 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::live::members::{find, member_as, stand_in_worker, Members, Plan, STAND_IN_WORKER};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window, ANSWER};
 use cf_e2e::live::{self, ask, Harness, Log};
@@ -114,6 +123,11 @@ fn signal(window: &Window, signal: Signal) -> Result<()> {
         .process()
         .ok_or_else(|| Error::Daemon("the pane host named no process of the window".into()))?
         .pid;
+    signal_group(pid, signal)
+}
+
+/// Signals every process of the group of `pid`.
+fn signal_group(pid: u32, signal: Signal) -> Result<()> {
     let group = getpgid(Some(Pid::from_raw(pid as i32)))
         .map_err(|error| Error::Daemon(format!("no group of {pid}: {error}")))?;
     killpg(group, signal).map_err(|error| Error::Daemon(format!("{signal} {group}: {error}")))
@@ -177,5 +191,107 @@ fn a_claude_code_window_stopped_after_a_paste_shows_and_records_it_as_it_shows()
     ];
     drop(window);
     rig.close()?;
+    report::conclude(&log, "what each check came to", &checks)
+}
+
+/// What the chief's folder tells it.
+const CHIEF_BRIEF: &str = "This folder is an automated ConsensFlow test. When a ConsensFlow message arrives, reply with exactly one line, SEEN, and run no tools.\n";
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on a chief of Claude Code; cargo xtask live stopped"]
+fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_seconds() -> Result {
+    let log = Log::begin("live stopped (daemon)")?;
+    ask::prepare()?;
+    log.found(Harness::Claude)?;
+    let plan = Plan::new("stopped-chief", member_as(Harness::Claude, "chief"))
+        .with(stand_in_worker())
+        .told(CHIEF_BRIEF);
+    let mut members = Members::open(&plan, std::path::Path::new(FAKE_AGENT), &log)?;
+    members.add(STAND_IN_WORKER, &[])?;
+    if !members.chief_is_idle(&log)? {
+        let checks = vec![Check::failed("claude chief", "goes idle", members.chief_window())];
+        members.close()?;
+        return report::conclude(&log, "what each check came to", &checks);
+    }
+    let pane = serde_json::json!({ "id": format!("p{}-chief", members.project_id()), "generation": 1 });
+    let pid = members
+        .rig()
+        .window_process(&pane)
+        .ok_or_else(|| Error::Daemon("the pane host named no process of the chief".into()))?
+        .pid;
+    members.give(STAND_IN_WORKER, "Reply with exactly: ONE done.")?;
+    // Stopped as soon as the daemon begins to hand the result over.
+    let result = find(&log, "the result's delivery to begin", Duration::from_secs(300), Duration::from_millis(100), || {
+        Ok(members.events().into_iter().find(|event| {
+            event["kind"] == "delivery.begun"
+                && members
+                    .inbox(Some("chief"))
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .any(|message| message["kind"] == "result" && message["id"] == event["data"]["message"])
+        }))
+    })?;
+    let Some(begun) = result else {
+        members.close()?;
+        return Err(Error::Daemon("the result's delivery never began".into()));
+    };
+    signal_group(pid, Signal::SIGSTOP)?;
+    log.say("claude chief: the result's paste begun, the chief stopped");
+    sleep(STOPPED);
+    signal_group(pid, Signal::SIGCONT)?;
+    log.say("claude chief: going on");
+    let id = begun["data"]["message"].as_i64().unwrap_or_default();
+    let settled = find(&log, "the result to settle", Duration::from_secs(300), Duration::from_secs(1), || {
+        Ok(members.inbox(Some("chief"))?.into_iter().find(|message| {
+            message["id"] == id && (message["state"] == "delivered" || message["state"] == "failed")
+        }))
+    })?;
+    let events = members.events();
+    let count = |kind: &str| {
+        events
+            .iter()
+            .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
+            .count()
+    };
+    let session = members
+        .rig()
+        .open_frames()
+        .into_iter()
+        .rev()
+        .find(|frame| frame["id"] == pane["id"])
+        .and_then(|frame| cf_e2e::live::members::session_of(&frame));
+    let items = match session {
+        Some(session) => ask::records(Harness::Claude.kind(), &session, members.rig().environment())?
+            .map(|record| record.items)
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let marker = format!("[ConsensFlow m-{id} ");
+    let held = items
+        .iter()
+        .filter(|item| item.role == "user" && item.text.contains(&marker))
+        .count();
+    let checks = vec![
+        Check::new(
+            "claude chief",
+            "the result is delivered on its first attempt",
+            settled.as_ref().is_some_and(|message| message["state"] == "delivered" && message["attempts"] == 1),
+            format!("{settled:?}"),
+        ),
+        Check::new(
+            "claude chief",
+            "it is pasted once",
+            count("delivery.begun") == 1 && count("delivery.retried") == 0,
+            format!("{} begun, {} retried", count("delivery.begun"), count("delivery.retried")),
+        ),
+        Check::new(
+            "claude chief",
+            "the chief's record holds it once",
+            held == 1,
+            format!("{held} user item(s) hold its header"),
+        ),
+    ];
+    members.close()?;
     report::conclude(&log, "what each check came to", &checks)
 }
