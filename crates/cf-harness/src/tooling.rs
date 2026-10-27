@@ -10,6 +10,7 @@
 //! | `op` | the question | the answer |
 //! |---|---|---|
 //! | `records` | `kind`, `session`, `env`: what the harness's own record of the conversation says | `{reading, settled}`: the reading as [`records::answers`] writes it, and whether the window's turn is over, as the dispatcher reads it |
+//! | `turn_cut` | `kind`, `session`, `env`: the record of a conversation whose window is closed, as the human's Resume reads it | `{cut, began, words}`: whether its turn was cut ([`Records::turn_cut`](crate::contract::Records::turn_cut)), null where the record cannot tell, and of a cut turn when the message that began it came and its words, where the record holds it |
 //! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation, or with `resume` true on the one `session` names | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
 //! | `window_text` | `text`: as a window can take it | the text |
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
@@ -57,18 +58,19 @@ use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use crate::claude::install;
-use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Skill};
+use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Records, Skill, TurnLeft};
 use crate::launch::adapter;
 use crate::records::{self, Options};
 use crate::shared::input_box::{self, InputBox};
 use crate::shared::record_state::record_state;
 use crate::shared::{trust, window_args};
-use crate::testing::Fakes;
+use crate::testing::{finished, Fakes};
 
 /// The answer to `question`, or why it cannot be answered.
 pub fn answer(question: &Value) -> Result<Value, String> {
     match text(question, "op")? {
         "records" => read_record(question),
+        "turn_cut" => turn_cut(question),
         "start" => start(question),
         "window_text" => Ok(json!(window_text(text(question, "text")?))),
         "console_text" => Ok(json!(console_text(text(question, "text")?))),
@@ -88,7 +90,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "trust" => trust(question),
         "input_box" => input_box(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust and input_box"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust and input_box"
         )),
     }
 }
@@ -209,6 +211,25 @@ fn read_record(question: &Value) -> Result<Value, String> {
     );
     let settled = record_state(reading.clone()).settled;
     Ok(json!({ "reading": &*reading, "settled": settled }))
+}
+
+/// Whether the turn of the conversation the question names was cut, as the human's
+/// Resume reads its record with no window open.
+fn turn_cut(question: &Value) -> Result<Value, String> {
+    let records = Fakes::new(&env(question)?).records;
+    let left = finished(records.turn_cut(
+        harness(text(question, "kind")?)?,
+        text(question, "session")?,
+    ));
+    Ok(match left {
+        None => json!({ "cut": null }),
+        Some(TurnLeft::AtRest) => json!({ "cut": false }),
+        Some(TurnLeft::Cut(opening)) => json!({
+            "cut": true,
+            "began": opening.as_ref().and_then(|opening| opening.at.clone()),
+            "words": opening.map(|opening| opening.words),
+        }),
+    })
 }
 
 /// The harness's own window on a new conversation, or, when the question says

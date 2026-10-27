@@ -1,0 +1,343 @@
+# A window whose turn had ended, with only background work running, is at rest at
+# the human's Resume, and is told nothing of a cut turn: the notification of a job
+# Claude Code ended itself begins no turn, and what only its notices hold open was
+# no turn; an idle compaction's summary is no word of the user's. A note a Resume
+# wrote of a window's state is judged again at the next, and withdrawn where the
+# record no longer says it. A cut turn is named by when the message that began it
+# came and its first words (T-814: poker-lab's and sites's chiefs, told their turns
+# were cut, went to work on their own). One plant takes one rule out; a test of it
+# fails.
+
+[run]
+# The Claude reader's own tests: what each record says of a turn.
+fcn-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+# What the engine asks of a record with no window open, on every harness.
+fcn-harness-contract = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::"]
+# The field records, read as the Resume reads them, with Claude's statuses or none.
+fcn-harness-closed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::closed_at_rest"]
+fcn-harness-outside = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::outside"]
+# The Resume's notes.
+fcn-engine-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+# The ledger's words of a continuation, and its withdrawal of a note.
+fcn-ledger-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::continuations"]
+fcn-ledger-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "continuations::"]
+
+# --- A: background work is rest ---
+
+[[plant]]
+name = "false cut note: a queued notification of a job Claude Code ended holds the turn"
+meant = "a_notification_ends_its_job_whichever_record_says_it_and_whichever_end_it_says"
+runs = ["fcn-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''            .filter(|content| !begins_no_turn(content));'''
+replace = '''            .filter(|content| !begins_no_turn(content) || !content.is_empty());'''
+
+[[plant]]
+name = "false cut note: a notification of a job Claude Code ended waits, once taken, for its turn"
+meant = "the_notification_of_a_job_claude_code_ended_itself_taken_after_the_turn_holds_no_turn"
+runs = ["fcn-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''        if !begins_no_turn(&taken) {'''
+replace = '''        if !begins_no_turn(&taken) || !taken.is_empty() {'''
+
+[[plant]]
+name = "false cut note: a turn held open only by its harness's notices is read as cut"
+meant = "a_record_held_open_only_by_its_harness_s_notices_of_background_work_was_at_rest_on_every_harness"
+runs = ["fcn-harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
+replace = ""
+
+[[plant]]
+name = "false cut note: the Claude reader never says notices alone hold the turn"
+meant = "a_notification_of_any_end_taken_as_the_window_closed_is_background_work_not_a_turn"
+runs = ["fcn-harness-closed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''        record.lines.held_by_notices = settlement == Settlement::InFlight && self.held_by_notices();'''
+replace = '''        record.lines.held_by_notices =
+            settlement == Settlement::InFlight && self.held_by_notices() && self.count == 0;'''
+
+[[plant]]
+name = "false cut note: a message a human queued is taken for a notice"
+meant = "a_record_no_claude_shows_was_cut_in_no_turn_for_a_message_its_program_queued_and_never_took"
+runs = ["fcn-harness-outside"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''                .all(|content| is_notice(content))'''
+replace = '''                .all(|content| is_notice(content) || !content.is_empty())'''
+
+[[plant]]
+name = "false cut note: a message the human took back is taken for a notice"
+meant = "a_record_with_a_message_the_human_took_back_beside_a_jobs_notification_is_no_notices_alone"
+runs = ["fcn-harness-outside"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''
+        self.popped.is_empty()
+            && self'''
+replace = '''
+        (self.popped.is_empty() || !self.popped.is_empty())
+            && self'''
+
+[[plant]]
+name = "false cut note: an idle compaction's summary is the record's last word"
+meant = "a_reply_and_then_an_idle_compaction_s_summary_ends_at_rest_on_every_harness"
+runs = ["fcn-harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        .find(|item| item.role != Role::Custom && !item.compaction)'''
+replace = '''        .find(|item| item.role != Role::Custom)'''
+
+[[plant]]
+name = "false cut note: the sites chief's record after an idle compaction is read as cut"
+meant = "a_chief_closed_at_rest_after_an_idle_compaction_was_cut_in_no_turn"
+runs = ["fcn-harness-closed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        .find(|item| item.role != Role::Custom && !item.compaction)'''
+replace = '''        .find(|item| item.role != Role::Custom)'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''        if !begins_no_turn(&taken) {'''
+replace = '''        if !begins_no_turn(&taken) || !taken.is_empty() {'''
+
+[[plant]]
+name = "false cut note: poker-lab's chief, at rest with its job ended, is read as cut"
+meant = "a_chief_closed_at_rest_while_its_background_command_ran_was_cut_in_no_turn"
+runs = ["fcn-harness-closed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''        if !begins_no_turn(&taken) {'''
+replace = '''        if !begins_no_turn(&taken) || !taken.is_empty() {'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
+replace = ""
+
+# --- C: a cut turn is named ---
+
+[[plant]]
+name = "false cut note: a cut turn names no message"
+meant = "a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it"
+runs = ["fcn-harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        if last_word(items).is_some_and(|item| item.role == Role::Assistant && item.complete) {'''
+replace = '''        if last_word(items).is_some_and(|item| item.role == Role::Assistant && item.complete) || !items.is_empty() {'''
+
+[[plant]]
+name = "false cut note: a turn answered whole is named by the message before it"
+meant = "a_record_whose_last_turn_was_answered_whole_names_no_turn_for_a_message_it_never_began"
+runs = ["fcn-harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        if last_word(items).is_some_and(|item| item.role == Role::Assistant && item.complete) {'''
+replace = '''        if last_word(items).is_some_and(|item| item.role == Role::Assistant && item.complete) && items.is_empty() {'''
+
+[[plant]]
+name = "false cut note: a mid-turn compaction's summary is named as the turn's message"
+meant = "a_turn_compacted_in_its_middle_is_named_by_the_message_that_began_it_not_the_summary"
+runs = ["fcn-harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''            .find(|item| item.role == Role::User && !item.compaction)?;'''
+replace = '''            .find(|item| item.role == Role::User)?;'''
+
+[[plant]]
+name = "false cut note: a cut turn's message is kept whole"
+meant = "a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it"
+runs = ["fcn-harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        let mut kept: String = words.chars().take(OPENING_WORDS).collect();'''
+replace = '''        let mut kept: String = words.chars().take(OPENING_WORDS * 10).collect();'''
+
+[[plant]]
+name = "false cut note: a cut turn's message keeps its line breaks and runs of spaces"
+meant = "a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it"
+runs = ["fcn-harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        let words = words.join(" ");'''
+replace = '''        let words = item.text.to_string() + &words.join("")[..0];'''
+
+[[plant]]
+name = "false cut note: a cut turn says no time"
+meant = "a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it"
+runs = ["fcn-harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''            .and_then(|at| at.parse::<jiff::Timestamp>().ok())'''
+replace = '''            .and_then(|at| at.parse::<jiff::Timestamp>().ok().filter(|_| at.is_empty()))'''
+
+[[plant]]
+name = "false cut note: the field record cut in a turn names no message"
+meant = "a_turn_cut_in_its_middle_is_told_with_the_time_and_the_words_of_the_message_that_began_it"
+runs = ["fcn-harness-closed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''                    Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),'''
+replace = '''                    Settlement::InFlight => Some(TurnLeft::Cut(None)),'''
+
+[[plant]]
+name = "false cut note: the chief's note does not name the turn"
+meant = "a_cut_note_names_the_turn_by_when_its_message_came_and_its_first_words"
+runs = ["fcn-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''            (Coming::Chief, Some(turn)) => format!("{CHIEF_CUT}: {turn}. {RESUME_WORDS}"),'''
+replace = '''            (Coming::Chief, Some(_)) => format!("{CHIEF_CUT}. {RESUME_WORDS}"),'''
+
+[[plant]]
+name = "false cut note: a member's continuation does not name the turn"
+meant = "a_cut_note_names_the_turn_by_when_its_message_came_and_its_first_words"
+runs = ["fcn-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''            (Coming::Member { task, .. }, Some(turn)) => continuation_in(*task, &turn),'''
+replace = '''            (Coming::Member { task, .. }, Some(_)) => continuation(*task),'''
+
+[[plant]]
+name = "false cut note: the ledger knows no continuation that names its turn"
+meant = "a_continuation_that_names_the_turn_it_was_cut_in_reads_back_whatever_that_turn_s_words"
+runs = ["fcn-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        Some((list, turn)) if start == STOPPED && turn.starts_with("the turn that began ") => {'''
+replace = '''        Some((list, turn)) if start == STOPPED && turn.starts_with("the turn that began no") => {'''
+
+[[plant]]
+name = "false cut note: a continuation that names its turn stays queued when its task is paused"
+meant = "a_continuation_that_names_its_turn_goes_with_a_pause_of_its_task_as_any_does"
+runs = ["fcn-ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        Some((list, turn)) if start == STOPPED && turn.starts_with("the turn that began ") => {'''
+replace = '''        Some((list, turn)) if start == STOPPED && turn.starts_with("the turn that began no") => {'''
+
+# --- B: a note of a window's state holds for its Resume alone ---
+
+[[plant]]
+name = "false cut note: a note an earlier Resume left queued is given without the record read again"
+meant = "a_cut_note_an_earlier_resume_left_queued_is_withdrawn_where_the_record_now_reads_at_rest"
+runs = ["fcn-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''
+        if handed_again {
+            return Ok(None);
+        }
+'''
+replace = '''
+        if handed_again {
+            return Ok(None);
+        }
+        let earlier = self
+            .seams
+            .ledger
+            .borrow()
+            .pending(participant.id)?
+            .into_iter()
+            .find(|message| {
+                message.sender.is_none()
+                    && message.kind == "note"
+                    && message.state == "queued"
+                    && coming.told_in(&message.body)
+            });
+        if earlier.is_some() {
+            return Ok(earlier);
+        }
+'''
+
+[[plant]]
+name = "false cut note: a member's continuation an earlier Resume left queued is given without the record read again"
+meant = "a_continuation_an_earlier_resume_left_queued_is_withdrawn_where_the_record_now_reads_at_rest"
+runs = ["fcn-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''
+        if handed_again {
+            return Ok(None);
+        }
+'''
+replace = '''
+        if handed_again {
+            return Ok(None);
+        }
+        let earlier = self
+            .seams
+            .ledger
+            .borrow()
+            .pending(participant.id)?
+            .into_iter()
+            .find(|message| {
+                matches!(coming, Coming::Member { .. })
+                    && message.sender.is_none()
+                    && message.kind == "note"
+                    && message.state == "queued"
+                    && coming.told_in(&message.body)
+            });
+        if earlier.is_some() {
+            return Ok(earlier);
+        }
+'''
+
+[[plant]]
+name = "false cut note: a note that no longer holds is left queued"
+meant = "a_cut_note_an_earlier_resume_left_queued_is_withdrawn_where_the_record_now_reads_at_rest"
+runs = ["fcn-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''                ledger.withdraw_note(&message, "the Resume read the window's record again")?;'''
+replace = '''                let _ = &message;'''
+
+[[plant]]
+name = "false cut note: the chief's note is known by the words of old alone"
+meant = "a_cut_note_that_names_its_turn_and_still_holds_is_told_once_across_resumes"
+runs = ["fcn-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''            Coming::Chief => body.starts_with(CHIEF_CUT),'''
+replace = '''            Coming::Chief => body == format!("{CHIEF_CUT}. {RESUME_WORDS}"),'''
+
+[[plant]]
+name = "false cut note: a Resume withdraws a note of a participant's"
+meant = "a_resume_withdraws_only_a_note_of_consensflow_s_own_still_queued"
+runs = ["fcn-ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''    if now.kind != "note" || now.sender.is_some() || now.state != "queued" {'''
+replace = '''    if now.kind != "note" || now.state != "queued" {'''
