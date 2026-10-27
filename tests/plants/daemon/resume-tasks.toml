@@ -2196,8 +2196,8 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = "         AND instr(t.text, ?) > 0 AND t.copied_at >= ?"
-replace = "         AND instr(t.text, ?) > 0 AND (t.copied_at >= ? OR 1)"
+find = "         AND t.compaction = 0 AND instr(t.text, ?) > 0 AND t.copied_at >= ?"
+replace = "         AND t.compaction = 0 AND instr(t.text, ?) > 0 AND (t.copied_at >= ? OR 1)"
 
 [[plant]]
 name = "resume tasks: the mark of a paste the human sent goes before the ledger has it"
