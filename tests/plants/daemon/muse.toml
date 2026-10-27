@@ -717,7 +717,7 @@ const QUOTA_STATUSES: [f64; 2] = [402.0, 429.0];
 
 [[plant]]
 name = "muse: pi reads billing as a quota"
-meant = "a_refusal_of_the_accounts_billing_or_login_is_the_account_unavailable_and_no_quota_that_resets"
+meant = "pi_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota"
 runs = ["muse-pi"]
 
 [[plant.edit]]
@@ -746,7 +746,7 @@ replace = '''
 
 [[plant]]
 name = "muse: claude reads billing as no refusal"
-meant = "a_refusal_of_the_accounts_billing_or_login_is_the_account_unavailable_and_no_quota_that_resets"
+meant = "claude_code_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota"
 runs = ["muse-claude"]
 
 [[plant.edit]]
@@ -908,7 +908,7 @@ replace = '''
 
 [[plant]]
 name = "muse: the human is told at every look"
-meant = "holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_human_once"
+meant = "a_second_window_of_the_member_refused_a_minute_later_holds_its_task_and_the_human_is_not_told_again"
 runs = ["muse-engine"]
 
 [[plant.edit]]

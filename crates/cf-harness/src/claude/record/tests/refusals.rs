@@ -319,8 +319,8 @@ fn quota_of(said: &str, fields: &str) -> Value {
 }
 
 #[test]
-fn a_refusal_of_the_accounts_billing_or_login_is_the_account_unavailable_and_no_quota_that_resets()
-{
+fn claude_code_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota(
+) {
     // MUS-23: a 402, a 401, and the words Anthropic gives an API account with no credit or
     // a key it does not know have no reset, as a 429's has: unavailable until the human fixes it.
     for (said, fields, because) in [

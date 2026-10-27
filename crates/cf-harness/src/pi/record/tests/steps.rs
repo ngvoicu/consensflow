@@ -144,8 +144,7 @@ fn a_refusal_names_its_quota_and_only_the_next_assistant_step_clears_it() {
 }
 
 #[test]
-fn a_refusal_of_the_accounts_billing_or_login_is_the_account_unavailable_and_no_quota_that_resets()
-{
+fn pi_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota() {
     // MUS-23: OpenRouter's spent credit (a 402) and a login Pi could not refresh (a 401) have
     // no reset, as a 429's has: the account is unavailable until its human fixes it.
     for (error, said) in [

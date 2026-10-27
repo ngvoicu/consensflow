@@ -109,6 +109,37 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
 }
 
 #[test]
+fn a_second_window_of_the_member_refused_a_minute_later_holds_its_task_and_the_human_is_not_told_again(
+) {
+    // Two windows of one member run into the same refused account: each task is held and its
+    // requester told, and the human, who has one account to fix, hears it once.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("One");
+    tiers.open_body("Two");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let (one, two) = (tiers.assignee(1), tiers.assignee(2));
+    context.adapter.refuse(&one, unavailable(&context));
+    context.pass().unwrap();
+    context.advance(60_000);
+    context.adapter.refuse(&two, unavailable(&context));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "paused"]
+    );
+    let waits: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.contains(" waits with @"))
+        .collect();
+    assert_eq!(waits.len(), 2, "{waits:?}");
+    assert_eq!(human_notes(&tiers).len(), 1, "{:?}", human_notes(&tiers));
+}
+
+#[test]
 fn the_human_saying_the_account_works_again_brings_the_member_back_and_its_task_goes_on() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
