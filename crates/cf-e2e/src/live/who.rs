@@ -73,11 +73,11 @@ mod tests {
         let failed = Who::named("kimi", "worker").unwrap_err().to_string();
         assert_eq!(
             failed,
-            "no worker is called kimi: fake, claude, opencode, pi, devin, codex"
+            "no worker is called kimi: fake, claude, opencode, pi, devin, codex, muse"
         );
         assert_eq!(
             Who::named("kimi", "door").unwrap_err().to_string(),
-            "no door is called kimi: fake, claude, opencode, pi, devin, codex"
+            "no door is called kimi: fake, claude, opencode, pi, devin, codex, muse"
         );
     }
 

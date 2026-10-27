@@ -154,6 +154,18 @@ impl Rig {
             .collect()
     }
 
+    /// Every command line the rig's Muse ([`Config::muse`](super::Config::muse)) was
+    /// started with so far, oldest first, as the daemon launched it (its model and
+    /// effort in it, which the rig's Muse takes out before it runs).
+    pub fn muse_launches(&self) -> Vec<Vec<String>> {
+        crate::muse::launches(&self.root.join("muse-argv.log"))
+    }
+
+    /// The sessions the rig's Muse keeps in the rig's home, oldest first, each with its log.
+    pub fn muse_sessions(&self) -> Vec<(String, std::path::PathBuf)> {
+        crate::muse::sessions(std::path::Path::new(self.var("HOME").unwrap_or_default()))
+    }
+
     /// The lines of what the stand-in `opencode` wrote down, each as the JSON it is.
     fn opencode_lines(&self) -> Vec<Value> {
         let text = files::read_finished_lines(&self.root.join("opencode.jsonl"));

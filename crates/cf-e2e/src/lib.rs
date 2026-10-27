@@ -35,6 +35,8 @@
 //!   harnesses keep and say and what the daemon wrote as it went, what the
 //!   pane host says a worker's turn left running, what a run says and how it
 //!   waits, and the variables `cargo xtask live` sets from its flags.
+//! - [`muse`] is the machine's own Muse, which the rig's Muse windows run on its fake
+//!   model, and the session logs Muse writes.
 //! - [`rollout`] reads a Codex thread's rollout, what it began with and was told,
 //!   in the rig's Codex home and the machine's.
 //! - [`ports`] names a port on loopback for a program to listen on, one that no
@@ -106,6 +108,7 @@ mod error;
 pub mod files;
 pub mod http;
 pub mod live;
+pub mod muse;
 mod outcome;
 pub mod pattern;
 pub mod png;

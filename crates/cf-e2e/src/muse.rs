@@ -1,0 +1,260 @@
+//! Muse Code as a case meets it from the outside: the machine's own install, which the
+//! rig's windows run on Muse's built-in fake model (`--provider echo`: offline, no
+//! login, no quota), and the session logs Muse writes, read as a case reads them.
+//!
+//! The rig puts a launcher of its own on its windows' `PATH` (`muse`) and beside it the
+//! `.muse-version` of the machine's install and a `muse-bin-<version>` that runs the
+//! machine's binary with `--provider echo`, as the product runs the binary a launcher
+//! names. Echo refuses a model and an effort, so the stand-in takes them out of what it
+//! runs, and writes down every command line it was given whole (`argv`), for a case to
+//! hold the launch to. It `exec`s Muse, so the window's process is Muse's, as the
+//! product's own window's is.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+
+use crate::process::own_var;
+use crate::{files, Result};
+
+/// How the rig's Muse windows run: on Muse's fake model, each turn this many
+/// milliseconds long, or live, on the model each is launched on, the person's login
+/// found from their home.
+#[derive(Debug, Clone)]
+pub enum Run {
+    Echo { turn_ms: u64 },
+    Live { real_home: PathBuf },
+}
+
+/// Gives a live rig's home what its Muse windows read their login by: settings of their
+/// own, and a copy of the metadata of the person's login (`auth.json`; the secret stays
+/// in the keychain, the one item every Muse of the machine reads). The person's file is
+/// read, never written.
+pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
+    let config = rig_home.join(".config").join("muse");
+    files::write(&config.join("settings.json"), "{\"schema_version\":1}\n")?;
+    let auth = real_home.join(".config").join("muse").join("auth.json");
+    files::write(&config.join("auth.json"), files::read(&auth)?)
+}
+
+/// The machine's own Muse: its binary and the version line naming it.
+#[derive(Debug, Clone)]
+pub struct Installed {
+    pub binary: PathBuf,
+    pub version: String,
+}
+
+/// The Muse installed in the home of whoever runs the tests (`~/.local/bin`, where its
+/// installer puts it), or why there is none to run: Muse's rig cases run on a Mac with
+/// Muse Code installed. The Windows machines have none yet (MUS-20), nor has CI.
+pub fn installed() -> std::result::Result<Installed, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Muse Code's rig cases run on a Mac with Muse installed; this machine is no Mac (the Windows machines have no Muse yet, MUS-20)".to_owned());
+    }
+    let home = own_var("HOME").ok_or("no home to find Muse Code in")?;
+    let bin = Path::new(&home).join(".local").join("bin");
+    let version = fs::read_to_string(bin.join(".muse-version"))
+        .map(|line| line.trim().to_owned())
+        .map_err(|_| {
+            "Muse Code is not installed on this machine (no ~/.local/bin/.muse-version)".to_owned()
+        })?;
+    let binary = bin.join(format!("muse-bin-{version}"));
+    if !binary.is_file() {
+        return Err(format!(
+            "Muse Code's binary {} is not on this machine",
+            binary.display()
+        ));
+    }
+    Ok(Installed { binary, version })
+}
+
+/// Writes the rig's Muse in `dir`: its launcher, the version line, and the binary that
+/// runs `install`'s on echo, each turn `delay_ms` long, writing each command line it
+/// is given to `argv` (its words split by a unit separator, each line ended by a record
+/// separator: a first message has lines of its own).
+pub fn write_stand_in(dir: &Path, install: &Installed, delay_ms: u64, argv: &Path) -> Result {
+    let pinned = dir.join(format!("muse-bin-{}", install.version));
+    files::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
+    files::write_executable(
+        &dir.join("muse"),
+        format!("#!/bin/sh\nexec '{}' \"$@\"\n", pinned.display()),
+    )?;
+    let script = format!(
+        r#"#!/bin/bash
+# The rig's Muse: the machine's, on its fake model. Echo takes no model or effort.
+( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
+words=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model|--reasoning-effort) shift 2 ;;
+    *) words+=("$1"); shift ;;
+  esac
+done
+exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{delay_ms}}}" "${{words[@]}}"
+"#,
+        argv = argv.display(),
+        binary = install.binary.display(),
+    );
+    files::write_executable(&pinned, script)
+}
+
+/// Writes the rig's Muse in `dir` for a live run: its launcher, the version line, and
+/// the binary that runs `install`'s on the real model, with the model and effort it is
+/// given, writing each command line to `argv` as [`write_stand_in`]'s does. Muse keeps
+/// its login's secret in the system's keychain, which it finds by the person's home
+/// (`real_home`: a throwaway home opens its onboarding, T-705); its settings, the copy of
+/// the login's metadata, and its sessions are in the rig's home (`rig_home`), where the
+/// daemon reads them, so nothing of the person's Muse folders is read or written.
+pub fn write_live_stand_in(
+    dir: &Path,
+    install: &Installed,
+    real_home: &Path,
+    rig_home: &Path,
+    argv: &Path,
+) -> Result {
+    let pinned = dir.join(format!("muse-bin-{}", install.version));
+    files::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
+    files::write_executable(
+        &dir.join("muse"),
+        format!("#!/bin/sh\nexec '{}' \"$@\"\n", pinned.display()),
+    )?;
+    let script = format!(
+        r#"#!/bin/bash
+# The rig's Muse, live: the machine's, on its real model, the person's keychain login.
+( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
+export HOME='{real}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
+exec '{binary}' "$@"
+"#,
+        argv = argv.display(),
+        real = real_home.display(),
+        rig = rig_home.display(),
+        binary = install.binary.display(),
+    );
+    files::write_executable(&pinned, script)
+}
+
+/// Every command line the rig's Muse was given, in order, as its words.
+pub fn launches(argv: &Path) -> Vec<Vec<String>> {
+    fs::read_to_string(argv)
+        .unwrap_or_default()
+        .split('\u{1e}')
+        .filter(|line| !line.is_empty())
+        .map(|line| line.split('\u{1f}').map(str::to_owned).collect())
+        .collect()
+}
+
+/// The sessions Muse keeps in the home `home` (its data folder there, `.local/share/muse`),
+/// by id, each with its log, oldest first (a UUIDv7 sorts by when it began).
+pub fn sessions(home: &Path) -> Vec<(String, PathBuf)> {
+    let root = home
+        .join(".local")
+        .join("share")
+        .join("muse")
+        .join("sessions");
+    let mut found = Vec::new();
+    for year in dirs(&root) {
+        for month in dirs(&year) {
+            for day in dirs(&month) {
+                for session in dirs(&day) {
+                    let log = session.join("session.jsonl");
+                    if log.is_file() {
+                        let id = session
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned();
+                        found.push((id, log));
+                    }
+                }
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+fn dirs(folder: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.file_name().is_some_and(|name| name != "subagent"))
+        .collect();
+    found.sort();
+    found
+}
+
+/// A session log's records, its torn lines passed over.
+pub fn records(log: &Path) -> Vec<Value> {
+    fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// What a record is, as a case names it: its payload's kind, and a run event's kind
+/// after a slash (`run/terminal`, `run/run_retracted`, `user_intent`).
+pub fn kind(record: &Value) -> String {
+    let payload = &record["payload"];
+    let kind = payload["kind"].as_str().unwrap_or_default();
+    match payload["event"]["kind"].as_str() {
+        Some(event) if !kind.is_empty() => format!("{kind}/{event}"),
+        _ => kind.to_owned(),
+    }
+}
+
+/// How each run of a log ended, in order: `completed`, `cancelled` or `failed`.
+pub fn terminals(records: &[Value]) -> Vec<String> {
+    records
+        .iter()
+        .filter(|record| kind(record) == "run/terminal")
+        .map(|record| {
+            record["payload"]["event"]["terminal"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect()
+}
+
+/// The words of each message of the user's Muse took in, in order
+/// (`runtime.user_intent.accepted`), and how each went in: a turn of its own, or a
+/// turn at work (`active_run_delivery`), by its `materialized` record.
+pub fn messages(records: &[Value]) -> Vec<String> {
+    records
+        .iter()
+        .filter(|record| record["payload_type"] == "runtime.user_intent.accepted")
+        .map(|record| {
+            record["payload"]["refill_blocks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .collect()
+}
+
+/// How each message of the user's went in, in order: the outcome of its
+/// `runtime.user_intent.materialized` (`top_level_turn_started`, `active_run_delivery`).
+pub fn deliveries(records: &[Value]) -> Vec<String> {
+    records
+        .iter()
+        .filter(|record| record["payload_type"] == "runtime.user_intent.materialized")
+        .map(|record| {
+            record["payload"]["outcome"]["kind"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect()
+}
+
+/// Whether the log has a record of `kind` ([`kind`]).
+pub fn has(records: &[Value], wanted: &str) -> bool {
+    records.iter().any(|record| kind(record) == wanted)
+}

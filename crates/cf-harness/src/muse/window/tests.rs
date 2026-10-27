@@ -352,3 +352,23 @@ fn a_window_follows_the_session_its_hook_says_it_resumed_into() {
     window.follow(older);
     assert_eq!(finished(window.observe()).unwrap().switched, None);
 }
+
+#[test]
+fn a_session_the_window_s_process_opens_after_its_hook_spoke_is_the_one_it_shows() {
+    let home = Home::new();
+    let session = v7(100);
+    home.log(&session, 40_085, "");
+    let window = home.window(Some(&session), None);
+    window.opened(&pane(), Some(40_085));
+    home.hook_said(&session, "startup");
+    // A /clear opens a session at once; its hook speaks only at its first prompt. The
+    // session began after the hook's word was written (the clock of both is the
+    // machine's).
+    use cf_base::time::Clock;
+    let now = cf_base::time::SystemClock.now_ms();
+    let hex = format!("{:012x}", now + 2_000);
+    let cleared = format!("{}-{}-7000-8000-000000000042", &hex[..8], &hex[8..]);
+    home.log(&cleared, 40_085, "");
+    let observed = finished(window.observe()).unwrap();
+    assert_eq!(observed.switched.as_deref(), Some(cleared.as_str()));
+}
