@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_harness::contract::{Pane, Work};
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Background, Servers};
 
 use super::Gate;
 use crate::seams::{BackgroundWork, CommandsSeen};
@@ -40,6 +40,10 @@ pub struct FakeBackground {
     rests: RefCell<Vec<(Pane, Vec<u64>)>>,
     /// The word that a turn begins waits for this gate before it is taken.
     mark_hold: RefCell<Option<Gate>>,
+    /// What a look at what a window left running answers: no answer, unless a test says.
+    left: RefCell<Option<Background>>,
+    /// The panes the engine looked at what they left running, in order.
+    left_asked: RefCell<Vec<Pane>>,
 }
 
 impl FakeBackground {
@@ -135,6 +139,16 @@ impl FakeBackground {
         self.rests.borrow().len()
     }
 
+    /// A look at what a window left running answers `left` from now on, or nothing (none).
+    pub fn leaves(&self, left: Option<Background>) {
+        *self.left.borrow_mut() = left;
+    }
+
+    /// The panes the engine looked at what they left running, in order.
+    pub fn left_asked(&self) -> Vec<Pane> {
+        self.left_asked.borrow().clone()
+    }
+
     /// What each of those marks said of which harness the window is.
     pub fn harness_said(&self) -> Vec<String> {
         self.marked
@@ -176,5 +190,11 @@ impl BackgroundWork for FakeBackground {
         rests.push((pane.clone(), keep.to_vec()));
         let number = u64::try_from(rests.len() - 1).ok();
         Box::pin(async move { number })
+    }
+
+    fn left_running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Background>> {
+        self.left_asked.borrow_mut().push(pane.clone());
+        let left = self.left.borrow().clone();
+        Box::pin(async move { left })
     }
 }

@@ -23,7 +23,7 @@ use cf_engine::seams::{BackgroundWork, CommandsSeen};
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
 use cf_proto::panes::{
-    CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
+    Background, CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
 };
 use serde_json::{json, Map, Value};
 
@@ -156,6 +156,13 @@ impl BackgroundWork for BridgeHost {
             let rest: Rest = serde_json::from_value(answer.get("rest")?.clone()).ok()?;
             rest
         })
+    }
+
+    fn left_running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Background>> {
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        let sent = self.bridge.request("pane.background", body, None);
+        // A host that does not answer, or answers what is no look, has nothing to name.
+        Box::pin(async move { serde_json::from_value(sent.await.ok()?).ok() })
     }
 }
 

@@ -346,6 +346,7 @@ pub(crate) fn listed(mut chosen: Vec<Member>) -> Background {
                 command: bounded(&member.command),
             })
             .collect(),
+        possibly_left: Vec::new(),
     }
 }
 

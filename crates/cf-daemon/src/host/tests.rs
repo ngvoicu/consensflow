@@ -644,3 +644,67 @@ async fn a_look_at_a_windows_commands_that_no_host_answers_is_unanswered_and_kee
         })
         .await;
 }
+
+#[tokio::test]
+async fn a_look_at_what_a_window_left_running_is_asked_by_its_pane_and_reads_what_may_be_its_own() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&seen);
+            let answers = Rc::new(RefCell::new(vec![
+                json!({
+                    "ok": true,
+                    "total": 2,
+                    "processes": [{ "pid": 4711, "command": "bash retry.sh" }],
+                    "possiblyLeft": [{ "pid": 4242, "program": "sleep" }],
+                }),
+                json!({ "ok": true, "total": 0, "processes": [] }),
+                json!({ "ok": true }),
+            ]));
+            let next = Rc::clone(&answers);
+            app.on("pane.background", move |_, body| {
+                heard.borrow_mut().push(body);
+                let answer = next.borrow_mut().remove(0);
+                async move { Ok(answer) }
+            });
+            let host = host_over(&daemon);
+            let at = pane("p1-zeus", 2);
+            assert_eq!(
+                host.left_running(&at).await,
+                Some(Background {
+                    total: 2,
+                    processes: vec![cf_proto::panes::BackgroundProcess {
+                        pid: 4711,
+                        command: "bash retry.sh".to_owned(),
+                    }],
+                    possibly_left: vec![cf_proto::panes::PossiblyLeft {
+                        pid: 4242,
+                        program: "sleep".to_owned(),
+                    }],
+                })
+            );
+            // An older host names nothing outside the tree; one that says no look, nothing.
+            assert_eq!(host.left_running(&at).await, Some(Background::default()));
+            assert_eq!(host.left_running(&at).await, None);
+            assert_eq!(
+                serde_json::to_string(&seen.borrow()[0]).unwrap(),
+                r#"{"id":"p1-zeus","generation":2}"#
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_look_at_what_a_window_left_running_that_no_host_answers_names_nothing() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            app.on("pane.background", |_, _| async {
+                Err::<serde_json::Value, String>("no such pane".to_owned())
+            });
+            let host = host_over(&daemon);
+            assert_eq!(host.left_running(&pane("p1-zeus", 2)).await, None);
+        })
+        .await;
+}
