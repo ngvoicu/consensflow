@@ -1089,7 +1089,7 @@ replace = '''            if false; then
 
 [[plant]]
 name = "installers: the publish job downloads the release's files merged, held to nothing"
-meant = "has_the_publish_job_hold_every_built_file_to_its_jobs_listing_before_it_publishes"
+meant = "has_the_publish_job_run_the_publisher_that_was_built_and_nothing_of_the_tree"
 runs = ["sign-job"]
 
 [[plant.edit]]
