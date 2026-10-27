@@ -14,13 +14,14 @@
 //! the item `Claude Code-credentials` of the account that is the user's name: the
 //! Keychain also holds one for the account `unknown`, from a run that had no `USER`,
 //! which holds no refresh token and is long expired, and a lookup that names no
-//! account returns that one. On another Unix it is `~/.claude/.credentials.json`.
+//! account returns that one. On Linux and on Windows it is
+//! `~/.claude/.credentials.json` (`%USERPROFILE%\.claude\.credentials.json`).
 //! Either is a JSON text that holds the login (`claudeAiOauth`) and the OAuth
 //! tokens of the person's MCP servers (`mcpOAuth`): only the login is copied, into
-//! the folder's `.credentials.json` (mode 600), where a Claude Code with
-//! `CLAUDE_CONFIG_DIR` set reads it. Nothing is ever written to the Keychain, and
-//! nothing is ever printed of the login. Windows has no copy: its runs are as they
-//! were, on the person's own config.
+//! the folder's `.credentials.json` (mode 600 where the system has a mode; the user's
+//! own temporary folder on Windows), where a Claude Code with `CLAUDE_CONFIG_DIR` set
+//! reads it. Nothing is ever written to the Keychain, and nothing is ever printed of
+//! the login.
 //!
 //! **A fresh config folder** opens Claude Code on its first-run dialogs; the folder
 //! is given the one file that answers them (`.claude.json`, with the onboarding
@@ -83,6 +84,12 @@ const SERVICE: &str = "Claude Code-credentials";
 /// needs ([`Login::of_machine_lasting`]): an eval is hours long.
 pub const LEFT: Duration = Duration::from_secs(2 * 60 * 60);
 
+/// The user's own home on this machine: `HOME`, else `USERPROFILE` (Windows' own), as the rest
+/// of the live kit finds it ([`super::machine::home`]); none where the run has neither.
+fn machine_home() -> Option<PathBuf> {
+    super::machine::home().ok()
+}
+
 /// What the folder of a run starts with in `.claude.json`: the first-run dialogs
 /// answered, and the notice of the default permission mode seen, which would
 /// otherwise be drawn above the prompt that the windows' readers read.
@@ -98,23 +105,23 @@ const PREFIX: &str = "consensflow-live-claude-";
 enum Source {
     /// The login Keychain, as the item of the user's own account.
     Keychain,
-    /// A file, where Claude Code on Linux keeps it.
+    /// A file, where Claude Code on Linux and on Windows keeps it.
     File(PathBuf),
 }
 
 impl Source {
-    /// Where this machine keeps it; none on Windows, where a run is as it was.
+    /// Where this machine keeps it.
     fn of_machine() -> Option<Self> {
-        if cfg!(target_os = "macos") {
-            Some(Self::Keychain)
-        } else if cfg!(unix) {
-            let home = own_var("HOME").filter(|home| !home.is_empty())?;
-            Some(Self::File(
-                Path::new(&home).join(".claude").join(".credentials.json"),
-            ))
-        } else {
-            None
+        Self::on(cfg!(target_os = "macos"), machine_home())
+    }
+
+    /// Where a machine keeps it: the Keychain on a Mac (`macos`), else the file below the
+    /// user's `home` (none where the run has no home to look in).
+    fn on(macos: bool, home: Option<PathBuf>) -> Option<Self> {
+        if macos {
+            return Some(Self::Keychain);
         }
+        Some(Self::File(home?.join(".claude").join(".credentials.json")))
     }
 
     /// What it holds, as its text; never said anywhere.
@@ -277,6 +284,8 @@ fn gained(before: &BTreeSet<String>, now: &BTreeSet<String>) -> Vec<String> {
 /// (`~/.consensflow-candidate/live/…`), the evals' (`~/.consensflow-candidate/evals/…`: the
 /// workspace of every eval), or in the home of a rig.
 fn is_run_folder(path: &str) -> bool {
+    // Windows writes a folder with its own separator in some places and with ours in others.
+    let path = path.replace('\\', "/");
     path.contains("/.consensflow-candidate/live/")
         || path.contains("/.consensflow-candidate/evals/")
         || path.contains("consensflow-integration-")
@@ -406,6 +415,20 @@ fn changes(before: &Seen, after: &Seen, typed: &str) -> Vec<String> {
     found
 }
 
+/// The machine's login as a config folder's `.credentials.json` holds it (`claudeAiOauth`
+/// alone, as JSON), for a suite that makes its own config folder: read where this machine
+/// keeps it, and refused as a [`Login`] refuses it, when its access token lasts less than
+/// `left` more. Never said anywhere.
+pub fn machine_login(left: Duration) -> Result<Vec<u8>> {
+    let source = Source::of_machine().ok_or_else(|| {
+        Error::Daemon("this run has no home to look for Claude Code's login in".to_owned())
+    })?;
+    let now = jiff::Timestamp::now().as_millisecond();
+    let oauth = oauth(&source.read()?, now, left)?;
+    serde_json::to_vec(&json!({ "claudeAiOauth": oauth }))
+        .map_err(|failed| Error::Daemon(format!("the login's copy: {failed}")))
+}
+
 /// The folder a run's Claude windows run on, once it is made.
 struct Made {
     /// The folder, removed when this is dropped: with the run, however it ends.
@@ -451,19 +474,20 @@ pub struct Login {
 }
 
 impl Login {
-    /// The login of this machine's Claude Code, for a live suite on it ([`LEFT`]); none on
-    /// Windows, where a run is on the person's own config.
+    /// The login of this machine's Claude Code, for a live suite on it ([`LEFT`]); none where
+    /// the run has no home to look for it in.
     pub fn of_machine() -> Option<Self> {
         Self::of_machine_lasting(LEFT)
     }
 
     /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
     /// included: the folder is made only if the access token lasts that much more (an eval, hours
-    /// long, states its own length; the live suites' is [`LEFT`]). None on Windows.
+    /// long, states its own length; the live suites' is [`LEFT`]). None where the run has no home
+    /// to look for it in.
     pub fn of_machine_lasting(left: Duration) -> Option<Self> {
         let source = Source::of_machine()?;
-        let home = own_var("HOME").filter(|home| !home.is_empty())?;
-        let mut login = Self::new(source, PathBuf::from(home), std::env::temp_dir());
+        let home = machine_home()?;
+        let mut login = Self::new(source, home, std::env::temp_dir());
         login.left = left;
         Some(login)
     }
@@ -679,5 +703,7 @@ fn said(touched: &[String], refreshed: &[String]) -> String {
     said
 }
 
+#[cfg(test)]
+mod portable;
 #[cfg(test)]
 mod tests;

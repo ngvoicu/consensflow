@@ -429,6 +429,9 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
     );
 }
 
+// Windows makes the shim as a `.cmd` and a Node script, by what the product's code says a
+// window of the real program opens on (the wrapper's own tests; the live suites run it).
+#[cfg(unix)]
 #[test]
 fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has_them_write_where_the_real_one_does(
 ) {
@@ -440,11 +443,6 @@ fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has
         folder.path(),
         Path::new("/the/fake-agent"),
     );
-    if cfg!(windows) {
-        // A shim is a shell script: on Windows there is none to start.
-        assert!(made.unwrap_err().to_string().contains("macOS and Linux"));
-        return;
-    }
     let debug = format!("{:?}", made.unwrap());
     let shim = folder.path().join("claude-shimmed");
     assert!(

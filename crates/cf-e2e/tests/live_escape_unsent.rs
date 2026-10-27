@@ -41,8 +41,8 @@
 //!
 //! Isolation. Claude Code runs on a throwaway `CLAUDE_CONFIG_DIR` (mode 700) that
 //! holds a copy of the owner's login, the `claudeAiOauth` of the Keychain item of the
-//! user's account (`security find-generic-password -a "$USER"`; the item with no
-//! account is a stale one), never printed, refused where its token ends within two
+//! user's account on a Mac (`security find-generic-password -a "$USER"`; the item with no
+//! account is a stale one) and of `~/.claude/.credentials.json` elsewhere, never printed, refused where its token ends within two
 //! hours, and a `.claude.json` that says onboarding is done (else Claude opens on its
 //! theme dialog). The copy is compared afterwards (a refresh is said, as a failure),
 //! and the folder deleted on every way out. The owner's `~/.claude/settings.json` must
@@ -58,11 +58,10 @@
 //! cargo xtask live escape-unsent devin codex          the ones named, in that order
 //! ```
 //!
-//! Claude Code runs in it on macOS alone: its login is read from the Keychain, and a
-//! live Claude window starts through a wrapper that is a shell script. The others run
-//! on Windows too (`windows-from-tree.sh … cargo xtask live escape-unsent devin`):
-//! there, the throwaway folder is the user's own in the temporary folder, as Windows
-//! gives it, with no mode of its own.
+//! Every harness runs in it on Windows too (`windows-from-tree.sh … cargo xtask live
+//! escape-unsent claude`): there Claude Code's login is read from
+//! `%USERPROFILE%\.claude\.credentials.json`, and the throwaway folder is the user's own in
+//! the temporary folder, as Windows gives it, with no mode of its own.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -72,7 +71,6 @@ use std::time::{Duration, Instant};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, agents, ask, codex, Harness, Installed, Log};
-use cf_e2e::process::Run;
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
 use regex::Regex;
@@ -551,45 +549,13 @@ fn owners_alone(_path: &Path, _mode: u32) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The owner's Claude login, from the Keychain item of the user's account (the item
-/// with no account is a stale one), as a config folder's `.credentials.json` takes
-/// it: its `claudeAiOauth` alone, none of its servers' logins. Refused where its
-/// token ends within [`LOGIN_LEFT`]: the owner's own Claude refreshes it first.
+/// The owner's Claude login as a config folder's `.credentials.json` takes it: its
+/// `claudeAiOauth` alone, none of its servers' logins, read where the machine keeps it
+/// (the Keychain item of the user's account on a Mac, `~/.claude/.credentials.json`
+/// elsewhere). Refused where its token ends within [`LOGIN_LEFT`]: the owner's own
+/// Claude refreshes it first.
 fn claude_login() -> Result<Vec<u8>> {
-    let user = cf_e2e::process::own_var("USER")
-        .ok_or_else(|| Error::Daemon("USER is not set: no Keychain account to read".to_owned()))?;
-    let ran = Run::new("/usr/bin/security")
-        .args([
-            "find-generic-password",
-            "-s",
-            "Claude Code-credentials",
-            "-a",
-            &user,
-            "-w",
-        ])
-        .limit(Duration::from_secs(120))
-        .run()?;
-    if ran.code != Some(0) {
-        return Err(Error::Daemon(format!(
-            "the Keychain gave no Claude login (exit {:?})",
-            ran.code
-        )));
-    }
-    let read: Value = serde_json::from_str(ran.stdout.trim())
-        .map_err(|_| Error::Daemon("the Claude login in the Keychain is no JSON".to_owned()))?;
-    let oauth = &read["claudeAiOauth"];
-    let left =
-        oauth["expiresAt"].as_i64().unwrap_or_default() - jiff::Timestamp::now().as_millisecond();
-    let least = i64::try_from(LOGIN_LEFT.as_millis()).unwrap_or(i64::MAX);
-    if left < least {
-        return Err(Error::Daemon(format!(
-            "the Claude login's token ends in {} min, under {} min: let the owner's Claude refresh it first",
-            left / 60_000,
-            least / 60_000
-        )));
-    }
-    serde_json::to_vec(&json!({ "claudeAiOauth": oauth }))
-        .map_err(|failed| Error::Daemon(format!("the login's copy: {failed}")))
+    live::login::machine_login(LOGIN_LEFT)
 }
 
 /// What the owner's Claude files say: `settings.json` by its hash, and how much of
@@ -800,11 +766,6 @@ fn keys_left_in_a_dialog_with_escape_hold_no_delivery_to_a_window_whose_box_is_e
         .collect::<Result<_>>()?;
     let home = live::machine::home()?;
     let claude = harnesses.contains(&Harness::Claude);
-    if claude && !cfg!(target_os = "macos") {
-        return Err(Error::Daemon(
-            "Claude Code runs live here on macOS alone: its login is the Keychain's".to_owned(),
-        ));
-    }
     let owners_before = claude.then(|| owners_claude(&home));
     let claude_config = claude
         .then(|| {
