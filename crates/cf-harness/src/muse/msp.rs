@@ -41,7 +41,7 @@ pub(crate) async fn conversation(
     requests: &[(&str, Value)],
     bound_ms: u64,
 ) -> Result<Vec<Value>, String> {
-    let child = processes.spawn(program, Streams::Quiet)?;
+    let child = processes.spawn(program, Streams::Lines)?;
     let armed = arm(time, bound_ms);
     let answered = armed.bound(talk(&*child, requests)).await;
     // Ended whichever way: a host that will not end is the process's to be given up on.

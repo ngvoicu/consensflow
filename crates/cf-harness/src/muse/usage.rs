@@ -14,8 +14,10 @@
 //! schema's `QuotaDetail`), which [`wire_quota`] reads. A reset the wire names beats any
 //! scraped text.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
+use cf_base::env::Env;
 use serde_json::Value;
 
 use crate::seams::processes::{Limits, Processes, Program};
@@ -105,6 +107,16 @@ pub fn wire_quota(detail: &Value, at: Option<&str>) -> Result<Option<Quota>, Str
         at: at.map(str::to_owned),
         resets_at: Some(date(resets)?),
     }))
+}
+
+/// `muse usage --json` at `executable`, with no update check and the login of `env`.
+pub fn program(executable: PathBuf, env: &Env) -> Program {
+    Program {
+        executable,
+        args: ["usage", "--json"].map(str::to_owned).to_vec(),
+        cwd: None,
+        env: env.clone().with_var("MUSE_NO_AUTO_UPDATE", "1"),
+    }
 }
 
 /// What `muse usage --json` (`program`) says of the account: one run, no model turn, no

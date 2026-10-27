@@ -15,6 +15,9 @@
 //! [`Models::default_model`] never answers it, and [`warning`] says what a picker shows
 //! beside one.
 
+use std::path::PathBuf;
+
+use cf_base::env::Env;
 use serde_json::{json, Value};
 
 use super::msp;
@@ -133,6 +136,18 @@ pub fn parse(result: &Value) -> Result<Models, String> {
         models,
         stale: result.get("source").and_then(Value::as_str) != Some("providerCatalog"),
     })
+}
+
+/// The host a list is read from: `muse serve` at `executable`, with no update check (`muse`
+/// is its launcher, which runs one an hour unless told not to) and the login of `env` as the
+/// human's own `muse` reads it.
+pub fn program(executable: PathBuf, env: &Env) -> Program {
+    Program {
+        executable,
+        args: msp::serve_args(),
+        cwd: None,
+        env: env.clone().with_var("MUSE_NO_AUTO_UPDATE", "1"),
+    }
 }
 
 /// The models the host `program` (`muse serve`, [`msp::serve_args`]) lists: one bounded

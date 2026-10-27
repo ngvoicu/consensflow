@@ -5,7 +5,7 @@ use cf_base::env::Env;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::seams::processes::Program;
+use crate::seams::processes::{Program, Streams};
 use crate::testing::{finished, ChildScript, Ends, ManualTime, ScriptedProcesses};
 
 /// What `muse serve` answered `model/list` with: the account's (`providerCatalog`, recorded
@@ -182,6 +182,9 @@ fn the_list_is_asked_of_a_host_after_its_initialize_and_the_host_is_ended() {
         spawned[0].0.args,
         ["serve", "--provider", "meta", "--no-session-log"]
     );
+    // Its input and output are this side's, a line at a time: on `Quiet` it takes no input
+    // (the first live read, 2026-10-27, failed so where this scripted host could not).
+    assert_eq!(spawned[0].1, Streams::Lines);
 }
 
 #[test]
