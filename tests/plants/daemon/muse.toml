@@ -31,6 +31,7 @@ muse-chief-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "d
 muse-moved = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "moved_models"]
 muse-wake = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_task_held_for_no_time"]
 muse-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::guard"]
+muse-claude-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::moves"]
 muse-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::tests::a_question_for_no_op"]
 muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
@@ -638,14 +639,14 @@ runs = ["muse-state"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record_state.rs"
 find = '''
-                record
-                    .model_moved
-                    .as_ref()
-                    .map(|moved| Arc::new(moved.as_quota()))
-                    .or_else(|| record.quota.clone()),
+    record
+        .model_moved
+        .as_ref()
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or_else(|| record.quota.clone())
 '''
 replace = '''
-                record.quota.clone(),
+    record.quota.clone()
 '''
 
 # MUS-24 in the other harnesses that switch on their own: Codex's reroute, Claude Code's model change.
@@ -920,19 +921,19 @@ runs = ["muse-state"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record_state.rs"
 find = '''
-                record
-                    .model_moved
-                    .as_ref()
-                    .map(|moved| Arc::new(moved.as_quota()))
-                    .or_else(|| record.quota.clone()),
+    record
+        .model_moved
+        .as_ref()
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or_else(|| record.quota.clone())
 '''
 replace = '''
-                record.quota.clone().or_else(|| {
-                    record
-                        .model_moved
-                        .as_ref()
-                        .map(|moved| Arc::new(moved.as_quota()))
-                }),
+    record.quota.clone().or_else(|| {
+        record
+            .model_moved
+            .as_ref()
+            .map(|moved| Arc::new(moved.as_quota()))
+    })
 '''
 
 [[plant]]
@@ -943,19 +944,19 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record_state.rs"
 find = '''
-                record
-                    .model_moved
-                    .as_ref()
-                    .map(|moved| Arc::new(moved.as_quota()))
-                    .or_else(|| record.quota.clone()),
+    record
+        .model_moved
+        .as_ref()
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or_else(|| record.quota.clone())
 '''
 replace = '''
-                record.quota.clone().or_else(|| {
-                    record
-                        .model_moved
-                        .as_ref()
-                        .map(|moved| Arc::new(moved.as_quota()))
-                }),
+    record.quota.clone().or_else(|| {
+        record
+            .model_moved
+            .as_ref()
+            .map(|moved| Arc::new(moved.as_quota()))
+    })
 '''
 
 [[plant]]
@@ -1024,11 +1025,17 @@ runs = ["muse-claude"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = '''
-        } else if let Some(from) = previous.filter(|from| from != model) {
+        } else if let Some(from) = previous
+            .filter(|from| from != model)
+            .filter(|from| !self.within_the_alias(from, model))
+        {
             self.model_drift = Some(Arc::new(ModelMoved {
 '''
 replace = '''
-        } else if let Some(from) = previous.filter(|from| from != model) {
+        } else if let Some(from) = previous
+            .filter(|from| from != model)
+            .filter(|from| !self.within_the_alias(from, model))
+        {
             self.model_moved = Some(Arc::new(ModelMoved {
 '''
 
@@ -1258,10 +1265,10 @@ runs = ["muse-moved"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-            quota.held_for_the_human() && self.before_open(record, quota.at())
+        quota.held_for_the_human() && self.before_open(record, quota.at())
 '''
 replace = '''
-            quota.held_for_the_human() && self.before_open(record, quota.at()) && false
+        quota.held_for_the_human() && self.before_open(record, quota.at()) && false
 '''
 
 
@@ -1273,10 +1280,10 @@ runs = ["muse-moved"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-        if record.quota.borrow().drift_told.as_deref() == Some(key.as_str()) {
+        if !record.quota.borrow_mut().drifts_told.insert(way) {
 '''
 replace = '''
-        if false && record.quota.borrow().drift_told.as_deref() == Some(key.as_str()) {
+        if !record.quota.borrow_mut().drifts_told.insert(way) && false {
 '''
 
 
@@ -1571,3 +1578,245 @@ runs = ["muse-moved"]
 file = "crates/cf-ledger/src/messages/holds.rs"
 find = "    let told = if notes[given].0.ends_with(TAIL_MOVED) {"
 replace = "    let told = if false && notes[given].0.ends_with(TAIL_MOVED) {"
+
+# T-841 P1-A: a refusal older than the window holds nothing but stays in the reading.
+
+[[plant]]
+name = "muse: an old refusal holds the reopened window again"
+meant = "a_task_held_for_an_account_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_refusal"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if same_refusal(handled.as_ref(), &quota) || self.older_than_the_window(record, &quota) {
+'''
+replace = '''
+        if same_refusal(handled.as_ref(), &quota) {
+'''
+
+
+[[plant]]
+name = "muse: an old move holds the reopened window again"
+meant = "a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_failed_turn"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if same_refusal(handled.as_ref(), &quota) || self.older_than_the_window(record, &quota) {
+'''
+replace = '''
+        if same_refusal(handled.as_ref(), &quota) {
+'''
+
+
+[[plant]]
+name = "muse: an old move is a refusal the window has not acted on"
+meant = "a_move_older_than_the_window_does_not_keep_the_requester_from_hearing_the_task_goes_on"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            && !same_refusal(handled.as_ref(), &quota)
+            && !self.older_than_the_window(record, &quota)
+'''
+replace = '''
+            && !same_refusal(handled.as_ref(), &quota)
+'''
+
+
+[[plant]]
+name = "muse: the reopened window's old failed turn is not the refusal's"
+meant = "a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_failed_turn"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        observed.failed
+            && observed
+                .quota
+                .as_deref()
+                .is_some_and(|quota| quota.level() == Level::Exhausted)
+'''
+replace = '''
+        observed.failed
+            && observed
+                .quota
+                .as_deref()
+                .is_some_and(|quota| quota.level() == Level::Exhausted && !quota.held_for_the_human())
+'''
+
+# T-841 P3-1: an alias's flips are no drift, and each way of a change is told once per window.
+
+[[plant]]
+name = "muse: a flip is told every time"
+meant = "a_flip_between_two_models_is_told_once_for_each_way_in_a_window_and_again_in_the_next"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        let way = format!("{}>{}", drift.from, drift.to);
+'''
+replace = '''
+        let way = format!("{}>{}@{}", drift.from, drift.to, drift.at.as_deref().unwrap_or_default());
+'''
+
+
+[[plant]]
+name = "muse: a window opened again remembers the flips it told"
+meant = "a_flip_between_two_models_is_told_once_for_each_way_in_a_window_and_again_in_the_next"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            record.quota.borrow_mut().drifts_told.clear();
+
+'''
+replace = '''
+
+'''
+
+
+[[plant]]
+name = "muse: an alias's flip is a drift"
+meant = "a_flip_between_the_models_an_alias_runs_on_is_no_drift_where_the_launch_names_the_alias"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        within(from) && within(model)
+'''
+replace = '''
+        false && within(from) && within(model)
+'''
+
+
+[[plant]]
+name = "muse: a model outside the alias is no drift"
+meant = "a_flip_between_the_models_an_alias_runs_on_is_no_drift_where_the_launch_names_the_alias"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        within(from) && within(model)
+'''
+replace = '''
+        within(from) || within(model)
+'''
+
+
+[[plant]]
+name = "muse: opusplan runs on one family"
+meant = "a_flip_between_the_models_an_alias_runs_on_is_no_drift_where_the_launch_names_the_alias"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        "opusplan" => &["opus", "sonnet"],
+'''
+replace = '''
+        "opusplan" => &["opus"],
+'''
+
+
+[[plant]]
+name = "muse: claude's look does not say the move"
+meant = "a_window_whose_transcript_holds_claude_codes_fallback_is_read_as_a_moved_model_by_its_look"
+runs = ["muse-claude-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+                    quota_of(record),
+'''
+replace = '''
+                    record.quota.clone(),
+'''
+
+
+[[plant]]
+name = "muse: claude's look tells the reader no launch model"
+meant = "an_opusplan_window_flipping_between_opus_and_sonnet_is_told_no_drift_and_another_launch_is"
+runs = ["muse-claude-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+        launch_model: model.map(str::to_owned),
+'''
+replace = '''
+        launch_model: model.and(None).map(str::to_owned),
+'''
+
+
+[[plant]]
+name = "muse: claude's reader ignores the launch model"
+meant = "an_opusplan_window_flipping_between_opus_and_sonnet_is_told_no_drift_and_another_launch_is"
+runs = ["muse-claude-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+        if let Some(model) = options.launch_model.as_deref() {
+'''
+replace = '''
+        if let Some(model) = options.launch_model.as_deref().filter(|_| false) {
+'''
+
+# T-841 P3-2: the live read copies the login file and the catalog alone, with their modes.
+
+[[plant]]
+name = "muse: a copied login file loses its mode"
+meant = "a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enters"
+runs = ["muse-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''
+    std::fs::copy(from, to).map(|_| ())
+'''
+replace = '''
+    std::fs::read(from).and_then(|bytes| std::fs::write(to, bytes))
+'''
+
+
+[[plant]]
+name = "muse: the scratch folders are open to others"
+meant = "a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enters"
+runs = ["muse-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''
+    std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o700);
+'''
+replace = '''
+    std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o755);
+'''
+
+
+[[plant]]
+name = "muse: the whole config is copied"
+meant = "a_run_of_muse_copies_the_login_file_and_the_model_catalog_and_nothing_else_of_the_config"
+runs = ["muse-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''
+    copy_kept(
+        &home.join(".config/muse/auth.json"),
+        &scratch.join("config/muse/auth.json"),
+    )?;
+'''
+replace = '''
+    copy_folder_kept(&home.join(".config/muse"), &scratch.join("config/muse"))?;
+'''
+
