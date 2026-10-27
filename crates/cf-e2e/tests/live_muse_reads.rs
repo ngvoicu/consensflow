@@ -20,10 +20,12 @@
 //! `user_avatar_url`, a signed link that expires: seen 2026-10-26 by T-705 and 2026-10-27
 //! here), so the reads run on a throwaway copy of the config and of the model catalog cache
 //! (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`), the login being the keychain's, which is global, and
-//! the human's own folder is proved untouched. The copy is made only where every login in
-//! `auth.json` is kept in the keychain (its `storage` key, read and never printed): a login
-//! held in a file would be carried by the copy, and a refresh from it could rotate a token
-//! the human's own login depends on. The copy is removed when the run ends or fails (T-816).
+//! the human's own folder is proved untouched. The copy is of `auth.json` and the model
+//! catalog cache alone (T-841; not the settings, their backup or the trust file), each with the
+//! mode it had, and made only where every login in `auth.json` is kept in the keychain (its
+//! `storage` key, read and never printed): a login held in a file would be carried by the copy,
+//! and a refresh from it could rotate a token the human's own login depends on. The run says
+//! where the copy is, and removes it when it ends or fails (T-816).
 //! A run on a data folder with no catalog cache
 //! lists only Muse's bundled model, which is why the cache is copied.
 //!
@@ -34,7 +36,7 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use cf_e2e::live::guard::{login_in_keychain, Scratch};
+use cf_e2e::live::guard::{copy_folder_kept, copy_kept, login_in_keychain, Scratch};
 use cf_e2e::live::{ask, machine, Log};
 use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
@@ -61,32 +63,6 @@ fn tree(root: &Path) -> Result<BTreeMap<PathBuf, u64>> {
         }
     }
     Ok(found)
-}
-
-/// A failure of the file or folder `path`, as the kit says one.
-fn failed(action: &'static str, path: &Path) -> impl FnOnce(std::io::Error) -> Error {
-    let path = path.to_owned();
-    move |source| Error::File {
-        action,
-        path,
-        source,
-    }
-}
-
-/// The folder `from` copied to `to`, with what is under it.
-fn copy_tree(from: &Path, to: &Path) -> Result {
-    for entry in std::fs::read_dir(from)
-        .map_err(failed("list", from))?
-        .flatten()
-    {
-        let (source, target) = (entry.path(), to.join(entry.file_name()));
-        if source.is_dir() {
-            copy_tree(&source, &target)?;
-        } else {
-            files::copy(&source, &target)?;
-        }
-    }
-    Ok(())
 }
 
 /// What Muse is given to run in: the run's own home, shell and search path, and its folders
@@ -123,11 +99,28 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
     login_in_keychain(&auth).map_err(Error::Daemon)?;
     let scratch =
         Scratch::at(std::env::temp_dir().join(format!("muse-reads-{}", std::process::id())));
-    copy_tree(&config, &scratch.0.join("config/muse"))?;
-    copy_tree(
-        &home.join(".local/share/muse/model-catalog"),
-        &scratch.0.join("data/muse/model-catalog"),
-    )?;
+    // What the run copies, and nothing else of Muse's folders: the login file (its keychain
+    // entry is the secret, which the copy does not carry) and the model catalog cache, each with
+    // its mode, into a folder only its owner enters. It is removed when the run ends or fails.
+    eprintln!(
+        "muse-reads: copying ~/.config/muse/auth.json and ~/.local/share/muse/model-catalog, and nothing else, into {} (removed when the run ends)",
+        scratch.0.display()
+    );
+    let io = |action: &'static str, path: &Path| {
+        let path = path.to_owned();
+        move |source| Error::File {
+            action,
+            path,
+            source,
+        }
+    };
+    let (login, catalog) = (
+        home.join(".config/muse/auth.json"),
+        home.join(".local/share/muse/model-catalog"),
+    );
+    copy_kept(&login, &scratch.0.join("config/muse/auth.json")).map_err(io("copy", &login))?;
+    copy_folder_kept(&catalog, &scratch.0.join("data/muse/model-catalog"))
+        .map_err(io("copy", &catalog))?;
     let env = env(&scratch.0);
 
     let listed = ask::question(&json!({ "op": "muse_models", "env": env }))?;

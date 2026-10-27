@@ -3,7 +3,8 @@
 //! the run ends or fails. Here, and not in the live test's own file, where the kit holds every
 //! test to be ignored unless asked for.
 
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -45,6 +46,40 @@ impl Scratch {
     pub fn at(folder: PathBuf) -> Self {
         Self(folder)
     }
+}
+
+/// What a run copies of a harness's folders: a file as it is, with the mode it had (a login
+/// file is 0600, and `files::copy` writes fresh bytes at the process's default, 0644: T-841),
+/// in folders only the owner enters.
+pub fn copy_kept(from: &Path, to: &Path) -> io::Result<()> {
+    if let Some(folder) = to.parent() {
+        owner_only_folders(folder)?;
+    }
+    // `std::fs::copy` opens the target with the source's mode and copies its permission bits.
+    std::fs::copy(from, to).map(|_| ())
+}
+
+/// `folder` and the folders above it that are not there yet made, readable by their owner alone
+/// (where the system has modes).
+fn owner_only_folders(folder: &Path) -> io::Result<()> {
+    let mut made = std::fs::DirBuilder::new();
+    made.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o700);
+    made.create(folder)
+}
+
+/// The folder `from` copied to `to` the same way, the files under it too.
+pub fn copy_folder_kept(from: &Path, to: &Path) -> io::Result<()> {
+    for entry in std::fs::read_dir(from)?.flatten() {
+        let (source, target) = (entry.path(), to.join(entry.file_name()));
+        if source.is_dir() {
+            copy_folder_kept(&source, &target)?;
+        } else {
+            copy_kept(&source, &target)?;
+        }
+    }
+    Ok(())
 }
 
 impl Drop for Scratch {
@@ -98,5 +133,37 @@ mod tests {
         });
         assert!(failing.is_err());
         assert!(!folder.exists(), "removed on a failed assertion too");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enters() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("auth.json");
+        std::fs::write(&source, "{}").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let target = root.path().join("scratch/config/muse/auth.json");
+        copy_kept(&source, &target).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "{}");
+        assert_eq!(mode(&target), 0o600, "a login file stays the owner's alone");
+        for folder in ["scratch", "scratch/config", "scratch/config/muse"] {
+            assert_eq!(mode(&root.path().join(folder)), 0o700, "{folder}");
+        }
+        // A file that was readable stays so, and a folder copies file by file.
+        let catalog = root.path().join("model-catalog");
+        std::fs::create_dir_all(catalog.join("inner")).unwrap();
+        std::fs::write(catalog.join("rows.json"), "[]").unwrap();
+        std::fs::write(catalog.join("inner/more.json"), "[]").unwrap();
+        std::fs::set_permissions(
+            catalog.join("rows.json"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        let copied = root.path().join("scratch/data/model-catalog");
+        copy_folder_kept(&catalog, &copied).unwrap();
+        assert_eq!(mode(&copied.join("rows.json")), 0o644);
+        assert!(copied.join("inner/more.json").is_file());
     }
 }
