@@ -33,6 +33,14 @@
 # version. `cf` comes inside the app: nothing else is set up. ConsensFlow is
 # made for Apple silicon Macs and Windows only.
 #
+# A run that is killed (SIGKILL, a power cut: no trap runs) leaves in the folder
+# the copy it was making, `.ConsensFlow.app.installing.<pid>`, or the app it had
+# moved aside, `.ConsensFlow.app.previous.<pid>`. The next run, before anything
+# else, removes what is unmistakably an earlier run's: in that folder, by exactly
+# such a name, of a pid that no install is running as. Where nothing is installed
+# any more, the app moved aside is put back; where the installed app is not whole
+# and checked, it is left, and said so. Every one it removes or leaves is said.
+#
 # Everything is inside main, called on the last line, so a download cut short
 # runs nothing. It writes only in a folder of its own under TMPDIR, removed at
 # the end, and in the folder the app goes to.
@@ -156,6 +164,81 @@ quit_open_app() {
     done
 }
 
+# Whether the process $1 is an install that goes on: a shell running a file
+# named install.sh, a program whose command line names one, or a shell that was
+# given the script on its input (`curl | sh` runs it as `sh -s`, which names
+# nothing). Never this shell: it has staged nothing yet, so a leftover with its
+# pid is an earlier run's, whose pid this one was given again.
+install_goes_on() {
+    [ "$1" != "$$" ] || return 1
+    program=$(ps -o comm= -p "$1" 2>/dev/null || true)
+    [ -n "$program" ] || return 1
+    commandline=$(ps -o command= -p "$1" 2>/dev/null || true)
+    case "$commandline" in
+        *install.sh*) return 0 ;;
+    esac
+    program=${program##*/}
+    case "${program#-}" in
+        sh | bash | dash | zsh | ksh | ash | csh | tcsh | fish) return 0 ;;
+    esac
+    return 1
+}
+
+# Takes away what an earlier run left in $dir if it was stopped where no trap
+# runs, and says each thing it did. A leftover is only a folder (never a link)
+# named exactly .ConsensFlow.app.installing.<pid> or .ConsensFlow.app.previous.<pid>,
+# in $dir itself, whose pid no install runs as: its path is made here from $dir
+# and the name, and nothing else is ever removed. The app moved aside goes first.
+remove_leftovers() {
+    for kind in previous installing; do
+        for found in "$dir"/.ConsensFlow.app."$kind".*; do
+            [ -e "$found" ] || [ -L "$found" ] || continue
+            name=${found##*/}
+            owner=${name#.ConsensFlow.app."$kind".}
+            case "$owner" in
+                "" | 0* | *[!0-9]*) continue ;;
+            esac
+            leftover="$dir/.ConsensFlow.app.$kind.$owner"
+            if [ -L "$leftover" ] || [ ! -d "$leftover" ]; then
+                say "left $leftover alone: an install makes a folder there, and this is not one."
+                continue
+            fi
+            if install_goes_on "$owner"; then
+                say "left $leftover alone: process $owner is an install that is still going on."
+                continue
+            fi
+            if [ "$kind" = installing ]; then
+                if rm -rf "$leftover"; then
+                    say "removed $leftover, the copy of the app an earlier install was making (no install runs as process $owner)."
+                else
+                    say "could not remove $leftover, the copy of the app an earlier install was making."
+                fi
+            elif [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
+                if mv "$leftover" "$dest"; then
+                    say "put $leftover back as $dest: an earlier install was stopped after it moved that app aside, and nothing was in its place."
+                else
+                    say "could not put $leftover back as $dest."
+                fi
+            else
+                have=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist" 2>/dev/null || true)
+                if [ -z "$have" ]; then
+                    problem="it says no version"
+                else
+                    # check_app refuses in words, and says nothing where it holds.
+                    problem=$( (check_app "$dest" "the ConsensFlow in $dir" "$have") 2>&1 | sed -n '1s/^consensflow: //p')
+                fi
+                if [ -n "$problem" ]; then
+                    say "left $leftover alone: the ConsensFlow in $dest is not a whole, checked app ($problem), and this may be the only whole one."
+                elif rm -rf "$leftover"; then
+                    say "removed $leftover, the app an earlier install moved aside: $dest is whole, and checked (version $have)."
+                else
+                    say "could not remove $leftover, the app an earlier install moved aside."
+                fi
+            fi
+        done
+    done
+}
+
 # Takes away what this run left half done: the mounted DMG, the copy that was
 # going in, a new app put in place and not yet confirmed, and the app it was
 # replacing, put back where nothing is; then the run's own folder. So a refusal
@@ -270,6 +353,7 @@ main() {
     mkdir -p "$dir" 2>/dev/null || refuse "could not make the folder $dir."
     [ -w "$dir" ] || refuse "$dir is not yours to write to. Run this as a user who can, or with CONSENSFLOW_INSTALL_DIR=$HOME/Applications; it never uses sudo itself."
     dest="$dir/ConsensFlow.app"
+    remove_leftovers
 
     if [ -z "$version" ]; then
         feed="$releases/download/feed-$channel/latest.json"
@@ -367,12 +451,14 @@ main() {
     say "ConsensFlow $version is installed in $dest. Open it from there or with: open \"$dest\""
 }
 
-# Refuses unless the app at $1 ($2 in the words) is the version asked for, its
-# code signature holds, it is ConsensFlow's under its Developer ID, and
+# Refuses unless the app at $1 ($2 in the words) is the version asked for ($3
+# where it is given: the one the app says, for an app that is only to be whole),
+# its code signature holds, it is ConsensFlow's under its Developer ID, and
 # Gatekeeper takes it as notarized.
 check_app() {
     shown=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null || true)
-    [ "$shown" = "$version" ] || refuse "$2 is version '$shown', not $version."
+    want=${3-$version}
+    [ "$shown" = "$want" ] || refuse "$2 is version '$shown', not $want."
     codesign --verify --deep --strict "$1" 2>"$tmp/codesign.txt" ||
         refuse "the code signature of $2 does not hold: $(cat "$tmp/codesign.txt")"
     codesign --verify -R="$requirement" "$1" 2>"$tmp/codesign.txt" ||

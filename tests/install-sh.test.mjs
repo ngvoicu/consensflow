@@ -16,7 +16,9 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import os from 'node:os'
@@ -889,6 +891,252 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'], 'nothing of the old app is left')
       run('codesign', ['--verify', '--deep', '--strict', path.join(at.apps, 'ConsensFlow.app')])
       assert.deepEqual(readdirSync(at.tmp), [])
+    })
+  })
+
+  // A run stopped by a signal that cannot be caught (SIGKILL, a power cut) runs no trap, and leaves
+  // what it was making beside the installed app: `.ConsensFlow.app.installing.<pid>`, the copy
+  // that was to go in, and `.ConsensFlow.app.previous.<pid>`, the app it had moved aside. The next
+  // run removes what is unmistakably an earlier run's, and only that.
+  describe('what an earlier install left in the folder', () => {
+    const children = []
+    after(() => {
+      for (const child of children) {
+        try {
+          process.kill(-child.pid, 'SIGKILL')
+        } catch {
+          // gone already
+        }
+      }
+    })
+
+    /** The pid of a process that ran and ended. */
+    async function deadPid() {
+      const child = spawn('/bin/sh', ['-c', 'exit 0'])
+      await new Promise((resolve) => child.on('exit', resolve))
+      return child.pid
+    }
+
+    /** A process kept running, in a group of its own that the test ends; its pid. */
+    function running(program, args, options = {}) {
+      const child = spawn(program, args, {
+        detached: true,
+        stdio: ['pipe', 'ignore', 'ignore'],
+        ...options,
+      })
+      children.push(child)
+      return child.pid
+    }
+
+    /** An install that goes on, as a shell running a file named install.sh. */
+    function installRunningAsFile() {
+      const script = path.join(mkdtempSync(path.join(work, 'running-')), 'install.sh')
+      writeFileSync(script, 'sleep 120\n')
+      return running('/bin/sh', [script])
+    }
+
+    /** What a leftover is: a copy of an app (of `version`) under the name `name` in the case's folder. */
+    function leftover(at, name, version = '3.0.7') {
+      const folder = mkdtempSync(path.join(work, 'left-'))
+      renameSync(fakeApp(folder, version), path.join(at.apps, name))
+      return path.join(at.apps, name)
+    }
+
+    const names = (at) => readdirSync(at.apps).sort()
+
+    test('one whose process is gone is removed, and the install goes on', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const pid = await deadPid()
+      const copy = leftover(at, `.ConsensFlow.app.installing.${pid}`)
+      const aside = leftover(at, `.ConsensFlow.app.previous.${pid}`, '3.0.7-alpha.1')
+      const ran = await install(at, ['--version', '3.0.7'])
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, new RegExp(`removed ${copy.replaceAll('.', '\\.')}`))
+      assert.match(ran.out, new RegExp(`removed ${aside.replaceAll('.', '\\.')}`))
+    })
+
+    test('one a running install made is kept: its process is a shell running install.sh, or one that was given the script on its input', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const dead = await deadPid()
+      leftover(at, `.ConsensFlow.app.installing.${dead}`)
+      const kept = [
+        // sh install.sh
+        `.ConsensFlow.app.installing.${installRunningAsFile()}`,
+        // curl | sh: the script is on the shell's input, which names nothing
+        `.ConsensFlow.app.installing.${running('/bin/sh', ['-s', '--', '--alpha'])}`,
+        // a program whose command line names install.sh
+        `.ConsensFlow.app.previous.${running(process.execPath, ['-e', 'setTimeout(() => {}, 120000)', 'install.sh'])}`,
+      ]
+      for (const name of kept) leftover(at, name, '3.0.7-alpha.1')
+      const ran = await install(at, ['--version', '3.0.7'])
+      assert.equal(ran.status, 0, ran.out)
+      assert.equal(installedVersion(at), '3.0.7')
+      assert.deepEqual(
+        names(at),
+        ['ConsensFlow.app', ...kept].sort(),
+        "the running installs' copies stay, the dead one's is gone",
+      )
+      for (const name of kept)
+        assert.match(
+          ran.out,
+          new RegExp(`left ${path.join(at.apps, name).replaceAll('.', '\\.')} alone`),
+        )
+    })
+
+    test('one whose pid is another program now is removed, and the program is left running', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const pid = running('/bin/sleep', ['120'])
+      const copy = leftover(at, `.ConsensFlow.app.installing.${pid}`)
+      const ran = await install(at, ['--version', '3.0.7'])
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, new RegExp(`removed ${copy.replaceAll('.', '\\.')}`))
+      process.kill(pid, 0)
+    })
+
+    test("one with this run's own pid is an earlier run's: it is removed before the copy goes in", async () => {
+      const at = freshCase()
+      const marker = path.join(at.dir, 'stubbed')
+      // mkdir is the first thing the script runs in its own shell: the folder it makes the app's
+      // folder is made by the stand-in, with what a run of this pid left in it.
+      const PATH = standIns(at, {
+        mkdir: `if [ ! -e "${marker}" ]; then : > "${marker}"; /bin/mkdir -p "${at.apps}/.ConsensFlow.app.installing.$PPID"; echo old > "${at.apps}/.ConsensFlow.app.installing.$PPID/left"; fi\nexec /bin/mkdir "$@"`,
+      })
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, /removed .*\.ConsensFlow\.app\.installing\.\d+/)
+    })
+
+    test("it runs under dash as under the Mac's sh", {
+      skip: !existsSync('/bin/dash') && 'no dash here',
+    }, async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const pid = await deadPid()
+      leftover(at, `.ConsensFlow.app.installing.${pid}`)
+      leftover(at, `.ConsensFlow.app.previous.${pid}`, '3.0.7-alpha.1')
+      assertInstalled(
+        at,
+        await install(at, ['--version', '3.0.7'], { shell: '/bin/dash' }),
+        '3.0.7',
+      )
+    })
+
+    // The two places a kill leaves the folder wrong: after the installed app was moved aside and
+    // before the new one is in its place (nothing is installed), and after it is in place and before
+    // the old one is deleted (the old one is a hidden copy). A stand-in for the program that does
+    // the next thing kills the install's shell with SIGKILL, as the system would, right then.
+    for (const [kill, program, words] of [
+      ['between its two moves', 'mv', 'the installed app moved aside, nothing in its place'],
+      ['before the old app is deleted', 'rm', 'the new app in place, the old one beside it'],
+    ]) {
+      test(`an install killed ${kill} (${words}) is mended by the next one`, async () => {
+        const at = freshCase()
+        fakeApp(at.apps, '3.0.7-alpha.1')
+        const stand =
+          program === 'mv'
+            ? `case "$*" in *.previous.*) /bin/mv "$@"; kill -KILL $PPID; exit 0 ;; esac\nexec /bin/mv "$@"`
+            : `case "$*" in *.previous.*) kill -KILL $PPID; exit 0 ;; esac\nexec /bin/rm "$@"`
+        const PATH = standIns(at, { [program]: stand })
+        const killed = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+        assert.notEqual(killed.status, 0, killed.out)
+        // What a kill leaves in the run's own folder under TMPDIR, outside the folder the app goes
+        // to: the DMG, still attached. The next run does not take it away; the test does.
+        for (const entry of readdirSync(at.tmp)) {
+          spawnSync('hdiutil', ['detach', '-quiet', '-force', path.join(at.tmp, entry, 'volume')])
+          rmSync(path.join(at.tmp, entry), { recursive: true, force: true })
+        }
+        assert.ok(
+          readdirSync(at.apps).some((name) => name.startsWith('.ConsensFlow.app.previous.')),
+          `the kill left what it was moving: ${readdirSync(at.apps)}`,
+        )
+        const ran = await install(at, ['--version', '3.0.7'])
+        assertInstalled(at, ran, '3.0.7')
+        assert.match(ran.out, /(put|removed) .*\.ConsensFlow\.app\.previous\.\d+/)
+      })
+    }
+
+    test('a .previous with no app where the app goes is put back, and the install goes on from it', async () => {
+      const at = freshCase()
+      const pid = await deadPid()
+      leftover(at, `.ConsensFlow.app.previous.${pid}`, '3.0.8')
+      const ran = await install(at)
+      // The put-back app is what the install finds: 3.0.8 is newer than the stable feed's 3.0.7.
+      assert.equal(ran.status, 1, ran.out)
+      assert.match(
+        ran.out,
+        new RegExp(
+          `put ${path.join(at.apps, `.ConsensFlow.app.previous.${pid}`).replaceAll('.', '\\.')} back as ${path.join(at.apps, 'ConsensFlow.app').replaceAll('.', '\\.')}`,
+        ),
+      )
+      assert.match(ran.out, /ConsensFlow 3\.0\.8 is installed in .*, newer than 3\.0\.7/)
+      assert.deepEqual(names(at), ['ConsensFlow.app'])
+      assert.equal(installedVersion(at), '3.0.8')
+      assert.deepEqual(readdirSync(at.tmp), [])
+    })
+
+    test('a .previous beside an app that is not whole and checked is left alone, and so is that app', async () => {
+      const at = freshCase()
+      const stranger = fakeApp(at.apps, '3.0.7-alpha.1', { identifier: 'dev.someone.else' })
+      const pid = await deadPid()
+      leftover(at, `.ConsensFlow.app.previous.${pid}`, '3.0.6')
+      // The install itself replaces the app there as it always does; what it must not do is
+      // delete what may be the only whole one on the word of a name.
+      const ran = await install(at, ['--version', '3.0.7'])
+      assert.equal(ran.status, 0, ran.out)
+      assert.match(
+        ran.out,
+        /left .*\.ConsensFlow\.app\.previous\.\d+ alone: the ConsensFlow in .* is not a whole, checked app/,
+      )
+      assert.equal(installedVersion(at), '3.0.7')
+      assert.deepEqual(names(at), ['ConsensFlow.app', `.ConsensFlow.app.previous.${pid}`].sort())
+      assert.ok(stranger)
+    })
+
+    test('a name that only looks similar is kept, and so is a link, which is never followed', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const dead = await deadPid()
+      leftover(at, `.ConsensFlow.app.installing.${dead}`)
+      const similar = [
+        `.ConsensFlow.app.installing.${dead}x`,
+        `.ConsensFlow.app.installing.${dead}.bak`,
+        `.ConsensFlow.app.installing.0${dead}`,
+        '.ConsensFlow.app.installing.',
+        '.ConsensFlow.app.installing',
+        `ConsensFlow.app.installing.${dead}`,
+        `.ConsensFlow.app.old.${dead}`,
+        `.ConsensFlow.app.previous.${dead}-1`,
+        `..ConsensFlow.app.installing.${dead}`,
+      ]
+      for (const name of similar) leftover(at, name)
+      // A link by the very name of a dead run's copy, to a folder somewhere else: it is no copy an
+      // install made, and what it points to is never touched.
+      const elsewhere = mkdtempSync(path.join(work, 'elsewhere-'))
+      writeFileSync(path.join(elsewhere, 'keep'), 'mine')
+      symlinkSync(elsewhere, path.join(at.apps, `.ConsensFlow.app.previous.${dead + 1}`))
+      // A file by that name too.
+      writeFileSync(path.join(at.apps, `.ConsensFlow.app.installing.${dead + 2}`), 'file')
+      const ran = await install(at, ['--version', '3.0.7'])
+      assert.equal(ran.status, 0, ran.out)
+      assert.equal(installedVersion(at), '3.0.7')
+      assert.deepEqual(
+        names(at),
+        [
+          'ConsensFlow.app',
+          ...similar,
+          `.ConsensFlow.app.previous.${dead + 1}`,
+          `.ConsensFlow.app.installing.${dead + 2}`,
+        ].sort(),
+        "only the dead run's copy is gone",
+      )
+      assert.equal(readFileSync(path.join(elsewhere, 'keep'), 'utf8'), 'mine')
+      assert.match(
+        ran.out,
+        new RegExp(`left .*\\.ConsensFlow\\.app\\.previous\\.${dead + 1} alone`),
+      )
     })
   })
 
