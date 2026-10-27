@@ -288,8 +288,18 @@ impl Dispatcher {
             let part = record.window.borrow();
             (part.window.clone(), part.pane.clone())
         };
+        // A box that holds a paste whose Enter was withheld is emptied first, by the key
+        // the hand-over presses (`uncleared`): what it holds is no word against the paste
+        // (Calliope's review of `9aa34baf6`, P1: read as words, the key never came, and
+        // every message for the window waited for good).
+        let emptied_first = record
+            .delivery
+            .borrow()
+            .uncleared
+            .as_ref()
+            .is_some_and(|stale| pane.as_ref() == Some(&stale.pane));
         let boxed = match (window, pane) {
-            (Some(window), Some(pane)) => {
+            (Some(window), Some(pane)) if !emptied_first => {
                 returning(window.input_box(&*self.seams.host, &pane)).await
             }
             _ => None,

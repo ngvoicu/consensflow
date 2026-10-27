@@ -389,3 +389,53 @@ fn an_urgent_tell_goes_at_the_first_look_at_rest() {
     context.pass().unwrap();
     assert_eq!(pasted(&context, "zeus").last(), Some(&tell.id));
 }
+
+/// Calliope's review of `9aa34baf6` (T-842, P1): a paste whose Enter was withheld stays
+/// in its window's input box, and the key that empties it is pressed before the next
+/// paste. The fresh look read that box as holding words, so the step returned before the
+/// key, every pass: every message for the window waited for good, its lane idle. With a
+/// settle, as the daemon runs: the box the engine empties first holds nothing for the
+/// look.
+#[test]
+fn a_box_holding_a_paste_whose_enter_was_withheld_is_emptied_and_the_next_paste_goes() {
+    let context = paced();
+    let tiers = crate::resume::at_work(&context);
+    let project = tiers.project.id;
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.settled = true;
+        agent.arrive = false;
+    });
+    let words = crate::withheld_enter::note_from(
+        &context,
+        project,
+        None,
+        "zeus-amber-pine",
+        &cf_ledger::continuation(1),
+    );
+    for _ in 0..2 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(words.id).state, "delivering");
+    crate::withheld_enter::enter_again_with(&context, "p1-zeus-amber-pine", || {
+        context.human_pause(project, 1);
+    });
+    assert_eq!(crate::deliveries::enters(&context), 0, "no key that sends");
+    // The box holds the paste whose Enter was withheld.
+    context.adapter.input_box.set(Some(InputBox::Holds));
+    context.resume_task(project, 1, "Carry on");
+    let next = tiers.task(1).messages.last().cloned().expect("the words");
+    for _ in 0..4 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    let seam = "adapter:claude-code";
+    assert_eq!(
+        (
+            crate::withheld_enter::clears(&context),
+            crate::withheld_enter::times_handed(&context, seam, next.id)
+        ),
+        (1, 1),
+        "the box emptied, then the words pasted"
+    );
+}
