@@ -1995,8 +1995,8 @@ runs = ["harness-launch-claude-stops"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            if self.restored.get() && !host.cleared() {"
-replace = "            if self.restored.get() {"
+find = "            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {"
+replace = "            if self.restored.get() || self.clear_first.take() {"
 
 [[plant]]
 name = "resume tasks: an Enter withheld for a closed project leaves the paste on its way in the box"
