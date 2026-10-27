@@ -34,6 +34,7 @@ fn item(id: &str, role: Role, complete: bool) -> Item {
         at: None,
         commentary: false,
         compaction: false,
+        synthetic: false,
     }
 }
 
