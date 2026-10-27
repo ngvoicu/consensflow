@@ -113,7 +113,7 @@ pub const PACED_VARIABLE: &str = "CF_KIT_PACED";
 
 /// Whether the kit runs in its paced mode ([`PACED_VARIABLE`]).
 pub fn paced_mode() -> bool {
-    std::env::var_os(PACED_VARIABLE).is_some()
+    cf_base::env::Env::from_process().text(PACED_VARIABLE).is_some()
 }
 
 /// A test's engine and everything it is made with.
