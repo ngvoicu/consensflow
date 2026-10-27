@@ -20,8 +20,9 @@
 #
 # The rig's cases are in `crates/cf-e2e/tests/regressions/
 # the_chiefs_job_was_killed_as_a_workers_turn_ended.rs`, which run the native `cf` and the pane
-# host built from the planted sources (`builds`). Every name holds `other windows`, so
-# `cargo xtask plants daemon "other windows"` runs them all.
+# host built from the planted sources (`builds`). Every name begins `other windows:`, so
+# `cargo xtask plants daemon "other windows:"` runs them all (without the colon the words also
+# name a plant of `long-run`, whose name holds "the other windows").
 
 [run]
 # The rig's cases, against the native `cf` and the pane host as planted.
