@@ -47,10 +47,11 @@
 use std::path::Path;
 use std::time::Duration;
 
-use cf_e2e::live::members::{self, delivered_result, find, is_over, Account, Members, Plan};
+use cf_e2e::live::members::{
+    self, delivered_result, find, is_over, Account, Machine, Members, Plan, ThisMachine,
+};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, agents, between, Harness, Log, Who};
-use cf_e2e::process::Run;
 use cf_e2e::{Error, Result};
 use serde_json::json;
 
@@ -180,26 +181,25 @@ struct Seen {
     delivered: bool,
 }
 
-/// The names of the processes `pgrep -f word` finds: none where it finds none.
+/// The processes of the machine whose command line holds `word`, each as its number and
+/// command line: none where none does. Read from the machine's process table as every
+/// live check reads it (`ThisMachine`: `ps` on macOS and Linux, Windows' own table there),
+/// not `pgrep`, which Windows has not: there the check said `(pgrep could not be run)` for
+/// every word (integration B round 2, T-800).
 fn matching(word: &str) -> Vec<String> {
-    let Ok(found) = Run::new(Path::new("pgrep"))
-        .args(["-f", word])
-        .inheriting_env()
-        .run()
-    else {
-        return vec!["(pgrep could not be run)".to_owned()];
+    let Ok(processes) = ThisMachine.processes() else {
+        return vec!["(the machine's processes could not be read)".to_owned()];
     };
-    found
-        .stdout
-        .split_whitespace()
-        .map(|pid| {
-            let name = Run::new(Path::new("ps"))
-                .args(["-o", "comm=", "-p", pid])
-                .inheriting_env()
-                .run()
-                .map(|ran| ran.stdout.trim().to_owned())
-                .unwrap_or_default();
-            format!("{pid} {name}")
+    let own = std::process::id();
+    processes
+        .into_iter()
+        .filter(|process| process.identity.pid != own && process.command.contains(word))
+        .map(|process| {
+            format!(
+                "{} {}",
+                process.identity.pid,
+                live::cut(&process.command, 80)
+            )
         })
         .collect()
 }

@@ -68,12 +68,16 @@ fn config() -> Result<TempDir> {
 /// launch reads it (`ask::devin_config`: its comments and trailing commas left out, none
 /// as an empty one), its compaction threshold at [`THRESHOLD`].
 fn config_in(machine: &Path) -> Result<TempDir> {
+    // The folder the adapter reads Devin's config in, on each system: `XDG_CONFIG_HOME` on
+    // macOS and Linux, Windows' data folder (`APPDATA`) there. Without the second, the case
+    // read the Windows machine's own config (integration B round 2, T-800).
     let env = [
         ("HOME".to_owned(), home()?.to_string_lossy().into_owned()),
         (
             "XDG_CONFIG_HOME".to_owned(),
             machine.to_string_lossy().into_owned(),
         ),
+        ("APPDATA".to_owned(), machine.to_string_lossy().into_owned()),
     ];
     let mut config = ask::devin_config(&env)?;
     let Some(fields) = config.as_object_mut() else {
