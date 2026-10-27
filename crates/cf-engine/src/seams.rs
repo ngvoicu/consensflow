@@ -217,6 +217,11 @@ pub struct Limits {
     /// (`pacing`). None at all (0) is no pacing: a message goes at the first look
     /// that reads the window at rest, as before 3.0.7.
     pub settle_ms: i64,
+    /// The kit's paced mode alone (`CF_KIT_PACED`, `npm run test:kit-paced`): the settle
+    /// counts as passed at the first look at rest, so a case that never moves the clock
+    /// still meets every other rule of the gate (the human's keys, the fallback, the fresh
+    /// look and its box). False in every daemon.
+    pub settle_from_first_look: bool,
 }
 
 impl Default for Limits {
@@ -228,6 +233,7 @@ impl Default for Limits {
             open_ms: 60_000,
             max_attempts: 3,
             settle_ms: 3_000,
+            settle_from_first_look: false,
         }
     }
 }
@@ -492,6 +498,7 @@ mod tests {
                 open_ms: 60_000,
                 max_attempts: 3,
                 settle_ms: 3_000,
+                settle_from_first_look: false,
             },
             "each variable sets its own wait and nothing else"
         );

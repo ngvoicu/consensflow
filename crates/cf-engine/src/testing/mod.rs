@@ -29,7 +29,7 @@ pub use adapter::{
 };
 pub use adapters::{FakeAdapters, FakeRecords};
 pub use background::FakeBackground;
-pub use context::{Closed, Context, Made, START_MS};
+pub use context::{paced_mode, Closed, Context, Made, PACED_VARIABLE, START_MS};
 pub use executor::{Answer, Gate, GateWait};
 pub use holds::Holds;
 pub use host::{window_of, FakeHost, OnRequest};

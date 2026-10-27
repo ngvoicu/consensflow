@@ -211,7 +211,7 @@ impl Dispatcher {
             return Ok(true);
         }
         let rest_ms = self.now() - rest.since;
-        if rest_ms < settle {
+        if rest_ms < settle && !self.seams.limits.settle_from_first_look {
             return Ok(false);
         }
         let (window, pane) = {
