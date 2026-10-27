@@ -26,6 +26,7 @@ muse-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dis
 muse-page-held = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "held for an account"]
 muse-page-why = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says why an unavailable member"]
 muse-scheduler = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "scheduler::"]
+muse-records-play = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]
 muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
 # The reader: a turn stopped before a word of it, its message put back in the box.
@@ -1098,4 +1099,19 @@ find = '''
             || (quota.unavailable() && handled == quota)
 '''
 replace = '''
+'''
+
+# MUS-23 against Node's recorded scenarios: OpenRouter's spent credit was a quota there.
+[[plant]]
+name = "muse: node's billing quota is held to no departure"
+meant = "every_look_node_took_reads_through_the_switch_what_node_read"
+runs = ["muse-records-play"]
+
+[[plant.edit]]
+file = "crates/cf-harness/tests/records/play.rs"
+find = '''
+const BILLING: [&str; 1] = ["opencode: OpenRouter's spent credit is quota too"];
+'''
+replace = '''
+const BILLING: [&str; 0] = [];
 '''
