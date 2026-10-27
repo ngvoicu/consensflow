@@ -170,6 +170,7 @@ struct Transcript {
     model: Option<Arc<str>>,
     model_asked: bool,
     model_moved: Option<Arc<ModelMoved>>,
+    model_drift: Option<Arc<ModelMoved>>,
     /// The records visited.
     count: usize,
     ancestry: Ancestry,
@@ -244,6 +245,7 @@ impl Transcript {
             model: None,
             model_asked: false,
             model_moved: None,
+            model_drift: None,
             count: 0,
             ancestry: Ancestry::default(),
             pending: Vec::new(),

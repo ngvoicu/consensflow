@@ -97,6 +97,12 @@ pub struct Record {
     /// ([`ModelMoved::as_quota`]).
     #[serde(skip)]
     pub model_moved: Option<Arc<ModelMoved>>,
+    /// The model the window answers from changed in its harness's records with none of
+    /// the harness's own word for it: Claude Code's `message.model` drifts when an alias
+    /// is repointed, when a window restarts on another model and at each flip of
+    /// `opusplan`. Said to the human once and never held on (T-816). Never said.
+    #[serde(skip)]
+    pub model_drift: Option<Arc<ModelMoved>>,
     pub quota: Option<Arc<Quota>>,
     pub settlement: Settlement,
     /// What the settled turn left running that its harness wakes its agent for as
@@ -284,6 +290,7 @@ impl Record {
             failure: None,
             took_back: false,
             model_moved: None,
+            model_drift: None,
             quota: None,
             settlement: Settlement::Unknown,
             pending: Pending::default(),

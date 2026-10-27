@@ -58,6 +58,11 @@ pub enum Quota {
     /// when it happened, if the record says, and why in plain words. It has no reset,
     /// only the human's fix, so nothing is retried but at their word (MUS-23).
     Unavailable { at: Option<String>, because: String },
+    /// A window whose harness moved its model on its own (MUS-24): the account is well,
+    /// and the window is not to be written to until the human says it may go on. Held as
+    /// an unavailable account is, and released by the human's word for that member alone,
+    /// never by a teammate's turn or an allowance (T-816).
+    Moved { at: Option<String>, because: String },
 }
 
 /// What an account refused for that is no usage limit: nothing resets it.
@@ -83,7 +88,9 @@ impl Quota {
     /// exhausted, a count says its own level.
     pub fn level(&self) -> Level {
         match self {
-            Quota::Exhausted { .. } | Quota::Unavailable { .. } => Level::Exhausted,
+            Quota::Exhausted { .. } | Quota::Unavailable { .. } | Quota::Moved { .. } => {
+                Level::Exhausted
+            }
             Quota::Usage { level, .. } => *level,
         }
     }
@@ -92,7 +99,9 @@ impl Quota {
     /// count has none.
     pub fn at(&self) -> Option<&str> {
         match self {
-            Quota::Exhausted { at, .. } | Quota::Unavailable { at, .. } => at.as_deref(),
+            Quota::Exhausted { at, .. }
+            | Quota::Unavailable { at, .. }
+            | Quota::Moved { at, .. } => at.as_deref(),
             Quota::Usage { .. } => None,
         }
     }
@@ -103,13 +112,25 @@ impl Quota {
             Quota::Exhausted { resets_at, .. } | Quota::Usage { resets_at, .. } => {
                 resets_at.as_deref()
             }
-            Quota::Unavailable { .. } => None,
+            Quota::Unavailable { .. } | Quota::Moved { .. } => None,
         }
     }
 
     /// Whether the account is unavailable: refused for what only its human cures.
     pub fn unavailable(&self) -> bool {
         matches!(self, Quota::Unavailable { .. })
+    }
+
+    /// Whether the window's model was moved by its harness: held for the human, as
+    /// an unavailable account is, and released by their word for that member alone.
+    pub fn moved(&self) -> bool {
+        matches!(self, Quota::Moved { .. })
+    }
+
+    /// Whether no time and no teammate cures it: an unavailable account, or a moved
+    /// model. It names no reset.
+    pub fn held_for_the_human(&self) -> bool {
+        self.unavailable() || self.moved()
     }
 }
 
@@ -125,7 +146,7 @@ impl Level {
 
 impl Serialize for Quota {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(3 + usize::from(self.unavailable())))?;
+        let mut map = serializer.serialize_map(Some(3 + usize::from(self.held_for_the_human())))?;
         match self {
             Quota::Exhausted { at, resets_at } => {
                 map.serialize_entry("state", "exhausted")?;
@@ -141,8 +162,8 @@ impl Serialize for Quota {
                 map.serialize_entry("usedPercent", used_percent)?;
                 map.serialize_entry("resetsAt", resets_at)?;
             }
-            Quota::Unavailable { at, because } => {
-                map.serialize_entry("state", "unavailable")?;
+            Quota::Unavailable { at, because } | Quota::Moved { at, because } => {
+                map.serialize_entry("state", if self.moved() { "moved" } else { "unavailable" })?;
                 map.serialize_entry("at", at)?;
                 map.serialize_entry("resetsAt", &Option::<&str>::None)?;
                 map.serialize_entry("because", because)?;

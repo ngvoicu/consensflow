@@ -644,6 +644,15 @@ impl Observed {
         }
     }
 
+    /// The model the conversation's records say changed with none of its harness's own word
+    /// for it ([`Record::model_drift`]): none where it could not be read.
+    pub fn model_drift(&self) -> Option<&Arc<crate::records::ModelMoved>> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.model_drift.as_ref(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => None,
+        }
+    }
+
     /// The monitors among what the conversation's turn left running, as its record says
     /// them: none where it could not be read.
     pub fn monitors(&self) -> Vec<Monitor> {
