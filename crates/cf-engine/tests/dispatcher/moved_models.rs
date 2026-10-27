@@ -271,3 +271,35 @@ fn a_drift_dated_before_the_window_opened_is_not_told() {
     context.pass().unwrap();
     assert_eq!(human_notes(&tiers), Vec::<String>::new());
 }
+
+#[test]
+fn a_task_that_waits_for_a_free_member_is_told_the_model_moved_not_a_billing_refused() {
+    // The reason a held member is not free is told in the words of what held it, also after a
+    // restart of the daemon, which keeps the hold in the ledger and not the kind of refusal.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("One");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let zeus = tiers.assignee(1);
+    context.advance(60_000);
+    context
+        .adapter
+        .refuse(&zeus, fell_back(&now(&context)).as_quota());
+    context.pass().unwrap();
+    tiers.open_body("Two");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let waits: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.starts_with("T-2 waits for a free"))
+        .collect();
+    assert_eq!(waits.len(), 1, "{:?}", tiers.notes("chief"));
+    assert!(
+        waits[0].contains("@zeus's model moved on its own (it waits for the human's word)"),
+        "{}",
+        waits[0]
+    );
+    assert!(!waits[0].contains("billing"), "{}", waits[0]);
+}

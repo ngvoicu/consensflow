@@ -269,10 +269,15 @@ const backAt = (iso, now = Date.now()) => {
 const outOfQuota = (participant, now) =>
   participant.outUntil !== null && Date.parse(participant.outUntil) > now
 /**
- * A member out until "never" has an account that refused for what no wait cures (its
- * billing or its login): nothing resets it, so no time is shown, only the human's way back.
+ * A member out until the year 9999 is held for no time: its account refused for what no
+ * wait cures (its billing or its login), or its harness moved its window's model on its own.
+ * Nothing resets either, so no time is shown, only the human's way back. The daemon marks
+ * the second with the later of its two times (`scheduler.rs`: `MOVED`, `NEVER`), which is
+ * all the ledger keeps of why, across a restart.
  */
+const MODEL_MOVED = '9999-12-31T23:59:59.999Z'
 const unavailable = (participant) => participant.outUntil?.startsWith('9999-') === true
+const modelMoved = (participant) => participant.outUntil === MODEL_MOVED
 /** "@zeus · amber-pine" for a session; the member's own name otherwise. */
 export const laneName = (participant) =>
   participant.member
@@ -309,9 +314,12 @@ function route(task) {
       : `blocked by ${taskNumbers(task.blockedBy)} · ${waitsFor}`
   }
   if (task.state === 'paused' && task.heldUntil) {
-    const until = task.heldUntil.startsWith('9999-')
-      ? 'unavailable until you say it works again'
-      : `out of quota until ${backAt(task.heldUntil)}`
+    const until =
+      task.heldUntil === MODEL_MOVED
+        ? 'held until you say its model may go on'
+        : task.heldUntil.startsWith('9999-')
+          ? 'unavailable until you say it works again'
+          : `out of quota until ${backAt(task.heldUntil)}`
     return `${until} · from ${who(task.requester)}`
   }
   return task.blockedBy.length === 0
@@ -386,13 +394,17 @@ export function laneStatus(lane, board, now) {
   const holding = 'A message waits until you send or erase what you typed here'
   if (outOfQuota(participant, now)) {
     // Why, in the engine's own words (its account refused, its model moved on its own), where
-    // it said them; else what an account that no time resets was most likely refused for.
-    const why = activity?.reason?.startsWith('unavailable: ')
-      ? activity.reason.slice('unavailable: '.length)
-      : 'its account was refused for billing or login'
-    const out = unavailable(participant)
-      ? `Unavailable: ${why}. Press Try again now once it works`
-      : `Out of quota until ${backAt(participant.outUntil, now)}`
+    // it said them; else what the time it marked the member out until says of it.
+    const said = (prefix) =>
+      activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+    let out
+    if (modelMoved(participant)) {
+      out = `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
+    } else if (unavailable(participant)) {
+      out = `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}. Press Try again now once it works`
+    } else {
+      out = `Out of quota until ${backAt(participant.outUntil, now)}`
+    }
     return ['out', lane.holding ? `${out}. ${holding}` : out]
   }
   if (lane.holding) return ['holding', holding]
@@ -418,9 +430,11 @@ export const tryAgain = (participant, action) =>
     'Try again now',
     'quiet-button try-again',
     action,
-    unavailable(participant)
-      ? `Try ${laneName(participant)} again now, once its account works`
-      : `Try ${laneName(participant)} again now, before its quota resets`,
+    modelMoved(participant)
+      ? `Try ${laneName(participant)} again now, once it is on the model you chose`
+      : unavailable(participant)
+        ? `Try ${laneName(participant)} again now, once its account works`
+        : `Try ${laneName(participant)} again now, before its quota resets`,
   )
 
 /** A participant's lamp: what its window is doing, at a glance, or that it is out of quota. */

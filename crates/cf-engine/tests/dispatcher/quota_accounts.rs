@@ -290,6 +290,69 @@ fn the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota() {
     assert_eq!(told().len(), 2, "{:?}", told());
 }
 
+#[test]
+fn a_billing_refusal_that_reaches_a_chief_out_for_a_limit_with_a_message_waiting_is_told_too() {
+    // T-816: the two notes shared a key, the chief's id and the time it was marked out, and
+    // `mark_out` keeps that time while the chief is out: the human, told what waits for a
+    // chief out for a 429, was never told that its account had a billing refused as well.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Ready.");
+    context.pass().unwrap();
+    let chief = tiers.id("chief");
+    let until = after(&context, 48 * 3_600_000);
+    context
+        .ledger
+        .borrow_mut()
+        .mark_out(chief, &until, "out of quota")
+        .unwrap();
+    context.pass().unwrap();
+    context
+        .create_task(
+            tiers.project.id,
+            NewTask {
+                from: "human".to_owned(),
+                to: Some("chief".to_owned()),
+                body: "Plan the release".to_owned(),
+                ..NewTask::default()
+            },
+        )
+        .message
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let told = |start: &str| -> Vec<String> {
+        tiers
+            .notes("human")
+            .into_iter()
+            .filter(|note| note.starts_with(start))
+            .collect()
+    };
+    assert_eq!(
+        told("@chief is out of quota").len(),
+        1,
+        "what waits is told"
+    );
+    // The same chief, out all along, is then refused for its billing.
+    context.advance(60_000);
+    context.adapter.refuse(
+        "chief",
+        Quota::Unavailable {
+            at: Some(now(&context)),
+            because: "its billing was refused".to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        told("@chief's account is unavailable").len(),
+        1,
+        "{:?}",
+        tiers.notes("human")
+    );
+}
+
 /// zeus at work on T-1 on Claude Code, whose windows are on one account, and the
 /// chief refused alone, out two days: zeus's window was never out.
 fn chief_out_alone(context: &Context) -> (Tiers<'_>, String, String) {

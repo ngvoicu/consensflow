@@ -1248,7 +1248,7 @@ test('says an account that refused for its billing or login is unavailable, with
   // MUS-23: nothing resets such an account, so no time is shown and nothing is said to wait for a reset.
   const data = model()
   data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana').participant.outUntil =
-    '9999-12-31T23:59:59.999Z'
+    '9999-12-31T23:59:59.998Z'
   await open(page, data)
   const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
@@ -1259,22 +1259,41 @@ test('says an account that refused for its billing or login is unavailable, with
   expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
 })
 
-test('says why an unavailable member is, in the words the engine gave: a model its harness moved on its own', async ({
+test('says a member whose harness moved its model on its own is held, why in the words the engine gave, and what to do', async ({
   page,
 }) => {
-  // MUS-24: the move holds the member as a refused account does, and the row says what moved.
+  // MUS-24: the move holds the member as a refused account does, and the row says what moved,
+  // and that only the human's word for that member lets it go on.
   const data = model()
   const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
   diana.participant.outUntil = '9999-12-31T23:59:59.999Z'
   diana.activity = {
     state: 'out',
     reason:
-      'unavailable: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose',
+      'moved: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose',
   }
   await open(page, data)
   await expect(page.locator('tr[data-handle="diana"] .row-status')).toHaveText(
-    'Unavailable: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose. Press Try again now once it works',
+    'Held: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose. Press Try again now once it is on the model you chose',
   )
+  await expect(
+    page.getByRole('button', {
+      name: 'Try @diana again now, once it is on the model you chose',
+    }),
+  ).toBeVisible()
+})
+
+test('says a held member whose engine lost its words after a restart is held for its model, not for a billing', async ({
+  page,
+}) => {
+  const data = model()
+  const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+  diana.participant.outUntil = '9999-12-31T23:59:59.999Z'
+  diana.activity = null
+  await open(page, data)
+  const status = page.locator('tr[data-handle="diana"] .row-status')
+  await expect(status).toHaveText(/^Held: its model moved on its own\. Press Try again now/)
+  await expect(status).not.toContainText('billing')
 })
 
 test('names the day of a reset that is not today, and tries a member or the chief out of quota again', async ({
@@ -1328,12 +1347,20 @@ test('a task held for an account no time resets says it waits for the human, not
   const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
   lane.tasks.push(
     task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, {
+      heldUntil: '9999-12-31T23:59:59.998Z',
+    }),
+  )
+  lane.tasks.push(
+    task(10, 'Write the notes', 'paused', 'chief', 'zeus', 5, {
       heldUntil: '9999-12-31T23:59:59.999Z',
     }),
   )
   await open(page, data)
   await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
     /^unavailable until you say it works again · from /,
+  )
+  await expect(page.locator('button.card[data-task="10"] .card-route')).toHaveText(
+    /^held until you say its model may go on · from /,
   )
 })
 
