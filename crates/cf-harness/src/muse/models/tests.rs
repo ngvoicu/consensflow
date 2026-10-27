@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::seams::processes::{Program, Streams};
-use crate::testing::{finished, ChildScript, Ends, ManualTime, ScriptedProcesses};
+use crate::testing::{finished, ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
 
 /// What `muse serve` answered `model/list` with: the account's (`providerCatalog`, recorded
 /// 2026-10-27 over the real login), and the bundled one a host answers with no login.
@@ -98,6 +98,9 @@ fn a_list_a_host_with_no_login_gives_is_muses_bundled_one_and_is_stale() {
     assert!(models.stale);
     assert_eq!(models.models.len(), 1);
     assert_eq!(models.models[0].id, "muse-spark-1.2");
+    // A model of a list that is not the account's is no default for it: the account may not
+    // offer it (T-816). The caller says the list is stale and the human chooses.
+    assert_eq!(models.default_model(), None);
 }
 
 #[test]
@@ -215,4 +218,43 @@ fn a_host_that_refuses_ends_or_says_nothing_is_a_reason_and_no_list() {
     assert!(finished(Box::pin(read(&processes, &*time, program())))
         .unwrap_err()
         .contains("ENOENT"));
+}
+
+#[test]
+fn a_host_that_says_nothing_is_given_up_on_at_the_bound_and_ended() {
+    // `muse serve` that never answers `model/list` (a login that hangs, a network that does not
+    // come back): the read fails at 30 s in a sentence of its own, and the host is ended, asked
+    // and then forced, not left running (T-816: the live read alone held the path).
+    let processes = Rc::new(ScriptedProcesses::default());
+    let time = Rc::new(ManualTime::new(0));
+    processes.child(
+        "muse",
+        ChildScript {
+            lines: vec![recorded("initialize").to_string()],
+            ends: Ends::Forced,
+        },
+    );
+    let mut driver = Driver::default();
+    let (host, clock) = (Rc::clone(&processes), Rc::clone(&time));
+    driver.begin(0, async move { read(&*host, &*clock, program()).await });
+    assert!(
+        driver.run().is_empty(),
+        "waiting on a host that says nothing"
+    );
+    let waits = time.waits(0);
+    assert_eq!(waits, [30_000], "the bound is the one wait");
+    assert!(time.fire_next(30_000));
+    assert!(driver.run().is_empty(), "asked to end, it goes on");
+    assert_eq!(
+        time.waits(0),
+        [2000, 4000],
+        "forced at two seconds, given up at four"
+    );
+    assert!(time.fire_next(32_000));
+    let settled = driver.run();
+    assert_eq!(settled.len(), 1);
+    assert_eq!(
+        settled[0].1,
+        Err("muse serve did not answer within 30 s".to_owned())
+    );
 }

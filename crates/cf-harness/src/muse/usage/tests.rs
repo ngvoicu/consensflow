@@ -1,6 +1,11 @@
+use std::path::PathBuf;
+
+use cf_base::env::Env;
 use serde_json::{json, Value};
 
 use super::*;
+use crate::seams::processes::Failed;
+use crate::testing::{finished, ManualTime, ScriptedProcesses};
 
 /// A recorded answer of `muse usage --json`.
 fn recorded(name: &str) -> Value {
@@ -70,9 +75,13 @@ fn an_account_with_no_allowance_is_unavailable_before_any_turn_is_refused() {
             because: NO_ALLOWANCE.to_owned(),
         }
     );
-    // A reason Muse gives that is not that one says nothing known.
-    let other = json!({ "allowance": null, "reason": "sign_in_needed" });
-    assert_eq!(quota_of(&other, NOW).unwrap(), None);
+    // A reason Muse gives that is not that one says nothing known: `server_sent_no_usage` is
+    // what a paid account answered on 2026-10-27 minutes after it answered a count, so the
+    // account is no worse for it and nothing is held (the hint it carries is Muse's own).
+    for reason in ["sign_in_needed", "server_sent_no_usage"] {
+        let other = json!({ "allowance": null, "reason": reason, "hint": "try later" });
+        assert_eq!(quota_of(&other, NOW).unwrap(), None, "{reason}");
+    }
 }
 
 #[test]
@@ -90,5 +99,51 @@ fn the_wires_refusal_names_the_reset_it_gives() {
     assert_eq!(
         wire_quota(&json!({ "limitKind": "tierLimit" }), at).unwrap(),
         None
+    );
+}
+
+/// `muse usage --json` as the daemon runs it, answered by `answer`.
+fn read_as(answer: Result<String, Failed>) -> Result<Option<Quota>, String> {
+    let processes = ScriptedProcesses::default();
+    processes.run_answer("muse usage --json", answer);
+    let time = ManualTime::new(NOW);
+    let program = program(PathBuf::from("/home/jane/.local/bin/muse"), &Env::default());
+    finished(Box::pin(read(&processes, &time, program)))
+}
+
+#[test]
+fn what_muse_usage_says_is_read_as_the_account_s_quota_and_a_failure_is_a_reason() {
+    // The launcher is not asked for an update check, and the program is `usage --json`.
+    let program = program(PathBuf::from("/home/jane/.local/bin/muse"), &Env::default());
+    assert_eq!(program.args, ["usage", "--json"]);
+    assert_eq!(program.env.text("MUSE_NO_AUTO_UPDATE"), Some("1"));
+    // The paid account's count and the account with no allowance, as they were recorded.
+    let said = read_as(Ok(recorded("allowance").to_string()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (said.level(), said.resets_at()),
+        (Level::Ok, Some("2026-10-26T21:56:41.000Z"))
+    );
+    let none = read_as(Ok(recorded("no-allowance").to_string()))
+        .unwrap()
+        .unwrap();
+    assert!(none.unavailable());
+    assert_eq!(none.at(), Some("2026-10-26T18:10:18.267Z"));
+    // A program that fails, and words that are no JSON, are a failure in the reader's words.
+    let failed = Failed {
+        message: "Command failed: muse usage --json".to_owned(),
+        code: Some(1),
+        killed: false,
+        stdout: String::new(),
+    };
+    assert_eq!(
+        read_as(Err(failed)),
+        Err("Command failed: muse usage --json".to_owned())
+    );
+    let refused = read_as(Ok("not json at all".to_owned())).unwrap_err();
+    assert!(
+        refused.starts_with("muse usage did not answer JSON: "),
+        "{refused}"
     );
 }

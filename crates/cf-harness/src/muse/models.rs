@@ -63,8 +63,13 @@ impl Models {
     /// The model a member is given where its agent names none: the one Muse marks, unless it
     /// is a contributor model, then its twin that is not (`muse-spark-1.3` for
     /// `muse-spark-1.3-contributor`), else the first that is not one. None where every model
-    /// is: no default is better than one Meta trains on.
+    /// is: no default is better than one Meta trains on. None too where the list is
+    /// [`Models::stale`], Muse's bundled one: it names what Muse ships, which the account may
+    /// not offer, and a member launched on it would fail at its first turn (T-816).
     pub fn default_model(&self) -> Option<&ModelChoice> {
+        if self.stale {
+            return None;
+        }
         let marked = self.models.iter().find(|model| model.marked_default);
         let twin = marked
             .filter(|model| model.contributor)

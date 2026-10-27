@@ -656,3 +656,21 @@ fn the_input_box_is_read_as_the_adapter_reads_it_and_a_harness_with_no_reader_re
         assert_eq!(read(kind, &[RULE, "❯", RULE]), Value::Null, "{kind}");
     }
 }
+
+#[test]
+fn a_question_for_no_op_names_every_op_the_table_of_the_tool_has() {
+    // The table at the head of `tooling.rs` is the list of what the tool answers; the error
+    // for a question that asks for another says the same (T-816: it lacked `muse_models` and
+    // `muse_usage`).
+    let source = include_str!("../tooling.rs");
+    let ops: Vec<&str> = source
+        .lines()
+        .filter_map(|line| line.strip_prefix("//! | `"))
+        .filter_map(|row| row.split('`').next())
+        .collect();
+    assert!(ops.len() >= 20, "the table's ops are read: {ops:?}");
+    let refused = answer(&json!({ "op": "no_such_op" })).unwrap_err();
+    for op in ops {
+        assert!(refused.contains(op), "{op} is not in: {refused}");
+    }
+}

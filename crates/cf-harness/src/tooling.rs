@@ -89,7 +89,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "trust" => trust(question),
         "input_box" => input_box(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, trust and input_box"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, muse_models, muse_usage, trust and input_box"
         )),
     }
 }
