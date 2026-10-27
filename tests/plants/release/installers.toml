@@ -1022,3 +1022,15 @@ platforms = ["windows"]
 file = "install/install.ps1"
 find = "    function CfRotr64([uint64]$x, [int]$n) { [uint64](($x -shr $n) -bor ($x -shl (64 - $n))) }"
 replace = "    function CfRotr64([uint64]$x, [int]$n) { [uint64](($x -shr $n) -bor ($x -shl (65 - $n))) }"
+
+[[plant]]
+name = "installers: the publisher job builds cf-publish with the tests' kit, which takes a key from the environment"
+meant = "builds_cf_publish_without_the_tests_kit_so_no_key_but_the_update_key_is_taken"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = """          cargo build --release --locked -p cf-publish
+          sha256="""
+replace = """          cargo build --release --locked -p cf-publish --features test-support
+          sha256="""

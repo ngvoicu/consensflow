@@ -137,6 +137,30 @@ mod who_may_publish {
     }
 
     #[test]
+    fn builds_cf_publish_without_the_tests_kit_so_no_key_but_the_update_key_is_taken() {
+        // The tests' kit (`test-support`) is what reads CF_PUBLISH_TEST_KEY: no build of the
+        // workflow's turns it on, by a feature named or by every feature.
+        let text = read("release.yml");
+        let builds: Vec<&str> = text
+            .lines()
+            .filter(|line| line.contains("cargo build") && line.contains("cf-publish"))
+            .collect();
+        assert_eq!(
+            builds.len(),
+            2,
+            "the Mac job's and the publisher job's: {builds:?}"
+        );
+        for line in builds {
+            assert!(
+                line.trim_end()
+                    .ends_with("cargo build --release --locked -p cf-publish"),
+                "{line}"
+            );
+        }
+        assert!(!text.contains("test-support") && !text.contains("CF_PUBLISH_TEST_KEY"));
+    }
+
+    #[test]
     fn builds_the_publisher_where_no_secret_is() {
         let publisher = job(&read("release.yml"), "publisher");
         assert!(
