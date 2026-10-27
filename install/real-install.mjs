@@ -27,7 +27,13 @@
 //
 // On a Mac the app goes to DIR (--dir), which a run outside CI must name: the
 // ConsensFlow in /Applications is never touched by it. On Windows the per-user
-// installer puts it where it puts it.
+// installer puts it where it puts it, over a ConsensFlow already installed for
+// the user (the one its uninstall entry names): a run outside CI refuses where
+// there is one, unless --dir names the folder it is installed in, which says
+// that this run may replace it. Outside CI --upgrade and --downgrade run with
+// --no-open on both: a ConsensFlow in use is never joined by another, nor ended
+// (a Mac's is asked to stop, a Windows one's processes are stopped, the daemon
+// too).
 
 import { Buffer } from 'node:buffer'
 import { spawn, spawnSync } from 'node:child_process'
@@ -174,6 +180,17 @@ function installed(dir) {
     })
     return { app: plist.stdout.trim(), cf: cf.stdout.trim(), where: app }
   }
+  const entry = windowsEntry()
+  if (!entry) return null
+  const cf = spawnSync(path.join(entry.where, 'cli', 'bin', 'cf.exe'), ['--version'], {
+    encoding: 'utf8',
+    env: cfEnv,
+  })
+  return { app: entry.version, cf: cf.stdout.trim(), where: entry.where }
+}
+
+/** The ConsensFlow Windows lists for this user, by the per-user installer's uninstall entry: its version and folder, or null. */
+function windowsEntry() {
   const entry = spawnSync(
     'powershell',
     [
@@ -184,12 +201,13 @@ function installed(dir) {
     { encoding: 'utf8' },
   )
   const [version, where] = entry.stdout.trim().split(/\r?\n/)
-  if (!version) return null
-  const cf = spawnSync(path.join(where, 'cli', 'bin', 'cf.exe'), ['--version'], {
-    encoding: 'utf8',
-    env: cfEnv,
-  })
-  return { app: version, cf: cf.stdout.trim(), where }
+  return version && where ? { version, where } : null
+}
+
+/** Whether two Windows folders are the same one, as Windows takes names: by case, and either slash. */
+function sameFolder(a, b) {
+  const plain = (folder) => path.win32.resolve(folder).replace(/\\+$/, '').toLowerCase()
+  return plain(a) === plain(b)
 }
 
 function expectInstalled(dir, version) {
@@ -279,15 +297,23 @@ async function mirror(versions, key, tamper) {
 }
 
 if (!['alpha', 'stable'].includes(options.channel)) fail('--channel is alpha or stable')
-if (mac && !process.env.CI) {
-  if (!options.dir)
+if (!process.env.CI) {
+  if (mac && !options.dir)
     fail(
       'on a Mac outside CI, name the folder to install into with --dir (the ConsensFlow in /Applications is never touched)',
     )
-  // A second ConsensFlow opened on a Mac in use would start a second daemon on its home.
+  // The installer puts ConsensFlow over the one Windows lists, and a run that opens and ends it
+  // (--downgrade) stops its processes by their path, the daemon too.
+  const listed = mac ? null : windowsEntry()
+  if (listed && !(options.dir && sameFolder(options.dir, listed.where)))
+    fail(
+      `on Windows outside CI, ConsensFlow ${listed.version} is installed in ${listed.where}, and this run would replace it: if that is a ConsensFlow to replace (a test machine's), name its folder with --dir "${listed.where}"`,
+    )
+  // A second ConsensFlow opened on a machine in use would start a second daemon on its home, and
+  // the one opened here is ended by its path.
   if ((options.upgrade || options.downgrade) && !options['no-open'])
     fail(
-      'on a Mac outside CI, --upgrade runs with --no-open: the ConsensFlow in use is never joined by another',
+      'outside CI, --upgrade and --downgrade run with --no-open: the ConsensFlow in use is never joined by another, nor ended',
     )
 }
 const dir = mac ? path.resolve(options.dir ?? '/Applications') : null

@@ -24,6 +24,7 @@ on:
     paths:
       - install/**
       - tests/install-*.test.mjs
+      - tests/real-install.test.mjs
       - tests/fixtures/install/**
       - .github/workflows/installers.yml
   workflow_run:
@@ -47,7 +48,7 @@ jobs:
           node-version: 26
       # On Linux both refuse in plain words, under sh and under PowerShell 7, and
       # the signature check runs in PowerShell 7 here too.
-      - run: node --test tests/install-sh.test.mjs tests/install-ps1.test.mjs tests/install-verifiers.test.mjs
+      - run: node --test tests/install-sh.test.mjs tests/install-ps1.test.mjs tests/install-verifiers.test.mjs tests/real-install.test.mjs
 
   real-release:
     if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
