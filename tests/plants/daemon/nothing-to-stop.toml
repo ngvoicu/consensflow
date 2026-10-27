@@ -71,6 +71,13 @@ file = "crates/cf-engine/src/stops.rs"
 find = "} else if observed.settled || observed.over == Over::Held || self.cut_short(observed) {"
 replace = "} else if observed.settled || self.cut_short(observed) {"
 
+# The stand-in writes Claude's own message of the interrupt, `[Request interrupted by user]`,
+# which pays the stop as a turn passed too (T-807): on the rig, that rule goes with it.
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed))"
+replace = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed && false))"
+
 [[plant]]
 name = "nothing to stop: a turn a refusal for quota ended is at work"
 meant = "a_task_held_for_its_job_whose_next_turn_is_refused_presses_no_key_and_goes_on_there_at_the_reset"
