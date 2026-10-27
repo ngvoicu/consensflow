@@ -7,7 +7,7 @@
 # freeze hangs (the relay is a `sleep`), so the machine cannot be asked to end the run: the case of a laptop that is off,
 # or a tunnel that does not come back. The machine is read every 5 s from this Mac (a read-only ssh, which takes no
 # lock) with the question of windows-linger.sh: when the run's process and lock go. Then a second run, straight after
-# the first, through the same queue with --wait 0, to see what the next run is told. The log is <out>/run.log, the
+# the first, told not to wait (--wait 0), to see what the next run is told. The log is <out>/run.log, the
 # machine's states <out>/poll.log, the second run's <out>/second.log, the times <out>/times.log.
 #   bash tools/xtask/windows-silent.sh windows-machines-3 300
 set -u
@@ -57,8 +57,14 @@ fi
 wait "$run"; ended=$?
 echo "$(date +%T) mac=$(date +%s) the run's Mac side ended with $ended" >> "$times"
 for pid in "$out"/state/nc.*; do kill -9 "${pid##*/nc.}" 2>/dev/null; done
-bash "$tool" "$tree" --machine "$machine" --wait 0 cmd /c "echo second run ran" > "$second" 2>&1
-echo "$(date +%T) the second run ended with $?: $(grep -m1 -E 'second run ran|busy|still going' "$second")" >> "$times"
+# From the tree itself, not through the tool, which takes no --wait: told not to wait, the run is refused at once
+# while a run goes on there, and sends nothing. It is made only while the machine is held (the last look).
+case "$(tail -1 "$poll")" in
+  *"lock=HELD"*)
+    (cd "$T/$tree" && cargo xtask windows --machine "$machine" --wait 0 -- cmd /c "echo second run ran") > "$second" 2>&1
+    echo "$(date +%T) the second run ended with $?: $(grep -m1 -E 'second run ran|busy|still going' "$second")" >> "$times" ;;
+  *) echo "$(date +%T) the machine was not held by the time the first run's Mac side had ended: no second run" >> "$times" ;;
+esac
 # Until the machine is clear, at most a quarter of an hour.
 for _ in $(seq 1 180); do
   last=$(tail -1 "$poll")

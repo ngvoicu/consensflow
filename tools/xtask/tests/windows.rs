@@ -576,7 +576,7 @@ fn script(folder: &Path, name: &str, body: &str) {
     let leaves_out_the_options = "quiet=; if [ \"$1\" = -q ]; then quiet=-q; shift; fi\nwhile [ \"$1\" = -o ]; do shift 2; done\nif [ -n \"$quiet\" ]; then set -- -q \"$@\"; fi\n";
     let body = match name {
         "ssh" => format!(
-            "case \"$*\" in *zeelin*) ;; *ServerAliveCountMax=1*) echo \"free 614\"; exit 0 ;; esac\n{leaves_out_the_options}{body}"
+            "case \"$*\" in *zeelin*) ;; *ServerAliveCountMax=1\\ *) echo \"free 614\"; exit 0 ;; esac\n{leaves_out_the_options}{body}"
         ),
         "scp" => format!("{leaves_out_the_options}{body}"),
         _ => body.to_owned(),
