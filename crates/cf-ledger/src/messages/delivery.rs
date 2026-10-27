@@ -337,18 +337,26 @@ fn looked(mut data: Value, look: Option<&Value>) -> Value {
     data
 }
 
-/// When message `message_id` was last handed over to its window, as the ledger
-/// writes a time: none while it is not on its way, or not handed over yet.
-pub(crate) fn handed_at(store: &Store, message_id: i64) -> Result<Option<String>, LedgerError> {
+/// When the delivery of message `message_id` on its way began (its last
+/// `delivery.begun`), as the ledger writes a time: none while it is not on its way.
+/// Its hand-over time is no such mark: an Enter pressed once more admits the paste
+/// again, and moves it.
+pub(crate) fn delivery_begun_at(
+    store: &Store,
+    message_id: i64,
+) -> Result<Option<String>, LedgerError> {
     Ok(store
         .db
         .query_row(
-            "SELECT handed_at FROM message WHERE id = ? AND state = 'delivering'",
+            "SELECT e.at FROM message m
+               JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.begun'
+                AND json_extract(e.data, '$.message') = m.id
+              WHERE m.id = ? AND m.state = 'delivering'
+              ORDER BY e.id DESC LIMIT 1",
             [message_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| row.get::<_, String>(0),
         )
-        .optional()?
-        .flatten())
+        .optional()?)
 }
 
 /// A message on its way whose window's record holds, after its hand-over, a user

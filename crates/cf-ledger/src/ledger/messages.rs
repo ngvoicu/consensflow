@@ -383,10 +383,10 @@ impl Ledger {
         messages::retry_delivery(&mut self.store, message_id, reason, refund, Some(look))
     }
 
-    /// When message `message_id` was last handed over to its window: none while it
-    /// is not on its way, or not handed over yet.
-    pub fn handed_at(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
-        messages::handed_at(&self.store, message_id)
+    /// When the delivery of message `message_id` on its way began (its last
+    /// `delivery.begun`): none while it is not on its way.
+    pub fn delivery_begun_at(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::delivery_begun_at(&self.store, message_id)
     }
 
     /// Message `message_id`, on its way, is taken for arrived though its window's

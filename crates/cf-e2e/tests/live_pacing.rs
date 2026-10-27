@@ -86,30 +86,46 @@ fn chief_pane(members: &Members) -> Value {
     json!({ "id": id, "generation": generation })
 }
 
-/// The chief's message of `kind` from `sender` (a handle that begins so), newest first.
-fn message_of(members: &Members, kind: &str, sender: &str) -> Result<Option<Value>> {
+/// The chief's message of `kind` whose body holds `words`.
+fn message_of(members: &Members, kind: &str, words: &str) -> Result<Option<Value>> {
     Ok(members.inbox(Some("chief"))?.into_iter().find(|message| {
-        message["kind"] == kind
-            && message["sender"]
-                .as_str()
-                .is_some_and(|handle| handle.starts_with(sender))
+        message["kind"] == kind && message["body"].as_str().is_some_and(|body| body.contains(words))
     }))
 }
 
-/// Waits for the chief's message of `kind` from `sender` to be in `states`.
+/// Waits for the chief's message of `kind` whose body holds `words` to be in `states`.
 fn wait_for(
     members: &Members,
     log: &Log,
     what: &str,
     kind: &str,
-    sender: &str,
+    words: &str,
     states: &[&str],
 ) -> Result<Option<Value>> {
-    find(log, what, WITHIN, LOOK, || {
-        Ok(message_of(members, kind, sender)?.filter(|message| {
+    let found = find(log, what, WITHIN, LOOK, || {
+        Ok(message_of(members, kind, words)?.filter(|message| {
             states.iter().any(|state| message["state"] == *state)
         }))
-    })
+    })?;
+    if found.is_none() {
+        // What the chief's inbox held instead, for the failure to say.
+        let held: Vec<String> = members
+            .inbox(Some("chief"))?
+            .iter()
+            .map(|message| {
+                format!(
+                    "m-{} {} {} from {}: {}",
+                    message["id"],
+                    message["kind"],
+                    message["state"],
+                    message["sender"],
+                    live::cut(message["body"].as_str().unwrap_or_default(), 40)
+                )
+            })
+            .collect();
+        log.say(format!("{what}: never; the chief's inbox: {held:?}; board: {}", members.board().map(|board| live::cut(&board.to_string(), 600)).unwrap_or_default()));
+    }
+    Ok(found)
 }
 
 /// The milliseconds of an event's `at`.
@@ -150,7 +166,8 @@ fn delivered_once(
 ) -> Vec<Check> {
     let id = message["id"].as_i64().unwrap_or_default();
     let begun = of(events, "delivery.begun", id);
-    let retried = of(events, "delivery.retried", id).len();
+    let retries = of(events, "delivery.retried", id);
+    let retried = retries.len();
     let rested = begun
         .first()
         .and_then(|begun| begun["data"]["look"]["restMs"].as_i64());
@@ -168,7 +185,14 @@ fn delivered_once(
             who,
             &format!("{what} is pasted once"),
             begun.len() == 1 && retried == 0,
-            format!("{} begun, {retried} retried", begun.len()),
+            format!(
+                "{} begun, {retried} retried{}",
+                begun.len(),
+                retries
+                    .iter()
+                    .map(|retry| format!("; retried: {}", retry["data"]))
+                    .collect::<String>()
+            ),
         ),
         Check::new(
             who,
@@ -226,6 +250,20 @@ fn in_order(who: &str, question: &Value, result: &Value, events: &[Value]) -> Ve
     ]
 }
 
+/// The native session of the conversation `handle` has newest, as the daemon's events say it
+/// was bound: a harness given no session id on its command line (Codex, Devin) is known by it
+/// alone.
+fn session_in(events: &[Value], handle: &str) -> Option<String> {
+    let started = events.iter().rev().find(|event| {
+        event["kind"] == "conversation.started" && event["data"]["participant"] == handle
+    })?;
+    let conversation = &started["data"]["conversation"];
+    let bound = events.iter().rev().find(|event| {
+        event["kind"] == "conversation.bound" && event["data"]["conversation"] == *conversation
+    })?;
+    bound["data"]["nativeSession"].as_str().map(str::to_owned)
+}
+
 /// The chief's record, as the daemon reads it.
 fn record_of(members: &Members, harness: Harness) -> Result<Vec<ask::Item>> {
     let pane = format!("p{}-chief", members.project_id());
@@ -235,7 +273,8 @@ fn record_of(members: &Members, harness: Harness) -> Result<Vec<ask::Item>> {
         .into_iter()
         .rev()
         .find(|frame| frame["id"] == pane.as_str())
-        .and_then(|frame| cf_e2e::live::members::session_of(&frame));
+        .and_then(|frame| cf_e2e::live::members::session_of(&frame))
+        .or_else(|| session_in(&members.events(), "chief"));
     let Some(session) = session else {
         return Ok(Vec::new());
     };
@@ -246,6 +285,16 @@ fn record_of(members: &Members, harness: Harness) -> Result<Vec<ask::Item>> {
     )
 }
 
+/// The human types `words` into the chief's window and sends them: Enter is a key of its
+/// own, pressed a moment after the words, as a person presses it (a line and its Enter in
+/// one burst is a paste to Devin, which keeps the line in its box).
+fn says(members: &Members, words: &str) -> Result<()> {
+    let pane = chief_pane(members);
+    members.rig().types(&pane, words.as_bytes())?;
+    std::thread::sleep(Duration::from_millis(700));
+    members.rig().types(&pane, b"\r")
+}
+
 /// The human's typing (Claude Code and Devin): words typed and not sent hold the next result;
 /// once erased, it goes in a settle after the last key. Then words the human sends while
 /// another waits begin a turn, and the result goes in after it, once.
@@ -253,15 +302,15 @@ fn typing(members: &Members, log: &Log, who: &str, harness: Harness) -> Result<V
     let pane = chief_pane(members);
     let words = "half a thought";
     members.rig().types(&pane, words.as_bytes())?;
-    members.give(STAND_IN_WORKER, "Reply with exactly: TWO done.")?;
-    let waiting = wait_for(members, log, "the third result to queue", "result", "worker-", &["queued", "delivering", "delivered"])?;
+    members.give(STAND_IN_WORKER, "Reply with exactly: TWO_DONE")?;
+    let waiting = wait_for(members, log, "the third result to queue", "result", "TWO_DONE", &["queued", "delivering", "delivered"])?;
     std::thread::sleep(HELD);
-    let held = message_of(members, "result", "worker-")?;
+    let held = message_of(members, "result", "TWO_DONE")?;
     let still = held.as_ref().is_some_and(|message| message["state"] == "queued");
     members
         .rig()
         .types(&pane, &vec![0x7f; words.chars().count()])?;
-    let third = wait_for(members, log, "the third result to go in", "result", "worker-", &["delivered", "failed"])?;
+    let third = wait_for(members, log, "the third result to go in", "result", "TWO_DONE", &["delivered", "failed"])?;
     let mut checks = vec![Check::new(
         who,
         "words typed and not sent hold the result",
@@ -286,12 +335,12 @@ fn typing(members: &Members, log: &Log, who: &str, harness: Harness) -> Result<V
     if !members.chief_is_idle(log)? {
         return Ok(checks);
     }
-    members.rig().types(&pane, b"Reply with exactly one line: HUMAN\r")?;
-    members.give(STAND_IN_WORKER, "Reply with exactly: THREE done.")?;
+    says(members, "Reply with exactly one line: HUMAN")?;
+    members.give(STAND_IN_WORKER, "Reply with exactly: THREE_DONE")?;
     let fourth = find(log, "the fourth result to go in", WITHIN, LOOK, || {
         Ok(members.inbox(Some("chief"))?.into_iter().find(|message| {
             message["kind"] == "result"
-                && message["body"].as_str().is_some_and(|body| body.contains("THREE"))
+                && message["body"].as_str().is_some_and(|body| body.contains("THREE_DONE"))
                 && (message["state"] == "delivered" || message["state"] == "failed")
         }))
     })?;
@@ -316,17 +365,18 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
         members.close()?;
         return Ok(checks);
     }
-    // The chief works: what the workers send waits behind its turn.
-    members.paste(&chief_pane(&members), WORK)?;
+    // The chief works: what the workers send waits behind its turn. The human asks for the
+    // work as a human does, in words and then Enter, its own key.
+    says(&members, WORK)?;
     find(log, "the chief to be at work", Duration::from_secs(60), LOOK, || {
         Ok((members.lane("chief")?["activity"]["state"] == "working").then_some(()))
     })?;
-    members.give(STAND_IN_WORKER, "Reply with exactly: ONE done.")?;
-    wait_for(&members, log, "the result to wait for the chief", "result", "worker-", &["queued", "delivering", "delivered"])?;
-    members.give(SECOND, "CF ask :: Which output format do you want, JSON or text?\nReply with exactly: asked.")?;
-    wait_for(&members, log, "the question to wait for the chief", "question", "worker-b", &["queued", "delivering", "delivered"])?;
-    let result = wait_for(&members, log, "the result to go in", "result", "worker-", &["delivered", "failed"])?;
-    let question = wait_for(&members, log, "the question to go in", "question", "worker-b", &["delivered", "failed"])?;
+    members.give(STAND_IN_WORKER, "Reply with exactly: ONE_DONE")?;
+    wait_for(&members, log, "the result to wait for the chief", "result", "ONE_DONE", &["queued", "delivering", "delivered"])?;
+    members.give(SECOND, "CF ask :: Which output format do you want, JSON or text?\nReply with exactly: ASKED")?;
+    wait_for(&members, log, "the question to wait for the chief", "question", "output format", &["queued", "delivering", "delivered"])?;
+    let result = wait_for(&members, log, "the result to go in", "result", "ONE_DONE", &["delivered", "failed"])?;
+    let question = wait_for(&members, log, "the question to go in", "question", "output format", &["delivered", "failed"])?;
     members.chief_is_idle(log)?;
     let events = members.events();
     let items = record_of(&members, harness)?;

@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use cf_engine::testing::{Context, Made};
-use cf_harness::contract::{Admission, Readiness};
+use cf_harness::contract::{Admission, InputBox, Readiness};
 use cf_harness::records::Role;
 use serde_json::{json, Value};
 
@@ -281,6 +281,29 @@ fn a_window_whose_harness_says_it_is_at_work_is_given_nothing_whatever_its_recor
     context.adapter.with("chief", |agent| agent.at_work = false);
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new(), "its settle begins");
+    context.advance(SETTLE);
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+}
+
+/// Devin kept words in its input box that the human's keys counted as sent (a line typed
+/// with its Enter in one burst): a paste would go in behind them, in one message with them
+/// (the live pacing run on Devin, 2026-10-27). The fresh look reads the box, and a box that
+/// holds words takes no paste.
+#[test]
+fn a_box_that_still_holds_words_takes_no_paste() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    context.adapter.input_box.set(Some(InputBox::Holds));
+    let note = context.note(project, "zeus", "chief", "One");
+    for _ in 0..3 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+    assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
+    context.adapter.input_box.set(Some(InputBox::Empty));
+    context.pass().unwrap();
     context.advance(SETTLE);
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [note.id]);

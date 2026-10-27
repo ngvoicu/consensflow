@@ -510,7 +510,7 @@ impl Dispatcher {
     }
 
     /// Whether `message`, on its way, arrived unproven (3.0.7 chief-meeting, CMT-23): a
-    /// user item its window's record was given after its hand-over holds its header, and
+    /// user item its window's record was given since its delivery began holds its header, and
     /// the proof (`is_paste_of`) does not take it for its paste. It is then taken for
     /// arrived, never pasted again and never said not to have reached its window: its
     /// shape is logged for filing (`delivery.unproven`), and whoever can act on it is
@@ -518,11 +518,13 @@ impl Dispatcher {
     fn arrived_unproven(&self, record: &Record, message: i64) -> Result<bool, EngineError> {
         let found = {
             let ledger = self.seams.ledger.borrow();
-            let Some(handed) = ledger.handed_at(message)? else {
+            // Since its delivery began: the hand-over's own time moves with an Enter
+            // pressed once more, which admits the paste again (Devin, 2026-10-27).
+            let Some(begun) = ledger.delivery_begun_at(message)? else {
                 return Ok(false);
             };
             ledger
-                .copied_items_since(record.id, &marker_of(message), &handed)?
+                .copied_items_since(record.id, &marker_of(message), &begun)?
                 .into_iter()
                 .next()
         };

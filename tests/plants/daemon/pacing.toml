@@ -11,8 +11,8 @@
 [run]
 # The Claude reader's own tests: what each record says of a turn.
 pacing-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
-# The engine's pacing and arrival cases (`tests/dispatcher/pacing.rs`, `unproven.rs`).
-pacing-kit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::", "unproven::"]
+# The engine's pacing and arrival cases (`tests/dispatcher/pacing.rs`, `unproven.rs`, `still_there.rs`).
+pacing-kit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::", "unproven::", "still_there::"]
 # The ledger's order of a queue.
 pacing-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "questions_first"]
 # Codex's broker, and what its window makes of it.
@@ -221,8 +221,8 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "                .copied_items_since(record.id, &marker_of(message), &handed)?"
-replace = "                .copied_items_since(record.id, &marker_of(message), &handed[..0])?"
+find = "                .copied_items_since(record.id, &marker_of(message), &begun)?"
+replace = "                .copied_items_since(record.id, &marker_of(message), &begun[..0])?"
 
 [[plant]]
 name = "questions first: every queue goes oldest first"
@@ -297,3 +297,43 @@ replace = '''
     }
 
     /// A paste and its Enter, held while the human's keys left text unsent,'''
+
+[[plant]]
+name = "pacing gate: the fresh look takes a box that holds words for an empty one"
+meant = "a_box_that_still_holds_words_takes_no_paste"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        let same = boxed != Some(InputBox::Holds)"
+replace = "        let same = boxed == boxed"
+
+[[plant]]
+name = "re-paste: a box that still holds the paste is pasted over"
+meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let held = boxed == Some(InputBox::Holds);"
+replace = "        let held = boxed == Some(InputBox::Holds) && false;"
+
+[[plant]]
+name = "re-paste: a window that prints is pasted again"
+meant = "a_window_whose_screen_printed_within_the_last_seconds_is_not_pasted_again"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);"
+replace = "            .is_some_and(|quiet| (quiet as f64) < 0.0);"
+
+[[plant]]
+name = "re-paste: a paste the window never drew is pasted again"
+meant = "a_window_that_has_printed_nothing_since_the_paste_was_written_is_not_pasted_again"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            .is_some_and(|(output, paste)| output >= paste);"
+replace = "            .is_some_and(|(output, paste)| output >= paste && false);"

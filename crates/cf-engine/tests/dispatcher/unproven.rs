@@ -171,3 +171,33 @@ fn a_member_s_message_arrived_unproven_is_told_to_its_task_s_requester() {
         "the chief gave T-1: it hears"
     );
 }
+
+/// Devin glued the paste behind words the human had left in its box, in one item, and
+/// the Enter pressed once more ten seconds after the hand-over admitted the paste again:
+/// the item came before that Enter, after the hand-over. It is the message's all the same
+/// (the live pacing run on Devin 3000.11.205, 2026-10-27: m-8 pasted twice).
+#[test]
+fn an_item_that_came_between_the_hand_over_and_the_enter_pressed_again_holds_the_message() {
+    let context = Context::new();
+    let (_, note) = a_note_that_never_shows(&context);
+    context.host.set_snapshot(json!({ "outputQuietMs": 60_000 }));
+    context.advance(1_000);
+    header_behind_words(&context, note);
+    context.pass().unwrap();
+    // Its Enter, once more, ten seconds on.
+    context.advance(10_000);
+    context.pass().unwrap();
+    assert!(
+        context
+            .host
+            .inputs()
+            .iter()
+            .any(|body| body["bytes"][0] == 13),
+        "the Enter went once more"
+    );
+    context.advance(PAST_ARRIVAL);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(note).receipt["unproven"], json!(true));
+    assert_eq!(handed(&context, note), 1, "never pasted again");
+}

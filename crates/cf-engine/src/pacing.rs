@@ -36,13 +36,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_base::js;
-use cf_harness::contract::Observed;
+use cf_harness::contract::{InputBox, Observed};
 use cf_harness::records::Reading;
 use cf_proto::ledger::MessageView;
 use serde_json::{json, Value};
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
+use crate::runtime::returning;
 use crate::seams::EngineError;
 
 /// What the lane of a window read at rest by the fallback says.
@@ -261,7 +262,8 @@ impl Dispatcher {
     }
 
     /// The fresh look just before `message`'s paste: the window must read at rest, from
-    /// a record that was read, on the last item the look that let it go read. Where it
+    /// a record that was read, on the last item the look that let it go read, and its
+    /// input box, where its harness has one it reads, must hold no words. Where it
     /// does not, its rest is over, and nothing is handed over. A message the gate did not
     /// let go (one that goes at rest, or no settle) is not looked at again.
     pub(crate) async fn still_at_rest(
@@ -277,15 +279,29 @@ impl Dispatcher {
             return Ok(false);
         };
         let fresh = self.observe(&participant, record).await;
+        // A box that holds words (ones the human's keys counted as sent, as Devin kept a
+        // line typed with its Enter in one burst) would send a paste behind them, in one
+        // message with them: it takes none.
+        let (window, pane) = {
+            let part = record.window.borrow();
+            (part.window.clone(), part.pane.clone())
+        };
+        let boxed = match (window, pane) {
+            (Some(window), Some(pane)) => {
+                returning(window.input_box(&*self.seams.host, &pane)).await
+            }
+            _ => None,
+        };
         if self.forgotten(record) {
             return Ok(false);
         }
-        let same = fresh.as_ref().is_ok_and(|fresh| {
-            fresh.settled
-                && fresh.waiting.is_none()
-                && read(fresh)
-                && Frontier::of(fresh) == paced.frontier
-        });
+        let same = boxed != Some(InputBox::Holds)
+            && fresh.as_ref().is_ok_and(|fresh| {
+                fresh.settled
+                    && fresh.waiting.is_none()
+                    && read(fresh)
+                    && Frontier::of(fresh) == paced.frontier
+            });
         if !same {
             self.rest_ends(record);
         }
