@@ -563,15 +563,17 @@ fn a_run_holds_the_machine_to_the_tree_it_sent_and_what_the_machine_says_of_it_i
 }
 
 /// An ssh that says the tree it unpacked is not the one this run sent, and goes on until
-/// it is ended (the first time) or the test is gone, then answers the second time it is
-/// asked (the run's end there) with `status`: the pid of the first is written down.
+/// it is ended (the first time), or the test is gone, or half a minute (a run that does not
+/// end it, as a plant that lets another tree by does not, fails the case and does not hang
+/// the run of the plants for ten minutes), then answers the second time it is asked (the
+/// run's end there) with `status`: the pid of the first is written down.
 fn another_tree(status: u8) -> String {
     format!(
         r#"printf 'ssh\t%s\t%s\t%s\n' "$1" "$2" "$$" >> "$CF_LOG"
 if [ -e "$CF_FIRST" ]; then exit {status}; fi
 : > "$CF_FIRST"
 echo "== tree 0123456789abcdef0123456789abcdef01234567 fedcba9876543210"
-while {owner}; do sleep 0.2; done"#,
+n=0; while {owner} && [ "$n" -lt 150 ]; do sleep 0.2; n=$((n + 1)); done"#,
         owner = cf_base::fixture::owner_there(std::process::id())
     )
 }
