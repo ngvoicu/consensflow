@@ -341,11 +341,7 @@ find = '''
                 project.id,
                 task.number,
                 until,
-                if unavailable.is_some() {
-                    "account unavailable"
-                } else {
-                    "out of quota"
-                },
+                unwell.map_or("out of quota", Unwell::hold),
             )?;
             if refused_at.is_none() {'''
 replace = '''

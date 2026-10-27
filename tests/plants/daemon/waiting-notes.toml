@@ -225,11 +225,11 @@ runs = ["waiting-notes-ledger", "waiting-notes-words"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/holds.rs"
 find = '''
-        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE]
+        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE, TAIL_MOVED]
             .iter()
             .any(|tail| body.ends_with(tail))'''
 replace = '''
-        && [TAIL, TAIL_UNAVAILABLE]
+        && [TAIL, TAIL_UNAVAILABLE, TAIL_MOVED]
             .iter()
             .any(|tail| body.ends_with(tail))'''
 
@@ -242,7 +242,7 @@ runs = ["waiting-notes-words", "waiting-notes-ledger"]
 file = "crates/cf-ledger/src/messages/holds.rs"
 find = '''
     body.starts_with(&format!("T-{number} waits with @"))
-        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE]
+        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE, TAIL_MOVED]
             .iter()
             .any(|tail| body.ends_with(tail))'''
 replace = '    body.starts_with(&format!("T-{number} "))'

@@ -216,3 +216,27 @@ fn an_unavailable_account_has_no_reset_and_says_why() {
         r#"{"state":"unavailable","at":"2026-10-27T05:00:00.000Z","resetsAt":null,"because":"no allowance"}"#
     );
 }
+
+#[test]
+fn a_moved_model_is_held_as_an_unavailable_account_is_and_says_it_is_neither_a_quota_nor_an_account(
+) {
+    // MUS-24: held for the human's word, with no reset, and told apart from the account in what
+    // it says (`moved`) and in what a release asks (`moved()`, never `unavailable()`).
+    let moved = Quota::Moved {
+        at: Some("2026-10-27T05:00:00.000Z".to_owned()),
+        because: "its model moved".to_owned(),
+    };
+    assert_eq!(moved.level(), Level::Exhausted);
+    assert_eq!(moved.resets_at(), None);
+    assert_eq!(moved.at(), Some("2026-10-27T05:00:00.000Z"));
+    assert!(moved.moved() && !moved.unavailable() && moved.held_for_the_human());
+    assert_eq!(
+        serde_json::to_string(&moved).unwrap(),
+        r#"{"state":"moved","at":"2026-10-27T05:00:00.000Z","resetsAt":null,"because":"its model moved"}"#
+    );
+    let account = Quota::Unavailable {
+        at: None,
+        because: "billing".to_owned(),
+    };
+    assert!(!account.moved() && account.unavailable() && account.held_for_the_human());
+}

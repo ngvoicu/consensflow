@@ -139,14 +139,10 @@ runs = ["quota-wait-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                Some(at) if unavailable.is_none() => {
-                    self.refused_its_resume(participant, &task, at)?
-                }
+                Some(at) if unwell.is_none() => self.refused_its_resume(participant, &task, at)?,
 '''
 replace = '''
-                Some(at) if unavailable.is_none() => {
-                    self.refused_its_resume(participant, &task, at)? && false
-                }
+                Some(at) if unwell.is_none() => self.refused_its_resume(participant, &task, at)? && false,
 '''
 
 [[plant]]
@@ -198,10 +194,10 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
             self.give_back(
                 delivering.message,
-                if unavailable.is_some() {
-                    "its account is unavailable"
-                } else {
-                    "the harness ran out of quota"
+                match unwell {
+                    Some(Unwell::Account(_)) => "its account is unavailable",
+                    Some(Unwell::Moved(_)) => "its model moved on its own",
+                    None => "the harness ran out of quota",
                 },
             )?;
 '''
