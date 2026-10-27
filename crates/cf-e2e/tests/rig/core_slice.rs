@@ -308,13 +308,30 @@ fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief
     let board = Project::new(&rig, project).board()?;
     assert_eq!(board["project"]["state"], "suspended");
     // Its Resume brings the chief back on the conversation it had, which was at
-    // rest when the app quit: it is told nothing.
+    // rest when the app quit: it is told nothing. Whether its turn was cut is read
+    // before its window opens, and a note that says so is its first message, pasted
+    // once it is up (a while after the window opens, on a loaded machine): the
+    // chief's inbox, once the window has opened, says whether one was written
+    // (integration B round 2, T-800: its record, read then, never held it yet).
     let resumed = rig.page("project.resume", json!({ "project": project }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
     let again = rig.open_frame(&format!("p{project}-chief"), secs(30))?;
     assert_eq!(after(&again, "--resume"), session, "{:?}", again["argv"]);
-    let board = Project::new(&rig, project).board()?;
-    assert_eq!(board["project"]["state"], "open");
+    let resumed = Project::new(&rig, project);
+    assert_eq!(resumed.board()?["project"]["state"], "open");
+    let told: Vec<Value> = resumed
+        .inbox("chief")?
+        .into_iter()
+        .filter(|message| {
+            message["body"]
+                .as_str()
+                .is_some_and(|body| body.contains("ConsensFlow stopped"))
+        })
+        .collect();
+    assert!(
+        told.is_empty(),
+        "the chief was told its turn was cut: {told:?}"
+    );
     assert!(!rig.transcript(&session).contains("ConsensFlow stopped"));
     rig.close()?;
     Ok(())
