@@ -272,7 +272,18 @@ fn a_child_that_ends_after_its_parents_turn_is_pending_until_its_result_is_taken
         "its result not taken in"
     );
     records.extend([started(8, "t2"), drained(9, "t2", "i1", "t2")]);
-    assert_eq!(record_of(&records).pending, Pending::default());
+    records.push(ended(10, "t2", "completed"));
+    let woken = record_of(&records);
+    assert_eq!(
+        woken.settlement,
+        Settlement::Settled,
+        "the run its result woke"
+    );
+    assert_eq!(
+        woken.pending,
+        Pending::default(),
+        "its result taken in, the child is done"
+    );
     // A status that says it ended ends it too (provisional: the binary's strings).
     let failed = [
         started(2, "t1"),

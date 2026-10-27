@@ -418,7 +418,7 @@ replace = '''
 # Held: a tool call holds its turn open until answered (live, T-705).
 [[plant]]
 name = "muse: an unanswered tool call does not hold the turn"
-meant = "a_tools_results_are_its_items_the_turn_open_until_each_is_answered"
+meant = "tool_calls_hold_the_turn_open_until_each_is_answered_and_each_result_is_a_tools_item"
 runs = ["muse-lib"]
 
 [[plant.edit]]
