@@ -643,8 +643,11 @@ impl Dispatcher {
             return Watching::Undecided;
         }
         if noticed > seen {
-            // Another said it ended: the next pass looks, whatever the wait was.
+            // Another said it ended: the next pass looks, whatever the wait was, and what the
+            // last look found says nothing of its command (a look kept through a pause is of
+            // the monitors there were, T-442).
             let mut held = record.held.borrow_mut();
+            held.seen = None;
             held.wait_ms = 0;
             held.next_look_ms = 0;
             held.running_looks = 0;

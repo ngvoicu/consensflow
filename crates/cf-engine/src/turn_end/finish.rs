@@ -44,7 +44,10 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
-use super::{first_on_its_way, leftovers, lost_in_turn, with_leftovers, with_lost, words_of};
+use super::{
+    first_on_its_way, leftovers, lost_in_turn, pending_after_look, watching_of, with_leftovers,
+    with_lost, words_of,
+};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -234,7 +237,9 @@ impl Dispatcher {
                 ),
             ));
         }
-        let pending = observed.pending();
+        // What the turn left, as the note to the chief counts it: a monitor that said it ended
+        // is over where a look found no command in the window.
+        let pending = pending_after_look(&observed, watching_of(&record.held.borrow()));
         let words = with_lost(words_of(&run), &participant.handle, lost);
         let body = with_leftovers(
             words,

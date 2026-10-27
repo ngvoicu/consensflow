@@ -341,3 +341,43 @@ runs = ["page-finish"]
 file = "app/ui/core/board.js"
 find = "const FINISHABLE = ['working', 'paused']"
 replace = "const FINISHABLE = ['working']"
+
+[[plant]]
+name = "tell then done: a look kept through a pause is taken for a look at the monitor that said it ended since"
+meant = "a_second_tells_turn_first_seen_settled_with_another_monitor_that_said_it_ended_is_told_only_after_a_look_of_its_own"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            held.seen = None;\n            held.wait_ms = 0;\n            held.next_look_ms = 0;\n            held.running_looks = 0;\n            return watching_of(&held);"
+replace = "            held.wait_ms = 0;\n            held.next_look_ms = 0;\n            held.running_looks = 0;\n            return watching_of(&held);"
+
+[[plant]]
+name = "tell then done: Finish counts what the turn left from the raw reading, not after the look"
+meant = "finish_after_the_look_found_the_monitor_over_says_nothing_of_the_monitor_in_the_result"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "pending_after_look(&observed, watching_of(&record.held.borrow()))"
+replace = "observed.pending()"
+
+[[plant]]
+name = "tell then done: a tell held at the gate is no tell on its way"
+meant = "finish_waits_for_a_tell_the_human_has_not_passed_on_and_takes_no_answer_from_before_it"
+runs = ["engine-paused-answers", "ledger-pause-notes"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "               AND state IN ('queued', 'gated', 'delivering')\",\n"
+replace = "               AND state IN ('queued', 'delivering')\",\n"
+
+[[plant]]
+name = "tell then done: a tell being pasted is no tell on its way"
+meant = "a_tell_is_on_its_way_while_it_is_queued_held_at_the_gate_or_being_pasted_and_not_after"
+runs = ["ledger-pause-notes"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "               AND state IN ('queued', 'gated', 'delivering')\",\n"
+replace = "               AND state IN ('queued', 'gated')\",\n"
