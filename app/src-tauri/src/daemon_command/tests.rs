@@ -997,8 +997,8 @@ fn a_shell_that_hangs_on_every_question_costs_the_start_one_limit() {
 /// whole limit: the two are asked at once, not one after the other, and the start still
 /// waits one limit at most. Here the login files of each question wait until the other's
 /// have begun: asked at once, both go on at once; asked one after the other, the first
-/// waits out its whole limit. No clock decides it but that limit (a loaded machine
-/// took more than the 1.5 s a sleep left it).
+/// waits out its whole limit. No clock decides it but that limit (the 1.5 s a sleep
+/// left it is a margin a loaded machine might use up: reasoned, not seen in a run).
 #[cfg(unix)]
 #[test]
 fn slow_login_files_leave_the_interactive_question_its_whole_limit() {
