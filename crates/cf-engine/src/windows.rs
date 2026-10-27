@@ -698,7 +698,7 @@ impl Dispatcher {
         };
         // The window's own process: an adapter may find the harness's own
         // status by it from its first look.
-        planned.window.opened(pid);
+        planned.window.opened(&pane, pid);
         if self.forgotten(record) {
             {
                 let mut part = record.window.borrow_mut();
@@ -1010,6 +1010,7 @@ impl Dispatcher {
         let prepared = returning(adapter.prepare(&launch))
             .await
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
+        let first_once_up = adapter.first_message_once_up(&launch);
         Ok(Some(Planned {
             window: prepared.window,
             keys: adapter.interrupt(),
@@ -1032,7 +1033,7 @@ impl Dispatcher {
                 .flat_map(|begun| &begun.carried)
                 .map(|row| row.id)
                 .collect(),
-            first_once_up: adapter.first_message_once_up(),
+            first_once_up,
             prelude,
             first_instructions: adapter.keeps_first_instructions().then_some(instructions),
             owner,

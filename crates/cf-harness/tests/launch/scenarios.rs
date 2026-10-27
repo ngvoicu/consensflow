@@ -1062,7 +1062,11 @@ fn set_up(played: &mut Played, step: &Value) -> bool {
         // What the engine tells a window once its pane opened.
         let pid = names.real(&step["opened"])["pid"].as_u64();
         let window = played.window.as_ref().expect("a window prepared");
-        window.opened(pid.map(|pid| u32::try_from(pid).unwrap()));
+        let pane = Pane {
+            id: "p1-zeus".to_owned(),
+            generation: 1,
+        };
+        window.opened(&pane, pid.map(|pid| u32::try_from(pid).unwrap()));
         return true;
     }
     if step.get("follow").is_some() {

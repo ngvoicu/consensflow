@@ -106,8 +106,8 @@ impl Adapter for LookingAdapter {
         self.adapter.keeps_first_instructions()
     }
 
-    fn first_message_once_up(&self) -> bool {
-        self.adapter.first_message_once_up()
+    fn first_message_once_up(&self, launch: &Launch) -> bool {
+        self.adapter.first_message_once_up(launch)
     }
 
     fn specmint(&self, variant: Variant) -> Result<Skill, String> {
@@ -122,8 +122,8 @@ struct LookingWindow {
 }
 
 impl Window for LookingWindow {
-    fn opened(&self, pid: Option<u32>) {
-        self.window.opened(pid);
+    fn opened(&self, pane: &Pane, pid: Option<u32>) {
+        self.window.opened(pane, pid);
     }
 
     fn follow(&self, session: &str) {

@@ -335,7 +335,7 @@ impl ClaudeWindow {
 }
 
 impl Window for ClaudeWindow {
-    fn opened(&self, pid: Option<u32>) {
+    fn opened(&self, _pane: &Pane, pid: Option<u32>) {
         if pid.is_some() {
             self.pid.set(pid);
         }

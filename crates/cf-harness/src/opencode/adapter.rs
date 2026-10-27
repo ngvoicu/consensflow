@@ -222,7 +222,7 @@ impl Adapter for OpenCodeAdapter {
     }
 
     /// Its first message is posted to its server once the window is up (`seed`).
-    fn first_message_once_up(&self) -> bool {
+    fn first_message_once_up(&self, _launch: &Launch) -> bool {
         true
     }
 }
@@ -272,7 +272,7 @@ impl OpenCodeWindow {
 impl Window for OpenCodeWindow {
     /// OpenCode's own conversation is named by the plugin, never by the
     /// window's process.
-    fn opened(&self, _pid: Option<u32>) {}
+    fn opened(&self, _pane: &Pane, _pid: Option<u32>) {}
 
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());

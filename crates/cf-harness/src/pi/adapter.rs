@@ -208,7 +208,7 @@ struct PiWindow {
 impl Window for PiWindow {
     /// Pi's own conversation is named by the extension, never by the window's
     /// process.
-    fn opened(&self, _pid: Option<u32>) {}
+    fn opened(&self, _pane: &Pane, _pid: Option<u32>) {}
 
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());

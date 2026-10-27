@@ -620,7 +620,7 @@ fn follows_a_clear_before_the_first_look_by_the_status_file_named_after_the_wind
     home.status(cleared, &json!({ "status": "idle" }), me());
     home.status(first, &json!({ "status": "idle" }), other.pid());
     let named = window(&adapter, &Request::resumed(first));
-    named.opened(Some(me()));
+    named.opened(&opened_pane(), Some(me()));
     let observed = finished(named.observe()).unwrap();
     assert_eq!(observed.switched.as_deref(), Some(cleared));
     // Unnamed, the window's process is the first whose file names the
@@ -638,7 +638,7 @@ fn takes_the_first_status_file_naming_the_launchs_conversation_when_none_is_name
     // Claude may run as another process than the pane's own child (one it
     // starts in its place): no status file is named after the child.
     let window = window(&home.adapter(), &Request::resumed(first));
-    window.opened(Some(DEAD));
+    window.opened(&opened_pane(), Some(DEAD));
     home.status(first, &json!({ "status": "idle" }), me());
     assert!(finished(window.observe()).unwrap().settled);
     // That process is the window's from then on: a /clear in it is followed.
@@ -899,4 +899,12 @@ fn reports_a_refused_request_as_exhausted_quota_with_the_reset_its_text_names() 
         ],
     );
     assert_eq!(finished(window.observe()).unwrap().quota, None);
+}
+
+/// The pane a window of these tests opened in.
+fn opened_pane() -> Pane {
+    Pane {
+        id: "s1-chief".to_owned(),
+        generation: 1,
+    }
 }

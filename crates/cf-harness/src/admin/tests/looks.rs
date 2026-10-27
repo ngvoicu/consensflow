@@ -300,22 +300,21 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
             .latest
             .says(Harness::from_name(command).unwrap(), release);
     }
-    // Muse says its version in the file beside its launcher, and runs nothing; no
-    // window is opened on it, so no update is offered it.
+    // Muse says its version in the file beside its launcher, and runs nothing; its
+    // update is offered as the others' are, with no command of ours to run it.
     let muse = fixture.install("bin", "muse");
     std::fs::write(muse.with_file_name(".muse-version"), "1.4.13-R1\n").unwrap();
     fixture.latest.says(Harness::Muse, "1.4.14-R1");
     let rows = fixture.check(None, false);
     let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
     assert_eq!(ids, ["devin", "claude", "codex", "opencode", "pi", "muse"]);
-    assert!(rows[..5]
+    assert!(rows
         .iter()
         .all(|row| matches!(row.update, Update::Available(_))));
-    assert!(
-        matches!(rows[5].update, Update::Unknown(_)),
-        "{:?}",
-        rows[5].update
-    );
+    let Update::Available(release) = &rows[5].update else {
+        unreachable!()
+    };
+    assert_eq!(release.command, None, "Muse's own launcher updates it");
     let mut ran: Vec<String> = fixture
         .capture
         .take_ran()
@@ -349,9 +348,6 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
 
 #[test]
 fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_version() {
-    let not_yet = Setup::NotSupportedYet {
-        reason: "ConsensFlow cannot open a Muse Code window yet.".to_owned(),
-    };
     // Its installer's launcher, which names the binary it runs beside it.
     let fixture = Fixture::new();
     let launcher = fixture.install("home/.local/bin", "muse");
@@ -369,13 +365,13 @@ fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_v
         fixture.capture.take_ran().is_empty(),
         "the launcher's own --version checks for an update"
     );
-    assert_eq!(row.setup, Some(not_yet.clone()));
+    assert_eq!(row.setup, Some(Setup::Ready));
     assert_eq!(
         row.distribution,
         Distribution::Named("Muse Code's installer".to_owned())
     );
-    // No window is opened on it, so no update is offered it, and none runs one.
-    let Update::Unknown(release) = &row.update else {
+    // Its update is offered, and ConsensFlow runs none: Muse's launcher updates itself.
+    let Update::Available(release) = &row.update else {
         panic!("{:?}", row.update);
     };
     assert_eq!(release.value, "1.4.13-R6996.2");
@@ -411,7 +407,7 @@ fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_v
             value: "1.4.13".to_owned()
         }
     );
-    assert_eq!(row.setup, Some(not_yet));
+    assert_eq!(row.setup, Some(Setup::Ready));
     let ran = fixture.capture.take_ran();
     assert_eq!(ran.len(), 1);
     assert_eq!(ran[0].0.env.text("MUSE_NO_AUTO_UPDATE"), Some("1"));

@@ -297,7 +297,7 @@ impl CodexWindow {
 
 impl Window for CodexWindow {
     /// The thread is named by the broker, never by the window's process.
-    fn opened(&self, _pid: Option<u32>) {}
+    fn opened(&self, _pane: &Pane, _pid: Option<u32>) {}
 
     fn follow(&self, session: &str) {
         *self.thread.borrow_mut() = Some(session.to_owned());

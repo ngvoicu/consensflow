@@ -1034,7 +1034,7 @@ impl Adapter for Asked {
     /// Not a call of Node's adapter: nothing is written down of it in the
     /// traces. The fake posts its first message once up where the test says it
     /// seeds, as OpenCode does.
-    fn first_message_once_up(&self) -> bool {
+    fn first_message_once_up(&self, _launch: &Launch) -> bool {
         self.fake.seeds.get()
     }
 

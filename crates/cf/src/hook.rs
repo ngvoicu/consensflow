@@ -8,7 +8,9 @@
 //! and this order can at worst hand it over twice.
 
 use std::cell::RefCell;
+use std::ffi::OsString;
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -16,11 +18,12 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_board::door::{self, DOOR_WAIT};
 use cf_board::Board;
-use cf_harness::{claude, devin};
+use cf_harness::{claude, devin, muse};
 use cf_proto::questions::{Answer, Question, Reply};
 
 pub fn run(
     harness: Option<&str>,
+    args: &[OsString],
     env: &Env,
     input: &mut dyn Read,
     out: &mut dyn Write,
@@ -53,6 +56,13 @@ pub fn run(
             input,
             env.path("CF_DEVIN_ROLE_FILE"),
             env.path("CHISEL_PURE_ACP_WIRE_LOG"),
+        ),
+        // Muse runs its hooks with an environment of its own: the launch names the
+        // role file and the file of the window's sessions on the command line.
+        Some("muse-session") => muse::session_hook(
+            input,
+            args.first().map(Path::new),
+            args.get(1).map(Path::new),
         ),
         _ => None,
     };
@@ -131,7 +141,7 @@ mod tests {
         ];
         let env = Env::from_vars(vars.into_iter().chain(extra.iter().copied()));
         let mut out = Watching::new(board);
-        let status = run(Some("claude"), &env, &mut EVENT.as_bytes(), &mut out).unwrap();
+        let status = run(Some("claude"), &[], &env, &mut EVENT.as_bytes(), &mut out).unwrap();
         (out, status)
     }
 
