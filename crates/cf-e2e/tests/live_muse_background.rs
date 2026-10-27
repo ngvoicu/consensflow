@@ -240,6 +240,10 @@ fn usage(
     let mut spent = Vec::new();
     percentages(&value, &mut spent);
     log.say(format!("usage: {value}"));
+    // Muse says so of a window no turn has used yet (1.4.13): nothing of it is spent.
+    if spent.is_empty() && value["reason"] == "server_sent_no_usage" {
+        spent.push(0.0);
+    }
     Ok(spent)
 }
 
