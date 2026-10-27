@@ -475,6 +475,53 @@ find = '''
         }'''
 replace = ""
 
+# Since 3.0.7 the fresh look before the paste (the pacing) asks the project again after its
+# own await, so the rule is taken out of both places (T-794).
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if !self.in_open_project(message.project_id)?
+            || self
+                .next_in_line(record)?
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().held = None;'''
+replace = '''
+        if self
+            .next_in_line(record)?
+            .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().held = None;'''
+
+[[plant]]
+name = "resume tasks: a delivery whose project closes during the look before the paste goes into it"
+meant = "a_delivery_whose_project_closes_during_the_look_before_the_paste_is_not_pasted"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if !self.in_open_project(message.project_id)?
+            || self
+                .next_in_line(record)?
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().held = None;'''
+replace = '''
+        if self
+            .next_in_line(record)?
+            .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().held = None;'''
+
 # Round 5 hands the check before the paste to the hand-over itself (the host that
 # admits it); main's own deliver hands the adapter a host that admits everything.
 [[plant]]
