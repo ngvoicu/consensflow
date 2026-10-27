@@ -439,3 +439,107 @@ fn a_box_holding_a_paste_whose_enter_was_withheld_is_emptied_and_the_next_paste_
         "the box emptied, then the words pasted"
     );
 }
+
+/// The reasons the gate held message `id` for, as the trace was told them, in order.
+fn held_reasons(context: &Context, id: i64) -> Vec<String> {
+    use cf_proto::trace::{Traced, WindowEvent};
+    context
+        .trace
+        .lines
+        .borrow()
+        .iter()
+        .filter_map(|line| match &line.what {
+            Traced::Window {
+                event: WindowEvent::DeliveryHeld { message, reason },
+                ..
+            } if *message == id => Some(reason.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// T-842's P2: the gate's waits were told nowhere, the lane idle throughout. Each reason
+/// is told the trace once, while it holds, and the board's reader says it
+/// (`Dispatcher::held_back`), since the message became held; once it goes, nothing is
+/// held.
+#[test]
+fn a_message_the_gate_holds_says_why_once_a_reason_and_since_when() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    let chief = context.id(project, "chief");
+    let note = context.note(project, "zeus", "chief", "One");
+    context.pass().unwrap();
+    let held = context.dispatcher.held_back(chief).expect("held");
+    assert_eq!(
+        (held.message, held.reason.as_str()),
+        (note.id, "it has not rested 3 s since its last turn")
+    );
+    let since = held.since_ms;
+    context.advance(SETTLE);
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let held = context.dispatcher.held_back(chief).expect("held");
+    assert_eq!(held.reason, "the human typed in it within the last 3 s");
+    assert_eq!(held.since_ms, since, "held since it was first held");
+    assert_eq!(
+        held_reasons(&context, note.id),
+        [
+            "it has not rested 3 s since its last turn",
+            "the human typed in it within the last 3 s"
+        ],
+        "once a reason, not once a look"
+    );
+    context.host.set_snapshot(json!({ "typedQuietMs": SETTLE }));
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+    assert_eq!(context.dispatcher.held_back(chief), None);
+}
+
+/// T-842's P2: the gate's snapshot had the arrival's 5 s to answer, where `ready()`'s own
+/// has the bridge's: under load every snapshot came late and nothing went, unsaid. A late
+/// answer is the host's word all the same.
+#[test]
+fn a_pane_host_that_answers_late_holds_nothing_back() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    let note = context.note(project, "zeus", "chief", "One");
+    context.pass().unwrap();
+    context.advance(SETTLE);
+    let looking = context
+        .host
+        .request_holds
+        .hold(|args| args[0] == "pane.snapshot");
+    let passing = context.begin_pass();
+    context.settle();
+    context.advance(6_000);
+    looking.open();
+    context.settle();
+    passing.take().unwrap().unwrap();
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+}
+
+/// T-842's P2 (item 3): a record that cannot be read lets no message in (CMT-05), and the
+/// board read the window idle while nothing went. Its lane says the record cannot be
+/// read, and so does the reason the message is held for.
+#[test]
+fn a_window_whose_record_cannot_be_read_says_so_on_its_lane_and_in_its_held_message() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    let chief = context.id(project, "chief");
+    context.adapter.unread("chief", true);
+    let note = context.note(project, "zeus", "chief", "One");
+    for _ in 0..3 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    let said = "its record cannot be read (the transcript could not be read): nothing is typed into it until it can be";
+    assert_eq!(
+        context.dispatcher.activity(chief).reason.as_deref(),
+        Some(said)
+    );
+    let held = context.dispatcher.held_back(chief).expect("held");
+    assert_eq!((held.message, held.reason.as_str()), (note.id, said));
+}

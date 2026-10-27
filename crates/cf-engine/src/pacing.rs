@@ -45,10 +45,23 @@ use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::returning;
 use crate::seams::EngineError;
+use crate::windows::pane_body;
 
 /// What the lane of a window read at rest by the fallback says.
 pub(crate) const FALLBACK: &str =
     "at rest by its record and a quiet screen: its harness says nothing of its own";
+
+/// What the gate says of the message at the head of a window's queue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Pace {
+    /// It goes now.
+    Go,
+    /// It waits, for this reason, which the trace and the board's reader of a window's
+    /// held message are told (`Dispatcher::held_back`).
+    Wait(String),
+    /// The window or its participant went while the gate looked: nothing to say.
+    Gone,
+}
 
 /// What a look read of a window at rest, which every look of its rest reads the same.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +132,20 @@ fn read(observed: &Observed) -> bool {
         .is_some_and(|reading| !Reading::read_failed(reading))
 }
 
+/// Why a message waits for a window whose harness's live word is that it is at work.
+const AT_WORK: &str = "its harness says it is at work";
+
+/// Why a message waits for a window whose record could not be read: nothing is typed
+/// into it until it can be (CMT-05), and the board says so.
+pub(crate) fn unreadable(observed: &Observed) -> String {
+    let why = observed
+        .reading
+        .as_deref()
+        .and_then(Reading::reason)
+        .unwrap_or("no reading");
+    format!("its record cannot be read ({why}): nothing is typed into it until it can be")
+}
+
 /// A number of milliseconds the pane host said, none where it said none.
 fn ms(snapshot: &Value, field: &str) -> Option<i64> {
     snapshot
@@ -163,8 +190,16 @@ impl Dispatcher {
         let mut part = record.delivery.borrow_mut();
         if !(idle && read(observed)) || at_work {
             part.rest = None;
+            part.unrest = if !read(observed) {
+                Some(unreadable(observed))
+            } else if at_work {
+                Some(AT_WORK.to_owned())
+            } else {
+                None
+            };
             return;
         }
+        part.unrest = None;
         let frontier = Frontier::of(observed);
         if let Some(rest) = part
             .rest
@@ -192,55 +227,72 @@ impl Dispatcher {
     /// Whether the window has rested long enough for `message` to be typed into it
     /// now. What a launch put ahead of its queue and an urgent row go at its first
     /// rest; anything else waits for the settle, and for the human's keys to have
-    /// been quiet as long. Says nothing to the trace: the lane says the window is idle,
-    /// and the next look asks again.
+    /// been quiet as long. A wait says why (`Pace::Wait`), which the step tells the
+    /// trace once a reason (T-842's P2).
     pub(crate) async fn paced(
         self: &Rc<Self>,
         record: &Rc<Record>,
         message: &MessageView,
-    ) -> Result<bool, EngineError> {
+    ) -> Result<Pace, EngineError> {
         record.delivery.borrow_mut().paced = None;
-        if self.goes_at_rest(record, message) {
-            return Ok(true);
+        if self.goes_at_rest(record, message)? {
+            return Ok(Pace::Go);
         }
-        let Some(rest) = record.delivery.borrow().rest.clone() else {
-            return Ok(false);
+        let rest = record.delivery.borrow().rest.clone();
+        let Some(rest) = rest else {
+            let unrest = record.delivery.borrow().unrest.clone();
+            return Ok(Pace::Wait(
+                unrest.unwrap_or_else(|| "it has not read at rest yet".to_owned()),
+            ));
         };
         let settle = self.seams.limits.settle_ms;
         if settle == 0 {
-            return Ok(true);
+            return Ok(Pace::Go);
         }
         let rest_ms = self.now() - rest.since;
+        let seconds = settle as f64 / 1000.0;
         if rest_ms < settle && !self.seams.limits.settle_from_first_look {
-            return Ok(false);
+            return Ok(Pace::Wait(format!(
+                "it has not rested {seconds} s since its last turn"
+            )));
         }
         let (window, pane) = {
             let part = record.window.borrow();
             (part.window.clone(), part.pane.clone())
         };
         let (Some(window), Some(pane)) = (window, pane) else {
-            return Ok(false);
+            return Ok(Pace::Gone);
         };
-        // A host that does not answer in time says nothing of the human's keys.
-        let Some(snapshot) = self.snapshot_now(&pane).await else {
-            return Ok(false);
-        };
+        // The pane host's word, however long it took: the bound `ready()` gives its own
+        // snapshot (the bridge's), so a loaded host holds no message the window is ready
+        // for (T-842's P2: the arrival's 5 s bound held every message under load).
+        let asked = returning(self.seams.host.request("pane.snapshot", pane_body(&pane)))
+            .await
+            .ok()
+            .filter(|snapshot| snapshot.get("ok") == Some(&Value::Bool(true)));
         if self.forgotten(record) {
-            return Ok(false);
+            return Ok(Pace::Gone);
         }
+        let Some(snapshot) = asked else {
+            return Ok(Pace::Wait("its pane host did not answer".to_owned()));
+        };
         let typed_quiet_ms = ms(&snapshot, "typedQuietMs");
         let output_quiet_ms = ms(&snapshot, "outputQuietMs");
         // None is a window the human never typed in.
         if typed_quiet_ms.is_some_and(|quiet| quiet < settle) {
-            return Ok(false);
+            return Ok(Pace::Wait(format!(
+                "the human typed in it within the last {seconds} s"
+            )));
         }
         let fallback = !window.idle_word();
         if fallback && output_quiet_ms.is_none_or(|quiet| quiet < settle) {
-            return Ok(false);
+            return Ok(Pace::Wait(format!(
+                "its screen printed within the last {seconds} s, and its harness says nothing of its own rest"
+            )));
         }
         // A paste the host writes still is no rest of the window's.
         if js::truthy(snapshot.get("pasteInFlight")) {
-            return Ok(false);
+            return Ok(Pace::Wait("a paste is being written into it".to_owned()));
         }
         record.delivery.borrow_mut().paced = Some(Paced {
             message: message.id,
@@ -250,40 +302,50 @@ impl Dispatcher {
             output_quiet_ms,
             fallback,
         });
-        Ok(true)
+        Ok(Pace::Go)
     }
 
     /// What a launch put ahead of the window's queue, and an urgent row, go at the
     /// window's first rest, as they went before the pacing.
-    fn goes_at_rest(&self, record: &Record, message: &MessageView) -> bool {
+    /// So does the head of a queue an urgent row waits in: the urgent row is not held
+    /// back behind the head's settle (T-842's P3: a member's question goes first).
+    fn goes_at_rest(&self, record: &Record, message: &MessageView) -> Result<bool, EngineError> {
         let prelude = record.delivery.borrow().prelude.clone();
-        message.urgent
+        if message.urgent
             || prelude.is_some_and(|prelude| {
                 prelude.replacement == message.id || prelude.displaced == Some(message.id)
             })
+        {
+            return Ok(true);
+        }
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .pending(record.id)?
+            .iter()
+            .any(|waiting| waiting.urgent && waiting.state == "queued"))
     }
 
     /// The fresh look just before `message`'s paste: the window must read at rest, from
-    /// a record that was read, on the last item the look that let it go read, and its
-    /// input box, where its harness has one it reads, must hold no words. Where it
-    /// does not, its rest is over, and nothing is handed over. A message the gate did not
-    /// let go (one that goes at rest, or no settle) is not looked at again.
+    /// a record that was read, on the last item the look that let it go read, its harness
+    /// must not say it is at work, and its input box, where its harness has one it reads,
+    /// must hold no words. Where it does not, its rest is over, nothing is handed over,
+    /// and the wait says why. A message the gate did not let go (one that goes at rest,
+    /// or no settle) is not looked at again.
     pub(crate) async fn still_at_rest(
         self: &Rc<Self>,
         record: &Rc<Record>,
         message: i64,
-    ) -> Result<bool, EngineError> {
+    ) -> Result<Pace, EngineError> {
         let paced = record.delivery.borrow().paced.clone();
         let Some(paced) = paced.filter(|paced| paced.message == message) else {
-            return Ok(true);
+            return Ok(Pace::Go);
         };
         let Some(participant) = self.participant_of(record)? else {
-            return Ok(false);
+            return Ok(Pace::Gone);
         };
         let fresh = self.observe(&participant, record).await;
-        // A box that holds words (ones the human's keys counted as sent, as Devin kept a
-        // line typed with its Enter in one burst) would send a paste behind them, in one
-        // message with them: it takes none.
         let (window, pane) = {
             let part = record.window.borrow();
             (part.window.clone(), part.pane.clone())
@@ -298,26 +360,37 @@ impl Dispatcher {
             .uncleared
             .as_ref()
             .is_some_and(|stale| pane.as_ref() == Some(&stale.pane));
-        let boxed = match (window, pane) {
+        // A box that holds words (ones the human's keys counted as sent, as Devin kept a
+        // line typed with its Enter in one burst) would send a paste behind them, in one
+        // message with them: it takes none.
+        let boxed = match (&window, pane) {
             (Some(window), Some(pane)) if !emptied_first => {
                 returning(window.input_box(&*self.seams.host, &pane)).await
             }
             _ => None,
         };
         if self.forgotten(record) {
-            return Ok(false);
+            return Ok(Pace::Gone);
         }
-        let same = boxed != Some(InputBox::Holds)
-            && fresh.as_ref().is_ok_and(|fresh| {
-                fresh.settled
-                    && fresh.waiting.is_none()
-                    && read(fresh)
-                    && Frontier::of(fresh) == paced.frontier
-            });
-        if !same {
-            self.rest_ends(record);
-        }
-        Ok(same)
+        let at_work = window.as_ref().is_some_and(|window| window.at_work());
+        let why = match fresh {
+            Err(_) => Some("a look at it failed as the message was to go".to_owned()),
+            Ok(fresh) if !read(&fresh) => Some(unreadable(&fresh)),
+            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
+                Some("it began a turn as the message was to go".to_owned())
+            }
+            Ok(fresh) if Frontier::of(&fresh) != paced.frontier => {
+                Some("its record changed as the message was to go".to_owned())
+            }
+            Ok(_) if at_work => Some(AT_WORK.to_owned()),
+            Ok(_) if boxed == Some(InputBox::Holds) => Some("its input box holds words".to_owned()),
+            Ok(_) => None,
+        };
+        let Some(why) = why else {
+            return Ok(Pace::Go);
+        };
+        self.rest_ends(record);
+        Ok(Pace::Wait(why))
     }
 
     /// What the look that let `message` go read, for its `delivery.begun`.

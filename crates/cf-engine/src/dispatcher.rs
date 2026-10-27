@@ -155,6 +155,14 @@ impl Dispatcher {
         )
     }
 
+    /// Why the message at the head of `participant`'s window's queue does not go in now,
+    /// where it is held (by the pacing, the window's readiness, or a box to empty): the
+    /// one place that says it (T-842's P2). None where nothing is held.
+    pub fn held_back(&self, participant: i64) -> Option<crate::deliveries::HeldBack> {
+        self.record(participant)
+            .and_then(|record| record.delivery.borrow().held.clone())
+    }
+
     /// Whether a message waits for this participant until the human sends
     /// what they typed in its window.
     pub fn holding(&self, participant: i64) -> Result<bool, EngineError> {
@@ -1203,6 +1211,16 @@ impl Dispatcher {
                             participant.handle
                         ),
                     ),
+                    // A record that cannot be read lets no message in (CMT-05), though the
+                    // look reads the window at rest: its lane says so (T-842's P2).
+                    None if state == ActivityState::Idle
+                        && observed
+                            .reading
+                            .as_deref()
+                            .is_some_and(cf_harness::records::Reading::read_failed) =>
+                    {
+                        Activity::because(state, pacing::unreadable(&observed))
+                    }
                     // A window whose harness says nothing of its rest is read at rest by
                     // the pacing's fallback, and its lane says so.
                     None if state == ActivityState::Idle && !self.idle_word(record) => {
@@ -1350,8 +1368,14 @@ impl Dispatcher {
                         .keep_apart(project, participant, record, &next, owner)
                         .await;
                 }
-                // Typed in only once the window has rested long enough (`pacing`).
-                if !self.paced(record, &next).await? || self.forgotten(record) {
+                // Typed in only once the window has rested long enough (`pacing`); a wait
+                // says why, once a reason.
+                match self.paced(record, &next).await? {
+                    pacing::Pace::Go => {}
+                    pacing::Pace::Wait(why) => return self.held_once(record, next.id, &why),
+                    pacing::Pace::Gone => return Ok(()),
+                }
+                if self.forgotten(record) {
                     return Ok(());
                 }
                 let (this, held) = (Rc::clone(self), Rc::clone(record));

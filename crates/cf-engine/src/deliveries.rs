@@ -23,6 +23,7 @@ use serde_json::{json, Value};
 use crate::arrival::ENTER_AGAIN_QUIET_MS;
 use crate::delivery_text::{delivery_text, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
+use crate::pacing::Pace;
 use crate::record::Record;
 use crate::role_change::Prelude;
 use crate::runtime::returning;
@@ -88,6 +89,20 @@ pub(crate) struct Unread {
     pub(crate) told: Option<i64>,
 }
 
+/// Why the message at the head of a window's queue does not go in now: the one place
+/// that says it, for the trace, the board and the human's note of a message held long
+/// (T-842's P2; T-839 builds the bound and the note on it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldBack {
+    /// The message held.
+    pub message: i64,
+    /// Why, in words a person reads: the gate's, the window's readiness's, or the box's.
+    pub reason: String,
+    /// Since when this message has been held, on the engine's clock, whatever its
+    /// reasons since.
+    pub since_ms: i64,
+}
+
 /// The record's delivery part.
 #[derive(Debug, Default)]
 pub(crate) struct DeliveryPart {
@@ -100,8 +115,12 @@ pub(crate) struct DeliveryPart {
     /// items that conversation's record held while it read a turn at work, and since when
     /// it has held as many (`arrival`'s `watch_left`).
     pub(crate) left_at_work: Option<(i64, usize, i64)>,
-    /// The message a window not ready for a paste holds, told to the trace once.
-    pub(crate) held: Option<i64>,
+    /// Why the message at the head of the window's queue does not go in now, told to
+    /// the trace once a reason (`held_once`): what `Dispatcher::held_back` reads.
+    pub(crate) held: Option<HeldBack>,
+    /// Why the window has no rest that a message could go in on, where a look said:
+    /// its record could not be read, or its harness says it is at work (`pacing`).
+    pub(crate) unrest: Option<String>,
     /// What goes into the window before anything else of its queue, in this
     /// order and while it waits and may go: a launch that is to say a role
     /// first puts the replacement here, and the message it displaced after it
@@ -418,19 +437,9 @@ impl Dispatcher {
             record.delivery.borrow_mut().emptied = None;
         }
         if let Some(held) = held {
-            // Said once per message, so a wait is in the trace, not a mystery.
-            let first = record.delivery.borrow().held != Some(message.id);
-            if first {
-                record.delivery.borrow_mut().held = Some(message.id);
-                self.trace_window(
-                    record,
-                    WindowEvent::DeliveryHeld {
-                        message: message.id,
-                        reason: format!("the window is not ready for a paste: {}", held.sentence()),
-                    },
-                )?;
-            }
-            return Ok(());
+            // Said once a reason, so a wait is in the trace, not a mystery.
+            let reason = format!("the window is not ready for a paste: {}", held.sentence());
+            return self.held_once(record, message.id, &reason);
         }
         // A paste whose Enter was withheld waits in the input box, where this one
         // would go in beside it, to be sent with it (both reviews of 2026-10-20,
@@ -538,18 +547,22 @@ impl Dispatcher {
                 );
             }
         }
-        record.delivery.borrow_mut().held = None;
         // A fresh look just before the paste reads the window at rest on the last item
         // the look that let it go read, or nothing is handed over and nothing is spent
-        // (`pacing`); what it waited for is asked again after it.
-        if !self.still_at_rest(record, message.id).await?
-            || !self.in_open_project(message.project_id)?
+        // (`pacing`), and the wait says why; what it waited for is asked again after it.
+        match self.still_at_rest(record, message.id).await? {
+            Pace::Go => {}
+            Pace::Wait(why) => return self.held_once(record, message.id, &why),
+            Pace::Gone => return Ok(()),
+        }
+        if !self.in_open_project(message.project_id)?
             || self
                 .next_in_line(record)?
                 .is_none_or(|next| next.id != message.id)
         {
             return Ok(());
         }
+        record.delivery.borrow_mut().held = None;
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
@@ -922,11 +935,25 @@ impl Dispatcher {
     }
 
     /// A delivery waits this pass, `reason` said in the trace once per message.
-    fn held_once(&self, record: &Record, message: i64, reason: &str) -> Result<(), EngineError> {
-        if record.delivery.borrow().held == Some(message) {
-            return Ok(());
-        }
-        record.delivery.borrow_mut().held = Some(message);
+    pub(crate) fn held_once(
+        &self,
+        record: &Record,
+        message: i64,
+        reason: &str,
+    ) -> Result<(), EngineError> {
+        let since_ms = {
+            let held = record.delivery.borrow().held.clone();
+            match held.filter(|held| held.message == message) {
+                Some(held) if held.reason == reason => return Ok(()),
+                Some(held) => held.since_ms,
+                None => self.now(),
+            }
+        };
+        record.delivery.borrow_mut().held = Some(HeldBack {
+            message,
+            reason: reason.to_owned(),
+            since_ms,
+        });
         self.trace_window(
             record,
             WindowEvent::DeliveryHeld {
