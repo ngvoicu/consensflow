@@ -40,6 +40,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 use crate::background::leaving;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
+use crate::pacing;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
@@ -1143,14 +1144,18 @@ impl Dispatcher {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
-                    // A look that failed says nothing of what is on its way in (`arrival`).
+                    // A look that failed says nothing of what is on its way in (`arrival`),
+                    // nor of the window's rest (`pacing`).
                     self.unknown(record, "a look at it failed");
+                    self.rest_ends(record);
                     self.set_activity(record, Activity::because(ActivityState::Unknown, reason))?;
                 }
                 return Ok(());
             }
         };
         record.delivery.borrow_mut().lost = observed.lost().len();
+        // Which look this is, for a rest to be read over looks that follow each other.
+        let looked = self.looked(record);
         // Quota belongs to the member: a session that runs out takes its member out.
         let owner = self.member_of(project, participant);
         // A window with nothing in its record may still be drawing its screen.
@@ -1198,6 +1203,11 @@ impl Dispatcher {
                             participant.handle
                         ),
                     ),
+                    // A window whose harness says nothing of its rest is read at rest by
+                    // the pacing's fallback, and its lane says so.
+                    None if state == ActivityState::Idle && !self.idle_word(record) => {
+                        Activity::because(state, pacing::FALLBACK)
+                    }
                     None => Activity::of(state),
                 }
             };
@@ -1315,6 +1325,7 @@ impl Dispatcher {
             && observed.settled
             && observed.waiting.is_none();
         let idle = free && !drawing;
+        self.note_rest(record, &observed, idle, looked);
         if record.pending_switch.borrow().is_some() {
             return self
                 .await_switch(project, participant, record, &observed, idle)
@@ -1338,6 +1349,10 @@ impl Dispatcher {
                     return self
                         .keep_apart(project, participant, record, &next, owner)
                         .await;
+                }
+                // Typed in only once the window has rested long enough (`pacing`).
+                if !self.paced(record, &next).await? || self.forgotten(record) {
+                    return Ok(());
                 }
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.deliver(&held, next).await })

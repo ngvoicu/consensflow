@@ -25,6 +25,7 @@ pub mod handoff;
 pub mod host;
 mod in_flight;
 mod ownership;
+mod pacing;
 mod record;
 mod resume;
 mod role_change;

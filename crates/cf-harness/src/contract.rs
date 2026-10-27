@@ -458,6 +458,15 @@ pub trait Window {
     /// it; one that writes nothing of a turn it was interrupted in (Claude,
     /// before its first word) reads the looks that follow by it.
     fn interrupted(&self) {}
+    /// Whether the harness has a word of its own that its window is at rest, apart
+    /// from its record (Claude Code's status, Codex's broker, Pi's extension, Devin's
+    /// store and wire log, OpenCode's TUI status). One that has none is read at rest
+    /// for a delivery only by the fallback: its record's turn ended, its screen quiet
+    /// and no key of the human's, each for the settle (`pacing`), and the board says
+    /// the fallback is in use.
+    fn idle_word(&self) -> bool {
+        true
+    }
 }
 
 /// A window's pane, by the pane host's id and the generation it opened in.
@@ -587,6 +596,12 @@ pub enum Admission {
         queued: bool,
     },
     Refused {
+        reason: String,
+    },
+    /// Refused because the harness is at work: nothing went in, and the message
+    /// waits for the window's next rest, with no attempt spent (Pi's extension
+    /// sends nothing while Pi is busy; 3.0.7 chief-meeting, D9).
+    Busy {
         reason: String,
     },
     Uncertain {

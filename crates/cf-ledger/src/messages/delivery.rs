@@ -253,8 +253,14 @@ pub(crate) fn first_received(
 }
 
 /// A message's delivery begins: it is what the paste is told by, with the
-/// rows it carries, which are the ones still waiting now and no others.
-pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun, LedgerError> {
+/// rows it carries, which are the ones still waiting now and no others. `look`
+/// is what the look that let it go read of the window (the pacing's evidence:
+/// 3.0.7 chief-meeting, CMT-08), which its `delivery.begun` says.
+pub(crate) fn begin_delivery(
+    store: &mut Store,
+    message_id: i64,
+    look: Option<&Value>,
+) -> Result<Begun, LedgerError> {
     store.write(|store| {
         let message = require_message(store, message_id, "queued")?;
         if message.recipient_role == "human" {
@@ -310,11 +316,11 @@ pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun
          WHERE id = ?",
             [message_id],
         )?;
-        store.log(
-            message.project_id,
-            "delivery.begun",
-            json!({ "message": message_id, "attempt": message.attempts + 1 }),
-        )?;
+        let mut begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
+        if let Some(look) = look {
+            begun["look"] = look.clone();
+        }
+        store.log(message.project_id, "delivery.begun", begun)?;
         Ok(Begun {
             message: known_message(store, message_id)?,
             carried: carried(store, message_id)?,

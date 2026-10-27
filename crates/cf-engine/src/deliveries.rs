@@ -136,6 +136,15 @@ pub(crate) struct DeliveryPart {
     /// each paste is told so until one goes in ([`PaneHost::cleared`]), and its
     /// adapter presses nothing more to empty it.
     pub(crate) emptied: Option<Pane>,
+    /// The rest the window's looks have read since it began (`pacing`): none while a
+    /// look reads it otherwise.
+    pub(crate) rest: Option<crate::pacing::Rest>,
+    /// How many looks of the step the window has had: a rest is read over looks that
+    /// follow each other, so one a step left unread (it returned before) ends it.
+    pub(crate) looks: u64,
+    /// What the look that let the message at the head of its queue go read, for the
+    /// fresh look before its paste and for its `delivery.begun` (`pacing`).
+    pub(crate) paced: Option<crate::pacing::Paced>,
 }
 
 /// A paste whose Enter was withheld, left in its window's input box.
@@ -527,12 +536,32 @@ impl Dispatcher {
             }
         }
         record.delivery.borrow_mut().held = None;
+        // A fresh look just before the paste reads the window at rest on the last item
+        // the look that let it go read, or nothing is handed over and nothing is spent
+        // (`pacing`); what it waited for is asked again after it.
+        if !self.still_at_rest(record, message.id).await?
+            || !self.in_open_project(message.project_id)?
+            || self
+                .next_in_line(record)?
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
         // What is pasted is what the ledger says it is when delivery begins: the
         // message, and the rows it carries still waiting, which are the set from now.
-        let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
+        // Its `delivery.begun` says what the look that let it go read, where one did.
+        let begun = match self.paced_look(record, message.id) {
+            Some(look) => self
+                .seams
+                .ledger
+                .borrow_mut()
+                .begin_delivery_looked(message.id, &look)?,
+            None => self.seams.ledger.borrow_mut().begin_delivery(message.id)?,
+        };
+        record.delivery.borrow_mut().paced = None;
         let owner = record.window.borrow().owner;
         if self.begins_a_turn(owner, &begun.message)? {
             let mut delivery = record.delivery.borrow_mut();
@@ -589,7 +618,7 @@ impl Dispatcher {
             },
         };
         // Something went into the box, or may have: it is no longer known empty.
-        if !matches!(outcome, Admission::Refused { .. }) {
+        if !matches!(outcome, Admission::Refused { .. } | Admission::Busy { .. }) {
             record.delivery.borrow_mut().emptied = None;
         }
         if self.forgotten(record) {
@@ -617,6 +646,17 @@ impl Dispatcher {
         delivering.session = session;
         if let Admission::Refused { reason } = &outcome {
             return self.settle_failure(delivering, reason, true);
+        }
+        // Refused for being at work (Pi's extension, D9): nothing went in, so the
+        // attempt is given back, and the message waits for the window's next rest.
+        if let Admission::Busy { reason } = &outcome {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .retry_delivery(message.id, reason, true)?;
+            self.rest_ends(record);
+            self.changed();
+            return Ok(());
         }
         // A window that closed while its harness took the message had nothing
         // on its way to settle when it went: the message goes again, unless the

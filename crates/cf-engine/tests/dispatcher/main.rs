@@ -71,6 +71,7 @@ mod nothing_to_stop;
 mod open_deadline;
 mod out_of_quota;
 mod own_steps;
+mod pacing;
 mod participant_leaves;
 mod paste_shapes;
 mod pause_notes;

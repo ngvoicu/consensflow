@@ -224,7 +224,17 @@ impl Ledger {
 
     /// A message's delivery into its window begins: it, and the rows its paste carries.
     pub fn begin_delivery(&mut self, message_id: i64) -> Result<Begun, LedgerError> {
-        messages::begin_delivery(&mut self.store, message_id)
+        messages::begin_delivery(&mut self.store, message_id, None)
+    }
+
+    /// [`Ledger::begin_delivery`], its `delivery.begun` saying what the look that let
+    /// the message go read of the window (`look`: the pacing's evidence).
+    pub fn begin_delivery_looked(
+        &mut self,
+        message_id: i64,
+        look: &Value,
+    ) -> Result<Begun, LedgerError> {
+        messages::begin_delivery(&mut self.store, message_id, Some(look))
     }
 
     /// The newest message pasted into a participant's window about a task and proved.

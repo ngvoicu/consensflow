@@ -89,6 +89,9 @@ pub struct Made {
     /// Codex has a fake of its own ([`Context::codex`]), so a test sees which
     /// harness a window opened on (`withCodex`).
     pub codex: bool,
+    /// The settle of the pacing ([`Limits::settle_ms`]): none, unless the case is
+    /// the pacing's.
+    pub settle_ms: i64,
 }
 
 impl Default for Made {
@@ -97,6 +100,7 @@ impl Default for Made {
             // The fake answers for any harness; OpenCode is here for a mixed staff.
             harnesses: vec!["claude-code", "opencode"],
             codex: false,
+            settle_ms: 0,
         }
     }
 }
@@ -217,6 +221,9 @@ impl Context {
                 launch_ms: 120_000,
                 open_ms: 60_000,
                 max_attempts: 3,
+                // No pacing, so every case keeps the timing it was written with; a
+                // case of the pacing's own asks for a settle (`Made::settle_ms`).
+                settle_ms: made.settle_ms,
             },
         };
         let dispatcher = Dispatcher::new(seams.clone());

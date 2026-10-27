@@ -282,6 +282,10 @@ impl Window for FakeWindow {
                 }
                 Ok(Admission::Admitted { queued: false }) => json!({ "admitted": true }),
                 Ok(Admission::Refused { reason }) => json!({ "admitted": false, "reason": reason }),
+                // No Node fake was ever busy: said as its refusals were, and why.
+                Ok(Admission::Busy { reason }) => {
+                    json!({ "admitted": false, "busy": true, "reason": reason })
+                }
                 Ok(Admission::Uncertain { reason }) => {
                     json!({ "admitted": null, "reason": reason })
                 }
@@ -316,6 +320,11 @@ impl Window for FakeWindow {
             wrapped.after().await;
             Ok(observed)
         })
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
+    fn idle_word(&self) -> bool {
+        self.fake.idle_word.get()
     }
 
     /// Not written down: the JavaScript fake was never asked.

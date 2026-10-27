@@ -277,6 +277,10 @@ pub struct FakeAdapter {
     /// The readings of the windows opened from now on say the record each item
     /// is of: every harness's but Devin's, whose items are its store's.
     pub says_places: Cell<bool>,
+    /// Its windows' harness has a word of its own that the window is at rest
+    /// (`Window::idle_word`): every harness's but one with no such word, whose
+    /// windows are read at rest by the pacing's fallback.
+    pub idle_word: Cell<bool>,
 }
 
 impl FakeAdapter {
@@ -348,6 +352,7 @@ impl FakeAdapter {
             resumes_records: Cell::new(false),
             trusts: RefCell::new(None),
             says_places: Cell::new(true),
+            idle_word: Cell::new(true),
         })
     }
 

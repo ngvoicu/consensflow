@@ -652,7 +652,7 @@ impl Dispatcher {
 
     /// The pane host's word on the window now: none where it failed, or came too late
     /// ([`SLOW_READ_MS`]) to say what the window does now.
-    async fn snapshot_now(&self, pane: &Pane) -> Option<Value> {
+    pub(crate) async fn snapshot_now(&self, pane: &Pane) -> Option<Value> {
         let asked = self.now();
         let body = json!({ "id": pane.id, "generation": pane.generation });
         // `.catch(() => null)` made a promise of its own to wait on, a turn

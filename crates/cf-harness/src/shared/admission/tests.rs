@@ -14,6 +14,7 @@ fn written(admission: &Admission) -> Value {
         Admission::Admitted { queued: false } => json!({ "admitted": true }),
         Admission::Admitted { queued: true } => json!({ "admitted": true, "queued": true }),
         Admission::Refused { reason } => json!({ "admitted": false, "reason": reason }),
+        Admission::Busy { reason } => json!({ "admitted": false, "busy": true, "reason": reason }),
         Admission::Uncertain { reason } => json!({ "admitted": null, "reason": reason }),
     }
 }
