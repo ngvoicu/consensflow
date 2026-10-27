@@ -16,6 +16,10 @@ verifiers = ["node", "--test", "tests/install-verifiers.test.mjs"]
 ps1 = ["node", "--test", "tests/install-ps1.test.mjs"]
 # The publisher's signed SHA256SUMS: what it publishes, what it checks after, and `cf-publish sums`.
 signed-sums = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "publish_release", "--test", "feeds_check", "--test", "sums_cli"]
+# The one-line installers' own real run, as a faked Windows and a Mac outside CI (what it refuses before it reads).
+real-install = ["node", "--test", "tests/real-install.test.mjs"]
+# The rule over every workflow: a downloaded binary runs only where the job that built it ran.
+binaries = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "workflow_binaries"]
 # The sign job of the release workflow: its text, and its steps run as written.
 sign-job = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "release_sign", "--test", "release_publish"]
 
@@ -141,7 +145,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    [ "$shown" = "$version" ] || refuse'''
+find = '''    [ "$shown" = "$want" ] || refuse'''
 replace = '''    true || refuse'''
 
 [[plant]]
@@ -1215,3 +1219,319 @@ replace = '''    runs-on: macos-latest
       contents: write
     outputs:
       sha256:'''
+
+# --- T-832: what an earlier install left in the folder, the Windows guard of the real run, the rule over downloaded binaries ---
+
+[[plant]]
+name = "installers: install.sh does not look for what an earlier install left"
+meant = "one whose process is gone is removed, and the install goes on"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    dest="$dir/ConsensFlow.app"
+    remove_leftovers
+'''
+replace = '''    dest="$dir/ConsensFlow.app"
+'''
+
+[[plant]]
+name = "installers: install.sh removes what a running install is making"
+meant = "one a running install made is kept: its process is a shell running install.sh, or one that was given the script on its input"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''            if install_goes_on "$owner"; then'''
+replace = '''            if false; then'''
+
+[[plant]]
+name = "installers: install.sh keeps the copy of any program that has the pid of a dead install"
+meant = "one whose pid is another program now is removed, and the program is left running"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    program=${program##*/}
+    case "${program#-}" in
+        sh | bash | dash | zsh | ksh | ash | csh | tcsh | fish) return 0 ;;
+    esac
+    return 1
+}'''
+replace = '''    return 0
+}'''
+
+[[plant]]
+name = "installers: install.sh takes its own pid for a running install"
+meant = "one with this run's own pid is an earlier run's: it is removed before the copy goes in"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    [ "$1" != "$$" ] || return 1
+'''
+replace = '''    :
+'''
+
+[[plant]]
+name = "installers: install.sh removes a name that only looks like an earlier install's"
+meant = "a name that only looks similar is kept, and so is a link, which is never followed"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                "" | 0* | *[!0-9]*) continue ;;'''
+replace = '''                "") continue ;;'''
+
+[[plant]]
+name = "installers: install.sh follows a link, or takes a file, for an earlier install's copy"
+meant = "a name that only looks similar is kept, and so is a link, which is never followed"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''            if [ -L "$leftover" ] || [ ! -d "$leftover" ]; then'''
+replace = '''            if [ ! -e "$leftover" ]; then'''
+
+[[plant]]
+name = "installers: install.sh removes the app moved aside beside an installed app that is not whole"
+meant = "a .previous beside an app that is not whole and checked is left alone, and so is that app"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                if [ -n "$problem" ]; then'''
+replace = '''                if false; then'''
+
+[[plant]]
+name = "installers: install.sh deletes the app an earlier install moved aside where nothing is installed"
+meant = "a .previous with no app where the app goes is put back, and the install goes on from it"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                if mv "$leftover" "$dest"; then'''
+replace = '''                if rm -rf "$leftover"; then'''
+
+[[plant]]
+name = "installers: install.sh holds the installed app to the release's version before it removes the app moved aside"
+meant = "one whose process is gone is removed, and the install goes on"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    want=${3-$version}'''
+replace = '''    want=$version'''
+
+[[plant]]
+name = "installers: install.sh removes an earlier install's copy without a word"
+meant = "one whose process is gone is removed, and the install goes on"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                    say "removed $leftover, the copy of the app an earlier install was making (no install runs as process $owner)."'''
+replace = '''                    :'''
+
+[[plant]]
+name = "installers: install.sh puts the app moved aside back without a word"
+meant = "a .previous with no app where the app goes is put back, and the install goes on from it"
+runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                    say "put $leftover back as $dest: an earlier install was stopped after it moved that app aside, and nothing was in its place."'''
+replace = '''                    :'''
+
+[[plant]]
+name = "installers: the real install replaces a ConsensFlow Windows lists, unasked"
+meant = "an installed ConsensFlow is not replaced, and nothing is read, unless the run names it"
+runs = ["real-install"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/real-install.mjs"
+find = '''  if (listed && !(options.dir && sameFolder(options.dir, listed.where)))'''
+replace = '''  if (false)'''
+
+[[plant]]
+name = "installers: the real install takes any folder for the ConsensFlow Windows lists"
+meant = "naming another folder than the installed one is not naming it"
+runs = ["real-install"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/real-install.mjs"
+find = '''  return plain(a) === plain(b)'''
+replace = '''  return true'''
+
+[[plant]]
+name = "installers: the real install opens and ends a ConsensFlow in use"
+meant = "--upgrade and --downgrade end the installed app, so they need --no-open even where it is named"
+runs = ["real-install"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/real-install.mjs"
+find = '''  if ((options.upgrade || options.downgrade) && !options['no-open'])'''
+replace = '''  if (false)'''
+
+[[plant]]
+name = "installers: the real install on a Mac outside CI takes /Applications"
+meant = "the folder to install into is named, and --upgrade and --downgrade run with --no-open"
+runs = ["real-install"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/real-install.mjs"
+find = '''  if (mac && !options.dir)'''
+replace = '''  if (false)'''
+
+[[plant]]
+name = "installers: the sign job makes the publisher built on Linux executable with chmod 755, and runs it no other way"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          chmod 755 "$tool"'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          signed=$("$RUNNER_TEMP/sums-tool/cf-publish" sums --dir . --version "$version")'''
+replace = '''          signed=$(echo "ConsensFlow_$version_SHA256SUMS")'''
+
+[[plant]]
+name = "installers: the sign job makes the publisher built on Linux executable through a second variable, with chmod u+x"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          tool="$RUNNER_TEMP/sums-tool/cf-publish"
+'''
+replace = '''          folder="$RUNNER_TEMP/sums-tool"
+          tool="$folder/cf-publish"
+'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          chmod u+x "$tool"'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          signed=$("$RUNNER_TEMP/sums-tool/cf-publish" sums --dir . --version "$version")'''
+replace = '''          signed=$(echo "ConsensFlow_$version_SHA256SUMS")'''
+
+[[plant]]
+name = "installers: the sign job runs the publisher built on Linux by its path, made executable no way the rule reads"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          : "$tool"'''
+
+[[plant]]
+name = "installers: the Windows build runs the publisher built on Linux, by its path"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        run: '"$RUNNER_TEMP/publisher/cf-publish" --version'
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "installers: the Windows build runs the publisher built on Linux from PowerShell"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: pwsh
+        run: '& "$env:RUNNER_TEMP\publisher\cf-publish" --version'
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "installers: the publish job downloads the publisher by a pattern, which no job's upload is held to"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish
+          path: ${{ runner.temp }}/publisher'''
+replace = '''          pattern: cf-publish*
+          path: ${{ runner.temp }}/publisher'''
+
+[[plant]]
+name = "installers: the workflow reader ends a job at an indented comment"
+meant = "an_indented_comment_inside_a_job_does_not_end_it"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/testing/workflow.rs"
+find = '''        .position(|line| !is_blank(line) && indent_of(line) <= 2)'''
+replace = '''        .position(|line| indent_of(line) == 2 && !line.trim().is_empty())'''
+
+[[plant]]
+name = "installers: the workflow reader does not take a job header with a comment for a job"
+meant = "a_job_header_with_a_comment_is_a_job"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/testing/workflow.rs"
+find = '''    (after.is_empty() || after.starts_with('#')).then_some(name)'''
+replace = '''    after.is_empty().then_some(name)'''
