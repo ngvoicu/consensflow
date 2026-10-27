@@ -27,6 +27,7 @@ muse-page-held = ["node", "app/node_modules/@playwright/test/cli.js", "test", "a
 muse-page-why = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says a member whose harness moved|lost its words after a restart"]
 muse-scheduler = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "scheduler::"]
 muse-records-play = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]
+muse-chief-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_billing_refusal_that_reaches"]
 muse-moved = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "moved_models"]
 muse-wake = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_task_held_for_no_time"]
 muse-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_reads"]
@@ -664,7 +665,7 @@ replace = '''
 
 [[plant]]
 name = "muse: claude keeps the model across a relaunch"
-meant = "the_humans_model_command_a_synthetic_message_a_subagent_and_a_relaunch_are_no_move"
+meant = "a_change_before_the_relaunch_boundary_is_neither_held_nor_told_and_one_after_it_is"
 runs = ["muse-claude"]
 
 [[plant.edit]]
@@ -959,7 +960,7 @@ replace = '''
 
 [[plant]]
 name = "muse: claude's /fast moves the model"
-meant = "the_humans_model_command_a_synthetic_message_a_subagent_and_a_relaunch_are_no_move"
+meant = "the_humans_model_command_a_synthetic_message_a_subagent_and_fast_are_neither_held_nor_told"
 runs = ["muse-claude"]
 
 [[plant.edit]]
@@ -1316,7 +1317,7 @@ replace = '''
 [[plant]]
 name = "muse: what waits and a billing share a mark"
 meant = "a_billing_refusal_that_reaches_a_chief_out_for_a_limit_with_a_message_waiting_is_told_too"
-runs = ["muse-accounts"]
+runs = ["muse-chief-told"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
