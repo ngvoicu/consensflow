@@ -293,6 +293,7 @@ impl Dispatcher {
         }
         let lost = lost_in_turn(record, observed, Some(start));
         if !observed.settled {
+            self.tell_lost(project, participant, record, &thread, lost)?;
             self.looks_finished(
                 project,
                 participant,
@@ -301,7 +302,6 @@ impl Dispatcher {
                 observed,
                 &items[start + 1..],
             )?;
-            self.tell_lost(project, participant, record, &thread, lost)?;
             return Ok(Turn::Open);
         }
         // Words told to the window before it was up are on their way to it (the brief was

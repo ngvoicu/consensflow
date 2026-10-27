@@ -358,8 +358,9 @@ find = """
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
-        );'''
-replace = '''        let body = with_lost(
+        );"""
+replace = """
+        let body = with_lost(
             with_leftovers(
                 words_of(&run),
                 &leftovers(&participant.handle, pending, Some(by), observed.settled),
