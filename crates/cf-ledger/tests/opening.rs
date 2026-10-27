@@ -270,13 +270,11 @@ fn names_a_file_that_is_not_a_ledger_instead_of_failing_somewhere_inside_sqlite(
 #[cfg(target_os = "macos")]
 #[test]
 fn a_child_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
-    use std::os::fd::AsRawFd;
-
     let folder = tempfile::tempdir().expect("a folder");
     let stray = cf_process::test_support::stray();
     let mut child = spawn_child("hold", &folder.path().join("consensflow.db"));
     assert_eq!(said(&mut child), "ready");
-    let held = cf_process::test_support::holds_null(child.id(), stray.as_raw_fd());
+    let held = stray.held_by(child.id());
     let _ = child.kill();
     let _ = child.wait();
     assert!(!held, "the child holds it");

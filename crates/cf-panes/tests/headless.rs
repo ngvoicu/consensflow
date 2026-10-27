@@ -1327,17 +1327,10 @@ fn helper_is_inert_when_stdin_is_not_a_pipe() {
 #[cfg(target_os = "macos")]
 #[test]
 fn the_helper_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
-    use std::os::fd::AsRawFd;
-
-    use cf_process::test_support::{holds_null, stray};
-
     let _pty_guard = serial_headless_test();
-    let stray = stray();
+    let stray = cf_process::test_support::stray();
     let mut helper = Headless::spawn();
-    assert!(
-        !holds_null(helper.child.id(), stray.as_raw_fd()),
-        "the helper holds it"
-    );
+    assert!(!stray.held_by(helper.child.id()), "the helper holds it");
     helper.close_input_and_wait();
 }
 
