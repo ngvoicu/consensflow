@@ -35,7 +35,7 @@ rig-regression-devin-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--t
 
 [[plant]]
 name = "notes twice: the window reads at rest in the first seconds of a turn and a paste is tried again at the arrival window, its turns or none, and the chief reads the second note twice"
-meant = "two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each"
+meant = "two_notes_that_come_together_after_a_cancel_go_in_once_each_with_no_settle"
 runs = ["rig-regression-devin-notes"]
 builds = true
 
