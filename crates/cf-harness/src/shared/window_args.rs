@@ -19,8 +19,9 @@ use crate::contract::Agent;
 pub(crate) struct Invocation {
     pub(crate) command: &'static str,
     pub(crate) args: Vec<String>,
-    /// Devin's first message, which it takes in another way than as an
-    /// argument.
+    /// The first message of a harness that takes it in another way than as an
+    /// argument: Devin's, in a prompt file, and a resumed Muse window's, pasted
+    /// once it is up (`muse resume` takes no prompt).
     pub(crate) prompt: Option<String>,
     /// The keys whose presence would silently switch the window's billing.
     pub(crate) drop_env: &'static [&'static str],
@@ -109,8 +110,37 @@ fn window(
                 drop_env: &["ANTHROPIC_API_KEY"],
             }
         }
-        // No Muse window is opened yet (MUS-08): its adapter refuses the launch.
-        Harness::Muse => return None,
+        // `muse [PROMPT]` opens the TUI with its first turn begun; `muse resume <id>`
+        // takes no prompt (Muse 1.4.13: "unknown argument"), so a resumed window's goes
+        // in once it is up. `--yolo` is the full-permission mode: no approval, no
+        // sandbox, the workspace trusted for the run (not saved). Contributor mode, in
+        // which Meta trains on what the window sees, is off for the run unless the
+        // agent's model is a contributor model, which only the human picks.
+        Harness::Muse => {
+            let mut args = match (resumed, session) {
+                (true, Some(session)) => words(&["resume", session]),
+                _ => Vec::new(),
+            };
+            args.extend(model_and_effort(harness, agent));
+            args.push("--yolo".to_owned());
+            if !given(agent.model).is_some_and(|model| model.ends_with(CONTRIBUTOR)) {
+                args.extend(words(&["--contributor-mode", "off"]));
+            }
+            let (args, prompt) = if resumed {
+                (args, seed.map(str::to_owned))
+            } else {
+                (seeded(args), None)
+            };
+            Invocation {
+                command: "muse",
+                args,
+                prompt,
+                // As Claude's key: Muse uses a `META_API_KEY` in its environment before
+                // the human's login (Muse's docs), which would move the window onto that
+                // key's billing.
+                drop_env: &["META_API_KEY"],
+            }
+        }
         // `--session-id` creates the session the first time and resumes it after.
         Harness::Pi => {
             let session = session?;
@@ -180,6 +210,10 @@ fn window(
     })
 }
 
+/// How Muse names a model in its contributor mode, where Meta trains on what the
+/// model sees: `muse-spark-1.3-contributor`.
+const CONTRIBUTOR: &str = "-contributor";
+
 /// The flags that put a window on its agent's model and effort.
 fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
     let model = given(agent.model);
@@ -229,8 +263,14 @@ fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
                 flag("--model", model.to_owned());
             }
         }
-        // No Muse window is opened yet (MUS-08).
-        Harness::Muse => {}
+        Harness::Muse => {
+            if let Some(model) = model {
+                flag("--model", model.to_owned());
+            }
+            if let Some(effort) = effort {
+                flag("--reasoning-effort", effort.to_owned());
+            }
+        }
     }
     flags
 }

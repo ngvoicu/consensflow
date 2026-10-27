@@ -464,7 +464,8 @@ mod tests {
                 "FRESH_OPENCODE",
                 "FRESH_PI",
                 "FRESH_DEVIN",
-                "FRESH_CODEX"
+                "FRESH_CODEX",
+                "FRESH_MUSE"
             ]
         );
         assert_eq!(the_ask("FRESH_PI"), "Reply with exactly one line: FRESH_PI");

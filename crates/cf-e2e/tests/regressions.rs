@@ -53,12 +53,8 @@ mod a_follow_up_after_a_restart_lost_its_windows_conversation;
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 #[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
 mod a_job_that_still_ran_was_taken_for_ended;
-// The stand-in Muse is a shell of a Unix machine.
 #[path = "regressions/a_message_the_chief_took_was_typed_in_again_under_load.rs"]
 mod a_message_the_chief_took_was_typed_in_again_under_load;
-#[cfg(unix)]
-#[path = "regressions/a_muse_member_took_pooled_work_and_failed_it.rs"]
-mod a_muse_member_took_pooled_work_and_failed_it;
 #[path = "regressions/a_paste_devin_held_pasted_again_after_a_switch_and_a_restart.rs"]
 mod a_paste_devin_held_pasted_again_after_a_switch_and_a_restart;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]

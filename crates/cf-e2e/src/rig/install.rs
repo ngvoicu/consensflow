@@ -194,6 +194,22 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     if let Some(codex) = &config.codex {
         write_shim(&system, "codex", "CF_TEST_CODEX", codex)?;
     }
+    match &config.muse {
+        Some((install, crate::muse::Run::Echo { turn_ms })) => {
+            crate::muse::write_stand_in(&own, install, *turn_ms, &root.join("muse-argv.log"))?;
+        }
+        Some((install, crate::muse::Run::Live { real_home })) => {
+            crate::muse::seed_live_home(&home, real_home)?;
+            crate::muse::write_live_stand_in(
+                &own,
+                install,
+                real_home,
+                &home,
+                &root.join("muse-argv.log"),
+            )?;
+        }
+        None => {}
+    }
     Ok(fake_bin)
 }
 

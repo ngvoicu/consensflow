@@ -1,5 +1,5 @@
 //! This machine, as a live run meets it: the harnesses it has (Claude Code,
-//! OpenCode, Pi, Devin and Codex), found as a shell finds them with the home
+//! OpenCode, Pi, Devin, Codex and Muse Code), found as a shell finds them with the home
 //! each reads its login from, and the rig whose windows run them.
 //!
 //! A window reads its login where it is, as it does for the person it belongs to
@@ -42,7 +42,7 @@ pub use wrapper::{isolated_claude, shimmed_claude, shimmed_claude_with_servers, 
 /// as both.
 pub use crate::stand_in::window_shim;
 
-/// A harness the live tests run: the five of ConsensFlow's.
+/// A harness the live tests run: the six of ConsensFlow's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Harness {
     Claude,
@@ -50,18 +50,20 @@ pub enum Harness {
     Pi,
     Devin,
     Codex,
+    Muse,
 }
 
 impl Harness {
     /// Every harness, in the order the live approval test rotates them through
     /// its positions: each is the chief of one project and the one after it
     /// is that project's worker.
-    pub const ALL: [Harness; 5] = [
+    pub const ALL: [Harness; 6] = [
         Harness::Claude,
         Harness::OpenCode,
         Harness::Pi,
         Harness::Devin,
         Harness::Codex,
+        Harness::Muse,
     ];
 
     /// What it is called on a command line, and what its command is called.
@@ -72,6 +74,7 @@ impl Harness {
             Self::Pi => "pi",
             Self::Devin => "devin",
             Self::Codex => "codex",
+            Self::Muse => "muse",
         }
     }
 
@@ -99,6 +102,9 @@ impl Harness {
             Self::Pi => &[".pi"],
             Self::Devin => &[".config/devin", ".local/share/devin"],
             Self::Codex => &[""],
+            // Muse keeps its login's metadata in its config folder and the secret in the
+            // system's keychain, which the run's windows reach by the user's name.
+            Self::Muse => &[".config/muse"],
         }
     }
 
@@ -110,6 +116,7 @@ impl Harness {
             Self::Pi => "log in by running `pi` once",
             Self::Devin => "log in with `devin auth login`",
             Self::Codex => "log in with `codex login`, or name its home in CODEX_HOME",
+            Self::Muse => "log in with `muse login`",
         }
     }
 }

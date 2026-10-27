@@ -1,62 +1,110 @@
-//! Muse Code, as the engine launches its windows: not yet. Its record is read and its
-//! sessions are told resumable or not, and a launch is refused in plain words, an
-//! older Muse first for its version (3.0.6's first phase, T-703; the window is
-//! MUS-08's).
+//! Muse Code's windows. Each launch runs the binary Muse's launcher names
+//! ([`launch::pinned`]) in full permission (`--yolo`), on its agent's model and
+//! effort, contributor mode off, the owner's hooks with ConsensFlow's SessionStart
+//! hook added for the one run (`-c hooks=`), which gives each session the window starts
+//! its role text and writes it down for the window to follow. A fresh window's first
+//! message is its prompt on the command line; a resumed one's is pasted once its prompt
+//! shows, for `muse resume` takes none ([`Adapter::first_message_once_up`]). The window
+//! is [`MuseWindow`]; its record is the session's log (`record`).
+//!
+//! Full permission is the posture every harness's window runs in (the owner's decision
+//! of 2026-09-19) until MUS-16 says otherwise: `--yolo` turns approval and the sandbox
+//! off and trusts the workspace for the run, so no trust dialog is asked and none is
+//! saved. It keeps Muse's question tool, which MUS-13's door answers.
 
-use std::path::Path;
 use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
+use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 
 use super::index;
-use super::version::{self, Version};
-use crate::contract::{Adapter, Launch, Prepared, Records, Skill, Work};
+use super::launch;
+use super::paths;
+use super::window::{MuseWindow, CLEAR_INPUT};
+use crate::contract::{Adapter, Input, Launch, Prepared, Records, Skill, Work};
 use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::Services;
-
-/// What a launch of a Muse window is refused with while ConsensFlow opens none.
-pub(crate) const NOT_YET: &str = "ConsensFlow cannot open a Muse Code window yet.";
+use crate::shared::paths::agents_skills;
+use crate::shared::role::write_role;
+use crate::shared::{specmint, window_args};
 
 /// Muse Code, as the engine launches its windows.
 pub struct MuseAdapter {
-    env: Env,
-    records: Rc<dyn Records>,
+    services: Services,
 }
 
 impl MuseAdapter {
     /// The adapter of the windows the engine's `services` serve.
     pub fn new(services: &Services) -> Self {
         Self {
-            env: services.env.clone(),
-            records: Rc::clone(&services.records),
+            services: services.clone(),
         }
+    }
+
+    fn env(&self) -> &Env {
+        &self.services.env
+    }
+
+    fn records(&self) -> &Rc<dyn Records> {
+        &self.services.records
     }
 }
 
 impl Adapter for MuseAdapter {
-    /// Refused: a Muse older than the minimum for its version, as the launcher's
-    /// `.muse-version` names it, and any other because no window is opened on Muse yet.
-    fn prepare<'a>(&'a self, _launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
+    fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
-            let program = executable(Harness::Muse, &self.env)?;
-            let installed = version::installed(Path::new(&program));
-            if installed
-                .as_deref()
-                .and_then(Version::of)
-                .is_some_and(|found| !found.supported())
-            {
-                return Err(version::required());
-            }
-            Err(NOT_YET.to_owned())
+            let env = self.env();
+            let executable = executable(Harness::Muse, env)?;
+            let role = write_role(
+                Harness::Muse,
+                launch.role,
+                env,
+                launch.id,
+                launch.instructions,
+            )?;
+            // A chief given specs reads its Specmint skill by the path its role text
+            // names: where Muse has none of its own, ConsensFlow's is written where it
+            // is kept for every launch.
+            specmint::write_own(Harness::Muse, env, launch)?;
+            let integration = launch::integration(
+                env,
+                launch.id,
+                &executable,
+                &self.services.bundle.pane_cf,
+                &role.file,
+            )?;
+            let agent = launch.agent.unwrap_or_default();
+            let open = if launch.resume.is_none() {
+                window_args::start
+            } else {
+                window_args::resume
+            };
+            let invocation = open(Harness::Muse, agent, launch.resume, launch.message)
+                .ok_or_else(|| "a Muse window opens on a session id".to_owned())?;
+            let mut argv = vec![integration.program];
+            argv.extend(integration.args);
+            argv.extend(invocation.args);
+            Ok(Prepared {
+                argv,
+                env: integration.env,
+                drop_env: invocation
+                    .drop_env
+                    .iter()
+                    .map(|&name| name.to_owned())
+                    .collect(),
+                native_session: launch.resume.map(str::to_owned),
+                window: Rc::new(MuseWindow::new(
+                    &self.services,
+                    launch.resume,
+                    integration.said,
+                    launch.first_message_ms,
+                    invocation.prompt,
+                )),
+            })
         })
-    }
-
-    /// Not yet: its window is 3.0.7's second phase (MUS-08).
-    fn opens_windows(&self) -> bool {
-        false
     }
 
     /// The session's log says (`index::resumable`), and Muse's index only where the
@@ -64,16 +112,57 @@ impl Adapter for MuseAdapter {
     fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async move {
             let looked = self
-                .records
+                .records()
                 .look(Harness::Muse, session, &Options::default())
                 .await;
-            index::resumable(&looked, index::row(session, &self.env))
+            index::resumable(&looked, index::row(session, self.env()))
         })
     }
 
-    /// No window, so no skill to find.
-    fn specmint(&self, _variant: Variant) -> Result<Skill, String> {
-        Err(NOT_YET.to_owned())
+    /// Muse starts its MCP servers with the window, before its trust question and any
+    /// turn, each a child of its own process in a group of its own, and the human's
+    /// `!` command likewise (the research of T-700, Muse 1.4.13 on macOS): Codex's
+    /// shape. Where the agent's own tool calls run (its managed shell, in a sandbox
+    /// where one is on) needs a model's turn to see, and is not seen yet. Linux and
+    /// Windows have not been probed.
+    fn servers(&self) -> Servers {
+        if cfg!(target_os = "macos") && !self.env().on_windows() {
+            Servers::AtLaunch
+        } else {
+            Servers::Unknown
+        }
+    }
+
+    /// A resumed window's: `muse resume` takes no prompt.
+    fn first_message_once_up(&self, launch: &Launch) -> bool {
+        launch.resume.is_some()
+    }
+
+    /// Pasted, and its box cleared with Control-C ([`CLEAR_INPUT`]).
+    fn input(&self) -> Input {
+        Input::Pasted {
+            clear: &CLEAR_INPUT,
+        }
+    }
+
+    /// Muse reads skills from its own folder (`muse/skills` in its config) and from
+    /// `~/.agents/skills`, as its docs say.
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+        let env = self.env();
+        let mut roots = Vec::new();
+        roots.extend(
+            paths::settings(env)
+                .ok()
+                .and_then(|file| file.parent().map(|folder| folder.join("skills")))
+                .map(|folder| folder.to_string_lossy().into_owned()),
+        );
+        roots.extend(agents_skills(env).ok());
+        specmint::place(
+            Harness::Muse,
+            env,
+            variant,
+            specmint::installed(&roots, variant),
+        )
     }
 }
 

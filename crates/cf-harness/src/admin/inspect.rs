@@ -143,7 +143,7 @@ fn offers(harness: Harness, setup: Option<&Setup>, release: &str) -> bool {
 }
 
 /// What the Muse of `version` is to the page: one older than the minimum is to be
-/// updated, and on any other no window is opened yet.
+/// updated, and any other is ready, as a launch takes it (`muse::launch::pinned`).
 fn muse_setup(version: Option<&str>) -> Setup {
     let found = version.and_then(muse::version::Version::of);
     if found.is_some_and(|found| !found.supported()) {
@@ -151,9 +151,7 @@ fn muse_setup(version: Option<&str>) -> Setup {
             reason: muse::version::required(),
         };
     }
-    Setup::NotSupportedYet {
-        reason: muse::NOT_YET.to_owned(),
-    }
+    Setup::Ready
 }
 
 /// Whether the Devin that said `version` is new enough to open a window on.

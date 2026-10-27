@@ -529,7 +529,7 @@ impl DevinWindow {
 }
 
 impl Window for DevinWindow {
-    fn opened(&self, _pid: Option<u32>) {}
+    fn opened(&self, _pane: &Pane, _pid: Option<u32>) {}
 
     /// The window is on `session` from now on: a switch to full permission begun for
     /// the conversation it was on is that one's, and another's time runs from the

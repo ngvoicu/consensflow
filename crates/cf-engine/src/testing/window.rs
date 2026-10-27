@@ -98,7 +98,7 @@ fn holds(screen: &[String], words: &str) -> bool {
 }
 
 impl Window for FakeWindow {
-    fn opened(&self, pid: Option<u32>) {
+    fn opened(&self, _pane: &Pane, pid: Option<u32>) {
         self.pid.set(pid);
     }
 

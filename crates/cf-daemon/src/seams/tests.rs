@@ -236,12 +236,8 @@ fn every_harness_whose_windows_open_has_its_adapter_and_no_other_word_has() {
     let services = Fakes::new(&Env::default()).services(&Env::default(), home.path());
     let adapters = HarnessAdapters::new(&services);
     for harness in Harness::ALL {
-        // Muse's windows open in 3.0.7's second phase (MUS-08): until then it is a
-        // harness ConsensFlow has no adapter for, which the engine gives no work, and
-        // refuses a project, a member and a chief on (T-767's P1).
-        assert_eq!(
+        assert!(
             adapters.adapter(harness.kind()).is_some(),
-            harness != Harness::Muse,
             "{}",
             harness.kind()
         );
@@ -251,6 +247,50 @@ fn every_harness_whose_windows_open_has_its_adapter_and_no_other_word_has() {
     for word in ["", "image", "kimi", "Codex", "mystery"] {
         assert!(adapters.adapter(word).is_none(), "{word:?}");
     }
+}
+
+/// An adapter whose windows do not open: a harness ConsensFlow lists and reads, and
+/// launches nothing on yet (Muse's until its window, T-767's P1).
+struct NoWindows(Rc<dyn Adapter>);
+
+impl Adapter for NoWindows {
+    fn prepare<'a>(
+        &'a self,
+        launch: &'a cf_harness::contract::Launch<'a>,
+    ) -> Work<'a, Result<cf_harness::contract::Prepared, String>> {
+        self.0.prepare(launch)
+    }
+
+    fn opens_windows(&self) -> bool {
+        false
+    }
+
+    fn specmint(
+        &self,
+        variant: cf_proto::specs::Variant,
+    ) -> Result<cf_harness::contract::Skill, String> {
+        self.0.specmint(variant)
+    }
+}
+
+#[test]
+fn a_harness_whose_windows_do_not_open_has_no_adapter_so_the_engine_refuses_it_at_the_door() {
+    let home = tempfile::tempdir().unwrap();
+    let services = Fakes::new(&Env::default()).services(&Env::default(), home.path());
+    let adapters = HarnessAdapters::of(Harness::ALL.into_iter().map(|harness| {
+        let made = adapter(harness, &services);
+        let made: Rc<dyn Adapter> = if harness == Harness::Pi {
+            Rc::new(NoWindows(made))
+        } else {
+            made
+        };
+        (harness, made)
+    }));
+    assert!(
+        adapters.adapter("pi").is_none(),
+        "no work, no project, no chief on it"
+    );
+    assert!(adapters.adapter("claude-code").is_some());
 }
 
 #[tokio::test]

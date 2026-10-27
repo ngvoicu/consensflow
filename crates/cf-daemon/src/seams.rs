@@ -173,10 +173,18 @@ pub struct HarnessAdapters {
 impl HarnessAdapters {
     /// An adapter for each harness whose windows open, built from `services`.
     pub fn new(services: &Services) -> Self {
-        Self {
-            by_harness: Harness::ALL
+        Self::of(
+            Harness::ALL
                 .into_iter()
-                .map(|harness| (harness, adapter(harness, services)))
+                .map(|harness| (harness, adapter(harness, services))),
+        )
+    }
+
+    /// Of `adapters`, those whose windows open.
+    fn of(adapters: impl IntoIterator<Item = (Harness, Rc<dyn Adapter>)>) -> Self {
+        Self {
+            by_harness: adapters
+                .into_iter()
                 .filter(|(_, adapter)| adapter.opens_windows())
                 .collect(),
         }

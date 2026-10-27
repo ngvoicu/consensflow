@@ -110,12 +110,13 @@ pub trait Adapter {
         false
     }
 
-    /// Whether a window's first message goes in once the window is up, through
-    /// the harness's own server, which asks [`PaneHost::admits`] then
-    /// ([`Window::started`]): OpenCode's. Every other harness's goes in with the
+    /// Whether the first message of a window opened on `launch` goes in once the
+    /// window is up, asking [`PaneHost::admits`] then ([`Window::started`]):
+    /// OpenCode's always, through its own server, and a resumed Muse window's,
+    /// pasted, for `muse resume` takes no prompt. Every other goes in with the
     /// command line its window opens with ([`Launch::message`]), handed over as
     /// the window's pane is asked for.
-    fn first_message_once_up(&self) -> bool {
+    fn first_message_once_up(&self, _launch: &Launch) -> bool {
         false
     }
 
@@ -340,8 +341,8 @@ pub enum Question {
 
 /// A window open on its harness.
 pub trait Window {
-    /// Its pane opened, the window's own process `pid` when the host knew it.
-    fn opened(&self, pid: Option<u32>);
+    /// Its pane `pane` opened, the window's own process `pid` when the host knew it.
+    fn opened(&self, pane: &Pane, pid: Option<u32>);
     /// The window shows `session` now (a `/clear` or `/resume` in it): later
     /// looks follow it there.
     fn follow(&self, session: &str);

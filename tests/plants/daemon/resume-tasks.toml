@@ -1711,17 +1711,17 @@ replace = '''        self.withdrawn.set(false);'''
 
 [[plant]]
 name = "resume tasks: OpenCode takes its first message with its command line"
-meant = "opencode_takes_its_first_message_once_its_window_is_up_and_no_other_harness_does"
+meant = "opencode_and_a_resumed_muse_take_their_first_message_once_the_window_is_up_and_no_other_does"
 runs = ["harness-first-message"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/adapter.rs"
 find = '''
-    fn first_message_once_up(&self) -> bool {
+    fn first_message_once_up(&self, _launch: &Launch) -> bool {
         true
     }'''
 replace = '''
-    fn first_message_once_up(&self) -> bool {
+    fn first_message_once_up(&self, _launch: &Launch) -> bool {
         false
     }'''
 

@@ -99,6 +99,9 @@ pub struct Config {
     devin: Option<PathBuf>,
     /// The stand-in `opencode`: of an OpenCode 1.x, or of one that is 2.
     opencode: Option<PathBuf>,
+    /// The machine's own Muse, which the rig's Muse windows run on its fake model,
+    /// each turn this many milliseconds long.
+    muse: Option<(crate::muse::Installed, crate::muse::Run)>,
     finder: bool,
     masker: Option<Masker>,
     reports: Option<PathBuf>,
@@ -167,6 +170,7 @@ impl Config {
             codex: None,
             devin: None,
             opencode: None,
+            muse: None,
             finder: false,
             masker: None,
             reports: None,
@@ -260,6 +264,38 @@ impl Config {
     #[must_use]
     pub fn devin(mut self, program: impl Into<PathBuf>) -> Self {
         self.devin = Some(program.into());
+        self
+    }
+
+    /// With the windows of a Muse agent running `install`, the machine's own Muse, on its
+    /// built-in fake model (`--provider echo`), each turn `delay_ms` long unless a case
+    /// sets `CF_TEST_MUSE_DELAY_MS`: they find the rig's launcher first on their `PATH`
+    /// as `muse`, and the binary it names beside it ([`crate::muse::write_stand_in`]).
+    /// What each was run with is in `muse-argv.log` of the rig's folder
+    /// ([`Rig::muse_launches`]). A script that runs it, so Unix's (a Mac's: no
+    /// Windows machine has Muse yet).
+    #[must_use]
+    pub fn muse(mut self, install: crate::muse::Installed, delay_ms: u64) -> Self {
+        self.muse = Some((install, crate::muse::Run::Echo { turn_ms: delay_ms }));
+        self
+    }
+
+    /// [`Config::muse`], live: the windows run the machine's Muse on the model each is
+    /// launched on, with the person's login (its secret in the keychain, which Muse finds
+    /// by `real_home`), their settings and sessions in the rig's home
+    /// ([`crate::muse::write_live_stand_in`]). It spends the account's allowance.
+    #[must_use]
+    pub fn muse_live(
+        mut self,
+        install: crate::muse::Installed,
+        real_home: impl Into<PathBuf>,
+    ) -> Self {
+        self.muse = Some((
+            install,
+            crate::muse::Run::Live {
+                real_home: real_home.into(),
+            },
+        ));
         self
     }
 

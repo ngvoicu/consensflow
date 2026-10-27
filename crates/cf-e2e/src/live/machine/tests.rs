@@ -92,7 +92,10 @@ fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds
 #[test]
 fn the_harnesses_are_named_as_a_command_line_and_the_roster_name_them() {
     let names: Vec<_> = Harness::ALL.iter().map(|harness| harness.name()).collect();
-    assert_eq!(names, ["claude", "opencode", "pi", "devin", "codex"]);
+    assert_eq!(
+        names,
+        ["claude", "opencode", "pi", "devin", "codex", "muse"]
+    );
     for harness in Harness::ALL {
         assert_eq!(Harness::from_name(harness.name()), Some(harness));
     }

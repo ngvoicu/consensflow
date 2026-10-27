@@ -28,19 +28,20 @@ pub(crate) const CODEX_FOLDER: &str = "codex";
 
 /// The harness folders a launch's files are in, in the order Node goes through
 /// them: a removal that fails stops there, leaving the folders after it. Codex's,
-/// which Node had no files for, comes last.
-const FOLDERS: [&str; 5] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER];
+/// which Node had no files for, comes after them, and Muse's, which came after
+/// Node, last.
+const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "muse"];
 
 /// The folder under `integrations` a harness keeps its launches' files in:
-/// Codex is given what it runs with, and keeps no role there ([`CODEX_FOLDER`]),
-/// and no Muse window is launched yet.
+/// Codex is given what it runs with, and keeps no role there ([`CODEX_FOLDER`]).
 pub(crate) fn harness_folder(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("claude"),
         Harness::Pi => Some("pi"),
         Harness::Devin => Some("devin"),
         Harness::Opencode => Some("opencode"),
-        Harness::Codex | Harness::Muse => None,
+        Harness::Muse => Some("muse"),
+        Harness::Codex => None,
     }
 }
 
@@ -126,6 +127,7 @@ mod tests {
             format!("integrations/pi/{A}"),
             format!("integrations/opencode/{A}"),
             format!("integrations/codex/{A}"),
+            format!("integrations/muse/{A}"),
             format!("integrations/claude/{B}"),
             "integrations/claude/not-a-launch".to_owned(),
             "extensions/pi".to_owned(),
@@ -136,7 +138,7 @@ mod tests {
         forget_launch(&home, &LaunchId::new(A).unwrap()).unwrap();
         // An id that is not a launch id names nothing: no launch is made of it.
         assert!(LaunchId::new("..").is_none());
-        for harness in ["claude", "pi", "opencode", "codex"] {
+        for harness in ["claude", "pi", "opencode", "codex", "muse"] {
             assert!(
                 !at(&format!("integrations/{harness}/{A}")).exists(),
                 "{harness}"

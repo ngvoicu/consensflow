@@ -126,7 +126,7 @@ mod tests {
         );
         assert_eq!(
             chiefs(&["nobody".to_owned()]).unwrap_err().to_string(),
-            "no chief is called nobody: fake, claude, opencode, pi, devin, codex"
+            "no chief is called nobody: fake, claude, opencode, pi, devin, codex, muse"
         );
     }
 
