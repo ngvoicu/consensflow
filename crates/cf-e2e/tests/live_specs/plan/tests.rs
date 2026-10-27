@@ -9,13 +9,14 @@ fn every_harness_is_the_chief_of_one_project_which_runs_every_step_in_order() {
     assert_eq!(chiefs, Harness::ALL);
     assert_eq!(
         all.iter().map(|project| project.number).collect::<Vec<_>>(),
-        [1, 2, 3, 4, 5]
+        [1, 2, 3, 4, 5, 6]
     );
     for project in &all {
         assert_eq!(project.steps, Step::ALL, "{}", project.name());
     }
     assert_eq!(all[0].name(), "p1 claude");
     assert_eq!(all[4].name(), "p5 codex");
+    assert_eq!(all[5].name(), "p6 muse");
 }
 
 #[test]
