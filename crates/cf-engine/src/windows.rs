@@ -752,6 +752,7 @@ impl Dispatcher {
             part.harness.clone_from(&planned.harness);
             part.pane = Some(pane.clone());
             part.opened_at = Some(asked_at);
+            record.quota.borrow_mut().drifts_told.clear();
             part.launch_id = Some(launch_id);
             part.token = Some(token);
             part.activity = Activity::of(ActivityState::Starting);

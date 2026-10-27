@@ -53,9 +53,21 @@ fn said_line(n: u32, model: &str) -> String {
 /// A window on the conversation of `lines`, opened when the record held the brief alone: what
 /// follows was written by the window's own process.
 fn window_on(lines: &[String]) -> (Home, Rc<dyn Window>) {
+    window_launched_on("claude-sonnet-5", lines)
+}
+
+/// The same, its launch naming the model `model`.
+fn window_launched_on(model: &'static str, lines: &[String]) -> (Home, Rc<dyn Window>) {
     let home = Home::new();
     home.transcript(SESSION, &[user_line(SESSION, 1, BRIEF)]);
-    let window = window(&home.adapter(), &Request::resumed(SESSION));
+    let mut request = Request::resumed(SESSION);
+    request.agent = Some(Agent {
+        model: Some(model),
+        effort: Some("high"),
+        thinking: None,
+        designer: false,
+    });
+    let window = window(&home.adapter(), &request);
     let mut all = vec![user_line(SESSION, 1, BRIEF)];
     all.extend_from_slice(lines);
     home.transcript(SESSION, &all);
@@ -100,4 +112,21 @@ fn a_model_that_only_drifts_holds_no_window_and_the_look_says_the_drift() {
         (drift.from.as_str(), drift.to.as_str()),
         ("claude-opus-5", "claude-opus-5-5")
     );
+}
+
+#[test]
+fn an_opusplan_window_flipping_between_opus_and_sonnet_is_told_no_drift_and_another_launch_is() {
+    // The launch names the alias, and the look carries it to the reader: plan mode and its
+    // flip back are what the human chose (T-841).
+    let flips = [
+        said_line(2, "claude-opus-5-5"),
+        said_line(3, "claude-sonnet-5-5"),
+        said_line(4, "claude-opus-5-5"),
+    ];
+    let (_home, window) = window_launched_on("opusplan", &flips);
+    let observed = look(&window);
+    assert_eq!(observed.model_drift(), None);
+    assert_eq!(observed.quota, None);
+    let (_home, window) = window_launched_on("claude-opus-5-5", &flips);
+    assert!(look(&window).model_drift().is_some());
 }

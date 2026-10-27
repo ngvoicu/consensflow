@@ -88,7 +88,10 @@ impl Transcript {
         } else if asked {
             self.model_moved = None;
             self.model_drift = None;
-        } else if let Some(from) = previous.filter(|from| from != model) {
+        } else if let Some(from) = previous
+            .filter(|from| from != model)
+            .filter(|from| !self.within_the_alias(from, model))
+        {
             self.model_drift = Some(Arc::new(ModelMoved {
                 from: from.to_string(),
                 to: model.to_string(),
@@ -96,6 +99,19 @@ impl Transcript {
                 at,
             }));
         }
+    }
+
+    /// Whether `from` and `model` are both models the launch's alias runs on by itself: Claude
+    /// Code's `opusplan` plans on Opus and works on Sonnet, and its records name each in turn
+    /// (the human chose both by choosing it). A launch that named another model, or none, names
+    /// no such pair.
+    fn within_the_alias(&self, from: &str, model: &str) -> bool {
+        let families = self.launch_model.as_deref().map_or(&[][..], alias_families);
+        let within = |id: &str| {
+            let id = id.to_ascii_lowercase();
+            families.iter().any(|family| id.contains(family))
+        };
+        within(from) && within(model)
     }
 
     /// An assistant's record: a fragment of a message, the tool calls it
@@ -404,4 +420,15 @@ fn date_parse(value: Option<&Value>) -> Result<f64, String> {
     #[allow(clippy::cast_precision_loss)]
     let ms = time::parse(&text).map_or(f64::NAN, |ms| ms as f64);
     Ok(ms)
+}
+
+/// The model families a launch's alias runs on by itself: `opusplan`, with or without a context
+/// suffix (`opusplan[1m]`), plans on Opus and works on Sonnet. Any other name is one model, or an
+/// alias that is repointed (which is news, told once), and names none.
+fn alias_families(launch_model: &str) -> &'static [&'static str] {
+    let name = launch_model.trim().to_ascii_lowercase();
+    match name.split('[').next().unwrap_or_default() {
+        "opusplan" => &["opus", "sonnet"],
+        _ => &[],
+    }
 }

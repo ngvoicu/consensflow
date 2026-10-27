@@ -127,9 +127,10 @@ pub(crate) struct QuotaPart {
     /// The time of the window's last answer that was looked at as news of its
     /// account's quota: each answer is news once.
     pub(crate) answered: Option<String>,
-    /// The drift of the model the human was told of last, by the models and the time its
-    /// record names: each is told once.
-    pub(crate) drift_told: Option<String>,
+    /// The changes of model the human was told of in this window, each way by the two models:
+    /// a flip back and forth (`opusplan`) is told once for each way. Cleared as a window opens,
+    /// whose harness starts its own baseline (T-841).
+    pub(crate) drifts_told: HashSet<String>,
 }
 
 /// News that an account has quota again.
@@ -604,16 +605,10 @@ impl Dispatcher {
         if self.before_open(record, drift.at.as_deref()) {
             return Ok(());
         }
-        let key = format!(
-            "{}>{}@{}",
-            drift.from,
-            drift.to,
-            drift.at.as_deref().unwrap_or_default()
-        );
-        if record.quota.borrow().drift_told.as_deref() == Some(key.as_str()) {
+        let way = format!("{}>{}", drift.from, drift.to);
+        if !record.quota.borrow_mut().drifts_told.insert(way) {
             return Ok(());
         }
-        record.quota.borrow_mut().drift_told = Some(key);
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {

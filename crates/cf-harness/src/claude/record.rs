@@ -95,20 +95,28 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
     let local = local.clone();
     let relaunched = Arc::new(AtomicU64::new(0));
     let told = Arc::clone(&relaunched);
+    let launched: Launched = Arc::default();
+    let launch = Arc::clone(&launched);
     Box::new(Relaunched {
         reader: TranscriptReader::new(
             Followed::new(
                 Box::new(move || transcript(&locating, &env)),
                 Box::new(move || {
                     let at = told.load(Ordering::Relaxed);
-                    Transcript::new(Arc::clone(&reading), local.clone(), at)
+                    let mut state = Transcript::new(Arc::clone(&reading), local.clone(), at);
+                    state.launch_model = launch.lock().ok().and_then(|model| model.clone());
+                    state
                 }),
             ),
             format!("claude session {session}"),
         ),
         at: relaunched,
+        launched,
     })
 }
+
+/// The model the window's launch named, as the latest look was told it.
+type Launched = Arc<std::sync::Mutex<Option<Arc<str>>>>;
 
 /// A transcript's reader, and the byte the latest process ConsensFlow started
 /// on its conversation began at (0 for none told), which a state made afresh
@@ -116,6 +124,8 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
 struct Relaunched {
     reader: TranscriptReader<Transcript>,
     at: Arc<AtomicU64>,
+    /// The model the window's launch named, which a state made afresh begins with.
+    launched: Launched,
 }
 
 impl Look for Relaunched {
@@ -128,6 +138,17 @@ impl Look for Relaunched {
         {
             self.at.store(at, Ordering::Relaxed);
             self.reader.retell(|state| state.relaunched(at));
+        }
+        // A look told which model the launch named, and not the one the reader knows: its drifts
+        // are read again, for what an alias runs on is no drift (T-841).
+        if let Some(model) = options.launch_model.as_deref() {
+            if let Ok(mut known) = self.launched.lock() {
+                if known.as_deref() != Some(model) {
+                    let model: Arc<str> = Arc::from(model);
+                    *known = Some(Arc::clone(&model));
+                    self.reader.retell(|state| state.launched_on(model));
+                }
+            }
         }
         self.reader.look(options, now_ms)
     }
@@ -168,6 +189,9 @@ struct Transcript {
     /// The model the main conversation's assistant last answered from, and the move away
     /// from it that nobody asked for (MUS-24).
     model: Option<Arc<str>>,
+    /// The model the window's launch named, where it was told: an alias such as `opusplan`
+    /// names the models it runs on by itself (`replay::within_the_alias`).
+    launch_model: Option<Arc<str>>,
     model_asked: bool,
     model_moved: Option<Arc<ModelMoved>>,
     model_drift: Option<Arc<ModelMoved>>,
@@ -243,6 +267,7 @@ impl Transcript {
             failure: None,
             quota: None,
             model: None,
+            launch_model: None,
             model_asked: false,
             model_moved: None,
             model_drift: None,
@@ -256,6 +281,13 @@ impl Transcript {
             }),
             last_at: None,
         }
+    }
+
+    /// Told the model the window's launch named: false, since what was read of the models
+    /// was read without it.
+    fn launched_on(&mut self, model: Arc<str>) -> bool {
+        self.launch_model = Some(model);
+        false
     }
 
     /// Told that the latest process ConsensFlow started on the conversation

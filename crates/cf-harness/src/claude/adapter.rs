@@ -143,7 +143,14 @@ impl Adapter for ClaudeAdapter {
             } else {
                 None
             };
-            let options = told(relaunched.as_ref(), &session);
+            let options = told(
+                relaunched.as_ref(),
+                launch
+                    .agent
+                    .and_then(|agent| agent.model)
+                    .filter(|model| !model.is_empty()),
+                &session,
+            );
             // A turn the old process left open, which a window with no message
             // to begin one has to be told apart from by what the record holds
             // later. A window given a message begins its own turn.
@@ -189,6 +196,11 @@ impl Adapter for ClaudeAdapter {
                     read_empty: Cell::new(None),
                     left_open: RefCell::new(left_open),
                     relaunched,
+                    model: launch
+                        .agent
+                        .and_then(|agent| agent.model)
+                        .filter(|model| !model.is_empty())
+                        .map(str::to_owned),
                     trusts: trust::trusts(launch.directory),
                     directory: launch.directory.to_owned(),
                 }),
@@ -273,6 +285,9 @@ struct ClaudeWindow {
     /// transcript held then, the window it was on closed: where the program
     /// the window runs began writing.
     relaunched: Option<(String, u64)>,
+    /// The model the launch named, where it named one: an alias such as `opusplan` names the
+    /// models it runs on by itself, which the reader takes for no change of model (T-841).
+    model: Option<String>,
     /// What a yes to Claude Code's question about the window's folder trusts.
     trusts: Trusts,
     /// The window's folder, whose local settings keep what Claude Code was told of the
@@ -282,11 +297,12 @@ struct ClaudeWindow {
 
 /// What a look at `session` is told: where the window's program began writing,
 /// when the window was opened again on that conversation.
-fn told(relaunched: Option<&(String, u64)>, session: &str) -> Options {
+fn told(relaunched: Option<&(String, u64)>, model: Option<&str>, session: &str) -> Options {
     Options {
         relaunched_at: relaunched
             .filter(|(on, _)| on == session)
             .map(|(_, at)| *at),
+        launch_model: model.map(str::to_owned),
         ..Options::default()
     }
 }
@@ -464,7 +480,7 @@ impl Window for ClaudeWindow {
             // could be older than the status.
             let live = self.status();
             let session = self.session.borrow().clone();
-            let options = told(self.relaunched.as_ref(), &session);
+            let options = told(self.relaunched.as_ref(), self.model.as_deref(), &session);
             let reading = self.records.look(Harness::Claude, &session, &options).await;
             let (empty, settled, failed, quota, agents) = match &*reading {
                 Reading::Known(record) => (

@@ -297,3 +297,53 @@ fn the_humans_model_command_back_ends_a_move_and_a_drift() {
     ]);
     assert_eq!((moved, drift), (None, None));
 }
+
+#[test]
+fn a_flip_between_the_models_an_alias_runs_on_is_no_drift_where_the_launch_names_the_alias() {
+    // `opusplan` plans on Opus and works on Sonnet: its records name each in turn, all day, and
+    // the human chose both by choosing it (T-841). A launch that names another model, or a model
+    // the alias does not run on, is told as any change is.
+    let flip = [
+        hello(),
+        on("claude-opus-5-5", "a1", "u1", "m1"),
+        user("u2", json!("a1"), json!("Go")),
+        on("claude-sonnet-5-5", "a2", "u2", "m2"),
+        user("u3", json!("a2"), json!("Plan")),
+        on("claude-opus-5-5", "a3", "u3", "m3"),
+    ];
+    let launched = |model: &str| Options {
+        launch_model: Some(model.to_owned()),
+        ..Options::default()
+    };
+    for named in ["opusplan", "OpusPlan", "opusplan[1m]"] {
+        assert_eq!(models_of(&flip, &launched(named)), (None, None), "{named}");
+    }
+    for named in ["claude-opus-5-5", "sonnet", "opus"] {
+        let (moved, drift) = models_of(&flip, &launched(named));
+        assert_eq!(moved, None, "{named}");
+        assert_eq!(
+            pair(&drift.unwrap_or_else(|| panic!("{named}: a drift to tell"))),
+            ("claude-sonnet-5-5", "claude-opus-5-5"),
+            "{named}"
+        );
+    }
+    assert!(plain(&flip).1.is_some(), "no launch told: a drift");
+    // A model outside what the alias runs on is still news, and a fallback is held for.
+    let other = [
+        hello(),
+        on("claude-opus-5-5", "a1", "u1", "m1"),
+        user("u2", json!("a1"), json!("Go")),
+        on("claude-haiku-5-5", "a2", "u2", "m2"),
+    ];
+    let (_, drift) = models_of(&other, &launched("opusplan"));
+    assert_eq!(
+        pair(&drift.expect("outside the alias")),
+        ("claude-opus-5-5", "claude-haiku-5-5")
+    );
+    let fallback = [
+        hello(),
+        on("claude-opus-5-5", "a1", "u1", "m1"),
+        fell_back("claude-opus-5-5", "claude-sonnet-5-5", "a2", "a1", "m2"),
+    ];
+    assert!(models_of(&fallback, &launched("opusplan")).0.is_some());
+}

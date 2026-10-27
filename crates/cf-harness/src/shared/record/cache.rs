@@ -29,6 +29,11 @@ pub struct Options {
     /// first: what is before it was written by a process that is gone, and the
     /// rest by the one that runs. Claude's reader reads it (`queues`).
     pub relaunched_at: Option<u64>,
+    /// The model the window's launch named, where it named one (an alias, as Claude Code's
+    /// `opusplan`, which plans on Opus and works on Sonnet): a change of model between the
+    /// models an alias runs on by itself is no news of the harness's (T-841). Claude's
+    /// reader reads it.
+    pub launch_model: Option<String>,
 }
 
 /// Where Pi's extension keeps its evidence of a window's turns, and which
@@ -241,6 +246,7 @@ mod tests {
                 launch_id: Some(launch_id.to_owned()),
             }),
             relaunched_at: None,
+            launch_model: None,
         };
         let first = cache.look(Harness::Pi, "a", &env, &settlement("one"), 5);
         let second = cache.look(Harness::Pi, "a", &env, &settlement("two"), 7);
@@ -252,16 +258,17 @@ mod tests {
         let fourth = cache.look(Harness::Claude, "a", &env, &relaunched, 11);
         assert_eq!(
             said(&first),
-            r#"Options { pi_settlement: Some(PiSettlement { directory: None, launch_id: Some("one") }), relaunched_at: None } at 5"#
+            r#"Options { pi_settlement: Some(PiSettlement { directory: None, launch_id: Some("one") }), relaunched_at: None, launch_model: None } at 5"#
         );
-        assert!(said(&second).ends_with(r#"Some("two") }), relaunched_at: None } at 7"#));
+        assert!(said(&second)
+            .ends_with(r#"Some("two") }), relaunched_at: None, launch_model: None } at 7"#));
         assert_eq!(
             said(&third),
-            "Options { pi_settlement: None, relaunched_at: None } at 9"
+            "Options { pi_settlement: None, relaunched_at: None, launch_model: None } at 9"
         );
         assert_eq!(
             said(&fourth),
-            "Options { pi_settlement: None, relaunched_at: Some(12) } at 11"
+            "Options { pi_settlement: None, relaunched_at: Some(12), launch_model: None } at 11"
         );
     }
 

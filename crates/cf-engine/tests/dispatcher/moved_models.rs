@@ -482,3 +482,62 @@ fn a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopen
 }
 
 const BECAUSE: &str = "its billing was refused";
+
+#[test]
+fn a_flip_between_two_models_is_told_once_for_each_way_in_a_window_and_again_in_the_next() {
+    // `opusplan` flips between Opus and Sonnet all day (T-841): a note for each way, once, and no
+    // more in the same window; a window opened again has its own baseline and says them anew.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let zeus = tiers.assignee(1);
+    let flip = |from: &str, to: &str| {
+        context.advance(60_000);
+        context
+            .adapter
+            .drifts(&zeus, from, to, Some(&now(&context)));
+        context.pass().unwrap();
+        context.pass().unwrap();
+        human_notes(&tiers).len()
+    };
+    assert_eq!(flip("claude-opus-5-5", "claude-sonnet-5-5"), 1);
+    assert_eq!(flip("claude-sonnet-5-5", "claude-opus-5-5"), 2);
+    assert_eq!(
+        flip("claude-opus-5-5", "claude-sonnet-5-5"),
+        2,
+        "that way was told"
+    );
+    assert_eq!(
+        flip("claude-sonnet-5-5", "claude-opus-5-5"),
+        2,
+        "and this way"
+    );
+    assert_eq!(tiers.out_until("zeus"), None, "none of it holds");
+    // The window ends and the human's words open another on the conversation.
+    context.exit("zeus");
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(tiers.project.id, 1, Some("chief"), "Go on")
+        .unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("working", Some(zeus.as_str()))
+    );
+    context.advance(60_000);
+    context.adapter.drifts(
+        &zeus,
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        Some(&now(&context)),
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(human_notes(&tiers).len(), 3, "told anew in the new window");
+}
