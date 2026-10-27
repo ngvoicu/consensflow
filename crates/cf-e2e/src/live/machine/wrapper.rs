@@ -623,21 +623,30 @@ mod tests {
 
     #[test]
     fn the_script_starts_the_stand_in_for_a_window_of_a_fake_model_and_ends_as_the_program_does() {
-        let real = ["-e", "console.log('real')"];
+        // After the `--` Node takes the words for the script's, so the window's own `-e` is
+        // the stand-in's alone: which program ran is what it printed.
+        let real = [
+            "-e",
+            "console.log('real', JSON.stringify(process.argv.slice(1)))",
+            "--",
+        ];
         // The Node is the stand-in here: it is given the window's words, and runs them.
-        let ran = relayed(
-            &real,
-            &[
-                "-e",
-                "console.log('stand-in', process.argv.slice(1))",
-                "fake",
-            ],
-        );
-        assert_eq!(ran.stdout.trim(), "stand-in [ 'fake' ]");
-        let ran = relayed(&real, &["-e", "process.exit(0)", "fake-chief"]);
-        assert_eq!(ran.code, Some(0));
+        for model in ["fake", "fake-chief"] {
+            let ran = relayed(
+                &real,
+                &[
+                    "-e",
+                    "console.log('stand-in', process.argv.slice(1))",
+                    model,
+                ],
+            );
+            assert_eq!(ran.stdout.trim(), format!("stand-in [ '{model}' ]"));
+        }
         // A word that only holds the name of a fake model is not the model.
-        assert_eq!(relayed(&real, &["fakes"]).stdout.trim(), "real");
+        assert_eq!(
+            relayed(&real, &["fakes"]).stdout.trim(),
+            r#"real ["fakes"]"#
+        );
         // The program's exit code is the wrapper's.
         let ran = relayed(&["-e", "process.exit(7)"], &[]);
         assert_eq!(ran.code, Some(7));

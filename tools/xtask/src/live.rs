@@ -8,9 +8,10 @@
 //!
 //! A Claude Code window of a run never runs on the owner's `~/.claude`: it runs on a
 //! config folder of the run's own, with a copy of the Keychain's login (the first
-//! run on a machine asks the owner once to allow the Keychain read), which is removed
-//! when the run is over, `--keep` or not (`--keep` copies the conversations and sessions
-//! it kept into the kept home first, never the login). A run refuses to start when the login's
+//! run on a machine asks the owner once to allow the Keychain read; on Linux and on
+//! Windows, of `~/.claude/.credentials.json`), which is removed when the run is over,
+//! `--keep` or not (`--keep` copies the conversations and sessions it kept into the kept
+//! home first, never the login). A run refuses to start when the login's
 //! access token expires within two hours (Claude Code refreshes it only when five minutes of
 //! it are left: run again after that), and fails if the owner's `settings.json`
 //! changed or `~/.claude.json`, `history.jsonl` or `projects` gained anything of its
