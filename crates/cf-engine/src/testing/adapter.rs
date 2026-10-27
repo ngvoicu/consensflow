@@ -178,6 +178,9 @@ pub struct FakeAdapter {
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// What its windows' input boxes show (`unsent_words`): none, as an adapter
+    /// with no reader of its harness's box.
+    pub box_words: RefCell<Option<String>>,
     /// A `started` of the test's own, that fails some windows.
     pub started: RefCell<Option<Started>>,
     /// A `came_up` of the test's own, that says a window came up after all.
@@ -319,6 +322,7 @@ impl FakeAdapter {
             starts_given_up: RefCell::new(Vec::new()),
             items,
             ready: RefCell::new(None),
+            box_words: RefCell::new(None),
             started: RefCell::new(None),
             came_up: RefCell::new(None),
             prepare: RefCell::new(None),

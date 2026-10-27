@@ -89,8 +89,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "devin_config" => launch::devin_config(question),
         "trust" => trust(question),
         "input_box" => input_box(question),
+        "unsent" => unsent(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust and input_box"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, input_box and unsent"
         )),
     }
 }
@@ -195,6 +196,22 @@ fn input_box(question: &Value) -> Result<Value, String> {
             Some(InputBox::Empty) => json!("empty"),
             Some(InputBox::Holds) => json!("holds"),
             None => Value::Null,
+        },
+    )
+}
+
+/// What an adapter makes of a window whose pane host counts the human's keys as left
+/// unsent, from the host's `snapshot` (with its `bottom` and `cursor`): the count of
+/// the human's writes at which the box read empty (`{"readEmpty": n}`, a paste told
+/// so goes in), or `"held"` ([`input_box::read_unsent`]).
+fn unsent(question: &Value) -> Result<Value, String> {
+    let snapshot = question
+        .get("snapshot")
+        .ok_or("the question names no snapshot")?;
+    Ok(
+        match input_box::read_unsent(harness(text(question, "kind")?)?, snapshot) {
+            input_box::Unsent::ReadEmpty(typed) => json!({ "readEmpty": typed }),
+            input_box::Unsent::Held => json!("held"),
         },
     )
 }

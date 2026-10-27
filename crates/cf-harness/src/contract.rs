@@ -413,6 +413,16 @@ pub trait Window {
         host: &'a dyn PaneHost,
         pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>>;
+    /// What the window's input box shows, for the human told of a delivery held for
+    /// words typed there and not sent ([`Held::Unsent`]): its words, empty where it
+    /// shows none, or none where no reader of the harness's reads a box on the screen.
+    fn unsent_words<'a>(
+        &'a self,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+    ) -> Work<'a, Option<String>> {
+        Box::pin(async { None })
+    }
     /// Whether the engine asks [`Window::ready`] of the window before it has drawn its
     /// screen too, only for a window that says it never will be fit for work
     /// ([`Readiness::Unfit`]), which is given up then: a harness whose readiness has

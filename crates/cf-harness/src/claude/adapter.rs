@@ -495,6 +495,15 @@ impl Window for ClaudeWindow {
         trust::chosen(&self.directory)
     }
 
+    /// What the box on the screen shows, for the human told of a delivery held for it.
+    fn unsent_words<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<String>> {
+        Box::pin(input_box::words_on_screen(host, pane, Harness::Claude))
+    }
+
     /// A paste waits for the window to be readable, on its conversation,
     /// with no paste going in, and for what the human typed and did not send,
     /// unless the input box reads empty on the screen ([`input_box::unsent`]).

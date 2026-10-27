@@ -494,8 +494,9 @@ fn validate_generation(state: &PaneInputState, pane: &PaneKey) -> Result<(), Arb
 /// cleared) leave none. Ctrl+V counts one, for what it pastes from the
 /// clipboard (an image's placeholder, in Claude Code). A bracketed paste
 /// counts its characters, its line breaks included. Other escape sequences
-/// (arrows, function keys, Alt+Enter's new line) and control keys change
-/// nothing.
+/// (arrows, function keys, Alt+Enter's new line, mouse reports) and control
+/// keys change nothing, and nor does a string the terminal reports in (OSC,
+/// DCS, APC, PM, SOS), to its BEL or ST (T-839).
 fn unsent_after(mut unsent: usize, bytes: &[u8]) -> usize {
     const PASTE_START: &[u8] = b"\x1b[200~";
     const PASTE_END: &[u8] = b"\x1b[201~";
@@ -517,6 +518,10 @@ fn unsent_after(mut unsent: usize, bytes: &[u8]) -> usize {
                 at += PASTE_START.len() + (end + PASTE_END.len()).min(text.len());
                 continue;
             }
+            0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {
+                at += 2 + string_end(&rest[2..]);
+                continue;
+            }
             0x1b => {
                 at += match rest.get(1) {
                     Some(b'[') => rest[2..]
@@ -536,6 +541,20 @@ fn unsent_after(mut unsent: usize, bytes: &[u8]) -> usize {
         at += 1;
     }
     unsent
+}
+
+/// How many bytes of `body`, a terminal string's after its opening, are the string
+/// with its ending: to its BEL or ST (`ESC \\`), or all of them where the write ends
+/// first.
+fn string_end(body: &[u8]) -> usize {
+    body.iter()
+        .enumerate()
+        .find_map(|(at, byte)| match byte {
+            0x07 => Some(at + 1),
+            0x1b if body.get(at + 1) == Some(&b'\\') => Some(at + 2),
+            _ => None,
+        })
+        .unwrap_or(body.len())
 }
 
 fn validate_admission(state: &PaneInputState, pane: &PaneKey) -> Result<(), ArbiterError> {
@@ -958,6 +977,43 @@ mod tests {
             super::unsent_after(0, b"\x16"),
             1,
             "Ctrl+V pastes from the clipboard"
+        );
+    }
+
+    /// What a terminal says of itself on the page's human path types nothing: a string
+    /// of OSC (`ESC ]`, a colour asked for), DCS (`ESC P`, the terminal's name), APC,
+    /// PM or SOS, ended by BEL or ST (`ESC \`), and a mouse report (`CSI <`, which
+    /// Claude Code's fullscreen asks for at every move, `?1003h`). The count took a
+    /// string's body for typed characters, so one such reply held every delivery to
+    /// the window (T-839).
+    #[test]
+    fn what_the_terminal_reports_types_nothing() {
+        let reports: [&[u8]; 7] = [
+            b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
+            b"\x1b]10;rgb:cccc/cccc/cccc\x07",
+            b"\x1bP>|xterm.js(6.0.0)\x1b\\",
+            b"\x1bP1$r0;1m\x1b\\",
+            b"\x1b_Gi=1;OK\x1b\\",
+            b"\x1b^private\x1b\\",
+            b"\x1b[<35;80;24M\x1b[<0;12;5m",
+        ];
+        for report in reports {
+            assert_eq!(
+                super::unsent_after(2, report),
+                2,
+                "{:?}",
+                String::from_utf8_lossy(report)
+            );
+        }
+        assert_eq!(
+            super::unsent_after(0, b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\ab"),
+            2,
+            "what follows a string is typed"
+        );
+        assert_eq!(
+            super::unsent_after(0, b"\x1b]11;rgb:1e1e"),
+            0,
+            "nor is a string the write cuts short"
         );
     }
 
