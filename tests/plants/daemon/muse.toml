@@ -30,7 +30,7 @@ muse-records-play = ["cargo", "test", "--offline", "-p", "cf-harness", "--test",
 muse-chief-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_billing_refusal_that_reaches"]
 muse-moved = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "moved_models"]
 muse-wake = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_task_held_for_no_time"]
-muse-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_reads"]
+muse-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::guard"]
 muse-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::tests::a_question_for_no_op"]
 muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
@@ -1466,7 +1466,7 @@ meant = "a_login_held_anywhere_but_the_keychain_is_not_copied"
 runs = ["muse-live"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/tests/live_muse_reads.rs"
+file = "crates/cf-e2e/src/live/guard.rs"
 find = '''
         .all(|login| login.get("storage").and_then(Value::as_str) == Some("keychain"))
 '''
@@ -1481,7 +1481,7 @@ meant = "the_scratch_folder_goes_when_the_run_fails_as_when_it_ends"
 runs = ["muse-live"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/tests/live_muse_reads.rs"
+file = "crates/cf-e2e/src/live/guard.rs"
 find = '''
         let _ = std::fs::remove_dir_all(&self.0);
 '''
