@@ -8,7 +8,22 @@
 use std::sync::Arc;
 
 use crate::contract::{Observed, Waiting};
-use crate::records::{Reading, Settlement};
+use crate::records::{Quota, Reading, Record, Settlement};
+
+/// What a record says of the window's quota, as the engine is told it: a window whose harness
+/// moved its model on its own is not used on it unasked, so the move reads as the hold only the
+/// human can end (MUS-24). It comes before a refusal the same record shows (Muse moved the model
+/// after the 402 of T-705's recordings): the human who fixes the billing and tries again is told
+/// besides that the window runs on a model nobody chose, or that refusal's handled mark would
+/// let the engine paste into it. Every harness's look says it, however it builds its own
+/// `Observed`: Claude's adds its status to the record and called this too late (T-841).
+pub(crate) fn quota_of(record: &Record) -> Option<Arc<Quota>> {
+    record
+        .model_moved
+        .as_ref()
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or_else(|| record.quota.clone())
+}
 
 /// The look a record says of its window: settled when its turn is, or when
 /// it is empty and nothing is in flight, and not waiting, not switched and not
@@ -22,17 +37,7 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
                 record.settlement == Settlement::Settled
                     || (record.settlement != Settlement::InFlight && empty),
                 record.failed,
-                // A window whose harness moved its model on its own is not used on it
-                // unasked: it reads as an account only the human can bring back (MUS-24).
-                // The move comes before a refusal the same record shows (Muse moved the model
-                // after the 402 of T-705's recordings): the human who fixes the billing and
-                // tries again is told besides that the window runs on a model nobody chose,
-                // or that refusal's handled mark would let the engine paste into it.
-                record
-                    .model_moved
-                    .as_ref()
-                    .map(|moved| Arc::new(moved.as_quota()))
-                    .or_else(|| record.quota.clone()),
+                quota_of(record),
             )
         }
         Reading::Unknown(_) | Reading::Missing(_) => (true, false, None),

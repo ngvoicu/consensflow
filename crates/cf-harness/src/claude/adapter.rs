@@ -74,7 +74,7 @@ use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
 use crate::shared::left_open::LeftOpen;
-use crate::shared::record_state::switched_to;
+use crate::shared::record_state::{quota_of, switched_to};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
 use crate::shared::{pane, specmint, window_args};
@@ -471,7 +471,7 @@ impl Window for ClaudeWindow {
                     record.items.is_empty(),
                     record.settlement == Settlement::Settled,
                     record.failed,
-                    record.quota.clone(),
+                    quota_of(record),
                     record.pending.agents > 0,
                 ),
                 Reading::Unknown(_) | Reading::Missing(_) => (true, false, false, None, false),
