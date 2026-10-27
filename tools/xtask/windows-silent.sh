@@ -36,14 +36,20 @@ exec /usr/bin/ssh -o "ProxyCommand=\$proxy" "\$@"
 WRAPPER
 chmod +x "$out/bin/relay.sh" "$out/bin/ssh"
 ASK='$d = Join-Path $env:USERPROFILE "consensflow-build"; $of = @(Get-Content (Join-Path $d ".windows-run.id") -ErrorAction SilentlyContinue); $p = if ($of.Count -ge 2) { Get-Process -Id ([int]$of[1]) -ErrorAction SilentlyContinue } ; $held = try { $l = [IO.File]::Open((Join-Path $d ".windows-run.lock"), "Open", "ReadWrite", "ReadWrite"); $l.Dispose(); "free" } catch { "HELD" }; "{0} owner-file={1} process={2} lock={3}" -f (Get-Date -Format HH:mm:ss.fff), (Test-Path (Join-Path $d ".windows-run.id")), $(if ($p) { "$($p.Id) exited=$($p.HasExited)" } else { "gone" }), $held'
+echo "$(date +%T) run starts" >> "$times"
+PATH="$out/bin:$PATH" bash "$tool" "$tree" --machine "$machine" cmd /c ping -n "$seconds" 127.0.0.1 > "$log" 2>&1 &
+run=$!
+for _ in $(seq 1 36000); do
+  grep -q '^windows-from-tree: on '"$machine" "$log" 2>/dev/null && break
+  kill -0 "$run" 2>/dev/null || break
+  sleep 1
+done
+echo "$(date +%T) the run has the machine" >> "$times"
 ( while :; do
     printf '%s mac=%s %s\n' "$(date +%T)" "$(date +%s)" "$(/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 "$machine" "$ASK" 2>&1 | tr -d '\r' | head -1)" >> "$poll"
     sleep 5
   done ) &
 poller=$!
-echo "$(date +%T) run starts" >> "$times"
-PATH="$out/bin:$PATH" bash "$tool" "$tree" --machine "$machine" cmd /c ping -n "$seconds" 127.0.0.1 > "$log" 2>&1 &
-run=$!
 for _ in $(seq 1 3600); do
   grep -q '^Pinging' "$log" 2>/dev/null && break
   kill -0 "$run" 2>/dev/null || break
