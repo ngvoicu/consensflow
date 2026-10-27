@@ -10,10 +10,12 @@
 
 use std::time::Duration;
 
-use cf_e2e::files;
-use cf_e2e::muse::{self, deliveries, has, messages, records, terminals};
+use cf_e2e::muse::members::{
+    in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
+};
+use cf_e2e::muse::{self, deliveries, has, messages, terminals};
 use cf_e2e::rig::{Config, Project, Rig};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::{config, secs, Outcome};
 
@@ -33,50 +35,6 @@ fn muse_rig() -> Option<Config> {
             None
         }
     }
-}
-
-/// The roster of the cases: the chief on the stand-in `claude`, and a Muse worker on
-/// the model and effort the live tests use (the rig's Muse takes them out, as echo
-/// takes neither).
-fn write_roster(rig: &Rig) -> cf_e2e::Result {
-    let roster = json!({
-        "schemaVersion": 1,
-        "agents": [
-            { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
-            {
-                "id": "muse-worker", "kind": "muse", "model": "muse-spark-1.3",
-                "effort": "minimal", "workTier": "standard",
-            },
-        ],
-    });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
-}
-
-/// The project of a case: a chief and a Muse worker.
-fn project(rig: &Rig) -> cf_e2e::Result<Project<'_>> {
-    write_roster(rig)?;
-    let project = Project::open(rig, "chief", json!({}))?;
-    project.add_member("muse-worker")?;
-    Ok(project)
-}
-
-/// The handle of the Muse worker at work on T-1: its agent's name and words of its own.
-fn worker(project: &Project<'_>) -> cf_e2e::Result<String> {
-    let task = project.task(1)?;
-    Ok(task["assignee"]
-        .as_str()
-        .or_else(|| task["owner"].as_str())
-        .unwrap_or_default()
-        .trim_start_matches('@')
-        .to_owned())
-}
-
-/// The one Muse session of the rig, its id and its records now.
-fn the_session(rig: &Rig) -> (String, Vec<Value>) {
-    let sessions = rig.muse_sessions();
-    assert_eq!(sessions.len(), 1, "one session: {sessions:?}");
-    let (id, log) = &sessions[0];
-    (id.clone(), records(log))
 }
 
 #[test]
@@ -142,39 +100,6 @@ fn muse_rig_of(turn_ms: u64) -> Option<Config> {
     muse_rig().map(|config| config.var("CF_TEST_MUSE_DELAY_MS", turn_ms.to_string()))
 }
 
-/// The worker's window, as the board names its pane.
-fn pane_of(project: &Project<'_>) -> cf_e2e::Result<Value> {
-    Ok(project.lane("muse-worker")?["pane"].clone())
-}
-
-/// Waits until the worker's window is in its first turn of T-1: the board says it
-/// works, and its session's log has the turn begun.
-fn in_its_turn(rig: &Rig, project: &Project<'_>, runs: usize) -> cf_e2e::Result {
-    rig.wait_for("the Muse worker to be in its turn", secs(90), || {
-        let begun = rig.muse_sessions().first().is_some_and(|(_, log)| {
-            records(log)
-                .iter()
-                .filter(|record| muse::kind(record) == "run/started")
-                .count()
-                >= runs
-        });
-        Ok(begun && project.lane("muse-worker")?["activity"]["state"] == "working")
-    })
-}
-
-/// The message of `participant`'s inbox whose words hold `words`, as it is now.
-fn message_with(
-    project: &Project<'_>,
-    participant: &str,
-    words: &str,
-) -> cf_e2e::Result<Option<Value>> {
-    Ok(project.inbox(participant)?.into_iter().find(|message| {
-        message["body"]
-            .as_str()
-            .is_some_and(|body| body.contains(words))
-    }))
-}
-
 #[test]
 fn an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_in_alone() -> Outcome
 {
@@ -187,7 +112,7 @@ fn an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_i
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
     )?;
-    in_its_turn(&rig, &project, 1)?;
+    in_its_turn(&rig, &project, 1, secs(90))?;
     let pane = pane_of(&project)?;
     let paused = rig.page("task.pause", json!({ "project": project.id(), "task": 1 }))?;
     assert_eq!(paused["ok"], true, "{paused}");
@@ -236,7 +161,7 @@ fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_o
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
     )?;
-    in_its_turn(&rig, &project, 1)?;
+    in_its_turn(&rig, &project, 1, secs(90))?;
     let worker = worker(&project)?;
     // The chief's tell into a task at work pauses it for the question: the daemon stops
     // the turn, Muse puts the brief back before a word of its answer, and the question
@@ -298,7 +223,7 @@ fn words_that_land_in_a_turn_at_work_are_the_turn_s_at_once_and_its_task_ends_on
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
     )?;
-    in_its_turn(&rig, &project, 1)?;
+    in_its_turn(&rig, &project, 1, secs(90))?;
     // A paste that reaches the window while its turn works, as one the daemon began at a
     // look that found it at rest does: Muse steers the running turn with it, and writes it
     // at once, while that turn still works, so the record shows the hand-over.
@@ -340,7 +265,7 @@ fn a_muse_worker_cut_by_the_app_s_quit_is_resumed_on_its_session_with_the_note_p
     let project = project(&rig)?;
     let id = project.id();
     rig.tell(id, "DISPATCH --tier standard Reply with exactly: T1_DONE")?;
-    in_its_turn(&rig, &project, 1)?;
+    in_its_turn(&rig, &project, 1, secs(90))?;
     let worker = worker(&project)?;
     let (session, _) = the_session(&rig);
     let root = rig.close_keeping_the_root()?;
@@ -381,13 +306,6 @@ fn a_muse_worker_cut_by_the_app_s_quit_is_resumed_on_its_session_with_the_note_p
         .any(|words| words.contains("Go on where you stopped.")));
     rig.close()?;
     Ok(())
-}
-
-/// Whether the rig's Muse was last started with `muse resume` on `session`.
-fn last_resumed(rig: &Rig, session: &str) -> bool {
-    rig.muse_launches()
-        .last()
-        .is_some_and(|argv| argv.windows(2).any(|pair| pair == ["resume", session]))
 }
 
 #[test]
@@ -484,7 +402,7 @@ fn a_stop_that_finds_the_muse_window_at_rest_is_paid_with_no_key() -> Outcome {
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
     )?;
-    in_its_turn(&rig, &project, 1)?;
+    in_its_turn(&rig, &project, 1, secs(90))?;
     // The human's own Escape stops the turn before its first word: the window rests.
     let pane = pane_of(&project)?;
     rig.types(&pane, &[27])?;

@@ -258,3 +258,163 @@ pub fn deliveries(records: &[Value]) -> Vec<String> {
 pub fn has(records: &[Value], wanted: &str) -> bool {
     records.iter().any(|record| kind(record) == wanted)
 }
+
+/// What `muse usage --json` says of the account's allowance now, asked of the machine's
+/// Muse with the person's login (its secret in the keychain, found by `real_home`) and
+/// the settings in `config_home`, a throwaway folder: no model turn.
+pub fn usage(install: &Installed, real_home: &Path, config_home: &Path) -> Result<Value> {
+    crate::process::Run::new(&install.binary)
+        .args(["usage", "--json"])
+        .var("HOME", real_home)
+        .var("XDG_CONFIG_HOME", config_home)
+        .var("XDG_DATA_HOME", config_home.join("data"))
+        .var("XDG_CACHE_HOME", config_home.join("cache"))
+        .var("MUSE_NO_AUTO_UPDATE", "1")
+        .var("MUSE_LOGIN", "0")
+        .var("PATH", "/usr/bin:/bin")
+        .closed_input()
+        .limit(std::time::Duration::from_secs(60))
+        .run()?
+        .json()
+}
+
+/// How much of its current window and of its week an allowance has used, in percent:
+/// none where `usage` says no allowance.
+pub fn used_percent(usage: &Value) -> Option<(u64, u64)> {
+    let allowance = &usage["allowance"];
+    Some((
+        allowance["window"]["usedPercent"].as_u64()?,
+        allowance["weekly"]["usedPercent"].as_u64()?,
+    ))
+}
+
+/// The model a log says Muse moved its session to on its own, away from `launched`
+/// (`runtime.model_reconfigure.completed`, whose `effective` is another model): what T-705
+/// saw after a refusal, to a contributor model. None where it never moved.
+pub fn moved_away(records: &[Value], launched: &str) -> Option<String> {
+    records
+        .iter()
+        .filter(|record| record["payload_type"] == "runtime.model_reconfigure.completed")
+        .filter_map(|record| record["payload"]["record"]["effective"]["model_id"].as_str())
+        .find(|model| *model != launched)
+        .map(str::to_owned)
+}
+
+/// The record kinds of a log in order, its run events after a slash, with what Muse
+/// writes of its own bookkeeping (each model request's context blocks and traces, the
+/// tasks of its reminders) left out: what a case says of a live turn's shape.
+pub fn shape(records: &[Value]) -> Vec<String> {
+    const NOISE: [&str; 6] = [
+        "run/context_block_diagnostic",
+        "run/model_input_trace_recorded",
+        "run/resource_usage_sampled",
+        "run/goal_usage_attribution",
+        "run/task_stream_linked",
+        "command_intake",
+    ];
+    records
+        .iter()
+        .filter(|record| record["stream"]["kind"] != "task")
+        .map(kind)
+        .filter(|kind| {
+            !kind.is_empty() && !kind.starts_with("task/") && !NOISE.contains(&kind.as_str())
+        })
+        .collect()
+}
+
+/// A project of the rig's with a chief on the stand-in `claude` and a Muse worker on
+/// `muse-spark-1.3` at `minimal` (the live tests' model; the rig's echo Muse takes both
+/// out), and what its cases read of it.
+pub mod members {
+    use std::time::Duration;
+
+    use serde_json::{json, Value};
+
+    use super::{kind, records};
+    use crate::files;
+    use crate::rig::{Project, Rig};
+    use crate::Result;
+
+    /// The worker's agent, as the roster names it.
+    pub const WORKER: &str = "muse-worker";
+
+    /// The model and effort the worker runs on.
+    pub const MODEL: &str = "muse-spark-1.3";
+    pub const EFFORT: &str = "minimal";
+
+    /// The project of a case: the roster written, the chief's project opened, the Muse
+    /// worker added.
+    pub fn project(rig: &Rig) -> Result<Project<'_>> {
+        let roster = json!({
+            "schemaVersion": 1,
+            "agents": [
+                { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
+                {
+                    "id": WORKER, "kind": "muse", "model": MODEL,
+                    "effort": EFFORT, "workTier": "standard",
+                },
+            ],
+        });
+        files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+        let project = Project::open(rig, "chief", json!({}))?;
+        project.add_member(WORKER)?;
+        Ok(project)
+    }
+
+    /// The handle of the Muse worker given T-1: its agent's name and words of its own.
+    pub fn worker(project: &Project<'_>) -> Result<String> {
+        Ok(project.task(1)?["assignee"]
+            .as_str()
+            .unwrap_or_default()
+            .trim_start_matches('@')
+            .to_owned())
+    }
+
+    /// The one Muse session of the rig, its id and its records now.
+    pub fn the_session(rig: &Rig) -> (String, Vec<Value>) {
+        let sessions = rig.muse_sessions();
+        assert_eq!(sessions.len(), 1, "one session: {sessions:?}");
+        let (id, log) = &sessions[0];
+        (id.clone(), records(log))
+    }
+
+    /// The worker's window, as the board names its pane.
+    pub fn pane_of(project: &Project<'_>) -> Result<Value> {
+        Ok(project.lane(WORKER)?["pane"].clone())
+    }
+
+    /// Waits until the worker's window is in its turn: the board says it works, and its
+    /// session's log has `runs` turns begun.
+    pub fn in_its_turn(rig: &Rig, project: &Project<'_>, runs: usize, within: Duration) -> Result {
+        rig.wait_for("the Muse worker to be in its turn", within, || {
+            let begun = rig.muse_sessions().first().is_some_and(|(_, log)| {
+                records(log)
+                    .iter()
+                    .filter(|record| kind(record) == "run/started")
+                    .count()
+                    >= runs
+            });
+            Ok(begun && project.lane(WORKER)?["activity"]["state"] == "working")
+        })
+    }
+
+    /// The message of `participant`'s inbox whose words hold `words`, as it is now.
+    pub fn message_with(
+        project: &Project<'_>,
+        participant: &str,
+        words: &str,
+    ) -> Result<Option<Value>> {
+        Ok(project.inbox(participant)?.into_iter().find(|message| {
+            message["body"]
+                .as_str()
+                .is_some_and(|body| body.contains(words))
+        }))
+    }
+
+    /// Whether the rig's Muse was last started with `muse resume` on `session`.
+    pub fn last_resumed(rig: &Rig, session: &str) -> bool {
+        rig.muse_launches()
+            .last()
+            .is_some_and(|argv| argv.windows(2).any(|pair| pair == ["resume", session]))
+    }
+}
