@@ -231,13 +231,17 @@ fn a_launch_s_files_are_forgotten_from_every_harness_s_folder() {
 }
 
 #[test]
-fn every_harness_the_ledger_names_has_its_adapter_and_no_other_word_has() {
+fn every_harness_whose_windows_open_has_its_adapter_and_no_other_word_has() {
     let home = tempfile::tempdir().unwrap();
     let services = Fakes::new(&Env::default()).services(&Env::default(), home.path());
     let adapters = HarnessAdapters::new(&services);
     for harness in Harness::ALL {
-        assert!(
+        // Muse's windows open in 3.0.7's second phase (MUS-08): until then it is a
+        // harness ConsensFlow has no adapter for, which the engine gives no work, and
+        // refuses a project, a member and a chief on (T-767's P1).
+        assert_eq!(
             adapters.adapter(harness.kind()).is_some(),
+            harness != Harness::Muse,
             "{}",
             harness.kind()
         );

@@ -5,6 +5,8 @@
 //! a log may hold that no recording does. The shapes only Muse's schema names are
 //! `provisional`'s.
 
+mod background;
+mod live;
 mod provisional;
 
 use std::fs;

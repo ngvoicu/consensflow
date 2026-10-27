@@ -35,15 +35,25 @@
 //! is settled, and no one's words, as the close Claude Code writes of a cut turn is
 //! no one's answer.
 //!
-//! What a turn with tools, questions, approvals, compaction, background work or a
-//! refusal for quota writes was never seen (the Mac's Muse login runs no model turn):
-//! its reading is the `provisional` module's, from the shapes Muse's exported schema and
-//! its own session reader name, until the live fixtures of MUS-02 replace them.
+//! A turn of a real model (T-705's and T-718's live logs, `tests/fixtures/muse/live`)
+//! writes its tool calls and their results, its questions and approvals (`held`: each
+//! holds the turn open until answered), what Muse delivers into the session
+//! (`inbox_item_queued`: a command's end, a monitor's line, a child's result, each the
+//! harness's own item), a compaction's summary (`context_compaction_installed`, its
+//! `replacement.text` where `replacement.kind` is `summary_text`: the harness's item,
+//! marked a compaction), and the work it leaves running (`work`), which a settled turn
+//! says is pending. A user's message pasted mid-turn that Muse has not yet taken into a
+//! run keeps the turn in flight, as Claude Code's queued message does; after a turn
+//! cancelled, not (Escape puts queued messages back in the box: Muse 1.4.6's changelog,
+//! never seen in a log). What no live log has shown is the `provisional` module's, from
+//! the binary's strings.
 //!
 //! A log written by a Muse older than [`version::MINIMUM`] (its
 //! `runtime.session.metadata`, `build.semver`) is not read: its shapes are not known.
 
+mod held;
 mod provisional;
+mod work;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,7 +62,9 @@ use cf_base::env::Env;
 use cf_base::time;
 use serde_json::Value;
 
+use self::held::Held;
 use self::provisional::Provisional;
+use self::work::Work;
 use super::paths::transcript;
 use super::version::{self, Version};
 use crate::shared::record::cache::Look;
@@ -88,7 +100,11 @@ struct Log {
     records: usize,
     /// The place among the records of the one being read.
     reading: usize,
-    /// What only the schema says of: tools, questions, background work, quota.
+    /// What holds a run open: its tool calls, questions and approvals.
+    held: Held,
+    /// The work the turns left running.
+    work: Work,
+    /// What no live log has shown: a refusal for quota.
     provisional: Provisional,
 }
 
@@ -124,6 +140,8 @@ impl Log {
             latest: None,
             records: 0,
             reading: 0,
+            held: Held::default(),
+            work: Work::default(),
             provisional: Provisional::default(),
         }
     }
@@ -137,12 +155,25 @@ impl Log {
             Some("runtime.session") => match field(payload, "kind").and_then(Value::as_str) {
                 Some("run") => self.run_event(record, payload, at, seq),
                 Some("task") => {
-                    let kind = field(field(payload, "event"), "kind").and_then(Value::as_str);
-                    self.provisional.task_event(field(payload, "task_id"), kind);
+                    self.work.task(payload);
+                    Ok(())
+                }
+                Some("approval") => {
+                    let run = native_id(field(payload, "run_id"), "muse run", seq)
+                        .map_err(Stop::Failed)?;
+                    self.held.approval(&run, field(payload, "event"));
                     Ok(())
                 }
                 _ => Ok(()),
             },
+            Some("subagent.control.spawn_accepted" | "subagent.control.status_updated") => {
+                self.work.child(field(payload, "record"));
+                Ok(())
+            }
+            Some("session.end" | "session.started") => {
+                self.work.segment_ended();
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -152,7 +183,7 @@ impl Log {
     fn intent(&mut self, payload: Option<&Value>, at: &Value, seq: &Value) -> Result<(), Stop> {
         let kind = field(field(payload, "semantic_kind"), "kind").and_then(Value::as_str);
         let surface = field(payload, "surface").and_then(Value::as_str);
-        // Provisional (schema only, MUS-02): a message of another kind or surface
+        // Provisional (the binary's strings): a message of another kind or surface
         // (a slash command's, a side chat's) was never seen; it is Muse's own.
         let role = if kind == Some("chat") && surface == Some("main") {
             Role::User
@@ -189,6 +220,7 @@ impl Log {
         match field(event, "kind").and_then(Value::as_str) {
             Some("started") => {
                 self.runs.entry(Arc::clone(&run)).or_default();
+                self.work.run_started(&run);
                 self.latest = Some(run);
             }
             Some("assistant_message_committed") => {
@@ -238,16 +270,46 @@ impl Log {
                 if let End::Failed { reason } = &end {
                     self.provisional.failed(&run, reason.as_deref(), at);
                 }
+                self.work.run_ended(&run);
                 self.runs.entry(run).or_default().end = Some(end);
             }
             Some("run_retracted") => {
                 self.runs.entry(run).or_default().retracted = true;
             }
+            Some("inbox_item_queued") => {
+                self.work.queued(payload, event);
+                // What Muse delivers is the harness's own words; the user's message
+                // pasted mid-turn is the user's, read where it was accepted.
+                let source = field(field(event, "source"), "source").and_then(Value::as_str);
+                let body = field(event, "body").and_then(Value::as_str).unwrap_or("");
+                if source != Some("user_steer") && !body.trim().is_empty() {
+                    let id =
+                        native_id(record.get("id"), "muse record", seq).map_err(Stop::Failed)?;
+                    self.add(id, Role::Custom, body.to_owned(), at);
+                }
+            }
+            Some("inbox_item_drained") => self.work.drained(event),
+            Some("context_compaction_installed") => {
+                let replacement = field(event, "replacement");
+                let summary = field(replacement, "text")
+                    .and_then(Value::as_str)
+                    .filter(|_| {
+                        field(replacement, "kind").and_then(Value::as_str) == Some("summary_text")
+                    })
+                    .unwrap_or("");
+                if !summary.trim().is_empty() {
+                    let id =
+                        native_id(record.get("id"), "muse record", seq).map_err(Stop::Failed)?;
+                    let place = self.add(id, Role::Custom, summary.to_owned(), at);
+                    self.items[place].item.compaction = true;
+                }
+            }
+            // Provisional (the binary's strings): the task a tool call put in the
+            // background, which Muse 1.4.13 says in the task's output instead.
+            Some("task_backgrounded") => self.work.backgrounded(field(event, "task_id")),
             Some(kind) => {
-                let said = self.provisional.event(kind, &run, record, event, at, seq)?;
-                for (id, role, text, compaction) in said {
-                    let place = self.add(id, role, text, at);
-                    self.items[place].item.compaction |= compaction;
+                for (id, role, text) in self.held.event(kind, &run, record, event, seq)? {
+                    self.add(id, role, text, at);
                 }
             }
             None => {}
@@ -353,14 +415,15 @@ impl Answer for Log {
             .latest
             .as_ref()
             .and_then(|run| Some((run, self.runs.get(run)?)));
-        let open = latest.is_some_and(|(run, _)| self.provisional.holds_open(run));
-        let in_flight = latest.is_some_and(|(_, turn)| turn.end.is_none()) || open;
+        let open = latest.is_some_and(|(run, _)| self.held.holds_open(run));
         let end = latest.and_then(|(_, turn)| turn.end.as_ref());
+        let steered = self.work.steering() && !matches!(end, Some(End::Cancelled));
+        let in_flight = latest.is_some_and(|(_, turn)| turn.end.is_none()) || open || steered;
         let mut record = Record::new();
         record.items = self.items.iter().map(|kept| kept.item.clone()).collect();
         record.lines.places = Some(self.items.iter().map(|kept| kept.began).collect());
         record.in_flight = in_flight;
-        record.asking = latest.is_some_and(|(run, _)| self.provisional.asking(run));
+        record.asking = latest.is_some_and(|(run, _)| self.held.asking(run));
         if let Some(End::Failed { reason }) = end {
             record.failed = true;
             record.failure.clone_from(reason);
@@ -368,12 +431,17 @@ impl Answer for Log {
         record.took_back =
             matches!(end, Some(End::Cancelled)) && latest.is_some_and(|(_, turn)| turn.retracted);
         record.quota = latest.and_then(|(run, _)| self.provisional.quota(run));
-        record.pending = self.provisional.pending();
         record.settlement = match end {
             _ if in_flight => Settlement::InFlight,
             Some(_) => Settlement::Settled,
             None => Settlement::Unknown,
         };
+        // The jobs are said of a turn under way too (Finish takes one), and the agents of
+        // a turn that is over alone, as Claude Code's reader says them (`Pending`).
+        record.pending = self.work.pending();
+        if record.settlement != Settlement::Settled {
+            record.pending.agents = 0;
+        }
         Ok(record)
     }
 }

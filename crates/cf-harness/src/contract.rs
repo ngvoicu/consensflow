@@ -33,6 +33,15 @@ pub trait Adapter {
     /// sentence).
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>>;
 
+    /// Whether ConsensFlow opens windows on this harness at all. One that does not yet
+    /// (Muse Code, until its window is built) is no adapter to the engine: no work is
+    /// given to a member on it, and a project, a member and a chief on it are refused at
+    /// the door, as for a harness ConsensFlow has no adapter for. Its record is read all
+    /// the same ([`Records`]).
+    fn opens_windows(&self) -> bool {
+        true
+    }
+
     /// Whether a window can be opened again on its conversation `session`, as
     /// the harness's own record of it says: yes where it holds the conversation,
     /// no where it holds nothing a resume could find (Codex writes a thread's

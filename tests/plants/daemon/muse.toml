@@ -15,6 +15,10 @@ muse-admin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin:
 muse-records = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "records::tests"]
 muse-env = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::"]
 muse-scrub = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "scrub_muse_session::"]
+muse-fixtures = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "fixtures"]
+muse-daemon-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
+# The daemon started on the rig, its staff refusing a Muse agent (T-767's P1).
+muse-rig-no-window = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_muse_member_took_pooled_work_and_failed_it::"]
 
 # The reader: a turn stopped before a word of it, its message put back in the box.
 [[plant]]
@@ -44,21 +48,6 @@ find = '''
 '''
 replace = '''
             end.is_some() && latest.is_some_and(|(_, turn)| turn.retracted);
-'''
-
-# The reader: a turn started and never ended is in flight (a window at work, or a cut turn).
-[[plant]]
-name = "muse: a turn with no end is not in flight"
-meant = "a_turn_whose_process_was_killed_is_in_flight_and_one_killed_at_rest_is_settled"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/record.rs"
-find = '''
-        let in_flight = latest.is_some_and(|(_, turn)| turn.end.is_none()) || open;
-'''
-replace = '''
-        let in_flight = open;
 '''
 
 # The reader: a failed turn is a failure, in Muse's words.
@@ -278,79 +267,6 @@ replace = '''
                 return Err(NOT_YET.to_owned());
 '''
 
-# Provisional (schema only, MUS-02): a tool call holds its turn open until answered.
-[[plant]]
-name = "muse: an unanswered tool call does not hold the turn"
-meant = "tool_calls_hold_the_turn_open_until_each_is_answered_and_each_result_is_a_tools_item"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/record/provisional.rs"
-find = '''
-        self.calls.get(run).is_some_and(|open| !open.is_empty()) || self.asking(run)
-'''
-replace = '''
-        self.asking(run)
-'''
-
-# Provisional (schema only, MUS-02): a question open is the window asking.
-[[plant]]
-name = "muse: an open question is not asking"
-meant = "a_question_or_an_approval_open_is_asking_and_holds_the_turn_until_settled"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/record/provisional.rs"
-find = '''
-        self.asked.get(run).is_some_and(|open| !open.is_empty())
-'''
-replace = '''
-        self.asked.get(run).is_some_and(|open| open.is_empty())
-'''
-
-# Provisional (schema only, MUS-02): work put in the background is pending.
-[[plant]]
-name = "muse: background work is not pending"
-meant = "a_task_put_in_the_background_is_pending_until_its_task_ends"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/record/provisional.rs"
-find = '''
-            jobs: self.background.len(),
-'''
-replace = '''
-            jobs: 0,
-'''
-
-# Provisional (schema only, MUS-02): a compaction's summary is marked one.
-[[plant]]
-name = "muse: a compaction's summary is not marked"
-meant = "a_compactions_summary_is_the_harnesss_own_item_marked_a_compaction"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/record.rs"
-find = '''
-                    self.items[place].item.compaction |= compaction;
-'''
-replace = ""
-
-# Provisional (schema only, MUS-02): a steer is the user's intent, not a second item.
-[[plant]]
-name = "muse: a steer is a delivery of the harness's"
-meant = "a_delivery_that_is_not_the_users_is_the_harnesss_and_a_steer_is_the_users_intent"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/record/provisional.rs"
-find = '''
-                if source == Some("user_steer") || body.trim().is_empty() {
-'''
-replace = '''
-                if body.trim().is_empty() {
-'''
-
 # Provisional (MUS-14): a 402 is a refusal for quota.
 [[plant]]
 name = "muse: a 402 is no refusal for quota"
@@ -482,4 +398,318 @@ find = '''
 '''
 replace = '''
         if muse_s_own && placed.len() > usize::MAX - 1 {
+'''
+
+# The reader: a turn started and never ended is in flight (a window at work, or a cut turn).
+[[plant]]
+name = "muse: a turn with no end is not in flight"
+meant = "a_turn_whose_process_was_killed_is_in_flight_and_one_killed_at_rest_is_settled"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        let in_flight = latest.is_some_and(|(_, turn)| turn.end.is_none()) || open || steered;
+'''
+replace = '''
+        let in_flight = open || steered;
+'''
+
+# Held: a tool call holds its turn open until answered (live, T-705).
+[[plant]]
+name = "muse: an unanswered tool call does not hold the turn"
+meant = "a_tools_results_are_its_items_the_turn_open_until_each_is_answered"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '''
+        self.calls.get(run).is_some_and(|open| !open.is_empty()) || self.asking(run)
+'''
+replace = '''
+        self.asking(run)
+'''
+
+# Held: a question open is the window asking (live).
+[[plant]]
+name = "muse: an open question is not asking"
+meant = "a_question_and_an_approval_are_asking_until_answered"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '''
+        self.asked.get(run).is_some_and(|open| !open.is_empty())
+'''
+replace = '''
+        self.asked.get(run).is_some_and(|open| open.is_empty())
+'''
+
+# Held: an approval is read where Muse writes it, `payload.kind: approval` (live; T-767's P2).
+[[plant]]
+name = "muse: an approval is not read"
+meant = "a_question_and_an_approval_are_asking_until_answered"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+                    self.held.approval(&run, field(payload, "event"));
+'''
+replace = '''
+                    let _ = (&run, &self.held);
+'''
+
+# The reader: a compaction's summary is at `replacement.text` (live; T-767's P2).
+[[plant]]
+name = "muse: a compaction's summary is not marked"
+meant = "a_compactions_summary_is_the_harnesss_own_item_marked_a_compaction"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+                    self.items[place].item.compaction = true;
+'''
+replace = ""
+
+# The reader: the user's message pasted mid-turn is the user's intent, not a delivery of the harness's.
+[[plant]]
+name = "muse: a steer is a delivery of the harness's"
+meant = "a_message_pasted_mid_turn_is_the_users_at_once_and_its_turn_follows"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+                if source != Some("user_steer") && !body.trim().is_empty() {
+'''
+replace = '''
+                if !body.trim().is_empty() {
+'''
+
+# Work: a command run in the background says so in its task's output (live: `execution_state`).
+[[plant]]
+name = "muse: a background command is not work"
+meant = "a_command_run_in_the_background_is_pending_until_its_end_is_taken_into_a_run"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+        self.state.as_deref() == Some("background_running")
+'''
+replace = '''
+        self.state.as_deref() == Some("never")
+'''
+
+# Work: a monitor says so by its work's name (live).
+[[plant]]
+name = "muse: a monitor is not work"
+meant = "a_monitor_is_pending_until_its_stream_ends_and_its_events_are_taken_in"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+                .is_some_and(|work| work.starts_with("work.v2.monitor."))
+'''
+replace = '''
+                .is_some_and(|work| work.starts_with("never"))
+'''
+
+# Work: whatever a run leaves open at its terminal is background work.
+[[plant]]
+name = "muse: a task open at its run's end is no work"
+meant = "a_task_still_open_when_its_run_ends_is_background_work_whatever_it_said"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+            task.background = true;
+        }
+    }
+'''
+replace = '''
+            let _ = task;
+        }
+    }
+'''
+
+# Work: a task that ends ends its work.
+[[plant]]
+name = "muse: a stopped background task stays pending"
+meant = "a_background_command_stopped_ends_its_work_with_no_word_to_wait_for"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+                self.tasks.remove(&task);
+'''
+replace = '''
+                let _ = &task;
+'''
+
+# Work: a delivery waits until a run that has begun takes it in (the gap between a command's end and the turn it wakes).
+[[plant]]
+name = "muse: a delivery drained into a run not begun is taken in"
+meant = "a_command_that_outlives_its_turn_is_pending_until_the_run_it_wakes_has_begun"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+            Some(run) if !self.started.contains(&run) => {
+'''
+replace = '''
+            Some(run) if run.is_empty() => {
+'''
+
+# Work: each piece of work is counted once, however many of its items wait.
+[[plant]]
+name = "muse: a monitor's events count each"
+meant = "a_monitors_events_wait_for_the_agent_each_counted_with_the_monitor_once"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+        work.len() + ownerless
+'''
+replace = '''
+        work.len() + ownerless + self.items().filter(|item| item.family == family && item.owner.is_some()).count()
+'''
+
+# Work: a child whose result is queued is pending as that result (live: `result_ready` a record before).
+[[plant]]
+name = "muse: a child stays a child after its result is queued"
+meant = "a_child_that_ends_after_its_parents_turn_is_pending_until_its_result_is_taken_in"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+                    self.children.remove(owner);
+'''
+replace = '''
+                    let _ = owner;
+'''
+
+# Work: what a process left is retired at its segment's end, not pending for good.
+[[plant]]
+name = "muse: work a process left stays pending"
+meant = "what_a_process_left_running_is_retired_when_its_segment_ends_and_a_resume_reads_it_so"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+                self.work.segment_ended();
+'''
+replace = ""
+
+# The reader: a steer not yet taken in keeps the turn in flight, as Claude Code's queued message does.
+[[plant]]
+name = "muse: a steer waiting is no turn in flight"
+meant = "the_users_message_pasted_mid_turn_keeps_the_turn_in_flight_until_a_run_takes_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        let steered = self.work.steering() && !matches!(end, Some(End::Cancelled));
+'''
+replace = '''
+        let steered = false;
+'''
+
+# The reader: a steer after a cancelled turn went back in the box: no wait for good.
+[[plant]]
+name = "muse: a steer after a cancel waits"
+meant = "the_users_message_pasted_mid_turn_keeps_the_turn_in_flight_until_a_run_takes_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        let steered = self.work.steering() && !matches!(end, Some(End::Cancelled));
+'''
+replace = '''
+        let steered = self.work.steering();
+'''
+
+# The reader: agents are said of a turn that is over alone, as `Pending` says.
+[[plant]]
+name = "muse: agents are said of a turn under way"
+meant = "a_child_agent_its_parent_waits_on_holds_the_turn_and_is_no_agent_pending_of_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+            record.pending.agents = 0;
+'''
+replace = ""
+
+# The adapters: a harness whose windows do not open has no adapter (T-767's P1).
+[[plant]]
+name = "muse: an adapter that opens no window is registered"
+meant = "every_harness_whose_windows_open_has_its_adapter_and_no_other_word_has"
+runs = ["muse-daemon-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''
+                .filter(|(_, adapter)| adapter.opens_windows())
+'''
+replace = ""
+
+# The same, by the daemon the rig starts: a Muse agent refused as a member and as a chief.
+[[plant]]
+name = "muse: an adapter that opens no window is registered, by the rig's daemon"
+meant = "a_muse_agent_is_refused_as_a_member_and_as_a_chief_and_no_window_is_made_on_it"
+runs = ["muse-rig-no-window"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''
+                .filter(|(_, adapter)| adapter.opens_windows())
+'''
+replace = ""
+
+# The adapter: Muse's windows do not open yet.
+[[plant]]
+name = "muse: Muse says its windows open"
+meant = "every_harness_whose_windows_open_has_its_adapter_and_no_other_word_has"
+runs = ["muse-daemon-seams"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''
+    fn opens_windows(&self) -> bool {
+        false
+    }
+'''
+replace = '''
+    fn opens_windows(&self) -> bool {
+        true
+    }
+'''
+
+# The fixtures' scrubber: Muse's runtime socket names the uid and a profile (T-767's P3).
+[[plant]]
+name = "muse: the scrubber keeps the runtime socket"
+meant = "muses_runtime_socket_loses_the_uid_and_the_profile_it_names"
+runs = ["muse-scrub"]
+
+[[plant.edit]]
+file = "tools/xtask/src/scrub_muse_session.rs"
+find = '''
+        let placed = sockets(&places(text));
+'''
+replace = '''
+        let placed = places(text);
 '''

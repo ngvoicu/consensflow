@@ -11,6 +11,9 @@
 //! - the throwaway home (`/var/folders/<a>/<b>/T/muse-rec-<x>`, `/private` before it
 //!   or not), which becomes `/muse-home`, and any other place in the temporary
 //!   folder, which becomes `/tmp/`;
+//! - Muse's runtime socket (`/tmp/tbh-<uid>-rt/muse/ms-<profile>.sock`, `/private`
+//!   before it or not, and the `.lease` beside it), which names the user's uid and a
+//!   profile's id, and becomes [`SOCKET`];
 //! - Muse's own words, which are Meta's and no part of a conversation (the base
 //!   prompt, the context it builds for each request, its diagnostics of that
 //!   context): every text longer than [`LONGEST`] of a record of
@@ -42,6 +45,12 @@ const HOME: &str = "/muse-home";
 
 /// The name the recorder gives its throwaway home in the temporary folder.
 const RECORDER_HOME: &str = "muse-rec-";
+
+/// What Muse's runtime socket becomes.
+const SOCKET: &str = "/tmp/muse-runtime/ms.sock";
+
+/// The folder Muse's runtime socket is in, by the user's uid: `/tmp/tbh-<uid>-rt/`.
+const RUNTIME: &str = "/tmp/tbh-";
 
 /// The longest text of Muse's own that stays.
 const LONGEST: usize = 64;
@@ -142,7 +151,7 @@ fn scrubbed(record: Map<String, Value>) -> Value {
     let muse_s_own = is_muse_s_own(&record);
     let mut record = Value::Object(record);
     strings(&mut record, &mut |text| {
-        let placed = places(text);
+        let placed = sockets(&places(text));
         if muse_s_own && placed.len() > LONGEST {
             format!("[scrubbed: {} bytes]", placed.len())
         } else {
@@ -210,6 +219,25 @@ fn places(text: &str) -> String {
                 after
             }
         };
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `text` with every path of Muse's runtime socket replaced by [`SOCKET`]: a path from
+/// `/tmp/tbh-` (with `/private` before it or not) to the first character no path of it
+/// has.
+fn sockets(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(RUNTIME) {
+        let (before, from) = rest.split_at(at);
+        out.push_str(before.strip_suffix("/private").unwrap_or(before));
+        out.push_str(SOCKET);
+        let end = from
+            .find(|c: char| !(c.is_ascii_alphanumeric() || "/._-".contains(c)))
+            .unwrap_or(from.len());
+        rest = &from[end..];
     }
     out.push_str(rest);
     out

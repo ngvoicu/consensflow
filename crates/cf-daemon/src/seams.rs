@@ -162,19 +162,22 @@ impl LaunchFiles for LaunchFolders {
     }
 }
 
-/// An adapter for each harness, built once with the daemon's services, by the
-/// word the ledger names the harness with.
+/// An adapter for each harness whose windows ConsensFlow opens
+/// ([`Adapter::opens_windows`]), built once with the daemon's services, by the word the
+/// ledger names the harness with. A harness whose windows do not open has none, so the
+/// engine gives a member on it no work and refuses a project, member or chief on it.
 pub struct HarnessAdapters {
     by_harness: HashMap<Harness, Rc<dyn Adapter>>,
 }
 
 impl HarnessAdapters {
-    /// An adapter for each harness there is, built from `services`.
+    /// An adapter for each harness whose windows open, built from `services`.
     pub fn new(services: &Services) -> Self {
         Self {
             by_harness: Harness::ALL
                 .into_iter()
                 .map(|harness| (harness, adapter(harness, services)))
+                .filter(|(_, adapter)| adapter.opens_windows())
                 .collect(),
         }
     }

@@ -47,6 +47,21 @@ fn the_recorders_home_and_the_temporary_folder_are_replaced_wherever_they_are_wr
 }
 
 #[test]
+fn muses_runtime_socket_loses_the_uid_and_the_profile_it_names() {
+    let kept = scrubbed_line(json!({ "payload": { "kind": "route_facts", "record": {
+        "local_runtime_command_socket_path": "/private/tmp/tbh-501-rt/muse/ms-2ee2d561e12e.sock",
+        "bare": "/tmp/tbh-501-rt/muse/ms-aa.sock.lease",
+        "said": "listening on /private/tmp/tbh-501-rt/muse/ms-2ee2d561e12e.sock now",
+        "other": "/tmp/other/ms-1.sock",
+    }}}));
+    let record = &kept["payload"]["record"];
+    assert_eq!(record["local_runtime_command_socket_path"], SOCKET);
+    assert_eq!(record["bare"], SOCKET);
+    assert_eq!(record["said"], format!("listening on {SOCKET} now"));
+    assert_eq!(record["other"], "/tmp/other/ms-1.sock");
+}
+
+#[test]
 fn muses_own_long_words_go_and_the_conversations_stay() {
     let long = "x".repeat(LONGEST + 1);
     let short = "y".repeat(LONGEST);

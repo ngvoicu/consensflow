@@ -15,14 +15,19 @@ use serde_json::Value;
 
 /// What a transcript of a live run has in it that is personal, each with a sample:
 /// a folder of a user's, on a Mac and on Linux, a Mac's temporary folder (a user's
-/// own, with `/private` before it or not), an address, and the ids of an account's
+/// own, with `/private` before it or not), Muse's runtime socket (its folder names the
+/// user's uid, its file a profile's id), an address, and the ids of an account's
 /// bridge sessions. (A word is what JavaScript's `\w` made it: ASCII.)
-const PERSONAL: [(&str, &str); 6] = [
+const PERSONAL: [(&str, &str); 7] = [
     (r"/Users/", "/Users/jane/Projects/app"),
     (r"/home/", "/home/jane/app"),
     (
         r"/var/folders/",
         "/private/var/folders/5f/cy8ywl/T/muse-rec-1/work",
+    ),
+    (
+        r"/tmp/tbh-",
+        "/private/tmp/tbh-501-rt/muse/ms-2ee2d561e12e.sock",
     ),
     (
         r"[A-Za-z0-9_.+-]+@[A-Za-z0-9_-]+\.[A-Za-z0-9_]+",
@@ -67,15 +72,29 @@ fn the_claude_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
 #[test]
 fn the_muse_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
     let folder = folder("muse");
-    let mut names: Vec<String> = fs::read_dir(&folder)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+    // The echo recordings, and the live ones beside them (`live/`).
+    let mut names: Vec<String> = ["", "live"]
+        .into_iter()
+        .flat_map(|sub| {
+            fs::read_dir(folder.join(sub)).unwrap().map(move |entry| {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                if sub.is_empty() {
+                    name
+                } else {
+                    format!("{sub}/{name}")
+                }
+            })
+        })
         .filter(|name| {
             name.ends_with(".jsonl") || name.ends_with(".json") || name.ends_with(".sql")
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 10, "the fixtures are there: {names:?}");
+    assert!(names.len() >= 11, "the fixtures are there: {names:?}");
+    assert!(
+        names.iter().any(|name| name.starts_with("live/")),
+        "{names:?}"
+    );
     for name in names {
         let text = fs::read_to_string(folder.join(&name)).unwrap();
         for (pattern, _) in PERSONAL {

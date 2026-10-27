@@ -54,6 +54,11 @@ impl Adapter for MuseAdapter {
         })
     }
 
+    /// Not yet: its window is 3.0.7's second phase (MUS-08).
+    fn opens_windows(&self) -> bool {
+        false
+    }
+
     /// The session's log says (`index::resumable`), and Muse's index only where the
     /// log cannot be read.
     fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
