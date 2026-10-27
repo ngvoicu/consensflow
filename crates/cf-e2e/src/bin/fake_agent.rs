@@ -38,7 +38,11 @@
 //! not yet paid. Control-C once clears what is typed, and twice ends the window.
 //! A window with `CF_TEST_ANSWER_MS` set takes that long to write its answer once
 //! its work is done, so that a case can do something while the turn is still open
-//! in the record: quit the app, as a human may at any moment. A turn that runs a
+//! in the record: quit the app, as a human may at any moment. One with
+//! `CF_TEST_REST_MS` set takes that long, once its answer is written, to end its turn
+//! in the record (the stop hooks' summary) and to say it is at rest (its status file
+//! says `busy` until then), so that a case that goes on at the answer, and not at
+//! the rest, is always in the shape a loaded machine made rare. A turn that runs a
 //! command (`RUN`, in `tool`) works until the command ends, and Escape stops it
 //! and, as the line says, the command with it or not. A turn that runs a build
 //! (`BUILD`, in `build`) waits for it as for a command, and the build leaves a
@@ -815,6 +819,9 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     }),
                 )
                 .map_err(failed)?;
+            // The answer is in the record, and the turn is not yet ended in it, nor the
+            // window at rest.
+            wait_as_told("CF_TEST_REST_MS");
             records
                 .append(
                     pid,

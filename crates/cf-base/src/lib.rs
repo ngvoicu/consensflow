@@ -3,13 +3,15 @@
 //! things in, a file told apart from another renamed over it, JavaScript's
 //! readings of values and text, paths joined as Node joins them, text cut
 //! where JavaScript cut it, and JSON read and written the way Node read and
-//! wrote it, and the words after a verb as Node's `parseArgs` reads them.
+//! wrote it, the words after a verb as Node's `parseArgs` reads them, and the
+//! programs a test starts that end when the test does.
 
 #![forbid(unsafe_code)]
 
 pub mod args;
 pub mod env;
 pub mod file;
+pub mod fixture;
 pub mod home;
 pub mod js;
 pub mod json;

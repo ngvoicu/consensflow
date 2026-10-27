@@ -479,7 +479,7 @@ fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
             "/bin/stty raw -echo; tree=/tmp/cf-tree-$$; \
              /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
              printf \"%s\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
-             while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
+             while [ ! -s \"$tree\" ] && kill -0 $PPID 2>/dev/null; do :; done; grandchild=$(/bin/cat \"$tree\"); \
              /bin/rm -f \"$tree\"; printf 'PIDS:%s,%s,%s\nready' \"$$\" \"$child\" \"$grandchild\"; \
              /usr/bin/od -An -tx1 -N 17; printf '\nRECORDER-DONE\n'; wait \"$child\"",
             4096,
@@ -911,7 +911,7 @@ fn stdin_eof_reaps_every_spawned_process() {
                 "/bin/sleep 4; tree=/tmp/cf-eof-tree-$$; \
                  /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
                  printf \"%s\\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
-                 while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
+                 while [ ! -s \"$tree\" ] && kill -0 $PPID 2>/dev/null; do :; done; grandchild=$(/bin/cat \"$tree\"); \
                  /bin/rm -f \"$tree\"; printf '%s,%s,%s\\n' \"$$\" \"$child\" \"$grandchild\"; wait \"$child\"",
                 1024,
             ),
@@ -1487,14 +1487,14 @@ fn a_pane_open_answers_the_process_id_of_the_windows_program() {
 /// child's number.
 #[cfg(target_os = "macos")]
 const EXITS_OVER_A_BACKGROUND_CHILD: &str =
-    "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; read _; exit 0";
+    "trap '' HUP; (while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf 'CHILD %s END' \"$!\"; read _; exit 0";
 
 /// [`EXITS_OVER_A_BACKGROUND_CHILD`], with the child started by a subshell that ends at once, as a
 /// server that detaches itself is: the process that started the child has gone before the
 /// program does, and the window's program is not the one that did.
 #[cfg(target_os = "macos")]
 const EXITS_OVER_A_JOB_ITS_STARTER_LEFT: &str =
-    "trap '' HUP; (/bin/sleep 1000 & printf 'CHILD %s END' \"$!\"); read _; exit 0";
+    "trap '' HUP; ((while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf 'CHILD %s END' \"$!\"); read _; exit 0";
 
 /// Opens a window of `script` (one of the programs above), types the line that ends its
 /// program and waits for `pane.exit`: the background child's number, and when `pane.exit`
@@ -1900,6 +1900,7 @@ fn under_load_a_window_whose_program_exits_ends_the_background_child_it_left() {
 const OPENS_ITS_TERMINAL_AGAIN: &str = "exec /usr/bin/python3 -c '
 import ctypes, os, signal, time
 signal.signal(signal.SIGHUP, signal.SIG_IGN)
+parent = os.getppid()
 name = os.ttyname(0)
 print(\"PROGRAM %d END\" % os.getpid(), flush=True)
 libc = ctypes.CDLL(None, use_errno=True)
@@ -1907,7 +1908,7 @@ if libc.revoke(name.encode()) != 0:
     raise OSError(ctypes.get_errno(), \"revoke\")
 time.sleep(2)
 again = os.open(name, os.O_RDWR | os.O_NOCTTY)
-while True:
+while os.getppid() == parent:
     os.write(again, b\"BACK\\r\\n\")
     time.sleep(1)
 '";
@@ -2126,6 +2127,7 @@ fn a_program_that_exits_while_an_orphan_writes_on_to_its_terminal_is_told_closed
 #[cfg(target_os = "macos")]
 const CLEANS_UP_FOR_SIX_SECONDS: &str = "exec /usr/bin/python3 -c '
 import ctypes, os, signal, time
+parent = os.getppid()
 name = os.ttyname(0)
 def clean_up(number, frame):
     ctypes.CDLL(None).revoke(name.encode())
@@ -2134,7 +2136,8 @@ def clean_up(number, frame):
 signal.signal(signal.SIGHUP, signal.SIG_IGN)
 signal.signal(signal.SIGTERM, clean_up)
 print(\"PROGRAM %d END\" % os.getpid(), flush=True)
-time.sleep(1000)
+while os.getppid() == parent:
+    time.sleep(0.2)
 '";
 
 /// The daemon is told a window closed only on proof that its program has gone: a close
@@ -3037,9 +3040,17 @@ const A_TOOL_SHELL_DETACHES_A_SERVER: &str = "/usr/bin/python3 -c 'import os; os
 /// signal it is sent and can catch to the file `$SIGNALS`, and its number to `$JOB`, and
 /// sleeps. With `LEADS=server` it leads a session of its own (`setsid`) first; with
 /// `LEADS=job` it leads one, starts the job in it, which writes its number, and sleeps beside
-/// it.
+/// it. Detached, it has no parent to look at: it sleeps for as long as its owner, the test
+/// whose number is `$OWNER`, is there (T-693's rule, a fixture that ends with its owner).
 #[cfg(target_os = "macos")]
 const SERVER: &str = r#"import os, signal, time
+owner = int(os.environ["OWNER"])
+def owner_there():
+    try:
+        os.kill(owner, 0)
+        return True
+    except OSError:
+        return False
 def said(number, _):
     with open(os.environ["SIGNALS"], "a") as file:
         file.write("%d\n" % number)
@@ -3048,12 +3059,12 @@ for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, sig
 if os.environ.get("LEADS"):
     os.setsid()
     if os.environ["LEADS"] == "job" and os.fork() != 0:
-        while True:
+        while owner_there():
             time.sleep(1)
 with open(os.environ["JOB"] + ".part", "w") as file:
     file.write(str(os.getpid()))
 os.rename(os.environ["JOB"] + ".part", os.environ["JOB"])
-while True:
+while owner_there():
     time.sleep(1)
 "#;
 
@@ -3126,7 +3137,13 @@ fn closed_over_a_detached_job(tool: &str, env: Value, program: &str, look: bool)
     };
     let (job_file, signals_file) = (file("job"), file("signals"));
     let mut body = open_body(A_TOOL_SHELL_DETACHES_A_SERVER, 4096);
-    body["env"] = json!({"JOB": job_file, "SIGNALS": signals_file, "TOOL": tool, "PROG": SERVER});
+    body["env"] = json!({
+        "JOB": job_file,
+        "SIGNALS": signals_file,
+        "TOOL": tool,
+        "PROG": SERVER,
+        "OWNER": std::process::id().to_string(),
+    });
     for (name, value) in env.as_object().into_iter().flatten() {
         body["env"][name] = value.clone();
     }
@@ -3397,7 +3414,7 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
             // The helper, which began before the turn, waits for the window to say it
             // has begun and runs a shell, which says so once it runs a job; the window
             // says it started once it has.
-            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ]; do sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ]; do sleep 0.05; done; printf started; wait"#,
+            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ] && kill -0 $PPID 2>/dev/null; do sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ] || ! kill -0 $PPID 2>/dev/null; do sleep 0.05; done; printf started; wait"#,
             4096,
         );
         body["env"] = json!({"BINS": bins, "SAID": said, "GO": go});

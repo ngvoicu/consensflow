@@ -15,6 +15,7 @@ use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
 use super::stranger::Stranger;
 use super::{Config, Rig};
+use crate::bundle;
 use crate::daemon::Daemon;
 use crate::daemon_log::{self, errors_with_cause, lines_of, StartLine};
 use crate::outcome::Verdict;
@@ -95,8 +96,17 @@ impl Rig {
 
         // Beside the pane host, before any window: none of theirs.
         let stranger = Stranger::start()?;
-        let (mut daemon, start_line) = start_daemon(&config, &env)?;
-        let (mut host, host_output) = start_host(&env)?;
+        let copies = bundle::folder(&root);
+        let cf = bundle::copy_of(
+            match &config.cf {
+                Some(program) => program,
+                None => cf::binary()?,
+            },
+            &copies,
+        )?;
+        let pane_host = bundle::copy_of(cf::pane_host()?, &copies)?;
+        let (mut daemon, start_line) = start_daemon(&config, &cf, &env)?;
+        let (mut host, host_output) = start_host(&pane_host, &env)?;
         let shared = route(&mut daemon, &mut host, host_output)?;
 
         // The rig owns its home from here on: it goes with it.
@@ -111,6 +121,7 @@ impl Rig {
             shared,
             daemon,
             host,
+            cf,
             stranger,
             claude_config: claude_config.map(|(_, claude_config)| claude_config),
             claude_config_finished: false,
@@ -130,7 +141,11 @@ impl Rig {
 
 /// The daemon under test, started and held to being the native one: its handle
 /// line read, and its start line in its log, which says what runtime it is.
-fn start_daemon(config: &Config, env: &[(String, String)]) -> Result<(Daemon, StartLine)> {
+fn start_daemon(
+    config: &Config,
+    cf: &Path,
+    env: &[(String, String)],
+) -> Result<(Daemon, StartLine)> {
     let mut env = env.to_vec();
     for (name, value) in &config.daemon_vars {
         env.retain(|(held, _)| held != name);
@@ -139,11 +154,7 @@ fn start_daemon(config: &Config, env: &[(String, String)]) -> Result<(Daemon, St
     let env = env.as_slice();
     let mut daemon = match &config.daemon {
         Some(program) => Daemon::run(program, [] as [&str; 0], env.iter().cloned())?,
-        None => Daemon::run(
-            cf::binary()?,
-            ["ui", "--json", "--no-open"],
-            env.iter().cloned(),
-        )?,
+        None => Daemon::run(cf, ["ui", "--json", "--no-open"], env.iter().cloned())?,
     };
     let log = Path::new(var(env, "CONSENSFLOW_HOME")).join("daemon.log");
     let handle = daemon.handle(READY).map_err(|failed| {
@@ -179,8 +190,11 @@ const HUMAN_KEYS: &str = "CONSENSFLOW_TEST_HUMAN_KEYS";
 
 /// The pane host, started: its handle line read, and what it goes on to say
 /// kept for the routers.
-fn start_host(env: &[(String, String)]) -> Result<(Spawned, BufReader<ChildStdout>)> {
-    let mut host = Run::new(cf::pane_host()?)
+fn start_host(
+    pane_host: &Path,
+    env: &[(String, String)],
+) -> Result<(Spawned, BufReader<ChildStdout>)> {
+    let mut host = Run::new(pane_host)
         .vars(env.iter().map(|(name, value)| (name, value)))
         .var(HUMAN_KEYS, "1")
         .finding_programs()

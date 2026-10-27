@@ -24,7 +24,9 @@ cf-panes = { path = ".", features = ["test-support"] }
 cf-process = { workspace = true, features = ["test-support"] }
 
 [dependencies]
-# The environment, read once in the bridge's main (`Env`); on Windows also cygwin.rs.
+# The environment, read once in the bridge's main (`Env`); the programs the tests start that end
+# with the test (src/pty/sentinel.rs and the tests of the crate); on Windows also cygwin.rs, `ps -W`'s
+# parent.
 cf-base.workspace = true
 cf-bridge.workspace = true
 # The sentinel holds only its streams (test-support alone).

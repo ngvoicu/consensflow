@@ -446,7 +446,10 @@ runs = ["engine-resume-close-look"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''
-            record.window.borrow_mut().killing = Some(Killing::default());
+            record.window.borrow_mut().killing.push(Killing {
+                pane: pane.clone(),
+                paused: None,
+            });
             // The exit is settled here, and says nothing of the screen the window ends
             // with: where it was asking, the human's yes in it is read off the screen now.
             self.bank_yes_before_close(record, pane).await;
@@ -455,7 +458,10 @@ replace = '''
             // The exit is settled here, and says nothing of the screen the window ends
             // with: where it was asking, the human's yes in it is read off the screen now.
             self.bank_yes_before_close(record, pane).await;
-            record.window.borrow_mut().killing = Some(Killing::default());
+            record.window.borrow_mut().killing.push(Killing {
+                pane: pane.clone(),
+                paused: None,
+            });
 '''
 
 [[plant]]

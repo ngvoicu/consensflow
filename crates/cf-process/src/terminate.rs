@@ -46,7 +46,8 @@ pub fn terminate(pid: u32, how: Ending) {
 pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool, job: &Job) {
     #[cfg(unix)]
     {
-        // Signalling waits for nothing, and a group holds what a job would.
+        // Signalling waits for nothing but what a group forced to end is looked at again for
+        // (`force_stragglers`), and a group holds what a job would.
         let _ = (wait, job);
         let Some(target) = i32::try_from(pid).ok().and_then(|pid| target(pid, reach)) else {
             return;
@@ -62,6 +63,15 @@ pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool, job: &Job) {
         unsafe {
             libc::kill(target, signal);
         }
+        #[cfg(test)]
+        AFTER_SIGNAL.with(|hook| {
+            if let Some(hook) = &*hook.borrow() {
+                hook();
+            }
+        });
+        if how == Ending::Forced && reach == Reach::Group {
+            force_stragglers(target);
+        }
     }
     #[cfg(windows)]
     {
@@ -72,6 +82,9 @@ pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool, job: &Job) {
         if job.terminate() {
             return;
         }
+        // Started outside the lock every other start of this crate is under
+        // (`spawning`): Windows has no pipe made in two steps for a start to inherit, and
+        // `taskkill` has no stream of this process's, all three being null.
         #[allow(clippy::disallowed_methods)] // The one place a process starts.
         let mut command = std::process::Command::new("taskkill");
         command
@@ -89,6 +102,38 @@ pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool, job: &Job) {
     }
 }
 
+/// How long a group forced to end is looked at again for what was started as the signal went
+/// round: a program that keeps starting programs is in the middle of starting one when it is
+/// sent the signal, and the one it was starting is in the group, and was not there to be sent it.
+/// The program ends of it, and starts no more; this long is for it to be scheduled to (T-581:
+/// at a load of 100, after the crate's tests had ended a program that kept starting `sleep`s, one
+/// of them was found running, orphaned, in the group the program had led).
+#[cfg(unix)]
+const STRAGGLERS_WITHIN: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Forces the group `target` names (`-pgid`) again for as long as a process of it that is not
+/// a zombie is there, for [`STRAGGLERS_WITHIN`] at most. The group is held by its leader, which
+/// the caller has not reaped: while it is not, no number it leads is another's.
+#[cfg(unix)]
+fn force_stragglers(target: i32) {
+    let until = std::time::Instant::now() + STRAGGLERS_WITHIN;
+    while !crate::table::in_group(-target).is_empty() && std::time::Instant::now() < until {
+        std::thread::sleep(crate::table::BETWEEN_PASSES);
+        #[allow(unsafe_code)]
+        // SAFETY: as above: two integers, and the group is still held by its unreaped leader.
+        unsafe {
+            libc::kill(target, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+thread_local! {
+    /// What a test does right after a signal went round (a program started as it did).
+    static AFTER_SIGNAL: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// What `kill` is given to reach `pid` as `reach` says: a negative number
 /// names the group of that id. None where the number would name more than
 /// asked: group 0 is this process's own, 1 is none, and -1 is every process.
@@ -104,6 +149,7 @@ fn target(pid: i32, reach: Reach) -> Option<i32> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::spawning::StartedUnderTheLock as _;
     use crate::testing::{gone_within, pids_written_to, Survivors};
     use std::os::unix::process::{CommandExt, ExitStatusExt};
     use std::time::Duration;
@@ -129,7 +175,7 @@ mod tests {
                 .arg("sleep 30 & echo $! > \"$0\"; wait")
                 .arg(&file)
                 .process_group(0)
-                .spawn()
+                .spawn_locked()
                 .unwrap();
             let sleep = pids_written_to(&file, 1)[0];
             // What the process alone leaves is ended as the test ends.
@@ -142,12 +188,69 @@ mod tests {
     }
 
     #[test]
+    fn a_program_started_as_the_group_was_forced_to_end_is_forced_to_end_too() {
+        // As a program that keeps starting programs is when it is sent the signal (T-581): the
+        // one it was starting is in the group, and the signal did not find it there. A shell that
+        // leads a group and waits for a sleep is forced to end; as the signal has gone round, a
+        // sleep is started in its group, which the leader, a zombie not yet reaped, still holds.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("pid");
+        let mut shell = crate::testing::command("/bin/sh")
+            .arg("-c")
+            .arg("sleep 30 & echo $! > \"$0\"; wait")
+            .arg(&file)
+            .process_group(0)
+            .spawn_locked()
+            .unwrap();
+        let sleep = pids_written_to(&file, 1)[0];
+        let leader = shell.id();
+        let started: std::rc::Rc<std::cell::RefCell<Vec<std::process::Child>>> = Default::default();
+        let kept = std::rc::Rc::clone(&started);
+        AFTER_SIGNAL.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                let late = crate::testing::command("/bin/sleep")
+                    .arg("30")
+                    .process_group(i32::try_from(leader).unwrap())
+                    .spawn_locked()
+                    .unwrap();
+                kept.borrow_mut().push(late);
+            }));
+        });
+        end(leader, Ending::Forced, Reach::Group, false, &Job::unheld());
+        AFTER_SIGNAL.with(|hook| *hook.borrow_mut() = None);
+        let mut late = started
+            .borrow_mut()
+            .pop()
+            .expect("a program was started in the group");
+        let _left = Survivors(vec![sleep, late.id()]);
+        assert_eq!(shell.wait().unwrap().signal(), Some(libc::SIGKILL));
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        let ended = loop {
+            if let Some(status) = late.try_wait().unwrap() {
+                break Some(status);
+            }
+            if std::time::Instant::now() >= until {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(
+            ended.map(|status| status.signal()),
+            Some(Some(libc::SIGKILL)),
+            "the program started as the signal went round was not forced to end"
+        );
+    }
+
+    #[test]
     fn ends_a_child_with_the_signal_asked_for() {
         for (how, signal) in [
             (Ending::Asked, libc::SIGTERM),
             (Ending::Forced, libc::SIGKILL),
         ] {
-            let mut child = crate::testing::command("sleep").arg("30").spawn().unwrap();
+            let mut child = crate::testing::command("sleep")
+                .arg("30")
+                .spawn_locked()
+                .unwrap();
             terminate(child.id(), how);
             assert_eq!(child.wait().unwrap().signal(), Some(signal), "{how:?}");
         }
@@ -159,7 +262,10 @@ mod tests {
             (Ending::Asked, libc::SIGTERM),
             (Ending::Forced, libc::SIGKILL),
         ] {
-            let mut child = crate::testing::command("sleep").arg("30").spawn().unwrap();
+            let mut child = crate::testing::command("sleep")
+                .arg("30")
+                .spawn_locked()
+                .unwrap();
             end(child.id(), how, Reach::Process, false, &Job::unheld());
             assert_eq!(child.wait().unwrap().signal(), Some(signal), "{how:?}");
         }
@@ -169,6 +275,7 @@ mod tests {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    use crate::spawning::StartedUnderTheLock as _;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -178,7 +285,7 @@ mod tests {
         let mut child = std::process::Command::new("ping")
             .args(["-n", "30", "127.0.0.1"])
             .stdout(std::process::Stdio::null())
-            .spawn()
+            .spawn_locked()
             .unwrap();
         let started = Instant::now();
         end(

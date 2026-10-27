@@ -161,8 +161,10 @@ runs = ["regressions-finder"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/regressions/codex_in_homebrew_taken_for_not_installed.rs"
-find = "Ok(files::read_string(&found).is_ok_and(|said| said.ends_with('\\n')))"
-replace = "Ok(files::read_string(&found).is_ok())"
+find = '''        Ok(!files::read_finished_lines(&found)
+            .unwrap_or_default()
+            .is_empty())'''
+replace = '''        Ok(files::read_string(&found).is_ok())'''
 
 [[plant]]
 name = "load flakes: the windows of the headless host are given a second to print"

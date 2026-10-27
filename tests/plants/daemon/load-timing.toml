@@ -1,0 +1,376 @@
+# Eight tests that failed under load (T-581, 3.0.6: the gates of T-433, T-442, T-514 and T-549, at a load
+# of 50 to 150 on 14 cores), each reproduced under a bounded load (`tools/under-load.py`, 28 to 56 CPU
+# burners) and mended at its cause, and the ones of the same crate that failed beside them. A plant takes
+# one mending out, or puts one wrong, and the case that was mended fails.
+#
+# - cf-process: a program that keeps starting programs, ended, left one running that it was starting as the
+#   signal went round (the group is looked at again until no process of it runs); a held program's session
+#   was left one that its child was forking as the three passes of the sweep went round (the sweep goes on
+#   while what it signalled is still ending); a killed process that its parent has not yet reaped read as
+#   running (a zombie is gone); every program the crate starts is started with no other start under way (a
+#   program forked between the two steps of a pipe's making inherits its end); and the case of a closed
+#   stream needs one program of ten that dies of it (a forked program not yet started holds the read end).
+# - cf-daemon: the liveness of the driver is no longer timed as a whole (five thousand hand-offs took over
+#   ten seconds at a load of 140); a wake that is lost still fails it.
+# - cf-panes: the flow of output and input of a pane that waits for acks is no longer timed as a whole (a
+#   thousand round trips and half a megabyte of input took over ten seconds); a pane held up by another's
+#   flow, and an ack that frees nothing, still fail it.
+# - the app: the login shell that hangs is not given a time to start in; it is ended when it has started
+#   what it started.
+# - the rig: the case that waited for a file waits for what is written in it (the shell's `>` makes the file
+#   before `printf` writes), the restart case waits for the chief's turn to end in its record, and the
+#   windows of a rig find the `cf` the rig runs, a copy no build takes away.
+#
+# Every name holds `load timing`, so `npm run plants:daemon -- "load timing"` runs them all.
+
+[run]
+lt-terminate = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "terminate::tests::a_program_started_as_the_group"]
+lt-sweep = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "group::tests::a_sweep_goes_on"]
+lt-spawning = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "spawning::"]
+lt-closed = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_out_of_time_that_writes_once_asked"]
+lt-held = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "stalls::held::tests::a_job_is_stopped_under_its_program"]
+lt-output-end = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "output_end::tests::what_a_program_says_after_an_end_of_its_output"]
+lt-live-member = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_member::a_devin_members_window_is_opened_whole"]
+lt-daemon-copy = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "a_daemon_runs_a_copy_of_the_cf_in_its_home"]
+lt-deaf = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_that_ignores_the_ask_to_end_goes_when"]
+lt-gone = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "testing::a_process_that_has_ended"]
+lt-liveness = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "contract::liveness::wakes_streamed"]
+lt-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::input_remains_responsive_while_output_waits_for_ack"]
+lt-login = ["cargo", "xtask", "app", "test", "daemon_command::tests::a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started"]
+lt-homebrew = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_window_of_a_daemon_on_the_finders_path_finds_a_program_in_the_systems_folder"]
+lt-restart = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief_back_on_its_own_conversation"]
+lt-cf-gone = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_chief_runs_cf_in_its_window_though_the_build_it_was_made_from_is_gone"]
+
+# --- cf-process ---
+
+[[plant]]
+name = "load timing: a group forced to end is signalled once, and what was being started as the signal went round is left"
+meant = "a_program_started_as_the_group_was_forced_to_end_is_forced_to_end_too"
+runs = ["lt-terminate"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/terminate.rs"
+find = '''        if how == Ending::Forced && reach == Reach::Group {
+            force_stragglers(target);
+        }'''
+replace = '''        if how == Ending::Forced && reach == Reach::Group && false {
+            force_stragglers(target);
+        }'''
+
+[[plant]]
+name = "load timing: a group forced to end is looked at again only once"
+meant = "a_program_started_as_the_group_was_forced_to_end_is_forced_to_end_too"
+runs = ["lt-terminate"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/terminate.rs"
+find = '''    while !crate::table::in_group(-target).is_empty() && std::time::Instant::now() < until {'''
+replace = '''    while false && !crate::table::in_group(-target).is_empty() && std::time::Instant::now() < until {'''
+
+[[plant]]
+name = "load timing: the sweep of what a held program left stops after one pass"
+meant = "a_sweep_goes_on_for_what_is_started_in_the_session_while_it_goes_round"
+runs = ["lt-sweep"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = '''        if !sent || std::time::Instant::now() >= until {
+            break;
+        }'''
+replace = '''        let _ = (sent, until);
+        break;'''
+
+[[plant]]
+name = "load timing: a process that has ended and waits to be reaped is not gone"
+meant = "a_process_that_has_ended_and_is_not_reaped_yet_is_gone_though_it_reads_alive"
+runs = ["lt-gone"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/testing.rs"
+find = '''    let until = Instant::now() + within;
+    while running(pid) {'''
+replace = '''    let until = Instant::now() + within;
+    while alive(pid) {'''
+
+# A program is started with no other start of the crate under way (macOS makes a pipe in two steps, and
+# a program forked between them inherits the pipe's end: a capture then waits for a stranger's stream).
+
+[[plant]]
+name = "load timing: a capture starts its program while another is being started"
+meant = "every_way_a_program_is_started_waits_for_a_start_that_is_under_way"
+runs = ["lt-spawning"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "crate::spawning::one_at_a_time(|| command.spawn())"
+replace = "command.spawn()"
+
+[[plant]]
+name = "load timing: a spawn starts its program while another is being started"
+meant = "every_way_a_program_is_started_waits_for_a_start_that_is_under_way"
+runs = ["lt-spawning"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = "crate::spawning::one_at_a_time(|| command.spawn())"
+replace = "command.spawn()"
+
+[[plant]]
+name = "load timing: a hand over starts its program while another is being started"
+meant = "every_way_a_program_is_started_waits_for_a_start_that_is_under_way"
+runs = ["lt-spawning"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = "crate::spawning::one_at_a_time(|| command.spawn())"
+replace = "command.spawn()"
+
+[[plant]]
+name = "load timing: a start owned starts its program while another is being started"
+meant = "every_way_a_program_is_started_waits_for_a_start_that_is_under_way"
+runs = ["lt-spawning"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "crate::spawning::one_at_a_time(|| command.spawn())"
+replace = "command.spawn()"
+
+# The capture closes its streams before it asks the program to end (probed on Node): on B the case runs
+# alone, in a process of its own (stop-deadline's `the_closed_stream_alone`), where no other thread forks a
+# program that holds the read end, so its one program dies of the closed stream (integration B round 2,
+# T-800: Calliope's T-672 pick, `alone` kept and the tries dropped).
+
+[[plant]]
+name = "load timing: a capture out of time closes its streams after the program has ended"
+meant = "a_program_out_of_time_that_writes_once_asked_dies_of_its_closed_stream"
+runs = ["lt-closed"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = '''    drop((stdout, stderr));
+    group.end(Ending::Asked);
+    (forced(child, group).await, killed)
+}'''
+replace = '''    group.end(Ending::Asked);
+    let ended = forced(child, group).await;
+    drop((stdout, stderr));
+    (ended, killed)
+}'''
+
+# --- cf-daemon: a lost wake still fails the liveness case ---
+
+[[plant]]
+name = "load timing: a wake from another thread does not wake the driver"
+meant = "wakes_streamed_from_another_thread_while_drains_run_and_end_are_never_lost"
+runs = ["lt-liveness"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/runtime/executor.rs"
+find = '''            if let Some(driver) = driver {
+                driver.wake();
+            }'''
+replace = '''            if let Some(driver) = driver {
+                let _ = driver;
+            }'''
+
+[[plant]]
+name = "load timing: the driver registers no waker, so that a wake from another thread finds none"
+meant = "wakes_streamed_from_another_thread_while_drains_run_and_end_are_never_lost"
+runs = ["lt-liveness"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/runtime/executor.rs"
+find = '''            *locked(&executor.woken.driver) = Some(context.waker().clone());'''
+replace = '''            let _ = context;'''
+
+# --- cf-panes: a flow held up, an ack that frees nothing ---
+
+[[plant]]
+name = "load timing: a write holds the table while it waits for the pane's flow, and another pane's waits for the table"
+meant = "input_remains_responsive_while_output_waits_for_ack"
+runs = ["lt-pty"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''        let _active_write = ActiveWrite(active_writes);
+        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
+replace = '''        let _active_write = ActiveWrite(active_writes);
+        let _table = self.lock_panes()?;
+        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
+
+[[plant]]
+name = "load timing: an ack frees nothing of the pane's flow"
+meant = "input_remains_responsive_while_output_waits_for_ack"
+runs = ["lt-pty"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''            state.unacked.pop_front();
+            state.unacked_bytes -= byte_count;
+        }
+        self.ready.notify_all();
+        Ok(())'''
+replace = '''            state.unacked.pop_front();
+            state.unacked_bytes -= byte_count;
+        }
+        Ok(())'''
+
+# --- the app: the hanging login shell is ended when it has started what it started ---
+
+[[plant]]
+name = "load timing: a login shell is given a thousandth of its time"
+meant = "a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started"
+runs = ["lt-login"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "    let deadline = Instant::now() + timeout;\n    let status = loop {"
+replace = "    let deadline = Instant::now() + timeout / 1000;\n    let status = loop {"
+
+# --- the rig ---
+
+[[plant]]
+name = "load timing: the case that looks for where the stand-in found its program reads the file for being there"
+meant = "a_window_of_a_daemon_on_the_finders_path_finds_a_program_in_the_systems_folder"
+runs = ["lt-homebrew"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/codex_in_homebrew_taken_for_not_installed.rs"
+find = '''        Ok(!files::read_finished_lines(&found)
+            .unwrap_or_default()
+            .is_empty())'''
+replace = '''        Ok(found.exists())'''
+
+[[plant]]
+name = "load timing: the restart case goes on when the chief's answer is in its record, not its turn"
+meant = "a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief_back_on_its_own_conversation"
+runs = ["lt-restart"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/core_slice.rs"
+find = '''            .contains("\"subtype\":\"stop_hook_summary\""))'''
+replace = '''            .contains("\"text\":\"BEFORE-RESTART\""))'''
+
+[[plant]]
+name = "load timing: the windows of a rig find the build's cf, which a build takes away"
+meant = "a_chief_runs_cf_in_its_window_though_the_build_it_was_made_from_is_gone"
+runs = ["lt-cf-gone"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bundle.rs"
+find = '''    files::make_dir(folder)?;
+    let name = program'''
+replace = '''    if program.exists() {
+        return Ok(program.to_path_buf());
+    }
+    files::make_dir(folder)?;
+    let name = program'''
+
+# --- T-643: five more tests of the same kind ---
+#
+# - cf-evals `a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart`: its wait went on
+#   once two processes were listed, and took the look of a job that had not read the terminal yet (`R`, `S`,
+#   `U`), or of a program not yet waiting (`Rs+`); it waits for the job to be `T` under a program in `S`.
+# - cf-panes `what_a_program_says_after_an_end_of_its_output_and_before_it_is_seen_gone_is_read`: the test sent
+#   SIGKILL to the helper its program leaves, which was still dying when the close of the pane came for it, and
+#   the guard of the test's signals, which knew nothing of the helper, stopped the close's SIGTERM. The test
+#   registers the helper with the guard and lets the close end it.
+# - cf-e2e `a_spawned_programs_input_is_ended_after_everything_queued_is_written`: what the case read of the
+#   error output right after the program's end was what the thread that reads it had read so far; on B,
+#   `Spawned::wait` waits for the stream's end (merge-flakes' settle, whose plants are merge-flakes.toml's), so
+#   the case reads `errors()` after the wait (3.0.6-alpha.3 integration B round 2, T-800).
+# - cf-panes `input_remains_responsive_while_output_waits_for_ack` is T-581's (the gates of T-610 failed it at
+#   the 10 s it had: "blocked input write resumes after output acks: Timeout").
+
+[[plant]]
+name = "load timing: a job is taken for stopped under its program once two processes are listed"
+meant = "a_job_is_stopped_under_its_program_only_when_the_states_say_so_not_when_it_is_listed"
+runs = ["lt-held"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls/held/tests.rs"
+find = '''    matches!(
+        taken.processes.as_deref(),
+        Ok([program, job]) if state_in(program).starts_with('S') && state_in(job).starts_with('T')
+    )'''
+replace = '''    taken.processes.as_ref().is_ok_and(|lines| lines.len() == 2)'''
+
+[[plant]]
+name = "load timing: the helper a program leaves is not told to the guard of the test's signals"
+meant = "what_a_program_says_after_an_end_of_its_output_and_before_it_is_seen_gone_is_read"
+runs = ["lt-output-end"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end/tests.rs"
+find = "        crate::process_tree::guard::register(helper);"
+replace = "        let _ = helper;"
+
+# --- T-673: Calliope's review of T-581 ---
+#
+# The copy of `cf` goes where a build can break the program a window or a long-lived daemon finds by
+# its path: the hooks of a live Devin member's window (`live/window/open.rs`) and a daemon of a
+# scratch home (`Daemon::start_from`). The sources that run `cf` once, to its end, by the test's own
+# process (`ScratchHome::cf`, the cli cases, `codex-session`, `daemon_stop`) stay on the build: a build
+# can fail only the exec itself, loudly, and none resolves it again.
+
+[[plant]]
+name = "load timing: a Devin member's window has hooks that name the build's cf, which a build takes away"
+meant = "a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversation_with_the_note_in_its_launch"
+runs = ["lt-live-member"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window/open.rs"
+find = "                cf: self.rig.cf(),"
+replace = "                cf: crate::cf::binary()?,"
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window/open.rs"
+find = "                keep_only_consensflows_hooks(&start.args, self.rig.cf())?;"
+replace = "                keep_only_consensflows_hooks(&start.args, crate::cf::binary()?)?;"
+
+[[plant]]
+name = "load timing: a daemon of a scratch home runs the build's cf and not a copy of it"
+meant = "a_daemon_runs_a_copy_of_the_cf_in_its_home_and_not_the_build_a_cargo_build_takes_away"
+runs = ["lt-daemon-copy"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/daemon.rs"
+find = "        let own = bundle::copy_of(program, &bundle::folder(root))?;"
+replace = "        let _ = (root, bundle::folder);\n        let own = program.to_path_buf();"
+
+# --- T-686: a program that ignores the ask to end ends with the test that started it ---
+#
+# A harness whose output is closed exits at once with its tests in flight, and the program a test started
+# in a group of its own, that ignores the ask to end, went on for ever: two of them for eight hours. The
+# script the case of the forced program runs (`cf_base::fixture::deaf`, since T-693) ends when the process
+# that started it is gone.
+
+[[plant]]
+name = "load timing: a program that ignores the ask to end goes on when the process that started it is gone"
+meant = "a_program_that_ignores_the_ask_to_end_goes_when_the_process_that_started_it_is_gone"
+runs = ["lt-deaf"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/fixture.rs"
+find = '''{first}while {OWNER_THERE}; do sleep 0.2; done")'''
+replace = '''{first}while :; do sleep 0.2; done")'''

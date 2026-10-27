@@ -657,7 +657,11 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     script(
         fakes.path(),
         "ssh",
-        r#"case "$*" in *BatchMode=yes*) echo "free 614"; exit 0 ;; esac; printf '%s\t%s\n' "$$" "$2" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; exec sleep 120"#,
+        &format!(
+            r#"case "$*" in *BatchMode=yes*) echo "free 614"; exit 0 ;; esac; printf '%s\t%s\n' "$$" "$2" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; while {}; do sleep 0.2; done"#,
+            // Its parent is the `xtask` the case starts, which waits for it: its owner is the test.
+            cf_base::fixture::owner_there(std::process::id())
+        ),
     );
     let tree = tree(&[("keep.txt", "kept")]);
     let manifest = tree.path().join("tools").join("xtask");

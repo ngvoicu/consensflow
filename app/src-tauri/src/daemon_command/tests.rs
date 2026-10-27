@@ -157,7 +157,9 @@ fn the_login_shell_holds_nothing_of_the_apps_but_its_streams() {
     );
 }
 
-/// The pid a shell wrote in `file`, once it has.
+/// The pid a shell wrote in `file`, once it has. How soon a shell runs is the machine's
+/// (a loaded one took seconds to start a script), not what is tested: the bound is for a
+/// shell that never does.
 #[cfg(unix)]
 fn pid_in(file: &Path) -> i32 {
     let started = Instant::now();
@@ -169,7 +171,7 @@ fn pid_in(file: &Path) -> i32 {
             return pid;
         }
         assert!(
-            started.elapsed() < Duration::from_secs(10),
+            started.elapsed() < Duration::from_secs(60),
             "the shell never ran"
         );
         thread::sleep(Duration::from_millis(20));
@@ -188,6 +190,12 @@ fn kill(pid: i32) {
 /// PATH the app was started with; the app's start does not wait on it. Only
 /// the shell is ended: what its login files started is the user's, an
 /// `ssh-agent -D` that other programs use, say (the reviews of 2026-10-16).
+///
+/// The shell that hangs is not given a time to run in: it is a slow start of a loaded
+/// machine that kills it, at the time it is given, before it has started anything
+/// (T-581: "the shell never ran" in the gate at a load of 50 to 150, the shell killed
+/// at 300 ms before its first command). What it started is looked for when it says it
+/// did, and the shell is ended then, as the app's quit ends it.
 #[cfg(unix)]
 #[test]
 fn a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started() {
@@ -199,21 +207,52 @@ fn a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started() 
         None
     );
 
-    let waited_for = home.path().join("waited-for.pid");
-    let hanging = login_shell(
+    // A shell that hangs is not waited for beyond its time, though a program it started
+    // holds its output as long as it lives (30 s here): the time is up long before.
+    let held = home.path().join("held.pid");
+    let holding = login_shell(
         home.path(),
-        &format!("/bin/sleep 30 & echo $! > '{}'; wait", waited_for.display()),
+        &format!("/bin/sleep 30 & echo $! > '{}'; wait", held.display()),
     );
     let started = Instant::now();
     assert_eq!(
-        login_path_in(&hanging, Duration::from_millis(300), &lookup),
+        login_path_in(
+            &holding,
+            Duration::from_millis(300),
+            &LoginLookup::default()
+        ),
         None
     );
     assert!(
-        started.elapsed() < Duration::from_secs(2),
+        started.elapsed() < Duration::from_secs(20),
         "the shell held up the start"
     );
+    if let Some(held) = std::fs::read_to_string(&held)
+        .ok()
+        .and_then(|said| said.trim().parse().ok())
+    {
+        kill(held);
+    }
+
+    // What the shell started is left running when the shell is ended. It starts slowly, as a
+    // loaded machine's does; the time it is given is long, and it is ended when it has
+    // started what it started, as the app's quit ends it.
+    let waited_for = home.path().join("waited-for.pid");
+    let hanging = login_shell(
+        home.path(),
+        &format!(
+            "/bin/sleep 1; /bin/sleep 30 & echo $! > '{}'; wait",
+            waited_for.display()
+        ),
+    );
+    let asking = std::sync::Arc::new(LoginLookup::default());
+    let asked = {
+        let (asking, hanging) = (std::sync::Arc::clone(&asking), hanging.clone());
+        thread::spawn(move || login_path_in(&hanging, Duration::from_secs(120), &asking))
+    };
     let agent = pid_in(&waited_for);
+    asking.end();
+    assert_eq!(asked.join().expect("the lookup ended"), None);
     // Given a moment to be ended, as it would have been with the shell.
     thread::sleep(Duration::from_millis(200));
     let left = cf_panes::pty::process_exists(agent);
@@ -329,7 +368,7 @@ fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
         .args([
             "-c",
             &format!(
-                "i=0; while :; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
+                "i=0; while kill -0 $PPID 2>/dev/null; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
                 beat.display()
             ),
         ])
@@ -565,8 +604,10 @@ fn a_shell_that_ends_without_its_path_while_what_it_started_writes_on_is_given_u
     let shell = login_shell(
         home.path(),
         &format!(
-            "/bin/sh -c 'echo $$ > {}; while :; do echo noise; /bin/sleep 0.2; done' & exit 0",
-            writer.display()
+            "/bin/sh -c 'echo $$ > {}; while {}; do echo noise; /bin/sleep 0.2; done' & exit 0",
+            writer.display(),
+            // Its parent is the shell that exits at once: its owner is the test.
+            cf_base::fixture::owner_there(std::process::id())
         ),
     );
     let (sent, ended) = mpsc::channel();

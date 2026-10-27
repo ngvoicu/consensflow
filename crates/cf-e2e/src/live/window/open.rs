@@ -15,7 +15,7 @@ use super::super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::super::{list, Log};
 use super::{trust_claude, Window};
 use crate::rig::Rig;
-use crate::{cf, files, Error, Result};
+use crate::{files, Error, Result};
 
 /// The launch the live windows' settings are written for: one id, so each is
 /// written over the last.
@@ -332,11 +332,11 @@ impl<'a> Open<'a> {
                 message: member.message.as_deref(),
                 agent,
                 instructions: &member.instructions,
-                cf: cf::binary()?,
+                cf: self.rig.cf(),
                 env,
             })?;
             if member.alone {
-                keep_only_consensflows_hooks(&start.args, cf::binary()?)?;
+                keep_only_consensflows_hooks(&start.args, self.rig.cf())?;
             }
             let program = start.command.clone();
             return Ok((start, program));

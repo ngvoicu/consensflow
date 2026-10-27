@@ -265,7 +265,10 @@ fn switching_the_chief_opens_a_fresh_window_that_gets_the_handoff_and_reads_what
 #[test]
 fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief_back_on_its_own_conversation(
 ) -> Outcome {
-    let mut rig = rig()?;
+    // The stand-in takes two seconds to say it is at rest once its answer is in its
+    // record, as a loaded machine makes it: the case goes on when the daemon has seen
+    // the chief at rest, and not when the answer is there.
+    let mut rig = Rig::start(config().var("CF_TEST_REST_MS", "2000"))?;
     // The human's own agent, not the rig's: the restart must keep the roster.
     let roster = json!({
         "schemaVersion": 1,
@@ -284,6 +287,14 @@ fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief
         Ok(rig
             .transcript(&session)
             .contains("\"text\":\"BEFORE-RESTART\""))
+    })?;
+    // And its turn to be over in the record: the answer is there before the end of the
+    // turn is (Claude writes the stop hooks' summary a moment on, and the record of a
+    // turn without it reads as cut), so a quit between them cuts the turn.
+    rig.wait_for("the chief's turn to end in its record", secs(30), || {
+        Ok(rig
+            .transcript(&session)
+            .contains("\"subtype\":\"stop_hook_summary\""))
     })?;
 
     // The app's quit order: the daemon dies first, then the pane host.
