@@ -263,7 +263,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Build the app, ad hoc, of the smoke's identity
-        run: npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}'
+        run: npm --prefix app run build -- --bundles app
         timeout-minutes: 20
       - name: The built app passes the packaged smoke
         run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
