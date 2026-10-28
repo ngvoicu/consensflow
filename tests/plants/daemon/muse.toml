@@ -32,6 +32,10 @@ muse-moved = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispat
 muse-wake = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_task_held_for_no_time"]
 muse-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::guard"]
 muse-claude-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::moves"]
+muse-devin-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::windows"]
+muse-opencode-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "opencode::looks"]
+muse-codex-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::windows"]
+muse-quota-wait = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_paste_that_landed"]
 muse-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::tests::a_question_for_no_op"]
 muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
@@ -643,10 +647,11 @@ find = '''
         .model_moved
         .as_ref()
         .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
         .or_else(|| record.quota.clone())
 '''
 replace = '''
-    record.quota.clone()
+    live.or_else(|| record.quota.clone())
 '''
 
 # MUS-24 in the other harnesses that switch on their own: Codex's reroute, Claude Code's model change.
@@ -925,10 +930,11 @@ find = '''
         .model_moved
         .as_ref()
         .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
         .or_else(|| record.quota.clone())
 '''
 replace = '''
-    record.quota.clone().or_else(|| {
+    live.or_else(|| record.quota.clone()).or_else(|| {
         record
             .model_moved
             .as_ref()
@@ -948,10 +954,11 @@ find = '''
         .model_moved
         .as_ref()
         .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
         .or_else(|| record.quota.clone())
 '''
 replace = '''
-    record.quota.clone().or_else(|| {
+    live.or_else(|| record.quota.clone()).or_else(|| {
         record
             .model_moved
             .as_ref()
@@ -1720,10 +1727,10 @@ runs = ["muse-claude"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = '''
-        "opusplan" => &["opus", "sonnet"],
+        "opusplan" | "default" => &["opus", "sonnet"],
 '''
 replace = '''
-        "opusplan" => &["opus"],
+        "opusplan" | "default" => &["opus"],
 '''
 
 
@@ -1735,10 +1742,11 @@ runs = ["muse-claude-launch"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = '''
-                    quota_of(record),
+                ..observed_from(Arc::clone(&reading), None)
 '''
 replace = '''
-                    record.quota.clone(),
+                quota: None,
+                ..observed_from(Arc::clone(&reading), None)
 '''
 
 
@@ -1765,10 +1773,10 @@ runs = ["muse-claude-launch"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-        if let Some(model) = options.launch_model.as_deref() {
+        let model = options.launch_model.as_deref();
 '''
 replace = '''
-        if let Some(model) = options.launch_model.as_deref().filter(|_| false) {
+        let model = options.launch_model.as_deref().filter(|_| false);
 '''
 
 # T-841 P3-2: the live read copies the login file and the catalog alone, with their modes.
@@ -1818,5 +1826,158 @@ find = '''
 '''
 replace = '''
     copy_folder_kept(&home.join(".config/muse"), &scratch.join("config/muse"))?;
+'''
+
+# T-853 P2-1: a cut is gone on over words given after it, and decided on the words, not on the refusal's date.
+
+[[plant]]
+name = "muse: any paste is words since the cut"
+meant = "a_refusal_that_landed_after_the_last_look_and_before_a_restart_is_held_when_the_resume_goes_on_into_it"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            .is_some_and(|pasted| {
+                !items[pasted + 1..]
+                    .iter()
+                    .any(|item| item.role == Role::Assistant)
+            }))
+'''
+replace = '''
+            .is_some())
+'''
+
+
+[[plant]]
+name = "muse: words that landed are no words since the cut"
+meant = "a_paste_that_landed_while_the_reader_still_reads_the_failure_is_not_gone_on_over"
+runs = ["muse-quota-wait"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            .is_some_and(|pasted| {
+                !items[pasted + 1..]
+                    .iter()
+                    .any(|item| item.role == Role::Assistant)
+            }))
+'''
+replace = '''
+            .is_some_and(|_| false))
+'''
+
+# T-853 P3-3, P3-4: the reader is told a launch with no model too, and the default alias runs on two models.
+
+[[plant]]
+name = "muse: a launch with no model leaves the reader the alias"
+meant = "a_look_launched_with_no_model_reads_the_flips_again_where_an_earlier_one_named_the_alias"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            if known.as_deref() != model {
+'''
+replace = '''
+            if model.is_some() && known.as_deref() != model {
+'''
+
+
+[[plant]]
+name = "muse: the default alias is one model"
+meant = "the_default_alias_flips_between_opus_and_sonnet_by_design_too"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        "opusplan" | "default" => &["opus", "sonnet"],
+'''
+replace = '''
+        "opusplan" => &["opus", "sonnet"],
+'''
+
+# T-853 P3-2: one place builds a look; the precedence is the move, the window's live word, then the record's.
+
+[[plant]]
+name = "muse: the record's quota outranks the window's word"
+meant = "the_quota_a_look_says_is_the_move_then_what_the_window_says_live_then_the_records"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+        .or(live)
+        .or_else(|| record.quota.clone())
+'''
+replace = '''
+        .or_else(|| record.quota.clone())
+        .or(live)
+'''
+
+
+[[plant]]
+name = "muse: an unread record drops the window's word"
+meant = "the_quota_a_look_says_is_the_move_then_what_the_window_says_live_then_the_records"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+        Reading::Unknown(_) | Reading::Missing(_) => (true, false, live),
+'''
+replace = '''
+        Reading::Unknown(_) | Reading::Missing(_) => (true, false, None),
+'''
+
+
+[[plant]]
+name = "muse: devin's wire replaces the record's quota"
+meant = "a_move_the_record_holds_outranks_the_refusal_the_wire_log_says_and_the_records_own_stands_beside_a_silent_wire"
+runs = ["muse-devin-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''
+            let mut observed = observed_from(reading, wire.quota);
+'''
+replace = '''
+            let mut observed = observed_from(reading, None);
+            observed.quota = wire.quota;
+'''
+
+
+[[plant]]
+name = "muse: opencode's retry outranks a move"
+meant = "a_move_the_record_holds_outranks_the_quota_the_window_waits_out"
+runs = ["muse-opencode-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''
+            let mut observed = observed_from(reading, retry.map(Arc::new));
+'''
+replace = '''
+            let mut observed = observed_from(reading, None);
+            observed.quota = retry.map(Arc::new).or(observed.quota);
+'''
+
+
+[[plant]]
+name = "muse: codex's look says the record's refusal before its move"
+meant = "says_a_move_the_record_holds_before_a_refusal_it_shows_too"
+runs = ["muse-codex-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
+'''
+replace = '''
+        .filter(|_| false)
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
 '''
 
