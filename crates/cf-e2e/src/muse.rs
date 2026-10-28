@@ -279,9 +279,14 @@ pub fn usage(install: &Installed, real_home: &Path, config_home: &Path) -> Resul
 }
 
 /// How much of its current window and of its week an allowance has used, in percent:
-/// none where `usage` says no allowance.
+/// none where `usage` says no allowance. A window the server sent no usage for yet
+/// (`server_sent_no_usage`: "this can happen before your first use in a new window",
+/// Muse 1.4.14) is one nothing was spent of.
 pub fn used_percent(usage: &Value) -> Option<(u64, u64)> {
     let allowance = &usage["allowance"];
+    if allowance.is_null() && usage["reason"] == "server_sent_no_usage" {
+        return Some((0, 0));
+    }
     Some((
         allowance["window"]["usedPercent"].as_u64()?,
         allowance["weekly"]["usedPercent"].as_u64()?,
@@ -416,5 +421,30 @@ pub mod members {
         rig.muse_launches()
             .last()
             .is_some_and(|argv| argv.windows(2).any(|pair| pair == ["resume", session]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::used_percent;
+
+    /// T-829's live run (Muse 1.4.14, 2026-10-28): a window of the subscription in which
+    /// nothing was used yet answers no allowance with `server_sent_no_usage`, which is no
+    /// account without one: nothing of it is spent, and the run goes on.
+    #[test]
+    fn a_window_the_server_sent_no_usage_for_yet_is_one_nothing_was_spent_of() {
+        let fresh = json!({
+            "schemaVersion": 1, "allowance": null, "reason": "server_sent_no_usage",
+            "hint": "the server sent no usage data for this subscription; this can happen before your first use in a new window",
+        });
+        assert_eq!(used_percent(&fresh), Some((0, 0)));
+        let used = json!({ "schemaVersion": 1, "allowance": {
+            "window": { "usedPercent": 23, "resetsAtMs": 1 }, "weekly": { "usedPercent": 4, "resetsAtMs": 2 },
+        } });
+        assert_eq!(used_percent(&used), Some((23, 4)));
+        let none = json!({ "schemaVersion": 1, "allowance": null, "reason": "no_allowance" });
+        assert_eq!(used_percent(&none), None);
     }
 }
