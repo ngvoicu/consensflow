@@ -90,7 +90,7 @@ use std::time::{Duration, Instant};
 use std::collections::BTreeMap;
 
 use cf_e2e::live::claude::{self, Entry};
-use cf_e2e::live::mcp_server::Server;
+use cf_e2e::live::mcp_server::{Runtime, Server};
 use cf_e2e::live::members::{Machine, ThisMachine};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
@@ -223,6 +223,14 @@ impl Look {
             self.status
         )
     }
+}
+
+/// Whether the server that was to leave the window's process group did: it was started
+/// (`detached` is its process) and is the leader of a group of its own (`group`). A machine
+/// whose servers cannot leave a group (`leaves` false: Windows') has none that was to, so the
+/// check holds to what the others do.
+fn left_the_group(leaves: bool, detached: Option<u32>, group: Option<u32>) -> bool {
+    !leaves || (detached.is_some() && group == detached)
 }
 
 /// The process group the process `pid` is in: none where it is gone, or the platform has
@@ -711,11 +719,11 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ask::prepare()?;
     let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
-    let python = live::working_command("python3", &["--version"])?;
+    let runtime = Runtime::of_machine()?;
     let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-monitor-wait");
     fs::create_dir_all(&made)
         .map_err(|error| Error::Daemon(format!("{}: {error}", made.display())))?;
-    let server = Server::write_leaving_group(&made, &python)?;
+    let server = Server::write_leaving_group(&made, &runtime)?;
     // The first message goes in as the window opens, its first turn under way from the
     // first look (`Open::seed`).
     let mut open = Open::new(&rig, &claude, FOLDER, FOLDER)
@@ -787,10 +795,14 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ];
     let detached = server.detached_pid();
     let group = detached.and_then(group_of);
-    let left = detached.is_some() && group == detached;
+    // A machine whose servers cannot leave a process group (Windows') has none that did, and the
+    // check holds to what the others do: the host finds no command, and the plain look counts.
+    let left = left_the_group(server.leaves_group(), detached, group);
     log.say(format!(
         "the server that leaves the window's group: {}",
         match detached {
+            _ if !server.leaves_group() =>
+                "none on this machine: a process has no group to leave".to_owned(),
             Some(pid) if left => format!("process {pid}, in a group of its own"),
             Some(pid) => format!("process {pid}, in the group {group:?}"),
             None => "not started".to_owned(),
@@ -1184,6 +1196,19 @@ fn the_fixtures_expiry_is_read_from_its_records() {
             delivered_at: written_at(&json!({ "timestamp": "2026-10-20T23:03:10.329Z" })).unwrap(),
         }]
     );
+}
+
+#[test]
+fn a_server_left_its_group_when_it_leads_one_of_its_own_and_where_none_can_leave_none_was_to() {
+    assert!(left_the_group(true, Some(40), Some(40)));
+    assert!(
+        !left_the_group(true, Some(40), Some(7)),
+        "in the window's group"
+    );
+    assert!(!left_the_group(true, Some(40), None), "no group to tell");
+    assert!(!left_the_group(true, None, None), "never started");
+    // Windows: no server was written that leaves, and what a process group is has no answer.
+    assert!(left_the_group(false, None, None));
 }
 
 #[test]
