@@ -56,7 +56,9 @@
 //! `last_exits`: the exits the pane host tells as a rig closes, which the long run of
 //! the evals reads after the close. So is `reports`: a rig keeps a report of a case
 //! that failed and none of one that passed, and every case here and in the
-//! regressions that starts a rig closes it.)
+//! regressions that starts a rig closes it. So is `smoke_stand_in`: the packaged
+//! smoke's stand-in harness taking its brief and handing back its result on the
+//! checkout's daemon, which the smoke itself proves only in a built app.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -122,6 +124,10 @@ mod printed_output;
 mod reports;
 #[path = "rig/specs.rs"]
 mod specs;
+// The packaged smoke's stand-in is a shell script.
+#[cfg(unix)]
+#[path = "rig/smoke_stand_in.rs"]
+mod smoke_stand_in;
 #[cfg(unix)]
 #[path = "rig/specs_codex.rs"]
 mod specs_codex;
