@@ -435,7 +435,7 @@ fn finish_is_refused_while_told_words_are_on_their_way_and_says_so_to_the_chief(
     assert_eq!(
         refused.to_string(),
         format!(
-            "cannot finish T-1: words told to @{session} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it"
+            "cannot finish T-1: words for @{session} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it"
         )
     );
     assert_eq!(tiers.task(1).task.state, "working");

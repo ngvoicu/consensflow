@@ -258,20 +258,23 @@ async fn before(
 }
 
 /// The folders the record and the acknowledgement go in, made if they are
-/// not there, and the record written to its temporary (`publishRaw`).
+/// not there, and the record written to its temporary (`publishRaw`). The record
+/// holds the message's words, as private as a launch's prompt: the folders made
+/// are their owner's alone and the record its owner's to read and write, where
+/// Node's defaults made them anyone's to read (Calliope's P2 on T-697, its class).
 fn write_record(
     target: &Target<'_>,
     record: &Value,
     ack_file: &str,
     temporary: &str,
 ) -> Result<(), FileError> {
-    make_folder(Path::new(target.inbox), 0o777, Mkdir::Promise)?;
+    make_folder(Path::new(target.inbox), 0o700, Mkdir::Promise)?;
     // The folder of the file `join` made of the acknowledgements' folder.
     if let Some(folder) = Path::new(ack_file).parent() {
-        make_folder(folder, 0o777, Mkdir::Promise)?;
+        make_folder(folder, 0o700, Mkdir::Promise)?;
     }
     let text = format!("{}\n", js::stringify(record));
-    write_file(Path::new(temporary), text.as_bytes(), 0o666)
+    write_file(Path::new(temporary), text.as_bytes(), 0o600)
 }
 
 /// The pane a claim can name: a generation is a whole number from 1, and one

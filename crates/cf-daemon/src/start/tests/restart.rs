@@ -164,16 +164,18 @@ async fn a_start_settles_what_was_on_its_way_into_a_window_and_it_waits_for_the_
 const DEVIN_SESSION: &str = "calm-river";
 const DEVIN_LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
 
-/// The limit the Devin record reader names (`devin::record::answer`): the previous daemon
-/// stopped while the first message of a resumed Devin window was on its way, after Devin
-/// had stored it with the command it ran under, `/bypass <message>`. A start sweeps the
-/// launch folders before it settles what was on its way, the launch's prompt file with
-/// them, so the record is read as Devin stored it: no paste, and the message goes back
-/// to its queue, to be given again. (Settled first and swept after, a failed settle
-/// still lost the proof, and a settled reading outlived the wire log it rested on: the
-/// reviews of round 12.)
+/// Gap 5 of the Devin arrival gaps (`issues/devin-arrival-gaps-main-has-too.md`): the
+/// previous daemon stopped while the first message of a resumed Devin window was on its
+/// way, after Devin had stored it with the command it ran under, `/bypass <message>`. A
+/// start sweeps the launch folders before it settles what was on its way, the launch's
+/// prompt file and wire log with them; the record was read as Devin stored it, no paste,
+/// and the message went back to its queue to be given again. The sweep keeps what the
+/// launch proves of its first message (`cf_harness::devin::kept`), the settle reads the
+/// stored message as its paste, and what was kept goes once it is settled. (Settled
+/// first and swept after, a failed settle still lost the proof, and a settled reading
+/// outlived the wire log it rested on: the reviews of B5's round 12.)
 #[tokio::test]
-async fn a_start_sweeps_the_launch_folders_first_so_a_first_message_devin_stored_behind_bypass_goes_back_to_its_queue(
+async fn a_first_message_devin_stored_behind_bypass_is_settled_as_received_though_the_start_swept_its_launch(
 ) {
     LocalSet::new()
         .run_until(async {
@@ -200,36 +202,7 @@ async fn a_start_sweeps_the_launch_folders_first_so_a_first_message_devin_stored
                 cf_engine::delivery_text::delivery_text(&begun.message, &begun.carried)
             );
             // Devin's store, the message in it as Devin stored it.
-            let data = if cfg!(windows) {
-                root.path().join("home").join("AppData").join("Roaming")
-            } else {
-                root.path().join("home").join(".local").join("share")
-            };
-            let store = data.join("devin").join("cli");
-            std::fs::create_dir_all(&store).unwrap();
-            let store = rusqlite::Connection::open(store.join("sessions.db")).unwrap();
-            store
-                .execute_batch(
-                    "CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
-                     CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
-                       node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT)",
-                )
-                .unwrap();
-            store
-                .execute(
-                    "INSERT INTO sessions VALUES (?, 'n-1')",
-                    [DEVIN_SESSION],
-                )
-                .unwrap();
-            let message = json!({ "message_id": "u-1", "role": "user", "content": stored });
-            store
-                .execute(
-                    "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
-                     VALUES (?, 'n-1', NULL, ?, '2026-10-18T10:00:00Z')",
-                    (DEVIN_SESSION, message.to_string()),
-                )
-                .unwrap();
-            drop(store);
+            drop(devin_store(root.path(), std::slice::from_ref(&stored)));
             // The launch's folder: its wire log names the session, and its prompt file
             // holds what it was given.
             let launch = root
@@ -261,12 +234,247 @@ async fn a_start_sweeps_the_launch_folders_first_so_a_first_message_devin_stored
                 .and_then(|messages| messages.iter().find(|message| message["id"] == note.id))
                 .cloned()
                 .unwrap();
-            assert_eq!(settled["state"], "queued", "{settled}");
-            assert_eq!(
-                settled["reason"], "the daemon stopped before it arrived",
-                "{settled}"
-            );
+            assert_eq!(settled["state"], "delivered", "{settled}");
+            assert_eq!(settled["attempts"], 1, "given once: {settled}");
             assert!(!launch.exists(), "the launch's folder went");
+            let kept = root
+                .path()
+                .join("consensflow")
+                .join("integrations")
+                .join("devin-kept");
+            assert_eq!(
+                std::fs::read_dir(&kept).map(Iterator::count).unwrap_or(0),
+                0,
+                "what the sweep kept went once the start had settled"
+            );
+            daemon.stop("SIGTERM");
+            daemon.finished().await;
+        })
+        .await;
+}
+
+/// Calliope's P3 on T-697 (and Sol's P1 on B5's round 12): what was kept of Devin's launches
+/// whose folders went is the proof a settle reads, so a settle that failed, or panicked,
+/// leaves it for the next start's, and only one that settled lets it go.
+#[tokio::test]
+async fn what_was_kept_of_swept_launches_outlives_a_settle_that_failed_and_goes_with_one_that_settled(
+) {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().to_string_lossy().into_owned();
+    let errors = Errors::new(
+        Rc::new(Log::new(root.path())),
+        Rc::new(Trace::new(root.path())),
+    );
+    let kept = root.path().join("integrations").join("devin-kept");
+    std::fs::create_dir_all(&kept).unwrap();
+    let file = kept.join(format!("{DEVIN_LAUNCH}.json"));
+    std::fs::write(&file, r#"{"sessions":["calm-river"],"prompt":"the note"}"#).unwrap();
+    let refused = || {
+        cf_engine::seams::EngineError::from(cf_base::refusal::Refusal::new(
+            "database-full",
+            "database or disk is full",
+        ))
+    };
+    settle(async { Err(refused()) }, &home, &errors).await;
+    assert!(file.exists(), "a settle that failed keeps it");
+    settle(
+        async {
+            if file.exists() {
+                panic!("a bug in the settle");
+            }
+            Ok(())
+        },
+        &home,
+        &errors,
+    )
+    .await;
+    assert!(file.exists(), "and so does one that panicked");
+    let log = std::fs::read_to_string(root.path().join("daemon.log")).unwrap_or_default();
+    assert_eq!(
+        log.matches("settling what was on its way failed").count(),
+        2,
+        "{log}"
+    );
+    settle(async { Ok(()) }, &home, &errors).await;
+    assert!(!file.exists(), "one that settled lets it go");
+}
+
+/// Devin's store of its sessions under `root`'s home, with the session [`DEVIN_SESSION`]
+/// and its user's messages `said`, each a node below the one before.
+fn devin_store(root: &Path, said: &[String]) -> rusqlite::Connection {
+    let data = if cfg!(windows) {
+        root.join("home").join("AppData").join("Roaming")
+    } else {
+        root.join("home").join(".local").join("share")
+    };
+    let folder = data.join("devin").join("cli");
+    std::fs::create_dir_all(&folder).unwrap();
+    let store = rusqlite::Connection::open(folder.join("sessions.db")).unwrap();
+    store
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+             CREATE TABLE IF NOT EXISTS message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+               node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT)",
+        )
+        .unwrap();
+    for text in said {
+        devin_says(&store, text);
+    }
+    store
+}
+
+/// A user's message `text` in Devin's store, below the last, the session's head now.
+fn devin_says(store: &rusqlite::Connection, text: &str) {
+    let count: i64 = store
+        .query_row("SELECT count(*) FROM message_nodes", [], |row| row.get(0))
+        .unwrap();
+    let node = format!("n-{}", count + 1);
+    let parent = (count > 0).then(|| format!("n-{count}"));
+    let message =
+        json!({ "message_id": format!("u-{}", count + 1), "role": "user", "content": text });
+    store
+        .execute(
+            "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+             VALUES (?, ?, ?, ?, '2026-10-26T10:00:00Z')",
+            (DEVIN_SESSION, &node, parent, message.to_string()),
+        )
+        .unwrap();
+    store
+        .execute(
+            "INSERT INTO sessions VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET main_chain_id = ?2",
+            (DEVIN_SESSION, &node),
+        )
+        .unwrap();
+}
+
+/// The exit path of gap 5 (Calliope's P3 on T-697): a Devin chief comes back on its
+/// conversation, and its first message, the handoff of a switch, goes behind `/bypass` in
+/// its launch's prompt file. Devin stores it with the command kept, and the window ends before
+/// the daemon read its record again: the exit removes the launch's folder before it reads
+/// the record for the message it had on its way. What the folder proved is kept with it, so
+/// the handoff is settled as received, not given back to go in again. (On Unix: the
+/// stand-in Devin is a shell script.)
+#[cfg(unix)]
+#[tokio::test]
+async fn a_devin_chiefs_first_message_behind_bypass_is_received_though_its_window_closed_while_delivering(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let home = root.path().join("consensflow");
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("agents.json"),
+                json!({
+                    "schemaVersion": 1,
+                    "agents": [{ "id": "mydevin", "kind": "devin", "model": "swe-2", "workTier": "standard" }]
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let mut ledger = open_ledger(&home.join("consensflow.db"), LedgerOptions::default()).unwrap();
+            let workspace = root.path().join("workspace");
+            std::fs::create_dir_all(&workspace).unwrap();
+            let project = ledger
+                .create_project(&NewProject {
+                    directory: workspace.to_string_lossy().into_owned(),
+                    name: "app".to_owned(),
+                    chief: NewChief {
+                        harness: "devin".to_owned(),
+                        agent: Some("mydevin".to_owned()),
+                    },
+                    staff: Vec::new(),
+                    gate: false,
+                    wake_up: None,
+                    specs: None,
+                })
+                .unwrap()
+                .id;
+            // The handoff of a switch to Devin, still on its way to the chief.
+            let note = ledger
+                .note(
+                    project,
+                    &NewNote {
+                        from: None,
+                        to: "chief".to_owned(),
+                        task: None,
+                        body: "You are the chief now of app, switched in from Claude Code."
+                            .to_owned(),
+                    },
+                )
+                .unwrap();
+            ledger
+                .follow_conversation(note.recipient_id, "devin", DEVIN_SESSION)
+                .unwrap();
+            ledger.close().unwrap();
+            // The conversation the chief comes back on, which Devin holds.
+            let store = devin_store(root.path(), &["What is on the board?".to_owned()]);
+            // A Devin to be found on PATH, which says its version.
+            let bin = root.path().join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let devin = bin.join("devin");
+            std::fs::write(
+                &devin,
+                "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'devin 3000.11.205 (stand-in)'; exit 0; fi\nsleep 600\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(
+                &devin,
+                std::os::unix::fs::PermissionsExt::from_mode(0o755),
+            )
+            .unwrap();
+
+            let (options, app, opened) = app_that_opens_windows(root.path());
+            let daemon = start(environment(root.path()), options).await.unwrap();
+            ask(&app, "project.resume", json!({ "project": project })).await;
+            wait_for(root.path(), || !opened.borrow().is_empty()).await;
+            let pane = opened.borrow()[0].clone();
+            wait_for(root.path(), || daemon.parts.engine.pane(note.recipient_id).is_some()).await;
+            let launches = home.join("integrations").join("devin");
+            let launch = std::fs::read_dir(&launches)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let prompt = std::fs::read_to_string(launch.join("prompt.txt")).unwrap();
+            assert!(prompt.starts_with("/bypass [ConsensFlow m-"), "{prompt}");
+            let line = json!({
+                "sessionId": DEVIN_SESSION,
+                "update": { "sessionUpdate": "available_commands_update" },
+            });
+            // The clock stands from here: nothing of the daemon looks again before the exit.
+            tokio::time::pause();
+            std::fs::write(launch.join("wire.jsonl"), format!("{line}\n")).unwrap();
+            devin_says(&store, &prompt);
+            app.event(
+                "pane.exit",
+                json!({ "id": pane["id"], "generation": pane["generation"] }),
+            );
+            assert_eq!(ask(&app, "ping", json!({})).await, json!({ "ok": true }));
+            tokio::time::resume();
+            let mut settled = Value::Null;
+            let until = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < until {
+                let inbox = ask(
+                    &app,
+                    "inbox.get",
+                    json!({ "project": project, "participant": "chief" }),
+                )
+                .await;
+                settled = inbox["messages"]
+                    .as_array()
+                    .and_then(|messages| messages.iter().find(|message| message["id"] == note.id))
+                    .cloned()
+                    .unwrap();
+                if settled["state"] != "delivering" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert_eq!(settled["state"], "delivered", "{settled}");
+            assert_eq!(settled["attempts"], 1, "given once: {settled}");
+            assert!(!launch.exists(), "the launch's folder went with its window");
             daemon.stop("SIGTERM");
             daemon.finished().await;
         })

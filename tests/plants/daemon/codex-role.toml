@@ -382,8 +382,8 @@ replace = '''const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CO
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/launch_files.rs"
-find = '''            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() {'''
-replace = '''            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() || true {'''
+find = '''            if LaunchId::new(&name).is_none() {'''
+replace = '''            if LaunchId::new(&name).is_none() && false {'''
 
 [[plant]]
 name = "codex role: a manifest's commit that is no hexadecimal name of one is made the name of a folder"

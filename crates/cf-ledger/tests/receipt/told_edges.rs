@@ -64,6 +64,54 @@ fn told_words_that_never_reach_the_window_fail_their_task_and_its_answer_is_no_r
     assert_eq!(refused.code(), Some("invalid-transition"), "no result");
 }
 
+/// Devin arrival gap 4: a note of ConsensFlow's own about the task, which a start let go
+/// of from the paste it rode in, holds the result as told words do, by its own state:
+/// queued and being pasted, the window's done is refused; given up, it holds nothing.
+#[test]
+fn a_done_while_a_note_of_consensflows_own_is_on_its_way_is_refused_until_the_window_has_it() {
+    let mut w = world();
+    let (task, session, brief) = queued(&mut w);
+    w.begin(brief);
+    w.confirm(brief);
+    let note = |w: &mut World| {
+        w.ledger
+            .note(
+                w.project,
+                &NewNote {
+                    from: None,
+                    to: session.clone(),
+                    task: Some(task),
+                    body: "Keep the old reader too".into(),
+                },
+            )
+            .expect("a note")
+    };
+    let own = note(&mut w);
+    for paste in [false, true] {
+        if paste {
+            w.begin(own.id);
+        }
+        let refused = w
+            .ledger
+            .record_result(w.project, task, "Parser done")
+            .unwrap_err();
+        assert_eq!(refused.code(), Some("words-on-their-way"));
+        assert!(waiting(&w, &session, task));
+    }
+    w.confirm(own.id);
+    assert!(!waiting(&w, &session, task));
+    // One the window never takes holds nothing once given up.
+    let lost = note(&mut w);
+    w.begin(lost.id);
+    w.ledger
+        .fail_delivery(lost.id, "refused by the window")
+        .expect("given up");
+    w.ledger
+        .record_result(w.project, task, "Parser done")
+        .expect("the window has every note it will have");
+    assert_eq!(w.state(task), "done");
+}
+
 #[test]
 fn a_done_while_told_words_are_on_their_way_is_refused_until_the_window_has_them() {
     let refusal = |task: i64| {
