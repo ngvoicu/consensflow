@@ -133,7 +133,17 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
 fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat() -> Result {
     let log = Log::begin("live approval")?;
     let (chiefs, steps) = limits()?;
-    let plan = plan::projects(&chiefs, &steps);
+    let (seated, left_out) = live::seated(&chiefs, live::lacks).map_err(Error::Daemon)?;
+    for line in left_out {
+        log.say(line);
+    }
+    if seated.len() < 4 {
+        return Err(Error::Daemon(format!(
+            "a project's four seats need four harnesses, and this machine runs {}",
+            seated.len()
+        )));
+    }
+    let plan = plan::projects(&chiefs, &steps, &seated);
     if plan.iter().all(|project| project.steps.is_empty()) {
         return Err(Error::Daemon(
             "the harnesses and the steps asked for leave nothing to run".to_owned(),

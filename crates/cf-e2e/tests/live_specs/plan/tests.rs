@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn every_harness_is_the_chief_of_one_project_which_runs_every_step_in_order() {
-    let all = projects(&[], &[]);
+    let all = projects(&[], &[], &Harness::ALL);
     let chiefs: Vec<Harness> = all.iter().map(|project| project.chief).collect();
     assert_eq!(chiefs, Harness::ALL);
     assert_eq!(
@@ -21,7 +21,7 @@ fn every_harness_is_the_chief_of_one_project_which_runs_every_step_in_order() {
 
 #[test]
 fn the_harnesses_named_are_the_only_chiefs_and_keep_their_place_in_the_rotation() {
-    let two = projects(&[Harness::Pi, Harness::Claude], &[]);
+    let two = projects(&[Harness::Pi, Harness::Claude], &[], &Harness::ALL);
     let seen: Vec<(usize, Harness)> = two
         .iter()
         .map(|project| (project.number, project.chief))
@@ -31,13 +31,13 @@ fn the_harnesses_named_are_the_only_chiefs_and_keep_their_place_in_the_rotation(
 
 #[test]
 fn the_steps_asked_for_are_the_only_steps_run_in_their_own_order_and_the_board_brings_its_spec() {
-    let only = projects(&[Harness::Claude], &[Step::Small, Step::Off]);
+    let only = projects(&[Harness::Claude], &[Step::Small, Step::Off], &Harness::ALL);
     assert_eq!(only[0].steps, [Step::Off, Step::Small]);
     assert!(only[0].runs(Step::Off) && !only[0].runs(Step::Spec));
     // The board carries out a spec: asked for alone, it has the step that makes one first.
-    let board = projects(&[Harness::Claude], &[Step::Board]);
+    let board = projects(&[Harness::Claude], &[Step::Board], &Harness::ALL);
     assert_eq!(board[0].steps, [Step::Spec, Step::Board]);
-    let spec = projects(&[Harness::Claude], &[Step::Spec]);
+    let spec = projects(&[Harness::Claude], &[Step::Spec], &Harness::ALL);
     assert_eq!(spec[0].steps, [Step::Spec]);
 }
 
@@ -129,4 +129,18 @@ fn the_variants_are_the_ones_the_repository_vendors() {
 fn the_steps_are_called_by_the_words_the_brief_gives_them() {
     let names: Vec<&str> = Step::ALL.into_iter().map(Step::name).collect();
     assert_eq!(names, ["off", "source", "small", "spec", "board"]);
+}
+
+/// T-824's P2-3: a machine without a harness has no project whose chief it is.
+#[test]
+fn a_machine_without_a_harness_runs_no_project_whose_chief_it_is() {
+    let seated: Vec<Harness> = Harness::ALL
+        .into_iter()
+        .filter(|harness| *harness != Harness::Muse)
+        .collect();
+    let chiefs: Vec<Harness> = projects(&[], &[], &seated)
+        .iter()
+        .map(|project| project.chief)
+        .collect();
+    assert_eq!(chiefs, seated);
 }

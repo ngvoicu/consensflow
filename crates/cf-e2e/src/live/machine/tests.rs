@@ -569,3 +569,36 @@ fn the_owners_own_claude_config_is_never_seeded() {
     assert!(!home.path().join(".claude.json").exists());
     assert!(!owners.join(".claude.json").exists());
 }
+
+/// T-824's P2-3: a harness the machine lacks is left out of every seat and said, and
+/// one asked for by name that it lacks is the error.
+#[test]
+fn a_harness_the_machine_lacks_is_left_out_of_every_seat_with_why_unless_it_was_asked_for() {
+    let no_muse = |harness: Harness| {
+        (harness == Harness::Muse).then(|| "muse is in no folder of the PATH".to_owned())
+    };
+    let (kept, said) = seated(&[], no_muse).unwrap();
+    assert_eq!(
+        kept,
+        [
+            Harness::Claude,
+            Harness::OpenCode,
+            Harness::Pi,
+            Harness::Devin,
+            Harness::Codex
+        ]
+    );
+    assert_eq!(
+        said,
+        ["muse is left out of every seat: this machine cannot run it (muse is in no folder of the PATH)"]
+    );
+    assert_eq!(
+        seated(&[], |_| None).unwrap(),
+        (Harness::ALL.to_vec(), Vec::new())
+    );
+    let asked = seated(&[Harness::Pi, Harness::Muse], no_muse).unwrap_err();
+    assert_eq!(
+        asked,
+        "muse was asked for, and this machine cannot run it: muse is in no folder of the PATH"
+    );
+}

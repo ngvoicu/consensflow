@@ -85,11 +85,12 @@ impl Planned {
     }
 }
 
-/// The projects of a run: one for each harness the run is limited to as chief, or
-/// one for each harness when it is limited to none, each with the steps asked for
-/// (all of them when none are) and, for a step that goes on from another, the other
-/// first.
-pub fn projects(chiefs: &[Harness], steps: &[Step]) -> Vec<Planned> {
+/// The projects of a run over the harnesses `seated` (those the machine has, in
+/// [`Harness::ALL`]'s order: one it lacks is the chief of none): one for each harness
+/// the run is limited to as chief, or one for each when it is limited to none, each
+/// with the steps asked for (all of them when none are) and, for a step that goes on
+/// from another, the other first.
+pub fn projects(chiefs: &[Harness], steps: &[Step], seated: &[Harness]) -> Vec<Planned> {
     let wanted: Vec<Step> = Step::ALL
         .into_iter()
         .filter(|step| {
@@ -99,8 +100,9 @@ pub fn projects(chiefs: &[Harness], steps: &[Step]) -> Vec<Planned> {
                     .any(|asked| asked == step || asked.needs() == Some(*step))
         })
         .collect();
-    Harness::ALL
-        .into_iter()
+    seated
+        .iter()
+        .copied()
         .enumerate()
         .filter(|(_, chief)| chiefs.is_empty() || chiefs.contains(chief))
         .map(|(at, chief)| Planned {

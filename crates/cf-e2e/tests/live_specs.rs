@@ -136,7 +136,11 @@ fn a_chief_of_every_harness_is_told_of_specs_where_they_are_on_plans_one_and_car
 ) -> Result {
     let log = Log::begin("live specs")?;
     let (chiefs, steps, options) = limits()?;
-    let plan = plan::projects(&chiefs, &steps);
+    let (seated, left_out) = live::seated(&chiefs, live::lacks).map_err(Error::Daemon)?;
+    for line in left_out {
+        log.say(line);
+    }
+    let plan = plan::projects(&chiefs, &steps, &seated);
     if plan.is_empty() || plan.iter().all(|project| project.steps.is_empty()) {
         return Err(Error::Daemon(
             "the harnesses and the steps asked for leave nothing to run".to_owned(),

@@ -507,6 +507,51 @@ pub fn installed(harness: Harness) -> Result<Installed> {
     })
 }
 
+/// Why this machine cannot run `harness`'s windows, in words: its program is in no
+/// folder of the `PATH`, or it keeps no login where it reads one. None where it can
+/// ([`installed`] finds it then).
+pub fn lacks(harness: Harness) -> Option<String> {
+    if let Err(missing) = command(harness.name()) {
+        return Some(missing.to_string());
+    }
+    let home = home_of(
+        harness,
+        own_var("CODEX_HOME"),
+        own_var("HOME").or_else(|| own_var("USERPROFILE")),
+    )?;
+    let places = login_places(harness, &home, own_var("APPDATA").as_deref(), cfg!(windows));
+    (!has_login(&places)).then(|| no_login(harness, &places).to_string())
+}
+
+/// The harnesses a live run that rotates its seats over every harness seats: each of
+/// [`Harness::ALL`] the machine has, in that order, and the words that say why each one
+/// it lacks (`lacks`) is left out of every seat (Muse Code on a machine with none, as
+/// the Windows machines are today: T-824's P2-3). One the run was limited to by name
+/// (`named`) that the machine lacks is the error, in the same words: it was asked for.
+pub fn seated(
+    named: &[Harness],
+    lacks: impl Fn(Harness) -> Option<String>,
+) -> std::result::Result<(Vec<Harness>, Vec<String>), String> {
+    let mut seated = Vec::new();
+    let mut left_out = Vec::new();
+    for harness in Harness::ALL {
+        match lacks(harness) {
+            None => seated.push(harness),
+            Some(why) if named.contains(&harness) => {
+                return Err(format!(
+                    "{} was asked for, and this machine cannot run it: {why}",
+                    harness.name()
+                ));
+            }
+            Some(why) => left_out.push(format!(
+                "{} is left out of every seat: this machine cannot run it ({why})",
+                harness.name()
+            )),
+        }
+    }
+    Ok((seated, left_out))
+}
+
 /// The machine's Codex: [`installed`] for the harness the image designer runs on.
 pub fn codex() -> Result<Installed> {
     installed(Harness::Codex)
