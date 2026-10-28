@@ -48,6 +48,15 @@
 //! never seen in a log). What no live log has shown is the `provisional` module's, from
 //! the binary's strings.
 //!
+//! The model the window answers from (MUS-24): `runtime.model_reconfigure.completed` says a
+//! move (`previous` and `effective`, each a `model_id` and the `source` of its choice), and
+//! a session started by `/clear` names its model in its own start
+//! (`runtime.session_start.intake_v3`'s `session_metadata`), with no reconfigure event at all,
+//! where the one it left (`previous_session_stream`) ran another. A move is Muse's own, and
+//! [`Record::model_moved`], unless the human asked for it (a `/model` they typed, recorded as
+//! a command that ran: provisional, never seen live) or it is Muse applying the launch's own
+//! model to a session it resumed (`previous.source` is `replay`).
+//!
 //! A log written by a Muse older than [`version::MINIMUM`] (its
 //! `runtime.session.metadata`, `build.semver`) is not read: its shapes are not known.
 
@@ -71,17 +80,19 @@ use super::version::{self, Version};
 use crate::shared::record::cache::Look;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
+use crate::shared::record::reading::ModelMoved;
 use crate::shared::record::reading::{native_id, null_record, Item, Record, Role, Settlement};
 
 /// The reader of the session `session`, in the Muse data folder `env` names.
 pub fn reader(session: &str, env: &Env) -> Box<dyn Look + Send> {
     let locating = session.to_owned();
+    let located = env.clone();
     let env = env.clone();
     let reading: Arc<str> = Arc::from(session);
     Box::new(TranscriptReader::new(
         Followed::new(
-            Box::new(move || transcript(&locating, &env)),
-            Box::new(move |_: &Path| Log::new(Arc::clone(&reading))),
+            Box::new(move || transcript(&locating, &located)),
+            Box::new(move |_: &Path| Log::new(Arc::clone(&reading), env.clone())),
         ),
         format!("muse session log for {session}"),
     ))
@@ -107,6 +118,21 @@ struct Log {
     work: Work,
     /// What no live log has shown: a refusal for quota.
     provisional: Provisional,
+    /// Where Muse keeps the logs of the sessions this one followed.
+    env: Env,
+    /// The model the window answers from, and the move away from it that nobody asked for.
+    models: Models,
+}
+
+/// What the log said of the model.
+#[derive(Default)]
+struct Models {
+    /// The model it answers from now.
+    effective: Option<String>,
+    /// The latest move Muse made on its own.
+    moved: Option<Arc<ModelMoved>>,
+    /// The human typed `/model`: the next reconfigure is theirs.
+    asked: bool,
 }
 
 /// An item as the log left it, and the place among its records of the record that
@@ -132,7 +158,7 @@ enum End {
 }
 
 impl Log {
-    fn new(session: Arc<str>) -> Self {
+    fn new(session: Arc<str>, env: Env) -> Self {
         Self {
             session,
             items: Vec::new(),
@@ -144,6 +170,8 @@ impl Log {
             held: Held::default(),
             work: Work::default(),
             provisional: Provisional::default(),
+            env,
+            models: Models::default(),
         }
     }
 
@@ -151,7 +179,28 @@ impl Log {
     fn envelope(&mut self, record: &Value, at: &Value, seq: &Value) -> Result<(), Stop> {
         let payload = record.get("payload");
         match record.get("payload_type").and_then(Value::as_str) {
-            Some("runtime.session.metadata") => built(payload),
+            Some("runtime.session.metadata") => {
+                built(payload)?;
+                self.models.named(model_id(field(payload, "record")));
+                Ok(())
+            }
+            Some("run.model.configured") => {
+                self.models.named(model_id(field(payload, "record")));
+                Ok(())
+            }
+            Some("runtime.model_reconfigure.completed") => {
+                self.reconfigured(field(payload, "record"), at);
+                Ok(())
+            }
+            Some("runtime.session_start.intake_v3") => {
+                self.started(field(payload, "payload"), at);
+                Ok(())
+            }
+            Some("command.invoked") => {
+                let command = field(field(payload, "record"), "command").and_then(Value::as_str);
+                self.models.asked |= asks_for_a_model(command);
+                Ok(())
+            }
             Some("runtime.user_intent.accepted") => self.intent(payload, at, seq),
             Some("runtime.session") => match field(payload, "kind").and_then(Value::as_str) {
                 Some("run") => self.run_event(record, payload, at, seq),
@@ -192,6 +241,9 @@ impl Log {
             Role::Custom
         };
         let text = blocks_text(field(payload, "refill_blocks"));
+        if kind == Some("command") {
+            self.models.asked |= asks_for_a_model(Some(&text));
+        }
         if text.trim().is_empty() {
             return Ok(());
         }
@@ -268,9 +320,17 @@ impl Log {
                             .map(str::to_owned),
                     },
                 };
-                if let End::Failed { reason } = &end {
-                    self.provisional.failed(&run, reason.as_deref(), at);
-                }
+                let end = match end {
+                    // Where the account refused for what only its human cures, the failure
+                    // is said in plain words (MUS-23), not as the API said it.
+                    End::Failed { reason } => {
+                        let plain = self.provisional.failed(&run, event, reason.as_deref(), at);
+                        End::Failed {
+                            reason: plain.map(str::to_owned).or(reason),
+                        }
+                    }
+                    end => end,
+                };
                 self.work.run_ended(&run);
                 self.runs.entry(run).or_default().end = Some(end);
             }
@@ -330,6 +390,68 @@ impl Log {
         Ok(())
     }
 
+    /// A model Muse reconfigured the window to: a move nobody chose unless the human
+    /// typed it (`/model`) or it is the launch's own model applied to a resumed session.
+    fn reconfigured(&mut self, record: Option<&Value>, at: &Value) {
+        if field(record, "apply_outcome").and_then(Value::as_str) != Some("completed") {
+            return;
+        }
+        let from = model_id(field(record, "previous"));
+        let to = model_id(field(record, "effective"));
+        let (Some(from), Some(to)) = (from, to) else {
+            return;
+        };
+        self.models.effective = Some(to.to_owned());
+        let restoring =
+            field(field(record, "previous"), "source").and_then(Value::as_str) == Some("replay");
+        let asked = std::mem::take(&mut self.models.asked);
+        // The model is back on the launch's (a resume's replay) or on the one the human chose
+        // (`/model`): what was moved before is over (T-816 P2-1).
+        if restoring || asked {
+            self.models.moved = None;
+        }
+        if from == to || restoring || asked {
+            return;
+        }
+        let because = match self.latest.as_ref().and_then(|run| self.runs.get(run)) {
+            Some(Run {
+                end: Some(End::Failed {
+                    reason: Some(reason),
+                }),
+                ..
+            }) => format!("Muse switched on its own after its turn failed ({reason})"),
+            _ => "Muse switched on its own".to_owned(),
+        };
+        self.models.moved = Some(Arc::new(ModelMoved {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            because,
+            at: at.as_str().map(str::to_owned),
+        }));
+    }
+
+    /// A session's start: one a `/clear` made names its model in its own start, where
+    /// the session it left ran another, with no reconfigure event between (T-718).
+    fn started(&mut self, start: Option<&Value>, at: &Value) {
+        let to = model_id(field(start, "session_metadata"));
+        let cleared = field(start, "activation_source").and_then(Value::as_str) == Some("clear");
+        let previous = field(field(start, "previous_session_stream"), "id").and_then(Value::as_str);
+        if let (true, Some(to), Some(previous)) = (cleared, to, previous) {
+            let from = last_model(previous, &self.env);
+            if let Some(from) = from.filter(|from| from != to) {
+                self.models.moved = Some(Arc::new(ModelMoved {
+                    from,
+                    to: to.to_owned(),
+                    because:
+                        "a /clear started a new session on it, which Muse ran on another model"
+                            .to_owned(),
+                    at: at.as_str().map(str::to_owned),
+                }));
+            }
+        }
+        self.models.named(to);
+    }
+
     /// The item `id` names, added, or brought up to date: its text the latest the log
     /// gave it, its time the latest record's, its role the one it was first given.
     fn add(&mut self, id: Arc<str>, role: Role, text: String, at: &Value) -> usize {
@@ -356,6 +478,66 @@ impl Log {
         });
         place
     }
+}
+
+impl Models {
+    /// A record names the model the window answers from: the first to say it is the one
+    /// it begins on. A later one that names another is a resume's (a session's metadata
+    /// is the default, the reconfigure after it the session's own), and says nothing.
+    fn named(&mut self, model: Option<&str>) {
+        if self.effective.is_none() {
+            self.effective = model.map(str::to_owned);
+        }
+    }
+}
+
+/// The `model_id` of a record that names a model, if it is not empty.
+fn model_id(record: Option<&Value>) -> Option<&str> {
+    field(record, "model_id")
+        .and_then(Value::as_str)
+        .filter(|model| !model.is_empty())
+}
+
+/// Whether the human asked for a model: the command they typed is `/model`. Provisional
+/// (MUS-24): never recorded live, the commands seen are `/clear` and `/compact`.
+fn asks_for_a_model(command: Option<&str>) -> bool {
+    command.is_some_and(|command| {
+        let command = command.trim_start();
+        command == "/model" || command.starts_with("/model ")
+    })
+}
+
+/// The model the last record of a session's log that names one says, by what its log
+/// writes last: a metadata, a configuration for a turn, a reconfigure. None where the log
+/// cannot be found or read, or names none.
+fn last_model(session: &str, env: &Env) -> Option<String> {
+    use std::io::BufRead;
+    let log = transcript(session, env).ok()??;
+    let file = std::fs::File::open(log).ok()?;
+    let mut last = None;
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line.ok()?;
+        if !line.contains("model_id") {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let payload = record.get("payload");
+        let named = match record.get("payload_type").and_then(Value::as_str) {
+            Some("runtime.session.metadata" | "run.model.configured") => {
+                model_id(field(payload, "record"))
+            }
+            Some("runtime.model_reconfigure.completed") => {
+                model_id(field(field(payload, "record"), "effective"))
+            }
+            _ => None,
+        };
+        if let Some(named) = named {
+            last = Some(named.to_owned());
+        }
+    }
+    last
 }
 
 /// A log written by a Muse older than the minimum fails the look; one that names no
@@ -445,6 +627,7 @@ impl Answer for Log {
         record.took_back =
             matches!(end, Some(End::Cancelled)) && latest.is_some_and(|(_, turn)| turn.retracted);
         record.quota = latest.and_then(|(run, _)| self.provisional.quota(run));
+        record.model_moved.clone_from(&self.models.moved);
         record.settlement = match end {
             _ if in_flight => Settlement::InFlight,
             Some(_) => Settlement::Settled,

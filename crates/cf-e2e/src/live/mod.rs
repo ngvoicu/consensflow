@@ -84,6 +84,7 @@ pub mod calls;
 pub mod claude;
 pub mod cleanup;
 pub mod codex;
+pub mod guard;
 pub mod human;
 pub mod login;
 pub mod machine;

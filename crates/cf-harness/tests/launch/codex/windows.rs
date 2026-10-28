@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{Held, Readiness, Work};
-use cf_harness::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
+use cf_harness::records::{Item, ModelMoved, Options, Quota, Reading, Record, Role, Settlement};
 use cf_harness::seams::Time;
 use cf_harness::testing::{finished, AnsweringHost, Driver, ScriptedHost, FIRST_MESSAGE_MS};
 use cf_proto::agents::Harness;
@@ -358,6 +358,8 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         failed: false,
         failure: None,
         took_back: false,
+        model_moved: None,
+        model_drift: None,
         quota,
         settlement,
         pending: Default::default(),
@@ -470,4 +472,41 @@ fn passes_the_harness_s_word_on_its_quota_through() {
         (false, None, false)
     );
     assert_eq!(stand.asked.borrow().len(), 2, "no record was read");
+}
+
+#[test]
+fn says_a_move_the_record_holds_before_a_refusal_it_shows_too() {
+    // Codex's reroute and a refusal in one record (T-853): the window's look says the move, as the
+    // engine holds the member for it, whichever of the two the record names first.
+    let home = Home::new();
+    let moved = Arc::new(ModelMoved {
+        from: "gpt-6-astra".to_owned(),
+        to: "gpt-6-safe".to_owned(),
+        because: "Codex rerouted the turn".to_owned(),
+        at: None,
+    });
+    let refused = Arc::new(Quota::Unavailable {
+        at: None,
+        because: "its billing was refused".to_owned(),
+    });
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: Arc::new(Reading::Known(Record {
+            model_moved: Some(Arc::clone(&moved)),
+            ..match &*reading(Vec::new(), Settlement::Settled, Some(refused)) {
+                Reading::Known(record) => record.clone(),
+                _ => unreachable!(),
+            }
+        })),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    fakes
+        .loopback
+        .serve("GET /session", [shows(Some(THREAD), true)]);
+    let observed = finished(window.observe()).unwrap();
+    assert_eq!(observed.quota.as_deref(), Some(&moved.as_quota()));
 }

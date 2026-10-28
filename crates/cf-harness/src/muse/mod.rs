@@ -6,10 +6,13 @@
 mod adapter;
 pub(crate) mod index;
 mod launch;
+pub mod models;
+mod msp;
 pub(crate) mod paths;
 pub mod record;
 mod screen;
 mod session_hook;
+pub mod usage;
 pub(crate) mod version;
 mod window;
 

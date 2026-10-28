@@ -43,7 +43,7 @@ use crate::computer_use::ComputerUseState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::{News, SchedulerState};
+use crate::scheduler::{moved_hold, out_words, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
@@ -1220,6 +1220,7 @@ impl Dispatcher {
             return self.follow(participant, record, session);
         }
         self.record_quota(record, &owner, observed.quota.clone());
+        self.tell_drift(project, participant, record, &observed)?;
         if self.refused_here(record, &owner) {
             return self
                 .out_of_quota(project, participant, record, &owner, &observed)
@@ -1227,12 +1228,24 @@ impl Dispatcher {
         }
         let mut out = self.is_out(&owner);
         let mut returned = None;
-        // A window that got a turn through after its member was marked out says the quota is back.
-        if out && self.answered_since(&owner, &observed) {
+        // A window that got a turn through after its member was marked out says the quota is
+        // back, and so does the harness's own count of an allowance, for an account that
+        // was unavailable with no reset to wait for (MUS-23: Muse's `usage`). Not for a member
+        // held for its model's move, which only the human's word for it brings back, whatever
+        // another of its windows answered (T-816).
+        let answered = out
+            && !owner.out_until.as_deref().is_some_and(moved_hold)
+            && self.answered_since(&owner, &observed);
+        if answered || (out && self.shows_an_allowance(&owner, &observed)) {
+            let because = if answered {
+                format!("@{} answered again", participant.handle)
+            } else {
+                format!("@{} shows an allowance again", participant.handle)
+            };
             self.seams
                 .ledger
                 .borrow_mut()
-                .mark_back(owner.id, &format!("@{} answered again", participant.handle))?;
+                .mark_back(owner.id, &because)?;
             returned.clone_from(&owner.out_until);
             self.changed();
             out = false;
@@ -1275,8 +1288,11 @@ impl Dispatcher {
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
+            // Not over words given since the cut, which begin another turn.
             if self.cut_short(&observed) {
-                self.go_on(project, participant)?;
+                if !self.words_since_the_cut(participant, &observed)? {
+                    self.go_on(project, participant)?;
+                }
             } else {
                 // Its answer is its result, recorded now, unless its harness says the turn
                 // left work running that wakes its agent: then the task goes on. Nothing the
@@ -1380,15 +1396,17 @@ impl Dispatcher {
             return self.perform_switch(project, participant, record, to).await;
         }
         let until = owner.out_until.clone().unwrap_or_default();
+        let reported = record.quota.borrow().reported.clone();
+        let unwell = Unwell::of(reported.as_deref());
         self.set_activity(
             record,
-            Activity::because(ActivityState::Out, format!("out of quota until {until}")),
+            Activity::because(ActivityState::Out, out_words(&until, unwell)),
         )?;
         // A refusal of its own, dated before its member was marked out, holds the
         // window's work as the first did, with no note of its own.
         if participant.role != "chief" && self.refused_unhandled(record) {
             self.handled(record);
-            self.hold_work(project, participant, owner, &until, None)?;
+            self.hold_work(project, participant, owner, &until, None, unwell)?;
             self.changed();
         }
         self.tell_what_waits(project, participant, record, owner)?;
@@ -1475,23 +1493,41 @@ impl Dispatcher {
         record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
         let reset = self.reset_of(reported.as_deref());
-        let marked = self
-            .seams
-            .ledger
-            .borrow_mut()
-            .mark_out(owner.id, &reset, "out of quota")?;
+        let unwell = Unwell::of(reported.as_deref());
+        let marked = self.seams.ledger.borrow_mut().mark_out(
+            owner.id,
+            &reset,
+            unwell.map_or("out of quota", Unwell::hold),
+        )?;
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,
-            Activity::because(ActivityState::Out, format!("out of quota until {until}")),
+            Activity::because(ActivityState::Out, out_words(&until, unwell)),
         )?;
         self.confirm_arrival(record, observed)?;
         let delivering = record.delivery.borrow_mut().delivering.take();
         if let Some(delivering) = delivering {
-            self.give_back(delivering.message, "the harness ran out of quota")?;
+            self.give_back(
+                delivering.message,
+                match unwell {
+                    Some(Unwell::Account(_)) => "its account is unavailable",
+                    Some(Unwell::Moved(_)) => "its model moved on its own",
+                    None => "the harness ran out of quota",
+                },
+            )?;
         }
         let refused_at = self.refused_at(reported.as_deref());
-        self.hold_work(project, participant, owner, &until, Some(refused_at))?;
+        self.hold_work(
+            project,
+            participant,
+            owner,
+            &until,
+            Some(refused_at),
+            unwell,
+        )?;
+        if let Some(unwell) = unwell {
+            self.tell_unwell(project, participant, &marked, unwell)?;
+        }
         if participant.role != "chief" {
             self.close_if_free(record).await?;
         }

@@ -71,6 +71,8 @@ fn look(items: Vec<Item>) -> Observed {
             failed: false,
             failure: None,
             took_back: false,
+            model_moved: None,
+            model_drift: None,
             quota: None,
             settlement: Settlement::Unknown,
             pending: Default::default(),

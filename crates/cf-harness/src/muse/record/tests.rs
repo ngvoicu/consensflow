@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::records::{Options, Reading};
+use crate::records::{ModelMoved, Options, Quota, Reading};
 use crate::testing::LONG_AFTER_MS;
 
 /// A recorded session's log.
@@ -30,11 +30,18 @@ fn fixture(name: &str) -> &'static str {
         "cut-resumed" => include_str!("../../../tests/fixtures/muse/cut-resumed.jsonl"),
         "quit-mid-turn" => include_str!("../../../tests/fixtures/muse/quit-mid-turn.jsonl"),
         "steered" => include_str!("../../../tests/fixtures/muse/steered.jsonl"),
+        "billing-spark" => include_str!("../../../tests/fixtures/muse/billing-spark.jsonl"),
+        "billing-wonder" => include_str!("../../../tests/fixtures/muse/billing-wonder.jsonl"),
+        "clear-before" => include_str!("../../../tests/fixtures/muse/clear-before.jsonl"),
+        "clear-after" => include_str!("../../../tests/fixtures/muse/clear-after.jsonl"),
+        "launch-model-restored" => {
+            include_str!("../../../tests/fixtures/muse/launch-model-restored.jsonl")
+        }
         other => panic!("no fixture {other}"),
     }
 }
 
-const FIXTURES: [&str; 8] = [
+const FIXTURES: [&str; 13] = [
     "plain",
     "retracted",
     "cut",
@@ -43,6 +50,11 @@ const FIXTURES: [&str; 8] = [
     "cut-resumed",
     "quit-mid-turn",
     "steered",
+    "billing-spark",
+    "billing-wonder",
+    "clear-before",
+    "clear-after",
+    "launch-model-restored",
 ];
 
 /// The session a log is of: the stream of its first envelope.
@@ -67,6 +79,18 @@ impl Stage {
         };
         fs::create_dir_all(stage.log().parent().unwrap()).unwrap();
         stage
+    }
+
+    /// Another session's log in the same data folder, as Muse writes it.
+    fn alongside(&self, session: &str, text: &str) {
+        let log = self
+            .home
+            .path()
+            .join("muse/sessions/2026/10/26")
+            .join(session)
+            .join("session.jsonl");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::write(log, text).unwrap();
     }
 
     fn env(&self) -> Env {
@@ -465,4 +489,281 @@ fn a_session_with_no_log_is_missing_and_one_whose_log_appears_is_read() {
     assert!(!look(&mut reader).read_failed(), "missing is read");
     stage.write(&format!("{}\n", intent(1, "t1", "Go.")));
     assert_eq!(said(known(&look(&mut reader))), [(Role::User, "Go.")]);
+}
+
+/// What Muse's reader says of an account with no allowance (MUS-23).
+const NO_ALLOWANCE: &str = "Muse refused: the account has no allowance; set up billing at accountscenter.meta.com/muse_code";
+
+#[test]
+fn a_refusal_for_billing_is_a_failed_turn_in_plain_words_and_an_account_no_reset_cures() {
+    // T-705's two recordings of the refusal, on `muse-spark-1.3` and `muse-wonder-1.0`,
+    // contributor mode off: HTTP 402 `billing_error`, the turn failed, nothing answered.
+    for name in ["billing-spark", "billing-wonder"] {
+        let record = read(name);
+        assert!(
+            record.failed && !record.took_back && !record.in_flight,
+            "{name}"
+        );
+        assert_eq!(record.settlement, Settlement::Settled, "{name}");
+        assert_eq!(record.failure.as_deref(), Some(NO_ALLOWANCE), "{name}");
+        assert_eq!(
+            said(&record)
+                .iter()
+                .filter(|(role, _)| *role == Role::Assistant)
+                .count(),
+            0,
+            "{name}: nothing was answered"
+        );
+        // Not a quota that resets: unavailable, dated at the refusal, with the words.
+        let Some(quota) = record.quota.as_deref() else {
+            panic!("{name}: no refusal")
+        };
+        let Quota::Unavailable { at, because } = quota else {
+            panic!("{name}: {quota:?} is a quota that resets");
+        };
+        assert_eq!(because, NO_ALLOWANCE, "{name}");
+        assert!(
+            at.as_deref()
+                .is_some_and(|at| at.starts_with("2026-10-26T")),
+            "{name}: {at:?}"
+        );
+        assert_eq!(quota.resets_at(), None, "{name}");
+    }
+}
+
+/// The move the log says of the model, if one.
+fn moved(record: &Record) -> Option<&ModelMoved> {
+    record.model_moved.as_deref()
+}
+
+#[test]
+fn a_model_muse_switched_to_after_a_refused_turn_is_a_move_nobody_chose() {
+    // T-705's two recordings, `--contributor-mode off` on the model named: after the 402,
+    // Muse reconfigures to the contributor model, which Meta trains on, and no turn follows.
+    for (name, from) in [
+        ("billing-spark", "muse-spark-1.3"),
+        ("billing-wonder", "muse-wonder-1.0"),
+    ] {
+        let record = read(name);
+        let Some(moved) = moved(&record) else {
+            panic!("{name}: no move");
+        };
+        assert_eq!(moved.from, from, "{name}");
+        assert_eq!(moved.to, "muse-spark-1.3-contributor", "{name}");
+        assert!(
+            moved
+                .because
+                .starts_with("Muse switched on its own after its turn failed (Muse refused"),
+            "{name}: {}",
+            moved.because
+        );
+        assert!(
+            moved
+                .at
+                .as_deref()
+                .is_some_and(|at| at.starts_with("2026-10-26T")),
+            "{name}"
+        );
+        // The harness's refusal is the account's, and the move is read besides it.
+        assert!(record.failed && record.quota.is_some(), "{name}");
+    }
+}
+
+#[test]
+fn a_clear_that_lands_on_another_model_with_no_reconfigure_event_is_a_move_too() {
+    // T-718's chain: the old session ran `muse-spark-1.3-contributor`; `/clear` started a
+    // new one whose metadata, start and configuration name `muse-spark-1.3`, and nothing in
+    // either log says `model_reconfigure`.
+    let before = fixture("clear-before");
+    let after = fixture("clear-after");
+    assert!(!after.contains("model_reconfigure"));
+    let stage = Stage::new(&session_of(after));
+    stage.alongside(&session_of(before), before);
+    let mut reading_on = stage.reader();
+    let mut text = String::new();
+    for line in after.lines() {
+        stage.append(line);
+        text.push_str(line);
+        text.push('\n');
+        let on = look(&mut reading_on);
+        // Read on a record at a time, or fresh, the same.
+        let fresh = {
+            let stage = Stage::new(&session_of(after));
+            stage.alongside(&session_of(before), before);
+            stage.write(&text);
+            look(&mut stage.reader())
+        };
+        assert_eq!(on, fresh);
+    }
+    let record = known(&look(&mut reading_on)).clone();
+    let Some(moved) = moved(&record) else {
+        panic!("no move");
+    };
+    assert_eq!(
+        (moved.from.as_str(), moved.to.as_str()),
+        ("muse-spark-1.3-contributor", "muse-spark-1.3")
+    );
+    assert!(moved.because.contains("/clear"), "{}", moved.because);
+    // Where the old session's log cannot be found, nothing is known to have moved.
+    assert_eq!(moved_of("clear-after"), None);
+}
+
+fn moved_of(name: &str) -> Option<ModelMoved> {
+    moved(&read(name)).cloned()
+}
+
+#[test]
+fn a_change_nobody_asked_for_is_the_only_one_flagged() {
+    // Controls. Every other recorded log: no move. The resume that restores the model the
+    // launch named (previous source `replay`) is the launch's own: ConsensFlow's, not Muse's.
+    for name in FIXTURES {
+        if matches!(name, "billing-spark" | "billing-wonder") {
+            continue;
+        }
+        assert_eq!(moved_of(name), None, "{name}");
+    }
+    let restored = read("launch-model-restored");
+    assert!(restored.model_moved.is_none());
+}
+
+/// A reconfigure the harness recorded, `from` to `to`, whose previous model came from `source`.
+fn reconfigure(sequence: u64, from: &str, to: &str, source: &str) -> Value {
+    json!({
+        "schema_version": 1, "id": format!("r{sequence}"), "sequence": sequence,
+        "recorded_at": 1_793_032_773_917_599_i64 + sequence as i64,
+        "stream": { "kind": "session", "id": "s1" }, "record_type": "event",
+        "payload_type": "runtime.model_reconfigure.completed",
+        "payload": { "kind": "model_reconfigure", "record": {
+            "command_id": "c", "apply_outcome": "completed",
+            "previous": { "model_id": from, "source": source },
+            "effective": { "model_id": to, "source": "model_reconfigure" },
+        } },
+    })
+}
+
+#[test]
+fn the_humans_own_model_command_is_no_move() {
+    // Provisional (MUS-24): a `/model` the human typed was never recorded live. Muse records
+    // a command it ran (`command.invoked`), as it did `/clear` and `/compact`; a reconfigure
+    // that follows one is theirs. The same reconfigure with none is Muse's own.
+    let command = |sequence: u64, command: &str| {
+        json!({
+            "schema_version": 1, "id": format!("r{sequence}"), "sequence": sequence,
+            "stream": { "kind": "session", "id": "s1" },
+            "payload_type": "command.invoked",
+            "payload": { "kind": "command_invoked", "record": { "command": command } },
+        })
+    };
+    let theirs = record_of(&[
+        metadata("1.4.13"),
+        command(4, "/model muse-wonder-1.0"),
+        reconfigure(5, "muse-spark-1.3", "muse-wonder-1.0", "startup"),
+    ]);
+    assert_eq!(theirs.model_moved, None);
+    let own = record_of(&[
+        metadata("1.4.13"),
+        reconfigure(5, "muse-spark-1.3", "muse-spark-1.3-contributor", "startup"),
+    ]);
+    assert!(own.model_moved.is_some());
+    // The command is the next reconfigure's alone: a later one with none is Muse's.
+    let later = record_of(&[
+        metadata("1.4.13"),
+        command(4, "/model muse-wonder-1.0"),
+        reconfigure(5, "muse-spark-1.3", "muse-wonder-1.0", "startup"),
+        reconfigure(
+            6,
+            "muse-wonder-1.0",
+            "muse-spark-1.3-contributor",
+            "model_reconfigure",
+        ),
+    ]);
+    let Some(moved) = later.model_moved.as_deref() else {
+        panic!("no move")
+    };
+    assert_eq!(
+        (moved.from.as_str(), moved.to.as_str()),
+        ("muse-wonder-1.0", "muse-spark-1.3-contributor")
+    );
+    // A reconfigure that did not complete moved nothing.
+    let mut refused = reconfigure(5, "muse-spark-1.3", "muse-wonder-1.0", "startup");
+    refused["payload"]["record"]["apply_outcome"] = json!("failed");
+    assert_eq!(record_of(&[metadata("1.4.13"), refused]).model_moved, None);
+}
+
+#[test]
+fn what_the_engine_is_told_of_a_refused_window_that_muse_moved_is_the_move_besides_the_refusal() {
+    // T-705's recordings: the 402 and then the move, in one log. The human who fixes the billing
+    // and tries again must have heard that the window's model moved, or the engine would paste
+    // into a window on a model Meta trains on (MUS-24).
+    for (name, from) in [
+        ("billing-spark", "muse-spark-1.3"),
+        ("billing-wonder", "muse-wonder-1.0"),
+    ] {
+        let log = fixture(name);
+        let observed =
+            crate::shared::record_state::record_state(fresh_reading(&session_of(log), log));
+        let Some(Quota::Moved { because, .. }) = observed.quota.as_deref() else {
+            panic!("{name}: {:?}", observed.quota);
+        };
+        assert!(
+            because.starts_with(&format!(
+                "its model moved from {from} to muse-spark-1.3-contributor on its own (Muse switched on its own after its turn failed (Muse refused: the account has no allowance"
+            )),
+            "{name}: {because}"
+        );
+        assert!(observed.failed, "{name}");
+    }
+}
+
+#[test]
+fn a_move_ends_where_the_launch_or_the_human_puts_the_model_back() {
+    // T-816 P2-1: the move was read for good, so a restored model still read as moved, a
+    // fresh window's record held it, and the requester was never told the task went on.
+    let command = |sequence: u64, command: &str| {
+        json!({
+            "schema_version": 1, "id": format!("r{sequence}"), "sequence": sequence,
+            "stream": { "kind": "session", "id": "s1" },
+            "payload_type": "command.invoked",
+            "payload": { "kind": "command_invoked", "record": { "command": command } },
+        })
+    };
+    let moved = reconfigure(5, "muse-spark-1.3", "muse-spark-1.3-contributor", "startup");
+    assert!(record_of(&[metadata("1.4.13"), moved.clone()])
+        .model_moved
+        .is_some());
+    // A resume restores the model the launch named: Muse reconfigures from what the stored
+    // session held (previous source `replay`), and the window is on the launch's again.
+    let restored = reconfigure(7, "muse-spark-1.3-contributor", "muse-spark-1.3", "replay");
+    assert_eq!(
+        record_of(&[metadata("1.4.13"), moved.clone(), restored]).model_moved,
+        None
+    );
+    // The human puts it back with `/model`: theirs, and the move before it is over.
+    let theirs = reconfigure(
+        7,
+        "muse-spark-1.3-contributor",
+        "muse-spark-1.3",
+        "model_reconfigure",
+    );
+    assert_eq!(
+        record_of(&[
+            metadata("1.4.13"),
+            moved.clone(),
+            command(6, "/model muse-spark-1.3"),
+            theirs,
+        ])
+        .model_moved,
+        None
+    );
+    // A later move of Muse's own is read again.
+    let again = reconfigure(
+        9,
+        "muse-spark-1.3",
+        "muse-spark-1.3-contributor",
+        "model_reconfigure",
+    );
+    let restored = reconfigure(7, "muse-spark-1.3-contributor", "muse-spark-1.3", "replay");
+    assert!(record_of(&[metadata("1.4.13"), moved, restored, again])
+        .model_moved
+        .is_some());
 }

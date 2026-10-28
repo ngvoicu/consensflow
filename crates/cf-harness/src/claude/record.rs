@@ -87,7 +87,7 @@ use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
-use crate::shared::record::reading::{self, null_record, Reading, Record, Settlement};
+use crate::shared::record::reading::{self, null_record, ModelMoved, Reading, Record, Settlement};
 use ancestry::Ancestry;
 use items::Items;
 use jobs::Jobs;
@@ -104,20 +104,28 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
     let local = local.clone();
     let relaunched = Arc::new(Mutex::new(None));
     let told = Arc::clone(&relaunched);
+    let launched: Launched = Arc::default();
+    let launch = Arc::clone(&launched);
     Box::new(Relaunched {
         reader: TranscriptReader::new(
             Followed::new(
                 Box::new(move || transcript(&locating, &env)),
                 Box::new(move |file: &Path| {
                     let at = checked(lock(&told).as_ref(), file);
-                    Transcript::new(Arc::clone(&reading), local.clone(), at)
+                    let mut state = Transcript::new(Arc::clone(&reading), local.clone(), at);
+                    state.launch_model = launch.lock().ok().and_then(|model| model.clone());
+                    state
                 }),
             ),
             format!("claude session {session}"),
         ),
         told: relaunched,
+        launched,
     })
 }
+
+/// The model the window's launch named, as the latest look was told it.
+type Launched = Arc<Mutex<Option<Arc<str>>>>;
 
 /// A transcript's reader, and where the latest process ConsensFlow started on
 /// its conversation began (none told), which a state made afresh begins with
@@ -125,6 +133,8 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
 struct Relaunched {
     reader: TranscriptReader<Transcript>,
     told: Arc<Mutex<Option<Boundary>>>,
+    /// The model the window's launch named, which a state made afresh begins with.
+    launched: Launched,
 }
 
 impl Look for Relaunched {
@@ -147,6 +157,17 @@ impl Look for Relaunched {
                 self.reader.retell(|state, file| {
                     checked(Some(boundary), file).is_some_and(|at| state.relaunched(at))
                 });
+            }
+        }
+        // A look told a launch model other than the reader knows, none included (the reader is
+        // kept per conversation, and a later window on it may be launched with another model or
+        // none): its drifts are read again, for what an alias runs on is no drift (T-841, T-853).
+        let model = options.launch_model.as_deref();
+        if let Ok(mut known) = self.launched.lock() {
+            if known.as_deref() != model {
+                let model: Option<Arc<str>> = model.map(Arc::from);
+                known.clone_from(&model);
+                self.reader.retell(|state, _| state.launched_on(model));
             }
         }
         self.reader.look(options, now_ms)
@@ -205,6 +226,15 @@ struct Transcript {
     /// The latest turn failed: the API refused it, in these words.
     failure: Option<String>,
     quota: Option<Arc<Quota>>,
+    /// The model the main conversation's assistant last answered from, and the move away
+    /// from it that nobody asked for (MUS-24).
+    model: Option<Arc<str>>,
+    /// The model the window's launch named, where it was told: an alias such as `opusplan`
+    /// names the models it runs on by itself (`replay::within_the_alias`).
+    launch_model: Option<Arc<str>>,
+    model_asked: bool,
+    model_moved: Option<Arc<ModelMoved>>,
+    model_drift: Option<Arc<ModelMoved>>,
     /// The records visited.
     count: usize,
     ancestry: Ancestry,
@@ -287,6 +317,11 @@ impl Transcript {
             active_assistant: None,
             failure: None,
             quota: None,
+            model: None,
+            launch_model: None,
+            model_asked: false,
+            model_moved: None,
+            model_drift: None,
             count: 0,
             ancestry: Ancestry::default(),
             pending: Vec::new(),
@@ -296,6 +331,13 @@ impl Transcript {
             typed_compact: None,
             put_back: false,
         }
+    }
+
+    /// Told the model the window's launch named, if it named one: false, since what was read of
+    /// the models was read without it.
+    fn launched_on(&mut self, model: Option<Arc<str>>) -> bool {
+        self.launch_model = model;
+        false
     }
 
     /// Told that the latest process ConsensFlow started on the conversation
@@ -325,6 +367,12 @@ impl Transcript {
             relaunch.reached = true;
             self.queues.restart();
             self.jobs.retire();
+            // The process ConsensFlow started on the conversation names its own model: a
+            // change across it is its launch's, and the baseline is what the launch runs.
+            self.model = None;
+            self.model_asked = false;
+            self.model_moved = None;
+            self.model_drift = None;
             self.open_tools.clear();
             // The process that cancelled a compaction, and its input box, are gone.
             self.typed_compact = None;
@@ -439,6 +487,8 @@ impl Answer for Transcript {
         record.failed = self.failure.is_some();
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
         record.quota = self.quota.clone();
+        record.model_moved.clone_from(&self.model_moved);
+        record.model_drift.clone_from(&self.model_drift);
         record.settlement = settlement;
         // The jobs are those Claude Code has said no end of, whenever the record is
         // read: Finish takes a turn still under way, and says what runs (Astraeus on

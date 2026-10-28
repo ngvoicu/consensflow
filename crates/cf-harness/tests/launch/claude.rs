@@ -31,6 +31,7 @@ use tempfile::TempDir;
 mod agents;
 mod closed_at_rest;
 mod compact_cancelled;
+mod moves;
 mod outside;
 mod relaunched;
 mod resumed;

@@ -32,7 +32,8 @@ pub use crate::shared::quota::{Level, Quota};
 pub use crate::shared::record::boundary::Boundary;
 pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
 pub use crate::shared::record::reading::{
-    End, Item, Lines, Monitor, Notice, Pending, Reading, Record, Role, Settlement, Source,
+    End, Item, Lines, ModelMoved, Monitor, Notice, Pending, Reading, Record, Role, Settlement,
+    Source,
 };
 pub use crate::shared::record::torn::Say;
 pub use thread::Thread;

@@ -41,6 +41,8 @@ fn reading(items: Vec<Item>, settlement: Settlement) -> Arc<Reading> {
         failed: false,
         failure: None,
         took_back: false,
+        model_moved: None,
+        model_drift: None,
         quota: None,
         settlement,
         pending: Default::default(),

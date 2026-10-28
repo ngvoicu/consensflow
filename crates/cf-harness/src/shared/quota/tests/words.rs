@@ -206,10 +206,13 @@ fn a_status_is_what_number_reads_of_it() {
         json!(402.5),
         json!({}),
         json!(true),
+        // A billing refusal is no limit that resets (`account_refusal`).
+        json!(" 402 "),
+        json!(402),
     ] {
         assert!(!reads(Some(&no)), "{no}");
     }
-    for yes in [json!(" 402 "), json!(["402"]), json!(429.0), json!("0x1AD")] {
+    for yes in [json!(" 429 "), json!(["429"]), json!(429.0), json!("0x1AD")] {
         assert!(reads(Some(&yes)), "{yes}");
     }
 }

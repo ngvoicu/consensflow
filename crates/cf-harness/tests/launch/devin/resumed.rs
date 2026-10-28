@@ -48,6 +48,8 @@ fn record(items: Vec<Item>, settlement: Settlement, in_flight: bool) -> Record {
         failure: None,
         took_back: false,
         quota: None,
+        model_moved: None,
+        model_drift: None,
         settlement,
         pending: Default::default(),
         monitors: Vec::new(),

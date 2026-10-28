@@ -30,6 +30,29 @@ muse-hook-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "dispatch", 
 # The rig's cases on the machine's Muse (none where it has none: they pass, saying why).
 muse-rig-resume = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::a_muse_worker_cut"]
 muse-rig-take-back = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::an_interrupt_before"]
+muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
+muse-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record_state"]
+muse-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
+muse-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
+muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
+muse-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_teammates_turn"]
+muse-page-held = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "held for an account"]
+muse-page-why = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says a member whose harness moved|lost its words after a restart"]
+muse-scheduler = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "scheduler::"]
+muse-records-play = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]
+muse-chief-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_billing_refusal_that_reaches"]
+muse-moved = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "moved_models"]
+muse-wake = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_task_held_for_no_time"]
+muse-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::guard"]
+muse-claude-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::moves"]
+muse-devin-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::windows"]
+muse-opencode-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "opencode::looks"]
+muse-codex-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::windows"]
+muse-quota-wait = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_paste_that_landed"]
+muse-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::tests::a_question_for_no_op"]
+muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
 # The reader: a turn stopped before a word of it, its message put back in the box.
 [[plant]]
@@ -278,19 +301,90 @@ replace = '''
         return Ok(executable.to_owned());
 '''
 
-# Provisional (MUS-14): a 402 is a refusal for quota.
+# MUS-23 (reversing T-703's 402-as-quota, Calliope's P2 on T-767): a billing refusal is not a
+# quota that resets. It is the account unavailable, in plain words.
 [[plant]]
-name = "muse: a 402 is no refusal for quota"
+name = "muse: a 402 is a quota that resets"
+meant = "a_refusal_for_billing_is_a_failed_turn_in_plain_words_and_an_account_no_reset_cures"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+            Refused::Account(Refusal::Billing) => {
+                (unavailable(at, NO_ALLOWANCE), Some(NO_ALLOWANCE))
+            }
+'''
+replace = '''
+            Refused::Account(Refusal::Billing) => (
+                Quota::Exhausted {
+                    at,
+                    resets_at: None,
+                },
+                Some(NO_ALLOWANCE),
+            ),
+'''
+
+[[plant]]
+name = "muse: a 402 says no refusal"
+meant = "a_402_is_no_quota_and_an_account_whose_login_is_refused_is_unavailable_too"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+    if let Some(refusal) = account_refusal(reason, api_status(&lower)) {
+'''
+replace = '''
+    if let Some(refusal) = account_refusal(reason, api_status(&lower)).filter(|_| false) {
+'''
+
+[[plant]]
+name = "muse: a billing refusal is told in the API's words"
+meant = "a_refusal_for_billing_is_a_failed_turn_in_plain_words_and_an_account_no_reset_cures"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+                            reason: plain.map(str::to_owned).or(reason),
+'''
+replace = '''
+                            reason: reason.or(plain.map(str::to_owned)),
+'''
+
+[[plant]]
+name = "muse: a login refusal is a billing one"
+meant = "a_402_is_no_quota_and_an_account_whose_login_is_refused_is_unavailable_too"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+            Refused::Account(Refusal::Credentials) => {
+                (unavailable(at, LOGIN_REFUSED), Some(LOGIN_REFUSED))
+            }
+'''
+replace = '''
+            Refused::Account(Refusal::Credentials) => {
+                (unavailable(at, NO_ALLOWANCE), Some(NO_ALLOWANCE))
+            }
+'''
+
+# Provisional (MUS-14): a 429 and Muse's own limit words are a quota that resets, a limit.
+[[plant]]
+name = "muse: a 429 is no refusal for quota"
 meant = "a_turn_refused_for_the_accounts_limits_says_the_quota_spent_at_its_time"
 runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/record/provisional.rs"
 find = '''
-    ["api error 429", "api error 402", "usage limit reached"]
+        "api error 429",
+        "usage limit reached",
 '''
 replace = '''
-    ["api error 429", "usage limit reached"]
+        "usage limit reached",
 '''
 
 # Detection: Muse where its installer puts it on macOS and Linux.
@@ -1176,3 +1270,1407 @@ find = '''
                 args.extend(words(&["--contributor-mode", "off"]));
 '''
 replace = ""
+
+# MUS-24: a model Muse moves to on its own is read, never used silently.
+[[plant]]
+name = "muse: a reconfigure after a refusal is no move"
+meant = "a_model_muse_switched_to_after_a_refused_turn_is_a_move_nobody_chose"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        if from == to || restoring || asked {
+'''
+replace = '''
+        if true {
+'''
+
+[[plant]]
+name = "muse: a resume's replay is a move"
+meant = "a_change_nobody_asked_for_is_the_only_one_flagged"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        if from == to || restoring || asked {
+'''
+replace = '''
+        if from == to || asked {
+'''
+
+[[plant]]
+name = "muse: the humans model command is a move"
+meant = "the_humans_own_model_command_is_no_move"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        if from == to || restoring || asked {
+'''
+replace = '''
+        if from == to || restoring {
+'''
+
+[[plant]]
+name = "muse: a clear never moves the model"
+meant = "a_clear_that_lands_on_another_model_with_no_reconfigure_event_is_a_move_too"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        let cleared = field(start, "activation_source").and_then(Value::as_str) == Some("clear");
+'''
+replace = '''
+        let cleared = false;
+'''
+
+[[plant]]
+name = "muse: a move is no account refusal"
+meant = "a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_until_the_human_says"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+    record
+        .model_moved
+        .as_ref()
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
+        .or_else(|| record.quota.clone())
+'''
+replace = '''
+    live.or_else(|| record.quota.clone())
+'''
+
+# MUS-24 in the other harnesses that switch on their own: Codex's reroute, Claude Code's model change.
+[[plant]]
+name = "muse: codex reroutes to its own model"
+meant = "a_model_codex_rerouted_a_turn_to_is_a_move_nobody_chose"
+runs = ["muse-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+                    if from != to {
+'''
+replace = '''
+                    if true {
+'''
+
+[[plant]]
+name = "muse: claude keeps the model across a relaunch"
+meant = "a_change_before_the_relaunch_boundary_is_neither_held_nor_told_and_one_after_it_is"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            self.model = None;
+'''
+replace = '''
+            self.model_asked = false;
+'''
+
+# MUS-23's class: an account refusal that is no usage limit reads the same in every harness.
+[[plant]]
+name = "muse: a 402 is no billing refusal"
+meant = "tells_a_refusal_no_wait_cures_from_a_limit_that_resets"
+runs = ["muse-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = '''
+        Some(status) if status == BILLING_STATUS => Some(Refusal::Billing),
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "muse: a 402 is a quota again"
+meant = "tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors"
+runs = ["muse-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = '''
+const QUOTA_STATUSES: [f64; 1] = [429.0];
+'''
+replace = '''
+const QUOTA_STATUSES: [f64; 2] = [402.0, 429.0];
+'''
+
+[[plant]]
+name = "muse: pi reads billing as a quota"
+meant = "pi_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota"
+runs = ["muse-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+                let refusal = account_refusal(&failure, None);
+'''
+replace = '''
+                let refusal = account_refusal(&failure, None).filter(|_| false);
+'''
+
+[[plant]]
+name = "muse: opencode reads billing as a quota"
+meant = "a_refusal_for_quota_is_read_as_node_read_it"
+runs = ["muse-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = '''
+            let refusal = account_refusal(&failure, status.is_finite().then_some(status));
+'''
+replace = '''
+            let refusal = account_refusal(&failure, status.is_finite().then_some(status))
+                .filter(|_| false);
+'''
+
+[[plant]]
+name = "muse: claude reads billing as no refusal"
+meant = "claude_code_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+            account_refusal(&text, status)
+'''
+replace = '''
+            account_refusal(&text, status).filter(|_| false)
+'''
+
+[[plant]]
+name = "muse: codex reads a refused login as a failure"
+meant = "a_turn_ended_for_a_login_codex_refused_is_the_account_unavailable_and_no_quota_that_resets"
+runs = ["muse-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+        if info == Some("unauthorized") {
+'''
+replace = '''
+        if info == Some("never") {
+'''
+
+# MUS-14: the allowance Muse says ahead of a refusal, and the reset the wire names.
+[[plant]]
+name = "muse: a count at 95 percent is not low"
+meant = "a_paid_account_is_read_by_its_fullest_window_and_that_ones_reset"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/usage.rs"
+find = '''
+const LOW_PERCENT: f64 = 95.0;
+'''
+replace = '''
+const LOW_PERCENT: f64 = 100.0;
+'''
+
+[[plant]]
+name = "muse: a spent week resets with the earlier window"
+meant = "a_paid_account_is_read_by_its_fullest_window_and_that_ones_reset"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/usage.rs"
+find = '''
+            .reduce(f64::max)
+'''
+replace = '''
+            .reduce(f64::min)
+'''
+
+[[plant]]
+name = "muse: no allowance says nothing"
+meant = "an_account_with_no_allowance_is_unavailable_before_any_turn_is_refused"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/usage.rs"
+find = '''
+        let none = answer.get("reason").and_then(Value::as_str) == Some("no_allowance");
+'''
+replace = '''
+        let none = false;
+'''
+
+[[plant]]
+name = "muse: the wire's quota is not read"
+meant = "a_refusal_that_names_its_limit_and_reset_is_exhausted_until_then_and_the_second_wording_is_one"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+            detail.and_then(|detail| wire_quota(detail, at.as_deref()).ok().flatten())
+'''
+replace = '''
+            detail
+                .and_then(|detail| wire_quota(detail, at.as_deref()).ok().flatten())
+                .filter(|_| false)
+'''
+
+# MUS-15: the models Muse lists, never a contributor one by default.
+[[plant]]
+name = "muse: a contributor model can be the default"
+meant = "a_contributor_model_is_never_the_default_though_muse_marks_one"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '''
+            .filter(|model| !model.contributor)
+            .or(twin)
+'''
+replace = '''
+            .or(twin)
+'''
+
+[[plant]]
+name = "muse: the bundled list is the accounts"
+meant = "a_list_a_host_with_no_login_gives_is_muses_bundled_one_and_is_stale"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '''
+        stale: result.get("source").and_then(Value::as_str) != Some("providerCatalog"),
+'''
+replace = '''
+        stale: false,
+'''
+
+[[plant]]
+name = "muse: a hidden model is offered"
+meant = "a_hidden_model_a_contributor_by_description_and_a_list_with_no_model_are_read_as_they_say"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '''
+        .filter(|row| row.get("visibility").and_then(Value::as_str) != Some("hidden"))
+'''
+replace = '''
+        .filter(|_| true)
+'''
+
+[[plant]]
+name = "muse: the host is given no input"
+meant = "the_list_is_asked_of_a_host_after_its_initialize_and_the_host_is_ended"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/msp.rs"
+find = '''
+    let child = processes.spawn(program, Streams::Lines)?;
+'''
+replace = '''
+    let child = processes.spawn(program, Streams::Quiet)?;
+'''
+
+# MUS-23's engine: an unavailable member is held with no reset and told once, until the human or an allowance says.
+[[plant]]
+name = "muse: an unavailable account resets in an hour"
+meant = "holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_human_once"
+runs = ["muse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if quota.is_some_and(Quota::unavailable) {
+            return NEVER.to_owned();
+        }
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "muse: the page says an unavailable account resets"
+meant = "says an account that refused for its billing or login is unavailable, with no time, and tries it again on the human’s word"
+runs = ["muse-page"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+const unavailable = (participant) => participant.outUntil?.startsWith('9999-') === true
+'''
+replace = '''
+const unavailable = (participant) => participant.outUntil?.startsWith('99999-') === true
+'''
+
+# The move is told besides the refusal it came after, or the human's Try again would paste into the moved window.
+[[plant]]
+name = "muse: a refusal hides the move"
+meant = "a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_until_the_human_says"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+    record
+        .model_moved
+        .as_ref()
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
+        .or_else(|| record.quota.clone())
+'''
+replace = '''
+    live.or_else(|| record.quota.clone()).or_else(|| {
+        record
+            .model_moved
+            .as_ref()
+            .map(|moved| Arc::new(moved.as_quota()))
+    })
+'''
+
+[[plant]]
+name = "muse: a refusal hides the move from the engine"
+meant = "what_the_engine_is_told_of_a_refused_window_that_muse_moved_is_the_move_besides_the_refusal"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+    record
+        .model_moved
+        .as_ref()
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
+        .or_else(|| record.quota.clone())
+'''
+replace = '''
+    live.or_else(|| record.quota.clone()).or_else(|| {
+        record
+            .model_moved
+            .as_ref()
+            .map(|moved| Arc::new(moved.as_quota()))
+    })
+'''
+
+[[plant]]
+name = "muse: claude's /fast moves the model"
+meant = "the_humans_model_command_a_synthetic_message_a_subagent_and_fast_are_neither_held_nor_told"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+        && ["/model", "/fast"]
+'''
+replace = '''
+        && ["/model"]
+'''
+
+[[plant]]
+name = "muse: an unavailable chief is a later limit"
+meant = "a_teammates_turn_that_got_through_brings_back_an_unavailable_chief_and_it_is_no_later_limit"
+runs = ["muse-accounts"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    if later_limit(&until, returned) && !never(&until) {
+'''
+replace = '''
+                    if later_limit(&until, returned) {
+'''
+
+[[plant]]
+name = "muse: node's billing quota is held to no departure"
+meant = "every_look_node_took_reads_through_the_switch_what_node_read"
+runs = ["muse-records-play"]
+
+[[plant.edit]]
+file = "crates/cf-harness/tests/records/play.rs"
+find = '''
+const BILLING: [&str; 1] = ["opencode: OpenRouter's spent credit is quota too"];
+'''
+replace = '''
+const BILLING: [&str; 0] = [];
+'''
+
+# T-816 P1-1: only Claude Code's own `fallback` block holds a window; a model that drifts is told.
+[[plant]]
+name = "muse: a fallback block is no word of Claude Code's"
+meant = "a_fallback_block_is_claude_codes_own_word_for_a_move_and_the_only_one_that_holds"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        if let Some((from, to)) = fallback {
+'''
+replace = '''
+        if let Some((from, to)) = fallback.filter(|_| false) {
+'''
+
+
+[[plant]]
+name = "muse: a drift holds a window"
+meant = "a_model_that_only_drifts_in_the_records_is_told_and_never_held"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        } else if let Some(from) = previous
+            .filter(|from| from != model)
+            .filter(|from| !self.within_the_alias(from, model))
+        {
+            self.model_drift = Some(Arc::new(ModelMoved {
+'''
+replace = '''
+        } else if let Some(from) = previous
+            .filter(|from| from != model)
+            .filter(|from| !self.within_the_alias(from, model))
+        {
+            self.model_moved = Some(Arc::new(ModelMoved {
+'''
+
+
+[[plant]]
+name = "muse: a drift is not told"
+meant = "a_model_that_only_drifts_in_the_records_is_told_and_never_held"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+            self.model_drift = Some(Arc::new(ModelMoved {
+'''
+replace = '''
+            let _forgotten = Some(Arc::new(ModelMoved {
+'''
+
+
+[[plant]]
+name = "muse: a relaunch keeps the old program's move"
+meant = "a_change_before_the_relaunch_boundary_is_neither_held_nor_told_and_one_after_it_is"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            self.model_moved = None;
+            self.model_drift = None;
+            self.open_tools.clear();
+'''
+replace = '''
+            self.model_drift = None;
+            self.open_tools.clear();
+'''
+
+
+[[plant]]
+name = "muse: claude moves the model it was asked"
+meant = "the_humans_model_command_back_ends_a_move_and_a_drift"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        } else if asked {
+'''
+replace = '''
+        } else if false {
+'''
+
+
+# T-816 P2-1: a move ends where the model is put back.
+[[plant]]
+name = "muse: a restoring reconfigure keeps the move"
+meant = "a_move_ends_where_the_launch_or_the_human_puts_the_model_back"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+        if restoring || asked {
+            self.models.moved = None;
+        }
+'''
+replace = '''
+'''
+
+
+[[plant]]
+name = "muse: a new turn keeps codex's reroute"
+meant = "a_turn_that_begins_after_a_reroute_ends_it_and_one_inside_the_turn_does_not"
+runs = ["muse-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+                self.rerouted = None;
+'''
+replace = '''
+'''
+
+
+[[plant]]
+name = "muse: a move is an unavailable account"
+meant = "a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_until_the_human_says"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = '''
+    pub fn as_quota(&self) -> Quota {
+        Quota::Moved {
+'''
+replace = '''
+    pub fn as_quota(&self) -> Quota {
+        Quota::Unavailable {
+'''
+
+
+[[plant]]
+name = "muse: a moved model says it is an account"
+meant = "a_moved_model_is_held_as_an_unavailable_account_is_and_says_it_is_neither_a_quota_nor_an_account"
+runs = ["muse-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = "                map.serialize_entry(\"state\", if self.moved() { \"moved\" } else { \"unavailable\" })?;"
+replace = "                map.serialize_entry(\"state\", \"unavailable\")?;"
+
+
+# T-816 P1-2: a member held for its model's move comes back at the human's word for it alone.
+[[plant]]
+name = "muse: a teammate's turn brings a moved member back"
+meant = "a_teammates_turn_and_the_humans_word_for_another_member_release_no_member_held_for_a_move"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if moved_hold(&until) {
+                continue;
+            }
+'''
+replace = '''
+            if false && moved_hold(&until) {
+                continue;
+            }
+'''
+
+
+[[plant]]
+name = "muse: another window's answer releases a moved member"
+meant = "another_window_of_the_member_that_answers_and_an_allowance_release_no_hold_for_a_move"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            && !owner.out_until.as_deref().is_some_and(moved_hold)
+'''
+replace = '''
+'''
+
+
+[[plant]]
+name = "muse: an allowance releases a moved member"
+meant = "another_window_of_the_member_that_answers_and_an_allowance_release_no_hold_for_a_move"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            .is_some_and(|until| never(until) && !moved_hold(until))
+'''
+replace = '''
+            .is_some_and(never)
+'''
+
+
+[[plant]]
+name = "muse: a move is held for an hour"
+meant = "a_teammates_turn_and_the_humans_word_for_another_member_release_no_member_held_for_a_move"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if quota.is_some_and(Quota::moved) {
+            return MOVED.to_owned();
+        }
+'''
+replace = '''
+'''
+
+
+[[plant]]
+name = "muse: a move is told in a billing's words"
+meant = "the_requester_and_the_human_are_told_why_once_in_words_of_the_move_not_of_a_billing"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    Unwell::Moved(because) => ledger.note_hold_moved(
+'''
+replace = '''
+                    Unwell::Moved(because) => ledger.note_hold_unavailable(
+'''
+
+
+[[plant]]
+name = "muse: a moved member is not free for no reason"
+meant = "a_task_that_waits_for_a_free_member_is_told_the_model_moved_not_a_billing_refused"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            return Some(if moved_hold(until) {
+'''
+replace = '''
+            return Some(if false && moved_hold(until) {
+'''
+
+
+[[plant]]
+name = "muse: a window is never opened"
+meant = "a_move_dated_before_the_window_opened_holds_nothing_and_one_after_it_does"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            part.opened_at = Some(asked_at);
+'''
+replace = '''
+            part.opened_at = None;
+'''
+
+
+[[plant]]
+name = "muse: an old move is no history"
+meant = "a_move_dated_before_the_window_opened_holds_nothing_and_one_after_it_does"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        quota.held_for_the_human() && self.before_open(record, quota.at())
+'''
+replace = '''
+        quota.held_for_the_human() && self.before_open(record, quota.at()) && false
+'''
+
+
+[[plant]]
+name = "muse: a drift is told at every look"
+meant = "a_model_that_only_drifts_is_told_to_the_human_once_and_holds_nothing"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if !record.quota.borrow_mut().drifts_told.insert(way) {
+'''
+replace = '''
+        if !record.quota.borrow_mut().drifts_told.insert(way) && false {
+'''
+
+
+[[plant]]
+name = "muse: an old drift is told"
+meant = "a_drift_dated_before_the_window_opened_is_not_told"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if self.before_open(record, drift.at.as_deref()) {
+'''
+replace = '''
+        if false && self.before_open(record, drift.at.as_deref()) {
+'''
+
+
+[[plant]]
+name = "muse: a held member is told once by its own mark"
+meant = "a_second_window_of_the_member_refused_a_minute_later_holds_its_task_and_the_human_is_not_told_again"
+runs = ["muse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if !self.scheduler.unwell_noted.borrow_mut().insert(mark) {
+            return Ok(());
+        }
+        let because = unwell.because();
+'''
+replace = '''
+        let _ = mark;
+        let because = unwell.because();
+'''
+
+
+[[plant]]
+name = "muse: what waits and a billing share a mark"
+meant = "a_billing_refusal_that_reaches_a_chief_out_for_a_limit_with_a_message_waiting_is_told_too"
+runs = ["muse-chief-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if !self.scheduler.unwell_noted.borrow_mut().insert(mark) {
+'''
+replace = '''
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) {
+'''
+
+
+[[plant]]
+name = "muse: the requester is told it waits for a reset"
+meant = "holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_human_once"
+runs = ["muse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if let Some(unwell) = unwell {
+                // The requester is told it waits for the human's word, whatever the
+'''
+replace = '''
+            if let (Some(unwell), true) = (unwell, false) {
+                // The requester is told it waits for the human's word, whatever the
+'''
+
+
+[[plant]]
+name = "muse: an allowance shown is no news"
+meant = "an_allowance_the_harness_shows_again_brings_an_unavailable_member_back_a_still_full_one_does_not"
+runs = ["muse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        owner
+            .out_until
+            .as_deref()
+            .is_some_and(|until| never(until) && !moved_hold(until))
+            && matches!(
+'''
+replace = '''
+        false
+            && matches!(
+'''
+
+
+[[plant]]
+name = "muse: an unavailable refusal read again is a new one"
+meant = "an_unavailable_refusal_a_look_read_again_is_the_same_refusal_whatever_its_time"
+runs = ["muse-scheduler"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            || (quota.held_for_the_human() && handled == quota)
+'''
+replace = '''
+'''
+
+
+# T-816 P2-2: a hold at the year 9999 waits for the human, and the chief is woken for it.
+[[plant]]
+name = "muse: a hold with no time is work on its way"
+meant = "a_task_held_for_no_time_is_no_work_on_its_way_and_the_chief_is_woken_for_it"
+runs = ["muse-wake"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '''
+                      OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))
+'''
+replace = '''
+                      OR (t.state = 'paused' AND t.held_until IS NOT NULL))
+'''
+
+
+[[plant]]
+name = "muse: the page says a held card waits for a time"
+meant = "a task held for an account no time resets says it waits for the human, not for a time"
+runs = ["muse-page-held"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+          ? 'unavailable until you say it works again'
+'''
+replace = '''
+          ? 'out of quota until you say it works again'
+
+'''
+
+
+[[plant]]
+name = "muse: the page calls a moved card an account"
+meant = "a task held for an account no time resets says it waits for the human, not for a time"
+runs = ["muse-page-held"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+      task.heldUntil === MODEL_MOVED
+'''
+replace = '''
+      task.heldUntil === 'x'
+
+'''
+
+
+[[plant]]
+name = "muse: the page says why only generically"
+meant = "says a member whose harness moved its model on its own is held, why in the words the engine gave, and what to do"
+runs = ["muse-page-why"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+      activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+'''
+replace = '''
+      null
+'''
+
+
+[[plant]]
+name = "muse: the page calls a moved member an account"
+meant = "says a member whose harness moved its model on its own is held, why in the words the engine gave, and what to do"
+runs = ["muse-page-why"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+const modelMoved = (participant) => participant.outUntil === MODEL_MOVED
+'''
+replace = '''
+const modelMoved = (participant) => participant.outUntil === 'x'
+'''
+
+
+# T-816 P2-3 and the P3s.
+[[plant]]
+name = "muse: a login held in a file is copied"
+meant = "a_login_held_anywhere_but_the_keychain_is_not_copied"
+runs = ["muse-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''
+        .all(|login| login.get("storage").and_then(Value::as_str) == Some("keychain"))
+'''
+replace = '''
+        .all(|login| login.get("storage").is_some() || true)
+'''
+
+
+[[plant]]
+name = "muse: the scratch copy stays when the run fails"
+meant = "the_scratch_folder_goes_when_the_run_fails_as_when_it_ends"
+runs = ["muse-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''
+        let _ = std::fs::remove_dir_all(&self.0);
+'''
+replace = '''
+        let _ = &self.0;
+'''
+
+
+[[plant]]
+name = "muse: the tool does not name the Muse ops"
+meant = "a_question_for_no_op_names_every_op_the_table_of_the_tool_has"
+runs = ["muse-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling.rs"
+find = "devin_config, trust, muse_models, muse_usage, input_box and unsent"
+replace = "devin_config, trust, input_box and unsent"
+
+
+[[plant]]
+name = "muse: a silent host is waited for ever"
+meant = "a_host_that_says_nothing_is_given_up_on_at_the_bound_and_ended"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/msp.rs"
+find = '''
+    let answered = armed.bound(talk(&*child, requests)).await;
+'''
+replace = '''
+    let answered = Some(talk(&*child, requests).await);
+    let _ = &armed;
+'''
+
+
+[[plant]]
+name = "muse: a stale list has a default"
+meant = "a_list_a_host_with_no_login_gives_is_muses_bundled_one_and_is_stale"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '''
+        if self.stale {
+            return None;
+        }
+'''
+replace = '''
+'''
+
+
+[[plant]]
+name = "muse: usage is run with an update check"
+meant = "what_muse_usage_says_is_read_as_the_account_s_quota_and_a_failure_is_a_reason"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/usage.rs"
+find = '''
+        env: env.clone().with_var("MUSE_NO_AUTO_UPDATE", "1"),
+'''
+replace = '''
+        env: env.clone(),
+'''
+
+
+[[plant]]
+name = "muse: a usage that fails says nothing"
+meant = "what_muse_usage_says_is_read_as_the_account_s_quota_and_a_failure_is_a_reason"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/usage.rs"
+find = '''
+        .map_err(|failed| failed.message)?;
+'''
+replace = '''
+        .map_err(|_| String::new())?;
+'''
+
+[[plant]]
+name = "muse: a moved hold is told gone on as an account"
+meant = "a_human_who_accepts_the_model_and_presses_try_again_goes_on_though_the_record_still_reads_the_move"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = "    let told = if notes[given].0.ends_with(TAIL_MOVED) {"
+replace = "    let told = if false && notes[given].0.ends_with(TAIL_MOVED) {"
+
+# T-841 P1-A: a refusal older than the window holds nothing but stays in the reading.
+
+[[plant]]
+name = "muse: an old refusal holds the window opened after it"
+meant = "a_move_dated_before_the_window_opened_holds_nothing_and_one_after_it_does"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if same_refusal(handled.as_ref(), &quota) || self.older_than_the_window(record, &quota) {
+'''
+replace = '''
+        if same_refusal(handled.as_ref(), &quota) {
+'''
+
+
+[[plant]]
+name = "muse: an old move is a refusal the window has not acted on"
+meant = "a_move_older_than_the_window_does_not_keep_the_requester_from_hearing_the_task_goes_on"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            && !same_refusal(handled.as_ref(), &quota)
+            && !self.older_than_the_window(record, &quota)
+'''
+replace = '''
+            && !same_refusal(handled.as_ref(), &quota)
+'''
+
+
+[[plant]]
+name = "muse: a refusal older than the window is gone from the look"
+meant = "a_task_held_for_an_account_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_refusal"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        record.delivery.borrow_mut().lost = observed.lost().len();
+'''
+replace = '''
+        let stale = observed.quota.as_deref().is_some_and(|quota| {
+            quota.held_for_the_human() && self.before_open(record, quota.at())
+        });
+        let observed = if stale {
+            Observed {
+                quota: None,
+                ..observed
+            }
+        } else {
+            observed
+        };
+        record.delivery.borrow_mut().lost = observed.lost().len();
+'''
+
+[[plant]]
+name = "muse: a turn cut before the window opened is gone on in place"
+meant = "a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_failed_turn"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+                if !self.words_since_the_cut(participant, &observed)? {
+'''
+replace = '''
+                if true {
+'''
+
+
+[[plant]]
+name = "muse: a flip is told every time"
+meant = "a_flip_between_two_models_is_told_once_for_each_way_in_a_window_and_again_in_the_next"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        let way = format!("{}>{}", drift.from, drift.to);
+'''
+replace = '''
+        let way = format!("{}>{}@{}", drift.from, drift.to, drift.at.as_deref().unwrap_or_default());
+'''
+
+
+[[plant]]
+name = "muse: a window opened again remembers the flips it told"
+meant = "a_flip_between_two_models_is_told_once_for_each_way_in_a_window_and_again_in_the_next"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            record.quota.borrow_mut().drifts_told.clear();
+'''
+replace = '''
+            let _ = ();
+'''
+
+
+[[plant]]
+name = "muse: an alias's flip is a drift"
+meant = "a_flip_between_the_models_an_alias_runs_on_is_no_drift_where_the_launch_names_the_alias"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        within(from) && within(model)
+'''
+replace = '''
+        false && within(from) && within(model)
+'''
+
+
+[[plant]]
+name = "muse: a model outside the alias is no drift"
+meant = "a_flip_between_the_models_an_alias_runs_on_is_no_drift_where_the_launch_names_the_alias"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        within(from) && within(model)
+'''
+replace = '''
+        within(from) || within(model)
+'''
+
+
+[[plant]]
+name = "muse: opusplan runs on one family"
+meant = "a_flip_between_the_models_an_alias_runs_on_is_no_drift_where_the_launch_names_the_alias"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        "opusplan" | "default" => &["opus", "sonnet"],
+'''
+replace = '''
+        "opusplan" | "default" => &["opus"],
+'''
+
+
+[[plant]]
+name = "muse: claude's look does not say the move"
+meant = "a_window_whose_transcript_holds_claude_codes_fallback_is_read_as_a_moved_model_by_its_look"
+runs = ["muse-claude-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+                ..observed_from(Arc::clone(&reading), None)
+'''
+replace = '''
+                quota: None,
+                ..observed_from(Arc::clone(&reading), None)
+'''
+
+
+[[plant]]
+name = "muse: claude's look tells the reader no launch model"
+meant = "an_opusplan_window_flipping_between_opus_and_sonnet_is_told_no_drift_and_another_launch_is"
+runs = ["muse-claude-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+        launch_model: model.map(str::to_owned),
+'''
+replace = '''
+        launch_model: model.and(None).map(str::to_owned),
+'''
+
+
+[[plant]]
+name = "muse: claude's reader ignores the launch model"
+meant = "an_opusplan_window_flipping_between_opus_and_sonnet_is_told_no_drift_and_another_launch_is"
+runs = ["muse-claude-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+        let model = options.launch_model.as_deref();
+'''
+replace = '''
+        let model = options.launch_model.as_deref().filter(|_| false);
+'''
+
+# T-841 P3-2: the live read copies the login file and the catalog alone, with their modes.
+
+[[plant]]
+name = "muse: a copied login file loses its mode"
+meant = "a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enters"
+runs = ["muse-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''
+    std::fs::copy(from, to).map(|_| ())
+'''
+replace = '''
+    std::fs::read(from).and_then(|bytes| std::fs::write(to, bytes))
+'''
+
+
+[[plant]]
+name = "muse: the scratch folders are open to others"
+meant = "a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enters"
+runs = ["muse-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''
+    std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o700);
+'''
+replace = '''
+    std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o755);
+'''
+
+
+[[plant]]
+name = "muse: the whole config is copied"
+meant = "a_run_of_muse_copies_the_login_file_and_the_model_catalog_and_nothing_else_of_the_config"
+runs = ["muse-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''
+    copy_kept(
+        &home.join(".config/muse/auth.json"),
+        &scratch.join("config/muse/auth.json"),
+    )?;
+'''
+replace = '''
+    copy_folder_kept(&home.join(".config/muse"), &scratch.join("config/muse"))?;
+'''
+
+# T-853 P2-1: a cut is gone on over words given after it, and decided on the words, not on the refusal's date.
+
+[[plant]]
+name = "muse: any paste is words since the cut"
+meant = "a_refusal_that_landed_after_the_last_look_and_before_a_restart_is_held_when_the_resume_goes_on_into_it"
+runs = ["muse-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            .is_some_and(|pasted| {
+                !items[pasted + 1..]
+                    .iter()
+                    .any(|item| item.role == Role::Assistant)
+            }))
+'''
+replace = '''
+            .is_some())
+'''
+
+
+[[plant]]
+name = "muse: words that landed are no words since the cut"
+meant = "a_paste_that_landed_while_the_reader_still_reads_the_failure_is_not_gone_on_over"
+runs = ["muse-quota-wait"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            .is_some_and(|pasted| {
+                !items[pasted + 1..]
+                    .iter()
+                    .any(|item| item.role == Role::Assistant)
+            }))
+'''
+replace = '''
+            .is_some_and(|_| false))
+'''
+
+# T-853 P3-3, P3-4: the reader is told a launch with no model too, and the default alias runs on two models.
+
+[[plant]]
+name = "muse: a launch with no model leaves the reader the alias"
+meant = "a_look_launched_with_no_model_reads_the_flips_again_where_an_earlier_one_named_the_alias"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            if known.as_deref() != model {
+'''
+replace = '''
+            if model.is_some() && known.as_deref() != model {
+'''
+
+
+[[plant]]
+name = "muse: the default alias is one model"
+meant = "the_default_alias_flips_between_opus_and_sonnet_by_design_too"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        "opusplan" | "default" => &["opus", "sonnet"],
+'''
+replace = '''
+        "opusplan" => &["opus", "sonnet"],
+'''
+
+# T-853 P3-2: one place builds a look; the precedence is the move, the window's live word, then the record's.
+
+[[plant]]
+name = "muse: the record's quota outranks the window's word"
+meant = "the_quota_a_look_says_is_the_move_then_what_the_window_says_live_then_the_records"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+        .or(live)
+        .or_else(|| record.quota.clone())
+'''
+replace = '''
+        .or_else(|| record.quota.clone())
+        .or(live)
+'''
+
+
+[[plant]]
+name = "muse: an unread record drops the window's word"
+meant = "the_quota_a_look_says_is_the_move_then_what_the_window_says_live_then_the_records"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+        Reading::Unknown(_) | Reading::Missing(_) => (true, false, live),
+'''
+replace = '''
+        Reading::Unknown(_) | Reading::Missing(_) => (true, false, None),
+'''
+
+
+[[plant]]
+name = "muse: devin's wire replaces the record's quota"
+meant = "a_move_the_record_holds_outranks_the_refusal_the_wire_log_says_and_the_records_own_stands_beside_a_silent_wire"
+runs = ["muse-devin-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''
+            let mut observed = observed_from(Arc::clone(&reading), wire.quota);
+'''
+replace = '''
+            let mut observed = observed_from(Arc::clone(&reading), None);
+            observed.quota = wire.quota;
+'''
+
+
+[[plant]]
+name = "muse: opencode's retry outranks a move"
+meant = "a_move_the_record_holds_outranks_the_quota_the_window_waits_out"
+runs = ["muse-opencode-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''
+            let mut observed = observed_from(reading, retry.map(Arc::new));
+'''
+replace = '''
+            let mut observed = observed_from(reading, None);
+            observed.quota = retry.map(Arc::new).or(observed.quota);
+'''
+
+
+[[plant]]
+name = "muse: codex's look says the record's refusal before its move"
+meant = "says_a_move_the_record_holds_before_a_refusal_it_shows_too"
+runs = ["muse-codex-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
+'''
+replace = '''
+        .filter(|_| false)
+        .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
+'''
+
