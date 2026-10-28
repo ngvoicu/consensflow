@@ -632,20 +632,14 @@ for (const [label, shell] of shells) {
           ])
           const other = running(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'])
           const gone = folderIn(at, `consensflow-install.${dead}.${hex}`)
+          // A pid no process can have (above a signed 32-bit number): a name nothing of ours made.
+          const huge = folderIn(at, `consensflow-install.3000000000.${hex}`)
           const unrelated = folderIn(at, `consensflow-install.${other}.${hex}`)
           const kept = folderIn(at, `consensflow-install.${live}.${hex}`)
           // A junction inside a dead run's folder, to a folder that is someone's: only the junction goes.
           const elsewhere = mkdtempSync(path.join(work, 'elsewhere-'))
           writeFileSync(path.join(elsewhere, 'keep'), 'mine')
           symlinkSync(elsewhere, path.join(gone, 'link'), 'junction')
-          // And a symbolic link, where this user may make one (it takes a privilege Windows gives some).
-          const aside = mkdtempSync(path.join(work, 'aside-'))
-          writeFileSync(path.join(aside, 'keep'), 'mine')
-          try {
-            symlinkSync(aside, path.join(gone, 'symbolic'), 'dir')
-          } catch {
-            // not allowed here: the junction alone is tried
-          }
           const similar = [
             `consensflow-install.${dead}.${hex.slice(0, 11)}`,
             `consensflow-install.${dead}.${hex}c`,
@@ -675,6 +669,7 @@ for (const [label, shell] of shells) {
             readdirSync(at.tmp).sort(),
             [
               path.basename(kept),
+              path.basename(huge),
               ...similar,
               `consensflow-install.${dead + 1}.${hex}`,
               `consensflow-install.${dead + 2}.${hex}`,
@@ -682,12 +677,15 @@ for (const [label, shell] of shells) {
             `only a dead run's folder and the pid that is another program's are gone, and this run's own: ${ran.out}`,
           )
           assert.equal(readFileSync(path.join(elsewhere, 'keep'), 'utf8'), 'mine')
-          assert.equal(readFileSync(path.join(aside, 'keep'), 'utf8'), 'mine')
           assert.ok(!existsSync(gone) && !existsSync(unrelated))
           // The refusal is the release's own: this run's folder was there to download into.
           assert.match(ran.out, /ConsensFlow 3\.0\.6 has no signed SHA256SUMS/)
           assert.match(ran.out, new RegExp(`removed ${exact(gone)}`))
           assert.match(ran.out, new RegExp(`removed ${exact(unrelated)}`))
+          assert.match(
+            ran.out,
+            new RegExp(`left ${exact(huge)} alone: no process has a pid so large`),
+          )
           assert.match(
             ran.out,
             new RegExp(
@@ -697,6 +695,87 @@ for (const [label, shell] of shells) {
           assert.match(
             ran.out,
             new RegExp(`left .*consensflow-install\\.${dead + 1}\\.${hex} alone`),
+          )
+        })
+
+        // Making a directory symbolic link takes a privilege (an elevated session has it) or
+        // Developer Mode: where this user has neither, the test says so, and is skipped.
+        test("a symbolic link inside a dead run's folder goes as a link, and its target is left", async (t) => {
+          publish('3.0.6', { signature: null })
+          const at = freshCase()
+          const gone = folderIn(at, `consensflow-install.${await deadPid()}.0123456789ab`)
+          const aside = mkdtempSync(path.join(work, 'aside-'))
+          writeFileSync(path.join(aside, 'keep'), 'mine')
+          try {
+            symlinkSync(aside, path.join(gone, 'symbolic'), 'dir')
+          } catch (error) {
+            return t.skip(
+              `this user may not make a directory symbolic link here (${error.code}): it takes a privilege, or Developer Mode`,
+            )
+          }
+          t.diagnostic('the symbolic link was made')
+          const ran = await install(at, ['--version', '3.0.6'])
+          assert.match(ran.out, new RegExp(`removed ${exact(gone)}`))
+          assert.ok(!existsSync(gone), ran.out)
+          assert.equal(readFileSync(path.join(aside, 'keep'), 'utf8'), 'mine')
+        })
+
+        test('a pid reused by a host named for PowerShell is kept, whatever else its name says', async () => {
+          publish('3.0.6', { signature: null })
+          const at = freshCase()
+          const hosts = mkdtempSync(path.join(work, 'hosts-'))
+          const hex = '0123456789ab'
+          const kept = []
+          // Programs that are no PowerShell, named for a host: only their names say what they are.
+          for (const host of ['pwsh-preview', 'powershell-test']) {
+            copyFileSync(process.execPath, path.join(hosts, `${host}.exe`))
+            const pid = running(path.join(hosts, `${host}.exe`), [
+              '-e',
+              'setTimeout(() => {}, 120000)',
+            ])
+            kept.push(folderIn(at, `consensflow-install.${pid}.${hex}`))
+          }
+          const ran = await install(at, ['--version', '3.0.6'])
+          assert.notEqual(ran.status, 0, ran.out)
+          for (const folder of kept) {
+            assert.ok(existsSync(folder), `${folder} was removed: ${ran.out}`)
+            assert.match(
+              ran.out,
+              new RegExp(`left ${exact(folder)} alone: process \\d+ may be an install`),
+            )
+          }
+        })
+
+        test('a folder of another user is left alone, and said', async () => {
+          publish('3.0.6', { signature: null })
+          // This copy takes the owner of a folder for someone's other than the user's own: SYSTEM's.
+          const at = freshCase([
+            ['$mine = @($me.User.Value, $me.Owner.Value)', "$mine = @('S-1-5-18')"],
+          ])
+          const theirs = folderIn(at, `consensflow-install.${await deadPid()}.0123456789ab`)
+          const ran = await install(at, ['--version', '3.0.6'])
+          assert.notEqual(ran.status, 0, ran.out)
+          assert.ok(existsSync(theirs), `it was removed: ${ran.out}`)
+          assert.match(ran.out, new RegExp(`left ${exact(theirs)} alone: it is not yours`))
+        })
+
+        test("this run's own folder is never a dead run's, however its path is spelled", async () => {
+          publish('3.0.6', { signature: null })
+          // The path the sweep is given for the run's own folder has slashes where Windows has backslashes.
+          const at = freshCase([
+            [
+              '        Remove-CfStaleRuns $tmp\n',
+              "        Remove-CfStaleRuns ($tmp.Replace('\\', '/'))\n",
+            ],
+          ])
+          const gone = folderIn(at, `consensflow-install.${await deadPid()}.0123456789ab`)
+          const ran = await install(at, ['--version', '3.0.6'])
+          assert.match(ran.out, new RegExp(`removed ${exact(gone)}`))
+          assert.match(ran.out, /ConsensFlow 3\.0\.6 has no signed SHA256SUMS/)
+          assert.deepEqual(
+            readdirSync(at.tmp),
+            [],
+            'nothing is left, and the run reached its own refusal',
           )
         })
 

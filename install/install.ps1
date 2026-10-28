@@ -492,11 +492,12 @@ remove everything.
         $null
     }
 
-    # Whether the process $process may be an install that goes on: any PowerShell (an
-    # `irm | iex` runs inside one, and names nothing), or a program whose command line
-    # names install.ps1.
+    # Whether the process $process may be an install that goes on: any PowerShell host
+    # (powershell, pwsh, a preview or an ISE by their names: an `irm | iex` runs inside one,
+    # and names nothing), or a program whose command line names install.ps1.
     function Test-CfInstallGoesOn($process) {
-        if (@('powershell', 'pwsh', 'powershell_ise') -contains $process.ProcessName.ToLowerInvariant()) { return $true }
+        $program = $process.ProcessName.ToLowerInvariant()
+        if ($program -like 'powershell*' -or $program -like 'pwsh*') { return $true }
         $line = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction SilentlyContinue
         [bool]($line -and $line.CommandLine -and $line.CommandLine -like '*install.ps1*')
     }
@@ -505,19 +506,33 @@ remove everything.
     # temporary folder: its folder, consensflow-install.<pid>.<12 hex>, of a pid no install
     # runs as (a process that has it is an install only if Test-CfInstallGoesOn says it may
     # be). Only a real folder, never a link (a link inside it goes as a link: Remove-Item does
-    # not follow one, which the test holds); this run's own folder ($own) is never one;
+    # not follow one, which the test holds), owned by this user (or by what the user's token
+    # gives what it makes: the Administrators group, where the session is elevated), under a
+    # pid a process can have; this run's own folder ($own) is never one, by its name;
     # every one is said in full.
     function Remove-CfStaleRuns([string]$own) {
+        $ownName = Split-Path -Leaf $own
+        $me = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $mine = @($me.User.Value, $me.Owner.Value)
         foreach ($item in Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Force -ErrorAction SilentlyContinue) {
             if ($item.Name -cnotmatch '\Aconsensflow-install\.([1-9][0-9]{0,9})\.[0-9a-f]{12}\z') { continue }
-            if ($item.FullName -eq $own) { continue }
+            if ($item.Name -eq $ownName) { continue }
             $pidOf = [long]($item.Name -split '\.')[1]
             $path = $item.FullName
+            if ($pidOf -gt [int]::MaxValue) {
+                Write-Host "consensflow: left $path alone: no process has a pid so large, and nothing of ours made this name."
+                continue
+            }
             if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
                 Write-Host "consensflow: left $path alone: an install makes a folder there, and this is not one."
                 continue
             }
-            $process = if ($pidOf -ne $PID -and $pidOf -le [int]::MaxValue) { Get-Process -Id $pidOf -ErrorAction SilentlyContinue } else { $null }
+            try { $owner = (Get-Acl -LiteralPath $path).GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { $owner = '' }
+            if ($mine -notcontains $owner) {
+                Write-Host "consensflow: left $path alone: it is not yours (its owner is '$owner')."
+                continue
+            }
+            $process = if ($pidOf -ne $PID) { Get-Process -Id $pidOf -ErrorAction SilentlyContinue } else { $null }
             if ($process -and (Test-CfInstallGoesOn $process)) {
                 Write-Host "consensflow: left $path alone: process $pidOf may be an install that is still going on."
                 continue
