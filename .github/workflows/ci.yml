@@ -3,9 +3,9 @@
 # (the daemon, and the rig on a real pane host, with stand-in agents in real
 # terminals, and the regressions on it; the CLI), the page's Playwright suite
 # (on macOS: it needs no app, and once is enough), and the Rust host's tests,
-# headless ones included, and clippy. The packaged smoke needs a built app and
-# stays with the release build. Rust comes from the runner's own rustup; the
-# third-party actions are pinned to a commit. A release publishes only a
+# headless ones included, and clippy; and on the Mac the packaged smoke, on the app
+# built as a download is (the `packaged` job). Rust comes from the runner's own
+# rustup; the third-party actions are pinned to a commit. A release publishes only a
 # commit this gate passed on both platforms (release.yml's `gate` job, cf-release
 # `ci-passed`): its run by a push or by hand, with `gate (macos-latest)` and
 # `gate (windows-latest)` green. A promotion's commit is pushed to its
@@ -25,7 +25,8 @@
 #              tests, cf-e2e's own, clippy, and cf-bridge's;
 #   workspace  the workspace's tests, whole (its limit below says why);
 #   daemons    the daemons' suites in three shards, a third of their cases
-#              each (`cargo xtask test daemons` with CF_TEST_SHARD: suites.rs).
+#              each (`cargo xtask test daemons` with CF_TEST_SHARD: suites.rs);
+#   packaged   the app built and smoked, on the Mac alone (T-904).
 # Five jobs a platform: GitHub runs five macOS jobs of an account at once.
 name: CI
 
@@ -41,6 +42,7 @@ defaults:
 
 jobs:
   checks:
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -88,6 +90,7 @@ jobs:
       - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings
 
   workspace:
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -142,6 +145,7 @@ jobs:
         timeout-minutes: 40
 
   daemons:
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -231,13 +235,47 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The app as a download is built, and run as a user would (T-904): the packaged
+  # smoke opens a pane, a worker takes a task, and the app is hidden while a window
+  # floods. It was run by the release's tag run alone, so that a regression only a
+  # built app shows (alpha.3's board case, T-863: the stand-in drew no prompt, and
+  # every gate passed) was found after the tag was pushed, and a failed tag run
+  # leaves its tag behind. Here it is found at the push that made it, with the merge
+  # named. The app is built ad hoc (the product's configuration signs with "-"; no
+  # key reaches a build of CI) and of the smoke's identity, not the live app's: to
+  # macOS a copy of the live app's identity is the live app, on a person's Mac that
+  # runs these two commands as it does on the runner's. The identity is the one every
+  # smoke build has (cf_base::bundle::SMOKE), set at the build so that the bundle
+  # never carries the release's; the smoke starts a copy of it where it can (T-860),
+  # and the bundle itself is what the release's run alone asks it to start
+  # (CONSENSFLOW_SMOKE_SHIPPED, which this job never sets). What this does not show:
+  # the Developer ID signature and its hardened runtime, notarization, the update
+  # bundle and its feeds, and Windows: the release's run still holds those. The build
+  # is cached as the other jobs' are (the setup), and saved though the smoke fails:
+  # a red smoke is what this job is for, and every run after it would otherwise
+  # build from nothing.
+  packaged:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          cache-on-failure: true
+      - name: Build the app, ad hoc, of the smoke's identity
+        run: npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}'
+        timeout-minutes: 20
+      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+        timeout-minutes: 15
+
   # The checks a release and a branch rule read, one a platform, named as the
   # one job a platform was: green only when every job above passed. They run
   # whatever the jobs above did (`always()`), so that a job that failed, was
   # cancelled or was skipped makes them red and not skipped, which a rule would
   # take for passed.
   gate:
-    needs: [checks, workspace, daemons]
+    needs: [checks, workspace, daemons, packaged]
     if: always()
     strategy:
       fail-fast: false
