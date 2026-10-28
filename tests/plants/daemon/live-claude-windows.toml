@@ -16,6 +16,8 @@ live-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "stand_i
 live-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_held_typed", "--", "isolation::"]
 live-mcp-server = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server"]
 live-monitor-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_server_left_its_group"]
+live-rig-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
+live-claude-table = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::claude"]
 live-monitor-wait-host = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_platform_with_no_groups"]
 
 [[plant]]
@@ -278,3 +280,28 @@ runs = ["live-monitor-wait-host"]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
 find = '''        !seen.is_empty() && seen.iter().all(Option::is_none),'''
 replace = '''        true,'''
+
+# T-858: `live resume-cut` on Windows: a resumed Claude window's screen read blank for 120 s though it had
+# printed its whole prompt (zeewin2): Claude titles its window with a string ended by ST, and the rig's
+# `plain` took the title to end at the next BEL, which came 2,000 bytes later.
+[[plant]]
+name = "windows live: a title ended by the string terminator takes the screen after it"
+meant = "a_title_ended_by_the_string_terminator_ends_there_and_takes_none_of_what_follows"
+runs = ["live-rig-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = '''(?:\x07|\x1b\\)")'''
+replace = '''\x07")'''
+
+# `live reopened` on Windows stopped at 'could not start `ps`': the processes of a long command are read
+# from the machine's own table there.
+[[plant]]
+name = "windows live: the processes that hold a word are those that start with it"
+meant = "the_processes_of_a_machines_table_that_hold_a_word_are_the_ones_whose_command_line_does"
+runs = ["live-claude-table"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/claude.rs"
+find = '''        .filter(|process| process.command.contains(text))'''
+replace = '''        .filter(|process| process.command.starts_with(text))'''
