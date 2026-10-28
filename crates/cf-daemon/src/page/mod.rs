@@ -38,6 +38,7 @@ mod computer_use;
 mod engine;
 mod history;
 mod messages;
+mod models;
 mod operations;
 mod projects;
 mod sessions;
@@ -78,6 +79,8 @@ pub struct Page {
     pub specs: Specs,
     /// The machine's computer use, and the opener of System Settings panes.
     pub computer_use: ComputerUsePage,
+    /// The models each harness lists, read at the first ask and at the human's Refresh.
+    pub models: Rc<crate::models::ModelLists>,
 }
 
 /// What an operation serves: the fields of its answer, which follow `ok: true`,

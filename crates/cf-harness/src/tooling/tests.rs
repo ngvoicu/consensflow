@@ -688,3 +688,17 @@ fn the_unsent_question_answers_the_adapters_decision_of_a_snapshot() {
         .unwrap_err()
         .contains("no snapshot"));
 }
+
+#[test]
+fn the_models_question_reads_as_the_daemon_and_says_why_a_harness_has_none() {
+    let env = json!({ "PATH": "" });
+    assert_eq!(
+        answer(&json!({ "op": "models", "kind": "claude-code", "env": env })),
+        Err("claude is not installed on this machine".to_owned())
+    );
+    assert_eq!(
+        answer(&json!({ "op": "models", "kind": "opencode", "env": env })),
+        Err("ConsensFlow cannot read this harness's models".to_owned())
+    );
+    assert!(answer(&json!({ "op": "models", "kind": "kimi", "env": env })).is_err());
+}

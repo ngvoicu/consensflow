@@ -38,6 +38,7 @@ use std::time::Duration;
 
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::models::Models;
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 
@@ -123,6 +124,13 @@ impl CodexAdapter {
 }
 
 impl Adapter for CodexAdapter {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<Models, String>> {
+        Box::pin(super::models::listed(
+            &self.services.env,
+            &*self.services.processes,
+            &*self.services.time,
+        ))
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let services = &self.services;

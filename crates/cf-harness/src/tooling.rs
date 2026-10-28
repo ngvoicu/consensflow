@@ -29,6 +29,7 @@
 //! | `devin_config` | `env`: the owner's own config of Devin, read as the adapter reads it for a launch, in the config folder `env` names | the config, an object: its comments and trailing commas left out, and an empty one where there is none |
 //! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt, grants, servers}`: the key it presses next toward a yes (`down`, `up`, `enter`), or null where the lines show no such question or the harness never asks one, whether they are the harness's prompt, and whether the question is the one of a trusted folder's grants or Claude's dialog of new servers of `.mcp.json`; with `directory`, `trusts` too: `{folder, inside, servers_above}`, what a yes trusts for a window opened in that project's folder, and the nearest folder above it whose `.mcp.json` Claude reads too |
 //! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
+//! | `models` | `kind`, `env`, `fetch`: the models the harness lists, read as the daemon reads them (no model turn), `fetch` being the human's Refresh | `{models, stale, how, default, warnings}`: each model as the home keeps it, whether the list is stale, how it was read, the model a harness is started on where nothing names one, and the warning of each contributor model by its `--model` |
 //!
 //! The last nine are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
@@ -45,6 +46,7 @@
 //! folder trust holds against the real harnesses' screens.
 
 mod launch;
+mod models;
 mod readiness;
 mod session;
 
@@ -90,8 +92,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "trust" => trust(question),
         "input_box" => input_box(question),
         "unsent" => unsent(question),
+        "models" => models::models(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, input_box and unsent"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, input_box, unsent and models"
         )),
     }
 }

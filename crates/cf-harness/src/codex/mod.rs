@@ -9,6 +9,7 @@ pub mod computer_use;
 #[cfg(test)]
 mod fakes;
 mod launch;
+pub(crate) mod models;
 pub(crate) mod paths;
 mod quota;
 pub mod record;

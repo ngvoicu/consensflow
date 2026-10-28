@@ -72,6 +72,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::models::Models;
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
@@ -85,6 +86,7 @@ use crate::contract::{
 };
 use crate::detect::executable;
 use crate::records::{Boundary, Options, Reading, Settlement};
+use crate::seams::processes::Processes;
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, InputBox, Unsent};
@@ -100,6 +102,7 @@ pub struct ClaudeAdapter {
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     entropy: Rc<dyn Entropy>,
+    processes: Rc<dyn Processes>,
     /// Where Claude keeps its own status of each of its processes, made
     /// whole once, as Node resolved it when it made the adapter; or why
     /// there is none.
@@ -114,12 +117,20 @@ impl ClaudeAdapter {
             records: Rc::clone(&services.records),
             time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
+            processes: Rc::clone(&services.processes),
             statuses: status::folder(&services.env),
         }
     }
 }
 
 impl Adapter for ClaudeAdapter {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<Models, String>> {
+        Box::pin(super::models::listed(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+        ))
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Claude, &self.env)?;

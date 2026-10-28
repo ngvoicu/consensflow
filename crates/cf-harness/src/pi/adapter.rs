@@ -21,6 +21,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::models::Models;
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 
@@ -34,6 +35,7 @@ use crate::contract::{
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
+use crate::seams::processes::Processes;
 use crate::seams::{Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
@@ -50,6 +52,7 @@ pub struct PiAdapter {
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     entropy: Rc<dyn Entropy>,
+    processes: Rc<dyn Processes>,
 }
 
 impl PiAdapter {
@@ -60,11 +63,20 @@ impl PiAdapter {
             records: Rc::clone(&services.records),
             time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
+            processes: Rc::clone(&services.processes),
         }
     }
 }
 
 impl Adapter for PiAdapter {
+    fn models(&self, fetch: bool) -> Work<'_, Result<Models, String>> {
+        Box::pin(super::models::listed(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+            fetch,
+        ))
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Pi, &self.env)?;

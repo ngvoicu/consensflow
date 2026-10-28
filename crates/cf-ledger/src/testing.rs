@@ -50,6 +50,7 @@
 mod compaction;
 mod described;
 mod handed;
+mod model_list;
 mod pasted_into;
 mod paused_with_project;
 mod program_gone;
@@ -61,6 +62,7 @@ use serde_json::{Map, Value};
 
 pub use compaction::undo_migration_0020;
 pub use handed::undo_migration_0022;
+pub use model_list::undo_migration_0025;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
@@ -138,9 +140,11 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     for column in added_columns().filter_map(|definition| definition.split_whitespace().next()) {
         take_column_out(tables, "project", column);
     }
-    for table in compaction::made("TABLE") {
-        tables.remove(table);
-    }
+    // Kept in their order: a table taken out mid-list must not move the last into its place.
+    let made: Vec<&str> = compaction::made("TABLE")
+        .chain([model_list::TABLE])
+        .collect();
+    tables.retain(|table, _| !made.contains(&table.as_str()));
 }
 
 /// `column` of `table`, as the recorder dumps a table (its `columns` and its
@@ -195,7 +199,9 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             .chain(compaction::made("INDEX"))
             .any(|made| made == name)
     });
-    schema.retain(|entry| entry["name"] != pasted_into::TRIGGER);
+    schema.retain(|entry| {
+        entry["name"] != pasted_into::TRIGGER && entry["name"] != model_list::TABLE
+    });
     for entry in schema {
         let name = entry["name"].as_str().map(str::to_owned);
         let Some(Value::String(sql)) = entry.get_mut("sql") else {

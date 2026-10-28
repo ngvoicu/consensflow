@@ -72,6 +72,7 @@
     "live:image-paste": "cargo xtask live image-paste",
     "live:task-working": "cargo xtask live task-working",
     "live:harnesses": "cargo xtask live harnesses",
+    "live:models": "cargo xtask live models",
     "live:pi-parity": "cargo xtask live pi-parity",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"

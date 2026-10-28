@@ -1,0 +1,9 @@
+{
+ "command": "get_available_models",
+ "data": {
+  "models": []
+ },
+ "id": "models",
+ "success": true,
+ "type": "response"
+}

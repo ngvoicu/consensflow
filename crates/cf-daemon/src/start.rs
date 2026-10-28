@@ -53,6 +53,7 @@ use crate::errors::{contain, Errors};
 use crate::files::{Log, Trace};
 use crate::host::{daemon_bridge, watch_exits, BridgeHost};
 use crate::machine;
+use crate::models::ModelLists;
 use crate::page::{self, Page};
 use crate::pass::{throttle, PassLoop};
 use crate::roster::Agents;
@@ -360,11 +361,12 @@ async fn run(
     let opening = Duration::from_millis(u64::try_from(limits.open_ms).unwrap_or_default());
     let host = Rc::new(BridgeHost::new(bridge.clone(), env.clone()).opening_within(opening));
     let computer_use = Rc::new(MachineComputerUse::new(env.clone()));
+    let adapters = Rc::new(HarnessAdapters::new(&services));
     let seams = Seams {
         ledger: Rc::clone(&ledger),
         host: Rc::clone(&host) as _,
         background: host as _,
-        adapters: Rc::new(HarnessAdapters::new(&services)),
+        adapters: Rc::clone(&adapters) as _,
         records: Rc::clone(&records) as _,
         time: Rc::clone(&time) as _,
         launch_ids: Rc::new(RandomLaunchIds),
@@ -466,6 +468,11 @@ async fn run(
             open: system_opener(env.clone()),
             grants_of: crate::computer_use::grants_of(&env),
         },
+        models: Rc::new(ModelLists::new(
+            adapters,
+            env.clone(),
+            Rc::clone(&time) as _,
+        )),
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);

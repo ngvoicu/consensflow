@@ -21,6 +21,7 @@ mod messages;
 /// The ledger's vocabulary: the words its records hold, their limits, and
 /// the parsers a caller reading JSON (the API, the page) checks a request with.
 pub mod model;
+mod model_lists;
 mod names;
 mod openings;
 mod page_reads;
