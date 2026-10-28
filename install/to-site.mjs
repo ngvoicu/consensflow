@@ -13,8 +13,13 @@
 // repository's two installers byte for byte, and refuses (1) when one is
 // missing or differs, which is what a release finds before it is published
 // (the site's branch once held an installer older than the repository's: T-840).
-// The gate runs it, on the main checkout, once the site holds the installers.
+// It reads the site's git objects, never its working tree: the site's checkout
+// is on `main`, which holds no installer, while they wait on its `installers`
+// branch. The branch tip is read where that branch exists, else HEAD; a site
+// that is there and has the installers on no ref is refused, not passed over
+// (T-847). The gate runs it where the site lies beside this repository.
 
+import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
@@ -25,37 +30,62 @@ const check = words.includes('--check')
 const site = path.resolve(
   words.find((word) => word !== '--check') ?? path.join(ROOT, '..', 'sites', 'consensflow-site'),
 )
-const page = path.join(site, 'index.html')
-if (!existsSync(page)) {
-  console.error(`to-site: ${site} holds no index.html: name the site's folder`)
-  process.exit(2)
-}
 const key = scriptKeyLine(readFileSync(INSTALL_SH, 'utf8'))
 if (scriptKeyLine(readFileSync(INSTALL_PS1, 'utf8')) !== key || updaterKeyLine() !== key) {
   console.error("to-site: install.sh, install.ps1 and the app's updater do not hold one key")
   process.exit(1)
 }
-if (!readFileSync(page, 'utf8').includes(key)) {
-  console.error(`to-site: ${page} does not show the key the installers pin, ${key}`)
-  process.exit(1)
+
+/** What git says of the site, as bytes: its status and its output. */
+function git(...args) {
+  const ran = spawnSync('git', ['-C', site, ...args], { encoding: 'buffer' })
+  return { ok: ran.status === 0, out: ran.stdout ?? Buffer.alloc(0) }
 }
+
 if (check) {
-  const stale = [INSTALL_SH, INSTALL_PS1].flatMap((script) => {
-    const name = path.basename(script)
-    const held = path.join(site, name)
-    if (!existsSync(held)) return [`${name} is missing from the site`]
-    return readFileSync(held).equals(readFileSync(script))
-      ? []
-      : [`${name} differs from this repository's`]
-  })
-  if (stale.length > 0) {
+  if (!git('rev-parse', '--git-dir').ok) {
+    console.error(`to-site: ${site} is not a git repository: --check reads its branch tips`)
+    process.exit(2)
+  }
+  const ref = git('rev-parse', '--verify', '--quiet', 'refs/heads/installers').ok
+    ? 'installers'
+    : 'HEAD'
+  const page = git('show', `${ref}:index.html`)
+  if (!page.ok) {
+    console.error(`to-site: ${site} holds no index.html on ${ref}: name the site's folder`)
+    process.exit(2)
+  }
+  if (!page.out.toString('utf8').includes(key)) {
     console.error(
-      `to-site: ${stale.join('; ')}: run npm run site:installers -- ${site}, and commit it on the site's branch`,
+      `to-site: index.html on ${ref} in ${site} does not show the key the installers pin, ${key}`,
     )
     process.exit(1)
   }
-  console.log(`to-site: the site holds this repository's installers (${site})`)
+  const stale = [INSTALL_SH, INSTALL_PS1].flatMap((script) => {
+    const name = path.basename(script)
+    const held = git('show', `${ref}:${name}`)
+    if (!held.ok) return [`${name} is missing from ${ref}`]
+    return held.out.equals(readFileSync(script))
+      ? []
+      : [`${name} differs from this repository's on ${ref}`]
+  })
+  if (stale.length > 0) {
+    console.error(
+      `to-site: ${stale.join('; ')}: run npm run site:installers -- ${site} with the site's installers branch checked out, and commit it there`,
+    )
+    process.exit(1)
+  }
+  console.log(`to-site: the site holds this repository's installers on ${ref} (${site})`)
 } else {
+  const page = path.join(site, 'index.html')
+  if (!existsSync(page)) {
+    console.error(`to-site: ${site} holds no index.html: name the site's folder`)
+    process.exit(2)
+  }
+  if (!readFileSync(page, 'utf8').includes(key)) {
+    console.error(`to-site: ${page} does not show the key the installers pin, ${key}`)
+    process.exit(1)
+  }
   for (const script of [INSTALL_SH, INSTALL_PS1]) {
     copyFileSync(script, path.join(site, path.basename(script)))
     console.log(`to-site: ${path.basename(script)} -> ${path.join(site, path.basename(script))}`)
