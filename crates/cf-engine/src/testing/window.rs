@@ -189,6 +189,12 @@ impl Window for FakeWindow {
         Box::pin(async move { came_up.and_then(|came_up| came_up()) })
     }
 
+    /// The test's word of what the pane host said of the human's input: no call of Node's
+    /// fake.
+    fn human_input(&self) -> Option<cf_proto::panes::HumanInput> {
+        self.fake.human_input.borrow().clone()
+    }
+
     /// The test's word of what the box shows: no call of Node's fake.
     fn unsent_words<'a>(
         &'a self,

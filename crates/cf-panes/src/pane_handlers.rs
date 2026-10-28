@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::arbiter::{InputArbiter, OutputClock};
+use crate::arbiter::{ArbiterSnapshot, InputArbiter, OutputClock};
 use crate::ended::Ended;
 use crate::input_queue::{wait_for_input_blocking, InputError, InputQueue};
 use crate::output_hub::OutputHub;
@@ -320,17 +320,7 @@ pub fn register_pane_handlers(
         let snapshot = snapshot_arbiter
             .snapshot(&key)
             .map_err(|error| error.to_string())?;
-        let mut answer = json!({
-            "ok":true,
-            "generation":snapshot.generation,
-            "pasteInFlight":snapshot.paste_in_flight,
-            "inputFailed":snapshot.input_failed,
-            "unsent":snapshot.unsent,
-            "typed":snapshot.typed,
-            "typedQuietMs":snapshot.typed_quiet_ms,
-            "outputQuietMs":snapshot.output_quiet_ms,
-            "pasteQuietMs":snapshot.paste_quiet_ms,
-        });
+        let mut answer = snapshot_answer(&snapshot);
         // The screen's last lines, for a request that asks for them. A pane
         // the table no longer holds has none to give.
         if let Some(lines) = request.tail {
@@ -353,6 +343,30 @@ pub fn register_pane_handlers(
         }
         Ok(answer)
     });
+}
+
+/// What `pane.snapshot` says of a pane's input: the human's last writes as how long ago,
+/// how many bytes and of what kinds, never a byte of them (`HumanWrite`).
+fn snapshot_answer(snapshot: &ArbiterSnapshot) -> Value {
+    let writes: Vec<Value> = snapshot
+        .human_writes
+        .iter()
+        .map(|write| {
+            json!({ "agoMs": write.ago_ms, "length": write.length, "classes": write.classes })
+        })
+        .collect();
+    json!({
+        "ok":true,
+        "generation":snapshot.generation,
+        "pasteInFlight":snapshot.paste_in_flight,
+        "inputFailed":snapshot.input_failed,
+        "unsent":snapshot.unsent,
+        "typed":snapshot.typed,
+        "typedQuietMs":snapshot.typed_quiet_ms,
+        "outputQuietMs":snapshot.output_quiet_ms,
+        "pasteQuietMs":snapshot.paste_quiet_ms,
+        "humanWrites":writes,
+    })
 }
 
 /// The human's own keys over the bridge (`pane.typed`), for the headless host,
@@ -626,6 +640,46 @@ mod tests {
     /// human's unsent text, so they hold neither a paste nor a native send,
     /// and the snapshot says nothing is unsent.
     #[cfg(unix)]
+    /// The human's last writes are said as how long ago, how many bytes and of what kinds
+    /// (Calliope's T-844, T-883).
+    #[test]
+    fn a_snapshot_says_the_humans_last_writes_by_age_length_and_kinds() {
+        let snapshot = ArbiterSnapshot {
+            generation: 1,
+            paste_in_flight: false,
+            input_failed: false,
+            unsent: true,
+            typed: 2,
+            typed_quiet_ms: Some(40),
+            output_quiet_ms: None,
+            paste_quiet_ms: None,
+            human_writes: vec![
+                crate::arbiter::HumanWrite {
+                    ago_ms: 90,
+                    length: 25,
+                    classes: vec!["string"],
+                },
+                crate::arbiter::HumanWrite {
+                    ago_ms: 40,
+                    length: 5,
+                    classes: vec!["text", "enter"],
+                },
+            ],
+        };
+        let answer = super::snapshot_answer(&snapshot);
+        assert_eq!(
+            answer["humanWrites"],
+            json!([
+                { "agoMs": 90, "length": 25, "classes": ["string"] },
+                { "agoMs": 40, "length": 5, "classes": ["text", "enter"] },
+            ])
+        );
+        assert_eq!(
+            (&answer["typed"], &answer["typedQuietMs"], &answer["unsent"]),
+            (&json!(2), &json!(40), &json!(true))
+        );
+    }
+
     #[test]
     fn the_daemons_own_keys_hold_no_paste_and_no_claim() {
         use std::io::{BufRead, BufReader, Write};

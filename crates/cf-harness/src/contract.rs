@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{HumanInput, Servers};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -424,6 +424,12 @@ pub trait Window {
         _pane: &'a Pane,
     ) -> Work<'a, Option<String>> {
         Box::pin(async { None })
+    }
+    /// What the pane host said of the human's input into the window at its last
+    /// [`Window::ready`], for the trace of a delivery that look held; none where that look
+    /// read no snapshot of the pane, or the harness's reads none.
+    fn human_input(&self) -> Option<HumanInput> {
+        None
     }
     /// Whether the engine asks [`Window::ready`] of the window before it has drawn its
     /// screen too, only for a window that says it never will be fit for work

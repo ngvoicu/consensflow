@@ -463,7 +463,10 @@ fn held_reasons(context: &Context, id: i64) -> Vec<String> {
         .iter()
         .filter_map(|line| match &line.what {
             Traced::Window {
-                event: WindowEvent::DeliveryHeld { message, reason },
+                event:
+                    WindowEvent::DeliveryHeld {
+                        message, reason, ..
+                    },
                 ..
             } if *message == id => Some(reason.clone()),
             _ => None,
@@ -816,4 +819,89 @@ fn an_urgent_head_waits_while_the_windows_harness_says_it_is_at_work() {
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [first.id, asked.id]);
     assert_eq!(context.message(second.id).state, "queued");
+}
+
+/// What the trace was told of the human's input at each hold of message `id`.
+fn held_inputs(context: &Context, id: i64) -> Vec<Option<cf_proto::panes::HumanInput>> {
+    use cf_proto::trace::{Traced, WindowEvent};
+    context
+        .trace
+        .lines
+        .borrow()
+        .iter()
+        .filter_map(|line| match &line.what {
+            Traced::Window {
+                event: WindowEvent::DeliveryHeld { message, input, .. },
+                ..
+            } if *message == id => Some(input.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// T-839 left what raised the count of keys of a window nobody typed in unproven, and
+/// Calliope's T-844 asked for the trace that settles the next one: a hold the gate's own
+/// snapshot let it read says what the pane host said of the human's input at that look
+/// (T-883). A hold no snapshot was read for says nothing of it.
+#[test]
+fn a_hold_says_what_the_pane_host_said_of_the_humans_input_at_that_look() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    let note = context.note(project, "zeus", "chief", "One");
+    context.pass().unwrap();
+    context.advance(SETTLE);
+    context.host.set_snapshot(json!({
+        "typed": 2,
+        "typedQuietMs": 100,
+        "unsent": false,
+        "humanWrites": [{ "agoMs": 100, "length": 25, "classes": ["string"] }],
+    }));
+    context.pass().unwrap();
+    let inputs = held_inputs(&context, note.id);
+    assert_eq!(inputs.len(), 2, "{inputs:?}");
+    assert_eq!(inputs[0], None, "the settle's wait read no snapshot");
+    assert_eq!(
+        inputs[1],
+        Some(cf_proto::panes::HumanInput {
+            typed: Some(2),
+            typed_quiet_ms: Some(100),
+            unsent: Some(false),
+            writes: vec![cf_proto::panes::HumanWrite {
+                ago_ms: 100,
+                length: 25,
+                classes: vec!["string"],
+            }],
+        })
+    );
+    // A later look that reads no snapshot (a new item starts the settle again) says
+    // nothing of the human's input: what a look read is that look's.
+    context.adapter.answer("chief", "Still reading.");
+    context.pass().unwrap();
+    let inputs = held_inputs(&context, note.id);
+    assert_eq!(inputs.len(), 3, "{inputs:?}");
+    assert_eq!(inputs[2], None);
+}
+
+/// The same of a hold `ready()` made: what the window's harness read of the pane at it.
+#[test]
+fn a_hold_the_windows_readiness_made_says_what_its_harness_read_of_the_humans_input() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    let read = cf_proto::panes::HumanInput {
+        typed: Some(4),
+        typed_quiet_ms: Some(60_000),
+        unsent: Some(true),
+        writes: Vec::new(),
+    };
+    *context.adapter.human_input.borrow_mut() = Some(read.clone());
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| {
+        Ok(Readiness::Held(cf_harness::contract::Held::Unsent))
+    }));
+    let note = context.note(project, "zeus", "chief", "One");
+    context.pass().unwrap();
+    context.advance(SETTLE);
+    context.host.set_snapshot(json!({ "typedQuietMs": SETTLE }));
+    context.pass().unwrap();
+    let inputs = held_inputs(&context, note.id);
+    assert_eq!(inputs.last(), Some(&Some(read)), "{inputs:?}");
 }

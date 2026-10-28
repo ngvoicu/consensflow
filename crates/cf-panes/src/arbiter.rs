@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -95,6 +95,56 @@ pub struct ArbiterSnapshot {
     /// paste the host held while it was slow is written when it catches up, and
     /// the window's record has had only this long to show it.
     pub paste_quiet_ms: Option<u64>,
+    /// The human's last writes into the pane, oldest first: how long ago, how many
+    /// bytes, of what kinds, and never a byte of them ([`HumanWrite`]).
+    pub human_writes: Vec<HumanWrite>,
+}
+
+/// A write of the human's path into a pane, as the pane keeps it for the trace of a
+/// delivery held for what the human typed (T-839: what raised the count of keys of a
+/// window nobody typed in is unproven, Calliope's T-844): how long ago it came, how many
+/// bytes it held, and of which kinds ([`CLASSES`]). Its bytes are never kept.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HumanWrite {
+    pub ago_ms: u64,
+    pub length: usize,
+    pub classes: Vec<&'static str>,
+}
+
+/// How many of the human's last writes a pane keeps.
+const HUMAN_WRITES: usize = 8;
+
+/// The kinds of bytes a write of the human's path holds, by the names a snapshot says
+/// them in, which the daemon's trace reads them by.
+const CLASSES: [&str; 9] = cf_proto::panes::HUMAN_WRITE_CLASSES;
+
+/// Which of [`CLASSES`] a write holds, a bit each.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Classes(u16);
+
+impl Classes {
+    fn with(&mut self, class: &str) {
+        if let Some(at) = CLASSES.iter().position(|known| *known == class) {
+            self.0 |= 1 << at;
+        }
+    }
+
+    fn names(self) -> Vec<&'static str> {
+        CLASSES
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| self.0 & (1 << at) != 0)
+            .map(|(_, name)| *name)
+            .collect()
+    }
+}
+
+/// What a pane keeps of one of the human's writes: when, how many bytes, of what kinds.
+#[derive(Debug, Clone, Copy)]
+struct Written {
+    at: Instant,
+    length: usize,
+    classes: Classes,
 }
 
 /// When one generation of a pane last printed. Its output thread notes every
@@ -193,6 +243,8 @@ struct PaneInputState {
     output: Arc<OutputClock>,
     /// When a paste was last written into this generation of the pane.
     pasted: Option<Instant>,
+    /// The human's last writes into this generation, oldest first ([`HUMAN_WRITES`]).
+    writes: VecDeque<Written>,
 }
 
 type PaneState = Arc<Mutex<PaneInputState>>;
@@ -209,6 +261,7 @@ impl PaneInputState {
             typed_at: None,
             output: Arc::new(OutputClock::new()),
             pasted: None,
+            writes: VecDeque::new(),
         }
     }
 
@@ -226,6 +279,15 @@ impl PaneInputState {
             paste_quiet_ms: self
                 .pasted
                 .map(|pasted| u64::try_from(pasted.elapsed().as_millis()).unwrap_or(u64::MAX)),
+            human_writes: self
+                .writes
+                .iter()
+                .map(|written| HumanWrite {
+                    ago_ms: u64::try_from(written.at.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    length: written.length,
+                    classes: written.classes.names(),
+                })
+                .collect(),
         }
     }
 }
@@ -367,6 +429,15 @@ impl InputArbiter {
         if state.generation == pane.generation {
             let read = keys_of(state.unsent, bytes);
             state.unsent = read.unsent;
+            // What came, and when, and never a byte of it (`HumanWrite`).
+            if state.writes.len() == HUMAN_WRITES {
+                state.writes.pop_front();
+            }
+            state.writes.push_back(Written {
+                at: Instant::now(),
+                length: bytes.len(),
+                classes: read.classes,
+            });
             // A write that holds no key (what the terminal reports of itself) is no key
             // of the human's: the adapter's wait for their last key does not start again.
             if read.keyed {
@@ -499,6 +570,7 @@ fn validate_generation(state: &PaneInputState, pane: &PaneKey) -> Result<(), Arb
 struct Keys {
     unsent: usize,
     keyed: bool,
+    classes: Classes,
 }
 
 /// How many characters the human's keys leave unsent in a window's input
@@ -523,15 +595,18 @@ fn keys_of(mut unsent: usize, bytes: &[u8]) -> Keys {
     const PASTE_END: &[u8] = b"\x1b[201~";
     let characters = |text: &[u8]| text.iter().filter(|byte| *byte & 0xC0 != 0x80).count();
     let mut keyed = false;
+    let mut classes = Classes::default();
     let mut at = 0;
     while at < bytes.len() {
         let rest = &bytes[at..];
         match rest[0] {
             0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {
+                classes.with("string");
                 at += 2 + string_end(&rest[2..]);
                 continue;
             }
             0x1b if rest.starts_with(b"\x1b[M") => {
+                classes.with("mouse");
                 at += 6.min(rest.len());
                 continue;
             }
@@ -539,16 +614,35 @@ fn keys_of(mut unsent: usize, bytes: &[u8]) -> Keys {
                 || rest.starts_with(b"\x1b[I")
                 || rest.starts_with(b"\x1b[O") =>
             {
+                classes.with(if rest[2] == b'<' { "mouse" } else { "focus" });
                 at += csi_end(rest);
                 continue;
             }
             _ => keyed = true,
         }
         match rest[0] {
-            b'\r' | b'\n' | 0x03 | 0x15 => unsent = 0,
-            0x7f | 0x08 => unsent = unsent.saturating_sub(1),
-            0x16 => unsent += 1,
+            b'\r' | b'\n' => {
+                classes.with("enter");
+                unsent = 0;
+            }
+            0x03 => {
+                classes.with("control");
+                unsent = 0;
+            }
+            0x15 => {
+                classes.with("erase");
+                unsent = 0;
+            }
+            0x7f | 0x08 => {
+                classes.with("erase");
+                unsent = unsent.saturating_sub(1);
+            }
+            0x16 => {
+                classes.with("control");
+                unsent += 1;
+            }
             0x1b if rest.starts_with(PASTE_START) => {
+                classes.with("paste");
                 let text = &rest[PASTE_START.len()..];
                 let end = text
                     .windows(PASTE_END.len())
@@ -559,6 +653,7 @@ fn keys_of(mut unsent: usize, bytes: &[u8]) -> Keys {
                 continue;
             }
             0x1b => {
+                classes.with("escape");
                 at += match rest.get(1) {
                     Some(b'[') => csi_end(rest),
                     Some(b'O') => 3.min(rest.len()),
@@ -567,13 +662,20 @@ fn keys_of(mut unsent: usize, bytes: &[u8]) -> Keys {
                 };
                 continue;
             }
-            byte if byte < 0x20 => {}
-            byte if byte & 0xC0 != 0x80 => unsent += 1,
+            byte if byte < 0x20 => classes.with("control"),
+            byte if byte & 0xC0 != 0x80 => {
+                classes.with("text");
+                unsent += 1;
+            }
             _ => {}
         }
         at += 1;
     }
-    Keys { unsent, keyed }
+    Keys {
+        unsent,
+        keyed,
+        classes,
+    }
 }
 
 /// How many bytes of `rest`, which begins with a CSI (`ESC [`), are that sequence:
@@ -1143,6 +1245,74 @@ mod tests {
         );
     }
 
+    /// The pane keeps the human's last writes as how long ago, how many bytes and of what
+    /// kinds, for the trace of a delivery held for what they typed, and never a byte of
+    /// them (Calliope's T-844, T-883): the letters typed are nowhere in the snapshot.
+    #[test]
+    fn a_pane_keeps_the_humans_last_writes_as_age_length_and_kinds_and_no_byte_of_them() {
+        let key = PaneKey::new("ring", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        let writes: [&[u8]; 6] = [
+            b"QZXJ",
+            b"\r",
+            b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
+            b"\x1b[200~QZ\nXJ\x1b[201~",
+            b"\x7f\x1b[A\x03",
+            b"\x1b[<35;80;24M\x1b[I",
+        ];
+        for write in writes {
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, write)
+                .expect("a write");
+        }
+        let read = arbiter.snapshot(&key).expect("snapshot");
+        let kept: Vec<_> = read
+            .human_writes
+            .iter()
+            .map(|write| (write.length, write.classes.clone()))
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                (4, vec!["text"]),
+                (1, vec!["enter"]),
+                (25, vec!["string"]),
+                (17, vec!["paste"]),
+                (5, vec!["erase", "control", "escape"]),
+                (15, vec!["mouse", "focus"]),
+            ]
+        );
+        assert!(
+            read.human_writes
+                .windows(2)
+                .all(|pair| pair[0].ago_ms >= pair[1].ago_ms),
+            "oldest first: {:?}",
+            read.human_writes
+        );
+        let shown = format!("{read:?}");
+        assert!(
+            !shown.contains(['Q', 'Z', 'X', 'J']),
+            "no byte of what was typed: {shown}"
+        );
+        for _ in 0..20 {
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, b"a")
+                .expect("a key");
+        }
+        let read = arbiter.snapshot(&key).expect("snapshot");
+        assert_eq!(read.human_writes.len(), 8, "the last eight");
+        // The daemon's own keys and the emulator's replies are no writes of the human's.
+        arbiter
+            .write_via(writer.as_ref(), &key, b"b")
+            .expect("ours");
+        assert_eq!(
+            arbiter.snapshot(&key).expect("snapshot").human_writes.len(),
+            8
+        );
+    }
+
     /// A pane that leaves the table takes its state with it, but an older
     /// generation retiring late leaves the newer one's state alone.
     #[test]
@@ -1619,6 +1789,7 @@ mod tests {
                 typed_quiet_ms: None,
                 output_quiet_ms: None,
                 paste_quiet_ms: None,
+                human_writes: Vec::new(),
             }
         );
     }

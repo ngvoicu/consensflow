@@ -299,7 +299,7 @@ runs = ["panes-lib-handlers"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = """            "pasteQuietMs":snapshot.paste_quiet_ms,"""
+find = """        "pasteQuietMs":snapshot.paste_quiet_ms,"""
 replace = ""
 
 [[plant]]

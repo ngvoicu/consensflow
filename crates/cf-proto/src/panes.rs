@@ -23,6 +23,74 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// The kinds of bytes a write of the human's path into a pane can hold, as the host
+/// names them in a snapshot's `humanWrites`: characters typed; a bracketed paste; Enter;
+/// Backspace or Ctrl+U; another control key; an escape sequence (an arrow, a function key,
+/// Alt with a key); a terminal string (OSC, DCS, APC, PM, SOS); a mouse report; a focus
+/// report.
+pub const HUMAN_WRITE_CLASSES: [&str; 9] = [
+    "text", "paste", "enter", "erase", "control", "escape", "string", "mouse", "focus",
+];
+
+/// What the pane host said of the human's input into a window (`pane.snapshot`), for the
+/// trace of a delivery held at that look: how many writes of their keys it took, how long
+/// since the last, whether it counts words typed and not sent, and its last writes as how
+/// long ago, how many bytes and of what kinds (T-839, Calliope's T-844). Read field by
+/// field and nothing else of the snapshot, a kind only by its known name: never a byte of
+/// what was typed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HumanInput {
+    pub typed: Option<u64>,
+    pub typed_quiet_ms: Option<u64>,
+    pub unsent: Option<bool>,
+    pub writes: Vec<HumanWrite>,
+}
+
+/// One of the human's last writes into a pane ([`HumanInput`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HumanWrite {
+    pub ago_ms: u64,
+    pub length: u64,
+    pub classes: Vec<&'static str>,
+}
+
+impl HumanInput {
+    /// What `snapshot`, a host's answer to `pane.snapshot`, says of the human's input;
+    /// none where it did not answer.
+    pub fn of(snapshot: &Value) -> Option<Self> {
+        if snapshot.get("ok") != Some(&Value::Bool(true)) {
+            return None;
+        }
+        let write = |write: &Value| {
+            Some(HumanWrite {
+                ago_ms: write.get("agoMs")?.as_u64()?,
+                length: write.get("length")?.as_u64()?,
+                classes: write
+                    .get("classes")?
+                    .as_array()?
+                    .iter()
+                    .filter_map(|class| {
+                        HUMAN_WRITE_CLASSES
+                            .into_iter()
+                            .find(|known| class.as_str() == Some(known))
+                    })
+                    .collect(),
+            })
+        };
+        Some(Self {
+            typed: snapshot.get("typed").and_then(Value::as_u64),
+            typed_quiet_ms: snapshot.get("typedQuietMs").and_then(Value::as_u64),
+            unsent: snapshot.get("unsent").and_then(Value::as_bool),
+            writes: snapshot
+                .get("humanWrites")
+                .and_then(Value::as_array)
+                .map(|writes| writes.iter().filter_map(write).collect())
+                .unwrap_or_default(),
+        })
+    }
+}
 
 /// The most lines of a screen the host sends as its tail, and so the most a
 /// request for it gets. Empty lines are not counted: they are not sent.

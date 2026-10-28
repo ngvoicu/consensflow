@@ -53,8 +53,10 @@ runs = ["escape-unsent-arbiter"]
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
 find = '''            0x1b => {
+                classes.with("escape");
                 at += match rest.get(1) {'''
 replace = '''            0x1b => {
+                classes.with("escape");
                 unsent = 0;
                 at += match rest.get(1) {'''
 
@@ -338,7 +340,9 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
 find = '''            0x1b => {
+                classes.with("escape");
                 at += match rest.get(1) {'''
 replace = '''            0x1b => {
+                classes.with("escape");
                 unsent = 0;
                 at += match rest.get(1) {'''

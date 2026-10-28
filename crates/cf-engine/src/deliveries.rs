@@ -17,6 +17,7 @@ use cf_ledger::{
     is_told, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver, MessageView, NewNote,
     ParticipantView, ProjectView, TaskView,
 };
+use cf_proto::panes::HumanInput;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
@@ -121,6 +122,10 @@ pub(crate) struct DeliveryPart {
     /// Why the message at the head of the window's queue does not go in now, told to
     /// the trace once a reason (`held_once`): what `Dispatcher::held_back` reads.
     pub(crate) held: Option<HeldBack>,
+    /// What the pane host said of the human's input into the window at this look, where
+    /// it read a snapshot of the pane (the gate's, or the window's readiness's): what the
+    /// trace of a hold says of it (`hold`).
+    pub(crate) input: Option<HumanInput>,
     /// Why the window has no rest that a message could go in on, where a look said:
     /// its record could not be read, or its harness says it is at work (`pacing`).
     pub(crate) unrest: Option<String>,
@@ -406,6 +411,9 @@ impl Dispatcher {
             .ready(host, &pane)
             .await
             .map_err(|error| EngineError::said("not-ready", error))?;
+        if let Some(input) = window.human_input() {
+            record.delivery.borrow_mut().input = Some(input);
+        }
         if self.forgotten(record) {
             return Ok(());
         }
@@ -753,6 +761,7 @@ impl Dispatcher {
             .ready(host, &pane)
             .await
             .map_err(|error| EngineError::said("not-ready", error))?;
+        record.delivery.borrow_mut().input = window.human_input();
         // Forgotten, closed, handed or given up while the window got ready: nothing.
         if self.forgotten(record)
             || record.window.borrow().pane.as_ref() != Some(&pane)
@@ -1128,6 +1137,7 @@ impl Dispatcher {
                     WindowEvent::DeliveryHeld {
                         message,
                         reason: reason.to_owned(),
+                        input: record.delivery.borrow().input.clone(),
                     },
                 )?;
                 held

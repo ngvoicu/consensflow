@@ -1367,9 +1367,10 @@ impl Dispatcher {
             let next = self.next_in_line(record)?;
             // A hold is the head's: a message that left the head of its queue (withdrawn,
             // its task paused or cancelled) is held back no more (Calliope's re-check of
-            // `a0aecd192`, T-854).
+            // `a0aecd192`, T-854). And what a look read of the human's input is this look's.
             {
                 let mut part = record.delivery.borrow_mut();
+                part.input = None;
                 let head = next.as_ref().map(|next| next.id);
                 if part
                     .held

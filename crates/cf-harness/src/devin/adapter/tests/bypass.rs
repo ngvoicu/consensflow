@@ -114,6 +114,25 @@ fn a_window_in_the_normal_mode_is_given_bypass_once_drawn_and_is_ready_when_the_
     assert_eq!(pastes(&host.asked), ["/bypass"]);
 }
 
+/// The look `ready()` took read the pane: what it said of the human's input is the
+/// window's to say, for the trace of a delivery that look held (T-883).
+#[test]
+fn a_window_says_what_its_last_look_read_of_the_humans_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, configured("mild-coin", "bypass")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window(&fakes, &wire, Some("mild-coin"));
+    let host = host(Rc::new(Cell::new(2_000.0)), Rc::new(Cell::new(false)));
+    assert_eq!(window.human_input(), None, "no look yet");
+    assert_eq!(finished(window.ready(&host, &pane())), Ok(Readiness::Ready));
+    assert_eq!(
+        window.human_input(),
+        Some(cf_proto::panes::HumanInput::default()),
+        "a snapshot that says nothing of the human"
+    );
+}
+
 /// The Enters the host was asked to press.
 fn enters(asked: &RefCell<Vec<(String, Value)>>) -> usize {
     asked

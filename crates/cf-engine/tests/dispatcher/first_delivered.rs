@@ -63,6 +63,7 @@ fn held(context: &Context, message: i64) -> Vec<String> {
                     WindowEvent::DeliveryHeld {
                         message: held,
                         reason,
+                        ..
                     },
                 ..
             } if *held == message => Some(reason.clone()),

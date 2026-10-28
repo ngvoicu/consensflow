@@ -39,6 +39,7 @@ use cf_base::js;
 use cf_harness::contract::{InputBox, Observed};
 use cf_harness::records::Reading;
 use cf_proto::ledger::MessageView;
+use cf_proto::panes::HumanInput;
 use serde_json::{json, Value};
 
 use crate::dispatcher::Dispatcher;
@@ -330,6 +331,7 @@ impl Dispatcher {
         let Some(snapshot) = asked else {
             return Ok(Pace::Wait("its pane host did not answer".to_owned()));
         };
+        record.delivery.borrow_mut().input = HumanInput::of(&snapshot);
         let typed_quiet_ms = ms(&snapshot, "typedQuietMs");
         let output_quiet_ms = ms(&snapshot, "outputQuietMs");
         // None is a window the human never typed in.

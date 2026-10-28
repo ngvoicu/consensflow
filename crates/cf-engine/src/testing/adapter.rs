@@ -189,6 +189,9 @@ pub struct FakeAdapter {
     /// What its windows' input boxes show (`unsent_words`): none, as an adapter
     /// with no reader of its harness's box.
     pub box_words: RefCell<Option<String>>,
+    /// What its windows' last `ready` read of the human's input (`human_input`): none, as
+    /// an adapter that reads no snapshot of the pane.
+    pub human_input: RefCell<Option<cf_proto::panes::HumanInput>>,
     /// A `started` of the test's own, that fails some windows.
     pub started: RefCell<Option<Started>>,
     /// A `came_up` of the test's own, that says a window came up after all.
@@ -338,6 +341,7 @@ impl FakeAdapter {
             items,
             ready: RefCell::new(None),
             box_words: RefCell::new(None),
+            human_input: RefCell::new(None),
             started: RefCell::new(None),
             came_up: RefCell::new(None),
             prepare: RefCell::new(None),

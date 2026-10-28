@@ -18,6 +18,14 @@ held-typed-arbiter-keys = ["cargo", "test", "--offline", "-p", "cf-panes", "--li
 held-typed-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unsent::"]
 held-typed-readers = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "input_box"]
 held-typed-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "results_held_for_words_nobody_typed::"]
+# The masked trace of the human's input (T-883): the pane host's ring and its snapshot, the
+# trace's reader and line, the engine's holds, and the two adapters that read the pane.
+held-typed-ring = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::a_pane_keeps_the_humans_last_writes_as_age_length_and_kinds_and_no_byte_of_them"]
+held-typed-snapshot = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::a_snapshot_says_the_humans_last_writes_by_age_length_and_kinds"]
+held-typed-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "trace::tests::a_held_deliverys_line_says_what_the_pane_host_said_of_the_humans_input"]
+held-typed-trace = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "pacing::a_hold_"]
+held-typed-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::agents::a_window_says_what_its_last_look_read_of_the_humans_input"]
+held-typed-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::adapter::tests::bypass::a_window_says_what_its_last_look_read_of_the_humans_input"]
 
 # --- the pane host's count ---
 
@@ -240,3 +248,128 @@ runs = ["held-typed-engine"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''                return format!("held: {}", held.reason);'''
 replace = '''                return "held for words typed there and not sent".to_owned();'''
+
+# --- the masked trace of the human's input (T-883) ---
+
+[[plant]]
+name = "held-typed trace: the pane keeps only the human's last write"
+meant = "a_pane_keeps_the_humans_last_writes_as_age_length_and_kinds_and_no_byte_of_them"
+runs = ["held-typed-ring"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''            if state.writes.len() == HUMAN_WRITES {'''
+replace = '''            if !state.writes.is_empty() {'''
+
+[[plant]]
+name = "held-typed trace: what the terminal reports of itself is no write of the human's"
+meant = "a_pane_keeps_the_humans_last_writes_as_age_length_and_kinds_and_no_byte_of_them"
+runs = ["held-typed-ring"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''                classes: read.classes,
+            });'''
+replace = '''                classes: read.classes,
+            });
+            if !read.keyed {
+                state.writes.pop_back();
+            }'''
+
+[[plant]]
+name = "held-typed trace: a write is said by its first kind alone"
+meant = "a_pane_keeps_the_humans_last_writes_as_age_length_and_kinds_and_no_byte_of_them"
+runs = ["held-typed-ring"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''            .map(|(_, name)| *name)
+            .collect()'''
+replace = '''            .map(|(_, name)| *name)
+            .take(1)
+            .collect()'''
+
+[[plant]]
+name = "held-typed trace: pane.snapshot says nothing of the human's writes"
+meant = "a_snapshot_says_the_humans_last_writes_by_age_length_and_kinds"
+runs = ["held-typed-snapshot"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''        "humanWrites":writes,'''
+replace = '''        "humanWrites":writes.iter().take(0).collect::<Vec<_>>(),'''
+
+[[plant]]
+name = "held-typed trace: the reader takes any word the snapshot calls a kind"
+meant = "a_held_deliverys_line_says_what_the_pane_host_said_of_the_humans_input"
+runs = ["held-typed-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/panes.rs"
+find = '''                        HUMAN_WRITE_CLASSES
+                            .into_iter()
+                            .find(|known| class.as_str() == Some(known))'''
+replace = '''                        class
+                            .as_str()
+                            .map(|class| &*Box::leak(class.to_owned().into_boxed_str()))'''
+
+[[plant]]
+name = "held-typed trace: a held delivery's line says nothing of the human's input"
+meant = "a_held_deliverys_line_says_what_the_pane_host_said_of_the_humans_input"
+runs = ["held-typed-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/trace.rs"
+find = '''                        if let Some(input) = input {'''
+replace = '''                        if let Some(input) = input.as_ref().filter(|_| false) {'''
+
+[[plant]]
+name = "held-typed trace: the gate's snapshot is not read for the trace"
+meant = "a_hold_says_what_the_pane_host_said_of_the_humans_input_at_that_look"
+runs = ["held-typed-trace"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = '''        record.delivery.borrow_mut().input = HumanInput::of(&snapshot);'''
+replace = '''        let _ = HumanInput::of(&snapshot);'''
+
+[[plant]]
+name = "held-typed trace: a hold says nothing of what the window's readiness read"
+meant = "a_hold_the_windows_readiness_made_says_what_its_harness_read_of_the_humans_input"
+runs = ["held-typed-trace"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if let Some(input) = window.human_input() {'''
+replace = '''        if let Some(input) = window.human_input().filter(|_| false) {'''
+
+[[plant]]
+name = "held-typed trace: what a look read of the human's input outlives it"
+meant = "a_hold_says_what_the_pane_host_said_of_the_humans_input_at_that_look"
+runs = ["held-typed-trace"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                part.input = None;
+'''
+replace = ''''''
+
+[[plant]]
+name = "held-typed trace: Claude's readiness keeps nothing of the human's input"
+meant = "a_window_says_what_its_last_look_read_of_the_humans_input"
+runs = ["held-typed-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''            self.input.replace(HumanInput::of(&snapshot));'''
+replace = '''            let _ = HumanInput::of(&snapshot);'''
+
+[[plant]]
+name = "held-typed trace: Devin's readiness keeps nothing of the human's input"
+meant = "a_window_says_what_its_last_look_read_of_the_humans_input"
+runs = ["held-typed-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            self.input.replace(HumanInput::of(&snapshot));'''
+replace = '''            let _ = HumanInput::of(&snapshot);'''
