@@ -350,7 +350,7 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                    pacing::Pace::Wait(why) => return self.held_once(record, next.id, &why),"
+find = "                    pacing::Pace::Wait(why) => return self.held_once(record, next.id, &why).await,"
 replace = "                    pacing::Pace::Wait(_) => return Ok(()),"
 
 [[plant]]
@@ -360,8 +360,8 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                Some(held) if held.reason == reason => return Ok(()),"
-replace = "                Some(held) if held.reason == reason || true => return Ok(()),"
+find = "            Some(held) if held.reason == reason => held,"
+replace = "            Some(held) if held.reason == reason || true => held,"
 
 [[plant]]
 name = "pacing review: snapshot: the gate's snapshot has the arrival's 5 s"

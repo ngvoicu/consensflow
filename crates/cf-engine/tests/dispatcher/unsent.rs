@@ -285,3 +285,125 @@ fn the_requester_is_told_how_many_characters_the_box_shows_and_none_of_them() {
     assert!(chief[0].contains("shows 14 characters"), "{}", chief[0]);
     assert!(!chief[0].contains("ha…"), "{}", chief[0]);
 }
+
+// One clock per head message, whatever holds it (Calliope's T-844, joined with the gate
+// of chief-meeting's Phase 1, T-883): the human is told of a message held ten minutes at
+// the head of its window's queue, once, in the words of what holds it at that look.
+
+/// The notes the human was told of a message held long, of `window`'s.
+fn told_held(tiers: &Tiers, window: &str) -> Vec<String> {
+    tiers
+        .notes("human")
+        .into_iter()
+        .filter(|note| note.contains("has waited") && note.contains(&format!("@{window}'s")))
+        .collect()
+}
+
+/// A chief's result held by the gate, its window idle by its record while its harness
+/// says it is at work (Codex's broker): told at ten minutes, in the gate's words.
+#[test]
+fn a_message_held_past_the_bound_for_any_reason_tells_the_human_once_why() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| agent.at_work = true);
+    context.adapter.answer("zeus", "Parser done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = tiers.id("chief");
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.reason),
+        Some("its harness says it is at work".to_owned())
+    );
+    held_for(&context, 9);
+    assert_eq!(told_held(&tiers, "chief"), Vec::<String>::new());
+    held_for(&context, 2);
+    let notes = told_held(&tiers, "chief");
+    assert_eq!(notes.len(), 1, "{:?}", tiers.notes("human"));
+    assert!(
+        notes[0].contains("held: its harness says it is at work"),
+        "{}",
+        notes[0]
+    );
+    assert!(!notes[0].contains("not sent"), "{}", notes[0]);
+    held_for(&context, 30);
+    assert_eq!(told_held(&tiers, "chief").len(), 1, "told once");
+}
+
+/// The clock is the message's, not its reason's: held for words typed and not sent, then
+/// by the gate, the hold is told at ten minutes from its first look, in the words of what
+/// holds it then.
+#[test]
+fn a_hold_whose_reason_changes_is_told_at_ten_minutes_from_its_first_look_in_its_last_words() {
+    let context = Context::new();
+    let never = Rc::new(Cell::new(None));
+    let tiers = a_result_held_at_the_chief(&context, &never);
+    held_for(&context, 6);
+    context.adapter.with("chief", |agent| agent.at_work = true);
+    held_for(&context, 1);
+    assert_eq!(
+        context
+            .dispatcher
+            .held_back(tiers.id("chief"))
+            .map(|held| held.reason),
+        Some("its harness says it is at work".to_owned())
+    );
+    assert_eq!(told_held(&tiers, "chief"), Vec::<String>::new());
+    held_for(&context, 4);
+    let notes = told_held(&tiers, "chief");
+    assert_eq!(notes.len(), 1, "{:?}", tiers.notes("human"));
+    assert!(notes[0].contains("waited 11 minutes"), "{}", notes[0]);
+    assert!(notes[0].contains("at work"), "{}", notes[0]);
+    assert!(
+        !notes[0].contains("ha…"),
+        "no box words for the gate's hold: {}",
+        notes[0]
+    );
+}
+
+/// A hold is the head's: a message held nine minutes that leaves the head of its queue
+/// (its task cancelled by the chief) is never told, and the message that is head after it
+/// is told at ten minutes of its own hold, not of the one before it.
+#[test]
+fn a_held_message_that_leaves_the_head_of_its_queue_is_never_told_and_lends_no_time() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsent))));
+    let project = tiers.project.id;
+    let worker = tiers.assignee(1);
+    let asked = context.ask(project, &worker, "chief", 1, "Which format?");
+    context.pass().unwrap();
+    let chief = tiers.id("chief");
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.message),
+        Some(asked.id)
+    );
+    held_for(&context, 9);
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    let next = context.note(project, "diana", "chief", "Two");
+    context.pass().unwrap();
+    assert_eq!(context.message(asked.id).state, "cancelled");
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.message),
+        Some(next.id)
+    );
+    held_for(&context, 2);
+    assert_eq!(told_held(&tiers, "chief"), Vec::<String>::new());
+    held_for(&context, 9);
+    let notes = told_held(&tiers, "chief");
+    assert_eq!(notes.len(), 1, "{:?}", tiers.notes("human"));
+    assert!(
+        notes[0].starts_with(&format!("m-{},", next.id)),
+        "{}",
+        notes[0]
+    );
+}

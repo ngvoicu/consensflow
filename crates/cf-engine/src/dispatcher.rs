@@ -1390,7 +1390,7 @@ impl Dispatcher {
                 // says why, once a reason.
                 match self.paced(record, &next).await? {
                     pacing::Pace::Go => {}
-                    pacing::Pace::Wait(why) => return self.held_once(record, next.id, &why),
+                    pacing::Pace::Wait(why) => return self.held_once(record, next.id, &why).await,
                     pacing::Pace::Gone => return Ok(()),
                 }
                 if self.forgotten(record) {
