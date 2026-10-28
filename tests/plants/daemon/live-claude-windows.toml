@@ -18,6 +18,7 @@ live-mcp-server = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live:
 live-monitor-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_server_left_its_group"]
 live-rig-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
 live-claude-table = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::claude"]
+live-members-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command"]
 live-monitor-wait-host = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_platform_with_no_groups"]
 
 [[plant]]
@@ -305,3 +306,15 @@ runs = ["live-claude-table"]
 file = "crates/cf-e2e/src/live/claude.rs"
 find = '''        .filter(|process| process.command.contains(text))'''
 replace = '''        .filter(|process| process.command.starts_with(text))'''
+
+# `live reopened` on Windows (zeewin2): T-1's command ran and the check waited 120 s for it, for the node of a
+# Windows table is a quoted path with its `.exe`.
+[[plant]]
+name = "windows live: the node of the command is the one a line starts with by a bare name"
+meant = "the_node_of_a_windows_table_is_the_command_too_by_its_quoted_path_and_its_exe"
+runs = ["live-members-command"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = '''                .is_some_and(|found| ends_with_program(&found[1], "node"))'''
+replace = '''                .is_some_and(|found| found[1].ends_with("node"))'''
