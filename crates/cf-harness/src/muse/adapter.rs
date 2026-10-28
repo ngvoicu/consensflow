@@ -2,10 +2,10 @@
 //! ([`launch::pinned`]) in full permission (`--yolo`), on its agent's model and
 //! effort, contributor mode off, the owner's hooks with ConsensFlow's SessionStart
 //! hook added for the one run (`-c hooks=`), which gives each session the window starts
-//! its role text and writes it down for the window to follow. A fresh window's first
-//! message is its prompt on the command line; a resumed one's is pasted once its prompt
-//! shows, for `muse resume` takes none ([`Adapter::first_message_once_up`]). The window
-//! is [`MuseWindow`]; its record is the session's log (`record`).
+//! its role text and writes it down for the window to follow. No first message is on
+//! the command line, fresh or resumed: it is pasted once the window's prompt shows, as
+//! any later message is ([`FirstMessage::Delivered`]). The window is [`MuseWindow`];
+//! its record is the session's log (`record`).
 //!
 //! Full permission is the posture every harness's window runs in (the owner's decision
 //! of 2026-09-19) until MUS-16 says otherwise: `--yolo` turns approval and the sandbox
@@ -23,7 +23,7 @@ use super::index;
 use super::launch;
 use super::paths;
 use super::window::{MuseWindow, CLEAR_INPUT};
-use crate::contract::{Adapter, Input, Launch, Prepared, Records, Skill, Work};
+use crate::contract::{Adapter, FirstMessage, Input, Launch, Prepared, Records, Skill, Work};
 use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::Services;
@@ -82,7 +82,7 @@ impl Adapter for MuseAdapter {
             } else {
                 window_args::resume
             };
-            let invocation = open(Harness::Muse, agent, launch.resume, launch.message)
+            let invocation = open(Harness::Muse, agent, launch.resume, None)
                 .ok_or_else(|| "a Muse window opens on a session id".to_owned())?;
             let mut argv = vec![integration.program];
             argv.extend(integration.args);
@@ -101,7 +101,6 @@ impl Adapter for MuseAdapter {
                     launch.resume,
                     integration.said,
                     launch.first_message_ms,
-                    invocation.prompt,
                 )),
             })
         })
@@ -133,9 +132,10 @@ impl Adapter for MuseAdapter {
         }
     }
 
-    /// A resumed window's: `muse resume` takes no prompt.
-    fn first_message_once_up(&self, launch: &Launch) -> bool {
-        launch.resume.is_some()
+    /// Pasted once the window's prompt shows, fresh or resumed: nothing of it is on
+    /// the command line, which every process on the machine reads.
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Delivered
     }
 
     /// Pasted, and its box cleared with Control-C ([`CLEAR_INPUT`]).

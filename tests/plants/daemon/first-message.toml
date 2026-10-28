@@ -1,0 +1,453 @@
+# A board window's first message was on its command line (T-432; the issue
+# `issues/a-windows-first-message-is-on-its-command-line.md` in consensflow-sme). On 2026-10-24 a
+# worker sent SIGINT to every process whose `ps` line matched "xtask plants", and two other workers'
+# Claude windows closed: ConsensFlow gave Claude Code's, Pi's and Codex's windows their first message,
+# a task's brief, as the last argument of their command line, which every process on the Mac reads
+# (`/bin/ps` is set-uid root) and every kill or wait by pattern matches.
+#
+# - The adapters say how a window takes its first message (`FirstMessage`,
+#   `crates/cf-harness/src/contract.rs`): Devin reads it from its prompt file, OpenCode is posted it,
+#   and Claude Code, Pi and Codex are given none as they open (`claude/adapter.rs`, `pi/adapter.rs`,
+#   `codex/adapter.rs`, `shared/window_args.rs`). Pi's role text goes by its file. A resumed window
+#   reads a turn the quit left open whatever its launch carries.
+# - The engine delivers it once the window is past the question of trusting its folder, has drawn
+#   and is at rest, by the window's own `deliver`, admitted then (`crates/cf-engine/src/windows.rs`,
+#   `dispatcher.rs`, `deliveries.rs`'s `hand_first`); one never ready in the launch's time is given up
+#   and says so, and a paste the record never shows is pressed Enter for once more (`arrival.rs`).
+#
+# The rig's cases build the native `cf` from the sources as planted, so their plants say `builds`.
+# Every name holds `first message`, so `npm run plants:daemon -- "first message"` runs them all.
+
+[run]
+fm-launch-rule = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "scenarios::no_launch_puts_its_first_message_on_its_command_line"]
+fm-launch-pi-roles = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::roles::"]
+fm-engine-delivered = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "first_delivered::"]
+fm-rig-claude = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_windows_first_message_was_on_its_command_line::a_workers_claude"]
+fm-rig-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_windows_first_message_was_on_its_command_line::a_workers_codex"]
+fm-rig-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked"]
+fm-rig-late-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose_question_comes_after_half_a_minute"]
+fm-rig-never-prompt = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_that_never_draws_its_prompt"]
+fm-kit-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
+fm-rig-servers = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_six_new_servers"]
+fm-rig-brief-picture = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed::a_task_cancelled_while_its_window_works_on_a_brief"]
+
+[[plant]]
+name = "first message: Claude Code's adapter puts it on the command line again"
+meant = "no_launch_puts_its_first_message_on_its_command_line"
+runs = ["fm-launch-rule"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "open(Harness::Claude, agent, Some(&session), None)"
+replace = "open(Harness::Claude, agent, Some(&session), launch.message)"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = "                command: \"claude\",\n                args,"
+replace = "                command: \"claude\",\n                args: args.into_iter().chain(seed.map(str::to_owned)).collect(),"
+
+[[plant]]
+name = "first message: a Claude worker's brief is on its window's command line (main's shape)"
+meant = "a_workers_claude_window_holds_no_brief_on_its_command_line_and_no_pattern_of_its_words_matches_it"
+runs = ["fm-rig-claude"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "open(Harness::Claude, agent, Some(&session), None)"
+replace = "open(Harness::Claude, agent, Some(&session), launch.message)"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = "                command: \"claude\",\n                args,"
+replace = "                command: \"claude\",\n                args: args.into_iter().chain(seed.map(str::to_owned)).collect(),"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            message: text.as_deref().filter(|_| !delivered),"
+replace = "            message: text.as_deref(),"
+
+[[plant]]
+name = "first message: a Codex worker's brief is on its window's command line (main's shape)"
+meant = "a_workers_codex_window_holds_no_brief_on_its_command_line_and_its_brief_reaches_it"
+runs = ["fm-rig-codex"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "open(Harness::Codex, agent, launch.resume, None)"
+replace = "open(Harness::Codex, agent, launch.resume, launch.message)"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = "                command: \"codex\",\n                args,"
+replace = "                command: \"codex\",\n                args: args.into_iter().chain(seed.map(str::to_owned)).collect(),"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            message: text.as_deref().filter(|_| !delivered),"
+replace = "            message: text.as_deref(),"
+
+[[plant]]
+name = "first message: Pi's role text is on its command line again"
+meant = "every_role_enters_pi_with_its_whole_text_already_loaded"
+runs = ["fm-launch-pi-roles"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = "                    .chain([role.file])"
+replace = "                    .chain([launch.instructions.to_owned()])"
+
+[[plant]]
+name = "first message: the engine gives a window it delivers the message to on its launch as well"
+meant = "a_window_delivered_its_first_message_opens_with_none_and_is_handed_its_brief_once_up"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            message: text.as_deref().filter(|_| !delivered),"
+replace = "            message: text.as_deref(),"
+
+[[plant]]
+name = "first message: it is handed over before the window has drawn"
+meant = "a_first_message_waits_while_its_window_has_not_drawn_its_screen"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            if !drawing && observed.settled && observed.waiting.is_none() && project.state == \"open\""
+replace = "            if observed.settled && observed.waiting.is_none() && project.state == \"open\""
+
+[[plant]]
+name = "first message: it is pasted while the window asks whether to trust its folder"
+meant = "a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_its_tasks"
+runs = ["fm-rig-trust"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            if !drawing && observed.settled && observed.waiting.is_none() && project.state == \"open\""
+replace = "            if (!drawing || asking) && (observed.settled || asking) && observed.waiting.is_none() && project.state == \"open\""
+
+[[plant]]
+name = "first message: a window not ready for it is handed it all the same"
+meant = "a_first_message_waits_while_its_window_is_not_ready_says_so_once_and_goes_in_once_it_is"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                return self.held_once(record, first.message, &reason);\n            }\n            Readiness::Unfit"
+replace = "                self.held_once(record, first.message, &reason)?;\n            }\n            Readiness::Unfit"
+
+[[plant]]
+name = "first message: one its window refused is taken for handed over"
+meant = "a_first_message_its_window_refused_is_handed_again_at_the_next_step"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            let reason = format!(\"its window refused its first message: {reason}\");\n            return self.held_once(record, first.message, &reason);"
+replace = "            let _ = reason;"
+
+[[plant]]
+name = "first message: a paste the record never shows gets no Enter more"
+meant = "a_first_message_pasted_once_up_that_its_record_never_shows_is_pressed_enter_for_once_more"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            if delivering.late\n"
+replace = "            if false && delivering.late\n"
+
+[[plant]]
+name = "first message: a launch never ready for it is said to have never shown it"
+meant = "a_window_never_ready_for_its_first_message_in_the_launch_s_time_is_given_up_and_its_brief_fails"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "                \"the window was never ready for its first message\""
+replace = "                \"the window never showed its first message\""
+
+[[plant]]
+name = "first message: one turned away by a Close is not given back to its queue"
+meant = "a_first_message_whose_project_closes_while_its_window_takes_it_is_given_back_and_goes_in_once_after_the_resume"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            self.give_back(first.message, admitting.because())?;\n"
+replace = ""
+
+# Calliope's review of T-432 (T-520), round 2 (T-523): her four P3s.
+
+[[plant]]
+name = "first message: the trust watch lets a window owed its first message go after 30 s with no question"
+meant = "a_worker_whose_question_comes_after_half_a_minute_is_answered_before_its_brief_goes_in"
+runs = ["fm-rig-late-trust"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = """
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {
+                        break (false, false);
+                    }
+                }
+                // No screen says nothing of the question"""
+replace = """
+                    } else if self.now() - began > ASKS_WITHIN_MS {
+                        break (false, false);
+                    }
+                }
+                // No screen says nothing of the question"""
+
+[[plant]]
+name = "first message: a window owed it that shows neither the question nor its prompt spends no launch time"
+meant = "a_worker_that_never_draws_its_prompt_fails_in_its_launch_s_time"
+runs = ["fm-rig-never-prompt"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "|| (trust == Trusting::Looking && delivering.owed.is_none())"
+replace = "|| trust == Trusting::Looking"
+
+[[plant]]
+name = "first message: one held for what the human typed spends the launch's time"
+meant = "a_first_message_held_for_what_the_human_typed_does_not_spend_the_launch_s_time"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                            delivering.since = now;\n                        }\n                    }\n                }"
+replace = "                        }\n                    }\n                }"
+
+[[plant]]
+name = "first message: a Close before any hand-over fails the brief"
+meant = "a_first_message_whose_project_closes_before_any_hand_over_is_given_back_and_goes_in_once_after_the_resume"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "if delivering.chief || (once_up && closed_with_project) {"
+replace = "if delivering.chief {"
+
+[[plant]]
+name = "first message: a Close after the hand-over, before its record shows it, fails the brief"
+meant = "a_first_message_handed_over_whose_project_closes_before_its_record_shows_it_is_given_back_and_goes_in_once_after_the_resume"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "let once_up = delivering.owed.is_some() || delivering.late;"
+replace = "let once_up = delivering.owed.is_some();"
+
+[[plant]]
+name = "first message: one owed to a window that ended by itself in an open project is given back"
+meant = "a_window_that_ends_by_itself_before_its_first_message_is_handed_over_fails_its_brief"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "(once_up && closed_with_project)"
+replace = "once_up"
+
+[[plant]]
+name = "first message: a monitor of the turn it begins proves no rest before it"
+meant = "a_monitor_of_the_turn_a_first_message_began_is_left_the_rest_before_the_hand_over"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        // every monitor of that turn will (`deliver`).
+        record.held.borrow_mut().rests.pasted();"""
+replace = """
+        // every monitor of that turn will (`deliver`)."""
+
+[[plant]]
+name = "first message: a window still to show it yields the answer before it as the result"
+meant = "a_window_the_resume_reopens_yields_no_result_before_its_continuation_is_in_nor_to_finish"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = """
+        if first_on_its_way(record) {
+            return Ok(Turn::Open);
+        }"""
+replace = ""
+
+[[plant]]
+name = "first message: Finish takes the answer before it from a window still to show it"
+meant = "a_window_the_resume_reopens_yields_no_result_before_its_continuation_is_in_nor_to_finish"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = """
+        if first_on_its_way(record) {
+            return Err(refused("""
+replace = """
+        if first_on_its_way(record) && false {
+            return Err(refused("""
+
+# 3.0.6-alpha.3's integration B (T-664): a launch's first message handed over once its window is up is a
+# paste like any, and keeps the conversation it went into while it is on its way (devin-arrival's
+# `paste_into`, migration 0023), as `deliver` does.
+
+[[plant]]
+name = "first message: a first message handed over once up keeps no conversation it was pasted into"
+meant = "a_first_message_handed_over_once_up_keeps_the_conversation_it_was_pasted_into"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+                .paste_into(first.message, conversation.id)?;'''
+replace = '''
+                .message(first.message)?;'''
+
+# A chief owed its handoff with no bound (T-629): after 2 minutes with no prompt seen, the
+# human hears once; nothing is given up or pasted blind.
+
+[[plant]]
+name = "first message: a chief whose window shows no prompt never has the human told"
+meant = "a_chief_whose_window_shows_no_prompt_for_two_minutes_has_the_human_told_once_and_its_handoff_waits"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                self.tell_no_prompt(project, record)?;"
+replace = "                let _ = (project, record);"
+
+[[plant]]
+name = "first message: the human is told of a chief's window before 2 minutes with no prompt"
+meant = "a_chief_whose_window_shows_its_prompt_within_two_minutes_has_the_human_told_nothing"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                && self.now() - began > NO_PROMPT_MS\n"
+replace = "                && self.now() - began >= 0\n"
+
+[[plant]]
+name = "first message: the human is told of a chief's window with no prompt at every look"
+meant = "a_chief_whose_window_shows_no_prompt_for_two_minutes_has_the_human_told_once_and_its_handoff_waits"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                told_no_prompt = true;\n"
+replace = ""
+
+# The live kit's own Claude config holds the trust a person's would (T-629): `live
+# folder-trust`'s fresh and follow-up cases went red under a config made fresh.
+
+[[plant]]
+name = "first message: a run's own Claude config is not seeded with the live folders trusted"
+meant = "a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_keeps_what_it_held"
+runs = ["fm-kit-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = "    held[\"projects\"][&root][\"hasTrustDialogAccepted\"] = serde_json::Value::Bool(true);\n"
+replace = "    let _ = &root;\n"
+
+[[plant]]
+name = "first message: the owner's own Claude config is seeded too"
+meant = "the_owners_own_claude_config_is_never_seeded"
+runs = ["fm-kit-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = "    if config == real(home) || config.starts_with(&owners) {"
+replace = "    if config == real(home) && config.starts_with(&owners) {"
+
+# Brought into 3.0.6-alpha.3's integration B (T-681), the chief's two rules. 1: a first message waits
+# until its window is at its prompt, past every question its harness asks as it starts (the folder's
+# trust, its grants, the project's new MCP servers), whatever their order and one that comes late.
+# 2: a pasted brief's image paths are attached like any paste's.
+
+[[plant]]
+name = "first message: a launch's time runs while its window asks of the project's new servers"
+meant = "a_worker_asked_of_six_new_servers_has_them_all_used_a_key_each"
+runs = ["fm-rig-servers"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            if trust.asks() || (trust == Trusting::Looking && delivering.owed.is_none()) {"
+replace = "            if trust == Trusting::Asked || (trust == Trusting::Looking && delivering.owed.is_none()) {"
+
+[[plant]]
+name = "first message: a question drawn after the watch let the window go is pasted into"
+meant = "a_question_drawn_after_the_window_showed_its_prompt_holds_its_first_message_until_it_is_answered"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if self.asks_before_its_first_message(record, &pane).await? {"
+replace = "        if false && self.asks_before_its_first_message(record, &pane).await? {"
+
+[[plant]]
+name = "first message: the engine lets a window owed its first message go after 30 s with no question"
+meant = "a_question_that_comes_after_half_a_minute_holds_a_workers_first_message_until_it_is_answered"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = """
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {
+                        break (false, false);
+                    }
+                }
+                // No screen says nothing of the question"""
+replace = """
+                    } else if self.now() - began > ASKS_WITHIN_MS {
+                        break (false, false);
+                    }
+                }
+                // No screen says nothing of the question"""
+
+[[plant]]
+name = "first message: a brief's picture sources are the user's item, and its answer is no result"
+meant = "a_brief_handed_over_once_up_is_a_paste_whose_pictures_are_attached_and_its_answer_is_the_result"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/adapter.rs"
+find = "                    agent.items.push(self.item(Role::Custom, &sources));"
+replace = "                    agent.items.push(self.item(Role::User, &sources));"
+
+[[plant]]
+name = "first message: a brief's picture sources are the user's item, and a cancel finds no turn about its task"
+meant = "a_window_at_work_on_a_brief_whose_pictures_were_attached_is_interrupted_when_its_task_is_cancelled"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/adapter.rs"
+find = "                    agent.items.push(self.item(Role::Custom, &sources));"
+replace = "                    agent.items.push(self.item(Role::User, &sources));"
+
+[[plant]]
+name = "first message: a brief's picture sources are the user's item, and a stop takes nothing back"
+meant = "a_brief_whose_pictures_were_attached_is_kept_when_its_window_takes_it_back_at_a_stop"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/adapter.rs"
+find = "                    agent.items.push(self.item(Role::Custom, &sources));"
+replace = "                    agent.items.push(self.item(Role::User, &sources));"
+
+[[plant]]
+name = "first message: the reader makes a brief's picture sources the user's last message, on the rig"
+meant = "a_task_cancelled_while_its_window_works_on_a_brief_whose_picture_was_attached_has_escape_pressed_into_its_turn"
+runs = ["fm-rig-brief-picture"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = """        self.items.push(id, Role::Custom, &hook.text, at, seq);"""
+replace = """        self.items.push(id, Role::User, &hook.text, at, seq);"""

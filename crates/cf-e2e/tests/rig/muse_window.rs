@@ -59,7 +59,8 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
         "{task}"
     );
     // The window: the pinned binary, its model and effort, full permission, the owner's
-    // contributor mode off, the hook, and the brief as its prompt.
+    // contributor mode off, the hook, and nothing of the brief: it is pasted once the
+    // window is up, never on a command line every process reads.
     let launches = rig.muse_launches();
     assert_eq!(launches.len(), 1, "{launches:?}");
     let argv = &launches[0];
@@ -78,7 +79,7 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
         .iter()
         .any(|word| word.starts_with("hooks=") && word.contains("hook muse-session")));
     assert!(
-        argv.last().unwrap().contains("Reply with exactly: T1_DONE"),
+        !argv.iter().any(|word| word.contains("T1_DONE")),
         "{argv:?}"
     );
     // Its session: one turn, its role text given by the hook, ended.

@@ -2,11 +2,11 @@
 //! signal: as the user's own programs are beside a window, it is none of the
 //! test's either. A shell the test starts detached (a child of the system's init, in a
 //! session of its own: no process of the test started it), with a job of its own, both
-//! asleep. The pane host signals only the window's own, whatever its selection says, so an
-//! ending or a close that is right never reaches them, and a test says so once it is over
+//! asleep. The pane host signals only the window's own, whatever its selection says, so a
+//! close that is right never reaches them, and a test says so once it is over
 //! ([`Sentinel::runs`]), and once more when the sentinel is dropped, which a test that
-//! failed before its own look at it reaches too. Every test that ends or closes a window of
-//! real processes has one: the bound of the tree is what keeps a wrong selection from them,
+//! failed before its own look at it reaches too. Every test that closes a window of real
+//! processes has one: the bound of the tree is what keeps a wrong selection from them,
 //! and this is what shows it did. The guard of a test build's real signals
 //! (`process_tree::guard`) refuses it as a stranger, which a child of the test would not be.
 
@@ -31,10 +31,18 @@ const ENDED: &str = "a process outside the window was ended";
 /// What the first shell runs: the second, in the background, which it leaves to the system's
 /// init as it ends. The second starts its job, sets its trap once the job has started (a
 /// job still to exec has its shell's traps, which take the request to end in the shell's
-/// place, and it outlives it), says its number and its job's, and waits.
+/// place, and it outlives it), says its number and its job's, and waits: for its job, and
+/// for as long as the test that started it is there, which is not its parent (T-693).
 const FIRST: &str = "/bin/sh -c \"$0\" &";
-const SECOND: &str =
-    "sleep 120 & job=$!; trap 'kill $job 2>/dev/null; exit 0' TERM; echo $$ $job; wait $job";
+
+/// What the second shell runs, for as long as the process `owner` is there.
+fn second(owner: u32) -> String {
+    format!(
+        "sleep 120 & job=$!; trap 'kill $job 2>/dev/null; exit 0' TERM; echo $$ $job; \
+         while kill -0 $job 2>/dev/null && {}; do /bin/sleep 0.2; done; kill $job 2>/dev/null",
+        cf_base::fixture::owner_there(owner)
+    )
+}
 
 /// A process by its number and by when it began, as `ps` says it: one that took the number
 /// of another is not it.
@@ -89,13 +97,20 @@ pub struct Sentinel {
 }
 
 impl Sentinel {
-    /// Starts the shell and its job, and waits for them to be left to the system's init.
+    /// Starts the shell and its job, and waits for them to be left to the system's init. They
+    /// end when the test that started them does.
+    pub fn start() -> Self {
+        Self::start_owned_by(std::process::id())
+    }
+
+    /// As [`Sentinel::start`], the shell and its job going on for as long as the process
+    /// `owner` is there.
     #[allow(clippy::disallowed_methods)] // A test's own programs.
     #[allow(clippy::expect_used)] // A test helper: a sentinel that did not start fails the test.
-    pub fn start() -> Self {
+    fn start_owned_by(owner: u32) -> Self {
         let mut command = Command::new("/bin/sh");
         command
-            .args(["-c", FIRST, SECOND])
+            .args(["-c", FIRST, &second(owner)])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -218,6 +233,26 @@ mod tests {
                 job.pid
             );
         }
+    }
+
+    #[test]
+    #[allow(clippy::disallowed_methods)] // A test's own programs.
+    fn a_sentinel_ends_with_the_test_that_started_it_and_its_job_with_it() {
+        // A stand-in for the test: a process the case ends, as a run that is killed is.
+        let mut owner = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let sentinel = Sentinel::start_owned_by(owner.id());
+        let (shell, job) = (sentinel.shell.clone(), sentinel.job.clone());
+        assert!(shell.runs() && job.runs());
+
+        owner.kill().unwrap();
+        owner.wait().unwrap();
+        shell.until_gone();
+        job.until_gone();
+
+        // It ended of itself, which a sentinel dropped would say, and fail for.
+        std::mem::forget(sentinel);
+        assert!(!process_exists(shell.pid), "the shell outlived its owner");
+        assert!(!process_exists(job.pid), "the job outlived its owner");
     }
 
     #[test]

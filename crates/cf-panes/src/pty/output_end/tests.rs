@@ -174,16 +174,21 @@ os._exit(5)
     let pieces = read_all(output(&table, &key, reader, gone));
     let seen = until_the_end(&pieces, Duration::from_secs(15));
     let _ = std::fs::remove_file(&asked);
-    // The helper is the test's to end, where its number was read; else it ends by itself.
+    // The helper is a detached job: it left its session and lost its parent, and holds the
+    // terminal. It is the test's own, so the guard of the test's signals is told so
+    // (`register`) and the close of the pane may end it, as it ends what a window leaves
+    // running. The test does not end it first: a helper the test had sent SIGKILL was still
+    // dying when the close came for it, on a loaded machine (T-643: 4 of 588 runs at a load
+    // of 130 to 190), and the guard, which knew nothing of it, stopped the close's SIGTERM
+    // and the test with it. Here the close finds it running every time.
     let said = seen.clone().unwrap_or_default();
-    if let Some(helper) = said
+    let helper = said
         .split("HELPER ")
         .nth(1)
         .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|number| number.parse::<i32>().ok())
-    {
-        // SAFETY: signal 9 to the helper this test's program started, by its number.
-        unsafe { libc::kill(helper, 9) };
+        .and_then(|number| number.parse::<i32>().ok());
+    if let Some(helper) = helper {
+        crate::process_tree::guard::register(helper);
     }
     let seen = seen.expect("the output's end");
     assert!(
@@ -191,6 +196,22 @@ os._exit(5)
         "its last words were dropped: {seen:?}"
     );
     table.kill(&key).expect("close the pane");
+    // The helper is ended with the pane, or by the test: it is not left for its twenty seconds.
+    if let Some(helper) = helper {
+        let until = Instant::now() + Duration::from_secs(30);
+        while process_exists(helper) && Instant::now() < until {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let left = process_exists(helper);
+        if left {
+            // SAFETY: signal 9 to the helper this test's program started, by its number.
+            unsafe { libc::kill(helper, 9) };
+        }
+        assert!(
+            !left,
+            "the pane's close left the helper of its program running"
+        );
+    }
 }
 
 /// A program that outlived its output is ended, and gone, before the daemon is told the
@@ -265,7 +286,10 @@ fn the_daemon_is_told_at_once_of_a_program_that_has_gone() {
 fn a_reader_of_a_terminal_that_never_goes_quiet_ends_once_the_program_has_gone() {
     let _pty_guard = serial_pty_test();
     let table = PaneTable::closing_within(Duration::from_millis(500));
-    let (key, reader) = open(&table, "while :; do printf .; sleep 0.02; done");
+    let (key, reader) = open(
+        &table,
+        "while kill -0 $PPID 2>/dev/null; do printf .; /bin/sleep 0.02; done",
+    );
     let gone = Arc::new(AtomicBool::new(false));
     let said = Arc::clone(&gone);
     let pieces = read_all(output(
@@ -363,7 +387,7 @@ fn a_program_not_proven_gone_in_the_bound_is_named_and_a_window_of_its_name_open
 fn a_program_the_close_has_not_ended_by_the_bound_is_named_then_and_its_close_goes_on() {
     let _pty_guard = serial_pty_test();
     let table = Arc::new(PaneTable::closing_within(Duration::from_secs(60)));
-    let (key, _reader) = open(&table, "trap '' TERM HUP; exec /bin/sleep 1000");
+    let (key, _reader) = open(&table, &cf_base::fixture::deaf("TERM HUP", ""));
     let program = table.process_group_id(&key).expect("the pane's program");
     let slot = slot_of(&table, &key);
     let pid = u32::try_from(program).ok();

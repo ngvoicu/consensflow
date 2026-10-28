@@ -1,0 +1,212 @@
+# T-693, 3.0.6: no test fixture outlives the test process that started it (the class of T-686's
+# two shells that ignored TERM and looped for eight hours, and the twenty-six that ignored TERM and
+# HUP for four days). A fixture that does not end of itself looks at its owner
+# (`kill -0 $PPID`, `kill -0 {owner}` where the owner is not the parent, Python's `os.getppid()`), as
+# `cf_base::fixture` does for the programs that ignore signals; the rule test
+# `fixtures_end_with_their_owner` (cf-e2e, the `cli` suite) refuses a string of a test that loops
+# without. A plant puts one shape back: the owner is not looked at, and the rule (or the case of the
+# shape's own, where it has one) fails.
+#
+# Every name holds `fixtures end with their owner`, so
+# `npm run plants:daemon -- "fixtures end with their owner"` runs them all.
+
+[run]
+fx-rule = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "fixtures_end_with_their_owner"]
+fx-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "fixture::"]
+fx-sentinel = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "sentinel::"]
+
+
+[[plant]]
+name = "fixtures end with their owner: the shared deaf script goes on when its owner is gone"
+meant = "a_deaf_script_goes_on_when_asked_to_end_and_ends_when_its_owner_does"
+runs = ["fx-base"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/fixture.rs"
+find = '''{first}while {OWNER_THERE}; do /bin/sleep 0.2; done")'''
+replace = '''{first}while :; do /bin/sleep 0.2; done")'''
+
+[[plant]]
+name = "fixtures end with their owner: a program that waits to be asked and is not asked loops for ever"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/execute.rs"
+find = '''echo hi; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done'''
+replace = '''echo hi; while true; do /bin/sleep 0.05; done'''
+
+[[plant]]
+name = "fixtures end with their owner: a wait for a file looks no more at its owner"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture/tests/tree.rs"
+find = '''while [ ! -s '{file}' ] && kill -0 $PPID 2>/dev/null; do /bin/sleep 0.01; done; echo said'''
+replace = '''while [ ! -s '{file}' ]; do /bin/sleep 0.01; done; echo said'''
+
+[[plant]]
+name = "fixtures end with their owner: a wait for a program to be another looks no more at its owner"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn/tests.rs"
+find = ''' || ! kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done; printf started'''
+replace = '''; do /bin/sleep 0.05; done; printf started'''
+
+[[plant]]
+name = "fixtures end with their owner: a writer that writes to a terminal looks no more at its owner"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end/tests.rs"
+find = '''while kill -0 $PPID 2>/dev/null; do printf .; /bin/sleep 0.02; done'''
+replace = '''while :; do printf .; /bin/sleep 0.02; done'''
+
+[[plant]]
+name = "fixtures end with their owner: a program whose owner is not its parent is given no owner"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command/tests.rs"
+find = '''while {}; do echo noise; /bin/sleep 0.2; done'''
+replace = '''while :; do echo noise; /bin/sleep 0.2; done'''
+
+[[plant]]
+name = "fixtures end with their owner: a Python program goes on when its parent is gone"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/tests/headless.rs"
+find = '''
+parent = os.getppid()
+name = os.ttyname(0)
+print('''
+replace = '''
+name = os.ttyname(0)
+print('''
+
+[[plant.edit]]
+file = "crates/cf-panes/tests/headless.rs"
+find = '''
+while os.getppid() == parent:
+    os.write(again'''
+replace = '''
+while True:
+    os.write(again'''
+
+[[plant]]
+name = "fixtures end with their owner: a shell that reads a pipe held open for writing looks no more at its owner"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = '''(while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done; kill -KILL $$) & \'''
+replace = '''\'''
+
+[[plant]]
+name = "fixtures end with their owner: a loop that counts its tries out counts no more"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/tests.rs"
+find = ''' && [ $n -lt 1200 ]; do /bin/sleep 0.1;'''
+replace = '''; do /bin/sleep 0.1;'''
+
+[[plant]]
+name = "fixtures end with their owner: a stand-in ssh that holds the run goes on when the test is gone"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run/tests.rs"
+find = '''
+echo started
+while {owner}; do /bin/sleep 0.2; done'''
+replace = '''
+echo started
+while :; do /bin/sleep 0.2; done'''
+
+[[plant]]
+name = "fixtures end with their owner: a stand-in app's job goes on when the test is gone"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/app/tests.rs"
+find = '''(while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done) &'''
+replace = '''(while :; do /bin/sleep 0.2; done) &'''
+
+[[plant]]
+name = "fixtures end with their owner: a stand-in app that does not end with its input goes on when the test is gone"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cases/tests.rs"
+find = '''while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done",'''
+replace = '''while :; do /bin/sleep 0.2; done",'''
+
+[[plant]]
+name = "fixtures end with their owner: a sentinel goes on when the test that started it is gone"
+meant = "a_sentinel_ends_with_the_test_that_started_it_and_its_job_with_it"
+runs = ["fx-sentinel"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/sentinel.rs"
+find = '''cf_base::fixture::owner_there(owner)'''
+replace = '''String::from("true")'''
+
+# 3.0.6-alpha.3 integration B round 2 (T-800): B's detached Python server (headless.rs's `SERVER`) has no
+# parent to look at, and is given its owner's number in `$OWNER`; the rule reads `os.kill(owner, 0)`.
+
+[[plant]]
+name = "fixtures end with their owner: a detached Python server looks no more at its owner"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["fx-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/tests/headless.rs"
+find = """
+owner = int(os.environ["OWNER"])
+def owner_there():
+    try:
+        os.kill(owner, 0)
+        return True
+    except OSError:
+        return False
+"""
+replace = """
+"""
+
+[[plant.edit]]
+file = "crates/cf-panes/tests/headless.rs"
+find = """
+while owner_there():
+    time.sleep(1)
+"#;"""
+replace = """
+while True:
+    time.sleep(1)
+"#;"""

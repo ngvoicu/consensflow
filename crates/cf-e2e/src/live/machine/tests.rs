@@ -508,3 +508,64 @@ fn a_live_test_has_a_folder_of_its_own_below_the_candidates_in_the_home_made_whe
         "kept"
     );
 }
+
+#[test]
+fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_keeps_what_it_held()
+{
+    let home = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    fs::write(
+        config.path().join(".claude.json"),
+        r#"{"hasCompletedOnboarding":true,"projects":{"/elsewhere":{"hasTrustDialogAccepted":false}}}"#,
+    )
+    .unwrap();
+    seed_claude_trust(config.path(), home.path()).unwrap();
+    let held: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
+            .unwrap();
+    let root = home.path().join(".consensflow-candidate").join("live");
+    assert_eq!(
+        held["projects"][root.to_string_lossy().as_ref()]["hasTrustDialogAccepted"],
+        true,
+        "{held}"
+    );
+    assert_eq!(held["hasCompletedOnboarding"], true);
+    assert_eq!(
+        held["projects"]["/elsewhere"]["hasTrustDialogAccepted"],
+        false
+    );
+    // The folder a run's live folder is made in is that root's.
+    assert!(live_folder_in(home.path(), "a-run")
+        .unwrap()
+        .starts_with(&root));
+}
+
+#[test]
+fn a_config_seeded_in_an_empty_folder_holds_the_trust_alone() {
+    let home = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    seed_claude_trust(config.path(), home.path()).unwrap();
+    let held: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        held["projects"].as_object().map(|projects| projects.len()),
+        Some(1)
+    );
+}
+
+#[test]
+fn the_owners_own_claude_config_is_never_seeded() {
+    let home = tempfile::tempdir().unwrap();
+    let owners = home.path().join(".claude");
+    fs::create_dir_all(&owners).unwrap();
+    for config in [home.path().to_path_buf(), owners.clone()] {
+        assert!(
+            seed_claude_trust(&config, home.path()).is_err(),
+            "{}",
+            config.display()
+        );
+    }
+    assert!(!home.path().join(".claude.json").exists());
+    assert!(!owners.join(".claude.json").exists());
+}

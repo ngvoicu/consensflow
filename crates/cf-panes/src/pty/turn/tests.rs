@@ -350,7 +350,7 @@ time.sleep(60)
             // it was forked as, which a look could catch first.
             "trap '' HUP; printf ready; read go; \
          /usr/bin/python3 -c 'import time; time.sleep(31)' & \
-         until ps -o comm= -p $! | grep -q python; do sleep 0.05; done; printf started",
+         until ps -o comm= -p $! | grep -q python || ! kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done; printf started",
         );
         until_shown(&pane.output, "ready");
         table

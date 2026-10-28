@@ -1,7 +1,9 @@
 //! How each harness's own window opens on a conversation ConsensFlow starts or
-//! resumes: the command, its arguments, the first message where the harness
-//! takes it otherwise, and the keys it must not inherit. Every adapter builds
-//! its pane from here.
+//! resumes: the command, its arguments, Devin's first message, which it reads
+//! from a file, and the keys it must not inherit. Every adapter builds its pane
+//! from here. No first message is an argument: every process on the machine reads
+//! a command line (`FirstMessage`), so the other harnesses' windows are given
+//! theirs once they are up.
 //!
 //! Every window, fresh or resumed, for every role, opens in full-permission
 //! ("yolo") mode (the owner's decision, 2026-09-19). Each flag is the
@@ -19,9 +21,7 @@ use crate::contract::Agent;
 pub(crate) struct Invocation {
     pub(crate) command: &'static str,
     pub(crate) args: Vec<String>,
-    /// The first message of a harness that takes it in another way than as an
-    /// argument: Devin's, in a prompt file, and a resumed Muse window's, pasted
-    /// once it is up (`muse resume` takes no prompt).
+    /// Devin's first message, which it reads from a file its command line names.
     pub(crate) prompt: Option<String>,
     /// The keys whose presence would silently switch the window's billing.
     pub(crate) drop_env: &'static [&'static str],
@@ -49,8 +49,8 @@ impl Invocation {
 }
 
 /// The window on a conversation that does not exist yet, `seed` its first
-/// message: none where the harness needs an id and has none (Claude and Pi
-/// take theirs from ConsensFlow).
+/// message where the harness reads it as it opens (Devin's): none where the
+/// harness needs an id and has none (Claude and Pi take theirs from ConsensFlow).
 pub(crate) fn start(
     harness: Harness,
     agent: Agent,
@@ -84,10 +84,6 @@ fn window(
     seed: Option<&str>,
     resumed: bool,
 ) -> Option<Invocation> {
-    let seeded = |mut args: Vec<String>| {
-        args.extend(seed.map(str::to_owned));
-        args
-    };
     let words = |words: &[&str]| {
         words
             .iter()
@@ -102,7 +98,7 @@ fn window(
             args.extend(words(&["--permission-mode", "bypassPermissions"]));
             Invocation {
                 command: "claude",
-                args: seeded(args),
+                args,
                 prompt: None,
                 // Taken off whatever else of the human's shell the window keeps: a
                 // leftover export would move the window off the human's subscription
@@ -110,12 +106,12 @@ fn window(
                 drop_env: &["ANTHROPIC_API_KEY"],
             }
         }
-        // `muse [PROMPT]` opens the TUI with its first turn begun; `muse resume <id>`
-        // takes no prompt (Muse 1.4.13: "unknown argument"), so a resumed window's goes
-        // in once it is up. `--yolo` is the full-permission mode: no approval, no
-        // sandbox, the workspace trusted for the run (not saved). Contributor mode, in
-        // which Meta trains on what the window sees, is off for the run unless the
-        // agent's model is a contributor model, which only the human picks.
+        // `muse` opens the TUI at rest and `muse resume <id>` on the conversation; the
+        // first message is pasted once the window is up, as Claude's is. `--yolo` is
+        // the full-permission mode: no approval, no sandbox, the workspace trusted for
+        // the run (not saved). Contributor mode, in which Meta trains on what the
+        // window sees, is off for the run unless the agent's model is a contributor
+        // model, which only the human picks.
         Harness::Muse => {
             let mut args = match (resumed, session) {
                 (true, Some(session)) => words(&["resume", session]),
@@ -126,15 +122,10 @@ fn window(
             if !given(agent.model).is_some_and(|model| model.ends_with(CONTRIBUTOR)) {
                 args.extend(words(&["--contributor-mode", "off"]));
             }
-            let (args, prompt) = if resumed {
-                (args, seed.map(str::to_owned))
-            } else {
-                (seeded(args), None)
-            };
             Invocation {
                 command: "muse",
                 args,
-                prompt,
+                prompt: None,
                 // As Claude's key: Muse uses a `META_API_KEY` in its environment before
                 // the human's login (Muse's docs), which would move the window onto that
                 // key's billing.
@@ -149,13 +140,12 @@ fn window(
             args.push("--approve".to_owned());
             Invocation {
                 command: "pi",
-                args: seeded(args),
+                args,
                 prompt: None,
                 drop_env: &[],
             }
         }
-        // `codex [PROMPT]` opens the real window seeded with that prompt; it
-        // announces no id, so the broker names the thread once Codex starts it.
+        // Codex announces no id: the broker names the thread once Codex starts it.
         Harness::Codex => {
             let mut args = match (resumed, session) {
                 (true, Some(session)) => words(&["resume", session]),
@@ -165,7 +155,7 @@ fn window(
             args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
             Invocation {
                 command: "codex",
-                args: seeded(args),
+                args,
                 prompt: None,
                 // As Claude's key: a leftover export would move the window off the
                 // human's ChatGPT login onto per-token API billing.

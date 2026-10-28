@@ -385,7 +385,7 @@ mod tests {
                 &[
                     "/bin/sh".to_string(),
                     "-c".to_string(),
-                    "trap '' TERM HUP; printf ready; while :; do sleep 1; done".to_string(),
+                    cf_base::fixture::deaf("TERM HUP", "printf ready"),
                 ],
                 &HashMap::new(),
                 PtySize {

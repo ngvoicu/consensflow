@@ -32,6 +32,11 @@
 //! A run neither takes the lock nor waits on it, and a poker-lab job that starts while a run
 //! goes on is not seen.
 //!
+//! **Every machine is asked what is on its copy** (the runner's own zeewin too, T-777 P2-1): a
+//! run in the copy, or a program that holds its run lock, makes it busy, and the head of a queue
+//! waits for it instead of uploading its tree into a 75 (and each run behind it after it). Only a
+//! machine the runner shares has poker-lab to ask of and a disk floor.
+//!
 //! The laptop's C: holds Gabriel's own files and WSL's disk: a run there is sent only while its
 //! profile's disk has [`FLOOR_GIB`] free, as the laptop's PowerShell says it, and is refused with
 //! 75 below it.
@@ -41,7 +46,10 @@
 //! copy), and else zeewin.
 
 use super::interrupt::Interrupt;
-use super::script::{encode_script, OWNER};
+use super::queue::{queued_words, Queues};
+use super::script::{encode_script, LOCK, OWNER};
+use cf_base::time::{Clock, SystemClock};
+
 use crate::context::Context;
 use crate::dispatch::Console;
 use crate::process::{self, Invocation};
@@ -59,6 +67,25 @@ const FLOOR_GIB: u64 = 50;
 /// zeelin answers only while WSL runs.
 const PROBE_TIMEOUT_S: u32 = 5;
 
+/// What a machine takes at once, less than all it has: the run script gives the builds and the
+/// tests these (`CARGO_BUILD_JOBS`, `RUST_TEST_THREADS`), and a run that names its own wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// How many crates cargo builds at once, and with them the compilers' memory.
+    pub build_jobs: u32,
+    /// How many tests a test program runs at once.
+    pub test_threads: u32,
+}
+
+/// zeewin's: with 7.4 GB and 12 threads it had 0 GB free in both of T-585's workspace runs, one
+/// of them 1,396 s (the other 585 s) with two lock cases failing on its time. Measured with
+/// four jobs and four test threads (T-701, `tools/xtask/windows-memory.sh`): least free memory
+/// 1.59 GB, the build 151 s (it was 128 s and 131 s) and the tests 747 s, the lock cases passing.
+const ZEEWIN_LIMITS: Limits = Limits {
+    build_jobs: 4,
+    test_threads: 4,
+};
+
 /// A Windows machine, as a run reaches it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Machine {
@@ -70,6 +97,8 @@ pub struct Machine {
     pub node: String,
     /// What a run must find before it is sent, on a machine that is not the runner's alone.
     pub shared: Option<Shared>,
+    /// What the machine takes at once, where it takes less than all it has.
+    pub limits: Option<Limits>,
 }
 
 /// A machine another project uses too, and whose disk is its owner's.
@@ -90,7 +119,10 @@ impl Machine {
     /// The machine `--machine` calls `name`, if it is one.
     pub fn named(name: &str) -> Option<Self> {
         match name {
-            "zeewin" => Some(Self::at("zeewin")),
+            "zeewin" => Some(Self {
+                limits: Some(ZEEWIN_LIMITS),
+                ..Self::at("zeewin")
+            }),
             "zeewin2" => Some(Self {
                 name: name.into(),
                 host: name.into(),
@@ -100,6 +132,7 @@ impl Machine {
                     lock: ".compile-lock/owner".into(),
                     floor_gib: FLOOR_GIB,
                 }),
+                limits: None,
             }),
             _ => None,
         }
@@ -112,53 +145,76 @@ impl Machine {
             host: host.into(),
             node: PROGRAM_FILES_NODE.into(),
             shared: None,
+            limits: None,
         }
     }
 
-    /// Whether a run may be sent now, for the copy `dir`: on a machine the runner shares, why
-    /// not if it may not ([`Ready::Refused`], which the run ends with 75), and what was found
-    /// that the person is told of if it may. A machine that could not be asked is the error.
+    /// Whether a run may be sent now, for the copy `dir`: why not if it may not
+    /// ([`Ready::Refused`], which the run ends with 75), and what was found that the person is told
+    /// of if it may. A machine that could not be asked is the error.
     pub fn ready(&self, context: &Context, dir: &str) -> Result<Ready, String> {
-        Ok(self.look(context, dir)?.0)
+        Ok(match self.look(context, dir)? {
+            (Ready::Go(_), Busy::Run) => Ready::Refused(format!(
+                "{} is busy: a run goes on there, and no run goes while it does.",
+                self.name
+            )),
+            (Ready::Go(_), Busy::Lock) => Ready::Refused(format!(
+                "{} is busy: {LOCK_HELD}, and no run goes while it does.",
+                self.name
+            )),
+            (ready, _) => ready,
+        })
     }
 
-    /// [`Machine::ready`], and whether a run of this runner holds the copy (none is known of a
-    /// machine the runner does not share, or that is refused).
-    fn look(&self, context: &Context, dir: &str) -> Result<(Ready, bool), String> {
-        let Some(shared) = &self.shared else {
-            return Ok((Ready::Go(Vec::new()), false));
-        };
+    /// [`Machine::ready`], and what holds the copy besides: a run of this runner, or a program
+    /// that took its lock. Every machine is asked what is on its copy, the runner's own as well
+    /// as the laptop: the head of a queue that does not ask uploads its tree into the 75 of a holder
+    /// outside the queue (a tree whose runner predates the queue, another project's copy), and
+    /// each run behind it does the same in its turn (T-777, P2-1). Only a machine the runner
+    /// shares has poker-lab to ask of and a disk floor.
+    fn look(&self, context: &Context, dir: &str) -> Result<(Ready, Busy), String> {
         let mut said = Vec::new();
-        match lock_of(context, shared) {
-            Lock::Held => {
-                let why = format!(
-                    "{} is busy: poker-lab's job holds it (~/{} on {}), and no run goes while it does.",
-                    self.name, shared.lock, shared.linux
-                );
-                return Ok((Ready::Refused(why), false));
-            }
-            Lock::Free => {}
-            Lock::NotRunning(why) => said.push(format!(
-                "{} did not answer ({why}), so Ubuntu is not running there and no poker-lab job can hold its lock: going on",
-                shared.linux
-            )),
-            Lock::Unknown(why) => {
-                let why = format!(
-                    "{} may be busy: {} answered, but not with whether poker-lab's job holds it ({why}), and no run goes while that is not known.",
-                    self.name, shared.linux
-                );
-                return Ok((Ready::Refused(why), false));
+        if let Some(shared) = &self.shared {
+            match lock_of(context, shared) {
+                Lock::Held => {
+                    let why = format!(
+                        "{} is busy: poker-lab's job holds it (~/{} on {}), and no run goes while it does.",
+                        self.name, shared.lock, shared.linux
+                    );
+                    return Ok((Ready::Refused(why), Busy::No));
+                }
+                Lock::Free => {}
+                Lock::NotRunning(why) => said.push(format!(
+                    "{} did not answer ({why}), so Ubuntu is not running there and no poker-lab job can hold its lock: going on",
+                    shared.linux
+                )),
+                Lock::Unknown(why) => {
+                    let why = format!(
+                        "{} may be busy: {} answered, but not with whether poker-lab's job holds it ({why}), and no run goes while that is not known.",
+                        self.name, shared.linux
+                    );
+                    return Ok((Ready::Refused(why), Busy::No));
+                }
             }
         }
         let state = self.state(context, dir)?;
-        if state.free_gib < shared.floor_gib {
-            let why = format!(
-                "{} is short of disk: a run needs {} GiB free there, and it has {}.",
-                self.name, shared.floor_gib, state.free_gib
-            );
-            return Ok((Ready::Refused(why), false));
+        if let Some(shared) = &self.shared {
+            if state.free_gib < shared.floor_gib {
+                let why = format!(
+                    "{} is short of disk: a run needs {} GiB free there, and it has {}.",
+                    self.name, shared.floor_gib, state.free_gib
+                );
+                return Ok((Ready::Refused(why), Busy::No));
+            }
         }
-        Ok((Ready::Go(said), state.running))
+        let busy = if state.running {
+            Busy::Run
+        } else if state.held {
+            Busy::Lock
+        } else {
+            Busy::No
+        };
+        Ok((Ready::Go(said), busy))
     }
 
     /// What the machine says of its profile's disk and of a run in the copy `dir`.
@@ -187,16 +243,36 @@ impl Machine {
         })
     }
 
-    /// Whether this machine is free for a run in the copy `dir`: [`Machine::ready`], and no run of
-    /// this runner holding its copy.
+    /// Whether this machine is free for a run in the copy `dir`: [`Machine::ready`], no run of
+    /// this runner holding its copy, no program holding its lock, and no run queued for it.
     fn free(&self, context: &Context, dir: &str) -> Free {
+        let queued = Queues::of(&context.env)
+            .map_or(0, |queues| queues.depth(&self.name, SystemClock.now_ms()));
+        if queued > 0 {
+            return Free::No(queued_words(queued));
+        }
         match self.look(context, dir) {
-            Ok((Ready::Go(_), false)) => Free::Yes,
-            Ok((Ready::Go(_), true)) => Free::No("a run goes on there".into()),
+            Ok((Ready::Go(_), Busy::No)) => Free::Yes,
+            Ok((Ready::Go(_), Busy::Run)) => Free::No("a run goes on there".into()),
+            Ok((Ready::Go(_), Busy::Lock)) => Free::No(LOCK_HELD.into()),
             Ok((Ready::Refused(why), _)) | Err(why) => Free::No(why),
         }
     }
 }
+
+/// What holds a machine's copy beside the run being asked about.
+#[derive(Debug, PartialEq, Eq)]
+enum Busy {
+    No,
+    /// A run of this runner (its owner file names a live PowerShell).
+    Run,
+    /// A program that took the run lock without the owner file: a session of another tool.
+    Lock,
+}
+
+/// How a lock that no run of this runner holds is told.
+const LOCK_HELD: &str =
+    "its run lock is held by a program that is not a run of this runner (another tool's session)";
 
 /// Whether a run may be sent to a machine now.
 #[derive(Debug, PartialEq, Eq)]
@@ -261,21 +337,29 @@ fn lock_of(context: &Context, shared: &Shared) -> Lock {
 
 /// What a machine said of itself.
 #[derive(Debug, PartialEq, Eq)]
-struct State {
+pub(super) struct State {
     /// What its profile's disk has free, in whole GiB.
-    free_gib: u64,
+    pub(super) free_gib: u64,
     /// Whether a run of this runner holds the copy (its owner file is there).
-    running: bool,
+    pub(super) running: bool,
+    /// Whether its run lock is held and cannot be opened to share: by a run, or by a program that
+    /// took it the same way.
+    pub(super) held: bool,
 }
 
 impl State {
     /// The state `text` says: a line `free N`, and a line `run` if a run holds the copy.
-    fn read(text: &str) -> Option<Self> {
+    pub(super) fn read(text: &str) -> Option<Self> {
         let free_gib = text
             .lines()
             .find_map(|line| line.trim().strip_prefix("free ")?.trim().parse().ok())?;
         let running = text.lines().any(|line| line.trim() == "run");
-        Some(Self { free_gib, running })
+        let held = text.lines().any(|line| line.trim() == "held");
+        Some(Self {
+            free_gib,
+            running,
+            held,
+        })
     }
 }
 
@@ -286,7 +370,12 @@ impl State {
 /// a BSOD), and a process id may be taken by a later program: neither is a run. It ends with
 /// `exit 0`: on a machine with no owner file the failed `Get-Content` leaves `$?` false, and a
 /// script whose last statement runs no command ends with 1, which the runner reads as a machine
-/// that did not say (the live run on zeewin2, 2026-10-26, found it).
+/// that did not say (the live run on zeewin2, 2026-10-26, found it). And `held` if the run lock
+/// ([`LOCK`]) cannot be opened to share with others, which says that something holds it that
+/// opened it to share with no one: a run, or a program that took it by the same protocol (T-708's
+/// session held zeewin2's for an hour while runs asked and were refused). The look opens the file
+/// to share and lets it go at once, so that it takes nothing; a run that opens it in that moment
+/// is refused as if it were held, which the waiting run that asked takes up again.
 pub fn state_script(dir: &str) -> String {
     format!(
         "$ProgressPreference = 'SilentlyContinue'\n\
@@ -295,6 +384,9 @@ pub fn state_script(dir: &str) -> String {
          $of = @(Get-Content -LiteralPath $owner -ErrorAction SilentlyContinue)\n\
          $run = if ($of.Count -ge 2) {{ try {{ Get-Process -Id ([int]$of[1]) -ErrorAction Stop | Where-Object {{ ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime }} }} catch {{}} }}\n\
          if ($run) {{ 'run' }}\n\
+         $lock = Join-Path (Join-Path $env:USERPROFILE '{dir}') '{LOCK}'\n\
+         $held = if (Test-Path -LiteralPath $lock) {{ try {{ $probe = [IO.File]::Open($lock, 'Open', 'ReadWrite', 'ReadWrite'); $probe.Dispose(); $false }} catch [IO.IOException] {{ $true }} catch {{ $false }} }} else {{ $false }}\n\
+         if ($held) {{ 'held' }}\n\
          exit 0\n"
     )
 }

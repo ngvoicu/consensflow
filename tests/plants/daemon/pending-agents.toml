@@ -222,10 +222,10 @@ runs = ["engine-dispatcher-pending-agents"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {'''
 replace = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.jobs > 0 {'''
 
 [[plant]]
@@ -334,10 +334,10 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {'''
 replace = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.jobs > 0 {'''
 
 [[plant]]

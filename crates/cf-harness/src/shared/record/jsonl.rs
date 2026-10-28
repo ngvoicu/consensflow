@@ -42,7 +42,7 @@ use serde_json::Value;
 use super::torn;
 
 /// How many bytes before where a look stopped the next look checks are unchanged.
-const EDGE_BYTES: u64 = 1024;
+pub(crate) const EDGE_BYTES: u64 = 1024;
 /// How much of the file a look reads at a time.
 const CHUNK: usize = 64 * 1024;
 /// How long a torn line with no record after it waits for one before it is

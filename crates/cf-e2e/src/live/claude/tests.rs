@@ -176,11 +176,13 @@ fn a_transcript_is_read_as_records_with_what_each_says() {
     let answer = r#"{"type":"assistant","timestamp":"2026-10-11T09:30:04.000Z","message":{"role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":"5555"},{"type":"tool_use","name":"Bash","input":{"command":"ls"}},{"type":"thinking"}]}}"#;
     let result = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","is_error":true,"content":"no such file"}]}}"#;
     let system = r#"{"type":"system","subtype":"turn_duration","durationMs":5}"#;
+    let request =
+        r#"{"type":"api-request-blob","message":{"role":"user","content":"Reply with the sum"}}"#;
     // The line Claude is writing as the transcript is read is not yet a record.
     let torn = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"te"#;
     crate::files::write(
         &config.path().join("projects/-p/s.jsonl"),
-        format!("{user}\n{answer}\n{result}\n{system}\n{torn}"),
+        format!("{user}\n{answer}\n{result}\n{system}\n{request}\n{torn}"),
     )
     .unwrap();
     let entries = record(config.path(), "s");
@@ -198,13 +200,15 @@ fn a_transcript_is_read_as_records_with_what_each_says() {
             ),
             ("user", "tool_result (error) no such file"),
             ("system/turn_duration", ""),
+            // What Claude Code kept of a request it sent is no message of the user's.
+            ("api-request-blob", "Reply with the sum"),
         ]
     );
     assert_eq!(entries[0].at_ms, Some(1_791_711_000_123));
     assert_eq!(entries[3].at_ms, None);
     // The model that answered is the assistant's record's, and no other says one.
     let models: Vec<Option<&str>> = entries.iter().map(|entry| entry.model.as_deref()).collect();
-    assert_eq!(models, [None, Some("claude-haiku-5-5"), None, None]);
+    assert_eq!(models, [None, Some("claude-haiku-5-5"), None, None, None]);
     assert_eq!(entries[0].raw, user);
     assert!(record(config.path(), "none").is_empty());
 }

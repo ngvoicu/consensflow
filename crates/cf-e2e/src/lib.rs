@@ -67,7 +67,8 @@
 //! Devin member's window opened again after a cut, asked to write, edit and run `cf`,
 //! `live_resume_fresh`
 //! a chief closed and resumed, whether it never had a turn or the human's typed
-//! turn was closed on at once, `live_bench` the
+//! turn was closed on at once, `live_reopened` a worker's window opened again
+//! with no task, which reads at rest until it has a turn of its own, `live_bench` the
 //! board between a real chief and real workers, `live_designer` a real Codex
 //! drawing an image, `live_approval` real harnesses in every seat of five
 //! projects sending what the human approves, behind the approval gate, and
@@ -99,6 +100,7 @@
 #![deny(unsafe_code)]
 
 pub mod agents_proof;
+mod bundle;
 pub mod cf;
 pub mod checkout;
 pub mod daemon;
@@ -118,6 +120,7 @@ pub mod rig;
 pub mod rollout;
 pub mod scratch_home;
 pub mod serial;
+pub mod smoke_harness;
 mod stand_in;
 pub mod terminal;
 pub mod wire;

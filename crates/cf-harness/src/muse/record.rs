@@ -56,6 +56,7 @@ mod provisional;
 mod work;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use cf_base::env::Env;
@@ -80,7 +81,7 @@ pub fn reader(session: &str, env: &Env) -> Box<dyn Look + Send> {
     Box::new(TranscriptReader::new(
         Followed::new(
             Box::new(move || transcript(&locating, &env)),
-            Box::new(move || Log::new(Arc::clone(&reading))),
+            Box::new(move |_: &Path| Log::new(Arc::clone(&reading))),
         ),
         format!("muse session log for {session}"),
     ))
@@ -349,6 +350,7 @@ impl Log {
                 at: Some(at.clone()),
                 commentary: false,
                 compaction: false,
+                synthetic: false,
             },
             began: self.reading,
         });

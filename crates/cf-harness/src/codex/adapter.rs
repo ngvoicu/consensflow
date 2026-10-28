@@ -44,8 +44,8 @@ use cf_proto::specs::Variant;
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Window, Work,
+    Adapter, Admission, Agent, FirstMessage, Held, Launch, Observed, Over, Pane, PaneHost,
+    Prepared, Readiness, Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -148,28 +148,26 @@ impl Adapter for CodexAdapter {
                 Some(agent) if !agent.designer => agent,
                 _ => Agent::default(),
             };
-            let message = launch.message.map(window_text);
             let open = if launch.resume.is_none() {
                 window_args::start
             } else {
                 window_args::resume
             };
             // None only for a conversation of an empty id, which no ledger holds.
-            let invocation = open(Harness::Codex, agent, launch.resume, message.as_deref())
+            let invocation = open(Harness::Codex, agent, launch.resume, None)
                 .ok_or_else(|| "a Codex window resumes a thread by its id".to_owned())?;
             // What the record holds before this window exists is the old
-            // process's: a turn it left open, which a window with no message to
-            // begin one is told apart from by what the record holds later. A
-            // window given a message begins its own turn.
+            // process's: a turn it left open, which the window is told apart from
+            // by what the record holds later, until it is delivered a message.
             let left_open = match launch.resume {
-                Some(thread) if launch.message.is_none() => {
+                Some(thread) => {
                     let before = services
                         .records
                         .look(Harness::Codex, thread, &Options::default())
                         .await;
                     LeftOpen::of(&before)
                 }
-                _ => None,
+                None => None,
             };
             let mut args = role;
             if launch.role != "chief" {
@@ -238,6 +236,14 @@ impl Adapter for CodexAdapter {
         true
     }
 
+    /// Through the broker once it names the window's thread, as every later
+    /// message is (`turn/start` to Codex's server): the TUI opened with no prompt
+    /// starts its thread as it comes up, and its own prompt would have gone in by
+    /// the same request.
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Delivered
+    }
+
     fn specmint(&self, variant: Variant) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
@@ -297,7 +303,7 @@ impl CodexWindow {
 
 impl Window for CodexWindow {
     /// The thread is named by the broker, never by the window's process.
-    fn opened(&self, _pane: &Pane, _pid: Option<u32>) {}
+    fn opened(&self, _pid: Option<u32>) {}
 
     fn follow(&self, session: &str) {
         *self.thread.borrow_mut() = Some(session.to_owned());
@@ -400,7 +406,7 @@ impl Window for CodexWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
-                    over: false,
+                    over: Over::No,
                     waiting: None,
                     failed: false,
                     quota: None,
@@ -408,6 +414,7 @@ impl Window for CodexWindow {
                     unnamed: false,
                     took_back: false,
                     at_prompt: false,
+                    shared: false,
                 });
             };
             // The broker's word first, then the record, which is then never

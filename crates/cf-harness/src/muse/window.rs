@@ -3,16 +3,19 @@
 //! Muse names its session itself, and a launch cannot give it one (`--session-id` is
 //! refused in the TUI). The log of the session the window's process opened says which,
 //! about a second in (`runtime.session.route_facts` names the process: [`opened_by`]);
-//! its SessionStart hook says it too, but only at the session's first prompt, which a
-//! window opened with no first message may not have for a long time. A session the
+//! its SessionStart hook says it too, but only at the session's first prompt. No window
+//! opens with a message on its command line, so a fresh window's first prompt comes
+//! only after its first message is pasted, and that only once the window is ready,
+//! which waits for its session: the log naming the process is the one way a fresh
+//! window learns it (Muse 1.4.13 writes it about a second in). A session the
 //! window resumes from inside (`/resume`) is the hook's word, written down at its first
 //! prompt (`session_hook`); one a `/clear` starts is said by its log alone, which names
 //! the session it was started from (`previous_session_stream`), for Muse 1.4.13 runs no
 //! SessionStart hook for it, so ConsensFlow cannot give it its role text. The window is
 //! followed there.
 //!
-//! A resumed window's first message is pasted once its prompt shows, for `muse resume`
-//! takes none. A message is pasted, and Enter sends it; one pasted while a turn works
+//! Every message, the first of a fresh or a resumed window too, is pasted once the
+//! prompt shows (`ready`), and Enter sends it; one pasted while a turn works
 //! goes to that turn (`active_run_delivery`), which its record shows at once, so the
 //! window says nothing more of it (`took`, `held`). An interrupt before the turn's
 //! first word puts the message back in the input box, and its record says so
@@ -38,7 +41,7 @@ use super::paths::{begun_ms, cleared_into, opened_by};
 use super::screen;
 use super::session_hook::last_said;
 use crate::contract::{
-    Admission, Held, Observed, Pane, PaneHost, Readiness, Records, Window, Work,
+    Admission, Held, Observed, Over, Pane, PaneHost, Readiness, Records, Window, Work,
 };
 use crate::records::{Options, Reading};
 use crate::seams::{Services, Time};
@@ -56,8 +59,7 @@ const HOLD: &str = "Muse has not said yet which session its window shows";
 /// What a window whose prompt is not drawn yet is held for.
 const STARTING: &str = "Muse has not shown its prompt yet";
 
-/// How often a window that names no session yet is looked at, and its screen while
-/// its first message waits for the prompt.
+/// How often a window that names no session yet is looked at.
 const LOOK_EVERY: Duration = Duration::from_millis(250);
 
 /// A Muse window, and what the engine told it of itself.
@@ -72,13 +74,9 @@ pub(super) struct MuseWindow {
     said: PathBuf,
     /// When it was launched, in ms since the epoch: no session older is its own.
     launched_ms: i64,
-    /// How long it has to name its session, and to show its prompt for a first
-    /// message pasted once it is up.
+    /// How long a fresh window has to name its session.
     first_message_ms: i64,
-    /// A resumed window's first message, pasted once its prompt shows.
-    first_message: Option<String>,
-    /// Its pane and its process, once the pane opened.
-    pane: RefCell<Option<Pane>>,
+    /// Its process, once its pane opened.
     pid: Cell<Option<u32>>,
     /// The latest look read its turn taken back: the message is in its input box.
     restored: Cell<bool>,
@@ -93,7 +91,6 @@ impl MuseWindow {
         session: Option<&str>,
         said: PathBuf,
         first_message_ms: i64,
-        first_message: Option<String>,
     ) -> Self {
         Self {
             env: services.env.clone(),
@@ -103,8 +100,6 @@ impl MuseWindow {
             said,
             launched_ms: services.time.wall_ms(),
             first_message_ms,
-            first_message,
-            pane: RefCell::default(),
             pid: Cell::default(),
             restored: Cell::new(false),
             read_empty: Cell::default(),
@@ -150,43 +145,6 @@ impl MuseWindow {
         Some((lines, Cursor::of(snapshot.get("cursor"))))
     }
 
-    /// Pastes the first message of a resumed window once its prompt shows: in the time
-    /// it has, the pane host admitting it at the paste. One Muse holds no session for
-    /// (another window has it open) is the launch's failure, in Muse's words.
-    async fn first_paste(&self, host: &dyn PaneHost, text: &str) -> Result<Option<String>, String> {
-        let pane = self
-            .pane
-            .borrow()
-            .clone()
-            .ok_or_else(|| "the Muse window's pane never opened".to_owned())?;
-        let deadline = self.time.wall_ms() + self.first_message_ms;
-        loop {
-            if let Some((lines, _)) = Self::screen(host, &pane).await {
-                if let Some(said) = screen::held_elsewhere(&lines) {
-                    return Err(format!("Muse did not resume the session: {said}"));
-                }
-                if screen::shows_prompt(&lines) {
-                    break;
-                }
-            }
-            if self.time.wall_ms() >= deadline {
-                return Err(
-                    "Muse never showed its prompt for the window's first message".to_owned(),
-                );
-            }
-            self.time.sleep(LOOK_EVERY).await;
-        }
-        let sent = pane::write_paste(host, &pane, &self.body(text), None).await;
-        // A paste the host did not admit went back to its queue: no failure of the launch.
-        if sent.ok || sent.refused {
-            return Ok(None);
-        }
-        Err(format!(
-            "the Muse window's first message may not have gone in: {}",
-            sent.cause.or(sent.error).unwrap_or_default()
-        ))
-    }
-
     /// `text` as the window is given it: Windows' console drops a paste's non-ASCII
     /// marks on their way, as it does Devin's.
     fn body(&self, text: &str) -> String {
@@ -199,8 +157,7 @@ impl MuseWindow {
 }
 
 impl Window for MuseWindow {
-    fn opened(&self, pane: &Pane, pid: Option<u32>) {
-        *self.pane.borrow_mut() = Some(pane.clone());
+    fn opened(&self, pid: Option<u32>) {
         if pid.is_some() {
             self.pid.set(pid);
         }
@@ -210,15 +167,13 @@ impl Window for MuseWindow {
         *self.session.borrow_mut() = Some(session.to_owned());
     }
 
-    /// A window that knows its session pastes the first message it takes once up, if
-    /// it has one; one that does not waits for its process to open one.
-    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    /// A window that knows its session (a resumed one) is started; a fresh one waits
+    /// for the log of the session its process opened, the one way it learns its session
+    /// before its first message is pasted.
+    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
         Box::pin(async move {
             if self.session.borrow().is_some() {
-                return match self.first_message.as_deref() {
-                    Some(text) => self.first_paste(host, text).await,
-                    None => Ok(None),
-                };
+                return Ok(None);
             }
             let deadline = self.time.wall_ms() + self.first_message_ms;
             while self.time.wall_ms() < deadline {
@@ -345,7 +300,7 @@ impl Window for MuseWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
-                    over: false,
+                    over: Over::No,
                     waiting: None,
                     failed: false,
                     quota: None,
@@ -353,6 +308,7 @@ impl Window for MuseWindow {
                     unnamed: false,
                     took_back: false,
                     at_prompt: false,
+                    shared: false,
                 });
             };
             let reading = self

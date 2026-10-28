@@ -1,7 +1,7 @@
 //! What the tree is of the processes there are: the session of a pane, told on a table
 //! written out, and the tree's look at real processes the tests start. What the tree signals, on a machine made up, is in `machine_tests`.
 
-use super::machine_tests::every_process;
+use super::machine_tests::{every_process, STRANGERS};
 use super::testing::{listed, Machine};
 use super::*;
 
@@ -62,9 +62,11 @@ const PARENT: &str = "import subprocess, sys; \
     print(child.pid, flush=True); input()";
 
 /// The incident, replayed on this machine's own table with the signals only recorded: a
-/// selection that names every process there is, and a window of two real processes
-/// among the hundreds that are not its own (the build this test runs in, the shell that
-/// started it, the user's programs). Only the window's two would be signalled.
+/// selection that names every process there is (a close's ask, whose selection takes every
+/// process but the window's for the window's session, and its force, given them all as found
+/// before), and a window of two real processes among the hundreds that are not its own (the
+/// build this test runs in, the shell that started it, the user's programs). Only the
+/// window's two would be signalled.
 #[cfg(target_os = "macos")]
 #[allow(clippy::disallowed_methods)] // A test's own programs.
 #[test]
@@ -88,14 +90,36 @@ fn a_selection_of_every_process_of_this_machine_would_signal_only_the_windows_ow
         .expect("the child's number");
     let child: i32 = line.trim().parse().expect("a process number");
 
-    let machine = Machine::new(native::processes().expect("this machine's processes"));
+    // Every process but the window's two is put in a session nobody leads, which the
+    // selection then takes for the window's: the bound keeps the session the program was
+    // attached with.
+    let strangers: Vec<Process> = native::processes()
+        .expect("this machine's processes")
+        .into_iter()
+        .map(|process| {
+            if [program_pid, child].contains(&process.identity.pid) {
+                process
+            } else {
+                Process {
+                    session: Some(STRANGERS),
+                    ..process
+                }
+            }
+        })
+        .collect();
+    let machine = Machine::new(strangers);
     let table = machine.processes().expect("the table");
+    tree.session = Some(STRANGERS);
     assert!(
         table.len() > 10,
         "the machine has strangers to be told from: {}",
         table.len()
     );
     let wrong = every_process(&table);
+    assert!(
+        tree.select(&table, &HashMap::new()).len() > 10,
+        "the selection names the strangers"
+    );
     let ours = {
         let mut ours = vec![program_pid, child];
         ours.sort_unstable();

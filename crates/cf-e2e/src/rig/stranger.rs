@@ -209,4 +209,37 @@ mod tests {
         );
         assert_eq!(stranger.ended_by_another(), None);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_look_at_how_a_stranger_ended_waits_for_no_pipe_a_process_it_left_holds() {
+        // Calliope on T-504 (T-505, T-438's P3 5): the look polled with `wait(ZERO)`, which
+        // waits once for the error output's end, held open here by a process the stranger
+        // left. A look waits for nothing: it ends before that process does.
+        let mut stranger = Stranger {
+            spawned: Run::new("/bin/sh")
+                .args(["-c", "printf said >&2; sleep 4 & exit 0"])
+                .spawn()
+                .unwrap(),
+            released: false,
+        };
+        let started = std::time::Instant::now();
+        let mut said = None;
+        assert!(
+            wait::until(Duration::from_secs(10), || {
+                said = stranger.ended_by_another();
+                said.is_some()
+            }),
+            "it ended"
+        );
+        assert_eq!(
+            said.as_deref(),
+            Some("before its input ended, with the code 0")
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+    }
 }

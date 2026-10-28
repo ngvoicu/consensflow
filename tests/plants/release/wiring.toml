@@ -105,6 +105,7 @@ find = """
       - run: npm run test:daemons
         env:
           CF_TEST_SHARD: ${{ matrix.shard }}
+          CF_TEST_SHARD_LIMIT_MINUTES: 30
         timeout-minutes: 30
 """
 replace = ""
@@ -120,14 +121,14 @@ find = "      - run: npm run test:clis\n"
 replace = "      - run: npm run test:regressions\n      - run: npm run test:clis\n"
 
 [[plant]]
-name = "wiring: the gate runs two shards of three"
+name = "wiring: the gate runs five shards of six"
 meant = "ci_runs_the_daemons_in_each_shard_of_n_once_on_each_platform"
 runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "shard: ['1/3', '2/3', '3/3']"
-replace = "shard: ['1/3', '2/3']"
+find = "shard: ['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']"
+replace = "shard: ['1/6', '2/6', '3/6', '4/6', '5/6']"
 
 [[plant]]
 name = "wiring: the gate's shards are not named to the suite, which runs whole in each"
@@ -243,3 +244,25 @@ runs = ["xtask-test-scripts"]
 file = "package.json"
 find = '"test:daemon-and-rig": "cargo xtask test daemon-and-rig",'
 replace = '"test:daemon-and-rig": "cargo xtask test daemons",'
+
+# A shard says its time against its step's limit and warns past ci-times' share of it (T-836).
+[[plant]]
+name = "wiring: a shard says no warning however near its limit it is"
+meant = "a_shard_says_its_time_against_its_limit_and_warns_past_the_share"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = "tools/xtask/src/suites/shard.rs"
+find = "    if percent >= u128::from(crate::ci_times::SHARE) {"
+replace = "    if percent >= 100 {"
+
+[[plant]]
+name = "wiring: a shard is told another limit than its step's"
+meant = "the_limit_a_shard_is_told_is_its_steps_timeout"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "          CF_TEST_SHARD_LIMIT_MINUTES: 30\n"
+replace = "          CF_TEST_SHARD_LIMIT_MINUTES: 45\n"
+

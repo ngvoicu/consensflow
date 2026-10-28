@@ -38,7 +38,11 @@
 //! not yet paid. Control-C once clears what is typed, and twice ends the window.
 //! A window with `CF_TEST_ANSWER_MS` set takes that long to write its answer once
 //! its work is done, so that a case can do something while the turn is still open
-//! in the record: quit the app, as a human may at any moment. A turn that runs a
+//! in the record: quit the app, as a human may at any moment. One with
+//! `CF_TEST_REST_MS` set takes that long, once its answer is written, to end its turn
+//! in the record (the stop hooks' summary) and to say it is at rest (its status file
+//! says `busy` until then), so that a case that goes on at the answer, and not at
+//! the rest, is always in the shape a loaded machine made rare. A turn that runs a
 //! command (`RUN`, in `tool`) works until the command ends, and Escape stops it
 //! and, as the line says, the command with it or not. A turn that runs a build
 //! (`BUILD`, in `build`) waits for it as for a command, and the build leaves a
@@ -51,7 +55,12 @@
 //! while idle: the bare command as it is typed, its boundary and its summary, then
 //! the command's own records and what it printed, in the record, and no turn; with
 //! nothing said since the conversation began or was last compacted it compacts
-//! nothing, as 2.1.304 does, and says so as the system's record.
+//! nothing, as 2.1.304 does, and says so as the system's record. `/compact` with words
+//! after it compacts too, the words its instructions, as Claude Code's does. A window
+//! with `CF_TEST_COMPACT_MS` set compacts for that long after its bare command, and an
+//! Escape in that time cancels it as Claude Code 2.1.310 does: the words before a
+//! command, a sibling of the bare command, and no more, and the `/compact` put back in
+//! its input box, where what is pasted next goes after it.
 //!
 //! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set (milliseconds,
 //! or `<member> <milliseconds>` for that member's windows alone) continues by
@@ -124,7 +133,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -281,6 +290,13 @@ fn run(
         }
     }
     let grows = asking && own_var("CF_TEST_RECORD_GROWS_ON_NO").is_some();
+    // A harness whose status says idle from its start, the question on its screen or
+    // not yet drawn: nothing but the screen tells that it asks.
+    if asking && own_var("CF_TEST_TRUST_IDLE_FIRST").is_some() {
+        records
+            .status(pid, "idle")
+            .map_err(|failed| failed.to_string())?;
+    }
     // Its terminal is read from the start, raw, as a TUI reads it: the question
     // before the prompt takes its keys from the same reader.
     let mut keys = Keys::start();
@@ -366,7 +382,9 @@ fn run(
         agents: Agents::default(),
         seeded: launch.seed.is_some(),
         tasks: Tasks::default(),
+        put_back: Arc::new(Mutex::new(None)),
     };
+    let put_back = Arc::clone(&window.put_back);
     // A server the harness starts with its window, before any turn, as an MCP
     // server may be (one that is late begins with the first message instead).
     window.server.as_the_window_opens(&window.jobs)?;
@@ -425,6 +443,14 @@ fn run(
                 }
                 Event::Interrupt => leave(&status_file, 0),
             }
+        }
+        // What a cancelled command put back in the box, as Claude Code puts it back.
+        if let Some(text) = put_back
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            keys.put_back(&text);
         }
         if let Some(shown) = input_box.as_mut() {
             let _ = shown.draw(keys.typed(), say);
@@ -498,12 +524,29 @@ const NOTHING_TO_COMPACT: &str = "There is nothing in the conversation to compac
 const CAVEAT: &str = "<local-command-caveat>The messages below were made by a command the user ran; do not answer them.</local-command-caveat>";
 
 /// One message: the window works on it and is idle again once it is answered
-/// or an Escape stopped it. `/compact` typed alone is no message: the window
-/// compacts its conversation as Claude Code does while idle (`compact`), and runs
-/// no turn (the long run's compaction, which its watch finds in the record).
+/// or an Escape stopped it. `/compact` is no message, alone or with words after it
+/// (its instructions): the window compacts its conversation as Claude Code does
+/// while idle (`compact`), and runs no turn (the long run's compaction, which its
+/// watch finds in the record).
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
-    if text.trim() == COMPACT {
-        return compact(records, pid);
+    if is_compact(text) {
+        // Its time, which an Escape cuts short.
+        let compacting = || {
+            window.stop.begin();
+            let stopped = window
+                .stop
+                .work(wait_of(own_var("CF_TEST_COMPACT_MS").as_deref()));
+            window.stop.end();
+            stopped
+        };
+        if compact(records, pid, text, compacting)? {
+            // Claude Code puts the command back in its input box.
+            *window
+                .put_back
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(text.trim().to_owned());
+        }
+        return Ok(());
     }
     if text == AUTO_CONTINUE_MARK {
         records
@@ -521,23 +564,41 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
     done
 }
 
-/// The conversation compacted while idle, as Claude Code 2.1.303 writes it (the
-/// long run of 2026-10-19, whose chief read at work after it for 80 minutes): busy
-/// while it compacts, with the bare `/compact` written as it is typed; then the
-/// boundary, whose chain starts afresh, the summary, the words before the command,
-/// the command and what it printed, each the child of the one before it, and the
-/// hook that ran as the conversation began again; and idle. A conversation with
-/// nothing said since it began or was last compacted is not compacted
-/// (`nothing_to_compact`).
-fn compact(records: &mut Records, pid: u32) -> Result<(), String> {
+/// Whether `text`, sent, is `/compact`: alone, or with words after it, whatever
+/// follows the command's name (a paste that went in after it in the box).
+fn is_compact(text: &str) -> bool {
+    text.trim().strip_prefix(COMPACT).is_some_and(|rest| {
+        !rest.starts_with(|next: char| next.is_alphanumeric() || next == '-' || next == '_')
+    })
+}
+
+/// The conversation compacted while idle on `typed` (`/compact` and its words), as
+/// Claude Code 2.1.303 writes it (the long run of 2026-10-19, whose chief read at work
+/// after it for 80 minutes): busy while it compacts, with the bare command written as
+/// it is typed; then the boundary, whose chain starts afresh, the summary, the words
+/// before the command, the command and what it printed, each the child of the one
+/// before it, and the hook that ran as the conversation began again; and idle. A
+/// conversation with nothing said since it began or was last compacted is not
+/// compacted (`nothing_to_compact`). `compacting` is its time, and says whether an
+/// Escape cut it short, which cancels it (`cancelled`): whether it was.
+fn compact(
+    records: &mut Records,
+    pid: u32,
+    typed: &str,
+    compacting: impl FnOnce() -> bool,
+) -> Result<bool, String> {
     if !records.said() {
-        return nothing_to_compact(records, pid);
+        return nothing_to_compact(records, pid).map(|()| false);
     }
     let failed = |cause: io::Error| cause.to_string();
     records.status(pid, "busy").map_err(failed)?;
+    let parent = records.last_uuid(pid);
     records
-        .append(pid, user(COMPACT, json!({})))
+        .append(pid, user(typed.trim(), json!({ "parentUuid": parent })))
         .map_err(failed)?;
+    if compacting() {
+        return cancelled(records, pid, &parent).map(|()| true);
+    }
     let boundary = json!({
         "type": "system", "subtype": "compact_boundary", "isSidechain": false,
         "parentUuid": null, "logicalParentUuid": records.last_uuid(pid),
@@ -567,6 +628,21 @@ fn compact(records: &mut Records, pid: u32) -> Result<(), String> {
         records.append(pid, record).map_err(failed)?;
     }
     records.compacted();
+    records.status(pid, "idle").map_err(failed).map(|()| false)
+}
+
+/// A compaction cancelled with Escape, as Claude Code 2.1.310 writes it (`cargo xtask
+/// live commands-at-rest`, `cancelled`): after the bare command, the words before a
+/// command alone, a sibling of it (`parent` its parent), no boundary and no more. Claude
+/// Code puts the command back in its input box (`take_turn`).
+fn cancelled(records: &mut Records, pid: u32, parent: &str) -> Result<(), String> {
+    let failed = |cause: io::Error| cause.to_string();
+    records
+        .append(
+            pid,
+            user(CAVEAT, json!({ "isMeta": true, "parentUuid": parent })),
+        )
+        .map_err(failed)?;
     records.status(pid, "idle").map_err(failed)
 }
 
@@ -743,6 +819,9 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     }),
                 )
                 .map_err(failed)?;
+            // The answer is in the record, and the turn is not yet ended in it, nor the
+            // window at rest.
+            wait_as_told("CF_TEST_REST_MS");
             records
                 .append(
                     pid,
@@ -865,6 +944,23 @@ mod tests {
     }
 
     #[test]
+    fn a_first_message_given_as_an_argument_is_no_paste_and_keeps_the_path_of_an_image_in_it() {
+        // Claude Code 2.1.308 makes no attachment of the first message of a launch given as an
+        // argument of the program (the probe of 2026-10-22, T-265): a window the kit seeds so
+        // (`Open::seed`) keeps it as it was. ConsensFlow's windows are handed their brief once up,
+        // as a paste (T-432), whose pictures are attached (T-681).
+        let folder = tempfile::tempdir().unwrap();
+        let picture = folder.path().join("reference.png");
+        std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
+        let brief = format!("Reply with exactly: DONE\n{}", picture.display());
+        let seeded = recorded(&brief, true);
+        assert_eq!(seeded.len(), 1, "{seeded:?}");
+        assert_eq!(seeded[0]["message"]["content"], brief.as_str());
+        let pasted = recorded(&brief, false);
+        assert!(pasted[0].to_string().contains("[Image #1]"), "{pasted:?}");
+    }
+
+    #[test]
     fn a_notification_that_names_a_picture_is_written_as_a_notification_and_no_paste_attaches_it() {
         // Alpha.3 merged the notification's records (turn-end) with the images a paste is
         // made into (T-215): a notification is a turn Claude Code begins by itself, so
@@ -957,7 +1053,7 @@ mod tests {
         let config = tempfile::tempdir().unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         told(&mut records);
-        compact(&mut records, 7).unwrap();
+        compact(&mut records, 7, COMPACT, || false).unwrap();
         let written = written_from(config.path(), 1);
         assert_eq!(
             written.iter().map(shape).collect::<Vec<_>>(),
@@ -992,6 +1088,52 @@ mod tests {
     }
 
     #[test]
+    fn a_compaction_cancelled_writes_the_words_before_a_command_beside_the_bare_command_and_no_more(
+    ) {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        told(&mut records);
+        let before = records.last_uuid(7);
+        assert!(compact(&mut records, 7, "/compact", || true).unwrap());
+        let written = written_from(config.path(), 1);
+        assert_eq!(
+            written.iter().map(shape).collect::<Vec<_>>(),
+            ["user /compact", "user <local-command-caveat"]
+        );
+        // Siblings: the bare command and the words have the same parent.
+        assert_eq!(written[0]["parentUuid"], json!(before));
+        assert_eq!(written[1]["parentUuid"], json!(before));
+        assert_eq!(written[1]["isMeta"], true);
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(records.status_file()).unwrap()).unwrap();
+        assert_eq!(status["status"], "idle");
+        // Nothing was compacted: a `/compact` with instructions compacts what was said.
+        assert!(!compact(&mut records, 7, "/compact keep the plan", || false).unwrap());
+        let compacted = written_from(config.path(), 3);
+        assert_eq!(shape(&compacted[0]), "user /compact keep the plan");
+        assert_eq!(
+            shape(&compacted[1]),
+            "compact_boundary Conversation compacted"
+        );
+        for typed in [
+            "/compact",
+            " /compact\n",
+            "/compact keep it",
+            "/compact\nand this",
+            "/compact[ConsensFlow m-1 · T-1 · result from @worker]",
+        ] {
+            assert!(is_compact(typed), "{typed:?}");
+        }
+        for not in [
+            "/compacted",
+            "please /compact",
+            "[ConsensFlow m-1] /compact",
+        ] {
+            assert!(!is_compact(not), "{not:?}");
+        }
+    }
+
+    #[test]
     fn a_compaction_with_nothing_said_since_the_last_writes_what_claude_2_1_304_does_and_no_turn() {
         let config = tempfile::tempdir().unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
@@ -1001,7 +1143,7 @@ mod tests {
             "local_command <local-command-stdout",
         ];
         // A conversation with nothing said in it.
-        compact(&mut records, 7).unwrap();
+        compact(&mut records, 7, COMPACT, || false).unwrap();
         let written = written_from(config.path(), 0);
         assert_eq!(written.iter().map(shape).collect::<Vec<_>>(), refused);
         assert!(written.iter().all(|record| record["isSidechain"] == false));
@@ -1021,11 +1163,11 @@ mod tests {
         assert_eq!(status["status"], "idle");
         // Something said is compacted; a /compact right after that finds nothing again.
         told(&mut records);
-        compact(&mut records, 7).unwrap();
+        compact(&mut records, 7, COMPACT, || false).unwrap();
         let compacted = written_from(config.path(), 4);
         assert_eq!(shape(&compacted[0]), "user /compact");
         assert_eq!(compacted.len(), 7);
-        compact(&mut records, 7).unwrap();
+        compact(&mut records, 7, COMPACT, || false).unwrap();
         let again = written_from(config.path(), 11);
         assert_eq!(again.iter().map(shape).collect::<Vec<_>>(), refused);
         // A conversation the window is resumed on has what was said in it.

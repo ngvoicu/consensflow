@@ -51,7 +51,8 @@
 //! and leaves out the rest. Either way the window goes on. Its keys are written down as
 //! the question's are; with `CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY` set it ignores the
 //! first key it is given, and with `CF_TEST_TRUST_SERVER_REFUSES` an Enter leaves every
-//! server out, whatever the cursor is on.
+//! server out, whatever the cursor is on. With `CF_TEST_TRUST_IDLE_FIRST` set its status says idle from its
+//! start, before the question, so that only the screen tells that it asks.
 
 use std::fs;
 use std::io::{self, Write};
@@ -178,10 +179,21 @@ fn repository_of(folder: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// Whether `root` is one of the folders trusted under `config`.
+/// Whether `root` is one of the folders trusted under `config`: the same folder, however
+/// each is spelled (a link on the way, or on Windows a short name such as the
+/// `C:\Users\RUNNER~1` of GitHub's runner, or another case).
 fn trusted(config: &Path, root: &Path) -> bool {
-    fs::read_to_string(config.join(TRUSTED))
-        .is_ok_and(|text| text.lines().any(|line| Path::new(line) == root))
+    let root = as_the_system_names(root);
+    fs::read_to_string(config.join(TRUSTED)).is_ok_and(|text| {
+        text.lines()
+            .any(|line| as_the_system_names(Path::new(line)) == root)
+    })
+}
+
+/// `folder` as the system names it, its links followed and its names whole; as it is
+/// written where it is not there.
+fn as_the_system_names(folder: &Path) -> PathBuf {
+    fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
 }
 
 /// The question's no, and what it says of the grants it would leave out, where it is
@@ -567,6 +579,35 @@ mod tests {
         let mut lines: Vec<&str> = written.lines().collect();
         lines.sort_unstable();
         assert_eq!(lines, ["/work/first", "/work/second"], "{written:?}");
+    }
+
+    /// A folder trusted under one spelling is trusted under another of the same folder:
+    /// the rig writes a folder as the system names it, and a window's working folder is
+    /// the folder as it was given (main's Windows CI, 2026-10-27: GitHub's runner names
+    /// its temp folder `C:\Users\RUNNER~1\…`, and two windows asked of a repository
+    /// trusted before as `C:\Users\runneradmin\…`). Here the other spelling is a link to
+    /// it, or on Windows its name in capitals.
+    #[test]
+    fn a_folder_trusted_under_one_spelling_is_trusted_under_another() {
+        let config = tempfile::tempdir().unwrap();
+        let place = tempfile::tempdir().unwrap();
+        let folder = place.path().join("a-repository");
+        fs::create_dir(&folder).unwrap();
+        #[cfg(unix)]
+        let other = {
+            let link = place.path().join("a-link");
+            std::os::unix::fs::symlink(&folder, &link).unwrap();
+            link
+        };
+        #[cfg(windows)]
+        let other = PathBuf::from(folder.to_string_lossy().to_uppercase());
+        assert_ne!(other, folder);
+        append(config.path(), TRUSTED, &folder.display().to_string()).unwrap();
+        assert!(trusted(config.path(), &other), "{other:?} is {folder:?}");
+        assert!(
+            !trusted(config.path(), place.path()),
+            "{place:?} was never trusted"
+        );
     }
 
     #[test]

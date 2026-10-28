@@ -13,6 +13,19 @@
 # - a stop does not wait for the error stream of a child that has exited, on any platform
 #   (`crates/cf-harness/src/shared/child.rs`, the unit tests on its `Recording` fake).
 #
+# - main's Windows CI after integration B (T-838, 2026-10-27), two cases that no load made:
+#   - the panes' key tests ran on the system's console host, as the workspace job put the one the
+#     app ships nowhere the tests look, and read a mark typed as text as the Alt key carrying it
+#     (key 18): the key tests ask for the shipped host (`crates/cf-panes/src/pty/keys.rs`, the
+#     loaded library `pty::conpty::host_library` names), and CI puts it beside the build
+#     (`suites::tests` holds ci.yml to it);
+#   - two trust cases waited for a note of a server while their window asked of its folder: the
+#     runner names its temp folder short (`C:\Users\RUNNER~1`), and the stand-in compared the
+#     folder trusted before, written whole, by its spelling (`crates/cf-e2e/src/bin/fake_agent/trust.rs`).
+#
+# A plant whose name says `(Windows: zeewin)` is of code only Windows compiles: a Mac runs no test
+# of it and reads it MISSED. Run it there, through the Windows runner.
+#
 # Every name holds `ci flakes`, so `npm run plants:daemon -- "ci flakes"` runs them all.
 
 [run]
@@ -24,6 +37,9 @@ daemon-lib-stop-stall = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib
 stop-program = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", "a_program_the_daemon_is_waiting_for"]
 stop-busy = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", "a_busy_daemon_is_stopped"]
 daemon-lib-stop-open = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::a_pass_that_never_ends"]
+stand-in-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "trust::"]
+xtask-suites-ci = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "--", "suites::tests::ci_puts"]
+panes-keys = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::"]
 
 [[plant]]
 name = "ci flakes: a server's stop waits for its error stream to close"
@@ -249,3 +265,41 @@ runs = ["daemon-lib-stop-open"]
 file = "crates/cf-daemon/src/stop.rs"
 find = "pub const DEADLINE: Duration = Duration::from_secs(1);"
 replace = "pub const DEADLINE: Duration = Duration::from_millis(300);"
+
+[[plant]]
+name = "ci flakes: the stand-in takes a folder trusted before for another when it is spelled otherwise (main's Windows CI, 2026-10-27)"
+meant = "a_folder_trusted_under_one_spelling_is_trusted_under_another"
+runs = ["stand-in-trust"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/trust.rs"
+find = "            .any(|line| as_the_system_names(Path::new(line)) == root)"
+replace = "            .any(|line| Path::new(line) == root)"
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/trust.rs"
+find = "    let root = as_the_system_names(root);\n"
+replace = "    let root = root.to_path_buf();\n"
+
+[[plant]]
+name = "ci flakes: CI runs the workspace's tests on Windows with no console host of the app's beside them (main's Windows CI, 2026-10-27)"
+meant = "ci_puts_the_console_host_the_app_ships_beside_the_workspace_tests_on_windows"
+runs = ["xtask-suites-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - if: runner.os == 'Windows'
+        run: cargo xtask conpty --into app/src-tauri/target/debug
+'''
+replace = ""
+
+[[plant]]
+name = "ci flakes (Windows: zeewin): the panes open their consoles with the system's host, whatever conpty.dll is beside them"
+meant = "a_mark_reaches_a_program_that_reads_key_events_as_itself_written_as_text_or_as_a_key"
+runs = ["panes-keys"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = '''Self::load("conpty.dll").or_else(|| Self::load("kernel32.dll"))'''
+replace = '''Self::load("kernel32.dll")'''

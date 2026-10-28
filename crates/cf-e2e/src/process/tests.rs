@@ -168,12 +168,13 @@ fn a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output_whe
     // The daemon's refused second start ended with 1, its sentence on the pipe, and a case
     // that read its error output the moment it was gone found none (2026-10-23). Here the
     // first program ends before the sentence is all in: the second says it a moment later.
-    let mut program = Run::new(std::env::current_exe().unwrap())
-        .args(["--exact", SETTLE_PROGRAMS, "--nocapture"])
+    // The case starts one program that writes a line after 300 ms: a verb of cf's time.
+    let mut program = super::case_of(std::env::current_exe().unwrap(), SETTLE_PROGRAMS, LIMIT)
+        .arg("--nocapture")
         .var(SETTLE, "first")
         .spawn()
         .unwrap();
-    let status = program.wait(Duration::from_secs(30)).unwrap();
+    let status = program.wait(LIMIT).unwrap();
     assert_eq!(status.and_then(|status| status.code()), Some(0));
     assert!(
         program.errors().contains("cf: it is refused\n"),
@@ -345,6 +346,9 @@ mod shell {
         program.end_input();
         let status = program.wait(Duration::from_secs(10)).unwrap();
         assert_eq!(status.and_then(|status| status.code()), Some(0));
+        // What it wrote is read on a thread of its own, which may not have run yet when the
+        // program has ended: the wait has waited for it to the end of the stream (T-643, on
+        // merge-flakes' settle).
         assert_eq!(program.errors(), "queued twice");
     }
 

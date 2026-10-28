@@ -55,6 +55,9 @@ impl Role {
     }
 }
 
+/// What a request no answer came to by its deadline is answered with, in `error`.
+pub const DEADLINE: &str = "deadline";
+
 /// The answer to a frame too large to carry, in or out.
 pub fn too_large_body() -> Value {
     json!({ "ok": false, "error": "too-large" })

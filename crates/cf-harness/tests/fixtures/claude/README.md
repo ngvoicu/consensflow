@@ -142,4 +142,45 @@ user's and the assistant's words stay as written:
   result names it (`task_id`, `task_type: local_bash`, `message: Successfully stopped
   task: …`), and no notification follows.
 
+Kept 2026-10-26 by `cargo xtask live compact-cancelled --case alone --keep` (Claude Code
+2.1.310, on Sonnet, the chief of a project on the native daemon), its chief's transcript
+scrubbed with `cargo xtask scrub-transcript`, which since T-483 keeps of each request Claude
+Code kept (`api-request`, `api-request-shape`, `api-request-blob`) only its type and session.
+The first 32 records, cut after the cancel (the rest is the worker's result, pasted after it,
+and the chief's answer):
+
+- `compact-cancelled.jsonl` — 3.0.6's item 6b. A message (`Reply with exactly one line:
+  READY`), answered; `/compact` typed as the human types it, and Escape a second later.
+  Claude writes the bare `/compact` and, at the Escape, the words before a command
+  (`<local-command-caveat>`, `isMeta`), a sibling of the bare command (the same
+  `parentUuid`), then a `file-history-snapshot` and nothing more: no boundary, no summary,
+  no command; its status reads idle, and the `/compact` is back in its input box.
+
 A new Claude version that writes these otherwise is a new fixture, not an edit.
+
+Made 2026-10-27 from two field records, not live runs (T-814), by a script that kept
+each record's type, subtype, origin, timestamps, uuids, parent links, queue
+operations, tool ids and background job ids, and gave every word of the user's, the
+assistant's, a tool's, a notification's summary and a compaction's summary made-up
+words of the same kind (the ConsensFlow headers keep their shape, as `m-12 · T-3`);
+the tool inputs keep only a Bash call's background flag. The records Claude Code keeps
+for itself alone (file history, API requests, titles, costs) are left out, and the
+result was scrubbed with `cargo xtask scrub-transcript`:
+
+- `closed-at-rest-with-a-job.jsonl` — poker-lab's chief, ConsensFlow 3.0.4, Claude
+  Code 2.1.301, 2026-10-15 (lines 30935–31090 of 37,814). Its turn ended at 20:41:51
+  with its answer; the background command it had started (`b9t1yyguj`) ran on; at
+  20:43:43 Claude Code queued and took the job's `killed` notification and began no
+  turn; the human closed the project at 20:44:36 and resumed it at 20:44:38, and the
+  Resume told the chief its turn was cut (m-2072). The resumed process's records follow:
+  its notice of the job the previous process left (`stopped`, written to the transcript
+  alone) and the Resume's note taken from the queue (an `enqueue` with no content),
+  up to before the note's own record.
+- `closed-at-rest-after-a-compaction.jsonl` — the sites chief, Claude Code 2.1.306, 2026-10-23: the start
+  of its background command (`b8bkfw7mc`, lines 100–125, 2026-10-21) and lines
+  12800–12866 of 12,866: its answer at 10:26:31, an idle compaction at 11:21:11 (with
+  the job still running), the Close at 19:11:37 (its `killed` notification queued and
+  taken as the program ended), and the resumed process's notice of the job and its
+  take of the Resume's note (m-3522), which it never began: the project closed again
+  at 19:11:40.
+

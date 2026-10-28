@@ -34,7 +34,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -95,7 +95,7 @@ impl Subject {
     }
 
     fn transcript(&self) -> Transcript {
-        Transcript::new(Arc::from(self.session.as_str()), local(), 0)
+        Transcript::new(Arc::from(self.session.as_str()), local(), None)
     }
 
     /// A transcript followed from look to look.
@@ -103,7 +103,7 @@ impl Subject {
         let (file, session) = (self.file.clone(), self.session.clone());
         Followed::new(
             Box::new(move || Ok(Some(file.clone()))),
-            Box::new(move || Transcript::new(Arc::from(session.as_str()), local(), 0)),
+            Box::new(move |_: &Path| Transcript::new(Arc::from(session.as_str()), local(), None)),
         )
     }
 

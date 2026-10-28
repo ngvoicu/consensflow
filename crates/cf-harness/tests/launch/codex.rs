@@ -272,7 +272,7 @@ fn pane() -> Pane {
 }
 
 #[test]
-fn runs_codex_under_its_supervisor_in_full_permission_mode_with_the_task_last() {
+fn runs_codex_under_its_supervisor_in_full_permission_mode_its_task_on_no_command_line() {
     let home = Home::new();
     let (adapter, fakes) = adapter(&home);
     let plan = prepare(&adapter, &Request::default()).unwrap();
@@ -308,9 +308,11 @@ fn runs_codex_under_its_supervisor_in_full_permission_mode_with_the_task_last() 
         "-c",
         "model_reasoning_effort=\"low\"",
         "--dangerously-bypass-approvals-and-sandbox",
-        TASK,
     ]));
+    // Its task goes in through the broker once the window is up
+    // (`FirstMessage::Delivered`): every process on the machine reads a command line.
     assert_eq!(without_role(&plan.argv), expected);
+    assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
     let [(name, bridge)] = &plan.env[..] else {
         panic!("{:?}", plan.env);
     };
@@ -430,7 +432,6 @@ fn opens_an_image_agent_s_window_on_codex_s_own_model_whose_image_tool_draws_no_
             "-c",
             "allow_login_shell=false",
             "--dangerously-bypass-approvals-and-sandbox",
-            TASK,
         ]
     );
     let resumed = Request {

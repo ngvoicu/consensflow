@@ -5,12 +5,13 @@
 //! resumed the chief at the start and paused what its windows were at, and its
 //! Resume after a Close resumed no task, so none of these is held to a Node trace.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted, TRUST_QUESTION};
 use cf_engine::{ActivityState, SwitchWhen};
-use cf_harness::contract::Readiness;
-use cf_ledger::{MessageView, NewNote, RESUME_WORDS};
+use cf_harness::contract::{Pane, Readiness};
+use cf_ledger::{continuation_tasks, MessageView, NewNote, RESUME_WORDS};
 use serde_json::{json, Value};
 
 use crate::chiefs::{to, to_human, with_codex};
@@ -23,6 +24,8 @@ const WORKER_CUT: &str =
     "ConsensFlow stopped while you were working on T-1. Go on where you stopped.";
 const CHIEF_CUT: &str =
     "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped.";
+/// How the chief's note begins, whether or not it names the turn.
+const CHIEF_CUT_BEGINS: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
 
 /// Zeus and diana at work, each on a task of its own, their windows in the middle
 /// of a turn: the app quits now.
@@ -80,7 +83,7 @@ pub(crate) fn cut_notes(context: &Context, to: i64) -> Vec<MessageView> {
                 && (message
                     .body
                     .starts_with("ConsensFlow stopped while you were working on T-")
-                    || message.body == CHIEF_CUT)
+                    || message.body.starts_with(CHIEF_CUT_BEGINS))
         })
         .collect();
     notes.reverse();
@@ -684,6 +687,66 @@ fn a_window_that_asks_and_ends_by_itself_while_the_close_looks_at_its_screen_and
     );
 }
 
+/// Calliope's re-check of T-504 (T-505, P3-1): the same, with the Close's look at the
+/// screen held for many times the bound a pass waits for its steps (`STEP_WAIT`), and
+/// passes made meanwhile. The Close holds the window's record all that while: no pass
+/// looks at the window, and the exit that comes during the look is still the window's
+/// own once the kill fails.
+#[test]
+fn a_window_that_asks_and_ends_by_itself_while_the_close_looks_past_a_passs_bound_and_whose_kill_fails_leaves_its_task_paused(
+) {
+    let context = Context::new();
+    context.adapter.asks_to_trust("/work/repository", false);
+    context
+        .host
+        .set_snapshot(json!({ "tail": [TRUST_QUESTION] }));
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = context.host.last("zeus").expect("its window").pane;
+    let id = zeus.id.clone();
+    let looking = context
+        .host
+        .request_holds
+        .hold(move |args| args[0] == "pane.snapshot" && args[1]["id"] == id.as_str());
+    let looks = |handle: &str| {
+        let launch = context.adapter.agent(handle).launch;
+        context
+            .recorder
+            .calls("adapter:claude-code", &["observe"])
+            .iter()
+            .filter(|(_, args)| args[0]["launch"]["launchId"] == launch.as_str())
+            .count()
+    };
+    let closing = context.begin_close_project(project);
+    context.settle();
+    let before = looks("zeus");
+    let bound = i64::try_from(cf_engine::steps::STEP_WAIT.as_millis()).unwrap();
+    for _ in 0..4 {
+        context.advance(2 * bound);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        looks("zeus"),
+        before,
+        "no pass looks at the window the Close holds"
+    );
+    // Zeus's harness crashes while the Close still looks at its screen; then its kill fails.
+    context.exit("zeus");
+    context.host.refuse_kills.set(true);
+    looking.open();
+    let refused = context.finish(closing).unwrap_err();
+    assert_match(&refused.to_string(), "would not close");
+    context.host.refuse_kills.set(false);
+
+    context.resume_project(project).unwrap();
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"],
+        "a window that closed by itself is the chief's to resume"
+    );
+}
+
 /// Sol's review of 2026-10-16: a Close that could not close the chief's window
 /// leaves it open while the project is closed, and a pass that stepped it gave it
 /// the note that the work is paused, which then reached it after the Resume had the
@@ -1144,7 +1207,7 @@ fn a_window_the_quit_cut_mid_turn_is_told_so_once_and_one_at_rest_is_told_nothin
 }
 
 #[test]
-fn a_cut_note_an_earlier_build_left_queued_in_its_words_is_the_one_the_window_is_given() {
+fn a_cut_note_an_earlier_build_left_queued_in_its_words_gives_way_to_one_in_this_build_s() {
     let context = Context::new();
     let tiers = at_work(&context);
     let project = tiers.project.id;
@@ -1158,19 +1221,136 @@ fn a_cut_note_an_earlier_build_left_queued_in_its_words_is_the_one_the_window_is
 
     after.resume_project(project).unwrap();
 
+    // Its record still reads the turn cut: it is told once, in the words of now.
+    assert_eq!(context.message(earlier.id).state, "cancelled");
+    let notes = cut_notes(&context, tiers.id("zeus-amber-pine"));
+    assert_eq!(notes.len(), 1, "{notes:?}");
     assert_match(
         launch_of(&context, "zeus-amber-pine")["message"]
             .as_str()
             .unwrap(),
         &format!(
-            r"^\[ConsensFlow m-{} · note from ConsensFlow\]\nConsensFlow quit while",
-            earlier.id
+            r"^\[ConsensFlow m-{} · T-1 · note from ConsensFlow\]\n{WORKER_CUT}$",
+            notes[0].id
         ),
     );
+}
+
+/// The sites chief, 2026-10-23 (T-814): the Resume told it its turn was cut, the human
+/// closed the project again a second later, and the note waited, queued, to be typed in
+/// at the next Resume, days later and whatever the record said by then.
+#[test]
+fn a_cut_note_an_earlier_resume_left_queued_is_withdrawn_where_the_record_now_reads_at_rest() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.note(project.id, "human", "chief", "Run the tests");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = context.id(project.id, "chief");
+    let after = quit_and_start(&context);
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(|_| Err("no window".to_owned())));
+    after.resume_project(project.id).unwrap();
+    let earlier = cut_notes(&context, chief);
+    assert_eq!(earlier.len(), 1);
+    assert_eq!(earlier[0].state, "queued");
+
+    // By the next Resume the record reads the window at rest.
+    context.adapter.answer("chief", "Tests pass.");
+    *context.adapter.prepare.borrow_mut() = None;
+    after.resume_project(project.id).unwrap();
+
+    assert_eq!(context.message(earlier[0].id).state, "cancelled");
+    assert_eq!(cut_notes(&context, chief).len(), 1, "none written anew");
+    assert_eq!(launch_of(&context, "chief")["message"], Value::Null);
+    after.pass().unwrap();
+    after.pass().unwrap();
     assert!(
-        cut_notes(&context, tiers.id("zeus-amber-pine")).is_empty(),
-        "no note in the new words: it is told once"
+        given(&context, "chief")
+            .iter()
+            .all(|text| !text.contains(CHIEF_CUT_BEGINS)),
+        "never given"
     );
+}
+
+#[test]
+fn a_continuation_an_earlier_resume_left_queued_is_withdrawn_where_the_record_now_reads_at_rest() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let after = quit_and_start(&context);
+    // An earlier Resume told zeus to go on, and the project closed again before the window
+    // came; zeus's record reads at rest now.
+    let earlier = context.note_from_consensflow(project, "zeus-amber-pine", WORKER_CUT);
+    context.adapter.answer("zeus", "Lexer written.");
+
+    after.resume_project(project).unwrap();
+
+    assert_eq!(context.message(earlier.id).state, "cancelled");
+    assert_eq!(
+        launch_of(&context, "zeus-amber-pine")["message"],
+        Value::Null
+    );
+}
+
+#[test]
+fn a_cut_note_names_the_turn_by_when_its_message_came_and_its_first_words() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.adapter.busy("chief");
+    context
+        .adapter
+        .turn_began_with("chief", Some("2026-10-15 20:41 UTC"), "Run the tests");
+    context.adapter.turn_began_with(
+        "zeus",
+        None,
+        "[ConsensFlow m-3 · T-1 · task from @chief] Write the parser",
+    );
+    let after = quit_and_start(&context);
+
+    after.resume_project(project).unwrap();
+
+    assert_match(
+        launch_of(&context, "chief")["message"].as_str().unwrap(),
+        &format!(
+            "^\\[ConsensFlow m-\\d+ · note from ConsensFlow\\]\n{CHIEF_CUT_BEGINS}: the turn that began at 2026-10-15 20:41 UTC with \"Run the tests\"\\. Go on where you stopped\\.$"
+        ),
+    );
+    let zeus = launch_of(&context, "zeus-amber-pine");
+    assert_eq!(
+        zeus["message"].as_str().unwrap().split_once('\n').unwrap().1,
+        "ConsensFlow stopped while you were working on T-1, in the turn that began with \"[ConsensFlow m-3 · T-1 · task from @chief] Write the parser\". Go on where you stopped."
+    );
+    // The ledger knows it for zeus's continuation of T-1, which goes with any move of it.
+    let note = cut_notes(&context, tiers.id("zeus-amber-pine")).remove(0);
+    assert_eq!(continuation_tasks(&note.body), Some(vec![1]));
+}
+
+#[test]
+fn a_cut_note_that_names_its_turn_and_still_holds_is_told_once_across_resumes() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.note(project.id, "human", "chief", "Run the tests");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .adapter
+        .turn_began_with("chief", Some("2026-10-15 20:41 UTC"), "Run the tests");
+    let chief = context.id(project.id, "chief");
+    let after = quit_and_start(&context);
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(|_| Err("no window".to_owned())));
+    after.resume_project(project.id).unwrap();
+    let earlier = cut_notes(&context, chief);
+    assert_eq!(earlier.len(), 1);
+
+    *context.adapter.prepare.borrow_mut() = None;
+    after.resume_project(project.id).unwrap();
+
+    let notes = cut_notes(&context, chief);
+    assert_eq!(notes.len(), 1, "told once: {notes:?}");
+    assert_eq!(notes[0].id, earlier[0].id);
 }
 
 /// Found live on 2026-10-12 with Devin as the worker: its record, read with no window
@@ -2888,5 +3068,131 @@ fn a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resu
             .count(),
         1,
         "{given:?}"
+    );
+}
+
+/// A window's generation and the gates of its kills, held one by one.
+type HeldKills = (u64, Vec<Gate>);
+
+/// A member opened again at the Resume whose window never comes up, its kills held one
+/// by one as `refused` says ([`FakeHost::hold_kills`]) and its exits held, the first
+/// kill, the give-up's, not answered in its wait: the launch goes on without the exit.
+/// The staff, the engine started again, the member's handle, its window and the gates
+/// of its kills.
+fn given_up_with_its_kill_unanswered<'a>(
+    context: &'a Context,
+    refused: &[bool],
+) -> (Tiers<'a>, Restarted<'a>, String, Pane, Vec<Gate>) {
+    let tiers = Tiers::new(context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    let after = quit_and_start(context);
+    context.advance(1_000);
+    context.host.hold_exits.set(true);
+    // Each window's kills are held once, as the first launch that sees it starts: the
+    // adapter's start is asked of every launch, the chief's too.
+    let gates: Rc<RefCell<Vec<HeldKills>>> = Rc::default();
+    let (host, handle, held, refused) = (
+        Rc::clone(&context.host),
+        session.clone(),
+        Rc::clone(&gates),
+        refused.to_vec(),
+    );
+    *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
+        let window = host.last(&handle).expect("its window").pane;
+        let mut held = held.borrow_mut();
+        if !held
+            .iter()
+            .any(|(generation, _)| *generation == window.generation)
+        {
+            held.push((window.generation, host.hold_kills(&window, &refused)));
+        }
+        Err(NEVER_NAMED.to_owned())
+    }));
+    after.resume_project(project).unwrap();
+    after.pass().unwrap();
+    assert!(context.timers.fire_next(), "the kill's wait ends");
+    context.settle();
+    assert_eq!(tiers.task(1).task.state, "working", "no exit has paused it");
+    *context.adapter.started.borrow_mut() = None;
+    let window = context.host.last(&session).unwrap().pane;
+    let gates = gates
+        .borrow()
+        .iter()
+        .find(|(generation, _)| *generation == window.generation)
+        .map(|(_, gates)| gates.clone())
+        .expect("its kills held");
+    (tiers, after, session, window, gates)
+}
+
+/// Rule 4's case, the Close's kill of the window answered first and taken: the exit is
+/// the Close's, and T-1's pause its. The give-up's kill of the same window, refused
+/// after, is no answer of the Close's: the human's Resume brings T-1 back (Calliope's
+/// P3-3 of T-510: each kill of the window kept an entry, the Close's answer took the
+/// give-up's and the exit marked the Close's, and the refusal took the mark back).
+#[test]
+fn a_give_up_whose_kill_is_refused_after_the_closes_kill_of_its_window_was_taken_leaves_the_pause_the_closes(
+) {
+    let context = Context::new();
+    let (tiers, after, _, _, gates) = given_up_with_its_kill_unanswered(&context, &[true, false]);
+    let project = tiers.project.id;
+    let closing = after.begin_close_project(project);
+    context.settle();
+    gates[1].open();
+    context.finish(closing).unwrap();
+    assert_eq!(context.project(project).state, "suspended");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    gates[0].open();
+    context.settle();
+
+    context.host.hold_exits.set(false);
+    after.resume_project(project).unwrap();
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "the Close's pause, which its Resume ends"
+    );
+}
+
+/// The same, the give-up's kill refused only after the human's Resume and a second
+/// Close: the first Close's pause is over, and the second Close's, of the window the
+/// Resume opened, is no pause the earlier kill can take back (Calliope's P3-2 of T-510:
+/// the refusal took back whatever mark the task held then, the second Close's too).
+#[test]
+fn a_give_up_whose_kill_is_refused_after_a_resume_and_a_second_close_leaves_the_second_closes_pause(
+) {
+    let context = Context::new();
+    let (tiers, after, session, first, gates) =
+        given_up_with_its_kill_unanswered(&context, &[true, false]);
+    let project = tiers.project.id;
+    let closing = after.begin_close_project(project);
+    context.settle();
+    gates[1].open();
+    context.finish(closing).unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+
+    context.host.hold_exits.set(false);
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_ne!(context.host.last(&session).unwrap().pane, first);
+    after.begin_close_project(project);
+    context.settle();
+    assert_eq!(context.project(project).state, "suspended");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    gates[0].open();
+    context.settle();
+
+    after.resume_project(project).unwrap();
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "the second Close's pause, which its Resume ends"
     );
 }

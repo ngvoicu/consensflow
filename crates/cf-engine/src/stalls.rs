@@ -58,7 +58,7 @@ impl Dispatcher {
     /// A task whose window went away is paused, and its requester told
     /// ([`Dispatcher::tell_stall`]). `own` when the engine closed the window
     /// itself: the ledger takes the pause for the suspension's where the project
-    /// is suspended, for the human's Resume to end.
+    /// is suspended, for the human's Resume to end, and says which stop the pause is.
     pub(crate) fn stall(
         &self,
         project: &ProjectView,
@@ -67,16 +67,22 @@ impl Dispatcher {
         why: &str,
         except: Option<i64>,
         own: bool,
-    ) -> Result<(), EngineError> {
-        {
+    ) -> Result<Option<i64>, EngineError> {
+        let stop = {
             let mut ledger = self.seams.ledger.borrow_mut();
             if own {
-                ledger.pause_with_project(project.id, task.number, because)?;
+                Some(
+                    ledger
+                        .pause_with_project(project.id, task.number, because)?
+                        .seq,
+                )
             } else {
                 ledger.pause_task(project.id, task.number, None, Some(because))?;
+                None
             }
-        }
-        self.tell_stall(project, task, because, why, except)
+        };
+        self.tell_stall(project, task, because, why, except)?;
+        Ok(stop)
     }
 
     /// A task ConsensFlow paused as its window went away (`because`), its requester

@@ -15,7 +15,7 @@
 //! words that send the task on go into the same window once it rests.
 
 use cf_engine::testing::Context;
-use cf_harness::contract::Pane;
+use cf_harness::contract::{Over, Pane};
 use cf_harness::records::{Pending, Role};
 use serde_json::{json, Value};
 
@@ -185,6 +185,71 @@ fn a_tell_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_an
 }
 
 #[test]
+fn a_tell_whose_escape_stopped_the_turn_is_paid_though_the_window_began_turns_of_its_own_before_its_rest_stood(
+) {
+    // T-807, 2026-10-27, Claude Code 2.1.311 (the live suite's tell case): the Escape
+    // stopped the turn, and Claude's record said so in a message of its own ("[Request
+    // interrupted by user for tool use]") while its status stayed busy for the agents. A
+    // second later an agent's notice began a turn of Claude's own, before the record's
+    // word had stood the moment it counts after, and every look read the window at work:
+    // the stop pressed into the turn the window began itself (two Escapes, +0.0 s and
+    // +3.4 s), and with notices coming as fast, round three and the close that ends the
+    // agents.
+    let context = Context::new();
+    let project = working(&context);
+    let launches = context.adapter.prepared().len();
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy("zeus");
+    context.tell(project, "zeus", 1, "Drop the per-member cap");
+    context.pass().unwrap();
+    let pane = context.host.last("zeus").expect("its window").pane;
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "the turn at work: one Escape"
+    );
+    // The interrupt ends the turn in the record, in the harness's own words, and the
+    // agents' notices begin turns of the window's own, one a round.
+    context.adapter.begins_its_own_turn(
+        "zeus",
+        "[Request interrupted by user for tool use]",
+        &now(&context),
+    );
+    for _ in 0..4 {
+        context.adapter.begins_its_own_turn(
+            "zeus",
+            "<task-notification> Agent \"sleep one\" is waiting on its own background work",
+            &now(&context),
+        );
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "no key into the turns the window began itself"
+    );
+    assert!(
+        context.host.killed().is_empty(),
+        "the turn stopped: no close"
+    );
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    assert_eq!(closes_told(&context, project), Vec::<String>::new());
+    assert_eq!(context.task(project, 1).task.state, "paused");
+
+    // Its own turns end: the window rests, and the words go into it.
+    rests(&context, "zeus");
+    context.pass().unwrap();
+    assert_eq!(given(&context, "zeus", "Drop the per-member cap"), 1);
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "the same window"
+    );
+    assert_eq!(context.host.inputs().len(), 1, "no key with them");
+}
+
+#[test]
 fn a_pause_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_and_its_resume_goes_in(
 ) {
     let context = Context::new();
@@ -212,6 +277,54 @@ fn a_pause_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_a
         launches,
         "the same window"
     );
+}
+
+#[test]
+fn a_record_that_says_the_turn_is_over_only_a_moment_ago_is_pressed_no_more_and_paid_once_it_stands(
+) {
+    // Claude says busy a moment before the message of a turn it begins is in its
+    // record, so the record's word that a turn is over counts once it has stood a
+    // moment (Calliope on T-551, T-644). Until then the stop neither presses again
+    // nor is paid, however late the next look comes.
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs().len(),
+        1,
+        "the turn at work: one Escape"
+    );
+    context
+        .adapter
+        .with("zeus", |agent| agent.over = Over::Pending);
+    for _ in 0..3 {
+        context.advance(10_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.host.inputs().len(),
+        1,
+        "no second key while it stands"
+    );
+    assert!(context.host.killed().is_empty());
+    let zeus = context.id(project, "zeus");
+    context
+        .adapter
+        .with("zeus", |agent| agent.over = Over::Held);
+    context.pass().unwrap();
+    context.resume_task(project, 1, "Go on");
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    context.pass().unwrap();
+    assert_eq!(
+        given(&context, "zeus", "Resumed: Go on"),
+        1,
+        "paid, and resumed in it"
+    );
+    assert_eq!(context.host.inputs().len(), 1);
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    assert_eq!(closes_told(&context, project), Vec::<String>::new());
 }
 
 /// zeus's turn on T-1 ended and left a job running in the background: the task
@@ -331,5 +444,55 @@ fn a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_
         closes_told(&context, project.id),
         ["@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. T-1 stays paused, and its window reopens on its conversation when it is resumed."],
         "one note, in the human's words, and none to the chief"
+    );
+}
+
+/// What the human and the chief read of a window closed for a stop it ignored, its
+/// task still paused.
+const CLOSED: [&str; 2] = [
+    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+];
+
+#[test]
+fn the_human_whose_pause_closed_a_chief_given_tasks_window_is_told_too_once() {
+    // The chief gave the task and hears of the close; the human paused it, and their
+    // own act closed the window and ended its work (the chief's call on T-644).
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    context.human_pause(project, 1);
+    rounds(&context);
+    context.host.exits_showing(Some(0), None, None);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed().len(), 1, "a hung turn is closed");
+    assert_eq!(closes_told(&context, project), CLOSED, "one note to each");
+}
+
+#[test]
+fn the_chief_whose_tell_closed_a_human_given_tasks_window_is_told_too_once() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.create_task(
+        project.id,
+        cf_ledger::NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..cf_ledger::NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context.tell(project.id, "zeus", 1, "Use the v2 grammar");
+    rounds(&context);
+    context.host.exits_showing(Some(0), None, None);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed().len(), 1, "a hung turn is closed");
+    assert_eq!(
+        closes_told(&context, project.id),
+        CLOSED,
+        "one note to each"
     );
 }

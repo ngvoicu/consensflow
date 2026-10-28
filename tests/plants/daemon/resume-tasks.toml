@@ -109,8 +109,8 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                self.stall(&project, &thread.task, &because, &why, except, is_own)?;"
-replace = "                self.stall(&project, &thread.task, &because, &why, except, false)?;"
+find = "                let stop = self.stall(&project, &thread.task, &because, &why, except, is_own)?;"
+replace = "                let stop = self.stall(&project, &thread.task, &because, &why, except, false)?;"
 
 [[plant]]
 name = "resume tasks: a window that closed by itself in a suspended project is taken for one the Close closed"
@@ -119,8 +119,8 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                self.stall(&project, &thread.task, &because, &why, except, is_own)?;"
-replace = "                self.stall(&project, &thread.task, &because, &why, except, true)?;"
+find = "                let stop = self.stall(&project, &thread.task, &because, &why, except, is_own)?;"
+replace = "                let stop = self.stall(&project, &thread.task, &because, &why, except, true)?;"
 
 [[plant]]
 name = "resume tasks: the ledger marks the pause of a window ConsensFlow closed in an open project too"
@@ -235,7 +235,7 @@ replace = '''const STOPPED: &str = "ConsensFlow quit while you were working on "
 
 [[plant]]
 name = "resume tasks: a cut note an earlier build left queued in its words is not known, and the window is told twice"
-meant = "a_cut_note_an_earlier_build_left_queued_in_its_words_is_the_one_the_window_is_given"
+meant = "a_cut_note_an_earlier_build_left_queued_in_its_words_gives_way_to_one_in_this_build_s"
 runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
@@ -332,11 +332,11 @@ runs = ["engine-resume-tasks"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''
-                if let Some((project, number)) = paused {
+                if let Some((project, number, stop)) = paused {
                     self.seams
                         .ledger
                         .borrow_mut()
-                        .unmark_pause(project, number)?;
+                        .unmark_pause(project, number, stop)?;
                 }'''
 replace = '''
                 let _ = paused;'''
@@ -348,7 +348,7 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                    killing.paused = Some((project.id, thread.task.number));"
+find = "                    killing.paused = Some((project.id, thread.task.number, stop));"
 replace = "                    let _ = killing;"
 
 [[plant]]
@@ -358,8 +358,8 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = "            \"UPDATE task SET paused_with_project = 0 WHERE id = ? AND state = 'paused'\","
-replace = "            \"UPDATE task SET paused_with_project = paused_with_project WHERE id = ? AND state = 'paused'\","
+find = "            \"UPDATE task SET paused_with_project = 0\n             WHERE id = ? AND state = 'paused' AND stop_seq = ?\","
+replace = "            \"UPDATE task SET paused_with_project = paused_with_project\n             WHERE id = ? AND state = 'paused' AND stop_seq = ?\","
 
 [[plant]]
 name = "resume tasks: the Resume withdraws the warning that a program may still run with the pause note"
@@ -584,8 +584,13 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = "        if !cut || !self.still_coming(participant, coming)? {"
-replace = "        if !cut {"
+find = '''
+        if !self.still_coming(participant, coming)? {
+            return Ok(None);
+        }
+        let mut ledger'''
+replace = '''
+        let mut ledger'''
 
 [[plant]]
 name = "resume tasks: the Resume opens the window of work paused while it read the record"
@@ -1672,7 +1677,7 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''        let Some(first) = delivering.filter(|_| !planned.first_once_up) else {'''
+find = '''        let Some(first) = delivering.filter(|_| planned.first == FirstMessage::Opened) else {'''
 replace = '''        let Some(first) = delivering else {'''
 
 [[plant]]
@@ -1682,7 +1687,7 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            .filter(|_| planned.first_once_up);'''
+find = '''            .filter(|_| planned.first == FirstMessage::Started);'''
 replace = '''            .filter(|_| false);'''
 
 [[plant]]
@@ -1710,19 +1715,19 @@ find = '''        self.withdrawn.set(handed == HandOver::Withdrawn);'''
 replace = '''        self.withdrawn.set(false);'''
 
 [[plant]]
-name = "resume tasks: OpenCode takes its first message with its command line"
-meant = "opencode_and_a_resumed_muse_take_their_first_message_once_the_window_is_up_and_no_other_does"
+name = "resume tasks: OpenCode reads its first message as its window opens"
+meant = "devin_reads_its_first_message_as_it_opens_opencode_posts_it_and_the_others_are_delivered_it"
 runs = ["harness-first-message"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/adapter.rs"
 find = '''
-    fn first_message_once_up(&self, _launch: &Launch) -> bool {
-        true
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Started
     }'''
 replace = '''
-    fn first_message_once_up(&self, _launch: &Launch) -> bool {
-        false
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Opened
     }'''
 
 [[plant]]
@@ -1995,8 +2000,8 @@ runs = ["harness-launch-claude-stops"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            if self.restored.get() && !host.cleared() {"
-replace = "            if self.restored.get() {"
+find = "            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {"
+replace = "            if self.restored.get() || self.clear_first.take() {"
 
 [[plant]]
 name = "resume tasks: an Enter withheld for a closed project leaves the paste on its way in the box"

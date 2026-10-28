@@ -54,6 +54,18 @@ pub(crate) fn read(screen: &[String], _cursor: Option<Cursor>) -> Option<InputBo
     })
 }
 
+/// The words Muse's input box shows on `screen`, its lines after the mark with a line
+/// break between two: empty for an empty box, none where it shows no box.
+pub(crate) fn words(screen: &[String]) -> Option<String> {
+    let (first, typed, _) = boxed(screen)?;
+    let end = first + screen[first..].iter().position(|line| is_rule(line))?;
+    let words = std::iter::once(typed)
+        .chain(screen[first + 1..end].iter().map(|line| line.trim()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(words.trim_end().to_owned())
+}
+
 /// Whether `screen` shows Muse's prompt: its input box, which it draws once it is up,
 /// at work or at rest.
 pub(crate) fn shows_prompt(screen: &[String]) -> bool {
@@ -111,6 +123,23 @@ mod tests {
         assert_eq!(read(&more, None), Some(InputBox::Holds));
         let second_empty = screen("", "❯\n  line two");
         assert_eq!(read(&second_empty, None), Some(InputBox::Holds));
+    }
+
+    #[test]
+    fn the_human_is_told_the_box_s_words_as_muse_draws_them_and_empty_for_an_empty_box() {
+        use crate::shared::input_box::shown;
+        use cf_proto::agents::Harness;
+        let more = screen("❯ Say hello.", "❯ Line one of a draft\n  line two of it\n");
+        assert_eq!(
+            shown(Harness::Muse, &more, None).as_deref(),
+            Some("Line one of a draft\nline two of it")
+        );
+        let empty = screen("❯ Say hello.\n◆ echo: Say hello.", "❯");
+        assert_eq!(shown(Harness::Muse, &empty, None).as_deref(), Some(""));
+        assert_eq!(
+            shown(Harness::Muse, &lines("  Muse Code 1.4.13"), None),
+            None
+        );
     }
 
     #[test]

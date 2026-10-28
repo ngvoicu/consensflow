@@ -21,6 +21,9 @@ reports-close-fails = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "
 reports-close-held = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_whose_case_holds"]
 reports-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_live_rigs"]
 reports-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
+reports-nested = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_nested"]
+reports-nested-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::nested"]
+reports-nested-rule = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "nested_cases_name_their_limit::"]
 reports-asked = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_report_of_a_rig_whose_close"]
 reports-xtask-driver = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::the_commands_are_given"]
 reports-xtask-runs = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::runs::tests::a_command_is_given"]
@@ -849,3 +852,68 @@ runs = ["reports-ci"]
 file = ".github/workflows/ci.yml"
 find = "name: rig-reports-${{ matrix.os }}-${{ strategy.job-index }}"
 replace = "name: rig-reports-${{ matrix.os }}"
+
+
+# A case a test runs again as its own program (T-848, main's CI after 3.0.6-alpha.3's integration B): it is
+# given the programs this run has, and builds none, and as long as a rig's start and close may take
+# (`crates/cf-e2e/src/rig/nested.rs`), not a verb of cf's 30 s.
+
+[[plant]]
+name = "rig reports: a nested rig case is not given the programs this run has, and builds them again"
+meant = "a_nested_rig_case_runs_the_programs_this_run_has_and_builds_none"
+runs = ["reports-nested"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/nested.rs"
+find = "        .var(cf::BUILT, folder))\n"
+replace = "        .var(cf::BUILT, \"\"))\n"
+
+[[plant]]
+name = "rig reports: a nested case is held to a verb of cf's limit"
+meant = "a_nested_case_that_takes_longer_than_a_programs_limit_is_run_to_its_end"
+runs = ["reports-nested"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/nested.rs"
+find = "    Ok(process::case_of(binary, case, RIG_BOUND + waits)\n"
+replace = "    Ok(process::case_of(binary, case, process::LIMIT.min(RIG_BOUND + waits))\n"
+
+[[plant]]
+name = "rig reports: the bound of a nested rig case leaves out the rig's wait to be ready"
+meant = "a_nested_rig_case_is_given_as_long_as_a_rigs_start_and_close_may_take"
+runs = ["reports-nested-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/nested.rs"
+find = "2 * bundle::COPY_WAIT.as_secs() + 2 * READY.as_secs() + 2 * EXIT.as_secs() + GONE.as_secs(),"
+replace = "2 * bundle::COPY_WAIT.as_secs() + 2 * EXIT.as_secs() + GONE.as_secs(),"
+
+[[plant]]
+name = "rig reports: the report case is run again as a program held to a verb of cf's limit"
+meant = "no_test_of_cf_e2e_runs_a_case_again_with_a_verb_of_cfs_limit"
+runs = ["reports-nested-rule"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/reports.rs"
+find = """
+    let mut run = nested::case_of(
+        &std::env::current_exe()?,
+        CASE_ALONE,
+        Duration::from_millis(200),
+    )?;"""
+replace = """
+    let mut run = Run::new(&std::env::current_exe()?)
+        .args(["--exact", CASE_ALONE, "--test-threads=1"])
+        .inheriting_env();
+    let _ = nested::case_of;"""
+
+[[plant]]
+name = "rig reports: the bound of a nested rig case leaves out the copies of its programs"
+meant = "a_nested_rig_case_is_given_as_long_as_a_rigs_start_and_close_may_take"
+runs = ["reports-nested-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/nested.rs"
+find = "2 * bundle::COPY_WAIT.as_secs() + 2 * READY.as_secs() + 2 * EXIT.as_secs() + GONE.as_secs(),"
+replace = "2 * READY.as_secs() + 2 * EXIT.as_secs() + GONE.as_secs(),"
+

@@ -50,18 +50,22 @@ const RIG: &str = "crates/cf-e2e/src/rig/install.rs";
 /// kit whose environment their `cf` is given, or none where it looks for no harness.
 const THROUGH: [(&str, Option<&str>); 14] = [
     ("app/tests/agents-server.mjs", Some("tests/helpers.mjs")),
+    // Its probe names the cf a copy is made of, and starts only cargo.
+    ("crates/cf-e2e/src/bundle.rs", None),
     ("crates/cf-e2e/src/daemon.rs", Some(SCRATCH)),
-    // It names the cf of a live window's hooks, which run in the rig's environment.
-    ("crates/cf-e2e/src/live/window/open.rs", Some(RIG)),
     ("crates/cf-e2e/src/rig/launch.rs", Some(RIG)),
-    ("crates/cf-e2e/src/rig/mod.rs", Some(RIG)),
+    // It names the folder of the cf under test to a case it runs again, which starts a rig.
+    ("crates/cf-e2e/src/rig/nested.rs", Some(RIG)),
     ("crates/cf-e2e/tests/cli/commands.rs", Some(SCRATCH)),
     ("crates/cf-e2e/tests/cli/roster.rs", Some(SCRATCH)),
     ("crates/cf-e2e/tests/cli/tool_folders.rs", None),
     ("crates/cf-e2e/tests/daemon/core_daemon.rs", None),
+    // It names the cf a rig is copied from, and starts it in the rig's environment.
+    (
+        "crates/cf-e2e/tests/regressions/a_cf_a_build_took_away_left_a_window_none.rs",
+        Some(RIG),
+    ),
     ("crates/cf-e2e/tests/rig/cf_native.rs", Some(SCRATCH)),
-    // It compares the path of the cf a launch's hooks name.
-    ("crates/cf-e2e/tests/rig/live_member.rs", None),
     ("crates/cf-e2e/tests/rig/codex_session.rs", None),
     ("crates/cf/tests/cli_goldens/names.rs", None),
     ("tests/choice.mjs", None),

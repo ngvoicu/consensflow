@@ -1,4 +1,4 @@
-//! What the Windows tests of an ending read of a pane's job, told of the list of its
+//! What the Windows tests of what a turn leaves read of a pane's job, told of the list of its
 //! members, so that the reading is held where there is no Windows to run it. The job holds
 //! the window's own program, which the tree starts at, and what it started, each with the
 //! command line it was started with and the process of the job that started it where that

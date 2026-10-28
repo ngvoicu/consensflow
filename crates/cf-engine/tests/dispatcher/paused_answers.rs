@@ -608,6 +608,151 @@ fn a_tells_turn_whose_monitor_command_still_runs_is_told_when_it_has_ended() {
     assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
 }
 
+#[test]
+fn a_second_tells_turn_first_seen_settled_with_another_monitor_that_said_it_ended_is_told_only_after_a_look_of_its_own(
+) {
+    // Calliope's P3 on round 3: the look of the first tell's turn found no command and its
+    // result is kept, as the harness counts a monitor that said it ended for the window's
+    // life. A second tell's turn that arms another, which expires between two passes, is
+    // first seen already settled, with the count one higher: what the first look found says
+    // nothing of the new monitor's command, and is not taken for a look at it.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.background.commands_run(Some(0));
+    answers_and_goes_on(&context, &told);
+    let first = monitor("ticks", Source::Command, Some(End::Expired));
+    context
+        .adapter
+        .answer_leaving_monitors("zeus", FINAL, pending(1, 1), vec![first.clone()]);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.background.looks(), 1);
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+
+    // The chief tells it again; the pass that puts the question into the window is the last
+    // that reads the first turn, and the window's whole second turn is written before the
+    // next: the new monitor armed and expired between the two passes.
+    let again = context.tell(project, "zeus", 1, "Once more");
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(again.id).state,
+        "delivering",
+        "pasted, not yet read"
+    );
+    let mut items = context.adapter.agent("zeus").items;
+    let mut second_words = context.adapter.item(Role::Assistant, "SECOND-RESULT");
+    second_words.complete = true;
+    items.push(second_words);
+    context.adapter.with("zeus", |agent| {
+        agent.items = items;
+        agent.settled = true;
+        agent.pending = pending(2, 2);
+        agent.monitors = vec![first, monitor("more", Source::Command, Some(End::Expired))];
+    });
+    context.pass().unwrap();
+    assert_eq!(
+        kept_notes(&context, project).len(),
+        1,
+        "not told on the strength of the first turn's look"
+    );
+    assert_eq!(context.background.looks(), 1);
+    context.pass().unwrap();
+    assert_eq!(context.background.looks(), 2, "a look of its own");
+    assert_eq!(kept_notes(&context, project).len(), 2);
+}
+
+#[test]
+fn finish_after_the_look_found_the_monitor_over_says_nothing_of_the_monitor_in_the_result() {
+    // Calliope's P3 on round 3: the note said the turn was over and Finish's result said the
+    // harness still counted a monitor that said it ended, from the raw reading.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.background.commands_run(Some(0));
+    answers_and_goes_on(&context, &told);
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        FINAL,
+        pending(1, 1),
+        vec![monitor("ticks", Source::Command, Some(End::Expired))],
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+
+    let finished = context.finish_task(project, 1, "chief").expect("finished");
+    assert_eq!((finished.jobs, finished.agents), (0, 0));
+    assert_eq!(
+        results(&context, project),
+        [format!(
+            "{FINAL}\n\n(ConsensFlow: Finished at @chief's word: what @zeus said last is the result.)"
+        )],
+        "the monitor is over, as the note said"
+    );
+}
+
+#[test]
+fn finish_waits_for_a_tell_the_human_has_not_passed_on_and_takes_no_answer_from_before_it() {
+    // The gated arm of the refusal (the project's human approves what the staff says to one
+    // another): the tell waits at the gate, the task is paused for it, and the record holds
+    // the turn from before it.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context
+        .ledger
+        .borrow_mut()
+        .set_gate(project.id, true)
+        .unwrap();
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    let brief = context.task(project.id, 1).messages[0].id;
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(brief, "human")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context
+        .adapter
+        .answer_leaving_a_job("zeus", "Stage one is done; the build runs");
+    context.pass().unwrap();
+    let told = context.tell(project.id, "zeus", 1, "Stop and tell me where you are");
+    assert_eq!(told.state, "gated");
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+
+    let refused = context.finish_task(project.id, 1, "chief").unwrap_err();
+    assert!(
+        refused.to_string().starts_with(
+            "cannot finish T-1: the words you told @zeus are on their way to its window"
+        ),
+        "{refused}"
+    );
+    assert_eq!(results(&context, project.id), Vec::<String>::new());
+
+    // Passed on and pasted, the window answers it, and Finish takes that answer.
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(told.id, "human")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(told.id).state, "delivered");
+    context
+        .adapter
+        .answer("zeus", "Where I am: the parser is done");
+    context.pass().unwrap();
+    context
+        .finish_task(project.id, 1, "chief")
+        .expect("finished");
+    assert!(results(&context, project.id)[0].starts_with("Where I am: the parser is done"));
+}
+
 /// The note T-1's window left for its requester while the task was paused, in its words.
 fn paused_words(handle: &str, told: &MessageView) -> String {
     format!(

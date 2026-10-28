@@ -80,7 +80,9 @@
 //! T-179's probe), or the human stopped a command's monitor from Claude Code's tasks
 //! (`killed`, "Task … was stopped by the user": `s_r` of 2.1.307, `Tmr` of 2.1.306, behind
 //! `tengu_rosy_donut`, on by default), which Claude Code queues passive, to be delivered
-//! with the next turn, in a record no live run has seen; so does a TaskStop's result.
+//! with the next turn; so does a TaskStop's result. Two field records have a `killed`
+//! notification of a background command, enqueued and taken, and no turn after it, the
+//! window at its prompt (T-814): it holds no turn ([`begins_no_turn`], `queues`).
 //!
 //! **Only Claude Code's own notification ends a job, never words that look like one**:
 //! a message the user wrote, or ConsensFlow pasted, may quote one whole, from its first
@@ -122,7 +124,7 @@
 //!
 //! **A relaunch retires, it does not end.** Where ConsensFlow closed the window and the
 //! host proved its program gone before it opened the conversation again
-//! (`Options::relaunched_at`), the jobs that process started are no longer the window's
+//! (`Options::relaunched`), the jobs that process started are no longer the window's
 //! to wait on: their notifications went with the process. They are retired, not ended:
 //! nothing says the processes they ran are gone (a job its shell detached can outlive the
 //! window), and the reading says how many were retired so (`Pending::retired`).
@@ -350,6 +352,22 @@ struct Head<'a> {
     /// after it: no line of a command's output, nor 2.1.306's word after a command's
     /// event of how to tell the user of it.
     closes_after_event: bool,
+}
+
+/// Whether `text` is a notification of Claude Code's: its head names a job. Read where the
+/// queue is concerned, whose records say nothing of where a message came from, so a
+/// message that quotes one whole from its first character is read as one there: what
+/// that costs is a window whose queue held only it read at rest at a Resume (`queues`).
+pub(super) fn is_notice(text: &str) -> bool {
+    !head(text).ids.is_empty()
+}
+
+/// Whether `text` is the notification of a job Claude Code itself ended (`killed`), which it
+/// takes from its queue and begins no turn for: the closes of poker-lab (2026-10-15, Claude
+/// Code 2.1.301, whose window then sat at its prompt for 53 s) and of sites (2026-10-23)
+/// each wrote one, enqueued and taken, and no record of a turn after it (T-814).
+pub(super) fn begins_no_turn(text: &str) -> bool {
+    head(text).status == Some("killed")
 }
 
 /// The head of the notification `text`: nothing where the text does not open with one.

@@ -6,10 +6,12 @@
 # #4]`, a space between, the header at once or a blank line and the wrapper; the field bug T-215 of
 # 2026-10-21: an image designer's result pasted three times and failed), and, for a member's fresh
 # window, behind the exact paste of the brief it received, which its launch gives first, and
-# nowhere else. A header quoted in other words, the human's or a message's, proves nothing: a look, a
-# window's end and a start each took any item that held it for the paste, so a message whose paste
-# never showed was confirmed by a question about it; and the stricter rule that followed took every
-# paste a real Claude records for lacking, so a Claude chief's result was pasted again.
+# nowhere else. A paste Claude Code was given in pieces is each piece in the wrapper and the last,
+# short piece bare after the last closing tag (T-763). A header quoted in other words, the human's
+# or a message's, proves nothing: a look, a window's end and a start each took any item that held it
+# for the paste, so a message whose paste never showed was confirmed by a question about it; and the
+# stricter rule that followed took every paste a real Claude records for lacking, so a Claude
+# chief's result was pasted again.
 #
 # The cases are the engine's, `crates/cf-engine/tests/dispatcher/quoted_headers.rs` (a look, the record
 # read as the window ends, ConsensFlow's copy of it read so, a message that quotes the header after a
@@ -99,10 +101,72 @@ runs = ["engine-lib-delivery-text"]
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
 find = '''
-    inner
-        .trim_end()
-        .strip_suffix(&format!("</{PASTED}{attributes}>"))
-        .unwrap_or(text)'''
+    if inner.contains(&format!("</{PASTED}{attributes}>")) {
+        inner
+    } else {
+        text
+    }'''
+replace = '''
+    let _ = attributes;
+    inner'''
+
+# A paste Claude Code was given in pieces (T-763, 2026-10-25 and 26: five deliveries retried, one failed
+# for the same reason on the second look): each piece in the wrapper, the last, short one bare after the
+# last closing tag. The closing tag must close the first piece; it need not end the text.
+
+[[plant]]
+name = "quoted header: a paste whose last piece Claude Code left bare after the last closing tag is taken for none, and pasted again (T-763)"
+meant = "a_paste_claude_code_recorded_in_pieces_with_the_last_left_bare_is_the_paste"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''    if inner.contains(&format!("</{PASTED}{attributes}>")) {'''
+replace = '''    if inner.trim_end().ends_with(&format!("</{PASTED}{attributes}>")) {'''
+
+[[plant]]
+name = "quoted header: a look takes a paste in pieces, the last bare, for none and the delivery is retried at 60 s of rest (T-763)"
+meant = "confirms_a_paste_claude_code_recorded_in_pieces_with_the_last_left_bare_at_the_first_look"
+runs = ["engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''    if inner.contains(&format!("</{PASTED}{attributes}>")) {'''
+replace = '''    if inner.trim_end().ends_with(&format!("</{PASTED}{attributes}>")) {'''
+
+[[plant]]
+name = "quoted header: a paste in pieces behind the placeholders of its images, the last bare, is taken for none (T-763)"
+meant = "confirms_a_paste_claude_code_recorded_in_pieces_behind_the_placeholders_of_its_images_at_the_first_look"
+runs = ["engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''    if inner.contains(&format!("</{PASTED}{attributes}>")) {'''
+replace = '''    if inner.trim_end().ends_with(&format!("</{PASTED}{attributes}>")) {'''
+
+[[plant]]
+name = "quoted header: a header in a later piece of a paste, or in its bare tail, is taken for the paste (T-763)"
+meant = "a_header_the_pieces_of_a_paste_only_quote_or_hold_after_the_first_is_no_paste_for_a_loose_tail"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker))"
+replace = "    paste.contains(&marker) || behind.is_some()"
+
+[[plant]]
+name = "quoted header: a tag that closes nothing the first piece holds, and a bare tail after it, is taken for Claude's wrapper (T-763)"
+meant = "a_header_the_pieces_of_a_paste_only_quote_or_hold_after_the_first_is_no_paste_for_a_loose_tail"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''
+    if inner.contains(&format!("</{PASTED}{attributes}>")) {
+        inner
+    } else {
+        text
+    }'''
 replace = '''
     let _ = attributes;
     inner'''

@@ -23,8 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Input, Interrupt, Launch, Prepared, Readiness, Skill, Trusts, Waiting,
-    Window, Work,
+    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, Opening, Over, Prepared, Readiness,
+    Skill, Trusts, TurnLeft, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -83,6 +83,8 @@ pub struct FakeAgent {
     pub stored: HashMap<String, Vec<String>>,
     /// Those of them that cannot be read: Devin's of a session its store holds no row of.
     pub records_unreadable: Vec<String>,
+    /// The lines each of those records lost, as its last look had them.
+    pub lost_records: HashMap<String, Vec<usize>>,
     /// Why the window has not said which conversation it shows yet.
     pub unnamed: Option<String>,
     /// How often the engine told the window it pressed the interrupt keys.
@@ -99,16 +101,22 @@ pub struct FakeAgent {
     /// Its harness says its window waits at its prompt, whatever its record says of the
     /// turn ([`Observed::at_prompt`]): set by [`FakeAdapter::answer_never_over`].
     pub at_prompt: bool,
-    /// Its record says its turn is over though its status kept the look from
-    /// reading it settled (`Observed::over`): Claude's busy while a background
+    /// Another program than the window's has shown its conversation since it opened
+    /// ([`Observed::shared`]): a Claude Code the human started outside ConsensFlow.
+    pub shared: bool,
+    /// Whether its record says its turn is over though its status kept the look
+    /// from reading it settled (`Observed::over`): Claude's busy while a background
     /// agent runs, after a turn an interrupt or a refusal ended.
-    pub over: bool,
+    pub over: Over,
     /// Interrupted, its turn ends in its record and its status stays busy: the
     /// look reads it over, not settled (a Claude whose background agents run).
     pub busy_when_interrupted: bool,
     /// Its record, read with no window open, cannot tell whether its turn was
     /// cut: Devin's, which reads a turn as going on only while its window shows it.
     pub cannot_tell_a_cut: bool,
+    /// The message its record shows a turn with no end began with, read with no
+    /// window open: none where it shows none.
+    pub opening: Option<Opening>,
     /// What its harness says of going on with the conversation, as its own record
     /// tells it: it holds it (`Some(true)`, as every harness did before it was
     /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
@@ -170,6 +178,9 @@ pub struct FakeAdapter {
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// What its windows' input boxes show (`unsent_words`): none, as an adapter
+    /// with no reader of its harness's box.
+    pub box_words: RefCell<Option<String>>,
     /// A `started` of the test's own, that fails some windows.
     pub started: RefCell<Option<Started>>,
     /// A `came_up` of the test's own, that says a window came up after all.
@@ -213,10 +224,12 @@ pub struct FakeAdapter {
     pub ready_holds: Holds,
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
-    /// Its windows take their first message once they are up, as OpenCode's do
-    /// through its server, and only if the host admits it then: not with the
-    /// launch, as a message on a command line goes in.
-    pub seeds: Cell<bool>,
+    /// How its windows take their first message: as they open, as Devin's does
+    /// from its file (as the fake of Node's suite took it); posted once they are up,
+    /// as OpenCode's through its server, only if the host admits it then; or
+    /// delivered once they are up as any later message is, as Claude Code's, Pi's
+    /// and Codex's are.
+    pub first: Cell<FirstMessage>,
     /// Where its harness has the Specmint variant installed, when the test says
     /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
     /// keep for it, which is the same for every launch.
@@ -245,6 +258,11 @@ pub struct FakeAdapter {
     /// in (`<pasted_content id="…">`), and a launch's first message as it was
     /// given: not, as the fake of Node's suite, which recorded both as given.
     pub wraps_pastes: Cell<bool>,
+    /// Its windows' record holds a paste as Claude Code records one that reached it in
+    /// pieces, under load (the field bug of 2026-10-25, T-763): each whole piece of a
+    /// thousand characters in the wrapper, and the last, shorter piece bare after the last
+    /// closing tag. A paste of fewer than a piece is recorded as it was given.
+    pub splits_pastes: Cell<bool>,
     /// Its windows' record holds a paste whose lines are paths of images as Claude Code
     /// 2.1.308 keeps one (the field bug T-215): a `[Image #N]` for each at the head of
     /// the message, those lines gone, and the sources as an item of their own after it.
@@ -304,6 +322,7 @@ impl FakeAdapter {
             starts_given_up: RefCell::new(Vec::new()),
             items,
             ready: RefCell::new(None),
+            box_words: RefCell::new(None),
             started: RefCell::new(None),
             came_up: RefCell::new(None),
             prepare: RefCell::new(None),
@@ -322,7 +341,7 @@ impl FakeAdapter {
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
             deliver_holds: Holds::default(),
-            seeds: Cell::new(false),
+            first: Cell::new(FirstMessage::Opened),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
@@ -330,6 +349,7 @@ impl FakeAdapter {
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
             wraps_pastes: Cell::new(false),
+            splits_pastes: Cell::new(false),
             attaches_images: Cell::new(false),
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
@@ -371,6 +391,7 @@ impl FakeAdapter {
             complete: role == Role::Assistant,
             at: None,
             commentary: false,
+            synthetic: false,
             compaction: false,
         }
     }
@@ -404,7 +425,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = true;
-            agent.over = false;
+            agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -420,7 +441,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = false;
-            agent.over = false;
+            agent.over = Over::No;
             agent.at_prompt = true;
             agent.pending = Pending::default();
             agent.monitors.clear();
@@ -480,7 +501,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = false;
-            agent.over = false;
+            agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -502,7 +523,7 @@ impl FakeAdapter {
     pub fn busy(&self, handle: &str) {
         self.with(handle, |agent| {
             agent.settled = false;
-            agent.over = false;
+            agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -551,6 +572,16 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.cannot_tell_a_cut = true);
     }
 
+    /// Its record, read with no window open, shows the turn it is in begun by the
+    /// message of `words`, which came at `at`, where a time is given.
+    pub fn turn_began_with(&self, handle: &str, at: Option<&str>, words: &str) {
+        let opening = Opening {
+            at: at.map(str::to_owned),
+            words: words.to_owned(),
+        };
+        self.with(handle, |agent| agent.opening = Some(opening.clone()));
+    }
+
     /// Its harness holds nothing of the window's conversation, as Codex holds
     /// nothing of a thread before its first turn.
     pub fn holds_nothing(&self, handle: &str) {
@@ -588,7 +619,7 @@ impl FakeAdapter {
             agent.quota = Some(Arc::new(quota));
             agent.failed = true;
             agent.settled = true;
-            agent.over = false;
+            agent.over = Over::No;
             agent.at_prompt = false;
             agent.pending = Pending::default();
             agent.monitors.clear();
@@ -604,7 +635,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(said);
             agent.settled = false;
-            agent.over = false;
+            agent.over = Over::No;
             agent.pending = Pending::default();
             agent.failed = false;
             agent.took_back = false;
@@ -634,15 +665,39 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.items.push(item));
     }
 
+    /// The window, opened again on a conversation the app's quit cut in a turn, is
+    /// given `prompt`: Claude Code closes the cut turn with a message of its own
+    /// (`No response requested.`, no model behind it, dated `at`), the harness's
+    /// commentary and synthetic, as its reader reads it while `prompt`, just after
+    /// it, is in flight.
+    pub fn closes_a_cut_turn(&self, handle: &str, prompt: &str, at: &str) {
+        let mut close = self.item(Role::Assistant, "No response requested.");
+        close.at = Some(json!(at));
+        close.complete = false;
+        close.commentary = true;
+        close.synthetic = true;
+        let mut said = self.item(Role::User, prompt);
+        said.at = Some(json!(at));
+        self.with(handle, |agent| {
+            agent.items.extend([close, said]);
+            agent.settled = false;
+            agent.failed = false;
+            agent.quota = None;
+        });
+    }
+
     /// The human switches the window to another conversation: from then on
     /// it writes that one's record, idle at first.
     pub fn switch_to(&self, handle: &str, native: &str) {
         self.with(handle, |agent| {
             let shown = agent.shows.clone().unwrap_or_else(|| agent.native.clone());
             let items = std::mem::take(&mut agent.items);
+            let lost = std::mem::take(&mut agent.lost);
             agent.records_settled.insert(shown.clone(), agent.settled);
-            agent.records.insert(shown, items);
+            agent.records.insert(shown.clone(), items);
+            agent.lost_records.insert(shown, lost);
             agent.items = agent.records.get(native).cloned().unwrap_or_default();
+            agent.lost = agent.lost_records.get(native).cloned().unwrap_or_default();
             agent.shows = Some(native.to_owned());
             agent.settled = true;
             agent.pending = Pending::default();
@@ -661,14 +716,17 @@ impl FakeAdapter {
 
     /// Whether the turn `session`'s record ends in was cut, as a harness reads it
     /// with no window open: none where no window had it, or its record cannot tell.
-    pub(super) fn cut_of(&self, session: &str) -> Option<bool> {
+    pub(super) fn cut_of(&self, session: &str) -> Option<TurnLeft> {
         let agents = self.agents.borrow();
         agents
             .iter()
             .rev()
             .find(|agent| agent.native == session)
             .filter(|agent| !agent.cannot_tell_a_cut)
-            .map(|agent| !agent.settled)
+            .map(|agent| match agent.settled {
+                true => TurnLeft::AtRest,
+                false => TurnLeft::Cut(agent.opening.clone()),
+            })
     }
 
     /// Whether the store of `session` says its window took a paste that begins with
@@ -694,10 +752,6 @@ impl FakeAdapter {
             .map_or(Some(true), |agent| agent.resumable)
     }
 
-    /// What the record of `session` holds (`adapter.record`): the latest
-    /// window's on it, none where no window had it, and whether the turn it
-    /// ends in is over (an agent that was never answered is in one still, as a
-    /// window the app's quit cut).
     /// The lines the record of `session` lost, as its last window's reading had them.
     fn lost_of(&self, session: &str) -> Vec<usize> {
         let agents = self.agents.borrow();
@@ -709,6 +763,10 @@ impl FakeAdapter {
             .unwrap_or_default()
     }
 
+    /// What the record of `session` holds (`adapter.record`): the latest
+    /// window's on it, none where no window had it, and whether the turn it
+    /// ends in is over (an agent that was never answered is in one still, as a
+    /// window the app's quit cut).
     pub(super) fn record_of(&self, session: &str) -> Option<(Vec<Item>, bool)> {
         let agents = self.agents.borrow();
         agents
@@ -737,7 +795,9 @@ impl FakeAdapter {
                 };
             }
             if agent.arrive {
-                let recorded = if self.wraps_pastes.get() {
+                let recorded = if self.splits_pastes.get() {
+                    in_pieces(text)
+                } else if self.wraps_pastes.get() {
                     format!(
                         "\n\n<pasted_content id=\"b118\">\n{text}\n</pasted_content id=\"b118\">\n"
                     )
@@ -768,6 +828,38 @@ impl FakeAdapter {
             }
         })
     }
+}
+
+/// What a window that records a paste it was given in pieces holds of `paste`
+/// (`splits_pastes`): Claude Code 2.1.30x under load, the field's items. Each piece of
+/// `PIECE` characters is in the wrapper (`\n\n<pasted_content id="…">`, the piece, and the
+/// tag closed on a line of its own), three line breaks between two, and the last piece,
+/// under a piece, bare after a blank line. A paste of fewer than a piece is recorded as
+/// it was given.
+fn in_pieces(paste: &str) -> String {
+    const PIECE: usize = 1_000;
+    let characters: Vec<char> = paste.chars().collect();
+    let whole = characters.len() / PIECE;
+    if whole == 0 {
+        return paste.to_owned();
+    }
+    let wrapped: Vec<String> = characters
+        .chunks(PIECE)
+        .take(whole)
+        .map(|piece| {
+            format!(
+                "<pasted_content id=\"b118\">\n{}\n</pasted_content id=\"b118\">",
+                piece.iter().collect::<String>()
+            )
+        })
+        .collect();
+    let bare: String = characters[whole * PIECE..].iter().collect();
+    let tail = if bare.is_empty() {
+        "\n".to_owned()
+    } else {
+        format!("\n\n{bare}")
+    };
+    format!("\n\n{}{tail}", wrapped.join("\n\n\n"))
 }
 
 /// What a window that attaches images records of `paste` (`attaches_images`): the words
@@ -881,21 +973,24 @@ impl Asked {
             records_settled: HashMap::new(),
             stored: HashMap::new(),
             records_unreadable: Vec::new(),
+            lost_records: HashMap::new(),
             unnamed: None,
             interrupted: 0,
             stops_when_interrupted: false,
             takes_back: false,
             took_back: false,
             at_prompt: false,
-            over: false,
+            shared: false,
+            over: Over::No,
             busy_when_interrupted: false,
             cannot_tell_a_cut: false,
+            opening: None,
             resumable: Some(true),
             unreadable: None,
         };
         let seeded = launch
             .message
-            .filter(|_| fake.seeds.get())
+            .filter(|_| fake.first.get() == FirstMessage::Started)
             .map(str::to_owned);
         if let Some(message) = launch
             .message
@@ -1032,10 +1127,9 @@ impl Adapter for Asked {
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the
-    /// traces. The fake posts its first message once up where the test says it
-    /// seeds, as OpenCode does.
-    fn first_message_once_up(&self, _launch: &Launch) -> bool {
-        self.fake.seeds.get()
+    /// traces. As the test says its windows take it ([`FakeAdapter::first`]).
+    fn first_message(&self) -> FirstMessage {
+        self.fake.first.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

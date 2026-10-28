@@ -703,16 +703,17 @@ file = "crates/cf-harness/src/shared/window_args.rs"
 find = '''            if !given(agent.model).is_some_and(|model| model.ends_with(CONTRIBUTOR)) {'''
 replace = '''            if given(agent.model).is_some() || !given(agent.model).is_some_and(|model| model.ends_with(CONTRIBUTOR)) {'''
 
-# The window's command line: `muse resume` takes no prompt.
+# The adapter: no first message is on a window's command line, which every process reads.
 [[plant]]
-name = "muse: a resumed window's first message goes on its command line"
-meant = "a_resumed_muse_window_takes_its_first_message_once_it_is_up_not_on_its_command_line"
-runs = ["muse-window-args"]
+name = "muse: a window's first message goes on its command line"
+meant = "a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no_message_on_its_command_line"
+runs = ["muse-lib"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/shared/window_args.rs"
-find = '''            let (args, prompt) = if resumed {'''
-replace = '''            let (args, prompt) = if false {'''
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            argv.extend(invocation.args);'''
+replace = '''            argv.extend(invocation.args);
+            argv.extend(launch.message.map(str::to_owned));'''
 
 # The window's command line: a key in its environment would move it off the human's login.
 [[plant]]
@@ -916,20 +917,28 @@ file = "crates/cf-harness/src/muse/window.rs"
 find = '''            if self.shown().is_some_and(|shown| shown != known) {'''
 replace = '''            if self.shown().is_some_and(|shown| shown != known) && false {'''
 
-# The window: a resumed window's first message waits for its prompt.
+# The window: its first message waits for its prompt, and a fresh one's for its session.
 [[plant]]
-name = "muse: a resumed window's first message is pasted before its prompt shows"
-meant = "a_resumed_window_pastes_its_first_message_once_its_prompt_shows_as_the_host_admits_it"
+name = "muse: a window is ready for its first message before its prompt shows"
+meant = "a_window_is_ready_at_its_prompt_and_held_before_it_for_another_session_or_for_words_the_human_left"
 runs = ["muse-unsent"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/window.rs"
-find = '''                if screen::shows_prompt(&lines) {
-                    break;
-                }'''
-replace = '''                if screen::shows_prompt(&lines) || true {
-                    break;
-                }'''
+find = '''                if !screen::shows_prompt(&lines) {'''
+replace = '''                if false && !screen::shows_prompt(&lines) {'''
+
+[[plant]]
+name = "muse: a fresh window is ready before the log of its process names its session"
+meant = "a_fresh_window_names_the_session_its_own_process_opened_before_any_hook_says_it"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''            let Some(known) = self.session.borrow().clone() else {
+                return Ok(Readiness::Held(Held::Because(HOLD.to_owned())));
+            };'''
+replace = '''            let known = self.session.borrow().clone().unwrap_or_default();'''
 
 # The window: a taken-back box is emptied before a paste only where it holds words.
 [[plant]]
@@ -953,16 +962,16 @@ file = "crates/cf-harness/src/muse/window.rs"
 find = '''            observed.took_back = took_back;'''
 replace = '''            observed.took_back = took_back && false;'''
 
-# The adapter: a resumed window's first message goes in once it is up.
+# The adapter: every window's first message is delivered once it is up.
 [[plant]]
-name = "muse: a resumed window's first message is taken for one on its command line"
-meant = "opencode_and_a_resumed_muse_take_their_first_message_once_the_window_is_up_and_no_other_does"
+name = "muse: a window's first message is taken for one it reads as it opens"
+meant = "devin_reads_its_first_message_as_it_opens_opencode_posts_it_and_the_others_are_delivered_it"
 runs = ["muse-first-message"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''        launch.resume.is_some()'''
-replace = '''        launch.resume.is_some() && false'''
+find = '''        FirstMessage::Delivered'''
+replace = '''        FirstMessage::Opened'''
 
 # The adapter: its servers start with the window, on a Mac.
 [[plant]]
@@ -986,9 +995,9 @@ file = "crates/cf-harness/src/shared/launch_files.rs"
 find = '''        Harness::Muse => Some("muse"),'''
 replace = '''        Harness::Muse => None,'''
 
-# The rig, on the machine's Muse: a resumed window's first message goes in once it is up.
+# The rig, on the machine's Muse: a resumed window's note is delivered once it is up.
 [[plant]]
-name = "muse rig: a resumed Muse worker's note is never pasted"
+name = "muse rig: a resumed Muse window never starts, so its note is never pasted"
 meant = "a_muse_worker_cut_by_the_app_s_quit_is_resumed_on_its_session_with_the_note_pasted_once_up"
 runs = ["muse-rig-resume"]
 builds = true
@@ -996,8 +1005,12 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/window.rs"
-find = '''                    Some(text) => self.first_paste(host, text).await,'''
-replace = '''                    Some(_) => Ok(None),'''
+find = '''            if self.session.borrow().is_some() {
+                return Ok(None);
+            }'''
+replace = '''            if self.session.borrow().is_some() {
+                return Err("planted".to_owned());
+            }'''
 
 # The rig, on the machine's Muse: a brief taken back is not pasted behind itself.
 [[plant]]

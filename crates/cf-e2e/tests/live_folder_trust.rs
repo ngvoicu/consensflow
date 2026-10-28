@@ -13,8 +13,9 @@
 //!   folders above it, and in a git repository below a trusted one; not in a plain
 //!   folder below a trusted one, nor in a plain folder of a trusted repository. (A
 //!   plain folder with nothing trusted above it asks as well: the owner's own config
-//!   trusts their home, so on it none ever did, and the run's config, which trusts
-//!   nothing, shows it, 2026-10-22.) Its
+//!   trusts their home, so on it none ever does. The run's config is seeded as the
+//!   owner's would be, the live folders' root trusted, T-629 and T-681, so a plain
+//!   folder of the run asks nothing.) Its
 //!   question opens on "No, exit"; Down, then Enter, says yes, which it writes down
 //!   for the repository's root (its question names the window's own folder), so a
 //!   window opened anywhere in it again does not ask.
@@ -279,8 +280,7 @@ fn must_ask(harness: Harness, case: Case) -> bool {
         || harness == Harness::Claude
             && matches!(
                 case,
-                Case::Fresh
-                    | Case::Repository
+                Case::Repository
                     | Case::Parent
                     | Case::RepositoryBelow
                     | Case::Untrusted
@@ -343,6 +343,30 @@ fn answer_as_the_engine(
     window.kill();
     sleep(Duration::from_secs(1));
     Ok(at_prompt)
+}
+
+/// Writes into Claude Code's record of folders `record` (the run's own config's
+/// `.claude.json`) the yes a person said once to `directory`, as Claude Code keeps it
+/// (`projects[<folder>].hasTrustDialogAccepted`), where it holds none: what a person's own
+/// config has of a plain folder they were asked of. No window of the run is open then.
+fn said_yes_once(record: &Path, directory: &Path) -> Result {
+    let mut held: serde_json::Value = fs::read_to_string(record)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| json!({}));
+    let folder = fs::canonicalize(directory)
+        .unwrap_or_else(|_| directory.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    if !held["projects"].is_object() {
+        held["projects"] = json!({});
+    }
+    held["projects"][&folder]["hasTrustDialogAccepted"] = json!(true);
+    fs::write(record, held.to_string()).map_err(|source| Error::File {
+        action: "write",
+        path: record.to_path_buf(),
+        source,
+    })
 }
 
 /// Writes the `.claude/settings.json` of `directory`, which pre-approves a tool.
@@ -485,6 +509,32 @@ fn claude_trusted(record: &Path, under: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// What Claude Code's own status files (`sessions/<pid>.json` in its config folder `config`,
+/// [`claude_config`]) say of
+/// the window whose process is `pid` or that runs in `directory`: the engine reads a window
+/// at rest only where it says idle, so one that says idle while it asks whether to trust
+/// its folder is held only by the watch for the question (Calliope's review of T-432,
+/// T-520). Read and never written.
+fn claude_status(config: &Path, pid: Option<u32>, directory: &Path) -> Vec<String> {
+    let real = fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf());
+    let Ok(entries) = fs::read_dir(config.join("sessions")) else {
+        return vec!["no status files".to_owned()];
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+        .filter_map(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .filter(|status| {
+            let ours = pid.is_some_and(|pid| status["pid"] == pid);
+            let here = status["cwd"].as_str().is_some_and(|cwd| {
+                fs::canonicalize(cwd).unwrap_or_else(|_| PathBuf::from(cwd)) == real
+            });
+            ours || here
+        })
+        .map(|status| live::text(&status["status"]))
+        .collect()
+}
+
 /// `git` with `words` in `folder`, which must do what it is asked.
 fn git(folder: &Path, words: &[&str]) -> Result {
     let ran = Run::new(Path::new("git"))
@@ -577,12 +627,16 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         case.name().replace([' ', '\'', ','], "-")
     );
     if case == Case::GrantedInRepository {
-        // The plain folder is answered, then the folder above it made a repository.
+        // The plain folder is answered, then the folder above it made a repository. Below
+        // the live folders' root, which the run's config trusts as the owner's trusts their
+        // home, a plain folder asks nothing: the yes a person said there once is what their
+        // config holds of it, and the run's is given it so (T-681).
         if !answer_as_the_engine(rig, install, &name, &format!("{id}-before"), log)? {
             return Err(Error::Daemon(format!(
                 "{name}: not at its prompt once answered"
             )));
         }
+        said_yes_once(&claude_record(rig, install), &directory)?;
         git(
             &live_folder_in(&home, &format!("{base}/granted-repository"))?,
             &["init", "-q"],
@@ -633,10 +687,20 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let mut lines = vec![format!("drew: {drew}")];
     lines.extend(first.iter().map(|line| format!("  {line}")));
     let asked = engine_asks(harness, &first)?;
+    // Whether what it asked first is of its folder: one trusted from above may ask only
+    // of the project's servers.
+    let asked_the_folder = asked && engine_read(harness, &first)?["servers"] != true;
     // The question of the folder's grants, which the engine answers only where the
     // folder its yes records is the project's.
     let grants = asked && engine_read(harness, &first)?["grants"] == true;
     let (folder, inside, servers_alone) = predicted(&directory)?;
+    if asked && harness == Harness::Claude {
+        let pid = window.process().map(|process| process.pid);
+        lines.push(format!(
+            "Claude Code's status while it asks: {:?}",
+            claude_status(&claude_config(rig, install), pid, &directory)
+        ));
+    }
     let mut keys = 0;
     // Whether the dialog of a new server was read, and the keys pressed into it.
     let mut served = false;
@@ -699,7 +763,13 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
             .into_iter()
             .filter(|folder| !trusted_before.contains(folder))
             .collect();
-        kept_where_said = kept == [folder.clone()];
+        // A window whose folder is trusted from above asks only of the servers: no yes of
+        // its folder was said, and none is kept.
+        kept_where_said = if asked_the_folder {
+            kept == [folder.clone()]
+        } else {
+            kept.is_empty()
+        };
         lines.push(format!(
             "the engine says a yes trusts {folder} (the project's: {inside}); Claude Code kept it for {kept:?}"
         ));
@@ -1335,7 +1405,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere(
+    fn claude_must_ask_in_a_repository_nobody_answered_and_of_grants_and_servers_and_no_harness_ever_elsewhere(
     ) {
         let asking: Vec<&str> = Case::ALL
             .into_iter()
@@ -1345,7 +1415,6 @@ mod tests {
         assert_eq!(
             asking,
             [
-                "fresh",
                 "plain below with pre-approved tools",
                 "answered, then in a repository, with pre-approved tools",
                 "repository",

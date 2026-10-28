@@ -687,8 +687,10 @@ fn fail(
         require_task_state(&task, &failable, "fail")?;
         let told = Dropped::of(store, &task)?;
         // The answer of a window's turn on a tell, noted for the requester and not yet given
-        // (an early resume, then a resumed turn that failed), waits for the reopen with the
-        // task: what the window said then is the chief's still (T-442).
+        // (an early resume, then a resumed turn that failed), is put back queued after the
+        // drop: the requester is given it at its next rest, in the words of a task that has
+        // moved on, then the note that the task failed (T-442). It does not wait for the
+        // reopen.
         let answers = queued_paused_answers(store, &task)?;
         if given_up {
             drop_queued_but_told(store, task.id)?;
@@ -752,9 +754,16 @@ fn fail(
 /// The human takes finished tasks off the board for good: each leaves the
 /// board and `cf task list`, and keeps its row, so its number is never
 /// given again, the threads that name it stay whole and `cf task get` still
-/// reads it. Only a finished task goes, and none a task not yet finished
-/// still needs; all of them go, or none. Nobody is told: the human tidies
-/// the board.
+/// reads it. Only a finished task goes; all of them go, or none. Nobody is
+/// told: the human tidies the board.
+///
+/// What waits for a task reads it as before once it is gone (nothing that
+/// decides a wait looks at `deleted_at`: `release_ready` and the waiter's
+/// `needs` take its state), so a task another needs goes too when its state
+/// cannot change: an accepted one is accepted for good, a cancelled one never
+/// will be. A failed one stays while a task not yet finished needs it: the
+/// chief can reopen it, and a deleted task is not reopened (`require_on_board`),
+/// so deleting it would leave that task waiting for good.
 pub(crate) fn delete_tasks(
     store: &mut Store,
     project_id: i64,
@@ -788,21 +797,25 @@ pub(crate) fn delete_tasks(
                         409,
                     ));
                 }
-                let needing = store
-                    .db
-                    .prepare(&format!(
-                        "SELECT w.number FROM task_need n JOIN task w ON w.id = n.task_id
+                let needing = if task.state == "failed" {
+                    store
+                        .db
+                        .prepare(&format!(
+                            "SELECT w.number FROM task_need n JOIN task w ON w.id = n.task_id
            WHERE n.needs_id = ? AND w.state NOT IN ({finished}) ORDER BY w.number"
-                    ))?
-                    .query_map([task.id], |row| {
-                        Ok(format!("T-{}", row.get::<_, i64>("number")?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                        ))?
+                        .query_map([task.id], |row| {
+                            Ok(format!("T-{}", row.get::<_, i64>("number")?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                } else {
+                    Vec::new()
+                };
                 if let [needed_by] = needing.as_slice() {
                     return Err(LedgerError::refused_with(
                         "task-needed",
                         format!(
-                            "{needed_by} still needs T-{number}: it stays on the board until {needed_by} is finished"
+                            "{needed_by} still needs T-{number}, which failed and may be reopened: it stays on the board until {needed_by} is finished"
                         ),
                         409,
                     ));
@@ -811,7 +824,7 @@ pub(crate) fn delete_tasks(
                     return Err(LedgerError::refused_with(
                         "task-needed",
                         format!(
-                            "{} still need T-{number}: it stays on the board until they are finished",
+                            "{} still need T-{number}, which failed and may be reopened: it stays on the board until they are finished",
                             needing.join(", ")
                         ),
                         409,

@@ -3,8 +3,8 @@
 //! selection gone wrong and a close, and what the bound refuses of them.
 
 use super::testing::{
-    a_window_among_strangers, identity_of, listed, the_windows, Machine, BUILD, DEEP, DETACHED,
-    JOB, LEFT, PROGRAM, SHELL, USERS_JOB, USERS_SHELL,
+    a_window_among_strangers, identity_of, listed, the_tests_own_parent, the_windows, Machine,
+    BUILD, DEEP, DETACHED, JOB, LEFT, PROGRAM, SHELL, USERS_JOB, USERS_SHELL,
 };
 use super::*;
 
@@ -17,19 +17,26 @@ fn tree_of(table: &[Process]) -> ProcessTree {
     tree
 }
 
-/// A session no process leads, which a user's shell and its job are in.
-const STRANGERS: i32 = 4_000_099;
+/// A session no process leads, which the strangers of a table are put in: its number is above
+/// any a Mac gives, so that no process there is has it.
+pub(super) const STRANGERS: i32 = 4_000_099;
 
-/// [`a_window_among_strangers`], where the user's shell and its job are in [`STRANGERS`].
+/// [`a_window_among_strangers`], where every process that is none of the window's (the test's
+/// own parent, the build, the user's shell and its job, the job that left the window's
+/// session) is in [`STRANGERS`].
 fn strangers_in_a_session_nobody_leads() -> Vec<Process> {
+    let windows = the_windows();
     a_window_among_strangers()
         .into_iter()
-        .map(|process| match process.identity.pid {
-            USERS_SHELL | USERS_JOB => Process {
-                session: Some(STRANGERS),
-                ..process
-            },
-            _ => process,
+        .map(|process| {
+            if windows.contains(&process.identity.pid) {
+                process
+            } else {
+                Process {
+                    session: Some(STRANGERS),
+                    ..process
+                }
+            }
         })
         .collect()
 }
@@ -49,10 +56,12 @@ fn a_selection_gone_wrong_asks_only_the_windows_own_to_end() {
     let mut tree = tree_of(&table);
     tree.session = Some(STRANGERS);
     let chosen = tree.select(&table, &HashMap::new());
-    assert!(
-        chosen.contains_key(&USERS_SHELL) && chosen.contains_key(&USERS_JOB),
-        "the selection names them: {chosen:?}"
-    );
+    for stranger in [the_tests_own_parent(), BUILD, USERS_SHELL, USERS_JOB, LEFT] {
+        assert!(
+            chosen.contains_key(&stranger),
+            "the selection names {stranger}: {chosen:?}"
+        );
+    }
 
     let asked = tree.ask_by(&machine, None).expect("asked");
 

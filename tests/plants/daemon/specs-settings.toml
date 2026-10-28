@@ -798,11 +798,11 @@ runs = ["settings-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if record.window.borrow().retiring {
-            return Ok(());
+            return self.exit_overdue(record).await;
         }
         // A participant forgotten while the step waits is done with.'''
 replace = '''        if record.window.borrow().retiring {
-            return Ok(());
+            return self.exit_overdue(record).await;
         }
         if participant.role == "chief" && self.seams.roster.app_specs().on {
             self.retire(record).await?;

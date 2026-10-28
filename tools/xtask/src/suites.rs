@@ -554,6 +554,65 @@ mod tests {
         assert_eq!(shard::SHARD, "CF_TEST_SHARD");
     }
 
+    /// A shard says its time against its step's limit (T-836): the limit it is told is the
+    /// step's own `timeout-minutes`, so that a change of either is a change of both.
+    #[test]
+    fn the_limit_a_shard_is_told_is_its_steps_timeout() {
+        let jobs = jobs(&workflow());
+        let (_, daemons) = jobs
+            .iter()
+            .find(|(_, lines)| {
+                lines
+                    .iter()
+                    .any(|line| line == "- run: npm run test:daemons")
+            })
+            .expect("no job runs npm run test:daemons");
+        let step: Vec<&String> = daemons
+            .iter()
+            .skip_while(|line| *line != "- run: npm run test:daemons")
+            .skip(1)
+            .take_while(|line| !line.starts_with("- "))
+            .collect();
+        let value = |key: &str| {
+            step.iter()
+                .find_map(|line| line.strip_prefix(&format!("{key}: ")))
+                .unwrap_or_else(|| panic!("the step has no {key}: {step:?}"))
+                .to_owned()
+        };
+        assert_eq!(value(shard::LIMIT), value("timeout-minutes"), "{step:?}");
+        assert!(value("timeout-minutes").parse::<u64>().is_ok());
+    }
+
+    /// The workspace's tests on Windows open their panes' consoles with the console host
+    /// the app ships, which the key tests ask for: CI puts it beside the build before
+    /// them, as the Windows runner does. Without it they ran on the system's own, which
+    /// made a mark typed as text the Alt key carrying it (main's CI, 2026-10-27).
+    #[test]
+    fn ci_puts_the_console_host_the_app_ships_beside_the_workspace_tests_on_windows() {
+        let jobs = jobs(&workflow());
+        let (_, workspace) = jobs
+            .iter()
+            .find(|(_, lines)| {
+                lines
+                    .iter()
+                    .any(|line| line.starts_with("- run: cargo test --workspace "))
+            })
+            .expect("no job runs cargo test --workspace");
+        let at = |wanted: &str| workspace.iter().position(|line| line == wanted);
+        let tests = at("- run: cargo test --workspace --exclude app --exclude cf-e2e");
+        let host = at("run: cargo xtask conpty --into app/src-tauri/target/debug");
+        assert!(
+            host.is_some_and(|host| tests.is_some_and(|tests| host < tests)),
+            "{workspace:?}"
+        );
+        let condition = host.and_then(|host| workspace.get(host - 1));
+        assert!(
+            condition.is_some_and(|line| line == "- if: runner.os == 'Windows'"),
+            "{workspace:?}"
+        );
+        assert_eq!(listed(workspace, "os"), ["macos-latest", "windows-latest"]);
+    }
+
     /// The check a release and a branch rule trust, `gate (<os>)`: it waits for
     /// every other job of the workflow, runs whatever they did, and passes only
     /// when each passed: a job that failed, was cancelled or was skipped fails it,

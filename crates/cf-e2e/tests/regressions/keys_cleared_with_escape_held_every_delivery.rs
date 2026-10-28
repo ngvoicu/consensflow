@@ -59,7 +59,7 @@ fn chiefs_window(rig: &Rig, project: &Project) -> cf_e2e::Result<Value> {
 }
 
 /// The chief's result, once it is given one: its id, and whether it is delivered.
-fn result(project: &Project) -> cf_e2e::Result<Option<(i64, bool)>> {
+pub(crate) fn result(project: &Project) -> cf_e2e::Result<Option<(i64, bool)>> {
     Ok(project
         .inbox("chief")?
         .iter()
@@ -74,7 +74,11 @@ fn result(project: &Project) -> cf_e2e::Result<Option<(i64, bool)>> {
 
 /// A rig whose chief draws Claude Code's input box, a worker at work on T-1 for
 /// `seconds`, and the chief idle: the chief's session.
-fn a_worker_at_work(rig: &Rig, project: &Project, seconds: u64) -> cf_e2e::Result<String> {
+pub(crate) fn a_worker_at_work(
+    rig: &Rig,
+    project: &Project,
+    seconds: u64,
+) -> cf_e2e::Result<String> {
     let added = project.add_member("worker")?;
     let session = windows_of(rig, project)
         .first()

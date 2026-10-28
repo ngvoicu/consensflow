@@ -94,7 +94,7 @@ fn a_launch_is_refused_in_plain_words_where_muse_is_missing_or_older_than_consen
 }
 
 #[test]
-fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_its_first_message_last(
+fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no_message_on_its_command_line(
 ) {
     let home = tempfile::tempdir().unwrap();
     let env = installed(home.path(), Some("1.4.13-R6996.1"));
@@ -117,7 +117,6 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_it
             "--yolo",
             "--contributor-mode",
             "off",
-            "Do it."
         ]
     );
     assert_eq!(
@@ -165,7 +164,7 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_it
 }
 
 #[test]
-fn a_resumed_window_opens_on_its_session_and_takes_its_first_message_once_it_is_up() {
+fn a_resumed_window_opens_on_its_session_with_no_message_on_its_command_line() {
     let home = tempfile::tempdir().unwrap();
     let env = installed(home.path(), Some("1.4.13-R6996.1"));
     let session = "01a17bc9-e758-77f3-ac8d-a725edf373ae";
@@ -177,10 +176,7 @@ fn a_resumed_window_opens_on_its_session_and_takes_its_first_message_once_it_is_
         prepared.argv
     );
     assert_eq!(prepared.native_session.as_deref(), Some(session));
-    let id = LaunchId::new(LAUNCH).unwrap();
-    let muse = adapter(&env);
-    assert!(muse.first_message_once_up(&launch(&id, Some(session))));
-    assert!(!muse.first_message_once_up(&launch(&id, None)));
+    assert_eq!(adapter(&env).first_message(), FirstMessage::Delivered);
 }
 
 #[test]

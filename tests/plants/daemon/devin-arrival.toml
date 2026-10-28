@@ -114,8 +114,8 @@ runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            if self.begun_on_the_store(&observed) {"
-replace = "            if false && self.begun_on_the_store(&observed) {"
+find = "            } else if self.begun_on_the_store(&observed) {"
+replace = "            } else if false && self.begun_on_the_store(&observed) {"
 
 [[plant]]
 name = "devin arrival: a turn whose agent never says a word reads at work for good"
@@ -176,8 +176,10 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        delivering.session = session;"
-replace = "        let _ = session;"
+find = """        delivering.queued = matches!(outcome, Admission::Admitted { queued: true });
+        delivering.session = session;"""
+replace = """        delivering.queued = matches!(outcome, Admission::Admitted { queued: true });
+        let _ = session;"""
 
 [[plant]]
 name = "devin arrival: the conversation left gives the paste back while its record is at work"

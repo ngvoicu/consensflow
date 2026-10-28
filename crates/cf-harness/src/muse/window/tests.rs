@@ -1,6 +1,6 @@
 //! A Muse window against a scripted pane host, a manual clock and session logs written
-//! where Muse writes them: which session it names, its resumed first message, its
-//! readiness, a turn taken back, and a session it was switched to.
+//! where Muse writes them: which session it names, its readiness, a resume Muse would
+//! not make, a turn taken back, and a session it was switched to.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,16 +40,10 @@ impl Home {
         self.dir.path().join("sessions.jsonl")
     }
 
-    /// A window on `session` where given, its first message `first` pasted once up.
-    fn window(&self, session: Option<&str>, first: Option<&str>) -> MuseWindow {
+    /// A window on `session` where given.
+    fn window(&self, session: Option<&str>) -> MuseWindow {
         let services = self.fakes.services(&self.env, Path::new(""));
-        MuseWindow::new(
-            &services,
-            session,
-            self.said(),
-            30_000,
-            first.map(str::to_owned),
-        )
+        MuseWindow::new(&services, session, self.said(), 30_000)
     }
 
     /// Writes `log` as the session `id`'s, its first lines naming the process `pid`.
@@ -128,9 +122,16 @@ fn asked(host: &ScriptedHost) -> Vec<String> {
 #[test]
 fn a_fresh_window_names_the_session_its_own_process_opened_before_any_hook_says_it() {
     let home = Home::new();
-    let window = Rc::new(home.window(None, None));
-    window.opened(&pane(), Some(40_085));
+    let window = Rc::new(home.window(None));
+    window.opened(Some(40_085));
     let host = Rc::new(ScriptedHost::default());
+    // Its first message is pasted only once it is ready, and it is held until its
+    // session is known: no hook speaks before a first prompt, so the log naming its
+    // process is the one way it learns it.
+    assert_eq!(
+        finished(window.ready(&*host, &pane())),
+        Ok(Readiness::Held(Held::Because(HOLD.to_owned())))
+    );
     let mut driver = Driver::default();
     let (starting, asking) = (Rc::clone(&window), Rc::clone(&host));
     driver.begin(0, async move { starting.started(&*asking).await });
@@ -143,16 +144,18 @@ fn a_fresh_window_names_the_session_its_own_process_opened_before_any_hook_says_
     home.log(&own, 40_085, "");
     home.fakes.time.fire_next(EPOCH_MS + 2_000);
     assert_eq!(driver.run(), [(0, Ok(Some(own.clone())))]);
-    assert!(
-        asked(&host).is_empty(),
-        "a fresh window's first message is on its command line"
+    assert!(asked(&host).is_empty(), "nothing is pasted as it starts");
+    host.answer("pane.snapshot", [at_prompt("")]);
+    assert_eq!(
+        finished(window.ready(&*host, &pane())),
+        Ok(Readiness::Ready)
     );
 }
 
 #[test]
 fn a_fresh_window_whose_process_says_nothing_is_given_up_with_why_and_a_hook_s_word_will_do() {
     let home = Home::new();
-    let window = Rc::new(home.window(None, None));
+    let window = Rc::new(home.window(None));
     let host = Rc::new(ScriptedHost::default());
     let mut driver = Driver::default();
     let (starting, asking) = (Rc::clone(&window), Rc::clone(&host));
@@ -177,40 +180,6 @@ fn a_fresh_window_whose_process_says_nothing_is_given_up_with_why_and_a_hook_s_w
     );
 }
 
-#[test]
-fn a_resumed_window_pastes_its_first_message_once_its_prompt_shows_as_the_host_admits_it() {
-    let home = Home::new();
-    let session = "01a17bc9-e758-77f3-ac8d-a725edf373ae";
-    let window = Rc::new(home.window(Some(session), Some("Your turn was cut.")));
-    window.opened(&pane(), Some(40_085));
-    let host = Rc::new(ScriptedHost::default());
-    host.answer(
-        "pane.snapshot",
-        [snapshot(&["  Muse Code 1.4.13", ""]), at_prompt("")],
-    );
-    host.answer("pane.write_paste", [ok()]);
-    let mut driver = Driver::default();
-    let (starting, asking) = (Rc::clone(&window), Rc::clone(&host));
-    driver.begin(0, async move { starting.started(&*asking).await });
-    assert!(driver.run().is_empty(), "no prompt yet");
-    home.fakes.time.fire_next(EPOCH_MS + 1_000);
-    assert_eq!(driver.run(), [(0, Ok(None))]);
-    assert_eq!(
-        asked(&host),
-        ["pane.snapshot", "pane.snapshot", "paste Your turn was cut."]
-    );
-    assert_eq!(host.admissions(), 1);
-    // A host that admits it no more (the project closed): nothing goes in, and the
-    // launch is not the failure.
-    let refused = home.window(Some(session), Some("Your turn was cut."));
-    refused.opened(&pane(), Some(40_085));
-    let closed = ScriptedHost::default();
-    closed.answer("pane.snapshot", [at_prompt("")]);
-    closed.refuse_hand_overs();
-    assert_eq!(finished(refused.started(&closed)), Ok(None));
-    assert_eq!(asked(&closed), ["pane.snapshot"]);
-}
-
 const PICKER: [&str; 4] = [
     "",
     "  that session is already open in another window — pick another session (held by pid 40913 on",
@@ -219,27 +188,27 @@ const PICKER: [&str; 4] = [
 ];
 
 #[test]
-fn a_resume_muse_will_not_make_for_another_window_holds_the_session_says_so_and_pastes_nothing() {
+fn a_resume_muse_will_not_make_for_another_window_is_unfit_in_muse_s_words_and_takes_nothing() {
     let home = Home::new();
     let session = "01a17bc9-e758-77f3-ac8d-a725edf373ae";
-    let window = home.window(Some(session), Some("Your turn was cut."));
-    window.opened(&pane(), Some(40_085));
+    let window = home.window(Some(session));
+    window.opened(Some(40_085));
     let host = ScriptedHost::default();
-    host.answer("pane.snapshot", [snapshot(&PICKER)]);
-    let failed = finished(window.started(&host)).unwrap_err();
+    assert_eq!(finished(window.started(&host)), Ok(None));
     assert!(
-        failed.starts_with("Muse did not resume the session: that session is already open"),
-        "{failed}"
+        asked(&host).is_empty(),
+        "a resumed window knows its session"
     );
-    assert_eq!(asked(&host), ["pane.snapshot"]);
-    // And one opened with nothing to say is unfit for work, in Muse's words.
-    let quiet = home.window(Some(session), None);
-    quiet.opened(&pane(), Some(40_085));
     host.answer("pane.snapshot", [snapshot(&PICKER)]);
-    let Ok(Readiness::Unfit(why)) = finished(quiet.ready(&host, &pane())) else {
+    let Ok(Readiness::Unfit(why)) = finished(window.ready(&host, &pane())) else {
         panic!("not unfit");
     };
+    assert!(
+        why.starts_with("Muse did not resume the session: that session is already open"),
+        "{why}"
+    );
     assert!(why.contains("kill 40913"), "{why}");
+    assert_eq!(asked(&host), ["pane.snapshot"]);
 }
 
 #[test]
@@ -248,8 +217,8 @@ fn a_window_is_ready_at_its_prompt_and_held_before_it_for_another_session_or_for
     let home = Home::new();
     let session = v7(100);
     home.log(&session, 40_085, "");
-    let window = home.window(Some(&session), None);
-    window.opened(&pane(), Some(40_085));
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
     let host = ScriptedHost::default();
     host.answer(
         "pane.snapshot",
@@ -309,8 +278,8 @@ fn a_turn_taken_back_is_read_so_and_its_box_cleared_before_the_next_paste_only_w
     let home = Home::new();
     let session = v7(100);
     home.log(&session, 40_085, &taken_back());
-    let window = home.window(Some(&session), None);
-    window.opened(&pane(), Some(40_085));
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
     let observed = finished(window.observe()).unwrap();
     assert!(observed.took_back && observed.settled, "{observed:?}");
     let host = ScriptedHost::default();
@@ -337,8 +306,8 @@ fn a_window_follows_the_session_its_hook_says_it_resumed_into() {
     let home = Home::new();
     let session = v7(100);
     home.log(&session, 40_085, "");
-    let window = home.window(Some(&session), None);
-    window.opened(&pane(), Some(40_085));
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
     assert_eq!(finished(window.observe()).unwrap().switched, None);
     home.hook_said(&session, "startup");
     assert_eq!(finished(window.observe()).unwrap().switched, None);
@@ -358,8 +327,8 @@ fn a_session_the_window_s_process_opens_after_its_hook_spoke_is_the_one_it_shows
     let home = Home::new();
     let session = v7(100);
     home.log(&session, 40_085, "");
-    let window = home.window(Some(&session), None);
-    window.opened(&pane(), Some(40_085));
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
     home.hook_said(&session, "startup");
     // A /clear opens a session at once; its hook speaks only at its first prompt. The
     // session began after the hook's word was written (the clock of both is the
@@ -378,8 +347,8 @@ fn a_window_cleared_with_no_hook_and_no_word_of_its_process_is_followed_by_its_l
     let home = Home::new();
     let session = v7(100);
     home.log(&session, 40_085, "");
-    let window = home.window(Some(&session), None);
-    window.opened(&pane(), Some(40_085));
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
     assert_eq!(finished(window.observe()).unwrap().switched, None);
     // `/clear`: a new session started from the window's, its log naming no process, and
     // no SessionStart hook for it (Muse 1.4.13).

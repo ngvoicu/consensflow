@@ -58,7 +58,8 @@ impl WindowEnv {
 
 /// The variables of `env` that [`TERMINAL_ENV`] names, as `env` holds them: none of
 /// ConsensFlow's own nor the PATH, which a window is given otherwise, and none whose
-/// value is no text a pane's environment can hold.
+/// value is no text a pane's environment can hold. An empty value is a value, as a
+/// terminal's `export NAME=` gives it.
 fn terminal_of(env: &Env) -> Vec<(String, String)> {
     let names: Vec<String> = env
         .text(TERMINAL_ENV)
@@ -67,7 +68,7 @@ fn terminal_of(env: &Env) -> Vec<(String, String)> {
     names
         .into_iter()
         .filter(|name| !name.starts_with("CONSENSFLOW_") && !name.eq_ignore_ascii_case("PATH"))
-        .filter_map(|name| Some((name.clone(), env.text(&name)?.to_owned())))
+        .filter_map(|name| Some((name.clone(), env.os(&name)?.to_str()?.to_owned())))
         .collect()
 }
 

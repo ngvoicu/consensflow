@@ -161,13 +161,17 @@ runs = ["regressions-finder"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/regressions/codex_in_homebrew_taken_for_not_installed.rs"
-find = "Ok(files::read_string(&found).is_ok_and(|said| said.ends_with('\\n')))"
-replace = "Ok(files::read_string(&found).is_ok())"
+find = '''        Ok(!files::read_finished_lines(&found)
+            .unwrap_or_default()
+            .is_empty())'''
+replace = '''        Ok(files::read_string(&found).is_ok())'''
 
 [[plant]]
 name = "load flakes: the windows of the headless host are given a second to print"
 meant = "stdin_eof_reaps_every_spawned_process"
 runs = ["panes-headless-eof"]
+# Not Windows': its meant test is in cf-panes' tests/headless.rs, which is Unix's (`#![cfg(unix)]`); sent there, it ran no test (integration B round 2, T-800).
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/tests/headless.rs"
@@ -194,6 +198,8 @@ replace = '''
 name = "load flakes: the closed-pipe test runs beside the other tests"
 meant = "a_program_out_of_time_dies_of_its_closed_stream_whatever_other_tests_start"
 runs = ["process-closed-stream-stress"]
+# Not Windows': its meant test is `#[cfg(unix)]`; sent there, it ran no test (integration B round 2, T-800).
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/execute.rs"

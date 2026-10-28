@@ -147,7 +147,8 @@ fn distinct(numbers: &[u64], field: &str) -> Result<Vec<i64>, LedgerError> {
 /// task is still on its work, waits on the board for it to be accepted.
 /// Given a pool and tier instead, it opens for the daemon to assign to a
 /// member of that pool and tier. A task on the board may need other tasks:
-/// it waits until each is accepted. With `before`, tasks still on the board
+/// it waits until each is accepted, one the human cleared from the board
+/// included when it was accepted. With `before`, tasks still on the board
 /// wait for this one.
 pub(crate) fn create_task(
     store: &mut Store,
@@ -263,13 +264,20 @@ pub(crate) fn create_task(
         let task_id = store.db.last_insert_rowid();
         for number in &needed {
             let need = store.task_row(project_id, *number)?;
-            super::require_on_board(&need, "wait for")?;
+            // Never accepted, so it never releases what waits for it, deleted or not.
             if need.state == "cancelled" {
                 return Err(LedgerError::refused_with(
                     "need-cancelled",
                     format!("T-{number} is cancelled: nothing waits for it"),
                     409,
                 ));
+            }
+            // The human's delete only takes a task off the board: it keeps its state, and a
+            // waiter reads it as before (`blocked_by`, `release_ready`), so an accepted task the
+            // human cleared still releases a new one at once. Any other deleted task would leave
+            // its waiter blocked for good: a failed one is not reopened any more.
+            if need.state != "accepted" {
+                super::require_on_board(&need, "wait for")?;
             }
             store.db.execute(
                 "INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)",

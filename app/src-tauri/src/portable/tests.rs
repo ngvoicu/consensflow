@@ -466,7 +466,7 @@ struct Running(std::process::Child);
 impl Running {
     fn start(at: &Path) -> Self {
         use std::os::windows::process::CommandExt;
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
 
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let shell = std::env::var_os("ComSpec").expect("ComSpec names the command interpreter");

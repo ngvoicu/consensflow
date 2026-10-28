@@ -3,7 +3,7 @@
 //! a reply streaming or cut at its length, and a part of another session.
 
 use super::*;
-use crate::shared::record::reading::Role;
+use crate::shared::record::reading::{Item, Role};
 
 #[test]
 fn a_reply_that_stopped_is_settled_and_one_streaming_or_cut_is_not_complete() {
@@ -514,4 +514,79 @@ fn the_summary_a_compaction_writes_is_marked_so_and_the_answer_before_it_is_not(
             ("Summary of the conversation so far", true),
         ]
     );
+}
+
+/// The last item a look reads of a reply to the user's message, `reply` its message's
+/// data and `parts` the data of its parts.
+fn reply_read(reply: &Value, parts: &[Value]) -> Item {
+    let staged = Staged::new();
+    staged.message(
+        "m1",
+        1,
+        &json!({ "role": "user", "time": { "created": 1 } }),
+    );
+    staged.part(
+        "p1",
+        "m1",
+        2,
+        &json!({ "type": "text", "text": "Review T-1" }),
+    );
+    staged.event(1, "message.updated.1", &info("m1", None));
+    staged.event(2, "message.part.updated.1", &part_of("p1", "m1"));
+    staged.message("m2", 3, reply);
+    staged.event(3, "message.updated.1", &info("m2", None));
+    let mut n = 4;
+    for part in parts {
+        let id = format!("p{n}");
+        staged.part(&id, "m2", n, part);
+        staged.event(n, "message.part.updated.1", &part_of(&id, "m2"));
+        n += 1;
+    }
+    if let Some(time) = reply
+        .get("time")
+        .filter(|time| time.get("completed").is_some())
+    {
+        staged.event(n, "message.updated.1", &info("m2", Some(time)));
+    }
+    match &*look(&mut staged.reader()) {
+        Reading::Known(record) => record.items.last().unwrap().clone(),
+        reading => panic!("{reading:?}"),
+    }
+}
+
+#[test]
+fn a_reply_with_nothing_of_the_models_in_it_is_synthetic_and_one_the_model_began_is_not() {
+    // T-530: OpenCode makes the assistant's message before the model replies, and keeps
+    // it when the request fails or is aborted before a token (seen on this Mac's
+    // store: rows of no part, `MessageAbortedError` and `APIError` rows of none, an
+    // `UnknownError` row of its `step-start` alone). No turn got through any of them.
+    let begun = json!({ "role": "assistant", "time": { "created": 3 } });
+    let failed = |name: &str| {
+        json!({ "role": "assistant", "time": { "created": 3, "completed": 4 },
+            "error": { "name": name, "data": { "message": "failed" } } })
+    };
+    let step = json!({ "type": "step-start" });
+    for (reply, parts) in [
+        (begun.clone(), vec![]),
+        (begun.clone(), vec![step.clone()]),
+        (failed("MessageAbortedError"), vec![]),
+        (failed("APIError"), vec![]),
+        (failed("UnknownError"), vec![step.clone()]),
+        (begun.clone(), vec![json!({ "type": "text", "text": " " })]),
+    ] {
+        let item = reply_read(&reply, &parts);
+        assert_eq!(
+            (item.role, item.synthetic),
+            (Role::Assistant, true),
+            "{reply} {parts:?}"
+        );
+    }
+    for part in [
+        json!({ "type": "text", "text": "Reading the" }),
+        json!({ "type": "reasoning", "text": "The user wants" }),
+        json!({ "type": "tool", "tool": "read", "callID": "c1", "state": { "status": "running" } }),
+    ] {
+        let item = reply_read(&begun, &[step.clone(), part.clone()]);
+        assert!(!item.synthetic, "{part}");
+    }
 }

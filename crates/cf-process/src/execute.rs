@@ -270,8 +270,11 @@ mod tests {
         }
         let _ran = crate::testing::Ran;
         // Probed on Node v26.8.1: the streams are closed before the program is
-        // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE).
-        let run = shell("trap 'echo bye; exit 0' TERM; echo hi; while true; do sleep 0.05; done");
+        // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE). The program
+        // goes with its owner, should the test be ended on its way (T-686).
+        let run = shell(
+            "trap 'echo bye; exit 0' TERM; echo hi; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done",
+        );
         let limits = Limits {
             timeout: Duration::from_millis(300),
             max_buffer: 1024,
@@ -375,10 +378,19 @@ mod tests {
         );
     }
 
+    /// A program that ignores the ask to end and goes on for as long as the process that started
+    /// it is there. One that went on for ever was left in a group of its own by a test that was
+    /// ended on its way: a harness whose output is closed exits at once, with its tests in flight
+    /// (T-686: two of them, for eight hours).
+    #[cfg(unix)]
+    fn deaf() -> String {
+        cf_base::fixture::deaf("TERM", "")
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_program_that_will_not_end_when_asked_is_forced_a_moment_later() {
-        let run = shell("trap '' TERM; while true; do sleep 0.05; done");
+        let run = shell(&deaf());
         let limits = Limits {
             timeout: Duration::from_millis(200),
             max_buffer: 1024,
@@ -388,6 +400,38 @@ mod tests {
         assert!(failed.killed);
         assert_eq!(failed.code, None);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The test starts what it probes.
+    fn a_program_that_ignores_the_ask_to_end_goes_when_the_process_that_started_it_is_gone() {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+
+        // An owner starts the program, says its number and waits; it is ended as a test is when
+        // the harness around it exits.
+        let mut owner = Command::new("/bin/sh")
+            .args(["-c", "/bin/sh -c \"$DEAF\" & echo $!; wait"])
+            .env("DEAF", deaf())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut said = String::new();
+        BufReader::new(owner.stdout.take().unwrap())
+            .read_line(&mut said)
+            .unwrap();
+        let program: u32 = said.trim().parse().unwrap();
+        let mut left = crate::testing::Survivors(vec![program]);
+        assert!(crate::testing::running(program));
+        owner.kill().unwrap();
+        owner.wait().unwrap();
+        assert!(
+            crate::testing::gone(program),
+            "the program went on with the process that started it gone"
+        );
+        // It has gone: nothing is sent to a number that may be another's by now.
+        left.0.clear();
     }
 
     #[test]

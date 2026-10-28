@@ -68,6 +68,38 @@ pub fn read(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Opti
     }
 }
 
+/// What the input box of a `harness` window shows on `screen`, the cursor where
+/// `cursor` says, for the human told of a delivery held for it: empty where its reader
+/// reads it so (a hint is no words), its words where it reads them, none where it reads
+/// no box.
+pub fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Option<String> {
+    let mark = match harness {
+        Harness::Claude => crate::claude::input_box::MARK,
+        Harness::Devin => crate::devin::input_box::MARK,
+        // Muse's rules are drawn shorter than Claude's and Devin's: its own reader.
+        Harness::Muse => return crate::muse::input_box_words(screen),
+        Harness::Codex | Harness::Pi | Harness::Opencode => return None,
+    };
+    match read(harness, screen, cursor)? {
+        InputBox::Empty => Some(String::new()),
+        InputBox::Holds => boxed(screen, mark).map(|boxed| boxed.words),
+    }
+}
+
+/// [`shown`], of a `harness` window's screen as drawn now.
+pub(crate) async fn words_on_screen(
+    host: &dyn PaneHost,
+    pane: &Pane,
+    harness: Harness,
+) -> Option<String> {
+    let snapshot = super::pane::snapshot_drawn(host, pane).await.ok()?;
+    shown(
+        harness,
+        &bottom(&snapshot)?,
+        Cursor::of(snapshot.get("cursor")),
+    )
+}
+
 /// Whether `line` is a rule drawn across the screen: `─`, with a label in it at
 /// most (Devin's says its permission mode), beginning and ending with the rule.
 pub(crate) fn is_rule(line: &str) -> bool {
@@ -87,6 +119,8 @@ pub(crate) struct Boxed<'a> {
     pub(crate) typed: &'a str,
     /// Whether any line after that holds anything.
     pub(crate) more: bool,
+    /// Its lines' text after the mark, a line break between two.
+    pub(crate) words: String,
 }
 
 impl Boxed<'_> {
@@ -121,11 +155,16 @@ pub(crate) fn boxed(screen: &[String], mark: char) -> Option<Boxed<'_>> {
     let more = screen[first + 1..end]
         .iter()
         .any(|line| !line.trim().is_empty());
+    let words = std::iter::once(typed)
+        .chain(screen[first + 1..end].iter().map(|line| line.trim()))
+        .collect::<Vec<_>>()
+        .join("\n");
     Some(Boxed {
         line: first,
         start: indent + 2,
         typed,
         more,
+        words: words.trim_end().to_owned(),
     })
 }
 
@@ -157,6 +196,36 @@ pub(crate) enum Unsent {
     ReadEmpty(u64),
 }
 
+/// What the input box of a `harness` window holds on its screen now, whatever the
+/// pane host counted of the human's keys: its last lines as drawn, read by the
+/// harness's reader ([`read`]). None where the host gives no lines or the reader
+/// reads no box in them.
+pub(crate) async fn on_screen(
+    host: &dyn PaneHost,
+    pane: &Pane,
+    harness: Harness,
+) -> Option<InputBox> {
+    let snapshot = super::pane::snapshot_drawn(host, pane).await.ok()?;
+    read(
+        harness,
+        &bottom(&snapshot)?,
+        Cursor::of(snapshot.get("cursor")),
+    )
+}
+
+/// The screen's last lines as drawn that a snapshot holds (`bottom`).
+fn bottom(snapshot: &Value) -> Option<Vec<String>> {
+    snapshot
+        .get("bottom")
+        .and_then(Value::as_array)
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| line.as_str().map(str::to_owned))
+                .collect()
+        })
+}
+
 /// What a `harness` window holds unsent, the count up in the snapshot `counted`:
 /// its screen's last lines as drawn, read by the harness's reader ([`read`]). A box
 /// it does not read, a key too recent, or a host that gives no lines is the count's
@@ -185,16 +254,7 @@ pub(crate) fn read_unsent(harness: Harness, snapshot: &Value) -> Unsent {
         typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)
     });
     let typed = snapshot.get("typed").and_then(Value::as_u64);
-    let lines: Option<Vec<String>> =
-        snapshot
-            .get("bottom")
-            .and_then(Value::as_array)
-            .map(|lines| {
-                lines
-                    .iter()
-                    .filter_map(|line| line.as_str().map(str::to_owned))
-                    .collect()
-            });
+    let lines = bottom(snapshot);
     let cursor = Cursor::of(snapshot.get("cursor"));
     match (settled, typed, lines) {
         (true, Some(typed), Some(lines))
@@ -203,5 +263,47 @@ pub(crate) fn read_unsent(harness: Harness, snapshot: &Value) -> Unsent {
             Unsent::ReadEmpty(typed)
         }
         _ => Unsent::Held,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Screens recorded live (`cargo xtask live held-typed`), each the pane host's snapshot an
+    /// adapter decided on: a box Claude Code drew empty, or with only its own words in it (its
+    /// prompt suggestion; its recap above the box), the human's keys counted as unsent with
+    /// nothing of them left (T-839). Each is read empty, the paste told so, and the human told
+    /// of a box that shows nothing.
+    #[test]
+    fn recorded_screens_of_a_box_with_no_words_of_the_humans_read_empty() {
+        let folder =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/screens");
+        let mut read = 0;
+        for entry in std::fs::read_dir(&folder).expect("the recorded screens") {
+            let path = entry.expect("a screen").path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let harness = match name.split('-').next() {
+                Some("claude") => Harness::Claude,
+                Some("devin") => Harness::Devin,
+                _ => continue,
+            };
+            let snapshot: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let typed = snapshot["typed"].as_u64().unwrap();
+            assert_eq!(
+                read_unsent(harness, &snapshot),
+                Unsent::ReadEmpty(typed),
+                "{name}"
+            );
+            let lines = bottom(&snapshot).unwrap();
+            assert_eq!(
+                shown(harness, &lines, Cursor::of(snapshot.get("cursor"))).as_deref(),
+                Some(""),
+                "{name}"
+            );
+            read += 1;
+        }
+        assert!(read > 0, "no screen was read");
     }
 }

@@ -131,7 +131,11 @@ fn same_limit(one: &str, other: &str) -> bool {
 }
 
 /// When a window's last turn that got through answered, as its record names the
-/// time: none for a turn that failed or was refused.
+/// time (its text, or the milliseconds OpenCode dates a message in): none for a turn
+/// that failed or was refused. An assistant's item with nothing of the model's in it
+/// is no answer (`synthetic`, T-530): Claude Code's close of a turn it found cut,
+/// written when the next message comes, a step Pi wrote of a run that failed or was
+/// aborted before the model's first token, a message OpenCode made before the reply.
 fn last_answer(observed: &Observed) -> Option<String> {
     if observed.failed
         || observed
@@ -145,10 +149,12 @@ fn last_answer(observed: &Observed) -> Option<String> {
         .items()
         .iter()
         .rev()
-        .find(|item| item.role == Role::Assistant)
-        .and_then(|item| item.at.as_ref())
-        .and_then(Value::as_str)
-        .map(str::to_owned)
+        .find(|item| item.role == Role::Assistant && !item.synthetic)
+        .and_then(|item| match item.at.as_ref()? {
+            Value::String(at) => Some(at.clone()),
+            Value::Number(ms) => ms.as_i64().map(time::iso),
+            _ => None,
+        })
 }
 
 /// Whether the time `later` names comes after the one `earlier` names; a

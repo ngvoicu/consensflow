@@ -10,6 +10,7 @@
 //! | `op` | the question | the answer |
 //! |---|---|---|
 //! | `records` | `kind`, `session`, `env`: what the harness's own record of the conversation says | `{reading, settled}`: the reading as [`records::answers`] writes it, and whether the window's turn is over, as the dispatcher reads it |
+//! | `turn_cut` | `kind`, `session`, `env`: the record of a conversation whose window is closed, as the human's Resume reads it | `{cut, began, words}`: whether its turn was cut ([`Records::turn_cut`](crate::contract::Records::turn_cut)), null where the record cannot tell, and of a cut turn when the message that began it came and its words, where the record holds it |
 //! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation, or with `resume` true on the one `session` names | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
 //! | `window_text` | `text`: as a window can take it | the text |
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
@@ -25,6 +26,7 @@
 //! | `devin_took` | `env`, `session`, `pasted`, `atMs`: Devin's store, a window's conversation, the text the window was given as it was pasted and when | `{took, prompts}`: whether the TUI took that text, as the engine asks the window after a paste (a history row of the session, written since, that begins with it whole), and how many history rows the session has |
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
+//! | `devin_config` | `env`: the owner's own config of Devin, read as the adapter reads it for a launch, in the config folder `env` names | the config, an object: its comments and trailing commas left out, and an empty one where there is none |
 //! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt, grants, servers}`: the key it presses next toward a yes (`down`, `up`, `enter`), or null where the lines show no such question or the harness never asks one, whether they are the harness's prompt, and whether the question is the one of a trusted folder's grants or Claude's dialog of new servers of `.mcp.json`; with `directory`, `trusts` too: `{folder, inside, servers_above}`, what a yes trusts for a window opened in that project's folder, and the nearest folder above it whose `.mcp.json` Claude reads too |
 //! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
 //!
@@ -36,7 +38,9 @@
 //! member is given, whole, which `start` leaves bare (no config, no hooks, no
 //! first message), what the daemon's readiness makes of that window's
 //! permission mode, read and then done, whether its TUI took a paste, as the
-//! engine reads it after the paste, and the key the engine presses into a
+//! engine reads it after the paste, the owner's Devin config as a launch reads
+//! it, which the live test of a compacted turn sets a threshold in, and the key
+//! the engine presses into a
 //! harness's question about trusting a window's folder, which the live test of
 //! folder trust holds against the real harnesses' screens.
 
@@ -54,18 +58,19 @@ use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use crate::claude::install;
-use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Skill};
+use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Records, Skill, TurnLeft};
 use crate::launch::adapter;
 use crate::records::{self, Options};
 use crate::shared::input_box::{self, InputBox};
 use crate::shared::record_state::record_state;
 use crate::shared::{trust, window_args};
-use crate::testing::Fakes;
+use crate::testing::{finished, Fakes};
 
 /// The answer to `question`, or why it cannot be answered.
 pub fn answer(question: &Value) -> Result<Value, String> {
     match text(question, "op")? {
         "records" => read_record(question),
+        "turn_cut" => turn_cut(question),
         "start" => start(question),
         "window_text" => Ok(json!(window_text(text(question, "text")?))),
         "console_text" => Ok(json!(console_text(text(question, "text")?))),
@@ -81,10 +86,12 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "devin_took" => launch::devin_took(question),
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
+        "devin_config" => launch::devin_config(question),
         "trust" => trust(question),
         "input_box" => input_box(question),
+        "unsent" => unsent(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, trust and input_box"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, input_box and unsent"
         )),
     }
 }
@@ -195,6 +202,22 @@ fn input_box(question: &Value) -> Result<Value, String> {
     )
 }
 
+/// What an adapter makes of a window whose pane host counts the human's keys as left
+/// unsent, from the host's `snapshot` (with its `bottom` and `cursor`): the count of
+/// the human's writes at which the box read empty (`{"readEmpty": n}`, a paste told
+/// so goes in), or `"held"` ([`input_box::read_unsent`]).
+fn unsent(question: &Value) -> Result<Value, String> {
+    let snapshot = question
+        .get("snapshot")
+        .ok_or("the question names no snapshot")?;
+    Ok(
+        match input_box::read_unsent(harness(text(question, "kind")?)?, snapshot) {
+            input_box::Unsent::ReadEmpty(typed) => json!({ "readEmpty": typed }),
+            input_box::Unsent::Held => json!("held"),
+        },
+    )
+}
+
 /// What the harness's own record of a conversation says, read whole once.
 fn read_record(question: &Value) -> Result<Value, String> {
     let reading = records::answers(
@@ -207,6 +230,25 @@ fn read_record(question: &Value) -> Result<Value, String> {
     );
     let settled = record_state(reading.clone()).settled;
     Ok(json!({ "reading": &*reading, "settled": settled }))
+}
+
+/// Whether the turn of the conversation the question names was cut, as the human's
+/// Resume reads its record with no window open.
+fn turn_cut(question: &Value) -> Result<Value, String> {
+    let records = Fakes::new(&env(question)?).records;
+    let left = finished(records.turn_cut(
+        harness(text(question, "kind")?)?,
+        text(question, "session")?,
+    ));
+    Ok(match left {
+        None => json!({ "cut": null }),
+        Some(TurnLeft::AtRest) => json!({ "cut": false }),
+        Some(TurnLeft::Cut(opening)) => json!({
+            "cut": true,
+            "began": opening.as_ref().and_then(|opening| opening.at.clone()),
+            "words": opening.map(|opening| opening.words),
+        }),
+    })
 }
 
 /// The harness's own window on a new conversation, or, when the question says

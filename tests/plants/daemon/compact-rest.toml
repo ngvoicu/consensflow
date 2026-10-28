@@ -24,7 +24,6 @@ compact-rest-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "reg
 compact-rest-watch = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "long_run::record"]
 compact-rest-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "a_compaction"]
 compact-rest-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_commands_at_rest"]
-compact-rest-ask = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::ask::tests::a_record_reads_in_flight_alone"]
 
 [[plant]]
 name = "compact-rest: what a command typed at the prompt printed begins a turn, as Node read it, and the chief given a /compact is never handed its worker's result"
@@ -34,13 +33,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/replay.rs"
-find = '''
-        if ends {
-            self.ended_natively();
-            return Ok(());
-        }
-'''
-replace = ""
+find = "        if ends || cancels {"
+replace = "        if cancels {"
 
 [[plant]]
 name = "compact-rest: the reader reads what a command typed at the prompt printed as a prompt, as Node read it"
@@ -49,13 +43,8 @@ runs = ["compact-rest-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/replay.rs"
-find = '''
-        if ends {
-            self.ended_natively();
-            return Ok(());
-        }
-'''
-replace = ""
+find = "        if ends || cancels {"
+replace = "        if cancels {"
 
 [[plant]]
 name = "compact-rest: what a command printed ends the turn whatever record it is the child of"
@@ -168,7 +157,9 @@ runs = ["compact-rest-watch"]
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/record.rs"
 find = '''
-                Kind::Output if last.is_some_and(|said| follows_its_command(said, entry)) => {
+                Kind::Output | Kind::Printed
+                    if last.is_some_and(|said| follows_its_command(said, entry)) =>
+                {
                     (open, candidate, ended, agents) = (false, None, None, 0);
                 }
 '''
@@ -218,11 +209,19 @@ runs = ["compact-rest-watch"]
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/record.rs"
 find = '''
-        while said.next_if(|entry| entry.kind == Kind::Output).is_some() {
-            if said.next_if(|entry| quiet(entry)).is_none() {
+        while let Some(output) =
+            said.next_if(|entry| matches!(entry.kind, Kind::Output | Kind::Printed))
+        {
+            let its_command = |entry: &&Entry| {
+                quiet(entry) && entry.uuid.is_some() && entry.uuid == output.parent
+            };
+            if said.next_if(its_command).is_some() {
+                said.next_if(|entry| {
+                    entry.kind == Kind::Prompt && entry.content.starts_with(CAVEAT)
+                });
+            } else if output.kind == Kind::Output {
                 return false;
             }
-            said.next_if(|entry| entry.kind == Kind::Prompt && entry.content.starts_with(CAVEAT));
         }
 '''
 replace = ""
@@ -234,14 +233,8 @@ runs = ["compact-rest-watch"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/record.rs"
-find = '''
-            if said.next_if(|entry| quiet(entry)).is_none() {
-                return false;
-            }
-'''
-replace = '''
-            said.next_if(|entry| entry.kind == Kind::Prompt);
-'''
+find = "                quiet(entry) && entry.uuid.is_some() && entry.uuid == output.parent"
+replace = "                entry.kind == Kind::Prompt"
 
 [[plant]]
 name = "compact-rest: the stand-in compacts a conversation with nothing said in it"
@@ -254,14 +247,14 @@ find = "    if !records.said() {"
 replace = "    if false && !records.said() {"
 
 [[plant]]
-name = "compact-rest: the live suite takes Claude busy for a refused /compact that wrote nothing of itself"
+name = "compact-rest: the live suite takes any system record for what a refused /compact printed"
 meant = "a_command_ran_only_where_it_left_fresh_evidence_of_its_own"
 runs = ["compact-rest-live"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = "        Command::Refused => wrote(\"system/local_command\"),"
-replace = "        Command::Refused => wrote(\"system/local_command\") || seen.busy,"
+find = "            .any(|entry| entry.kind == \"system/local_command\"),"
+replace = "            .any(|entry| entry.kind.starts_with(\"system/\")),"
 
 [[plant]]
 name = "compact-rest: the live suite takes a /compact for run once it says it compacted, with no PostCompact hook's words"
@@ -271,126 +264,64 @@ runs = ["compact-rest-live"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
 find = '''
-            wrote("system/compact_boundary")
+            any(boundary)
                 && seen
 '''
 replace = '''
-            wrote("system/compact_boundary")
+            any(boundary)
                 || seen
 '''
 
+# 3.0.6 (T-483): the cancelled compaction is a finding no more; the window must read at rest
+# after it, as after any command, Claude must hold idle once what the box held was sent, and the
+# window's settings must be as they were before it opened, to its end.
+
 [[plant]]
-name = "compact-rest: the live suite fails its run on the cancelled compaction, a finding left for 3.0.6"
-meant = "only_the_cancelled_compaction_is_a_finding_which_fails_nothing"
+name = "compact-rest: the live suite's cancelled compaction passes on a reading in flight, the finding it was until 3.0.6"
+meant = "a_command_holds_only_where_it_was_done_read_settled_and_kept_the_settings_cancelled_too"
 runs = ["compact-rest-live"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = "        self == Command::Cancelled"
-replace = "        false"
-
-# Round b7 (Calliope's review of round 3): the cancelled command's finding holds only where it
-# ran, Claude held idle and the owner's settings were kept.
-[[plant]]
-name = "compact-rest: the cancelled finding passes whatever came of it, a changed settings file or a prep that never answered (round 3's gate)"
-meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
-runs = ["compact-rest-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = '        came.at_rest || finding,'
-replace = '        came.at_rest || command.finding(),'
-[[plant]]
-name = "compact-rest: the cancelled finding passes though Claude changed the owner's settings"
-meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
-runs = ["compact-rest-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = '            in_flight: done && outcome.read && outcome.in_flight && kept,'
-replace = '            in_flight: done && outcome.read && outcome.in_flight,'
-[[plant]]
-name = 'compact-rest: the cancelled finding passes though the command never ran or Claude never held idle'
-meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
-runs = ["compact-rest-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = '            in_flight: done && outcome.read && outcome.in_flight && kept,'
-replace = '            in_flight: outcome.read && outcome.in_flight && kept,'
-
-# Round b9 (the review of b7): the finding holds only where the daemon read the window, and
-# Claude held idle and kept the settings once what the box held was sent.
-
-[[plant]]
-name = 'compact-rest: the cancelled finding passes though the daemon could not read the window'
-meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
-runs = ["compact-rest-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = '            in_flight: done && outcome.read && outcome.in_flight && kept,'
-replace = '            in_flight: done && outcome.in_flight && kept,'
-
-[[plant]]
-name = 'compact-rest: the cancelled finding passes though Claude never held idle once the box was sent'
-meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
-runs = ["compact-rest-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = '        let done = outcome.done && idle;'
-replace = '        let done = outcome.done;'
-
-[[plant]]
-name = 'compact-rest: the cancelled finding passes though Claude changed the settings once the box was sent'
-meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
-runs = ["compact-rest-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = '        let kept = outcome.kept && still;'
-replace = '        let kept = outcome.kept;'
-
-# Round T-118 (Calliope's review of round b9, P3 2): the cancelled finding passes only a record
-# read in flight alone, not one read `unknown`, failed or stopped by a quota.
-
-[[plant]]
-name = "compact-rest: the cancelled finding passes any record the daemon reads unsettled, one read unknown, failed or out of quota too"
-meant = "the_cancelled_finding_passes_only_a_record_read_in_flight_and_not_one_unknown_failed_or_out_of_quota"
-runs = ["compact-rest-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = "            in_flight: reading.is_some_and(ask::Record::in_flight_alone),"
-replace = "            in_flight: reading.is_some_and(|record| !record.settled),"
-
-[[plant]]
-name = "compact-rest: a record that failed reads in flight alone"
-meant = "a_record_reads_in_flight_alone_only_where_the_turn_is_at_work_and_neither_failed_nor_out_of_quota"
-runs = ["compact-rest-ask"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/ask.rs"
-find = "            && matches!(self.failed, Value::Null | Value::Bool(false))\n"
+find = "                && outcome.settled\n"
 replace = ""
 
 [[plant]]
-name = "compact-rest: a record that ran out of quota reads in flight alone"
-meant = "a_record_reads_in_flight_alone_only_where_the_turn_is_at_work_and_neither_failed_nor_out_of_quota"
-runs = ["compact-rest-ask"]
+name = "compact-rest: the live suite passes a command though Claude changed the window's settings"
+meant = "a_command_holds_only_where_it_was_done_read_settled_and_kept_the_settings_cancelled_too"
+runs = ["compact-rest-live"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/live/ask.rs"
-find = "            && self.quota.is_null()\n"
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = "                && outcome.kept\n"
 replace = ""
 
 [[plant]]
-name = "compact-rest: a record read unknown reads in flight alone"
-meant = "a_record_reads_in_flight_alone_only_where_the_turn_is_at_work_and_neither_failed_nor_out_of_quota"
-runs = ["compact-rest-ask"]
+name = "compact-rest: the live suite passes the cancelled compaction though Claude never held idle once the box was sent"
+meant = "a_command_holds_only_where_it_was_done_read_settled_and_kept_the_settings_cancelled_too"
+runs = ["compact-rest-live"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/live/ask.rs"
-find = "            && self.settlement == \"in-flight\"\n"
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = "                && idle\n"
+replace = ""
+
+[[plant]]
+name = "compact-rest: the live suite passes the cancelled compaction though Claude changed the settings once the box was sent"
+meant = "a_command_holds_only_where_it_was_done_read_settled_and_kept_the_settings_cancelled_too"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = "                && still,"
+replace = ","
+
+[[plant]]
+name = "compact-rest: the live suite passes a command whose window the daemon could not read"
+meant = "a_command_holds_only_where_it_was_done_read_settled_and_kept_the_settings_cancelled_too"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = "                && outcome.read\n"
 replace = ""

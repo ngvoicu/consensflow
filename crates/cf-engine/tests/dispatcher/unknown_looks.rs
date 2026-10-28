@@ -19,14 +19,17 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use cf_engine::delivery_text::delivery_text;
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Gate, TRUST_QUESTION};
+use cf_engine::{ActivityState, SwitchWhen};
+use cf_harness::contract::Pane;
 use cf_harness::records::Role;
 use cf_harness::seams::Time;
 use cf_proto::ledger::MessageView;
 use serde_json::{json, Value};
 
+use crate::chiefs::{chief_of, to, with_codex};
 use crate::deliveries::enters;
-use crate::fixtures::Tiers;
+use crate::fixtures::{closed, Tiers};
 use crate::work_in_flight::looks_at;
 
 /// The engine's arrival window in the kit, in milliseconds.
@@ -773,4 +776,133 @@ fn an_answer_its_record_shows_as_the_window_is_read_once_more_is_what_the_result
     context.pass().unwrap();
     assert_eq!(results_of(&tiers, 1), ["Recorded the run as JSON"]);
     assert_eq!(where_is(&context, &answer), ("delivered".to_owned(), 1));
+}
+
+/// How many times the engine looked at the record of `handle`'s window.
+fn looks(context: &Context, handle: &str) -> usize {
+    let launch = context.adapter.agent(handle).launch;
+    context
+        .recorder
+        .calls("adapter:claude-code", &["observe"])
+        .iter()
+        .filter(|(_, args)| args[0]["launch"]["launchId"] == launch.as_str())
+        .count()
+}
+
+/// Calliope's re-check of T-504 (T-505, P3-1): `close_own` runs inside pass steps too, and
+/// its look at a window that asks whether to trust its folder (`bank_yes_before_close`)
+/// can outlast the bound a pass waits for its steps. The chief's window asks; the human
+/// asked for a switch after its turn, and the chief is out of quota, so its next step
+/// performs the switch and closes the window. The look at its screen hangs, the pass goes
+/// on without the step, and the chief's window has been looked at as many times as it is
+/// when the step is left: the project's id, the window, and the hold of the look.
+fn a_switch_of_an_asking_chief_whose_close_looks_past_the_bound(
+    context: &Context,
+) -> (i64, Pane, Gate, usize) {
+    context.adapter.asks_to_trust("/work/repository", false);
+    context
+        .host
+        .set_snapshot(json!({ "tail": [TRUST_QUESTION] }));
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.activity(chief).reason.as_deref(),
+        Some("the window asks whether to trust its folder")
+    );
+    context
+        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Turn, false)
+        .unwrap();
+    assert_eq!(
+        chief_of(context, project.id).harness.as_deref(),
+        Some("claude-code")
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .mark_out(chief, "2099-01-01T00:00:00.000Z", "quota")
+        .unwrap();
+    let pane = context.host.last("chief").expect("its window").pane;
+    let id = pane.id.clone();
+    let looking = context
+        .host
+        .request_holds
+        .hold(move |args| args[0] == "pane.snapshot" && args[1]["id"] == id.as_str());
+    context.pass().unwrap();
+    assert_eq!(
+        logged(context, "a pass went on"),
+        ["a pass went on after 5 s without the steps of @chief"]
+    );
+    let left = looks(context, "chief");
+    // A minute of passes: the step left apart holds the chief's record, and none looks
+    // at its window, or closes it again.
+    for _ in 0..3 {
+        context.advance(20_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        looks(context, "chief"),
+        left,
+        "no pass looks at the window held"
+    );
+    assert!(!closed(context, &pane), "nor closes it");
+    (project.id, pane, looking, left)
+}
+
+#[test]
+fn a_switch_whose_close_looks_at_an_asking_chief_past_the_bound_holds_its_window_apart_until_it_ends(
+) {
+    let context = with_codex();
+    let (project, pane, looking, _) =
+        a_switch_of_an_asking_chief_whose_close_looks_past_the_bound(&context);
+    looking.open();
+    context.settle();
+    assert_eq!(
+        logged(&context, "the step of"),
+        ["the step of @chief ended 60 s after its pass began"]
+    );
+    assert!(closed(&context, &pane));
+    assert_eq!(
+        chief_of(&context, project).harness.as_deref(),
+        Some("codex")
+    );
+}
+
+#[test]
+fn a_chiefs_window_that_ends_by_itself_while_its_switchs_close_looks_past_the_bound_and_whose_kill_fails_is_settled_once(
+) {
+    // The exit comes while the step is left apart, outside the record's hold, as any exit
+    // the host tells; the kill that then fails says the window would not close, and the
+    // switch waits for the chief's next window, as it does for a window that stays.
+    let context = with_codex();
+    let (project, pane, looking, _) =
+        a_switch_of_an_asking_chief_whose_close_looks_past_the_bound(&context);
+    context.exit("chief");
+    context.host.refuse_kills.set(true);
+    looking.open();
+    context.settle();
+    context.host.refuse_kills.set(false);
+    assert_eq!(
+        logged(&context, "the step of"),
+        ["the step of @chief ended 60 s after its pass began"]
+    );
+    assert!(closed(&context, &pane), "its exit settled it");
+    let chief = context.id(project, "chief");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.project(project).state,
+        "open",
+        "a chief's exit closes no project"
+    );
+    assert_eq!(
+        context.dispatcher.activity(chief).state,
+        ActivityState::Closed
+    );
+    assert_eq!(
+        chief_of(&context, project).harness.as_deref(),
+        Some("claude-code")
+    );
 }

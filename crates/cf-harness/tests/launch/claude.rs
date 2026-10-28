@@ -29,6 +29,9 @@ use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 mod agents;
+mod closed_at_rest;
+mod compact_cancelled;
+mod outside;
 mod relaunched;
 mod resumed;
 mod specs;
@@ -271,7 +274,8 @@ fn me() -> u32 {
 }
 
 #[test]
-fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_with_the_task_last() {
+fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line(
+) {
     let home = Home::new();
     let plan = prepare(&home.adapter(), &Request::default()).unwrap();
     let session = plan.native_session.clone().unwrap();
@@ -307,9 +311,11 @@ fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_with_th
         "high",
         "--permission-mode",
         "bypassPermissions",
-        TASK,
     ]));
+    // Its task is pasted once the window is up (`FirstMessage::Delivered`): every
+    // process on the machine reads a command line.
     assert_eq!(plan.argv, argv);
+    assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
     assert!(plan.env.is_empty(), "cf stays usable inside the window");
     assert_eq!(plan.drop_env, ["ANTHROPIC_API_KEY"]);
     let written: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
@@ -410,10 +416,9 @@ fn starts_afresh_under_the_same_id_a_conversation_claude_never_kept_instead_of_r
         .position(|arg| arg == "--session-id")
         .unwrap();
     assert_eq!(plan.argv[at..at + 2], words(&["--session-id", session]));
-    assert_eq!(
-        plan.argv.last().map(String::as_str),
-        Some("Review T-1"),
-        "the brief goes in as its first message"
+    assert!(
+        plan.argv.iter().all(|word| !word.contains("Review T-1")),
+        "the brief is pasted once the window is up"
     );
 }
 
@@ -620,7 +625,7 @@ fn follows_a_clear_before_the_first_look_by_the_status_file_named_after_the_wind
     home.status(cleared, &json!({ "status": "idle" }), me());
     home.status(first, &json!({ "status": "idle" }), other.pid());
     let named = window(&adapter, &Request::resumed(first));
-    named.opened(&opened_pane(), Some(me()));
+    named.opened(Some(me()));
     let observed = finished(named.observe()).unwrap();
     assert_eq!(observed.switched.as_deref(), Some(cleared));
     // Unnamed, the window's process is the first whose file names the
@@ -638,7 +643,7 @@ fn takes_the_first_status_file_naming_the_launchs_conversation_when_none_is_name
     // Claude may run as another process than the pane's own child (one it
     // starts in its place): no status file is named after the child.
     let window = window(&home.adapter(), &Request::resumed(first));
-    window.opened(&opened_pane(), Some(DEAD));
+    window.opened(Some(DEAD));
     home.status(first, &json!({ "status": "idle" }), me());
     assert!(finished(window.observe()).unwrap().settled);
     // That process is the window's from then on: a /clear in it is followed.
@@ -660,7 +665,7 @@ fn gives_the_window_text_it_can_take_and_leaves_a_paste_the_bridge_lost_uncertai
         ..Request::default()
     };
     let plan = prepare(&adapter, &request).unwrap();
-    assert_eq!(plan.argv.last().map(String::as_str), Some(taken));
+    assert!(plan.argv.iter().all(|word| word != taken && word != text));
     let answer: RefCell<Result<Value, HostError>> = RefCell::new(Ok(json!({ "ok": true })));
     let host = AnsweringHost::new(|_| answer.borrow().clone());
     let pane = Pane {
@@ -899,12 +904,4 @@ fn reports_a_refused_request_as_exhausted_quota_with_the_reset_its_text_names() 
         ],
     );
     assert_eq!(finished(window.observe()).unwrap().quota, None);
-}
-
-/// The pane a window of these tests opened in.
-fn opened_pane() -> Pane {
-    Pane {
-        id: "s1-chief".to_owned(),
-        generation: 1,
-    }
 }

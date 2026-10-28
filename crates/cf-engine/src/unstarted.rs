@@ -175,6 +175,8 @@ impl Dispatcher {
             // A launch's first message is never pressed for.
             carried: Vec::new(),
             session: None,
+            owed: None,
+            late: false,
         };
         if participant.role == "chief" {
             // A chief's window the host would not kill is looked at again.

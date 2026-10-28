@@ -82,6 +82,20 @@ impl Tree {
         }
     }
 
+    /// What may be the window's and runs outside its tree, which nothing signals
+    /// (`ProcessTree::possibly_left`): on macOS; elsewhere none, and on Windows the pane's
+    /// job holds what its processes start wherever it goes.
+    fn possibly_left(&self) -> Vec<cf_proto::panes::PossiblyLeft> {
+        #[cfg(target_os = "macos")]
+        {
+            self.tree.possibly_left()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Vec::new()
+        }
+    }
+
     /// The turn's work that `baseline` proves, and still is [`SETTLE`] after it was
     /// first found ([`steady`]): looked at again when the first look finds any, so that
     /// a run of the harness's own, which has ended by then, is none of it.
@@ -187,8 +201,9 @@ impl PaneTable {
         Ok(())
     }
 
-    /// What the pane's tree has running that is the turn's work, as it was marked.
-    /// A pane never marked has none.
+    /// What the pane's tree has running that is the turn's work, as it was marked
+    /// (a pane never marked has none), and what may be the window's and runs outside its
+    /// tree, marked or not.
     pub fn background(&self, key: &PaneKey) -> Result<Background, PaneError> {
         let (tree, baseline) = {
             let panes = self.lock_panes()?;
@@ -197,7 +212,9 @@ impl PaneTable {
                 .ok_or_else(|| PaneError::NotFound(key.clone()))?;
             (pane.tree(), pane.baseline.clone())
         };
-        Ok(looked_at(&baseline, &tree)?)
+        let mut background = looked_at(&baseline, &tree)?;
+        background.possibly_left = tree.possibly_left();
+        Ok(background)
     }
 
     /// The commands of the window's harness that run in the pane's tree now

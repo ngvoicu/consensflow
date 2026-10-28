@@ -498,6 +498,8 @@ impl Login {
         let credentials = json!({ "claudeAiOauth": oauth }).to_string();
         write_private(&folder.path().join(".credentials.json"), &credentials)?;
         write_private(&folder.path().join(".claude.json"), CLAUDE_JSON)?;
+        // The live folders trusted as the owner's own config trusts them (T-629).
+        super::machine::seed_claude_trust(folder.path(), &self.owner.home)?;
         let path = folder.path().to_path_buf();
         *made = Some(Made {
             folder,

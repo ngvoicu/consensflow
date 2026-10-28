@@ -7,7 +7,8 @@ use super::*;
 #[test]
 fn the_names_are_the_two_machines_and_a_host_is_reached_as_zeewin_is() {
     let zeewin = Machine::named("zeewin").unwrap();
-    assert_eq!(zeewin, Machine::at("zeewin"));
+    assert_eq!(zeewin.name, "zeewin");
+    assert_eq!(zeewin.host, "zeewin");
     assert_eq!(zeewin.node, r"C:\Program Files\nodejs");
     assert_eq!(zeewin.shared, None);
     let zeewin2 = Machine::named("zeewin2").unwrap();
@@ -24,6 +25,21 @@ fn the_names_are_the_two_machines_and_a_host_is_reached_as_zeewin_is() {
             floor_gib: 50,
         })
     );
+    // How much each machine takes at once (T-585: zeewin ran out of memory under the workspace's
+    // tests with a build job and a test thread for each of its 12 threads; the laptop did not).
+    assert_eq!(
+        Machine::named("zeewin").unwrap().limits,
+        Some(Limits {
+            build_jobs: 4,
+            test_threads: 4
+        })
+    );
+    assert_eq!(zeewin2.limits, None);
+    assert_eq!(
+        Machine::at("zeewin").limits,
+        None,
+        "a host named by --host is not asked for less"
+    );
     assert_eq!(Machine::named("laptop"), None);
     for name in NAMES {
         assert_eq!(Machine::named(name).unwrap().name, name);
@@ -37,14 +53,24 @@ fn what_a_machine_says_of_itself_is_read_for_its_free_disk_and_a_run() {
         State::read("free 614\r\n"),
         Some(State {
             free_gib: 614,
-            running: false
+            running: false,
+            held: false
         })
     );
     assert_eq!(
         State::read("free 30\r\nrun\r\n"),
         Some(State {
             free_gib: 30,
-            running: true
+            running: true,
+            held: false
+        })
+    );
+    assert_eq!(
+        State::read("free 30\r\nheld\r\n"),
+        Some(State {
+            free_gib: 30,
+            running: false,
+            held: true
         })
     );
     assert_eq!(State::read("run\n"), None);
@@ -64,6 +90,33 @@ fn the_disk_is_asked_of_the_profiles_drive_and_the_run_of_the_copys_owner_file()
         )),
         "{script}"
     );
+}
+
+/// A lock held by a program that is no run of this runner (a session of another tool that took
+/// the file by its protocol: T-708 held zeewin2's for an hour while runs were refused) is told
+/// as held, by opening the lock file for what a probe is: a look that takes nothing and holds
+/// it for no time.
+#[test]
+fn the_lock_is_asked_of_by_opening_it_to_share_with_all_and_a_refusal_to_share_is_held() {
+    let script = state_script("consensflow-build");
+    assert!(
+        script.contains(&format!(
+            "Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') '{LOCK}'"
+        )),
+        "{script}"
+    );
+    assert!(
+        script.contains("[IO.File]::Open($lock, 'Open', 'ReadWrite', 'ReadWrite')"),
+        "{script}"
+    );
+    assert!(
+        script.contains("catch [IO.IOException] { $true }"),
+        "{script}"
+    );
+    assert!(script.contains("if ($held) { 'held' }"), "{script}");
+    // A copy that has no lock yet holds nothing: the file is looked for first, as a folder that
+    // is not there is an IOException too.
+    assert!(script.contains("Test-Path -LiteralPath $lock"), "{script}");
 }
 
 #[test]
@@ -153,6 +206,69 @@ fn the_disk_script_says_the_free_disk_and_a_run_in_the_machines_own_powershell()
     }
 }
 
+/// The lock as the machine's own PowerShell and file system tell it: held by a program that opened
+/// it to share with no one (a run's script, or T-708's session), not held when nobody has it, and
+/// the look takes nothing: the file can be taken by a run straight after.
+#[cfg(windows)]
+#[test]
+fn the_state_script_says_held_for_a_lock_nobody_else_can_open_and_takes_nothing() {
+    let profile = tempfile::tempdir().unwrap();
+    let ask = || {
+        let asked = Invocation::new("powershell", profile.path())
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(state_script("copy"));
+        let env = cf_base::env::Env::from_process();
+        let vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = env
+            .iter()
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("USERPROFILE"))
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .chain([("USERPROFILE".into(), profile.path().into())])
+            .collect();
+        let answer = process::capture(&asked, &cf_base::env::Env::from_vars(vars)).unwrap();
+        assert_eq!(answer.code, 0, "{}", answer.stderr);
+        State::read(&answer.stdout).unwrap_or_else(|| panic!("{:?}", answer.stdout))
+    };
+    // No copy yet, then a copy with no lock: nothing holds it.
+    assert!(!ask().held);
+    let copy = profile.path().join("copy");
+    std::fs::create_dir(&copy).unwrap();
+    assert!(!ask().held);
+    let lock = copy.join(LOCK);
+    std::fs::write(&lock, "").unwrap();
+    assert!(!ask().held, "a lock file nobody has open is not held");
+    // A PowerShell that holds it as a run does.
+    let mut holder = spawned(
+        profile.path(),
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!(
+                "$l = [IO.File]::Open('{}', 'OpenOrCreate', 'ReadWrite', 'None'); Start-Sleep 60",
+                lock.display()
+            ),
+        ],
+    );
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !ask().held {
+        assert!(std::time::Instant::now() < until, "never said held");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+    assert!(
+        !ask().held,
+        "the lock of a program that is gone is held by none"
+    );
+    // And the look left it free to take.
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock)
+        .unwrap();
+}
+
 #[cfg(unix)]
 mod asked {
     use std::ffi::OsString;
@@ -160,8 +276,10 @@ mod asked {
     use std::os::unix::fs::PermissionsExt;
 
     use cf_base::env::Env;
+    use cf_base::time::{Clock, SystemClock};
 
     use super::*;
+    use crate::windows::queue::{Queues, Who};
 
     /// The laptop's two sides, as the stand-in ssh answers for them: zeelin says `zeelin` (`held`,
     /// `free`) of poker-lab's lock, or is not asked at all (`down`: the connection times out, as
@@ -269,15 +387,42 @@ esac
         }
     }
 
+    /// zeewin is no one's but the runner's, and its queue is the runner's too: a run is asked
+    /// what is on its copy (a run, a program holding its lock) as the laptop's are, so that the
+    /// head of its queue waits for an holder outside the queue instead of uploading its tree
+    /// into a 75 (T-777, P2-1: that drained the queue, one upload for each run behind). It has
+    /// no poker-lab to ask of, and no disk floor.
     #[test]
-    fn a_machine_the_runner_does_not_share_is_asked_nothing() {
-        let laptop = Laptop::new("held", "free 1");
+    fn a_machine_the_runner_does_not_share_is_asked_what_holds_its_copy_and_nothing_of_poker_lab_nor_its_disk(
+    ) {
         let zeewin = Machine::named("zeewin").unwrap();
+        // The stand-in answers every machine but zeelin with the one answer: a nearly full disk
+        // is no reason, a run on the copy is.
+        let laptop = Laptop::new("held", "free 1");
         assert_eq!(
             zeewin.ready(&laptop.context, "consensflow-build"),
             Ok(Ready::Go(Vec::new()))
         );
-        assert!(laptop.asked().is_empty());
+        assert_eq!(laptop.asked(), ["zeewin"]);
+        let laptop = Laptop::new("held", "free 614\nrun");
+        assert_eq!(
+            zeewin.ready(&laptop.context, "consensflow-build"),
+            Ok(Ready::Refused(
+                "zeewin is busy: a run goes on there, and no run goes while it does.".into()
+            ))
+        );
+        let laptop = Laptop::new("held", "free 614\nheld");
+        let refused = zeewin.ready(&laptop.context, "consensflow-build").unwrap();
+        assert!(
+            matches!(&refused, Ready::Refused(why) if why.starts_with("zeewin is busy: its run lock is held")),
+            "{refused:?}"
+        );
+        // A machine that cannot say what it has is the error, as the laptop is.
+        let laptop = Laptop::new("held", "none");
+        assert!(zeewin
+            .ready(&laptop.context, "consensflow-build")
+            .unwrap_err()
+            .starts_with("zeewin did not say what it has free"));
     }
 
     #[test]
@@ -408,6 +553,57 @@ esac
     }
 
     #[test]
+    fn zeewin2_is_refused_while_a_run_goes_on_there_or_a_program_holds_its_run_lock() {
+        // A run that is only refused by the machine's own lock after its tree is sent wastes the
+        // upload, and a runner that waits for a turn must know the machine is not free.
+        for (zeewin2, why) in [
+            (
+                "free 614\\nrun",
+                "zeewin2 is busy: a run goes on there, and no run goes while it does.",
+            ),
+            (
+                "free 614\\nheld",
+                "zeewin2 is busy: its run lock is held by a program that is not a run of this runner (another tool's session), and no run goes while it does.",
+            ),
+        ] {
+            let laptop = Laptop::new("free", zeewin2);
+            assert_eq!(laptop.ready(), Ok(Ready::Refused(why.into())), "{zeewin2}");
+        }
+    }
+
+    #[test]
+    fn the_default_is_zeewin_while_runs_are_queued_for_zeewin2_and_says_how_many() {
+        let queues = tempfile::tempdir().unwrap();
+        let mut laptop = Laptop::new("free", "free 614");
+        laptop.context.env = Env::from_vars(
+            laptop
+                .context
+                .env
+                .iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .chain([("CF_WINDOWS_QUEUES".into(), queues.path().into())]),
+        );
+        let now = SystemClock.now_ms();
+        let who = Who {
+            tree: "a".into(),
+            command: "cargo test".into(),
+        };
+        let kept = Queues::of(&laptop.context.env)
+            .unwrap()
+            .join("zeewin2", &who, now)
+            .unwrap();
+        assert_eq!(
+            laptop.choose(),
+            (
+                "zeewin".into(),
+                "windows: on zeewin, as zeewin2 is not free: 1 run is queued for it\n".into()
+            )
+        );
+        drop(kept);
+        assert_eq!(laptop.choose().0, "zeewin2");
+    }
+
+    #[test]
     fn the_default_is_zeewin2_while_it_is_free_and_says_so() {
         let laptop = Laptop::new("free", "free 614");
         assert_eq!(
@@ -436,6 +632,11 @@ esac
                 "zeewin2 is short of disk: a run needs 50 GiB free there, and it has 30.",
             ),
             ("free", "free 614\\nrun", "a run goes on there"),
+            (
+                "free",
+                "free 614\\nheld",
+                "its run lock is held by a program that is not a run of this runner (another tool's session)",
+            ),
         ] {
             let laptop = Laptop::new(zeelin, zeewin2);
             assert_eq!(

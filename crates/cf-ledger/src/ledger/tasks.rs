@@ -86,22 +86,29 @@ impl Ledger {
     }
 
     /// ConsensFlow pauses a worker's task whose window it closed itself; in a
-    /// suspended project, the human's Resume of the project resumes it.
+    /// suspended project, the human's Resume of the project resumes it. Says which
+    /// stop the pause is ([`Ledger::unmark_pause`]).
     pub fn pause_with_project(
         &mut self,
         project_id: i64,
         number: i64,
         because: &str,
-    ) -> Result<TaskView, LedgerError> {
+    ) -> Result<Stop, LedgerError> {
         #[cfg(feature = "test-support")]
         self.watched("pause_task", Some(number))?;
         tasks::pause_with_project(&mut self.store, project_id, number, because)
     }
 
     /// The window of a task the engine paused with its project ended by itself
-    /// after all (its kill was refused): no Resume of the project resumes it.
-    pub fn unmark_pause(&mut self, project_id: i64, number: i64) -> Result<(), LedgerError> {
-        tasks::unmark_pause(&mut self.store, project_id, number)
+    /// after all (its kill was refused): no Resume of the project resumes it. Only
+    /// the pause that is stop `stop` ([`Ledger::pause_with_project`]).
+    pub fn unmark_pause(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        stop: i64,
+    ) -> Result<(), LedgerError> {
+        tasks::unmark_pause(&mut self.store, project_id, number, stop)
     }
 
     /// The daemon holds a task while its member is out of quota, until `until`.
@@ -136,6 +143,17 @@ impl Ledger {
     /// for the stops of that one.
     pub fn stop_of(&self, participant_id: i64) -> Result<Option<Stop>, LedgerError> {
         tasks::stop_of(&self.store, participant_id)
+    }
+
+    /// Who asked the stop `seq` of task `number`: the chief or the human whose
+    /// pause counted it, none where ConsensFlow asked it.
+    pub fn stop_asked_by(
+        &self,
+        project_id: i64,
+        number: i64,
+        seq: i64,
+    ) -> Result<Option<String>, LedgerError> {
+        tasks::stop_asked_by(&self.store, project_id, number, seq)
     }
 
     /// The task a participant's window is on as far as what it sends goes: the

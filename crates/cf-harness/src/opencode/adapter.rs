@@ -54,8 +54,8 @@ use super::quota::retry_quota;
 use super::role::{configure, configured_paths};
 use super::version;
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -222,8 +222,8 @@ impl Adapter for OpenCodeAdapter {
     }
 
     /// Its first message is posted to its server once the window is up (`seed`).
-    fn first_message_once_up(&self, _launch: &Launch) -> bool {
-        true
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Started
     }
 }
 
@@ -272,7 +272,7 @@ impl OpenCodeWindow {
 impl Window for OpenCodeWindow {
     /// OpenCode's own conversation is named by the plugin, never by the
     /// window's process.
-    fn opened(&self, _pane: &Pane, _pid: Option<u32>) {}
+    fn opened(&self, _pid: Option<u32>) {}
 
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());

@@ -48,6 +48,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use cf_base::env::Env;
@@ -66,14 +67,15 @@ use super::paths;
 use super::wire::selected_session;
 use super::wire_log::{Said, WireLog};
 use crate::contract::{
-    Adapter, Admission, Held, Input, Interrupt, Launch, Observed, Pane, PaneHost, Prepared,
-    Readiness, Records, Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, Observed, Over, Pane,
+    PaneHost, Prepared, Readiness, Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
+use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{pane, specmint, window_args};
@@ -182,6 +184,7 @@ pub(crate) fn window_on(services: &Services, wire: &str, session: &str) -> Rc<dy
         Some(session),
         DISCOVER_FOR_MS,
         true,
+        None,
     ))
 }
 
@@ -291,6 +294,21 @@ impl Adapter for DevinAdapter {
             let invocation = open(Harness::Devin, agent, launch.resume, message.as_deref())
                 .ok_or_else(|| "a Devin window opens on a session id".to_owned())?;
             let invocation = install::prepare_prompt(invocation, &integration)?;
+            // What the record holds before this window exists is the old process's: a
+            // turn it left open, which a window with no message to begin one is told
+            // apart from by what the record holds later. A window given a message
+            // begins its own turn.
+            let left_open = match launch.resume {
+                Some(session) if launch.message.is_none() => {
+                    let before = self
+                        .services
+                        .records
+                        .look(Harness::Devin, session, &Options::default())
+                        .await;
+                    LeftOpen::held(&before)
+                }
+                _ => None,
+            };
             let mut argv = vec![executable];
             argv.extend(integration.args);
             argv.extend(invocation.args);
@@ -311,6 +329,7 @@ impl Adapter for DevinAdapter {
                     launch.resume,
                     DISCOVER_FOR_MS.min(launch.first_message_ms),
                     history::at_enter(&integration.version),
+                    left_open,
                 )),
             })
         })
@@ -351,6 +370,12 @@ impl Adapter for DevinAdapter {
             presses: 2,
             close_after: Some(Duration::from_secs(1)),
         }
+    }
+
+    /// In a file of the launch's own, which `--prompt-file` names and Devin reads
+    /// as it opens (`install::prepare_prompt`).
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Opened
     }
 
     /// Pasted, and its box cleared with [`CLEAR_INPUT`].
@@ -397,6 +422,13 @@ struct DevinWindow {
     /// latest readiness read the input box empty on the screen, at this count of
     /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
     read_empty: Cell<Option<u64>>,
+    /// What its record held when the window was opened again with no message to begin
+    /// a turn. Devin resumed waits at its prompt and works on nothing, so no process is
+    /// in the turn the record leaves, whatever it says: a final answer its store marks
+    /// no end of (the GPT models' own, whose end only the old launch's wire log said), a
+    /// turn the quit cut after a step whose call has no result, a message of the user's
+    /// the cut left unanswered (T-722).
+    left_open: RefCell<Option<LeftOpen>>,
 }
 
 impl DevinWindow {
@@ -408,6 +440,7 @@ impl DevinWindow {
         session: Option<&str>,
         discover_for_ms: i64,
         at_enter: bool,
+        left_open: Option<LeftOpen>,
     ) -> Self {
         Self {
             env: services.env.clone(),
@@ -421,6 +454,7 @@ impl DevinWindow {
             history: History::default(),
             looked: Cell::default(),
             read_empty: Cell::default(),
+            left_open: RefCell::new(left_open),
         }
     }
 
@@ -529,7 +563,7 @@ impl DevinWindow {
 }
 
 impl Window for DevinWindow {
-    fn opened(&self, _pane: &Pane, _pid: Option<u32>) {}
+    fn opened(&self, _pid: Option<u32>) {}
 
     /// The window is on `session` from now on: a switch to full permission begun for
     /// the conversation it was on is that one's, and another's time runs from the
@@ -540,6 +574,8 @@ impl Window for DevinWindow {
             self.switch.set(Switch::default());
         }
         *known = Some(session.to_owned());
+        // The turn the record had open was a conversation's the window left.
+        *self.left_open.borrow_mut() = None;
     }
 
     fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
@@ -557,6 +593,15 @@ impl Window for DevinWindow {
             }
             Err("Devin never said which session it opened (its wire log stayed empty)".to_owned())
         })
+    }
+
+    /// What the box on the screen shows, for the human told of a delivery held for it.
+    fn unsent_words<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<String>> {
+        Box::pin(input_box::words_on_screen(host, pane, Harness::Devin))
     }
 
     fn ready<'a>(
@@ -663,7 +708,7 @@ impl Window for DevinWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
-                    over: false,
+                    over: Over::No,
                     waiting: None,
                     failed: false,
                     quota: None,
@@ -671,6 +716,7 @@ impl Window for DevinWindow {
                     unnamed: false,
                     took_back: false,
                     at_prompt: false,
+                    shared: false,
                 });
             };
             // The record and the wire log are read together: the log as it is
@@ -685,10 +731,22 @@ impl Window for DevinWindow {
             .await;
             let wire = wire?;
             self.looked.set(self.history().map(|seen| seen.prompts));
-            let mut observed = record_state(reading);
+            let mut observed = record_state(Arc::clone(&reading));
             observed.waiting = dialog_waiting(observed.reading.as_deref());
             observed.quota = wire.quota;
-            if self.begun_on_the_store(&observed) {
+            // What the record held when the window was opened with no message is the old
+            // process's, whatever it says of the turn: no process is in a turn that was
+            // cut, and one the record cannot end ended. The window has been given nothing
+            // since, so it is at rest, and a message of the user's written before the
+            // open is no turn it began.
+            if self
+                .left_open
+                .borrow()
+                .as_ref()
+                .is_some_and(|open| open.unchanged(&reading))
+            {
+                observed.settled = true;
+            } else if self.begun_on_the_store(&observed) {
                 observed.settled = false;
             }
             Ok(match wire.shown {

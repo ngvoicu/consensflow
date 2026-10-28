@@ -193,6 +193,13 @@ impl Dispatcher {
             .and_then(|record| record.window.borrow().pane.clone())
     }
 
+    /// Whether the participant has a window whose open went unanswered and which the
+    /// host has not said it ended ([`crate::windows::WindowPart::abandoned`]).
+    fn abandoned(&self, participant: i64) -> bool {
+        self.record(participant)
+            .is_some_and(|record| record.window.borrow().abandoned.is_some())
+    }
+
     /// Refuses a harness ConsensFlow has no adapter for.
     pub fn requires_adapter(&self, harness: &str) -> Result<(), EngineError> {
         self.require_adapter(harness)
@@ -652,7 +659,8 @@ impl Dispatcher {
                 }
                 let idle = participant.member_id.is_some()
                     && !working.contains(&participant.id)
-                    && self.pane(participant.id).is_none();
+                    && self.pane(participant.id).is_none()
+                    && !self.abandoned(participant.id);
                 if idle {
                     continue;
                 }
@@ -805,11 +813,19 @@ impl Dispatcher {
             None => project,
             Some(delivering) => {
                 let launches = record.window.borrow().launches;
+                // A first message the window was to be handed once up, which its record
+                // does not show (`settle_gone`), owed it still or pasted a moment before,
+                // reached no conversation when the window closed with its project: it
+                // waits for the Resume, as one turned away at its hand-over does
+                // (`hand_first`). One whose window ended by itself in an open project
+                // fails, as a launch that did not come up does.
+                let closed_with_project = project.state != "open";
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
                 self.settle_gone(delivering, move |delivering| {
+                    let once_up = delivering.owed.is_some() || delivering.late;
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief {
+                    if delivering.chief || (once_up && closed_with_project) {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
@@ -932,21 +948,22 @@ impl Dispatcher {
                     Some(own) => (own.why.unwrap_or_else(|| because.clone()), own.settling),
                     None => (because.clone(), None),
                 };
-                self.stall(&project, &thread.task, &because, &why, except, is_own)?;
+                let stop = self.stall(&project, &thread.task, &because, &why, except, is_own)?;
                 // Told while the engine's kill of this window waits for its answer, which
-                // decides whether this exit was the kill's (`close_own`), where the pause
-                // is the suspension's: an own exit in a suspended project. An earlier
-                // window's kill, answered late, is no answer of this one's, and a pause
-                // it made in an open project was no suspension's to take back (T-509).
-                let marked = is_own && project.state == "suspended";
-                if let Some(killing) = record
-                    .window
-                    .borrow_mut()
-                    .killing
-                    .iter_mut()
-                    .find(|killing| marked && killing.pane == *pane)
-                {
-                    killing.paused = Some((project.id, thread.task.number));
+                // decides whether this exit was the kill's (`close_own`): the pause of an
+                // own exit, by its stop, which a refusal takes back only while it is that
+                // pause (Calliope's P3-2 of T-510). An earlier window's kill, answered late,
+                // is no answer of this one's (T-509), and a pause made in an open project
+                // holds no mark to take back.
+                if let Some((stop, killing)) = stop.zip(
+                    record
+                        .window
+                        .borrow_mut()
+                        .killing
+                        .iter_mut()
+                        .find(|killing| killing.pane == *pane),
+                ) {
+                    killing.paused = Some((project.id, thread.task.number, stop));
                 }
             } else {
                 let given = match owner {
@@ -990,9 +1007,12 @@ impl Dispatcher {
 
     /// Whether the program of a window of participant `id` that ended is gone, kept on
     /// `conversation`, the one it wrote to. Not where another window of that
-    /// participant has opened, or is opening, since (`ended` is the record of the one
-    /// that ended, which still holds its pane): that window's program may write to it
-    /// now, and its own exit says whether it is gone (Calliope's P3-1 on 0181cd9a).
+    /// participant has opened, or is opening, on that conversation since (`ended` is the
+    /// record of the one that ended, which still holds its pane): that window's program
+    /// may write to it now, and its own exit says whether it is gone (Calliope's P3-1 on
+    /// 0181cd9a). A window on another conversation writes nothing to this one (her P3-1 on
+    /// 46664f52: a session brought back on a new conversation lost its own window's proof
+    /// while the deleted session's window still waited for its kill).
     fn keep_proof(
         &self,
         id: i64,
@@ -1010,7 +1030,12 @@ impl Dispatcher {
                 .filter(|record| ended.is_none_or(|ended| !Rc::ptr_eq(record, ended)))
                 .any(|record| {
                     let window = record.window.borrow();
-                    window.pane.is_some() || window.opening.is_some()
+                    let on = Some(conversation);
+                    (window.pane.is_some() && window.conversation == on)
+                        || window
+                            .opening
+                            .as_ref()
+                            .is_some_and(|opening| opening.conversation == on)
                 })
         };
         if !windowed {
@@ -1031,6 +1056,11 @@ impl Dispatcher {
         let record = self.record_of(participant.id);
         if record.window.borrow().pane.is_some() {
             return self.step_open(project, participant, &record).await;
+        }
+        // A window whose open went unanswered is asked to end again at each step until
+        // the host says it has: a member with nothing more for it is still stepped.
+        if !self.end_abandoned(&record).await? {
+            return Ok(());
         }
         if project.state != "open" {
             return Ok(());
@@ -1104,8 +1134,9 @@ impl Dispatcher {
         participant: &ParticipantView,
         record: &Rc<Record>,
     ) -> Result<(), EngineError> {
+        // A window on its way out is not looked at; one whose exit is overdue is settled.
         if record.window.borrow().retiring {
-            return Ok(());
+            return self.exit_overdue(record).await;
         }
         // A participant forgotten while the step waits is done with.
         let observed = match returning(self.observe(participant, record)).await {
@@ -1261,6 +1292,24 @@ impl Dispatcher {
             // A refusal for quota is the quota's to say; any other failure is the human's to hear.
             self.tell_chief_failed(project, participant, record, &observed)
                 .await?;
+        }
+        // A launch's first message that its window is delivered once it is up goes
+        // in as soon as the window is past any question of trusting its folder, has
+        // drawn and is at rest, its project open (`hand_first`).
+        let owed = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.owed.is_some());
+        if owed {
+            if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
+            {
+                let (this, held) = (Rc::clone(self), Rc::clone(record));
+                self.act(record, async move { this.hand_first(&held).await })
+                    .await;
+            }
+            return Ok(());
         }
         let free = record.delivery.borrow().delivering.is_none()
             && observed.settled

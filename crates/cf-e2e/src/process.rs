@@ -54,6 +54,16 @@ pub use spawned::{Sink, Spawned};
 /// once, and one that waited for ever would hold the whole suite with it.
 pub const LIMIT: Duration = Duration::from_secs(30);
 
+/// The case `case` of a test binary (`binary`: the test's own, `std::env::current_exe()`) run
+/// again alone as a program by a test of it, held to `limit`: the most what the case runs may
+/// take, which its caller says. A nested case is held to no verb of `cf`'s [`LIMIT`] by default:
+/// a case that starts a rig may take longer than that, and one was ended at it on main's CI
+/// (T-848); a rig case's own is [`crate::rig::nested::case_of`]. The words after are the
+/// caller's, and so is the environment (none of the test's unless it asks).
+pub fn case_of(binary: impl AsRef<OsStr>, case: &str, limit: Duration) -> Run {
+    Run::new(binary).args(["--exact", case]).limit(limit)
+}
+
 /// How often a program that has not ended is looked at again.
 const POLL: Duration = Duration::from_millis(2);
 

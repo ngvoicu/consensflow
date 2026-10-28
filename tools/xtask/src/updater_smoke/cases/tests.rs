@@ -315,7 +315,10 @@ fn a_quit_is_the_end_of_the_apps_input_and_leaves_nothing_of_the_app_the_daemons
     );
 
     // An app that does not end with its input is waited for until the wait is over.
-    let (mut kase, _app) = started_case(&inputs, "say update-boot '{}'\nsleep 300");
+    let (mut kase, _app) = started_case(
+        &inputs,
+        "say update-boot '{}'\nwhile kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done",
+    );
     kase.waits = Waits::new(Duration::from_millis(500));
     let said = quit(&kase, &[]).unwrap_err().to_string();
     assert!(

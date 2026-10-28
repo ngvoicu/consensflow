@@ -14,8 +14,9 @@
 //!   to finish. What is open at the deadline is dropped. The app ends the
 //!   daemon 2 s after asking it to stop, and its own exit hooks must run
 //!   first.
-//! - **The tail** has no wait in it: the children are ended without waiting,
-//!   the ledger is closed, `exit 0` is written, and the process exits. It
+//! - **The tail** has no wait in it: the children are forced to end without
+//!   waiting (each group looked at once more, at once, for what it started as
+//!   the signal went round: `Ender::force`), the ledger is closed, `exit 0` is written, and the process exits. It
 //!   never closes the bridge (a close refuses what waits on it, and the engine
 //!   would record a launch failed that Node left for the next start to
 //!   settle), and it never drops the runtime, whose read of its input cannot
@@ -86,7 +87,8 @@ pub struct Stopping {
     pub passes: Rc<OnceCell<PassLoop>>,
     pub api: Rc<Api>,
     /// Ends the children the daemon started, waiting for none: the daemon's own
-    /// is the system processes' `end_all`.
+    /// is the system processes' `end_all`, an `Ender::force` a child, which looks
+    /// once at what its group started and never waits (Calliope's P2 on T-581).
     pub ends_children: Rc<dyn Fn()>,
     pub ledger: Rc<RefCell<Ledger>>,
     /// How the process ends: the daemon's own exits; a test's is told it.

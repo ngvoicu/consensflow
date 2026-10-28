@@ -59,7 +59,8 @@ fn words(words: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_its_first_message_last() {
+fn a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_no_message_on_its_command_line(
+) {
     let agent = muse(Some("muse-spark-1.3"), Some("minimal"));
     let opened = start(Harness::Muse, agent, None, Some("The task.")).unwrap();
     assert_eq!(opened.command, "muse");
@@ -73,7 +74,6 @@ fn a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_its_first
             "--yolo",
             "--contributor-mode",
             "off",
-            "The task.",
         ])
     );
     assert_eq!(
@@ -86,7 +86,7 @@ fn a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_its_first
 }
 
 #[test]
-fn a_resumed_muse_window_takes_its_first_message_once_it_is_up_not_on_its_command_line() {
+fn a_resumed_muse_window_opens_on_its_session_with_no_message_on_its_command_line() {
     let agent = muse(Some("muse-spark-1.3"), Some("minimal"));
     let session = "01a17bc9-e758-77f3-ac8d-a725edf373ae";
     let resumed = resume(
@@ -110,7 +110,7 @@ fn a_resumed_muse_window_takes_its_first_message_once_it_is_up_not_on_its_comman
             "off",
         ])
     );
-    assert_eq!(resumed.prompt.as_deref(), Some("Your turn was cut."));
+    assert_eq!(resumed.prompt, None);
     assert!(resume(Harness::Muse, agent, None, None).is_none(), "no id");
 }
 

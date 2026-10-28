@@ -1,0 +1,234 @@
+# A `/compact` the human cancelled with Escape held the Claude chief, and would have taken the
+# next message (3.0.6, item 6b; the live suite `commands-at-rest`, Claude Code 2.1.304 and
+# 2.1.310). Claude Code writes of the cancel the bare `/compact` and, at the Escape, the words it
+# writes before a command (`<local-command-caveat>`, a meta record), a sibling of the bare
+# command, and nothing more, and puts the `/compact` back in its input box. Claude's reader ends
+# the turn at those words and says the command is back in the box (`Lines::put_back`;
+# `crates/cf-harness/src/claude/record/replay.rs`, `project.rs`, `patterns.rs`, `record.rs`); the
+# adapter reads the box on the screen before the next paste and clears it with one Ctrl+C where it
+# shows text and the human typed nothing, pastes with no key where it reads empty, and holds the
+# paste as the human's unsent words where the screen shows no box, which the board says
+# (`holding`; `crates/cf-harness/src/claude/adapter.rs`, `shared/input_box.rs`). The long run's watch reads a command the system writes whole as no turn
+# (`crates/cf-evals/src/long_run/record.rs`, `Kind::Printed`). The reader's tests are
+# `crates/cf-harness/src/claude/record/tests/commands.rs`, the adapter's
+# `crates/cf-harness/tests/launch/claude/compact_cancelled.rs` (on a live run's records), the
+# case `crates/cf-e2e/tests/regressions/a_cancelled_compact_held_the_chief_and_took_its_next_message.rs`,
+# whose stand-in cancels a compaction as Claude Code does.
+#
+# The case builds the native `cf` from the sources as they are planted, so its plants say
+# `builds`. Every name holds `compact-cancelled`, so `cargo xtask plants daemon compact-cancelled`
+# runs them all.
+
+[run]
+compact-cancelled-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+compact-cancelled-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::compact_cancelled"]
+compact-cancelled-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_cancelled_compact_held_the_chief_and_took_its_next_message::"]
+compact-cancelled-watch = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "long_run::record"]
+compact-cancelled-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_commands_at_rest"]
+compact-cancelled-live-product = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_compact_cancelled"]
+compact-cancelled-scrub = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "scrub_transcript::"]
+compact-cancelled-kit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::claude"]
+
+[[plant]]
+name = "compact-cancelled: the words before a command beside a bare /compact end nothing, and the chief reads working until the human types"
+meant = "a_claude_chief_whose_compact_the_human_cancelled_is_at_rest_and_is_handed_its_workers_result_alone"
+runs = ["compact-cancelled-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        if ends || cancels {"
+replace = "        if ends {"
+
+[[plant]]
+name = "compact-cancelled: the reader reads a cancelled compaction as a turn at work"
+meant = "a_compaction_cancelled_with_escape_is_at_rest_at_the_words_before_a_command_beside_it"
+runs = ["compact-cancelled-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        if ends || cancels {"
+replace = "        if ends {"
+
+[[plant]]
+name = "compact-cancelled: the window of a live run's cancelled compaction reads at work"
+meant = "a_window_whose_compaction_was_cancelled_is_at_rest"
+runs = ["compact-cancelled-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        if ends || cancels {"
+replace = "        if ends {"
+
+[[plant]]
+name = "compact-cancelled: the words before a command end a bare /compact's turn whatever record they are the child of, and a compaction at work reads cancelled"
+meant = "a_compaction_at_work_or_one_that_finished_is_never_read_cancelled"
+runs = ["compact-cancelled-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        matches!(&record.compacting, Some((Compacting::Caveat, parent)) if *parent == typed.parent)"
+replace = "        matches!(&record.compacting, Some((Compacting::Caveat, _)))"
+
+[[plant]]
+name = "compact-cancelled: a user's record that only says the caveat's words, no meta record, cancels a compaction"
+meant = "a_compaction_at_work_or_one_that_finished_is_never_read_cancelled"
+runs = ["compact-cancelled-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = "    } else if CAVEAT.is_match(&text) && meta {"
+replace = "    } else if CAVEAT.is_match(&text) {"
+
+[[plant]]
+name = "compact-cancelled: the reading never says Claude put the /compact back, and the next message is pasted behind it, its instructions"
+meant = "a_claude_chief_whose_compact_the_human_cancelled_is_at_rest_and_is_handed_its_workers_result_alone"
+runs = ["compact-cancelled-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "            self.put_back = cancels;\n"
+replace = ""
+
+[[plant]]
+name = "compact-cancelled: the reading says the /compact is back in the box of a window that went on"
+meant = "a_compaction_cancelled_with_escape_is_at_rest_at_the_words_before_a_command_beside_it"
+runs = ["compact-cancelled-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        let typed = self.typed_compact.take();
+        self.put_back = false;
+'''
+replace = '''
+        let typed = self.typed_compact.take();
+'''
+
+[[plant]]
+name = "compact-cancelled: a box that shows the /compact Claude put back is pasted into with no key"
+meant = "the_compact_claude_put_back_is_cleared_before_the_next_message_is_pasted"
+runs = ["compact-cancelled-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "                self.clear_first.set(true);\n"
+replace = ""
+
+[[plant]]
+name = "compact-cancelled: the adapter never clears the box a cancel left, and the worker's result goes in behind the /compact"
+meant = "a_claude_chief_whose_compact_the_human_cancelled_is_at_rest_and_is_handed_its_workers_result_alone"
+runs = ["compact-cancelled-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {"
+replace = "            if self.restored.get() && !host.cleared() {"
+
+[[plant]]
+name = "compact-cancelled: a box the screen shows empty after a cancel is cleared all the same, a Ctrl+C that may be the second in a row"
+meant = "a_box_the_screen_shows_empty_after_the_cancel_is_pasted_into_with_no_key"
+runs = ["compact-cancelled-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            Some(InputBox::Empty) => Readiness::Ready,"
+replace = "            Some(InputBox::Empty) => {\n                self.clear_first.set(true);\n                Readiness::Ready\n            }"
+
+[[plant]]
+name = "compact-cancelled: a box the screen does not show after a cancel is pasted into, behind what it may hold"
+meant = "a_claude_chief_whose_box_cannot_be_read_after_a_cancelled_compact_is_handed_nothing_behind_it"
+runs = ["compact-cancelled-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            None => Readiness::Held(Held::Unsent),"
+replace = "            None => Readiness::Ready,"
+
+[[plant]]
+name = "compact-cancelled: the adapter takes no word of the reading that the /compact is back in the box"
+meant = "the_compact_claude_put_back_is_cleared_before_the_next_message_is_pasted"
+runs = ["compact-cancelled-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+                    self.put_back
+                        .set(matches!(&*reading, Reading::Known(record) if record.lines.put_back));
+'''
+replace = '''
+                    self.put_back.set(false);
+'''
+
+[[plant]]
+name = "compact-cancelled: the watch reads what a command the system writes whole printed as a prompt, a phantom turn after a compaction"
+meant = "a_command_the_system_writes_whole_after_a_compaction_opens_no_turn_and_the_record_ends_in_it"
+runs = ["compact-cancelled-watch"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = "                Kind::Printed => continue,\n                Kind::Prompt | Kind::Output => {"
+replace = "                Kind::Prompt | Kind::Output | Kind::Printed => {"
+
+[[plant]]
+name = "compact-cancelled: the live suite takes a compaction that finished before the Escape for a cancel"
+meant = "a_cancel_is_the_bare_command_and_the_words_before_a_command_and_no_boundary"
+runs = ["compact-cancelled-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = "        Command::Cancelled => any(bare_compact) && any(caveat) && !any(boundary),"
+replace = "        Command::Cancelled => any(bare_compact) && any(caveat),"
+
+[[plant]]
+name = "compact-cancelled: the live suite lets the words before a command come before a compaction's boundary"
+meant = "the_words_before_a_command_come_after_a_compactions_boundary_or_it_is_told"
+runs = ["compact-cancelled-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = "        (Some(_), None) => true,"
+replace = "        (Some(_), None) => false,"
+
+[[plant]]
+name = "compact-cancelled: the product's live case takes a compaction that finished before the Escape for a cancel"
+meant = "a_cancel_is_the_bare_command_and_the_words_before_a_command_and_no_boundary"
+runs = ["compact-cancelled-live-product"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_compact_cancelled.rs"
+find = "        && !written.iter().any(boundary)\n}"
+replace = "}"
+
+[[plant]]
+name = "compact-cancelled: a fixture keeps what Claude Code sent the API, the instructions and the owner's folders among it"
+meant = "a_request_claude_code_kept_keeps_only_its_type_and_its_session"
+runs = ["compact-cancelled-scrub"]
+
+[[plant.edit]]
+file = "tools/xtask/src/scrub_transcript.rs"
+find = "        record.retain(|name, _| name == \"type\" || name == \"sessionId\");"
+replace = ""
+
+[[plant]]
+name = "compact-cancelled: the live kit reads what Claude Code kept of a request as a message of the user's, and a live case finds a result in it"
+meant = "a_transcript_is_read_as_records_with_what_each_says"
+runs = ["compact-cancelled-kit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/claude.rs"
+find = "        .filter(|kind| kind.starts_with(\"api-request\"))\n"
+replace = "        .filter(|_| false)\n"
+
+[[plant]]
+name = "compact-cancelled: a box the screen does not show after a cancel holds the paste for a reason the board never shows the human"
+meant = "a_box_the_screen_does_not_show_after_the_cancel_holds_the_paste"
+runs = ["compact-cancelled-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            None => Readiness::Held(Held::Unsent),"
+replace = "            None => Readiness::Held(Held::Because(\"the box is not shown\".to_owned())),"

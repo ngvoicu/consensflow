@@ -13,6 +13,11 @@
 # worker's, and each appends its pid: the worker's window closes once its
 # work is done, the chief's lives as long as the app.
 #
+# It draws Claude Code's prompt, as Claude does once it is up: the daemon pastes
+# a window's first message (the worker's brief) only once the window shows that
+# prompt, past any question of trusting its folder (T-432, T-523), and nothing
+# else lets it go. A stand-in that drew no prompt was never handed its brief.
+#
 # The flood is asked for rather than printed at start-up: 1.5 MiB of wrapped
 # lines pushes far more rows than xterm keeps, so a banner printed before it
 # is gone by the time anything can look for it. The page says when it has
@@ -22,12 +27,9 @@ LC_ALL=C
 export LC_ALL
 echo $$ >> "$CFSMOKE_PIDFILE"
 session=''
-seed=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --session-id|--resume) session="$2"; shift ;;
-    # A worker's window opens with its brief as the last argument.
-    '[ConsensFlow'*) seed="$1" ;;
   esac
   shift
 done
@@ -65,13 +67,11 @@ if command -v uname >/dev/null 2>&1; then
 else
   printf 'CFSMOKE-TOOLS missing\n'
 fi
-# A worker's first turn is its brief, answered at once: its header line is
-# the record the daemon looks for, and "noted" is its result.
-if [ -n "$seed" ]; then
-  nl='
-'
-  turn "${seed%%"$nl"*}"
-fi
+# Claude Code's prompt, its status line as Claude draws it in the mode every
+# window of ConsensFlow's is opened in. A worker's brief is pasted then, and read
+# below as any line is: its header line is the record the daemon looks for, and
+# "noted" is its result.
+printf '  >> bypass permissions on (shift+tab to cycle)\n'
 pad=''
 n=0
 while [ $n -lt @FLOOD_WIDTH@ ]; do

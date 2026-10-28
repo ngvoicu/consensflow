@@ -66,6 +66,19 @@ impl Task {
         }
     }
 
+    /// The task of [`Task::real`], the command run `calls` times, each in a call of its
+    /// own: a turn of several steps, which a harness's compactor can compact before the
+    /// answer.
+    pub fn several(calls: usize) -> Result<Self> {
+        let once = Self::real()?;
+        Ok(Self {
+            brief: format!(
+                "Run the shell command \"{COMMAND}\" with your shell tool {calls} times, each time in a call of its own, one after the other, and no other command. When the last has ended, reply with one line that holds what it printed, and nothing more."
+            ),
+            output: once.output,
+        })
+    }
+
     /// The task of the rig's stand-in agent, which has no shell tool: `RUN` starts the
     /// program as a process of its window, as a harness's tool does, and the reply says
     /// the line it ran.

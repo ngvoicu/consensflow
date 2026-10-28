@@ -199,7 +199,7 @@ impl ProcessTree {
     /// What may be the window's and runs on, not ended, for the exit to name: each
     /// process that carries the window's marker, began at or after its program, is in a
     /// session whose leader has gone (no process of any user has the session's number), and
-    /// that the bound refuses, so that no close or ending signals it. Its number and the
+    /// that the bound refuses, so that no close signals it. Its number and the
     /// name the system gives its program, nothing more. A job a tool shell detached is one
     /// (`(server &)` from Claude Code's or Pi's shell, which leads a session of its own and
     /// returns); so is a job the user started through a server that the window started and

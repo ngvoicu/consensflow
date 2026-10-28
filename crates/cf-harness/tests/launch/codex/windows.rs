@@ -375,6 +375,7 @@ fn settled_record(thread: &str) -> Arc<Reading> {
         complete: true,
         at: None,
         commentary: false,
+        synthetic: false,
         compaction: false,
     };
     reading(vec![item], Settlement::Settled, None)

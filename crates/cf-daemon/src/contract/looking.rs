@@ -10,8 +10,8 @@ use std::rc::Rc;
 
 use cf_engine::seams::Adapters;
 use cf_harness::contract::{
-    Adapter, Admission, Interrupt, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Skill,
-    Window, Work,
+    Adapter, Admission, FirstMessage, Interrupt, Launch, Observed, Pane, PaneHost, Prepared,
+    Readiness, Skill, Window, Work,
 };
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
@@ -106,8 +106,8 @@ impl Adapter for LookingAdapter {
         self.adapter.keeps_first_instructions()
     }
 
-    fn first_message_once_up(&self, launch: &Launch) -> bool {
-        self.adapter.first_message_once_up(launch)
+    fn first_message(&self) -> FirstMessage {
+        self.adapter.first_message()
     }
 
     fn specmint(&self, variant: Variant) -> Result<Skill, String> {
@@ -122,8 +122,8 @@ struct LookingWindow {
 }
 
 impl Window for LookingWindow {
-    fn opened(&self, pane: &Pane, pid: Option<u32>) {
-        self.window.opened(pane, pid);
+    fn opened(&self, pid: Option<u32>) {
+        self.window.opened(pid);
     }
 
     fn follow(&self, session: &str) {

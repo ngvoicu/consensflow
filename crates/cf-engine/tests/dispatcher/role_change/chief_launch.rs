@@ -434,10 +434,13 @@ fn a_chiefs_message_that_goes_in_after_the_role_is_never_given_up_for_being_slow
     );
     assert_eq!(kills_of(&context, "chief"), 0);
 
-    // The window goes: the note is given back to the queue with its attempt.
+    // The window goes: the note is given back to the queue with its attempt. The next
+    // Resume reads the record again (T-814): it still ends in a turn with no end, so the
+    // note holds, and is the one given.
     context.exit("chief");
     assert_eq!(context.message(cut[0].id).state, "queued");
     assert_eq!(context.message(cut[0].id).attempts, 0);
+    context.codex.busy("chief");
     context.resume_project(project.id).unwrap();
     through_a_turn(&context);
     assert_eq!(context.message(cut[0].id).state, "delivered");
