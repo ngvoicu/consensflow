@@ -11,6 +11,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::Value;
 
+use super::homes::Homes;
 use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
 use super::stranger::Stranger;
@@ -49,12 +50,10 @@ impl Rig {
                 .to_owned()
         });
         let turn = serial::turn();
-        // A Claude config folder of the case's own is made (or refused) before
-        // anything else is: nothing is spent on a login that cannot be used.
-        let claude_config = match &config.claude_config {
-            Some(claude_config) => Some((claude_config.folder()?, Arc::clone(claude_config))),
-            None => None,
-        };
+        // The homes of the real harnesses the case runs on (its Claude config folder, a
+        // Pi's, a Codex's) are made (or refused) before anything else is: nothing is spent
+        // on a login that cannot be used.
+        let (homes, home_vars) = Homes::start(&config)?;
         // A home of its own, which goes if the rig never starts; or the one it is
         // to resume on. In the machine's temp folder, whatever the rig is built for: the
         // real harnesses' windows open in no git repository there, where a home under the
@@ -82,12 +81,7 @@ impl Rig {
         let workspace = root.join("workspace");
         files::make_dir(&workspace)?;
         let fake_bin = write_fake_install(&root, &config)?;
-        let env = environment(
-            &root,
-            &fake_bin,
-            &config,
-            claude_config.as_ref().map(|(folder, _)| folder.as_path()),
-        );
+        let env = environment(&root, &fake_bin, &config, &home_vars);
         // A restart over the same home keeps its roster, as the app's does: the
         // agents a case wrote are still the ones its chief and staff run on.
         if config.existing_root.is_none() {
@@ -123,8 +117,7 @@ impl Rig {
             host,
             cf,
             stranger,
-            claude_config: claude_config.map(|(_, claude_config)| claude_config),
-            claude_config_finished: false,
+            homes,
             masker: config.masker,
             reports: config.reports,
             case,

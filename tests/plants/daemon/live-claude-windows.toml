@@ -13,7 +13,6 @@ live-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::ma
 live-login = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login"]
 live-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::tests"]
 live-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "stand_in::"]
-live-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_held_typed", "--", "isolation::"]
 live-mcp-server = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server"]
 live-monitor-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_server_left_its_group"]
 live-rig-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
@@ -164,24 +163,15 @@ file = "crates/cf-e2e/src/live/machine.rs"
 find = '''            .strip_prefix(r"\\?\")'''
 replace = '''            .strip_prefix(r"nothing")'''
 
-# T-858: the suites that make their own Claude config folder (`live held-typed`, `live escape-unsent`,
-# through `live_isolation/claude.rs`) judged the copy by its bytes, and Claude Code 2.1.310 writes what
-# it learns of the account beside the tokens (zeewin2: `subscriptionTypeSource`), so every run said the
-# login was refreshed.
+# T-858: the suites that made their own Claude config folder (`live held-typed`, `live escape-unsent`)
+# judged the copy by its bytes, and Claude Code 2.1.310 writes what it learns of the account beside the
+# tokens (zeewin2: `subscriptionTypeSource`), so every run said the login was refreshed. Integration C
+# (T-881) put those suites on the kit's own folder (T-724), and holds the owner's login to its tokens as
+# the copy is.
 [[plant]]
-name = "windows live: a suite's copy of the login is held to every byte of Claude's file"
-meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
-runs = ["live-isolation"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_isolation/claude.rs"
-find = '''        let changed = if self.file == ".credentials.json" {'''
-replace = '''        let changed = if false {'''
-
-[[plant]]
-name = "windows live: a suite's copy that Claude Code lost is not a refreshed one"
-meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
-runs = ["live-isolation"]
+name = "windows live: a copy that Claude Code lost is not a refreshed one"
+meant = "a_copy_that_was_refreshed_or_lost_fails_with_a_warning_that_the_machines_login_may_be_stale"
+runs = ["live-login"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
@@ -191,15 +181,29 @@ find = '''            Self::Lost => {
 replace = '''            Self::Lost => None,'''
 
 [[plant]]
-name = "windows live: a suite's copy rewritten beside its tokens is a refreshed one"
-meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
-runs = ["live-isolation"]
+name = "windows live: a copy rewritten beside its tokens fails the run as a refreshed one"
+meant = "a_copy_only_rewritten_beside_its_tokens_is_no_failure_and_a_refreshed_one_names_its_fields_and_no_value"
+runs = ["live-login"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
 find = '''            Self::Kept | Self::Rewritten(_) => None,'''
 replace = '''            Self::Kept => None,
             Self::Rewritten(_) => Some("rewritten".to_owned()),'''
+
+[[plant]]
+name = "windows live: the owner's login is held to every field beside its tokens"
+meant = "the_login_the_machine_keeps_changed_while_the_run_went_on_is_said_and_the_mcp_tokens_beside_it_are_not_held_to_it"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        let kept = now.is_some_and(|now| {
+            TOKENS
+                .iter()
+                .all(|field| now.get(field) == copied.get(field))
+        });'''
+replace = '''        let kept = now.as_ref() == Some(copied);'''
 
 # T-858: `live monitor-wait` and `live mcp` ran their MCP server on `python3`, which a Windows machine
 # may have only as the Store's alias (zeewin2: exit 9009), and whose `os.setsid` has no Windows. The

@@ -81,6 +81,19 @@ pub fn member_as(harness: Harness, id: &str) -> Value {
 
 use super::super::agents::harness_of;
 
+/// A file a check puts in the home the run gives a harness's windows, before they open: the
+/// MCP server, skill or instructions it configures the harness by, in the run's own home and
+/// never in the owner's ([`Isolation::write`](super::super::isolation::Isolation::write)).
+#[derive(Debug, Clone)]
+pub struct HomeFile {
+    pub harness: Harness,
+    /// The variable that names the folder the harness reads it in (`CODEX_HOME`).
+    pub variable: &'static str,
+    /// The path below that folder.
+    pub name: String,
+    pub text: String,
+}
+
 /// What a check opens.
 #[derive(Debug, Clone)]
 pub struct Plan {
@@ -101,6 +114,9 @@ pub struct Plan {
     /// The variables the daemon alone is given, as the app gives its daemon what it took
     /// of the human's terminal: the pane host and its windows start without them.
     pub daemon_vars: Vec<(String, String)>,
+    /// Files written in the homes of the run's own that the harnesses' windows run on, before
+    /// anything opens.
+    pub home_files: Vec<HomeFile>,
     /// The agents of the roster.
     pub roster: Vec<Value>,
     /// The id of the agent that is the project's chief.
@@ -121,6 +137,7 @@ impl Plan {
             files: Vec::new(),
             vars: Vec::new(),
             daemon_vars: Vec::new(),
+            home_files: Vec::new(),
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
             repository: false,
@@ -161,6 +178,25 @@ impl Plan {
     #[must_use]
     pub fn with_var(mut self, name: &str, value: impl Into<String>) -> Self {
         self.vars.push((name.to_owned(), value.into()));
+        self
+    }
+
+    /// With the file `name`, below the folder `variable` names in the home of the run's own
+    /// that `harness`'s windows run on, holding `text`.
+    #[must_use]
+    pub fn with_home_file(
+        mut self,
+        harness: Harness,
+        variable: &'static str,
+        name: &str,
+        text: impl Into<String>,
+    ) -> Self {
+        self.home_files.push(HomeFile {
+            harness,
+            variable,
+            name: name.to_owned(),
+            text: text.into(),
+        });
         self
     }
 

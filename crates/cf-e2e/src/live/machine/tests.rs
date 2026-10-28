@@ -2,6 +2,7 @@
 //! its windows need, and the rig that gives them to the windows.
 
 use std::fs;
+use std::time::Duration;
 
 use super::*;
 
@@ -277,6 +278,57 @@ fn a_rig_given_a_claude_config_of_its_own_keeps_its_claude_windows_there() {
         "{debug}"
     );
     assert!(!debug.contains("unset: [\"CLAUDE_CONFIG_DIR\"]"), "{debug}");
+}
+
+#[test]
+fn every_harness_found_runs_on_a_home_of_the_runs_own_but_for_the_two_that_are_not_ours_to_give() {
+    // The windows of Codex, Pi and Devin (where it is known how) run on a home with a copy
+    // of the login: not a case's to remember to make.
+    let mut isolated = vec![Harness::Codex, Harness::Pi];
+    if cfg!(unix) {
+        isolated.push(Harness::Devin);
+    }
+    for harness in isolated {
+        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
+        assert!(found.isolation().is_some(), "{harness:?}");
+    }
+    // Claude Code's is a config folder ([`Login`]), and OpenCode keeps the person's.
+    for harness in [Harness::Claude, Harness::OpenCode] {
+        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
+        assert!(found.isolation().is_none(), "{harness:?}");
+    }
+}
+
+#[test]
+fn an_install_on_a_home_of_the_runs_own_is_given_the_persons_home_and_none_of_the_variables_it_reads_a_login_by(
+) {
+    let codex = Installed::at(Harness::Codex, "/codex/bin/codex", "/home/me/.codex")
+        .with_isolation(Arc::new(Isolation::codex(
+            Path::new("/home/me"),
+            Path::new("/home/me/.codex"),
+        )));
+    let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/home/me").with_isolation(Arc::new(
+        Isolation::pi(
+            Path::new("/home/me"),
+            Path::new("/home/me/.pi/agent"),
+            "openrouter/x",
+            Duration::from_secs(60),
+        ),
+    ));
+    let debug = format!("{:?}", rig(&[codex, pi], "/the/stand-in"));
+    // None of the variables the person's login is read by: not Codex's, the XDG folder or Pi's.
+    for owners in ["CODEX_HOME", "XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR"] {
+        assert!(
+            !debug.contains(&format!("(\"{owners}\"")),
+            "{owners}: {debug}"
+        );
+    }
+    // Their home is the windows' all the same: the folders of the project are below it (Devin's
+    // window, opened below a folder of the rig's own, which macOS spells through the `/var` link
+    // of its temporary folder, showed no answer: 2026-10-27).
+    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
+    // What the rig has instead of the rest: a home for each, asked for its variables when it starts.
+    assert_eq!(debug.matches("Isolation {").count(), 2, "{debug}");
 }
 
 #[test]

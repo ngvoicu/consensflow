@@ -35,11 +35,13 @@
 //! wait for a throwaway config seeded with the login (T-302, Gabriel's decision of
 //! 2026-10-22): until the kit's rig has it, Claude is run only when asked. Known limit
 //! (Calliope's re-check T-300, P3-R7): the Claude leg of T-298's runs left two lines
-//! in the owner's Claude history, which T-302 keeps from happening again. Codex runs in a home of the
-//! run's own that holds a copy of the machine's `auth.json` and nothing else, so it
-//! has no MCP servers and never writes the machine's `~/.codex`; the run says whether
-//! that copy changed (a token Codex refreshed in it), which would leave the machine's
-//! own login stale, and the home goes with the run.
+//! in the owner's Claude history, which T-302 keeps from happening again. Codex, Pi and
+//! Devin run in a home of the run's own that holds a copy of the machine's login and
+//! nothing else ([`cf_e2e::live::isolation`], which the kit gives every window), so Codex
+//! has no MCP servers and none of them writes the machine's `~/.codex`, `~/.pi` or
+//! `~/.local/share/devin`; the run fails if a login copy changed (a token refreshed in it,
+//! which would leave the machine's own stale) or a file of the machine's did, and the
+//! home goes with the run.
 //!
 //! ```text
 //! cargo xtask live paste-screen                         all five, one after another
@@ -50,7 +52,7 @@
 //! The run fails where a worker's task was not done, or no look found its window at
 //! rest: what the screen showed is said either way.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::members::{self, find, is_over, Members, Plan};
@@ -211,94 +213,23 @@ fn harnesses(named: &[String]) -> Result<Vec<Harness>> {
         .collect()
 }
 
-/// A home of the run's own for Codex, holding a copy of the machine's `auth.json`
-/// and nothing else, and where that copy came from.
-struct CodexHome {
-    home: tempfile::TempDir,
-    copied: Vec<u8>,
-}
-
-impl CodexHome {
-    fn make() -> Result<Self> {
-        let machine = live::requested("CODEX_HOME")
-            .map(PathBuf::from)
-            .or_else(|| live::requested("HOME").map(|home| Path::new(&home).join(".codex")))
-            .ok_or_else(|| Error::Daemon("no Codex home to copy a login from".to_owned()))?;
-        let auth = machine.join("auth.json");
-        let copied = std::fs::read(&auth).map_err(|source| Error::File {
-            action: "read",
-            path: auth.clone(),
-            source,
-        })?;
-        let home = tempfile::Builder::new()
-            .prefix("cf-codex-home-")
-            .tempdir()
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: std::env::temp_dir(),
-                source,
-            })?;
-        let into = home.path().join("auth.json");
-        write_private(&into, &copied).map_err(|source| Error::File {
-            action: "write",
-            path: into,
-            source,
-        })?;
-        Ok(Self { home, copied })
-    }
-
-    fn path(&self) -> String {
-        self.home.path().to_string_lossy().into_owned()
-    }
-
-    /// Whether the run's copy of the login is no longer the copy made: Codex
-    /// refreshed its token in the run's home.
-    fn changed(&self) -> bool {
-        std::fs::read(self.home.path().join("auth.json")).map_or(true, |now| now != self.copied)
-    }
-}
-
-/// `bytes` written to `path` readable by its owner alone (mode 600 on Unix): a
-/// copy of a login.
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options.open(path)?.write_all(bytes)
-}
-
 /// One worker's run: the brief given, its window kept open and looked at through
 /// its turn and at rest after it.
 fn run(harness: Harness, log: &Log) -> Result<Check> {
     let name = harness.name();
     let log = log.scoped(name);
-    let codex = (harness == Harness::Codex)
-        .then(CodexHome::make)
-        .transpose()?;
-    let mut plan = Plan::new(&format!("paste-screen-{name}"), members::stand_in_chief())
+    let plan = Plan::new(&format!("paste-screen-{name}"), members::stand_in_chief())
         .with(members::member(harness));
-    if let Some(codex) = &codex {
-        // Where the run's copy of the login is, should a killed run leave it behind.
-        log.say(format!("Codex's home of the run's own: {}", codex.path()));
-        plan = plan.with_var("CODEX_HOME", codex.path());
-    }
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), &log)?;
     let seen = look(&mut members, harness, &log);
+    // The kit's homes are asked what the run came to when the rig ends: a login copy that
+    // changed, or a file of the machine's that did, fails the close.
     let closed = members.close();
-    let changed = codex.as_ref().is_some_and(CodexHome::changed);
-    if changed {
-        log.say("THE RUN'S COPY OF CODEX'S auth.json CHANGED: Codex refreshed its token in the run's home");
-    }
     let (done, seen) = seen?;
     closed?;
     let mut detail = seen.line();
     if let Some(wrong) = &seen.wrong {
         detail.push_str(&format!("; {wrong}"));
-    }
-    if changed {
-        detail.push_str("; Codex's auth.json copy changed in the run");
     }
     Ok(Check::new(
         name,
@@ -497,17 +428,6 @@ mod tests {
         );
         // A screen that holds none of the brief has nothing to hold to the rule.
         assert_eq!(misread(&lines(&["3470"]), &[false]), None);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_copy_of_a_login_is_readable_by_its_owner_alone() {
-        use std::os::unix::fs::PermissionsExt;
-        let folder = tempfile::tempdir().unwrap();
-        let file = folder.path().join("auth.json");
-        write_private(&file, b"{}").unwrap();
-        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
