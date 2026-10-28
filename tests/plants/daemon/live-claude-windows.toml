@@ -16,6 +16,7 @@ live-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "stand_i
 live-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_held_typed", "--", "isolation::"]
 live-mcp-server = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server"]
 live-monitor-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_server_left_its_group"]
+live-monitor-wait-host = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_platform_with_no_groups"]
 
 [[plant]]
 name = "windows live: a window of a fake model is started on the real Claude all the same"
@@ -239,3 +240,41 @@ runs = ["live-monitor-wait"]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
 find = '''    !leaves || (detached.is_some() && group == detached)'''
 replace = '''    detached.is_some() && group == detached'''
+
+# T-858: on Windows `pane.commands` answers `null` by design (no process groups: cf-proto's panes.rs), so the
+# five checks of `live monitor-wait` that read what the host finds in the window failed at every run (zeewin2,
+# 2026-10-28: 9 of 14 held, the reader's). They are replaced there by the one that holds the host to its
+# documented answer.
+[[plant]]
+name = "windows live: a platform that tells commands loses the checks that read them"
+meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+runs = ["live-monitor-wait-host"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''    if tells {
+        return checks;
+    }'''
+replace = '''    if false {
+        return checks;
+    }'''
+
+[[plant]]
+name = "windows live: a platform that tells no command keeps the checks that read them"
+meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+runs = ["live-monitor-wait-host"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''        .filter(|check| !READ_COMMANDS.contains(&check.what.as_str()))'''
+replace = '''        .filter(|check| !READ_COMMANDS.is_empty() || check.what.is_empty())'''
+
+[[plant]]
+name = "windows live: a host that counted a command where it cannot tell passes"
+meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+runs = ["live-monitor-wait-host"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''        !seen.is_empty() && seen.iter().all(Option::is_none),'''
+replace = '''        true,'''

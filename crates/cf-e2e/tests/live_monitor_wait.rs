@@ -1062,11 +1062,53 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     }
     drop(window);
     rig.close()?;
+    // What the host told of the window's commands at every look of the run.
+    let seen: Vec<Option<u64>> = [&looks, &stopping, &exits, &noisy]
+        .into_iter()
+        .flatten()
+        .map(|look| look.commands)
+        .chain(first_commands.iter().map(|(_, told)| *told))
+        .chain(commands.iter().map(|(_, told)| *told))
+        .collect();
+    let checks = host_can_answer(checks, !cfg!(windows), &seen);
     report::conclude(
         &log,
         "what Claude Code wrote, and what the reader counted",
         &checks,
     )
+}
+
+/// The checks that read what the pane host tells of the window's commands.
+const READ_COMMANDS: [&str; 5] = [
+    "first-turn-call",
+    "mcp-not-a-command",
+    "commands-armed",
+    "expiries-end",
+    "call-margin",
+];
+
+/// `checks`, as a platform can hold them. The host tells the commands of a window only on a
+/// platform with process groups, where a group says what a process is (`pane.commands`, in
+/// `cf-proto`'s `panes.rs`); on Windows it answers `null` ("cannot tell"), at every look. The
+/// five checks that read the commands (`READ_COMMANDS`) can then say nothing, and are replaced by
+/// the one that holds the platform to its documented answer: the host told no command at any
+/// look (`seen`, each look's count), and there was a look. On a platform that tells (`tells`),
+/// `checks` are as they are.
+fn host_can_answer(checks: Vec<Check>, tells: bool, seen: &[Option<u64>]) -> Vec<Check> {
+    if tells {
+        return checks;
+    }
+    let mut kept: Vec<Check> = checks
+        .into_iter()
+        .filter(|check| !READ_COMMANDS.contains(&check.what.as_str()))
+        .collect();
+    kept.push(Check::new(
+        "claude",
+        "commands-untold",
+        !seen.is_empty() && seen.iter().all(Option::is_none),
+        "with no process groups to say what a process is, the pane host told no command of the window at any look of the run (the five checks of what it finds in the window are the groups' platforms')",
+    ));
+    kept
 }
 
 #[cfg(test)]
@@ -1196,6 +1238,45 @@ fn the_fixtures_expiry_is_read_from_its_records() {
             delivered_at: written_at(&json!({ "timestamp": "2026-10-20T23:03:10.329Z" })).unwrap(),
         }]
     );
+}
+
+#[test]
+fn a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds(
+) {
+    let checks = || -> Vec<Check> {
+        [
+            "arming",
+            "first-turn-call",
+            "mcp-not-a-command",
+            "commands-armed",
+            "expiries-end",
+            "call-margin",
+            "stop",
+        ]
+        .iter()
+        .map(|what| Check::new("claude", what, true, "held"))
+        .collect()
+    };
+    let names = |checks: &[Check]| {
+        checks
+            .iter()
+            .map(|check| check.what.clone())
+            .collect::<Vec<_>>()
+    };
+    // Where the host tells, nothing changes.
+    assert_eq!(
+        names(&host_can_answer(checks(), true, &[Some(1)])),
+        names(&checks())
+    );
+    // Where it cannot: the reader's checks stay, the host's go, and one holds it to saying nothing.
+    let held = host_can_answer(checks(), false, &[None, None, None]);
+    assert_eq!(names(&held), ["arming", "stop", "commands-untold"]);
+    assert!(held.iter().all(|check| check.ok));
+    // A host that counted a command where it cannot tell, or was never looked at, fails it.
+    for seen in [vec![None, Some(0)], vec![Some(2)], vec![]] {
+        let failed = host_can_answer(checks(), false, &seen);
+        assert!(!failed.last().unwrap().ok, "{seen:?}");
+    }
 }
 
 #[test]
