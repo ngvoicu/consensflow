@@ -10,8 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
-/// The two dependencies, and the only two.
-const DEPENDENCIES: [&str; 2] = ["serde_json", "sha2"];
+/// The three dependencies, and the only three. minisign-verify depends on
+/// nothing: the closure below is the other two's.
+const DEPENDENCIES: [&str; 3] = ["minisign-verify", "serde_json", "sha2"];
 
 /// Every other crate they bring, by name, as the lockfile resolves them. The
 /// lockfile names a crate's dependencies for every platform and for every

@@ -31,6 +31,7 @@ use crate::failure::Failure;
 use crate::manifest::Manifest;
 use crate::read::{Patience, Reader};
 use crate::rule::{role_of, Role};
+use crate::sums::{SIGNATURE, SUMS};
 use crate::version::{later_release, named_release, Channel, Version};
 
 /// The file the publisher leaves in the release's folder, beside its
@@ -214,7 +215,7 @@ fn built(dir: &Path, path: &str) -> Result<Vec<u8>, Failure> {
 /// Whether every file of the release built in `dir` downloads from where it was
 /// published as the one built, which is a hash read off the download beside a
 /// hash of the file: the archive the apps install, the Windows files, the
-/// metadata, the sums.
+/// metadata, the sums and their signature.
 pub fn asset_problems(
     dir: &Path,
     version: &Version,
@@ -224,7 +225,7 @@ pub fn asset_problems(
     let tag = format!("v{version}");
     let assets = ReleaseAssets::of(version);
     let mut problems = Vec::new();
-    for path in assets.all().into_iter().chain(["SHA256SUMS"]) {
+    for path in assets.all().into_iter().chain([SUMS, SIGNATURE]) {
         let name = name_of(path);
         match reads.hash(&format!("{base}/{tag}/{name}")) {
             Err(refusal) => problems.push(format!(
