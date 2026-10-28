@@ -762,6 +762,26 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
 /// is ready, and its paste says at which count of the keys the box read empty, so the
 /// host takes it over the count unless a key came since. A box with words in it, one
 /// it cannot read, or a key a moment ago still holds the paste.
+/// T-829: the engine presses no key into a box its harness reads empty (Control-C there
+/// arms Claude Code's exit): the window says so of a box drawn empty, and not of one with
+/// words in it or of a screen with no box.
+#[test]
+fn the_engine_is_told_the_box_is_empty_only_where_claude_draws_it_empty() {
+    const RULE: &str = "────────────────────────────────────────";
+    let home = Home::new();
+    let window = window(
+        &home.adapter(),
+        &Request::resumed("e2c56db5-dffb-48d2-b060-d0f5a71096e0"),
+    );
+    let drawn = |typed: &str| {
+        json!({ "ok": true, "bottom": ["⏺ 4", "", RULE, typed, RULE,
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)"] })
+    };
+    assert!(window.box_read_empty(&drawn("❯ ")));
+    assert!(!window.box_read_empty(&drawn("❯ half a sentence")));
+    assert!(!window.box_read_empty(&json!({ "ok": true, "bottom": ["⏺ 4"] })));
+}
+
 #[test]
 fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog() {
     const RULE: &str = "────────────────────────────────────────";

@@ -231,6 +231,27 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
     assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
 }
 
+/// T-829: the engine presses no key into a box its harness reads empty: the window says
+/// so of a box that shows only Devin's hint, and not of one with words in it or of a
+/// screen with no box.
+#[test]
+fn the_engine_is_told_the_box_is_empty_only_where_devin_reads_it_so() {
+    const RULE: &str = "────────────────────────────────────────";
+    let home = Home::new();
+    let adapter = home.adapter();
+    let window = window(&adapter, &Request::resumed("mild-coin"));
+    let drawn = |typed: &str, plain_after: u64| {
+        json!({
+            "ok": true,
+            "bottom": [format!("{RULE} (bypass permissions on) ─"), typed, RULE, "SWE-2 Medium"],
+            "cursor": { "line": 1, "col": 2, "shown": true, "plainAfter": plain_after },
+        })
+    };
+    assert!(window.box_read_empty(&drawn("❭ Ask Devin anything about your code", 0)));
+    assert!(!window.box_read_empty(&drawn("❭ probe words", 10)));
+    assert!(!window.box_read_empty(&json!({ "ok": true, "bottom": ["SWE-2 Medium"] })));
+}
+
 /// Both reviews of 2026-10-16, round 4: a paste asks the host whether it still
 /// admits it as it is asked for, after the window's own reads.
 #[test]
