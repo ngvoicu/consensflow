@@ -119,7 +119,7 @@ pub fn skill_called(file_text: &str) -> Option<String> {
 }
 
 /// Where a window was given its role text, by what its `pane.open` says: a file
-/// (Claude's, OpenCode's and Devin's), or the text itself (Pi's, and Codex's as
+/// (Claude's and Devin's), or the text itself (Pi's, and Codex's as
 /// the developer's instructions).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoleText {
@@ -129,9 +129,8 @@ pub enum RoleText {
 
 /// How the window of `frame` (a `pane.open` request) was given its role: Claude
 /// appends a file to its system prompt, Pi appends the text, Codex is given it as
-/// developer instructions (a JSON string in a setting of its command line), Devin
-/// reads the file its environment names, and OpenCode has it as the last of the
-/// instructions its configuration lists.
+/// developer instructions (a JSON string in a setting of its command line), and
+/// Devin reads the file its environment names.
 pub fn role_of(frame: &Value) -> Option<RoleText> {
     let argv: Vec<&str> = frame["argv"]
         .as_array()
@@ -158,12 +157,7 @@ pub fn role_of(frame: &Value) -> Option<RoleText> {
         let text: String = serde_json::from_str(setting).ok()?;
         return Some(RoleText::Inline(text));
     }
-    if let Some(file) = frame["env"]["CF_DEVIN_ROLE_FILE"].as_str() {
-        return Some(RoleText::File(file.to_owned()));
-    }
-    let configuration: Value =
-        serde_json::from_str(frame["env"]["OPENCODE_CONFIG_CONTENT"].as_str()?).ok()?;
-    let file = configuration["instructions"].as_array()?.last()?.as_str()?;
+    let file = frame["env"]["CF_DEVIN_ROLE_FILE"].as_str()?;
     Some(RoleText::File(file.to_owned()))
 }
 

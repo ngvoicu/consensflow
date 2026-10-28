@@ -1043,3 +1043,28 @@ runs = ["engine-future-sizes"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "            Box::pin(this.perform_switch(&found, &chief, &held, to)).await?;"
 replace = "            this.perform_switch(&found, &chief, &held, to).await?;"
+
+# A window that cannot be launched: the human hears that the chief could not start, and a task
+# given to a worker whose window cannot be launched fails and its requester hears why. Held by the
+# rig's OpenCode 2 cases until they left with OpenCode (`.specs/remove-opencode`, RMOC-05); the
+# engine's cases of a launch that fails hold them now.
+
+[[plant]]
+name = "failure reason: a chief that cannot start tells the human nothing"
+meant = "a_chief_whose_launch_keeps_failing_its_handoff_waits_no_other_is_written_it_is_tried_ever_more_slowly_and_the_human_hears_once"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        if failures == 1 {"
+replace = "        if failures == 0 {"
+
+[[plant]]
+name = "failure reason: a worker's task that cannot be given fails and its requester is not told why"
+meant = "fails_what_was_given_to_a_member_on_it_by_name_and_its_requester_hears_why"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                self.tell_failed(&project, task, &task.requester, &because, &told, None)?;"
+replace = "                let _ = (&because, &told);"

@@ -50,7 +50,6 @@ fn the_chief_has_an_effort_where_its_harness_has_a_switch_for_one() {
         ("claude", Some("high")),
         ("codex", Some("high")),
         ("pi", Some("high")),
-        ("opencode", None),
         ("devin", None),
     ] {
         assert_eq!(

@@ -99,7 +99,7 @@ pub fn projects(chiefs: &[Harness], steps: &[Step]) -> Vec<Planned> {
                     .any(|asked| asked == step || asked.needs() == Some(*step))
         })
         .collect();
-    Harness::ALL
+    Harness::DEFAULT
         .into_iter()
         .enumerate()
         .filter(|(_, chief)| chiefs.is_empty() || chiefs.contains(chief))
@@ -153,7 +153,12 @@ pub fn chosen_variant(asked: Option<&str>, has: impl Fn(&str) -> bool) -> Result
 /// commas or blanks; the words that are no harness are the error.
 pub fn harnesses_named(list: &str) -> Result<Vec<Harness>, String> {
     words(list)
-        .map(|word| Harness::from_name(word).ok_or_else(|| format!("no harness is called {word}")))
+        .map(|word| {
+            Harness::DEFAULT
+                .into_iter()
+                .find(|harness| harness.name() == word)
+                .ok_or_else(|| format!("no harness is called {word}"))
+        })
         .collect()
 }
 

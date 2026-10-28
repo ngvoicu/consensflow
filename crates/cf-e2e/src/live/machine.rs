@@ -54,9 +54,7 @@ pub enum Harness {
 }
 
 impl Harness {
-    /// Every harness, in the order the live approval test rotates them through
-    /// its positions: each is the chief of one project and the one after it
-    /// is that project's worker.
+    /// Every harness a run can name.
     pub const ALL: [Harness; 5] = [
         Harness::Claude,
         Harness::OpenCode,
@@ -64,6 +62,13 @@ impl Harness {
         Harness::Devin,
         Harness::Codex,
     ];
+
+    /// The harnesses a suite runs where its run names none: all but OpenCode,
+    /// which leaves ConsensFlow (`.specs/remove-opencode`). In the order the live
+    /// approval test rotates them through its positions: each is the chief of one
+    /// project and the one after it is that project's worker.
+    pub const DEFAULT: [Harness; 4] =
+        [Harness::Claude, Harness::Pi, Harness::Devin, Harness::Codex];
 
     /// What it is called on a command line, and what its command is called.
     pub const fn name(self) -> &'static str {

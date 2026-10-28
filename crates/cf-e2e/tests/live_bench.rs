@@ -6,9 +6,8 @@
 //!
 //! The human gives the chief one task per worker: run `cf task add` for its tier;
 //! the daemon picks the worker (the free one of that tier with the fewest tasks so
-//! far, the earliest joined first), which the steps below lean on. The chief (OpenCode
-//! on the free Muse Spark model by default; `--chief claude` for a Claude Code chief
-//! on Sonnet) must run it itself; the daemon opens the worker's window with the task,
+//! far, the earliest joined first), which the steps below lean on. The chief (Claude
+//! Code on Sonnet) must run it itself; the daemon opens the worker's window with the task,
 //! the worker must answer in full-permission mode, the core must record the answer as
 //! the task's result and deliver it into the chief's window, and the worker must read
 //! idle. Then the app restarts, the project waits suspended, and the human's Resume
@@ -19,9 +18,8 @@
 //! State lives in a throwaway home; the harnesses use the real logins.
 //!
 //! ```text
-//! cargo xtask live bench                                         the baseline, the questions, a review, the restart: OpenCode, Pi and Devin
-//! cargo xtask live bench opencode pi devin claude codex          every worker
-//! cargo xtask live bench --chief claude                          a Claude Code chief
+//! cargo xtask live bench                                         the baseline, the questions, a review, the restart: Pi and Devin
+//! cargo xtask live bench pi devin claude codex                   every worker
 //! cargo xtask live bench --steps questions codex claude          the question door's alone, with no delivery baseline, review or restart
 //! cargo xtask live bench --reviewer pi                           another harness reviews (Devin does by default)
 //! ```
@@ -56,7 +54,7 @@ use bench::Bench;
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The workers when none is named.
-const DEFAULT: [Harness; 3] = [Harness::OpenCode, Harness::Pi, Harness::Devin];
+const DEFAULT: [Harness; 2] = [Harness::Pi, Harness::Devin];
 
 /// The id of the chief's agent in the roster.
 const CHIEF: &str = "bench-chief";
@@ -82,8 +80,8 @@ fn options(
         Harness::from_name(word)
             .ok_or_else(|| Error::Daemon(format!("unsupported bench {what}: {word}")))
     };
-    let chief = harness(chief.unwrap_or("opencode"), "chief")?;
-    if !matches!(chief, Harness::Claude | Harness::OpenCode) {
+    let chief = harness(chief.unwrap_or("claude"), "chief")?;
+    if chief != Harness::Claude {
         return Err(Error::Daemon(format!(
             "unsupported bench chief: {}",
             chief.name()
@@ -208,16 +206,15 @@ mod tests {
     }
 
     #[test]
-    fn the_bench_runs_every_step_on_opencode_pi_and_devin_with_an_opencode_chief_and_a_devin_reviewer(
-    ) {
+    fn the_bench_runs_every_step_on_pi_and_devin_with_a_claude_chief_and_a_devin_reviewer() {
         let all = options(None, None, None, &[]).unwrap();
         assert_eq!(
             all,
             Options {
-                chief: Harness::OpenCode,
+                chief: Harness::Claude,
                 reviewer: Harness::Devin,
                 all: true,
-                workers: vec![Harness::OpenCode, Harness::Pi, Harness::Devin],
+                workers: vec![Harness::Pi, Harness::Devin],
             }
         );
     }
@@ -248,6 +245,10 @@ mod tests {
         assert_eq!(
             refused(options(Some("pi"), None, None, &[])).as_deref(),
             Some("unsupported bench chief: pi")
+        );
+        assert_eq!(
+            refused(options(Some("opencode"), None, None, &[])).as_deref(),
+            Some("unsupported bench chief: opencode")
         );
         assert_eq!(
             refused(options(Some("kimi"), None, None, &[])).as_deref(),
@@ -281,23 +282,17 @@ mod tests {
             .collect();
         assert_eq!(
             ids,
-            [
-                "bench-chief",
-                "bench-opencode",
-                "bench-pi",
-                "bench-devin",
-                "bench-reviewer"
-            ]
+            ["bench-chief", "bench-pi", "bench-devin", "bench-reviewer"]
         );
-        // The chief and the opencode worker are the same harness on the same model: two agents.
-        assert_eq!(plan.roster[0]["kind"], plan.roster[1]["kind"]);
-        assert_eq!(plan.roster[0]["model"], plan.roster[1]["model"]);
+        // The devin worker and the reviewer are the same harness on the same model: two agents.
+        assert_eq!(plan.roster[2]["kind"], plan.roster[3]["kind"]);
+        assert_eq!(plan.roster[2]["model"], plan.roster[3]["model"]);
         // Each worker has the tier of its own that a task that names it lands on.
         let tiers: Vec<&str> = plan
             .roster
             .iter()
             .map(|row| row["workTier"].as_str().unwrap())
             .collect();
-        assert_eq!(tiers[1..4], ["light", "standard", "critical"]);
+        assert_eq!(tiers[1..3], ["standard", "critical"]);
     }
 }

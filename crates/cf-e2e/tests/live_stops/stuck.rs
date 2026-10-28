@@ -481,7 +481,7 @@ mod tests {
             running(10, 1, 1, "sh ./ignore-signals-cf-stops-live.sh"),
             running(11, 1, 1, "/bin/sh ./ignore-signals-cf-stops-live.sh"),
             // The harness whose launch text holds the task, which names the script.
-            running(12, 1, 1, "opencode run Run exactly this one shell command, then stop: sh ./ignore-signals-cf-stops-live.sh"),
+            running(12, 1, 1, "codex exec Run exactly this one shell command, then stop: sh ./ignore-signals-cf-stops-live.sh"),
             running(13, 1, 1, "sh ./ignore-signals-cf-stops-live.sh extra"),
             running(20, 2, 10, "sleep 200"),
             running(21, 2, 11, "/bin/sleep 200"),
@@ -687,7 +687,7 @@ mod tests {
                 100,
                 10,
                 1,
-                "opencode run then stop: sh ./ignore-signals-cf-stops-live.sh",
+                "codex exec then stop: sh ./ignore-signals-cf-stops-live.sh",
             ),
             running(
                 101,

@@ -131,11 +131,11 @@ impl Admin {
     }
 }
 
-/// The harnesses the command line names, or all five.
+/// The harnesses the command line names, or every one but OpenCode.
 fn named() -> Result<Vec<Harness>> {
     let words = live::list("harness");
     if words.is_empty() {
-        return Ok(Harness::ALL.to_vec());
+        return Ok(Harness::DEFAULT.to_vec());
     }
     words
         .iter()

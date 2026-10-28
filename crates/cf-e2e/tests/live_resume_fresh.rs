@@ -421,7 +421,7 @@ fn a_chief_comes_back_on_the_humans_resume_afresh_if_it_never_had_a_turn_and_on_
         &Harness::ALL,
         Harness::name,
         "harness",
-        &Harness::ALL,
+        &Harness::DEFAULT,
     )?;
     let mut checks = Vec::new();
     for chief in chiefs {
@@ -471,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn the_chief_is_a_real_harness_on_its_cheap_model_with_no_staff_and_every_harness_is_run_by_default(
+    fn the_chief_is_a_real_harness_on_its_cheap_model_with_no_staff_and_every_harness_but_opencode_is_run_by_default(
     ) {
         for harness in Harness::ALL {
             let plan = plan(harness);
@@ -483,14 +483,21 @@ mod tests {
             assert_eq!(plan.roster[0]["kind"], harness.kind());
             assert_eq!(plan.harnesses(), [harness]);
         }
-        let all = named(&[], &Harness::ALL, Harness::name, "harness", &Harness::ALL).unwrap();
-        assert_eq!(all, Harness::ALL);
+        let all = named(
+            &[],
+            &Harness::ALL,
+            Harness::name,
+            "harness",
+            &Harness::DEFAULT,
+        )
+        .unwrap();
+        assert_eq!(all, Harness::DEFAULT);
         let failed = named(
             &["kimi".to_owned()],
             &Harness::ALL,
             Harness::name,
             "harness",
-            &Harness::ALL,
+            &Harness::DEFAULT,
         )
         .unwrap_err()
         .to_string();

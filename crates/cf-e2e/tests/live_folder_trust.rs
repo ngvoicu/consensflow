@@ -1374,7 +1374,7 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
         &Harness::ALL,
         Harness::name,
         "harness",
-        &Harness::ALL,
+        &Harness::DEFAULT,
     )?;
     let parts = named(&live::list("part"), &PARTS, |part| part, "part", &PARTS)?;
     let stamp = jiff::Timestamp::now().as_second().to_string();

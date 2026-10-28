@@ -33,7 +33,7 @@
 //! first of the conversation), whole.
 //!
 //! ```text
-//! cargo xtask live first-message                       all five, one after the other
+//! cargo xtask live first-message                       all but OpenCode, one after the other
 //! cargo xtask live first-message claude                one harness
 //! cargo xtask live first-message claude --claude-config <folder>
 //!                                                      Claude on a config of the run's own
@@ -74,14 +74,13 @@ const LOOK: Duration = Duration::from_secs(1);
 /// Claude Code would have put in a file of its own.
 const LONG: usize = 16_000;
 
-/// The harnesses the words of the command line name, or all five.
+/// The harnesses the words of the command line name, or all but OpenCode.
 fn workers(named: &[String]) -> Result<Vec<Harness>> {
     if named.is_empty() {
         return Ok(vec![
             Harness::Claude,
             Harness::Codex,
             Harness::Pi,
-            Harness::OpenCode,
             Harness::Devin,
         ]);
     }
@@ -508,8 +507,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn with_no_harness_named_all_five_run_and_those_named_run_in_the_order_given() {
-        assert_eq!(workers(&[]).unwrap().len(), 5);
+    fn with_no_harness_named_all_but_opencode_run_and_those_named_run_in_the_order_given() {
+        assert_eq!(workers(&[]).unwrap().len(), 4);
         assert_eq!(
             workers(&["pi".to_owned(), "claude".to_owned()]).unwrap(),
             [Harness::Pi, Harness::Claude]

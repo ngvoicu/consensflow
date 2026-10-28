@@ -137,8 +137,6 @@ mod keys_cleared_with_escape_held_every_delivery;
 #[cfg(unix)]
 #[path = "regressions/mcp_servers_held_a_workers_result.rs"]
 mod mcp_servers_held_a_workers_result;
-#[path = "regressions/opencode_updated_itself_to_2.rs"]
-mod opencode_updated_itself_to_2;
 #[path = "regressions/results_held_for_words_nobody_typed.rs"]
 mod results_held_for_words_nobody_typed;
 #[path = "regressions/results_stay_queued_after_a_quota_pause.rs"]
@@ -175,10 +173,6 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The stand-in for Devin, which the windows of Devin's agents run.
 const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
-
-/// The stand-in for the `opencode` of a machine whose OpenCode has updated itself
-/// to 2, which the daemon asks its version of before it opens a window on it.
-const FAKE_OPENCODE_2: &str = env!("CARGO_BIN_EXE_fake-opencode-2");
 
 /// The stand-in for Codex, which the windows of Codex's agents run.
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");

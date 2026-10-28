@@ -89,13 +89,7 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 const FOLDER: &str = "escape-unsent";
 
 /// The harnesses, in the order a run with none named takes them: Claude Code last.
-const ORDER: [Harness; 5] = [
-    Harness::Devin,
-    Harness::Codex,
-    Harness::Pi,
-    Harness::OpenCode,
-    Harness::Claude,
-];
+const ORDER: [Harness; 4] = [Harness::Devin, Harness::Codex, Harness::Pi, Harness::Claude];
 
 /// What is typed at the prompt, and into the picker's filter: words no screen of
 /// a harness shows by itself.

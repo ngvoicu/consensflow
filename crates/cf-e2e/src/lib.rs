@@ -89,8 +89,8 @@
 //!
 //! The stand-ins the suites run in place of what ConsensFlow runs are
 //! binaries of this crate, behind the `test-support` feature the crate's own
-//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `fake-opencode-2`,
-//! `fake-cf`, `liar-daemon` and the packaged smoke's `smoke-paste-reader`.
+//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `fake-cf`,
+//! `liar-daemon` and the packaged smoke's `smoke-paste-reader`.
 
 // The two modules that call the system themselves allow it, block by block: the live checks'
 // hold on a process they end (`live::members::descent`'s native calls), and the count a

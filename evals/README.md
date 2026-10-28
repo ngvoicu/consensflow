@@ -9,7 +9,7 @@ findings on the board as notes (`cf note --human`).
 ```sh
 cargo xtask eval --scenario six-decisions                       # chief Claude on Opus, staff Claude on Haiku
 cargo xtask eval --scenario simple-fix --chief codex --staff pi   # a Codex chief, a Pi staff
-cargo xtask eval --scenario complex-launch --chief opencode --staff claude,codex,pi,opencode,devin
+cargo xtask eval --scenario complex-launch --chief pi --staff claude,codex,pi,devin
 cargo xtask eval --scenario six-decisions --model claude-sonnet-5 --repeat 3
 cargo xtask eval summary                                         # every report, one line each, and evals/RESULTS.md
 cargo xtask watch --project poker-lab                            # a project that is running, from outside
@@ -60,10 +60,10 @@ report), on a home of its own: `cargo test -p cf-evals --test dry_run -- --ignor
 
 Everything is real but the human. The daemon, the pane host and the harnesses
 are the ones the app uses (the live bench's shape). `--chief` names the
-chief's harness (claude, codex, pi, opencode, devin), saved as the chief's
+chief's harness (claude, codex, pi, devin), saved as the chief's
 agent with its model and effort. Every chief but
 Devin takes its model from `--model`; unless given, Claude Code runs Opus,
-Codex its cheap model, and Pi and OpenCode DeepSeek V4 Pro
+Codex its cheap model, and Pi DeepSeek V4 Pro
 (`crates/cf-evals/src/plan.rs`). Devin runs its staff's model, SWE-2 Medium.
 Claude and Codex windows start through wrappers the runner writes
 (`~/.consensflow-candidate/evals/bin`) that shut out MCP servers,
@@ -73,7 +73,7 @@ chief's model; a Pi wrapper gives Pi its model and thinking level. On the Mac a
 wrapper is a shell script; on Windows it is a `.cmd` that names Node and a
 script the runner writes beside it (a window opens on a `.cmd` only in npm's shape),
 and the Pi wrapper is the Mac's alone. `--effort` (default `high`) is the chief's
-reasoning level, through those wrappers; OpenCode's window and Devin have no
+reasoning level, through those wrappers; Devin has no
 switch for it, and the report says so (`effort: null`). `--staff-effort` (default
 `medium`) is every member's, on its roster agent. Before 2026-09-27 no run
 set either: each window ran at the user's own configured default.
@@ -251,7 +251,7 @@ Claude Code's members are `complex`, Devin's `light`, the rest `standard`.
 **The staff** is `--staff` (every harness unless it names fewer), each harness on
 the models it has here (`--models claude=a+b,...`; the defaults are in
 `long_run/staff.rs`): a worker for each model, and an advisor and a reviewer. A
-harness the machine has not, and an OpenCode of 2 or more, is left out, and the run
+harness the machine has not is left out, and the run
 says which and why. The chief is `--chief`, on `--model` as in the evals.
 
 **The disruptions** come one at a time, each `--every-min` minutes after the one

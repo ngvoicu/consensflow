@@ -80,10 +80,10 @@ pub fn id(harness: Harness) -> String {
 
 /// What the human's rules call the cheap model of each harness, as the app's
 /// catalog and the harness's own list of models both have it (checked on
-/// 2026-10-11): Claude Code on Sonnet 5.5, OpenCode and Pi on Muse Spark 1.3
-/// (OpenCode's free one, Pi's through OpenRouter, which is where the catalog
-/// has it: OpenCode Go is out of ConsensFlow), Devin on SWE-2 at medium, Codex
-/// on GPT-5.6 Luna. The model, and the effort where it has one: what a harness
+/// 2026-10-11): Claude Code on Sonnet 5.5, Pi on Muse Spark 1.3 through
+/// OpenRouter, which is where the catalog has it, Devin on SWE-2 at medium, Codex
+/// on GPT-5.6 Luna; OpenCode, which leaves ConsensFlow and no suite runs unnamed,
+/// on its free Muse Spark until its catalog rows go. The model, and the effort where it has one: what a harness
 /// runs on where the run names no other ([`model`]).
 fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
     match harness {
@@ -642,8 +642,7 @@ mod tests {
         );
     }
 
-    /// A run can name any agent of the product's catalog by its model and effort:
-    /// Buri, OpenCode Zen's free Nemotron 3.5 Super VL at xhigh, among them.
+    /// A run can name any agent of the product's catalog by its model and effort.
     #[test]
     fn every_agent_of_the_catalog_can_be_named_by_its_model_and_effort() {
         let presets: Value = serde_json::from_str(
@@ -675,15 +674,6 @@ mod tests {
                 "{piece}"
             );
         }
-        let buri = parse(
-            Some("opencode=opencode/nemotron-3.5-super-vl-free:xhigh"),
-            None,
-        )
-        .unwrap();
-        assert_eq!(
-            agent_on(buri.of(Harness::OpenCode)),
-            json!({ "kind": "opencode", "model": "opencode/nemotron-3.5-super-vl-free", "effort": "xhigh" })
-        );
     }
 
     #[test]

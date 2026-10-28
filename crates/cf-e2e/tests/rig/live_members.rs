@@ -17,7 +17,7 @@ use serde_json::json;
 
 use cf_e2e::rig::Rig;
 
-use crate::{after, config, rig, secs, Outcome, FAKE_AGENT, FAKE_OPENCODE};
+use crate::{after, config, rig, secs, Outcome, FAKE_AGENT};
 
 /// A project of a check whose chief and member are the stand-in agent, in the
 /// folder `folder` of the live folders of the rig's own home.
@@ -620,30 +620,17 @@ fn a_window_opened_without_the_daemon_is_never_opened_on_an_opencode_effort_it_w
     Ok(())
 }
 
-/// A model of OpenCode's that the catalog has no row of, which `--models` names at
-/// an effort. (It was the owner's Nemotron 3.5 Super VL until the catalog took it
-/// as Buri, 2026-10-16; the case holds that it is in no row of the catalog.)
-const MODEL: &str = "opencode/stand-in-no-catalog-row-free";
-const MODEL_ID: &str = "stand-in-no-catalog-row-free";
+/// A model of Claude's that the catalog has no row of, which `--models` names at
+/// an effort: the case holds that it is in no row of the catalog.
+const MODEL: &str = "claude-stand-in-no-catalog-row";
 
-/// The daemon's launch of a member's OpenCode window, as the stand-in OpenCode
-/// was asked it: the launch on a conversation (`--session`).
+/// The daemon's launch of the member's window, as the pane host was asked to open
+/// it: the window on the model `MODEL`, which no other window of the rig is on.
 fn window_launch(rig: &Rig) -> Option<Vec<String>> {
-    rig.opencode_asked()
+    rig.open_frames()
         .into_iter()
-        .find(|args| args.iter().any(|word| word == "--session"))
-}
-
-/// The first message the daemon posted to an OpenCode window's server, as its body.
-fn first_message(rig: &Rig) -> Option<serde_json::Value> {
-    rig.opencode_requests()
-        .into_iter()
-        .find(|request| {
-            request["target"]
-                .as_str()
-                .is_some_and(|target| target.contains("/prompt_async"))
-        })
-        .and_then(|request| serde_json::from_str(request["body"].as_str()?).ok())
+        .filter_map(|frame| serde_json::from_value::<Vec<String>>(frame["argv"].clone()).ok())
+        .find(|argv| argv.iter().any(|word| word == MODEL))
 }
 
 #[test]
@@ -656,25 +643,25 @@ fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_laun
         !presets.contains(&format!("\"{MODEL}\"")),
         "the catalog has {MODEL}: the case needs a model it has not"
     );
-    let models = agents::parse(Some(&format!("opencode={MODEL}:high")), None)?;
-    let row = agents::row_on(models.of(Harness::OpenCode), "light");
+    let models = agents::parse(Some(&format!("claude={MODEL}:high")), None)?;
+    let row = agents::row_on(models.of(Harness::Claude), "light");
     // The daemon takes the row as the live suites write it: a member of the human's
     // own, which needs a model and no catalog entry; the run's report says it.
-    let rig = Rig::start(config().opencode(FAKE_OPENCODE))?;
+    let rig = Rig::start(config())?;
     let log = Log::begin("live members")?;
     agents::write_roster(&rig, &[members::stand_in_chief(), row], &log)?;
     assert_eq!(
         log.ran_on(),
-        Some(format!("the windows ran on: opencode {MODEL}, effort high"))
+        Some(format!("the windows ran on: claude {MODEL}, effort high"))
     );
     let project = cf_e2e::rig::Project::open(&rig, "chief", json!({}))?;
-    let added = project.add_member(&agents::id(Harness::OpenCode))?;
-    assert_eq!(added["member"]["agent"], "live-opencode", "{added}");
+    let added = project.add_member(&agents::id(Harness::Claude))?;
+    assert_eq!(added["member"]["agent"], "live-claude", "{added}");
     rig.tell(
         project.id(),
         "DISPATCH --tier light Reply with exactly: UNCATALOGUED",
     )?;
-    // The window the daemon launched for the task: on that model.
+    // The window the daemon launched for the task: on that model, at that effort.
     rig.wait_for("the daemon to launch the member's window", secs(30), || {
         Ok(window_launch(&rig).is_some())
     })?;
@@ -683,19 +670,10 @@ fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_laun
         launch.windows(2).any(|pair| pair == ["--model", MODEL]),
         "{launch:?}"
     );
-    // Its first message, which carries the model and the effort OpenCode runs it on.
-    rig.wait_for(
-        "the daemon to post the task to the window",
-        secs(30),
-        || Ok(first_message(&rig).is_some()),
-    )?;
-    let message = first_message(&rig).unwrap_or_default();
-    assert_eq!(
-        message["model"],
-        json!({ "providerID": "opencode", "modelID": MODEL_ID }),
-        "{message}"
+    assert!(
+        launch.windows(2).any(|pair| pair == ["--effort", "high"]),
+        "{launch:?}"
     );
-    assert_eq!(message["variant"], "high", "{message}");
     rig.close()?;
     Ok(())
 }

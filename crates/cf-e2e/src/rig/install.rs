@@ -98,16 +98,6 @@ pub(super) fn environment(
     if let Some(devin) = &config.devin {
         env.push(("CF_TEST_DEVIN".to_owned(), text(devin)));
     }
-    if let Some(opencode) = &config.opencode {
-        // The stand-in's own: what it runs, and where it writes down what it is asked.
-        env.extend([
-            ("CF_TEST_OPENCODE".to_owned(), text(opencode)),
-            (
-                "CF_TEST_OPENCODE_LOG".to_owned(),
-                text(&root.join("opencode.jsonl")),
-            ),
-        ]);
-    }
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
@@ -168,8 +158,7 @@ fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec
 /// npm shim ([`stand_in::window_shim`]), which is how a window opens on it: it
 /// names the stand-in as both program and script, and the stand-in knows its own
 /// file when it is given it first. The stand-in `devin` beside it, where the rig
-/// has one, the stand-in `opencode` (of a 1.x, or of an OpenCode 2) likewise, and
-/// the stand-in `codex`. The folder they are in, which the `PATH` names.
+/// has one likewise, and the stand-in `codex`. The folder they are in, which the `PATH` names.
 /// As the Finder starts it, they are where each harness installs itself instead
 /// (see [`Config::as_the_finder_starts_it`]), and that folder holds none.
 pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf> {
@@ -187,9 +176,6 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     write_shim(&own, "claude", "CF_TEST_HARNESS", &config.stand_in)?;
     if let Some(devin) = &config.devin {
         write_shim(&own, "devin", "CF_TEST_DEVIN", devin)?;
-    }
-    if let Some(opencode) = &config.opencode {
-        write_shim(&own, "opencode", "CF_TEST_OPENCODE", opencode)?;
     }
     if let Some(codex) = &config.codex {
         write_shim(&system, "codex", "CF_TEST_CODEX", codex)?;
@@ -426,38 +412,6 @@ mod tests {
         assert_eq!(var(&env, "CF_TEST_HARNESS"), "/the/stand-in");
         let plain = environment(root.path(), &fake_bin, &config(), None);
         assert!(!plain.iter().any(|(name, _)| name == "CF_TEST_DEVIN"));
-    }
-
-    #[test]
-    fn a_rig_given_an_opencode_2_has_its_stand_in_found_as_opencode_and_named_in_the_environment() {
-        let root = tempfile::tempdir().unwrap();
-        let opencode = Path::new("/the/stand-in-opencode-2");
-        let given = Config::new("/the/stand-in").opencode_2(opencode);
-        let fake_bin = write_fake_install(root.path(), &given).unwrap();
-        let script =
-            files::read_string(&fake_bin.join(stand_in::program_name("opencode"))).unwrap();
-        if cfg!(windows) {
-            assert_eq!(
-                script,
-                "@echo off\r\n\"/the/stand-in-opencode-2\" \"/the/stand-in-opencode-2\" %*\r\n"
-            );
-        } else {
-            assert_eq!(script, "#!/bin/sh\nexec \"$CF_TEST_OPENCODE\" \"$@\"\n");
-        }
-        let env = environment(root.path(), &fake_bin, &given, None);
-        assert_eq!(var(&env, "CF_TEST_OPENCODE"), "/the/stand-in-opencode-2");
-        assert_eq!(
-            var(&env, "CF_TEST_OPENCODE_LOG"),
-            root.path().join("opencode.jsonl").to_string_lossy()
-        );
-        // And none of it where the rig is given none.
-        let bare = tempfile::tempdir().unwrap();
-        let fake_bin = write_fake_install(bare.path(), &config()).unwrap();
-        assert!(!fake_bin.join(stand_in::program_name("opencode")).exists());
-        let plain = environment(bare.path(), &fake_bin, &config(), None);
-        assert!(!plain
-            .iter()
-            .any(|(name, _)| name.starts_with("CF_TEST_OPENCODE")));
     }
 
     #[test]
