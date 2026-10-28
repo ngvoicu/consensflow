@@ -1,0 +1,82 @@
+# A worker's window ends only its own (T-827, 2026-10-27, 3.0.6-alpha.3): poker-lab's chief's
+# background watcher was `killed` 0.97 s after worker T-440's turn ended, on 3.0.4 (2026-10-15),
+# which T-814 read as a suspicion that a worker's turn end or close reached another window. It was
+# the owner's quit of the app, which ended every window; T-440's close never ran. The rig's cases
+# hold that a worker's close, after its result or at a cancel, ends the jobs its turn left and none
+# of the chief's: one under the chief's tool shell, one it detached.
+#
+# - the pane host's close of one window ends every window it hosts (what a quit does);
+# - a close's selection takes every program the pane host started (the other windows' programs,
+#   by the parent the closing program had when the tree attached to it) and what they started,
+#   and the bound allows what the selection names. The parent is kept at the attach because the
+#   close asks the program's group to end first, so the program has gone when the tree is looked
+#   at, and the host leaves itself out of every table it reads.
+#
+# A selection that takes the other windows alone is not caught here, by design: the bound refuses what
+# is not the window's (`process_tree/bound.rs`), and `background.toml`'s bound plants hold that.
+# The rig's pane host is a release build with no guard (`process_tree/guard.rs` is in test builds),
+# so each plant keeps to the rig's own windows by what it names: the panes of the host that closes,
+# or the processes that descend from that host's own children.
+#
+# The rig's cases are in `crates/cf-e2e/tests/regressions/
+# the_chiefs_job_was_killed_as_a_workers_turn_ended.rs`, which run the native `cf` and the pane
+# host built from the planted sources (`builds`). Every name begins `other windows:`, so
+# `cargo xtask plants daemon "other windows:"` runs them all (without the colon the words also
+# name a plant of `long-run`, whose name holds "the other windows").
+
+[run]
+# The rig's cases, against the native `cf` and the pane host as planted.
+rig-regression-other-windows = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "the_chiefs_job_was_killed_as_a_workers_turn_ended::"], builds = true }
+
+[[plant]]
+name = "other windows: the pane host's close of one window ends every window it hosts"
+meant = "a_workers_window_that_closes_after_its_result_ends_its_own_jobs_and_none_of_the_chiefs"
+runs = ["rig-regression-other-windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "        let killed = kill_panes.kill(&key);"
+replace = '''
+        crate::headless::reap_all(&kill_panes);
+        let killed = kill_panes.kill(&key);'''
+
+[[plant]]
+name = "other windows: a close takes every window of its pane host for its own, and the bound lets it"
+meant = "a_cancel_that_closes_a_workers_window_in_its_turn_ends_its_job_and_none_of_the_chiefs"
+runs = ["rig-regression-other-windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = """
+    /// The session the pane's program leads.
+    session: Option<i32>,"""
+replace = """
+    /// The session the pane's program leads.
+    session: Option<i32>,
+    host: Option<u64>,"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            session: None,"
+replace = """
+            session: None,
+            host: None,"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "        self.session = root.and_then(|p| p.session);"
+replace = """
+        self.host = root.as_ref().map(|p| p.parent);
+        self.session = root.and_then(|p| p.session);"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = "                || self.root.is_some_and(|root| p.parent == root.unique)"
+replace = """
+                || self.root.is_some_and(|root| p.parent == root.unique)
+                || self.host.is_some_and(|host| p.parent == host)"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = "        let known = |identifier: u64| Some(identifier) == program || seen.contains(&identifier);"
+replace = "        let known = |identifier: u64| Some(identifier) == program || seen.contains(&identifier) || true;"
