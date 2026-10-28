@@ -15,7 +15,8 @@
 //! (`window.kill_failed`) and never ran; the chief's Claude Code, asked to end, killed
 //! its own background shell 38 ms later; no ConsensFlow process ran at 20:43:56, the
 //! app was opened again at 20:44:35, and the chief's window resumed its session. T-440's
-//! turn had left nothing running.
+//! turn had left nothing running. The report is
+//! `issues/a-chiefs-job-was-killed-as-a-workers-turn-ended.md` in consensflow-sme.
 //!
 //! What the owner should see, and these cases hold on the real pane host: a worker's
 //! window that closes, after its result or at a cancel in the middle of its turn, ends
