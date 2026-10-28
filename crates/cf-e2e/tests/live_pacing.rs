@@ -50,7 +50,7 @@ const SETTLE_MS: i64 = 3_000;
 const BRIEF: &str = "This folder is an automated ConsensFlow test. When a ConsensFlow message arrives, reply with exactly one line, SEEN, and run no tools: decide nothing, answer no question with cf, accept nothing. When the human asks you something in this window, do what it asks.\n";
 
 /// The turn the chief is put in while the workers' messages come: a command of a minute.
-const WORK: &str = "Use your shell tool to run exactly this command in the foreground, and wait for it to finish: for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo tick $i; sleep 5; done . Then reply with exactly one line: WAITED.";
+const WORK: &str = "Use your shell tool to run exactly this command in the foreground, and wait for it to finish: for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo tick $i; /bin/sleep 5; done . Then reply with exactly one line: WAITED.";
 
 /// How long a message has to go in, and how often the board is looked at.
 const WITHIN: Duration = Duration::from_secs(360);

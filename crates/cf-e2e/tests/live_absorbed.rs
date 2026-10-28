@@ -45,7 +45,7 @@ const FOLDER: &str = "absorbed";
 /// The turn the note is pasted into: a command that runs long enough for the paste, in the
 /// turn (one run in the background ends the turn at once: the first live run, Sonnet 5.5),
 /// and no lone `sleep`, which Claude Code 2.1.311's Bash tool refuses in the foreground.
-const WORK: &str = "Use your Bash tool to run exactly this command in the foreground, with run_in_background false, and wait for it to finish: for i in 1 2 3 4 5 6 7 8; do echo tick $i; sleep 5; done . When it has finished, reply with the word SLEPT, and do whatever else a message given to you meanwhile asks.";
+const WORK: &str = "Use your Bash tool to run exactly this command in the foreground, with run_in_background false, and wait for it to finish: for i in 1 2 3 4 5 6 7 8; do echo tick $i; /bin/sleep 5; done . When it has finished, reply with the word SLEPT, and do whatever else a message given to you meanwhile asks.";
 
 /// The note's header, which the record must hold once.
 const HEADER: &str = "[ConsensFlow m-7 · note from @human]";
