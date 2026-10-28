@@ -45,6 +45,8 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 
+use cf_base::env::WINDOW_VARIABLES;
+
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process::{self, Invocation};
@@ -54,15 +56,6 @@ use crate::{app, clippy_windows, plants};
 /// workspace's build folder, not in it. The plants' runs that test xtask whole
 /// name it too (`tests/plants/release`), and a test of theirs holds them to it.
 pub(crate) const XTASK_TARGET: &str = "app/src-tauri/target/xtask-check";
-
-/// What a window gives its member to reach the board with. The tests of the
-/// gate stand on their own boards and read none from the shell they run in.
-const WINDOW_VARIABLES: [&str; 4] = [
-    "CONSENSFLOW_URL",
-    "CONSENSFLOW_TOKEN",
-    "CONSENSFLOW_PARTICIPANT",
-    "CONSENSFLOW_PROJECT",
-];
 
 pub const COMMANDS: &[Command] = &[Command {
     words: &["check"],

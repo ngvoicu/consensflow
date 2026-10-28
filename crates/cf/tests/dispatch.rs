@@ -9,7 +9,7 @@ mod common;
 use std::ffi::OsString;
 use std::{fs, io};
 
-use cf_base::env::Env;
+use cf_base::env::{Env, WINDOW_VARIABLES};
 use common::cf;
 
 #[test]
@@ -142,4 +142,69 @@ fn a_ui_that_reaches_the_library_is_an_unknown_command_and_starts_nothing() {
     }
     // Nothing was made in the home: no daemon, no log.
     assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+}
+
+/// What `cf ui` answers in a window: the member's token is set, so `cf` is the board's command
+/// and the daemon's `ui` is none of it. It says so, and what to do, never the token (T-868: an
+/// app started from a window had a `cf ui` that answered "unknown command" and no daemon).
+const UI_IN_A_WINDOW: &str = "cf: `cf ui` starts ConsensFlow's own daemon, and this is a window \
+    of a ConsensFlow board (CONSENSFLOW_TOKEN is set), where cf is that board's command and has \
+    no `ui`. Run it in a terminal outside the window, or unset CONSENSFLOW_URL, \
+    CONSENSFLOW_TOKEN, CONSENSFLOW_PARTICIPANT and CONSENSFLOW_PROJECT first.\n";
+
+#[test]
+fn a_ui_in_a_window_says_why_it_is_not_the_daemon_and_starts_nothing() {
+    assert_eq!(
+        WINDOW_VARIABLES,
+        [
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+            "CONSENSFLOW_PROJECT"
+        ],
+        "the words the refusal says to unset"
+    );
+    let home = tempfile::tempdir().unwrap();
+    let token = "a-members-secret-token";
+    // The whole window's variables, and the token alone: either way the token is set.
+    for window in [
+        vec![
+            ("CONSENSFLOW_URL", "http://127.0.0.1:9"),
+            ("CONSENSFLOW_TOKEN", token),
+            ("CONSENSFLOW_PARTICIPANT", "chief"),
+            ("CONSENSFLOW_PROJECT", "1"),
+        ],
+        vec![("CONSENSFLOW_TOKEN", token)],
+    ] {
+        let mut vars = window.clone();
+        vars.push(("CONSENSFLOW_HOME", home.path().to_str().unwrap()));
+        let env = Env::from_vars(vars);
+        for words in [
+            &["ui"][..],
+            &["ui", "--json", "--no-open"],
+            &["--json", "ui"],
+            &["ui", "--help"],
+        ] {
+            let args: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = cf::run(&env, &args, &mut io::empty(), &mut out, &mut err).unwrap();
+            let said = String::from_utf8(err).unwrap();
+            assert_eq!(said, UI_IN_A_WINDOW, "{window:?} {words:?}");
+            assert_eq!(code, 1, "{words:?}");
+            assert!(out.is_empty(), "{words:?}");
+            assert!(!said.contains(token), "the token is never said");
+        }
+    }
+    // Nothing was made in the home: no daemon, no log.
+    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn only_a_ui_is_refused_in_a_window_with_those_words() {
+    // A word after another is that verb's argument, and `ui` out of a window stays as it was.
+    let env = Env::from_vars([("CONSENSFLOW_TOKEN", "t")]);
+    let args: Vec<OsString> = ["whoami", "ui"].iter().map(OsString::from).collect();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    cf::run(&env, &args, &mut io::empty(), &mut out, &mut err).unwrap();
+    assert_ne!(String::from_utf8(err).unwrap(), UI_IN_A_WINDOW);
 }

@@ -1,0 +1,116 @@
+# Plants in what a board's window gives its member (`CONSENSFLOW_URL`, `_TOKEN`, `_PARTICIPANT`,
+# `_PROJECT`) and what an app started from a terminal inside such a window does with them
+# (T-868, 3.0.7): the Candidate, opened from a worker's shell, had the live board's token, so
+# its bundled `cf` was that board's command, `cf ui` an unknown command, and the daemon never
+# started, with no word why. The app takes the window's variables out of its own environment as
+# it starts, which is every program's it starts (the daemon, a terminal's pane, the opener, the
+# app an update restarts), and `cf ui` in a window says it is the daemon's and not the board's.
+# One plant takes one rule out, or puts one wrong; a test fails. Every name holds `board env`,
+# so `npm run plants:cli -- "board env"` runs them all.
+
+[run]
+# The app's own tests of what it takes from its environment (the pure choice of names, and a
+# child process started with a window's variables).
+app-board-env = ["cargo", "xtask", "app", "test", "a_window_of_a_board"]
+# The list of the variables, as the library of the base holds it.
+base-window = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "window"]
+
+[[plant]]
+name = "board env: an app started from a window keeps the window's variables"
+meant = "the_variables_a_window_of_a_board_gives_its_member_are_never_inherited"
+runs = ["app-board-env"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''            CLAUDE_SESSION_IDENTITY.contains(name) || cf_base::env::is_window_variable(name)'''
+replace = '''            CLAUDE_SESSION_IDENTITY.contains(name)'''
+
+[[plant]]
+name = "board env: an app started from a window takes nothing out of its environment"
+meant = "an_app_started_from_a_window_of_a_board_gives_nothing_of_that_board_to_what_it_starts"
+runs = ["app-board-env"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''    for name in inherited_variables(names.iter().map(String::as_str)) {
+        std::env::remove_var(name);
+    }'''
+replace = '''    for name in inherited_variables(names.iter().map(String::as_str)) {
+        let _ = name;
+    }'''
+
+[[plant]]
+name = "board env: an app started from a window takes every variable of ConsensFlow's out"
+meant = "the_variables_a_window_of_a_board_gives_its_member_are_never_inherited"
+runs = ["app-board-env"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''            CLAUDE_SESSION_IDENTITY.contains(name) || cf_base::env::is_window_variable(name)'''
+replace = '''            CLAUDE_SESSION_IDENTITY.contains(name) || name.starts_with("CONSENSFLOW_")'''
+
+[[plant]]
+name = "board env: the project of a window is left to an app started from it"
+meant = "a_windows_variables_are_the_four_a_member_reaches_its_board_with_and_nothing_else"
+runs = ["base-window"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '''pub const WINDOW_VARIABLES: [&str; 4] = [
+    "CONSENSFLOW_URL",
+    "CONSENSFLOW_TOKEN",
+    "CONSENSFLOW_PARTICIPANT",
+    "CONSENSFLOW_PROJECT",
+];'''
+replace = '''pub const WINDOW_VARIABLES: [&str; 3] = [
+    "CONSENSFLOW_URL",
+    "CONSENSFLOW_TOKEN",
+    "CONSENSFLOW_PARTICIPANT",
+];'''
+
+[[plant]]
+name = "board env: the names of a window's variables match in the case they are written in on Windows too"
+meant = "a_windows_variables_are_the_four_a_member_reaches_its_board_with_and_nothing_else"
+runs = ["base-window"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '''        if cfg!(windows) {
+            window.eq_ignore_ascii_case(name)
+        } else {
+            *window == name
+        }'''
+replace = '''        *window == name'''
+
+[[plant]]
+name = "board env: cf ui in a window is an unknown command again"
+meant = "a_ui_in_a_window_says_why_it_is_not_the_daemon_and_starts_nothing"
+runs = ["library", "ui"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = '''    if given.first().is_some_and(|first| first == "ui") && env.text("CONSENSFLOW_TOKEN").is_some() {'''
+replace = '''    if false && given.first().is_some_and(|first| first == "ui") && env.text("CONSENSFLOW_TOKEN").is_some() {'''
+
+[[plant]]
+name = "board env: cf ui in a window ends as if it had worked"
+meant = "a_ui_in_a_window_says_why_it_is_not_the_daemon_and_starts_nothing"
+runs = ["library", "ui"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = '''        writeln!(err, "cf: {UI_IN_A_WINDOW}")?;
+        return Ok(1);'''
+replace = '''        writeln!(err, "cf: {UI_IN_A_WINDOW}")?;
+        return Ok(0);'''
+
+[[plant]]
+name = "board env: cf ui in a window refuses every verb that is called ui"
+meant = "only_a_ui_is_refused_in_a_window_with_those_words"
+runs = ["library"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = '''    if given.first().is_some_and(|first| first == "ui") && env.text("CONSENSFLOW_TOKEN").is_some() {'''
+replace = '''    if given.iter().any(|word| word == "ui") && env.text("CONSENSFLOW_TOKEN").is_some() {'''

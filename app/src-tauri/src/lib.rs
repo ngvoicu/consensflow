@@ -277,11 +277,33 @@ pub(crate) const CLAUDE_SESSION_IDENTITY: [&str; 11] = [
     "CLAUDE_EFFORT",
 ];
 
-fn inherited_session_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+/// Which of the variables `names` the app was started with it does not keep: a Claude Code
+/// session's identity ([`CLAUDE_SESSION_IDENTITY`]), and what a window of a board gives its
+/// member ([`cf_base::env::WINDOW_VARIABLES`]). An app started from a terminal inside a window
+/// of a board has that window's: with its token set the bundled `cf` is that board's command,
+/// and `cf ui`, the daemon, is none, so the daemon never started (T-868); the terminal of
+/// the app's own would be that board's member, and so would the app an update restarts, which
+/// Tauri starts with a bare `Command` that holds whatever the process does.
+fn inherited_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
     names
         .into_iter()
-        .filter(|name| CLAUDE_SESSION_IDENTITY.contains(name))
+        .filter(|name| {
+            CLAUDE_SESSION_IDENTITY.contains(name) || cf_base::env::is_window_variable(name)
+        })
         .collect()
+}
+
+/// Takes the variables the app does not keep ([`inherited_variables`]) out of its own
+/// environment, which every program it starts is given: the daemon, the login shell it asks
+/// for the human's environment, the terminals' panes, the opener, and the app an update
+/// restarts. Before any thread exists, as nothing may read the environment meanwhile.
+fn remove_inherited_variables() {
+    let names: Vec<String> = std::env::vars_os()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .collect();
+    for name in inherited_variables(names.iter().map(String::as_str)) {
+        std::env::remove_var(name);
+    }
 }
 
 /// How big the error log grows before it is moved aside.
@@ -444,12 +466,7 @@ pub fn run() {
             std::process::exit(1);
         }
     }
-    let names: Vec<String> = std::env::vars_os()
-        .filter_map(|(name, _)| name.into_string().ok())
-        .collect();
-    for name in inherited_session_variables(names.iter().map(String::as_str)) {
-        std::env::remove_var(name);
-    }
+    remove_inherited_variables();
     if let Some(log) = error_log() {
         redirect_stderr(&log);
     }
@@ -578,6 +595,33 @@ mod tests {
         );
     }
 
+    /// What a window gives its member (T-868) is none of an app's started from it; the rest of
+    /// ConsensFlow's variables are: the home a run chose, the smoke's switch, the daemon's own.
+    #[test]
+    fn the_variables_a_window_of_a_board_gives_its_member_are_never_inherited() {
+        let names = [
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+            "CONSENSFLOW_PROJECT",
+            "CONSENSFLOW_HOME",
+            "CONSENSFLOW_SELFTEST",
+            "CONSENSFLOW_TOOL_FOLDERS",
+            "CONSENSFLOW_TERMINAL_ENV",
+            "CF_PANE_PROCESS_OWNER",
+            "PATH",
+        ];
+        assert_eq!(
+            inherited_variables(names),
+            [
+                "CONSENSFLOW_URL",
+                "CONSENSFLOW_TOKEN",
+                "CONSENSFLOW_PARTICIPANT",
+                "CONSENSFLOW_PROJECT",
+            ]
+        );
+    }
+
     #[test]
     fn a_parent_claude_sessions_identity_is_never_inherited() {
         // Seen in a live Claude Code 2.1 session's environment on 2026-09-19.
@@ -594,7 +638,7 @@ mod tests {
             "PATH",
         ];
         assert_eq!(
-            inherited_session_variables(names),
+            inherited_variables(names),
             [
                 "CLAUDECODE",
                 "CLAUDE_CODE_CHILD_SESSION",
