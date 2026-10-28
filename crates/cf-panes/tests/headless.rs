@@ -1327,17 +1327,10 @@ fn helper_is_inert_when_stdin_is_not_a_pipe() {
 #[cfg(target_os = "macos")]
 #[test]
 fn the_helper_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
-    use std::os::fd::AsRawFd;
-
-    use cf_process::test_support::{holds_null, stray};
-
     let _pty_guard = serial_headless_test();
-    let stray = stray();
+    let stray = cf_process::test_support::stray();
     let mut helper = Headless::spawn();
-    assert!(
-        !holds_null(helper.child.id(), stray.as_raw_fd()),
-        "the helper holds it"
-    );
+    assert!(!stray.held_by(helper.child.id()), "the helper holds it");
     helper.close_input_and_wait();
 }
 
@@ -1487,14 +1480,14 @@ fn a_pane_open_answers_the_process_id_of_the_windows_program() {
 /// child's number.
 #[cfg(target_os = "macos")]
 const EXITS_OVER_A_BACKGROUND_CHILD: &str =
-    "trap '' HUP; (while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf 'CHILD %s END' \"$!\"; read _; exit 0";
+    "trap '' HUP; (while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done) & printf 'CHILD %s END' \"$!\"; read _; exit 0";
 
 /// [`EXITS_OVER_A_BACKGROUND_CHILD`], with the child started by a subshell that ends at once, as a
 /// server that detaches itself is: the process that started the child has gone before the
 /// program does, and the window's program is not the one that did.
 #[cfg(target_os = "macos")]
 const EXITS_OVER_A_JOB_ITS_STARTER_LEFT: &str =
-    "trap '' HUP; ((while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf 'CHILD %s END' \"$!\"); read _; exit 0";
+    "trap '' HUP; ((while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done) & printf 'CHILD %s END' \"$!\"); read _; exit 0";
 
 /// Opens a window of `script` (one of the programs above), types the line that ends its
 /// program and waits for `pane.exit`: the background child's number, and when `pane.exit`
@@ -3414,7 +3407,7 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
             // The helper, which began before the turn, waits for the window to say it
             // has begun and runs a shell, which says so once it runs a job; the window
             // says it started once it has.
-            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ] && kill -0 $PPID 2>/dev/null; do sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ] || ! kill -0 $PPID 2>/dev/null; do sleep 0.05; done; printf started; wait"#,
+            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ] && kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ] || ! kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done; printf started; wait"#,
             4096,
         );
         body["env"] = json!({"BINS": bins, "SAID": said, "GO": go});

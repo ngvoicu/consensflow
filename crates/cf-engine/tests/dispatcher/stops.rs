@@ -8,6 +8,7 @@
 use cf_engine::testing::{Context, Gate};
 use cf_engine::{ActivityState, Unstopped};
 use cf_harness::contract::Pane;
+use cf_harness::records::Role;
 use serde_json::{json, Value};
 
 use cf_ledger::NewTask;
@@ -213,6 +214,39 @@ fn three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_re
     assert_eq!(thread.task.state, "done");
     let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
     assert_eq!(result.body, "Parser, finished");
+}
+
+#[test]
+fn a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_closed() {
+    // A stop is paid by a message of the user's after the one its turn began with
+    // (T-807): the turn is over. A turn that goes on writing its own words, or whose
+    // harness writes a compaction's summary in the user's place, is that same turn, at
+    // work through every round: it is closed as any that ignores them.
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    let pane = pane_of(&context, "zeus");
+    for round in 0..3 {
+        context.pass().unwrap();
+        context.adapter.writes(
+            "zeus",
+            &format!("Still at it, {round}"),
+            &after(&context, 0),
+        );
+        let mut summary = context
+            .adapter
+            .item(Role::User, "This session is being continued");
+        summary.compaction = true;
+        context
+            .adapter
+            .with("zeus", |agent| agent.items.push(summary));
+        context.advance(3_100);
+    }
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), vec![escape(&pane); 3]);
+    assert_eq!(context.host.killed(), [pane], "a hung turn is closed");
+    assert_eq!(context.task(project, 1).task.state, "paused");
 }
 
 #[test]

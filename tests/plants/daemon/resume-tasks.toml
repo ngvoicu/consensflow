@@ -235,7 +235,7 @@ replace = '''const STOPPED: &str = "ConsensFlow quit while you were working on "
 
 [[plant]]
 name = "resume tasks: a cut note an earlier build left queued in its words is not known, and the window is told twice"
-meant = "a_cut_note_an_earlier_build_left_queued_in_its_words_is_the_one_the_window_is_given"
+meant = "a_cut_note_an_earlier_build_left_queued_in_its_words_gives_way_to_one_in_this_build_s"
 runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
@@ -584,8 +584,13 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = "        if !cut || !self.still_coming(participant, coming)? {"
-replace = "        if !cut {"
+find = '''
+        if !self.still_coming(participant, coming)? {
+            return Ok(None);
+        }
+        let mut ledger'''
+replace = '''
+        let mut ledger'''
 
 [[plant]]
 name = "resume tasks: the Resume opens the window of work paused while it read the record"

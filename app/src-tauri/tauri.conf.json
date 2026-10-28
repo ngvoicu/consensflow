@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ConsensFlow",
-  "version": "3.0.6-alpha.2",
+  "version": "3.0.6-alpha.3",
   "identifier": "dev.ngvoicu.consensflow",
   "build": {
     "frontendDist": "../ui",

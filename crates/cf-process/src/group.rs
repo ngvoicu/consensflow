@@ -521,7 +521,7 @@ mod tests {
                 "-c",
                 // It ends with its owner, which the pipe it reads would not tell it: the pipe is
                 // held open for writing as well, so its reader never sees an end.
-                "exec 3<>\"$0\"; (while kill -0 $PPID 2>/dev/null; do sleep 0.2; done; kill -KILL $$) & \
+                "exec 3<>\"$0\"; (while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done; kill -KILL $$) & \
                  while read line <&3; do /bin/sleep 30 & echo $! >> \"$1\"; done",
             ])
             .arg(&fifo)

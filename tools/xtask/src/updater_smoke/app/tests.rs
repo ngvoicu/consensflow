@@ -289,7 +289,7 @@ fn every_process_the_app_has_been_is_ended_with_what_is_under_it() {
     let marker = stand.folder.path().join("sleeping");
     let app = stand.start(
         &format!(
-            "(while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) &\necho $! > '{}'\nsay update-boot '{{}}'\nreads",
+            "(while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done) &\necho $! > '{}'\nsay update-boot '{{}}'\nreads",
             marker.display()
         ),
         &[],

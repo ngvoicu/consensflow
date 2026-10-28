@@ -25,9 +25,6 @@ use std::time::Duration;
 use cf_e2e::process::Run;
 use cf_e2e::{files, Error, Result};
 
-/// The stand-in harness, with where its flood's size goes marked.
-const HARNESS: &str = include_str!("../../fixtures/smoke-harness.sh");
-
 /// How many lines the stand-in's flood is, and how wide each is.
 pub const FLOOD_LINES: usize = 4096;
 pub const FLOOD_WIDTH: usize = 384;
@@ -216,9 +213,7 @@ impl Drop for Machine {
 
 /// The stand-in harness, its flood sized.
 fn harness() -> String {
-    HARNESS
-        .replace("@FLOOD_LINES@", &FLOOD_LINES.to_string())
-        .replace("@FLOOD_WIDTH@", &FLOOD_WIDTH.to_string())
+    cf_e2e::smoke_harness::script(FLOOD_LINES, FLOOD_WIDTH)
 }
 
 /// The pids a file written by the stand-in harness holds, one to a line; none

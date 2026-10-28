@@ -12,7 +12,7 @@
 //!   so on every look from then on (`Observed::shared`): that one's turns are written into the
 //!   same record as the window's, and nothing in them tells them apart.
 
-use cf_harness::contract::{Observed, Records};
+use cf_harness::contract::{Observed, Records, TurnLeft};
 use cf_proto::agents::Harness;
 
 use super::*;
@@ -144,14 +144,26 @@ fn a_claude_of_another_conversation_or_a_parked_job_on_this_one_shares_nothing()
 /// What the Resume asks of the record with no window open: whether its turn was cut.
 fn turn_cut(home: &Home) -> Option<bool> {
     let records = Fakes::new(&home.env()).records;
-    finished(records.turn_cut(Harness::Claude, SESSION))
+    finished(records.turn_cut(Harness::Claude, SESSION)).map(|left| left != TurnLeft::AtRest)
+}
+
+/// The record a closed window left: the worker's turn ended, then the human typed a
+/// message, which the window's process queued and never took.
+fn left_typed() -> Vec<String> {
+    let mut lines = left_queued();
+    lines[3] = record(
+        SESSION,
+        4,
+        &json!({ "type": "queue-operation", "operation": "enqueue", "content": "One more thing" }),
+    );
+    lines
 }
 
 #[test]
 fn a_record_no_claude_shows_was_cut_in_no_turn_for_a_message_its_program_queued_and_never_took() {
-    // A Claude that quit idle, a notification queued: no sign of the quit is in its record.
+    // A Claude that quit idle, a message queued: no sign of the quit is in its record.
     let home = Home::new();
-    home.transcript(SESSION, &left_queued());
+    home.transcript(SESSION, &left_typed());
     assert_eq!(
         turn_cut(&home),
         Some(true),
@@ -170,6 +182,36 @@ fn a_record_no_claude_shows_was_cut_in_no_turn_for_a_message_its_program_queued_
         Some(true),
         "a Claude shows it, whose queue it may be"
     );
+}
+
+#[test]
+fn a_record_that_queued_only_a_jobs_notification_after_its_turn_ended_was_at_rest_whoever_shows_it()
+{
+    // Background work is rest (T-814): the notification of a job's end is Claude Code's
+    // own word of it, and no turn of the window's had begun for it.
+    let home = Home::new();
+    home.transcript(SESSION, &left_queued());
+    assert_eq!(turn_cut(&home), Some(false), "no statuses");
+    let other = OtherProcess::start();
+    home.status(SESSION, &json!({ "status": "idle" }), other.pid());
+    assert_eq!(turn_cut(&home), Some(false), "a Claude shows it");
+}
+
+#[test]
+fn a_record_with_a_message_the_human_took_back_beside_a_jobs_notification_is_no_notices_alone() {
+    // Taken back from the queue to be sent anew (`popAll`): a message of the human's
+    // waits, and none can say its program is gone.
+    let home = Home::new();
+    let mut lines = left_queued();
+    for (n, operation) in [(5, "enqueue"), (6, "popAll")] {
+        lines.push(record(
+            SESSION,
+            n,
+            &json!({ "type": "queue-operation", "operation": operation, "content": "One more thing" }),
+        ));
+    }
+    home.transcript(SESSION, &lines);
+    assert_eq!(turn_cut(&home), Some(true));
 }
 
 #[test]
@@ -214,6 +256,34 @@ fn a_window_followed_to_another_conversation_shares_it_only_if_another_claude_sh
         !finished(window.observe()).unwrap().shared,
         "the window alone shows this one"
     );
+}
+
+/// The window's own Claude is found by the conversation it shows where the host did not name
+/// it (on Windows the pane's program is not Claude's own process): a Claude that showed the
+/// conversation before the window opened is not it, whatever order Claude's statuses are listed
+/// in. Taken for the window's, its status stood for the window's on every look: the window read
+/// at its prompt while its own Claude worked, and a window followed to another conversation read
+/// as switched (zeewin2, 2 of 5: the relaunch plant missed, integration B round 2, T-800).
+#[test]
+fn a_claude_that_showed_the_conversation_before_the_window_opened_never_speaks_for_its_state() {
+    let home = Home::new();
+    let other = OtherProcess::start();
+    home.status(SESSION, &json!({ "status": "idle" }), other.pid());
+    home.transcript(SESSION, &left_queued());
+    let request = Request {
+        message: Some(REOPENED.to_owned()),
+        ..Request::resumed(SESSION)
+    };
+    let window = window(&home.adapter(), &request);
+    // The window's own Claude has said nothing yet: the other's idle is not the window's.
+    assert!(!finished(window.observe()).unwrap().at_prompt);
+    home.status(SESSION, &json!({ "status": "busy" }), me());
+    assert!(
+        !finished(window.observe()).unwrap().at_prompt,
+        "the window's own Claude works"
+    );
+    home.status(SESSION, &json!({ "status": "idle" }), me());
+    assert!(finished(window.observe()).unwrap().at_prompt);
 }
 
 #[test]

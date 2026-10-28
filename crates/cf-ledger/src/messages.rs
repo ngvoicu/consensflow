@@ -43,7 +43,8 @@ pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
     adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
 };
-pub use continuations::{continuation, continuation_tasks};
+pub(crate) use continuations::withdraw_queued_note;
+pub use continuations::{continuation, continuation_in, continuation_tasks, cut_turn};
 pub(crate) use continuations::{withdraw_continuations, withdraw_stale};
 #[cfg(feature = "test-support")]
 pub(crate) use delivery::forget_receipt;

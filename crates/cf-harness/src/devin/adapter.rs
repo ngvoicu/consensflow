@@ -595,6 +595,15 @@ impl Window for DevinWindow {
         })
     }
 
+    /// What the box on the screen shows, for the human told of a delivery held for it.
+    fn unsent_words<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<String>> {
+        Box::pin(input_box::words_on_screen(host, pane, Harness::Devin))
+    }
+
     fn ready<'a>(
         &'a self,
         host: &'a dyn PaneHost,

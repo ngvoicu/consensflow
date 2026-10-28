@@ -21,6 +21,8 @@ mod commands;
 mod fixtures_end_with_their_owner;
 #[path = "cli/host_verbs.rs"]
 mod host_verbs;
+#[path = "cli/nested_cases_name_their_limit.rs"]
+mod nested_cases_name_their_limit;
 #[path = "cli/off_node.rs"]
 mod off_node;
 #[path = "cli/role_files.rs"]

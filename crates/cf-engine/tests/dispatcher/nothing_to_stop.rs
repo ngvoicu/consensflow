@@ -185,6 +185,71 @@ fn a_tell_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_an
 }
 
 #[test]
+fn a_tell_whose_escape_stopped_the_turn_is_paid_though_the_window_began_turns_of_its_own_before_its_rest_stood(
+) {
+    // T-807, 2026-10-27, Claude Code 2.1.311 (the live suite's tell case): the Escape
+    // stopped the turn, and Claude's record said so in a message of its own ("[Request
+    // interrupted by user for tool use]") while its status stayed busy for the agents. A
+    // second later an agent's notice began a turn of Claude's own, before the record's
+    // word had stood the moment it counts after, and every look read the window at work:
+    // the stop pressed into the turn the window began itself (two Escapes, +0.0 s and
+    // +3.4 s), and with notices coming as fast, round three and the close that ends the
+    // agents.
+    let context = Context::new();
+    let project = working(&context);
+    let launches = context.adapter.prepared().len();
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy("zeus");
+    context.tell(project, "zeus", 1, "Drop the per-member cap");
+    context.pass().unwrap();
+    let pane = context.host.last("zeus").expect("its window").pane;
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "the turn at work: one Escape"
+    );
+    // The interrupt ends the turn in the record, in the harness's own words, and the
+    // agents' notices begin turns of the window's own, one a round.
+    context.adapter.begins_its_own_turn(
+        "zeus",
+        "[Request interrupted by user for tool use]",
+        &now(&context),
+    );
+    for _ in 0..4 {
+        context.adapter.begins_its_own_turn(
+            "zeus",
+            "<task-notification> Agent \"sleep one\" is waiting on its own background work",
+            &now(&context),
+        );
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "no key into the turns the window began itself"
+    );
+    assert!(
+        context.host.killed().is_empty(),
+        "the turn stopped: no close"
+    );
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    assert_eq!(closes_told(&context, project), Vec::<String>::new());
+    assert_eq!(context.task(project, 1).task.state, "paused");
+
+    // Its own turns end: the window rests, and the words go into it.
+    rests(&context, "zeus");
+    context.pass().unwrap();
+    assert_eq!(given(&context, "zeus", "Drop the per-member cap"), 1);
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "the same window"
+    );
+    assert_eq!(context.host.inputs().len(), 1, "no key with them");
+}
+
+#[test]
 fn a_pause_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_and_its_resume_goes_in(
 ) {
     let context = Context::new();

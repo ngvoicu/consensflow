@@ -183,6 +183,9 @@ file = "crates/cf-harness/src/records.rs"
 find = "        Harness::Claude if claude::shown_by_none(session, env) => {"
 replace = "        Harness::Claude => {"
 
+# The message queued is a job's notification, as T-442's was: since T-814 a record held open by
+# Claude Code's notices alone reads at rest whether or not the Resume tells it a boundary, so the
+# plant takes both out (each is held on its own by `claude::outside` and `false-cut-note`).
 [[plant]]
 name = "relaunch-follow-ups: a chief that quit idle with a message queued is told its turn was cut at the Resume"
 meant = "a_claude_chief_that_quit_idle_with_a_message_queued_is_given_no_note_at_a_resume"
@@ -193,3 +196,23 @@ builds = true
 file = "crates/cf-harness/src/contract.rs"
 find = "                relaunched: self.transcript_left(harness, session).await.ok().flatten(),"
 replace = "                relaunched: None,"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
+replace = ""
+
+# Integration B round 2 (T-800): where the host did not name the window's Claude, the one found by the
+# conversation is never one that showed it before the window opened; listed first (zeewin2's statuses
+# folder, 2 of 5), it stood for the window's state, and a followed window read as switched.
+
+[[plant]]
+name = "relaunch-follow-ups: a Claude that showed the conversation before the window opened is taken for the window's own status"
+meant = "a_claude_that_showed_the_conversation_before_the_window_opened_never_speaks_for_its_state"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "                .find(|(pid, status)| status.session == *session && !before.contains(pid));"
+replace = "                .find(|(pid, status)| status.session == *session && !before.contains(pid) || status.session == *session);"

@@ -13,9 +13,9 @@ use crate::approval::quit_and_start_again;
 use crate::decided_result::results;
 use crate::{after, rig, secs, session_of, Outcome};
 
-/// What a worker is told when the quit cut its turn on T-1.
-const WORKER_CUT: &str =
-    "ConsensFlow stopped while you were working on T-1. Go on where you stopped.";
+/// How a worker's note begins when the quit cut its turn on T-1: what follows names
+/// the turn, by the message that began it (T-814).
+const WORKER_CUT: &str = "ConsensFlow stopped while you were working on T-1";
 
 /// What the stand-in chief says when it dispatched a task.
 const DISPATCHED: &str = "\"text\":\"dispatched:";

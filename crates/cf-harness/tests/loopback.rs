@@ -196,12 +196,7 @@ fn no_peer_is_fetch_failed_before_any_head() {
 #[cfg(target_os = "macos")]
 #[test]
 fn the_server_a_test_keeps_holds_nothing_of_the_tests_but_its_streams() {
-    use std::os::fd::AsRawFd;
-
     let stray = cf_process::test_support::stray();
     let peer = Peer::start();
-    assert!(
-        !cf_process::test_support::holds_null(peer.node.id(), stray.as_raw_fd()),
-        "the server holds it"
-    );
+    assert!(!stray.held_by(peer.node.id()), "the server holds it");
 }

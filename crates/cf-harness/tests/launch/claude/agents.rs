@@ -103,12 +103,14 @@ fn agents_pending_are_no_word_of_the_window_where_claude_said_none() {
 fn a_window_on_its_own_dialog_waits_there_whatever_agents_its_turn_left() {
     let home = Home::new();
     home.transcript(SESSION, &turn(Some(2)));
+    // The window's own Claude writes its status once the window is open: one written
+    // before is another Claude's (T-800).
+    let window = window(&home.adapter(), &Request::resumed(SESSION));
     home.status(
         SESSION,
         &json!({ "status": "waiting", "waitingFor": "permission prompt" }),
         me(),
     );
-    let window = window(&home.adapter(), &Request::resumed(SESSION));
     let observed = look(&window);
     assert!(!observed.settled);
     assert_eq!(

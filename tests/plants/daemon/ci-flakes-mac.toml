@@ -1,0 +1,87 @@
+# T-837, 3.0.6-alpha.3: the two macOS reds of main's CI after integration B (run 40568487001),
+# neither of them load.
+#
+# `consensflows_own_the_loaders…` read nothing of the interactive shell: its rc exported
+# `DYLD_INSERT_LIBRARIES=/x.dylib`, and where dyld honours it (a program it does not protect, as
+# GitHub's runner's `/bin/sh` is taken to be) the shell was ended at its start, in a quarter of a
+# second, and the lookup gave none; on a Mac with SIP dyld takes `DYLD_*` out of what `/bin/sh` is
+# given, so the test held nothing of them there either. The class: a test of the interactive shell's
+# environment holds that it was read (`the_daemons_on_the_rc`, the rc's `PARITY_RC_READ`), and gives
+# a shell that answers the app's own limit; the loader's variables are held of a printed
+# environment; the slow login files' case waits on the other question, not a clock.
+#
+# `a_program_the_daemon_is_waiting_for_is_ended_when_it_stops` found its stand-in `claude` ended:
+# on the test's PATH its loop's bare `sleep` was not found, the loop spun, and the version probe
+# ended it once its 8 KiB of output were spent, 200 ms after it began. The class: a loop's wait
+# names its program by its path, which the rule `fixtures_end_with_their_owner` holds.
+#
+# Every name holds `ci flakes mac`, so `npm run plants:daemon -- "ci flakes mac"` runs them all.
+
+[run]
+app-rc = ["cargo", "xtask", "app", "test", "daemon_command::"]
+cfm-rule = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "fixtures_end_with_their_owner"]
+
+[[plant]]
+name = "ci flakes mac: the loader's variables of an rc are taken"
+meant = "of_a_printed_environment_consensflows_own_the_loaders_and_a_claude_sessions_are_not_taken"
+runs = ["app-rc"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''["TERM", "CONSENSFLOW_", "CF_", "DYLD_", "LD_"]'''
+replace = '''["TERM", "CONSENSFLOW_", "CF_", "LD_"]'''
+
+[[plant]]
+name = "ci flakes mac: the interactive shell's environment is never taken"
+meant = "consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_and_a_harness_home_is"
+runs = ["app-rc"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        .any(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .then_some(vars)'''
+replace = '''        .any(|(name, _)| name.eq_ignore_ascii_case("PATH") && cfg!(windows))
+        .then_some(vars)'''
+
+[[plant]]
+name = "ci flakes mac: the login files' question is answered before the interactive one is asked"
+meant = "slow_login_files_leave_the_interactive_question_its_whole_limit"
+runs = ["app-rc"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        let path = both.spawn(|| shell.and_then(|shell| login_path_in(shell, timeout, lookup)));
+'''
+replace = '''        let path = both.spawn(|| shell.and_then(|shell| login_path_in(shell, timeout, lookup)));
+        let path = path.join().unwrap_or_default();
+'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        (path.join().unwrap_or_default(), taken)'''
+replace = '''        (path, taken)'''
+
+[[plant]]
+name = "ci flakes mac: the daemon's stand-in claude sleeps by a name the test's PATH has not"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["cfm-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf/tests/daemon/mod.rs"
+find = '''kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done\nkill $helper'''
+replace = '''kill -0 $PPID 2>/dev/null; do sleep 0.2; done\nkill $helper'''
+
+[[plant]]
+name = "ci flakes mac: the shared deaf script sleeps by name"
+meant = "no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner"
+runs = ["cfm-rule"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/fixture.rs"
+find = '''{first}while {OWNER_THERE}; do /bin/sleep 0.2; done")'''
+replace = '''{first}while {OWNER_THERE}; do sleep 0.2; done")'''

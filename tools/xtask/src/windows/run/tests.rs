@@ -163,7 +163,7 @@ const WAITS: &str = r#"n=0
 while [ ! -e "$1" ]; do
   n=$((n + 1))
   if [ "$n" -gt "${2:-1200}" ]; then echo "waits: $1 was never made" >&2; exit 1; fi
-  sleep 0.05
+  /bin/sleep 0.05
 done"#;
 
 /// An scp that keeps what it is sent, and says so: in the rig's own file, and in the
@@ -202,7 +202,7 @@ fn holds(status: u8) -> String {
 if [ -e "$CF_FIRST" ]; then exit {status}; fi
 : > "$CF_FIRST"
 echo started
-while {owner}; do sleep 0.2; done"#,
+while {owner}; do /bin/sleep 0.2; done"#,
         owner = cf_base::fixture::owner_there(std::process::id())
     )
 }
@@ -573,7 +573,7 @@ fn another_tree(status: u8) -> String {
 if [ -e "$CF_FIRST" ]; then exit {status}; fi
 : > "$CF_FIRST"
 echo "== tree 0123456789abcdef0123456789abcdef01234567 fedcba9876543210"
-n=0; while {owner} && [ "$n" -lt 150 ]; do sleep 0.2; n=$((n + 1)); done"#,
+n=0; while {owner} && [ "$n" -lt 150 ]; do /bin/sleep 0.2; n=$((n + 1)); done"#,
         owner = cf_base::fixture::owner_there(std::process::id())
     )
 }
