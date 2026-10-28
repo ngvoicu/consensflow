@@ -708,6 +708,13 @@ fn is_mode(word: &str) -> bool {
     word.starts_with('-') || word.chars().all(|c| "ugoa+-=rwxXst,01234567".contains(c))
 }
 
+/// Whether `arg` names the PowerShell parameter `name` (`-command`), which may be given as any
+/// prefix of it that is more than the dash.
+fn is_parameter(arg: &str, name: &str) -> bool {
+    let arg = arg.to_lowercase();
+    arg.len() > 1 && name.starts_with(&arg)
+}
+
 /// The name of a program as the rule knows it: its last part, in lower case, without `.exe`.
 fn program_of(command: &str) -> String {
     let lowered = command.replace('\\', "/").to_lowercase();
@@ -768,10 +775,20 @@ impl Walk<'_> {
         } else {
             text.to_string()
         };
+        let mut previous: Vec<String> = Vec::new();
         for statement in statements(&expressions(&text), shell) {
             if !statement.piped {
                 self.named.clear();
             }
+            // A string piped into Invoke-Expression is run as the text it is.
+            if statement.piped
+                && statement.words.len() == 1
+                && ["invoke-expression", "iex"].contains(&program_of(&statement.words[0]).as_str())
+                && previous.len() == 1
+            {
+                self.text(&previous[0], Shell::Pwsh);
+            }
+            previous = statement.words.clone();
             self.statement(statement.words, shell);
         }
     }
@@ -864,7 +881,21 @@ impl Walk<'_> {
         }
         match program {
             "eval" => self.text(&args.join(" "), shell),
-            "invoke-expression" | "iex" => self.text(&args.join(" "), Shell::Pwsh),
+            "invoke-expression" | "iex" => {
+                // Its one parameter, -Command, may be named.
+                let text = match args.first() {
+                    Some(first) if is_parameter(first, "-command") => &args[1..],
+                    _ => args,
+                };
+                self.text(&text.join(" "), Shell::Pwsh);
+            }
+            "invoke-command" | "icm" => {
+                // A script file given to run is run (a block, in braces, is read as statements).
+                let file = args.iter().position(|arg| is_parameter(arg, "-filepath"));
+                if let Some(script) = file.and_then(|at| args.get(at + 1)) {
+                    self.hit(script);
+                }
+            }
             "sh" | "bash" | "dash" | "zsh" | "ksh" => {
                 let flag = args.iter().position(|arg| {
                     arg.starts_with('-') && !arg.starts_with("--") && arg.contains('c')
@@ -1724,12 +1755,26 @@ fn invoke_expression_and_invoke_command_run_what_they_are_given() {
         "icm { chmod 755 \"$env:RUNNER_TEMP/tool/tool\" }",
         "pwsh -File \"$env:RUNNER_TEMP/tool/tool.ps1\"",
         "powershell -NoProfile -File $env:RUNNER_TEMP/tool/tool.ps1 -Arg 1",
+        "Invoke-Expression -Command \"chmod +x $env:RUNNER_TEMP/tool/tool\"",
+        "iex -c \"$env:RUNNER_TEMP/tool/tool --version\"",
+        "\"chmod +x $env:RUNNER_TEMP/tool/tool\" | iex",
+        "'$env:RUNNER_TEMP/tool/tool --version' | Invoke-Expression",
+        "Invoke-Command -FilePath \"$env:RUNNER_TEMP/tool/tool.ps1\"",
+        "icm -FilePath $env:RUNNER_TEMP/tool/tool.ps1 -ArgumentList 1",
     ] {
         assert_caught(
             &running("macos-latest", TEMP_TOOL, "pwsh", script),
             LINUX_TOOL_ON_MAC,
         );
     }
+    // A string given to Invoke-Expression that runs nothing downloaded, and a script of another folder.
+    let elsewhere = check(&running(
+        "macos-latest",
+        TEMP_TOOL,
+        "pwsh",
+        "\"Get-Date\" | iex\nInvoke-Expression -Command \"Get-Date\"\nInvoke-Command -FilePath \"$env:RUNNER_TEMP/other/tool.ps1\"",
+    ));
+    assert_eq!(elsewhere.runs, 0, "{:?}", elsewhere.problems);
 }
 
 #[test]

@@ -830,3 +830,61 @@ file = ".github/workflows/release.yml"
 find = '''          chmod +x "$tool"'''
 replace = '''          cd "$ELSEWHERE"
           ./cf-publish --version'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher through Invoke-Expression -Command"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: pwsh
+        run: Invoke-Expression -Command "chmod +x $env:RUNNER_TEMP/publisher/cf-publish"
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher through a string piped to iex"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: pwsh
+        run: |
+          "chmod +x $env:RUNNER_TEMP/publisher/cf-publish" | iex
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher through Invoke-Command -FilePath"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: pwsh
+        run: Invoke-Command -FilePath "$env:RUNNER_TEMP\publisher\cf-publish.ps1"
+      # The two files people download, in a folder of their own, laid out as the
+'''
