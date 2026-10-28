@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::process::{signal, Run, Signal};
-use cf_e2e::rig::{Config, Rig};
+use cf_e2e::rig::{nested, Config, Rig};
 use cf_e2e::{checkout, live};
 use regex::Regex;
 
@@ -581,18 +581,68 @@ fn a_rig_shut_down_and_dropped_while_a_check_fails_keeps_its_report() -> Outcome
 const CASE_ALONE: &str = "reports::a_rig_its_case_left_on_an_error_it_returned_keeps_its_report";
 
 /// What the test binary says of one case it is asked to run alone: its output,
-/// as `cargo test` shows it (`shown`: as `--nocapture` does).
+/// as `cargo test` shows it (`shown`: as `--nocapture` does). The case starts a rig and waits
+/// 200 ms for what never comes: it is given that, and what the rig may take
+/// ([`cf_e2e::rig::nested::case_of`]).
 fn output_of_the_case_alone(shown: bool) -> Result<String, Box<dyn std::error::Error>> {
-    let mut asked = vec!["--exact", CASE_ALONE, "--test-threads=1"];
+    let mut run = nested::case_of(
+        &std::env::current_exe()?,
+        CASE_ALONE,
+        Duration::from_millis(200),
+    )?;
     if shown {
-        asked.push("--nocapture");
+        run = run.arg("--nocapture");
     }
-    let ran = Run::new(&std::env::current_exe()?)
-        .args(asked)
-        .inheriting_env()
-        .run()?;
+    let ran = run.run()?;
     assert_eq!(ran.code, Some(0), "{ran}");
     Ok(format!("{}{}", ran.stdout, ran.stderr))
+}
+
+/// The case a nested run is asked for that takes longer than a verb of `cf` is given
+/// ([`cf_e2e::process::LIMIT`]), run by the test below and by no run of the suite.
+const CASE_LONGER: &str = "reports::a_nested_case_that_takes_longer_than_a_programs_limit";
+
+#[test]
+#[ignore = "run by the test below, as a nested case"]
+fn a_nested_case_that_takes_longer_than_a_programs_limit() {
+    std::thread::sleep(cf_e2e::process::LIMIT + Duration::from_secs(2));
+}
+
+/// A test that runs a case of its binary again holds it to what the case runs, not to a verb
+/// of `cf`'s 30 s (T-848: the case of the reports above, its rig started beside the run's other
+/// cases on main's CI, was ended at the 30 s).
+#[test]
+fn a_nested_case_that_takes_longer_than_a_programs_limit_is_run_to_its_end() -> Outcome {
+    let ran = nested::case_of(
+        &std::env::current_exe()?,
+        CASE_LONGER,
+        cf_e2e::process::LIMIT + Duration::from_secs(2),
+    )?
+    .arg("--ignored")
+    .run()?;
+    assert!(!ran.timed_out, "{ran}");
+    assert_eq!(ran.code, Some(0), "{ran}");
+    Ok(())
+}
+
+/// A nested case of a rig builds nothing: the programs under test are the ones this run has.
+/// Here no compiler is there for it, and it is no nextest run's whose programs are built
+/// already (T-848: its builds, beside the run's other cases, took most of its 30 s on main's CI).
+#[test]
+fn a_nested_rig_case_runs_the_programs_this_run_has_and_builds_none() -> Outcome {
+    let ran = nested::case_of(
+        &std::env::current_exe()?,
+        CASE_ALONE,
+        Duration::from_millis(200),
+    )?
+    .var("RUSTC", "/no/rustc/is/here")
+    .var(
+        cf_e2e::cf::RUN,
+        format!("a-nested-run-{}", std::process::id()),
+    )
+    .run()?;
+    assert_eq!(ran.code, Some(0), "{ran}");
+    Ok(())
 }
 
 #[test]

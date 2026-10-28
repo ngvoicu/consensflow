@@ -36,7 +36,7 @@ pub fn deaf(signals: &str, first: &str) -> String {
     } else {
         format!("{first}; ")
     };
-    format!("trap '' {signals}; {first}while {OWNER_THERE}; do sleep 0.2; done")
+    format!("trap '' {signals}; {first}while {OWNER_THERE}; do /bin/sleep 0.2; done")
 }
 
 #[cfg(all(test, unix))]
@@ -81,11 +81,11 @@ mod tests {
     fn a_script_is_text_that_looks_at_its_owner() {
         assert_eq!(
             deaf("TERM HUP", "printf ready"),
-            "trap '' TERM HUP; printf ready; while kill -0 $PPID 2>/dev/null; do sleep 0.2; done"
+            "trap '' TERM HUP; printf ready; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done"
         );
         assert_eq!(
             deaf("TERM", ""),
-            "trap '' TERM; while kill -0 $PPID 2>/dev/null; do sleep 0.2; done"
+            "trap '' TERM; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done"
         );
         assert_eq!(owner_there(42), "kill -0 42 2>/dev/null");
     }

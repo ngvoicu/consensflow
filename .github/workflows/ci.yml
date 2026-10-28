@@ -131,6 +131,13 @@ jobs:
       # nextest runs a plant's `cargo test` (tools/xtask's plants), and the plants'
       # own tests run it: built once, then the cache's (~/.cargo/bin).
       - run: cargo install cargo-nextest --version 0.9.148 --locked
+      # On Windows the panes' tests open their consoles with the console host
+      # the app ships (conpty.dll and OpenConsole.exe), found beside the build
+      # as the Windows runner puts it (`cargo xtask windows`); the key tests
+      # refuse the system's own, which makes other keys of the same bytes
+      # (2026-10-27: a mark read as the Alt key carrying it).
+      - if: runner.os == 'Windows'
+        run: cargo xtask conpty --into app/src-tauri/target/debug
       - run: cargo test --workspace --exclude app --exclude cf-e2e
         timeout-minutes: 40
 

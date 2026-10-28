@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 
 use crate::Result;
 
+/// How long the copy of a program is tried for while a build has taken the program away.
+pub(crate) const COPY_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// `program` as a rig runs it: a copy of it in `folder`, under its own name, made if it is not
 /// there (a rig resumed on a home has the copy it had).
 #[cfg(unix)]
@@ -36,7 +39,7 @@ pub(crate) fn copy_of(program: &Path, folder: &Path) -> Result<PathBuf> {
         return Ok(own);
     }
     // The program may be missing as it is copied, a build having taken it for a moment.
-    let until = Instant::now() + Duration::from_secs(30);
+    let until = Instant::now() + COPY_WAIT;
     loop {
         match std::fs::copy(program, &own) {
             Ok(_) => return Ok(own),

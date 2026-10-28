@@ -3151,7 +3151,7 @@ mod tests {
         std::process::Command::new("/bin/sh")
             .arg("-c")
             .arg(format!(
-                "trap '' TERM; n=0; while [ ! -e '{folder}/go' ] && [ $n -lt 1200 ]; do sleep 0.1; n=$((n+1)); done; echo late > '{folder}/late'"
+                "trap '' TERM; n=0; while [ ! -e '{folder}/go' ] && [ $n -lt 1200 ]; do /bin/sleep 0.1; n=$((n+1)); done; echo late > '{folder}/late'"
             ))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())

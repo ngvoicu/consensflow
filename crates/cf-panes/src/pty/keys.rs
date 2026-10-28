@@ -65,6 +65,7 @@ mod conpty {
     use std::time::{Duration, Instant};
 
     use super::{keys_read, KeyRead};
+    use crate::pty::conpty::host_library;
     use crate::pty::conpty_test::{open, powershell, read_until, take};
     use crate::pty::{serial_pty_test, PaneKey, PaneOutput, PaneTable};
 
@@ -96,6 +97,24 @@ mod conpty {
             "Write-Output 'READY'; foreach ($n in 1..{keys}) {{ $k = [Console]::ReadKey($true); \
              Write-Output (\"KEY{{0}}=[{{1}}|{{2}}|{{3}}]#\" -f $n, $k.Key, [int]$k.KeyChar, [int]$k.Modifiers) }}"
         ))
+    }
+
+    /// That the panes here are given their keys by the console host the app ships beside
+    /// its pane host (`conpty.dll`, with its `OpenConsole.exe`), which every key test here
+    /// is of: the system's own makes other keys of the same bytes, a mark typed as text the
+    /// Alt key carrying it (main's Windows CI, 2026-10-27: no `conpty.dll` where the tests
+    /// look, and `a_mark_reaches…` read the mark as key 18, Alt's).
+    fn of_the_shipped_host() {
+        let library = host_library().expect("the console host's library");
+        let shipped = library
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case("conpty.dll"))
+            && library.with_file_name("OpenConsole.exe").is_file();
+        assert!(
+            shipped,
+            "the panes' console host is {}, not the conpty.dll the app ships beside its OpenConsole.exe: `cargo xtask conpty --into app/src-tauri/target/debug` puts them where the tests look",
+            library.display()
+        );
     }
 
     /// A pane that is read as it goes, noting when each key was first said whole.
@@ -146,6 +165,7 @@ mod conpty {
     /// the Escapes are the ones after it.
     fn pressed_after(mark: Option<&[u8]>, escape: &[u8]) -> Pressed {
         let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
         let table = Arc::new(PaneTable::new());
         let before = usize::from(mark.is_some());
         let (key, output) = open(&table, &key_reader(3 + before), &HashMap::new(), 1 << 20);
@@ -258,6 +278,7 @@ mod conpty {
     /// at once, and what its screen said.
     fn first_key(bytes: &[u8]) -> (Vec<KeyRead>, String) {
         let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
         let table = Arc::new(PaneTable::new());
         let (key, output) = open(&table, &key_reader(1), &HashMap::new(), 1 << 20);
         read_until(&table, &key, &output, "READY");

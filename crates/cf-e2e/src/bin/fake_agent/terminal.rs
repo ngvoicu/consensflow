@@ -177,6 +177,13 @@ impl Input {
                 self.pasting = false;
                 self.pending = rest.to_owned();
                 events.push(Event::Pasted(self.buffer.chars().count()));
+            } else if let Some(body) = terminal_string(&self.pending) {
+                // What the terminal reports of itself (an OSC colour, a DCS name), read
+                // to its BEL or ST and dropped, as a TUI reads a reply it asked for.
+                let Some(end) = string_end(body) else {
+                    break;
+                };
+                self.pending = body[end..].to_owned();
             } else if self.pending.starts_with('\u{1b}') {
                 // The start of a paste marker still arriving, which `quiet`
                 // takes for the Escape key if nothing more comes; or a key
@@ -232,6 +239,24 @@ impl Input {
             return vec![Event::Escape];
         }
         Vec::new()
+    }
+}
+
+/// The body of the terminal string `text` begins with (OSC, DCS, APC, PM, SOS), after
+/// its opening: none where it begins with none.
+fn terminal_string(text: &str) -> Option<&str> {
+    let body = text.strip_prefix('\u{1b}')?;
+    let kind = body.chars().next()?;
+    "]P_^X".contains(kind).then(|| &body[1..])
+}
+
+/// Where the terminal string `body` ends, past its BEL or ST: none while it has not.
+fn string_end(body: &str) -> Option<usize> {
+    let bel = body.find('\u{7}').map(|at| at + 1);
+    let st = body.find("\u{1b}\\").map(|at| at + 2);
+    match (bel, st) {
+        (Some(bel), Some(st)) => Some(bel.min(st)),
+        (bel, st) => bel.or(st),
     }
 }
 
@@ -305,6 +330,21 @@ mod tests {
     fn feed_all(chunks: &[&str]) -> Vec<Event> {
         let mut input = Input::default();
         chunks.iter().flat_map(|chunk| input.feed(chunk)).collect()
+    }
+
+    #[test]
+    fn what_the_terminal_reports_is_no_text_typed() {
+        let mut input = Input::default();
+        assert_eq!(
+            input.feed(
+                "\u{1b}]11;rgb:1e1e/1e1e/1e1e\u{1b}\\\u{1b}]10;rgb:cc/cc/cc\u{7}\u{1b}P>|xterm.js"
+            ),
+            vec![]
+        );
+        assert_eq!(
+            input.feed("(6.0.0)\u{1b}\\ok\r"),
+            vec![Event::Submit("ok".to_owned())]
+        );
     }
 
     #[test]
