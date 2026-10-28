@@ -1593,7 +1593,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]'''
+find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]'''
 replace = '''    [ ! -L "$1" ] && [ -d "$1" ]'''
 
 [[plant]]
@@ -1604,8 +1604,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]'''
-replace = '''    [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]'''
+find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]'''
+replace = '''    [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]'''
 
 [[plant]]
 name = "installers: install.sh takes a pid of six digits for a process's"
@@ -1808,25 +1808,25 @@ replace = '''('consensflow-install.' + [guid]::NewGuid().ToString('N').Substring
 
 [[plant]]
 name = "installers: to-site --check takes an installer that differs for the repository's"
-meant = "refuses a site whose installer is not the repository's, saying which and how to mend it"
+meant = "refuses a branch tip whose installer is not the repository's, saying which and how to mend it"
 runs = [["node", "--test", "tests/to-site.test.mjs"]]
 
 [[plant.edit]]
 file = "install/to-site.mjs"
-find = '''    return readFileSync(held).equals(readFileSync(script))
+find = '''    return held.out.equals(readFileSync(script))
       ? []'''
 replace = '''    return true
       ? []'''
 
 [[plant]]
 name = "installers: to-site --check takes an installer that is missing for the repository's"
-meant = "refuses a site that holds one of them, or none, and changes nothing"
+meant = "refuses a tip that holds one of them, or none, whatever the checkout holds: the site is not ready"
 runs = [["node", "--test", "tests/to-site.test.mjs"]]
 
 [[plant.edit]]
 file = "install/to-site.mjs"
-find = '''    if (!existsSync(held)) return [`${name} is missing from the site`]'''
-replace = '''    if (!existsSync(held)) return []'''
+find = '''    if (!held.ok) return [`${name} is missing from ${ref}`]'''
+replace = '''    if (!held.ok) return []'''
 
 [[plant]]
 name = "installers: the real install takes CI for GitHub's runner"
@@ -1837,3 +1837,82 @@ runs = ["real-install"]
 file = "install/real-install.mjs"
 find = '''if (!process.env.GITHUB_ACTIONS) {'''
 replace = '''if (!process.env.CI) {'''
+
+# --- T-850 (T-847's last P3s): the site by its branch tips, a link for an install folder, Windows parity ---
+
+[[plant]]
+name = "installers: install.sh reads the install folder with lstat, so a link to another volume never sweeps"
+meant = "an install folder that is a link to another volume is swept as any: its leftovers are the folder's own"
+runs = [["node", "--test", "--test-name-pattern", "removed with care", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''"$(stat -L -f %d "$2")"'''
+replace = '''"$(stat -f %d "$2")"'''
+
+[[plant]]
+name = "installers: to-site --check reads the installers branch no more than HEAD"
+meant = "is satisfied by the installers branch's tip when it holds the two, the checkout holding none"
+runs = [["node", "--test", "tests/to-site.test.mjs"]]
+
+[[plant.edit]]
+file = "install/to-site.mjs"
+find = '''    ? 'installers'
+    : 'HEAD''''
+replace = '''    ? 'HEAD'
+    : 'HEAD''''
+
+[[plant]]
+name = "installers: to-site --check reads a folder that is no git repository"
+meant = "a folder that is no git repository has no branch tips to read"
+runs = [["node", "--test", "tests/to-site.test.mjs"]]
+
+[[plant.edit]]
+file = "install/to-site.mjs"
+find = '''  if (!git('rev-parse', '--git-dir').ok) {'''
+replace = '''  if (false) {'''
+
+[[plant]]
+name = "installers: install.ps1 takes a folder of another user for the user's own"
+meant = "a folder of another user is left alone, and said"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''            if ($mine -notcontains $owner) {'''
+replace = '''            if ($false) {'''
+
+[[plant]]
+name = "installers: install.ps1 takes a host named for PowerShell for a program that is none"
+meant = "a pid reused by a host named for PowerShell is kept, whatever else its name says"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''        if ($program -like 'powershell*' -or $program -like 'pwsh*') { return $true }'''
+replace = '''        if ($program -eq 'powershell' -or $program -eq 'pwsh') { return $true }'''
+
+[[plant]]
+name = "installers: install.ps1 skips its own folder by its path as written"
+meant = "this run's own folder is never a dead run's, however its path is spelled"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''            if ($item.Name -eq $ownName) { continue }'''
+replace = '''            if ($item.FullName -eq $own) { continue }'''
+
+[[plant]]
+name = "installers: install.ps1 takes a pid above int32 for a process's"
+meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''            if ($pidOf -gt [int]::MaxValue) {'''
+replace = '''            if ($false) {'''

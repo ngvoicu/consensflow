@@ -607,3 +607,226 @@ file = "tools/cf-publish/src/testing/workflow.rs"
 find = '''                .or_else(|| line.strip_prefix(&first))
 '''
 replace = ''''''
+
+# --- T-850: the wrappers, PowerShell's Invoke-Expression, Invoke-Command and -File, and a cd the rule cannot resolve ---
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through timeout"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          timeout 60 "$tool" --version'''
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through nice"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          nice -n 5 "$tool" --version'''
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through caffeinate"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          caffeinate -i "$tool" --version'''
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through arch"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          arch -arm64 "$tool" --version'''
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through setsid"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          setsid "$tool" --version'''
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through flock"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          flock "$RUNNER_TEMP/lock" "$tool" --version'''
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through stdbuf"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          stdbuf -oL "$tool" --version'''
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through xvfb-run"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          xvfb-run -a "$tool" --version'''
+
+[[plant]]
+name = "workflow: the sign job runs the Linux publisher through script"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          script -q /dev/null "$tool" --version'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher through Invoke-Expression"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: pwsh
+        run: Invoke-Expression "& '$env:RUNNER_TEMP\publisher\cf-publish.exe' --version"
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher through Invoke-Command"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: pwsh
+        run: Invoke-Command -ScriptBlock { & "$env:RUNNER_TEMP\publisher\cf-publish.exe" --version }
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "workflow: the Windows build runs the Linux publisher through pwsh -File"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''      # The two files people download, in a folder of their own, laid out as the
+'''
+replace = '''      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      - name: The publisher's version
+        shell: pwsh
+        run: pwsh -File "$env:RUNNER_TEMP\publisher\cf-publish.ps1"
+      # The two files people download, in a folder of their own, laid out as the
+'''
+
+[[plant]]
+name = "workflow: the sign job runs ./cf-publish after a cd into a folder the rule cannot resolve"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = ["binaries"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          chmod +x "$tool"'''
+replace = '''          cd "$ELSEWHERE"
+          ./cf-publish --version'''
