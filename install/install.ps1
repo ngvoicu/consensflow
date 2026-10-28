@@ -509,7 +509,16 @@ remove everything.
     # not follow one, which the test holds), owned by this user (or by what the user's token
     # gives what it makes: the Administrators group, where the session is elevated), under a
     # pid a process can have; this run's own folder ($own) is never one, by its name;
-    # every one is said in full.
+    # every one is said in full. A folder owned by Administrators that this session's token
+    # does not give what it makes (an elevated run's, seen from a session that is not) is left
+    # and said so, not counted as the user's: that would let a non-elevated administrator take
+    # away what another administrator's elevated run left.
+    # The rule assumes a TEMP that is the user's own and on this PC (it is, unless a policy or a
+    # hand sets it otherwise). In a TEMP that users share, another elevated administrator's dead
+    # run's folder is owned by Administrators, which an elevated sweep counts as its own, so it
+    # goes if its ACL allows. In a TEMP on a network share that one account uses from two PCs, a
+    # run that is live on the other PC has no process here, so its folder goes and that install
+    # fails at its next download. On a file system with no owners (FAT, exFAT) nothing is swept.
     function Remove-CfStaleRuns([string]$own) {
         $ownName = Split-Path -Leaf $own
         $me = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -529,7 +538,17 @@ remove everything.
             }
             try { $owner = (Get-Acl -LiteralPath $path).GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { $owner = '' }
             if ($mine -notcontains $owner) {
-                Write-Host "consensflow: left $path alone: it is not yours (its owner is '$owner')."
+                if (-not $owner) {
+                    Write-Host "consensflow: left $path alone: its owner could not be read."
+                    continue
+                }
+                $who = $owner
+                try { $who = (New-Object Security.Principal.SecurityIdentifier $owner).Translate([Security.Principal.NTAccount]).Value } catch { }
+                if ($owner -eq 'S-1-5-32-544') {
+                    Write-Host "consensflow: left $path alone: it is owned by $who, which only an elevated PowerShell takes for its own; an elevated PowerShell removes it."
+                } else {
+                    Write-Host "consensflow: left $path alone: it is not yours (its owner is '$who')."
+                }
                 continue
             }
             $process = if ($pidOf -ne $PID) { Get-Process -Id $pidOf -ErrorAction SilentlyContinue } else { $null }

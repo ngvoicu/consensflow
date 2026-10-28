@@ -649,6 +649,8 @@ for (const [label, shell] of shells) {
             `consensflow-install.0${dead}.${hex}`,
             `consensflow-install.${dead}x.${hex}`,
             `consensflow-install.99999999999.${hex}`,
+            // Too many digits for any number the sweep reads a pid into.
+            `consensflow-install.${'9'.repeat(20)}.${hex}`,
             `consensflow-install.${dead}.${hex}.bak`,
             `consensflow-install.${dead}`,
             `consensflow-install.${hex}`,
@@ -746,17 +748,77 @@ for (const [label, shell] of shells) {
           }
         })
 
+        // The sweep reads the owner of a folder as a SID: these copies read another one (what a
+        // session that is, or is not, elevated would find), so that both machines hold the same case.
+        const READS_OWNER =
+          '$owner = (Get-Acl -LiteralPath $path).GetOwner([Security.Principal.SecurityIdentifier]).Value'
+        const TAKES_FOR_ITS_OWN = '$mine = @($me.User.Value, $me.Owner.Value)'
+        const ADMINISTRATORS = 'S-1-5-32-544'
+
         test('a folder of another user is left alone, and said', async () => {
           publish('3.0.6', { signature: null })
-          // This copy takes the owner of a folder for someone's other than the user's own: SYSTEM's.
-          const at = freshCase([
-            ['$mine = @($me.User.Value, $me.Owner.Value)', "$mine = @('S-1-5-18')"],
-          ])
+          // This copy finds SYSTEM the owner of what it looks at, which no session takes for its own.
+          const at = freshCase([[READS_OWNER, "$owner = 'S-1-5-18'"]])
           const theirs = folderIn(at, `consensflow-install.${await deadPid()}.0123456789ab`)
           const ran = await install(at, ['--version', '3.0.6'])
           assert.notEqual(ran.status, 0, ran.out)
           assert.ok(existsSync(theirs), `it was removed: ${ran.out}`)
-          assert.match(ran.out, new RegExp(`left ${exact(theirs)} alone: it is not yours`))
+          assert.match(
+            ran.out,
+            new RegExp(`left ${exact(theirs)} alone: it is not yours \\(its owner is '[^']+'\\)`),
+          )
+          assert.doesNotMatch(ran.out, /S-1-5-18/, 'the owner is said by its name where it has one')
+        })
+
+        test('a folder owned by Administrators is left alone by a session that does not take the group for its own, and said so', async () => {
+          publish('3.0.6', { signature: null })
+          const at = freshCase([
+            [READS_OWNER, `$owner = '${ADMINISTRATORS}'`],
+            [TAKES_FOR_ITS_OWN, '$mine = @($me.User.Value)'],
+          ])
+          const left = folderIn(at, `consensflow-install.${await deadPid()}.0123456789ab`)
+          const ran = await install(at, ['--version', '3.0.6'])
+          assert.notEqual(ran.status, 0, ran.out)
+          assert.ok(existsSync(left), `it was removed: ${ran.out}`)
+          assert.match(
+            ran.out,
+            new RegExp(
+              `left ${exact(left)} alone: it is owned by \\S+, which only an elevated PowerShell takes for its own; an elevated PowerShell removes it`,
+            ),
+          )
+          assert.doesNotMatch(ran.out, /not yours/)
+          assert.doesNotMatch(ran.out, new RegExp(ADMINISTRATORS), 'the group is said by its name')
+        })
+
+        test('a folder owned by what the session takes for its own, the Administrators group in an elevated one, is removed', async () => {
+          publish('3.0.6', { signature: null })
+          const at = freshCase([
+            [READS_OWNER, `$owner = '${ADMINISTRATORS}'`],
+            [TAKES_FOR_ITS_OWN, `$mine = @($me.User.Value, '${ADMINISTRATORS}')`],
+          ])
+          const gone = folderIn(at, `consensflow-install.${await deadPid()}.0123456789ab`)
+          const ran = await install(at, ['--version', '3.0.6'])
+          assert.match(ran.out, new RegExp(`removed ${exact(gone)}`))
+          assert.ok(!existsSync(gone), ran.out)
+        })
+
+        test('a folder whose owner cannot be read is left alone, and said', async () => {
+          publish('3.0.6', { signature: null })
+          // This copy reads the owner of a path that is not there.
+          const at = freshCase([
+            [
+              READS_OWNER,
+              '$owner = (Get-Acl -LiteralPath ($path + ".nowhere")).GetOwner([Security.Principal.SecurityIdentifier]).Value',
+            ],
+          ])
+          const left = folderIn(at, `consensflow-install.${await deadPid()}.0123456789ab`)
+          const ran = await install(at, ['--version', '3.0.6'])
+          assert.notEqual(ran.status, 0, ran.out)
+          assert.ok(existsSync(left), `it was removed: ${ran.out}`)
+          assert.match(
+            ran.out,
+            new RegExp(`left ${exact(left)} alone: its owner could not be read`),
+          )
         })
 
         test("this run's own folder is never a dead run's, however its path is spelled", async () => {

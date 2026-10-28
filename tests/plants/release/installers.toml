@@ -1745,7 +1745,7 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "install/install.ps1"
-find = '''        if (@('powershell', 'pwsh', 'powershell_ise') -contains $process.ProcessName.ToLowerInvariant()) { return $true }'''
+find = '''        if ($program -like 'powershell*' -or $program -like 'pwsh*') { return $true }'''
 replace = '''        if ($false) { return $true }'''
 
 [[plant]]
@@ -1771,7 +1771,7 @@ find = '''            if (-not $item.PSIsContainer -or ($item.Attributes -band [
 replace = '''            if (-not $item.PSIsContainer) {'''
 
 [[plant]]
-name = "installers: install.ps1 takes a pid of eleven digits for a process's"
+name = "installers: install.ps1 takes a pid of twenty digits for a process's"
 meant = "a dead run's folder is removed, a PowerShell's and what only looks similar kept, and a link is never followed"
 runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
 platforms = ["windows"]
@@ -1779,7 +1779,7 @@ platforms = ["windows"]
 [[plant.edit]]
 file = "install/install.ps1"
 find = '''([1-9][0-9]{0,9})'''
-replace = '''([1-9][0-9]{0,12})'''
+replace = '''([1-9][0-9]{0,24})'''
 
 [[plant]]
 name = "installers: install.ps1 takes its own folder for a dead run's"
@@ -1789,7 +1789,7 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "install/install.ps1"
-find = '''            if ($item.FullName -eq $own) { continue }
+find = '''            if ($item.Name -eq $ownName) { continue }
 '''
 replace = ''''''
 
@@ -1883,6 +1883,40 @@ platforms = ["windows"]
 file = "install/install.ps1"
 find = '''            if ($mine -notcontains $owner) {'''
 replace = '''            if ($false) {'''
+
+[[plant]]
+name = "installers: install.ps1 calls a folder of Administrators a stranger's"
+meant = "a folder owned by Administrators is left alone by a session that does not take the group for its own, and said so"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''                if ($owner -eq 'S-1-5-32-544') {'''
+replace = '''                if ($false) {'''
+
+[[plant]]
+name = "installers: install.ps1 says the owner of a folder by its SID"
+meant = "a folder of another user is left alone, and said"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''                try { $who = (New-Object Security.Principal.SecurityIdentifier $owner).Translate([Security.Principal.NTAccount]).Value } catch { }
+'''
+replace = ''''''
+
+[[plant]]
+name = "installers: install.ps1 takes an owner it could not read for one it did"
+meant = "a folder whose owner cannot be read is left alone, and said"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''                if (-not $owner) {'''
+replace = '''                if ($false) {'''
 
 [[plant]]
 name = "installers: install.ps1 takes a host named for PowerShell for a program that is none"
