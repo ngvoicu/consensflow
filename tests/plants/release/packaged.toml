@@ -30,6 +30,8 @@ smoke-command-run = ["cargo", "test", "--offline", "--target-dir", "app/src-taur
 candidate-steps = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "candidate::"]
 # The packaged smoke, on the app a build leaves.
 smoke-on-the-app = ["cargo", "xtask", "smoke"]
+# The packaged smoke's stand-in harness on the rig: the checkout's daemon and pane host.
+smoke-stand-in-on-the-rig = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--test", "rig", "--", "smoke_stand_in::"]
 # The page's half of the smoke: how long it waits, and when a flood has stopped (in fake time).
 selftest-wait = ["node", "--test", "tests/selftest-wait.test.mjs"]
 # The app's door for the smoke: what the page is told.
@@ -845,6 +847,20 @@ requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
 file = "crates/cf-e2e/tests/smoke.rs"
 find = "home: &machine.state,"
 replace = "home: &machine.probe,"
+
+# The stand-in harness on the rig (tests/rig/smoke_stand_in.rs, T-863): what the daemon
+# asks of a Claude window before it hands it its first message, asked of the stand-in on
+# every gate, which needs no app.
+[[plant]]
+name = "packaged smoke's stand-in: a worker window that draws no prompt is never handed its brief"
+meant = "the_smokes_stand_in_takes_its_brief_and_its_result_reaches_the_chief"
+runs = ["smoke-stand-in-on-the-rig"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-harness.sh"
+find = "printf '  >> bypass permissions on (shift+tab to cycle)\\n'"
+replace = "printf '  >> ready\\n'"
 
 # The hidden app's case (smoke/hidden.rs, T-454): a window that prints a flood while
 # the app is hidden is read as fast as shown.
