@@ -158,6 +158,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         event: Some("push"),
         before,
         left: Left::Tag(&tag),
+        head: None,
     })?;
     release.wait_for_feed(ALPHA_FEED, &plain, run)?;
     release.wait_for_feed(STABLE_FEED, &plain, run)?;

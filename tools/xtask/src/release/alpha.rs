@@ -49,7 +49,8 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
     // never moved, so what it would fail on is found out before there is one.
     // A hand run is of main's head, and CI may have been waited for a long
     // while: main must still be the commit CI passed, as upstream has it, or
-    // the run would be of something else.
+    // the run would be of something else. (A main that moves after this, before
+    // GitHub takes its head, is `trial`'s to find: it is looked for by the commit.)
     let head = release.main_as_upstream_has_it()?;
     if head != commit {
         return Err(refused(format!(
@@ -71,6 +72,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         event: Some("push"),
         before,
         left: Left::Tag(&tag),
+        head: None,
     })?;
     release.wait_for_feed(ALPHA_FEED, &version, run)?;
     // By the release it names, read as the one before was: a 404 is no change.

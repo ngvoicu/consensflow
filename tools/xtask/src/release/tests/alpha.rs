@@ -1,7 +1,7 @@
 //! `release alpha`, run on a checkout with real remotes and GitHub as a script.
 
 use super::fake::{git, Fake, World};
-use super::{advice, not_on_upstream, red_run, refusal};
+use super::{advice, not_on_upstream, red_run, refusal, TRIAL_NEXT, TRIAL_NEXT_WITHOUT_A_RUN};
 use crate::release::{alpha, Error, Options};
 
 const ALPHA: &str = "3.0.6-alpha.1";
@@ -554,7 +554,7 @@ fn a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagge
                 1001,
                 ended,
                 &format!("job {job}, step \"{step}\" ended {ended}"),
-                "nothing after it was done"
+                TRIAL_NEXT
             )
         );
         // The run's address is the one to read it at, and the tag's run never started.
@@ -583,7 +583,7 @@ fn a_trial_cancelled_with_no_step_to_name_is_refused_with_its_jobs() {
             1001,
             "cancelled",
             "job mac ended cancelled, job windows / build ended cancelled",
-            "nothing after it was done"
+            TRIAL_NEXT
         )
     );
     nothing_tagged(&world, &fake);
@@ -637,11 +637,38 @@ fn a_trial_github_never_lists_is_refused_and_nothing_is_tagged() {
     assert_eq!(
         said,
         format!(
-            "trial: no new run of release.yml appeared on {}: nothing after it was done",
+            "trial: no new run of release.yml appeared on {}: {TRIAL_NEXT_WITHOUT_A_RUN}",
             &world.head()[..8]
         )
     );
     nothing_tagged(&world, &fake);
+}
+
+/// The arguments that make `git commit` the commit of someone else, signed by no one.
+const ANOTHER_AUTHOR: [&str; 6] = [
+    "-c",
+    "user.name=Other",
+    "-c",
+    "user.email=o@example.com",
+    "-c",
+    "commit.gpgsign=false",
+];
+
+/// Someone else lands a commit on upstream's main, from a clone of their own.
+fn lands_on_upstream(upstream: &std::path::Path) {
+    let other = tempfile::tempdir().unwrap();
+    let clone = other.path().join("clone");
+    git(
+        other.path(),
+        &["clone", "-q", &upstream.to_string_lossy(), "clone"],
+    );
+    let landing = [
+        &ANOTHER_AUTHOR[..],
+        &["commit", "-q", "--allow-empty", "-m", "a landing"],
+    ]
+    .concat();
+    git(&clone, &landing);
+    git(&clone, &["push", "-q", "origin", "main"]);
 }
 
 #[test]
@@ -651,33 +678,18 @@ fn main_that_moved_while_ci_was_watched_is_not_trialled_for_a_hand_run_is_of_mai
         let (world, mut fake) = ready();
         let (root, upstream) = (world.root.clone(), world.upstream.clone());
         fake.after_ci = Some(Box::new(move || {
-            let author = [
-                "-c",
-                "user.name=Other",
-                "-c",
-                "user.email=o@example.com",
-                "-c",
-                "commit.gpgsign=false",
-            ];
-            let landing = [
-                &author[..],
-                &["commit", "-q", "--allow-empty", "-m", "a landing"],
-            ]
-            .concat();
             if together {
+                let landing = [
+                    &ANOTHER_AUTHOR[..],
+                    &["commit", "-q", "--allow-empty", "-m", "a landing"],
+                ]
+                .concat();
                 git(&root, &landing);
                 for remote in ["origin", "upstream"] {
                     git(&root, &["push", "-q", remote, "main"]);
                 }
             } else {
-                let other = tempfile::tempdir().unwrap();
-                let clone = other.path().join("clone");
-                git(
-                    other.path(),
-                    &["clone", "-q", &upstream.to_string_lossy(), "clone"],
-                );
-                git(&clone, &landing);
-                git(&clone, &["push", "-q", "origin", "main"]);
+                lands_on_upstream(&upstream);
             }
         }));
         let said = refusal(released(&world, &mut fake, false).0);
@@ -699,6 +711,169 @@ fn main_that_moved_while_ci_was_watched_is_not_trialled_for_a_hand_run_is_of_mai
             fake.lines()
         );
         nothing_tagged(&world, &fake);
+    }
+}
+
+#[test]
+fn a_hand_run_of_another_commit_is_not_taken_for_the_trial() {
+    let (world, mut fake) = ready();
+    trial_fails_at(
+        &mut fake,
+        "failure",
+        "mac",
+        "The signed app passes the packaged smoke",
+    );
+    // Ours shows a look late. Someone else's hand run, of another commit, newer than
+    // ours and green, is there first: tagging on it would tag what was not tried.
+    fake.unlisted_for = 1;
+    fake.after_dispatch = Some(Box::new(|fake| {
+        let key = ("release.yml", "workflow_dispatch");
+        let red = fake.conclusions.remove(&key);
+        fake.unlisted_for = 0;
+        fake.start("release.yml", &"f".repeat(40), "workflow_dispatch");
+        fake.conclusions.extend(red.map(|ended| (key, ended)));
+    }));
+    let said = refusal(released(&world, &mut fake, false).0);
+    // The run watched is ours, 1001, not the other's, 1002.
+    assert_eq!(
+        said,
+        red_run(
+            "trial",
+            1001,
+            "failure",
+            "job mac, step \"The signed app passes the packaged smoke\" ended failure",
+            TRIAL_NEXT
+        )
+    );
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn a_run_of_another_commit_that_gh_lists_anyway_is_refused_for_what_it_says_of_itself() {
+    let (world, mut fake) = ready();
+    // GitHub's filter by commit does not hold, our own hand run never starts, and
+    // another commit's is the newest there is.
+    fake.ignores_commit_filter = true;
+    fake.hand_runs_start = false;
+    fake.after_dispatch = Some(Box::new(|fake| {
+        fake.start("release.yml", &"f".repeat(40), "workflow_dispatch");
+    }));
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "trial run 1001 (https://github.com/ngvoicu/consensflow/actions/runs/1001) is of ffffffff, not {}: {TRIAL_NEXT}",
+            &world.head()[..8]
+        )
+    );
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn main_that_moved_between_the_check_and_the_dispatch_is_refused_at_once_with_the_run_of_the_new_head(
+) {
+    let (world, mut fake) = ready();
+    let upstream = world.upstream.clone();
+    // After the command asked main once more, and before GitHub took main's head for the run.
+    fake.before_dispatch = Some(Box::new(move || lands_on_upstream(&upstream)));
+    let ours = world.head();
+    let said = refusal(released(&world, &mut fake, false).0);
+    let new_head = git(&world.upstream, &["rev-parse", "main"]);
+    assert_ne!(new_head, ours);
+    assert_eq!(
+        said,
+        format!(
+            "main moved on to {new}: run 1001 is of {new}, not {old}; nothing was tagged. Run the command \
+             again, once that run (https://github.com/ngvoicu/consensflow/actions/runs/1001) has ended",
+            new = &new_head[..8],
+            old = &ours[..8]
+        )
+    );
+    // At once: the one wait was CI's run, going on for a look. Not twenty minutes of
+    // looks for a run of ours that GitHub will never list.
+    assert_eq!(fake.pauses, 1);
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_commit_it_ran_on() {
+    // An older hand run, of another commit, is the newest there is when ours is asked
+    // for; then main moves on, and ours shows a look late, or two.
+    for unlisted in [1, 2] {
+        let (world, mut fake) = ready();
+        fake.start("release.yml", &"e".repeat(40), "workflow_dispatch");
+        fake.unlisted_for = unlisted;
+        let upstream = world.upstream.clone();
+        fake.after_dispatch = Some(Box::new(move |_| lands_on_upstream(&upstream)));
+        let head = world.head();
+        // The trial is 1002, of the commit asked for: green, and the tag follows on it.
+        released(&world, &mut fake, false).0.unwrap();
+        let trials = fake.runs_of("release.yml", "workflow_dispatch");
+        assert_eq!(
+            trials.last().map(|run| (run.id, &run.commit)),
+            Some((1002, &head))
+        );
+        for remote in [&world.origin, &world.upstream] {
+            assert_eq!(
+                World::tagged(remote, &format!("v{ALPHA}")),
+                Some(head.clone())
+            );
+        }
+    }
+}
+
+#[test]
+fn a_gh_that_fails_while_the_trial_is_watched_is_a_refusal_naming_the_run_and_that_nothing_was_tagged(
+) {
+    // While the run is looked at.
+    let (world, mut fake) = ready();
+    fake.view_fails = vec![1001];
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "trial run 1001 (https://github.com/ngvoicu/consensflow/actions/runs/1001): gh could not say how \
+             it went (`gh run view 1001 --repo ngvoicu/consensflow --json status,conclusion,headSha,jobs` ended \
+             with status 1: HTTP 502: Bad Gateway); {TRIAL_NEXT}"
+        )
+    );
+    nothing_tagged(&world, &fake);
+    // While the run is looked for, after it was asked for.
+    let (world, mut fake) = ready();
+    fake.after_dispatch = Some(Box::new(|fake| fake.gh_fails = true));
+    let head = world.head();
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "trial: the run of release.yml on {} could not be looked for (`gh run list --repo ngvoicu/consensflow \
+             --workflow release.yml --commit {head} --event workflow_dispatch --limit 1 --json databaseId,headSha` \
+             ended with status 4: To get started with GitHub CLI, please run:  gh auth login); \
+             {TRIAL_NEXT_WITHOUT_A_RUN}",
+            &head[..8]
+        )
+    );
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn a_gh_that_fails_while_the_tags_run_is_watched_says_the_tag_stays_and_names_the_run() {
+    let (world, mut fake) = ready();
+    // The trial is 1001 and the tag's run 1002.
+    fake.view_fails = vec![1002];
+    let tag = format!("v{ALPHA}");
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "release run 1002 (https://github.com/ngvoicu/consensflow/actions/runs/1002): gh could not say how \
+             it went (`gh run view 1002 --repo ngvoicu/consensflow --json status,conclusion,headSha,jobs` ended \
+             with status 1: HTTP 502: Bad Gateway); {tag} stays on upstream; {}",
+            advice(&tag, Some(1002))
+        )
+    );
+    for remote in [&world.origin, &world.upstream] {
+        assert!(World::tagged(remote, &tag).is_some());
     }
 }
 

@@ -295,6 +295,16 @@ pub struct Fake {
     pub dispatch_fails: bool,
     /// What happens once CI's run of the commit has been watched: main moves on, say.
     pub after_ci: Option<Box<dyn FnOnce()>>,
+    /// What happens when a hand run is asked for, before GitHub takes `--ref`'s head
+    /// (main moves on, say), and once its run is started (someone else's hand run
+    /// of another commit follows it, say).
+    pub before_dispatch: Option<Box<dyn FnOnce()>>,
+    pub after_dispatch: Option<Box<dyn FnOnce(&mut Fake)>>,
+    /// The runs, by id, that `gh run view` cannot answer for (a 502, say).
+    pub view_fails: Vec<u64>,
+    /// Whether `gh run list` takes no notice of `--commit`, as it would if GitHub's
+    /// filter did not hold.
+    pub ignores_commit_filter: bool,
     /// Whether a `release/` branch pushed to upstream starts CI on it, and
     /// whether someone runs CI on it by hand as well, beside the push's run.
     pub branches_start_ci: bool,
@@ -341,6 +351,10 @@ impl Fake {
             hand_runs_start: true,
             dispatch_fails: false,
             after_ci: None,
+            before_dispatch: None,
+            after_dispatch: None,
+            view_fails: Vec::new(),
+            ignores_commit_filter: false,
             branches_start_ci: true,
             branch_ci_by_hand: false,
             gh_fails: false,
@@ -520,20 +534,29 @@ impl Fake {
                             .to_owned(),
                     };
                 }
+                if let Some(then) = self.before_dispatch.take() {
+                    then();
+                }
                 if self.hand_runs_start {
                     let commit =
                         self.upstream_commit(&flag("--ref").expect("a hand run is on a branch"));
                     self.start("release.yml", &commit, "workflow_dispatch");
+                }
+                if let Some(then) = self.after_dispatch.take() {
+                    then(self);
                 }
                 said("")
             }
             ["run", "list", ..] => {
                 let workflow = flag("--workflow").unwrap();
                 let (commit, event) = (flag("--commit"), flag("--event"));
-                let mut newest = None;
+                let by_commit = !self.ignores_commit_filter;
+                let mut newest: Option<(u64, String)> = None;
                 for run in &mut self.runs {
                     let fits = run.workflow == workflow
-                        && commit.as_ref().is_none_or(|commit| run.commit == *commit)
+                        && commit
+                            .as_ref()
+                            .is_none_or(|commit| !by_commit || run.commit == *commit)
                         && event.as_ref().is_none_or(|event| run.event == *event);
                     if !fits {
                         continue;
@@ -542,16 +565,25 @@ impl Fake {
                         run.unlisted_for -= 1;
                         continue;
                     }
-                    newest = newest.max(Some(run.id));
+                    if newest.as_ref().is_none_or(|(id, _)| run.id > *id) {
+                        newest = Some((run.id, run.commit.clone()));
+                    }
                 }
                 let listed: Vec<_> = newest
-                    .map(|id| json!({ "databaseId": id }))
+                    .map(|(id, commit)| json!({ "databaseId": id, "headSha": commit }))
                     .into_iter()
                     .collect();
                 said(&json!(listed).to_string())
             }
             ["run", "view", id, ..] => {
                 let id: u64 = id.parse().unwrap();
+                if self.view_fails.contains(&id) {
+                    return Captured {
+                        code: 1,
+                        stdout: String::new(),
+                        stderr: "HTTP 502: Bad Gateway".to_owned(),
+                    };
+                }
                 let run = self.runs.iter_mut().find(|run| run.id == id).unwrap();
                 let (status, conclusion) = if run.running_for > 0 {
                     run.running_for -= 1;
@@ -573,8 +605,11 @@ impl Fake {
                     })
                     .collect();
                 said(
-                    &json!({ "status": status, "conclusion": conclusion, "jobs": jobs })
-                        .to_string(),
+                    &json!({
+                        "status": status, "conclusion": conclusion,
+                        "headSha": run.commit, "jobs": jobs,
+                    })
+                    .to_string(),
                 )
             }
             _ => panic!("gh was asked what GitHub's script does not answer: {args:?}"),

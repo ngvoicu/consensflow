@@ -39,8 +39,13 @@
 //!    main`) on that commit, the trial, watched to its end: it builds, signs and
 //!    smoke-tests the packages as the tag's run will, and publishes nothing. One
 //!    that does not end green stops the run before any tag, saying the job and
-//!    the step that failed and the run's address. Main must still be the commit
-//!    CI passed, for a hand run is of a branch's head;
+//!    the step that failed, the run's address and what to do next; so does a `gh`
+//!    that cannot be asked about it. The run watched is of the commit tagged: it is
+//!    looked for by that commit, and its own `headSha` must be it. A hand run is of
+//!    a branch's head, so main must still be the commit CI passed: it is asked
+//!    again before the dispatch, and a main that moves between that and the
+//!    dispatch is told from a run that is only late, and refused at once, with the
+//!    run of the new head;
 //! 7. the annotated tag, its message the notes, pushed to origin and upstream;
 //! 8. the Release run of the tag, watched to its end: its `gate` job finds CI's
 //!    green run of the commit, and its `mac` and `windows` jobs build, sign and

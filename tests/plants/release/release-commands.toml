@@ -942,3 +942,143 @@ find = '''
                 format!("{}; {address}", failed.join(", "))'''
 replace = '''
                 failed.join(", ")'''
+
+# The trial is bound to the commit that is tagged, and told from a main that moved (T-897).
+
+[[plant]]
+name = "release: the run asked for is looked for by no commit"
+meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = ".newest_run(workflow, Some(watched.commit), watched.event)"
+replace = ".newest_run(workflow, None, watched.event)"
+
+[[plant]]
+name = "release: the list of runs is not asked for the commit"
+meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+        if let Some(commit) = commit {
+            args.extend(["--commit", commit]);
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "release: a run of another commit is taken for the one asked for"
+meant = "a_run_of_another_commit_that_gh_lists_anyway_is_refused_for_what_it_says_of_itself"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "            if status.head_sha != watched.commit {"
+replace = "            if status.head_sha.is_empty() {"
+
+[[plant]]
+name = "release: a main that moved is not looked for while the run is waited for"
+meant = "main_that_moved_between_the_check_and_the_dispatch_is_refused_at_once_with_the_run_of_the_new_head"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "                self.main_moved(watched, head)?;"
+replace = "                let _ = head;"
+
+[[plant]]
+name = "release: a main that is still the commit is taken for moved"
+meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "        if now == watched.commit {"
+replace = "        if now.is_empty() {"
+
+[[plant]]
+name = "release: the run that is ours is taken for one of a main that moved"
+meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_commit_it_ran_on"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "        if Some(id) == head.newest_before || sha == watched.commit {"
+replace = "        if Some(id) == head.newest_before {"
+
+[[plant]]
+name = "release: the run that was there before is taken for one of a main that moved"
+meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_commit_it_ran_on"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "        if Some(id) == head.newest_before || sha == watched.commit {"
+replace = "        if sha == watched.commit {"
+
+[[plant]]
+name = "release: the newest run before the trial is not taken"
+meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_commit_it_ran_on"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+        let newest_before = self.newest_run("release.yml", None, Some("workflow_dispatch"))?;'''
+replace = "        let newest_before = None;"
+
+[[plant]]
+name = "release: a gh that fails while the run is looked at ends the command as gh's error"
+meant = "a_gh_that_fails_while_the_trial_is_watched_is_a_refusal_naming_the_run_and_that_nothing_was_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                .status(id)
+                .map_err(|error| watched.unasked(&error, Some(id)))?;'''
+replace = '''
+                .status(id)?;'''
+
+[[plant]]
+name = "release: a gh that fails while the run is looked for ends the command as gh's error"
+meant = "a_gh_that_fails_while_the_trial_is_watched_is_a_refusal_naming_the_run_and_that_nothing_was_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                .newest_run(workflow, Some(watched.commit), watched.event)
+                .map_err(|error| watched.unasked(&error, None))?;'''
+replace = '''
+                .newest_run(workflow, Some(watched.commit), watched.event)?;'''
+
+[[plant]]
+name = "release: a trial that fails is told as nothing after it was done"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+            left: Left::Trial,'''
+replace = '''
+            left: Left::Nothing,'''
+
+[[plant]]
+name = "release: a trial that fails says nothing of what to do next"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                Some(_) => "nothing was tagged. Read the failed step at the address; for a flake run the command \
+                            again, which starts a new trial; for a real failure fix it on main so that CI runs \
+                            again, then run the command again"
+                    .to_owned(),'''
+replace = '''
+                Some(_) => "nothing was tagged".to_owned(),'''
