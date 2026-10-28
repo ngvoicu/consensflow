@@ -66,8 +66,9 @@ const WORKFLOW: &str = "ci.yml";
 /// The runs read when none is named.
 const LAST: usize = 5;
 
-/// The share of its limit a job or a step may take.
-const SHARE: u64 = 80;
+/// The share of its limit a job or a step may take: past it, a shard of the daemons warns as it
+/// runs ([`crate::suites`]), and this check fails.
+pub(crate) const SHARE: u64 = 80;
 
 /// What a limit is set on.
 #[derive(Debug, PartialEq, Eq)]

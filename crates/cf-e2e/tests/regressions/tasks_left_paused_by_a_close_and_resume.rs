@@ -22,9 +22,6 @@ use serde_json::{json, Value};
 use crate::a_trust_question_after_git_init_stopped_every_launch::{git_init, notes_of, trusted};
 use crate::{config, secs, Outcome};
 
-/// How the window of a resumed task is told its turn was cut, after its number.
-const CUT: &str = ". Go on where you stopped.";
-
 /// The chief's own words of a pause, which a task that goes on never needs.
 const PAUSED: &str = "is paused:";
 
@@ -58,6 +55,21 @@ fn told(rig: &Rig, session: &str, words: &str) -> usize {
         .filter_map(|record| record["message"]["content"].as_str().map(str::to_owned))
         .filter(|text| text.contains(words))
         .count()
+}
+
+/// How many of the messages a conversation was given tell it its turn on T-`number`
+/// was cut: the note's sentence ends after the task, or goes on to name the turn (T-814).
+fn told_cut(rig: &Rig, session: &str, number: i64) -> usize {
+    [".", ", in the turn that began "]
+        .iter()
+        .map(|after| {
+            told(
+                rig,
+                session,
+                &format!("while you were working on T-{number}{after}"),
+            )
+        })
+        .sum()
 }
 
 /// The state of the task `number`.
@@ -173,11 +185,10 @@ fn a_close_and_a_resume_bring_back_the_tasks_the_close_paused_in_their_own_windo
             task.number,
             again["argv"]
         );
-        let words = format!("while you were working on T-{}{CUT}", task.number);
         rig.wait_for(
             &format!("T-{}'s window to be told its turn was cut", task.number),
             secs(60),
-            || Ok(told(&rig, &task.session, &words) == 1),
+            || Ok(told_cut(&rig, &task.session, task.number) == 1),
         )?;
     }
     // The chief came back on its own, and was never told of a pause that no longer is.
@@ -199,8 +210,7 @@ fn a_close_and_a_resume_bring_back_the_tasks_the_close_paused_in_their_own_windo
         rig.transcript(&chief_session)
     );
     for task in &working {
-        let words = format!("while you were working on T-{}{CUT}", task.number);
-        assert_eq!(told(&rig, &task.session, &words), 1, "told once");
+        assert_eq!(told_cut(&rig, &task.session, task.number), 1, "told once");
     }
 
     // T-3 stays paused, and its window does not come back.
@@ -259,11 +269,10 @@ fn a_window_the_resume_opens_again_on_the_trust_question_is_answered_and_told_on
         "{:?}",
         again["argv"]
     );
-    let words = format!("while you were working on T-1{CUT}");
     rig.wait_for("T-1 to be done", secs(90), || {
         Ok(state(&project, 1)? == "done")
     })?;
-    assert_eq!(told(&rig, &task.session, &words), 1, "told once");
+    assert_eq!(told_cut(&rig, &task.session, task.number), 1, "told once");
     let same = |line: &str| {
         std::fs::canonicalize(line).ok() == std::fs::canonicalize(rig.workspace()).ok()
     };

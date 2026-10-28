@@ -9,6 +9,9 @@
 
 use crate::shared::input_box::{boxed, Cursor, InputBox};
 
+/// The prompt mark the box's first line begins with.
+pub(crate) const MARK: char = '❯';
+
 /// The suggestion an empty box shows in a new conversation.
 const SUGGESTS: &str = "Try \"";
 
@@ -17,7 +20,7 @@ const SUGGESTS: &str = "Try \"";
 /// the cursor says so ([`Boxed::only_a_hint`](crate::shared::input_box::Boxed));
 /// else it is not read.
 pub(crate) fn read(screen: &[String], cursor: Option<Cursor>) -> Option<InputBox> {
-    let boxed = boxed(screen, '❯')?;
+    let boxed = boxed(screen, MARK)?;
     let (typed, more) = (boxed.typed, boxed.more);
     if (!more && typed.is_empty()) || boxed.only_a_hint(cursor) {
         return Some(InputBox::Empty);
@@ -128,5 +131,29 @@ mod tests {
             super::read(&boxed("❯ Try \"how do I log an error?\"\n  more"), at(2, 0)),
             Some(InputBox::Holds)
         );
+    }
+
+    /// What the human is told the box shows, of a delivery held for it (T-839): its
+    /// words, every line of them; nothing where it holds only a hint; and no word of a
+    /// screen with no box.
+    #[test]
+    fn the_box_shows_its_words_a_hint_none_and_a_screen_with_no_box_is_not_read() {
+        use crate::shared::input_box::shown;
+        use cf_proto::agents::Harness;
+        let claude = |screen: &[String], cursor| shown(Harness::Claude, screen, cursor);
+        assert_eq!(
+            claude(&boxed("❯ half a thought"), None).as_deref(),
+            Some("half a thought")
+        );
+        assert_eq!(
+            claude(&boxed("❯ first\n  second"), None).as_deref(),
+            Some("first\nsecond")
+        );
+        assert_eq!(
+            claude(&boxed("❯ Try \"how do I log an error?\""), at(2, 0)).as_deref(),
+            Some("")
+        );
+        assert_eq!(claude(&boxed("❯ "), None).as_deref(), Some(""));
+        assert_eq!(claude(&lines("fake agent started on s-1"), None), None);
     }
 }

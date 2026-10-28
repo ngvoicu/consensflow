@@ -16,8 +16,16 @@
 //! regressions take two minutes each), go to different shards. The test
 //! program is still libtest's, as without a shard: one process for a file's
 //! cases, which take turns in it.
+//!
+//! A shard says how long it has taken after each test file, against the limit its
+//! step has where CI gives it one ([`LIMIT`], the step's `timeout-minutes`), and
+//! warns past [`crate::ci_times::SHARE`] of it: on GitHub as a warning of the run
+//! (`::warning::`), so that a suite that grows is seen before a shard is cut short
+//! (3.0.6-alpha.3's integration B doubled the daemons' cases' time, and every macOS
+//! shard hit its 30 minutes in the first run on main, T-836).
 
 use std::ffi::OsString;
+use std::time::{Duration, Instant};
 
 use crate::context::Context;
 use crate::dispatch::{Console, Failure};
@@ -27,6 +35,14 @@ use super::Suite;
 
 /// The variable that names the shard of a suite a run is: `I/N`.
 pub(crate) const SHARD: &str = "CF_TEST_SHARD";
+
+/// The variable that says, in minutes, the limit of the step a shard runs in: CI's
+/// `timeout-minutes` of that step, which ci.yml gives it beside (a test holds the two
+/// equal).
+pub(crate) const LIMIT: &str = "CF_TEST_SHARD_LIMIT_MINUTES";
+
+/// The variable GitHub's runners set, where a warning of the run is a line of its own.
+const ON_GITHUB: &str = "GITHUB_ACTIONS";
 
 /// The most the names given to one run of a test file may come to, in bytes:
 /// Windows starts no program whose command line passes 32,767 characters, and
@@ -179,6 +195,13 @@ pub(crate) fn run(
         shard.count,
         each.join(", ")
     )?;
+    let limit = context
+        .env
+        .text(LIMIT)
+        .and_then(|minutes| minutes.trim().parse::<u64>().ok())
+        .map(|minutes| Duration::from_secs(minutes * 60));
+    let on_github = context.env.text(ON_GITHUB) == Some("true");
+    let began = Instant::now();
     for (file, names) in &mine {
         for invocation in runs(context, file, args, names) {
             let code = process::run(&invocation, &context.env)?;
@@ -186,8 +209,46 @@ pub(crate) fn run(
                 return Ok(code);
             }
         }
+        for line in timing(shard, file, began.elapsed(), limit, on_github) {
+            writeln!(console.err, "{line}")?;
+        }
     }
     Ok(0)
+}
+
+/// What the shard says once it has run the cases of `file`, `elapsed` since it began:
+/// how long it has taken, of its `limit` where it has one, and a warning past
+/// [`crate::ci_times::SHARE`] of it (GitHub's own line `::warning` where `on_github`).
+fn timing(
+    shard: Shard,
+    file: &str,
+    elapsed: Duration,
+    limit: Option<Duration>,
+    on_github: bool,
+) -> Vec<String> {
+    let (index, count) = (shard.index, shard.count);
+    let took = elapsed.as_secs();
+    let Some(limit) = limit.filter(|limit| !limit.is_zero()) else {
+        return vec![format!("shard {index}/{count}: {file} done, {took} s in")];
+    };
+    let of = limit.as_secs();
+    let percent = elapsed.as_millis() * 100 / limit.as_millis();
+    let mut lines = vec![format!(
+        "shard {index}/{count}: {file} done, {took} s in, {percent} % of the step's {of} s"
+    )];
+    if percent >= u128::from(crate::ci_times::SHARE) {
+        let said = format!(
+            "shard {index}/{count} of the daemons has taken {percent} % of its step's {of} s \
+             (past {} %): add a shard or raise the limit before it is cut short",
+            crate::ci_times::SHARE
+        );
+        lines.push(if on_github {
+            format!("::warning title=shard {index}/{count} near its limit::{said}")
+        } else {
+            format!("warning: {said}")
+        });
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -209,6 +270,37 @@ mod tests {
         (0..count)
             .map(|n| format!("{prefix}::case_{n:03}"))
             .collect()
+    }
+
+    /// A shard says its time after each test file, against its step's limit where it has
+    /// one, and warns past the share `ci-times` holds a step to; on GitHub as a warning of
+    /// the run.
+    #[test]
+    fn a_shard_says_its_time_against_its_limit_and_warns_past_the_share() {
+        let shard = Shard { index: 2, count: 6 };
+        let minutes = |n: u64| Duration::from_secs(n * 60);
+        assert_eq!(
+            timing(shard, "rig", Duration::from_secs(400), None, true),
+            ["shard 2/6: rig done, 400 s in"]
+        );
+        assert_eq!(
+            timing(shard, "rig", minutes(15), Some(minutes(30)), true),
+            ["shard 2/6: rig done, 900 s in, 50 % of the step's 1800 s"]
+        );
+        let near = timing(shard, "regressions", minutes(24), Some(minutes(30)), true);
+        assert_eq!(
+            near[0],
+            "shard 2/6: regressions done, 1440 s in, 80 % of the step's 1800 s"
+        );
+        assert!(
+            near[1].starts_with("::warning title=shard 2/6 near its limit::"),
+            "{near:?}"
+        );
+        let off_github = timing(shard, "regressions", minutes(29), Some(minutes(30)), false);
+        assert!(
+            off_github[1].starts_with("warning: shard 2/6 of the daemons has taken 96 %"),
+            "{off_github:?}"
+        );
     }
 
     #[test]

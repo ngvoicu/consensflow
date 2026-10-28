@@ -26,9 +26,9 @@ use crate::{config, rig, secs, session_of, Outcome};
 /// What Claude writes of a turn it was interrupted in.
 const INTERRUPTED: &str = "[Request interrupted by user]";
 
-/// What the chief is told when the app quit in the middle of its turn.
-const CHIEF_CUT: &str =
-    "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped.";
+/// How the chief's note begins when the app quit in the middle of its turn: what
+/// follows names the turn, by the message that began it (T-814).
+const CHIEF_CUT: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
 
 /// A project with a chief and one worker, whose human approves every hand-off.
 fn gated_project(rig: &Rig) -> cf_e2e::Result<Project<'_>> {

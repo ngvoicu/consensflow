@@ -5,7 +5,7 @@
 //! (`messages/continuations.rs`; the lead's design of 2026-10-17, after both
 //! reviews of round 7).
 
-use cf_ledger::{continuation, GivenUp, HandOver, MessageView, NewNote};
+use cf_ledger::{continuation, continuation_in, cut_turn, GivenUp, HandOver, MessageView, NewNote};
 
 use crate::fixture::{world, World};
 
@@ -390,4 +390,61 @@ fn a_reassignment_never_carries_a_continuation_into_the_next_brief() {
             "handed {handed}"
         );
     }
+}
+
+#[test]
+fn a_continuation_that_names_its_turn_goes_with_a_pause_of_its_task_as_any_does() {
+    let mut w = world();
+    let (number, session, first) = continued(&mut w);
+    let named = w
+        .ledger
+        .note(
+            w.project,
+            &NewNote {
+                from: None,
+                to: session,
+                task: Some(number),
+                body: continuation_in(number, &cut_turn(None, "Write the lexer")),
+            },
+        )
+        .expect("the continuation");
+
+    w.pause(number);
+
+    for note in [first.id, named.id] {
+        assert_eq!(withdrawn(&w, note).0, "cancelled");
+    }
+}
+
+#[test]
+fn a_resume_withdraws_only_a_note_of_consensflow_s_own_still_queued() {
+    let mut w = world();
+    let (_, session, note) = continued(&mut w);
+    let from_the_chief = w
+        .ledger
+        .note(
+            w.project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session,
+                task: None,
+                body: "Carry on".to_owned(),
+            },
+        )
+        .expect("the chief's note");
+
+    assert!(!w
+        .ledger
+        .withdraw_note(&from_the_chief, "judged again")
+        .unwrap());
+    assert_eq!(w.message(from_the_chief.id).state, "queued");
+    assert!(w.ledger.withdraw_note(&note, "judged again").unwrap());
+    assert_eq!(
+        withdrawn(&w, note.id),
+        ("cancelled".to_owned(), Some("judged again".to_owned()))
+    );
+    assert!(
+        !w.ledger.withdraw_note(&note, "judged again").unwrap(),
+        "once"
+    );
 }

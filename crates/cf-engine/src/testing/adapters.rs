@@ -6,7 +6,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use cf_harness::contract::{Adapter, Records, Work};
+use cf_harness::contract::{Adapter, Records, TurnLeft, Work};
 use cf_harness::records::{Options, Reading, Record, Settlement};
 use cf_proto::agents::Harness;
 use serde_json::json;
@@ -141,7 +141,7 @@ impl Records for FakeRecords {
     /// it is no call of the adapter in a trace. A read the test holds
     /// (`record_holds`, told `[{ conversation: { nativeSession } }, "cut"]`)
     /// answers once it is let go.
-    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
+    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<TurnLeft>> {
         let Some(fake) = self.adapters.fake(harness.kind()) else {
             return Box::pin(async { None });
         };

@@ -82,7 +82,7 @@ fn cut_note(question: &Value) -> Result<Value, String> {
         kind: "note".to_owned(),
         task_number: coming.task(),
         reply_to: None,
-        body: coming.words(),
+        body: coming.words(None),
         state: "delivering".to_owned(),
         attempts: 0,
         reason: None,

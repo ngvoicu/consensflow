@@ -9,9 +9,18 @@
 //! closes a cut turn, and runs a `SessionStart:resume` hook, for a `/resume`
 //! in the window too, which keeps its queue, and writes the hook's record
 //! after what the new process queued first.
+//!
+//! A notification of a job Claude Code ended itself (`killed`) is queued and taken
+//! and begins no turn ([`begins_no_turn`]): it waits in no state, and a window
+//! whose turn it was all that held was at rest (T-814: the closes of poker-lab and
+//! sites each left one taken, and the Resume told those chiefs their turns were cut).
+//! What Claude Code's other notifications hold is said apart ([`Queues::only_notices`]):
+//! a turn is to begin for each, so a window that is open waits for it, but nothing of
+//! it began in the record.
 
 use std::collections::VecDeque;
 
+use super::jobs::{begins_no_turn, is_notice};
 use super::text::same_queued_content;
 
 /// The contents of the messages in each state, the oldest first.
@@ -26,9 +35,25 @@ pub(super) struct Queues {
 }
 
 impl Queues {
-    /// How many messages wait in any state (`queuedTurns`).
+    /// How many messages wait in any state (`queuedTurns`), but a notification
+    /// queued that begins no turn.
     pub(super) fn turns(&self) -> usize {
-        self.queued.len() + self.dequeued.len() + self.popped.len()
+        let queued = self
+            .queued
+            .iter()
+            .filter(|content| !begins_no_turn(content));
+        queued.count() + self.dequeued.len() + self.popped.len()
+    }
+
+    /// Whether every message that waits is a notification of Claude Code's: no
+    /// message of anyone's waits.
+    pub(super) fn only_notices(&self) -> bool {
+        self.popped.is_empty()
+            && self
+                .queued
+                .iter()
+                .chain(&self.dequeued)
+                .all(|content| is_notice(content))
     }
 
     /// An `enqueue`.
@@ -37,10 +62,13 @@ impl Queues {
     }
 
     /// A `dequeue`: the oldest queued message is taken, or an empty one when
-    /// the record never queued it.
+    /// the record never queued it. A notification that begins no turn is gone
+    /// once taken.
     pub(super) fn dequeue(&mut self) {
-        self.dequeued
-            .push_back(self.queued.pop_front().unwrap_or_default());
+        let taken = self.queued.pop_front().unwrap_or_default();
+        if !begins_no_turn(&taken) {
+            self.dequeued.push_back(taken);
+        }
     }
 
     /// A `popAll`: the message it names is taken back, out of the queue as
