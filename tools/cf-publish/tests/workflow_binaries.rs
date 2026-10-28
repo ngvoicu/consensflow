@@ -445,7 +445,7 @@ struct Statement {
 }
 
 /// The statements of a script, split at a line's end, `;`, `&`, `&&`, `|`, `||`, a parenthesis and
-/// a backtick, outside quotes; the comments left out, and PowerShell's `&` that starts a statement
+/// a backtick (and, in PowerShell, a brace: the statements of a block are the block's), outside quotes; the comments left out, and PowerShell's `&` that starts a statement
 /// (the call operator) with them. Quotes are as the shell reads them: cmd has no single quote, and
 /// only bash takes a backslash for an escape.
 fn statements(script: &str, shell: Shell) -> Vec<Statement> {
@@ -498,7 +498,11 @@ fn statements(script: &str, shell: Shell) -> Vec<Statement> {
                         at += 1;
                     }
                 }
-                ' ' | '\t' | '\r' | '\n' | ';' | '|' | '(' | ')' | '`' | '&' => {
+                c if matches!(
+                    c,
+                    ' ' | '\t' | '\r' | '\n' | ';' | '|' | '(' | ')' | '`' | '&'
+                ) || (shell == Shell::Pwsh && matches!(c, '{' | '}')) =>
+                {
                     if started {
                         words.push(std::mem::take(&mut word));
                         started = false;
@@ -632,6 +636,39 @@ const READS: [&str; 40] = [
     "remove-item",
 ];
 
+/// Programs that run the command they are given: for each, the options that are given a value of
+/// their own, and how many words come between its options and the command.
+const WRAPPERS: [(&str, &[&str], usize); 9] = [
+    ("timeout", &["-s", "--signal", "-k", "--kill-after"], 1),
+    ("nice", &["-n", "--adjustment"], 0),
+    ("caffeinate", &["-t", "-w"], 0),
+    ("arch", &["-arch"], 0),
+    ("setsid", &[], 0),
+    (
+        "flock",
+        &["-w", "--timeout", "-E", "--conflict-exit-code"],
+        1,
+    ),
+    ("stdbuf", &["-i", "-o", "-e"], 0),
+    (
+        "xvfb-run",
+        &[
+            "-s",
+            "--server-args",
+            "-n",
+            "--server-num",
+            "-e",
+            "--error-file",
+            "-f",
+            "--auth-file",
+            "-w",
+            "--wait",
+        ],
+        0,
+    ),
+    ("script", &["-t"], 1),
+];
+
 /// `xargs` options that are given a value of their own.
 const XARGS_TAKES: [&str; 9] = ["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "-J"];
 
@@ -686,6 +723,8 @@ struct Walk<'a> {
     cwd: Option<String>,
     found: BTreeSet<usize>,
     named: BTreeSet<usize>,
+    /// The relative paths run after a `cd` into a folder the rule cannot resolve.
+    unplaced: Vec<String>,
 }
 
 impl Walk<'_> {
@@ -710,8 +749,14 @@ impl Walk<'_> {
             .collect()
     }
 
-    /// A file at `path` is run.
+    /// A file at `path` is run. A path from no root, where the folder the script is in is not
+    /// known (a `cd` into a variable the rule does not know), is not placed: that is said, never
+    /// taken for a file of nothing.
     fn hit(&mut self, path: &str) {
+        if !absolute(path) && self.cwd.is_none() {
+            self.unplaced.push(path.to_string());
+            return;
+        }
         let found = self.inside_of(path);
         self.found.extend(found);
     }
@@ -791,8 +836,35 @@ impl Walk<'_> {
         if NO_COMMAND.contains(&program) {
             return;
         }
+        if let Some((_, takes, before)) = WRAPPERS.iter().find(|(name, ..)| *name == program) {
+            // flock and script may be given the command as a string.
+            let string = args
+                .iter()
+                .position(|arg| arg == "-c" || arg == "--command")
+                .and_then(|at| args.get(at + 1));
+            if let Some(string) = string.filter(|_| ["flock", "script"].contains(&program)) {
+                self.text(string, Shell::Bash);
+                return;
+            }
+            let mut at = 0;
+            while at < args.len() && args[at].starts_with('-') {
+                at += if takes.contains(&args[at].as_str()) {
+                    2
+                } else {
+                    1
+                };
+            }
+            if let Some(wrapped) = args
+                .get(at + before..)
+                .filter(|wrapped| !wrapped.is_empty())
+            {
+                self.command(&wrapped[0], &wrapped[1..], shell);
+            }
+            return;
+        }
         match program {
             "eval" => self.text(&args.join(" "), shell),
+            "invoke-expression" | "iex" => self.text(&args.join(" "), Shell::Pwsh),
             "sh" | "bash" | "dash" | "zsh" | "ksh" => {
                 let flag = args.iter().position(|arg| {
                     arg.starts_with('-') && !arg.starts_with("--") && arg.contains('c')
@@ -807,6 +879,13 @@ impl Walk<'_> {
                     .position(|arg| ["-c", "-command"].contains(&arg.to_lowercase().as_str()));
                 if let Some(at) = flag {
                     self.text(&args[at + 1..].join(" "), Shell::Pwsh);
+                }
+                // A script given to run is run.
+                let file = args
+                    .iter()
+                    .position(|arg| ["-file", "-f"].contains(&arg.to_lowercase().as_str()));
+                if let Some(script) = file.and_then(|at| args.get(at + 1)) {
+                    self.hit(script);
                 }
             }
             "cmd" => {
@@ -908,13 +987,14 @@ impl Walk<'_> {
 }
 
 /// The downloads (by their place in `downloads`) whose files the script makes run.
-fn runs_of(script: &Script, downloads: &[Download]) -> BTreeSet<usize> {
+fn runs_of(script: &Script, downloads: &[Download]) -> (BTreeSet<usize>, Vec<String>) {
     let mut walk = Walk {
         downloads,
         bindings: BTreeMap::new(),
         cwd: None,
         found: BTreeSet::new(),
         named: BTreeSet::new(),
+        unplaced: Vec::new(),
     };
     for (name, value) in &script.env {
         let value = value.trim_matches(['"', '\'']);
@@ -926,7 +1006,7 @@ fn runs_of(script: &Script, downloads: &[Download]) -> BTreeSet<usize> {
         |dir| spelled(&expand(&expressions(dir), &walk.bindings)),
     ));
     walk.text(&script.text, script.shell);
-    walk.found
+    (walk.found, walk.unplaced)
 }
 
 // --- the rule ------------------------------------------------------------------------------
@@ -963,11 +1043,20 @@ fn check(workflows: &Workflows) -> Report {
     }
     let mut runs = 0;
     for job in &jobs {
-        let run: BTreeSet<usize> = job
-            .scripts
-            .iter()
-            .flat_map(|script| runs_of(script, &job.downloads))
-            .collect();
+        let mut run: BTreeSet<usize> = BTreeSet::new();
+        for script in &job.scripts {
+            let (found, unplaced) = runs_of(script, &job.downloads);
+            run.extend(found);
+            // With nothing downloaded there is nothing of a downloaded binary to run.
+            if !job.downloads.is_empty() {
+                for path in unplaced {
+                    problems.push(format!(
+                        "{}:{} runs {path} after a cd into a folder this rule cannot resolve",
+                        job.workflow, job.name
+                    ));
+                }
+            }
+        }
         for index in run {
             runs += 1;
             let artifact = &job.downloads[index].artifact;
@@ -1061,7 +1150,7 @@ fn runs_x(script: &str, shell: Shell) -> bool {
         artifact: "x".to_string(),
         folder: "$RUNNER_TEMP/x".to_string(),
     }];
-    !runs_of(&script, &downloads).is_empty()
+    !runs_of(&script, &downloads).0.is_empty()
 }
 
 #[test]
@@ -1588,6 +1677,93 @@ fn under_cmd_a_bare_program_of_the_folder_one_is_in_is_run() {
         "cd /d %RUNNER_TEMP%\\tool\ndir\ncopy tool.exe ..\\dist\\\necho tool.exe\ncertutil -hashfile tool.exe SHA256\ndel old.exe",
     ));
     assert_eq!(reads.runs, 0, "{:?}", reads.problems);
+}
+
+// --- what the rule once did not read, again (T-847 P3-5) ----------------------------------------
+
+#[test]
+fn a_wrapper_program_runs_its_argument() {
+    for script in [
+        "timeout 5 \"$RUNNER_TEMP/tool/tool\" --version",
+        "timeout -s KILL 5 \"$RUNNER_TEMP/tool/tool\"",
+        "nice -n 5 \"$RUNNER_TEMP/tool/tool\"",
+        "caffeinate -i \"$RUNNER_TEMP/tool/tool\"",
+        "caffeinate -t 60 \"$RUNNER_TEMP/tool/tool\"",
+        "arch -arm64 \"$RUNNER_TEMP/tool/tool\"",
+        "setsid \"$RUNNER_TEMP/tool/tool\"",
+        "flock \"$RUNNER_TEMP/lock\" \"$RUNNER_TEMP/tool/tool\"",
+        "flock -c 'chmod +x \"$RUNNER_TEMP/tool/tool\"' \"$RUNNER_TEMP/lock\"",
+        "stdbuf -oL \"$RUNNER_TEMP/tool/tool\"",
+        "stdbuf -o L \"$RUNNER_TEMP/tool/tool\"",
+        "xvfb-run -a \"$RUNNER_TEMP/tool/tool\"",
+        "script -q /dev/null \"$RUNNER_TEMP/tool/tool\" --version",
+        "script -c 'chmod +x \"$RUNNER_TEMP/tool/tool\"' /dev/null",
+        "timeout 5 nice -n 5 chmod +x \"$RUNNER_TEMP/tool/tool\"",
+    ] {
+        assert_caught(
+            &running("macos-latest", TEMP_TOOL, "bash", script),
+            LINUX_TOOL_ON_MAC,
+        );
+    }
+    // A wrapper around a program that only reads runs nothing of what it is given.
+    let read = check(&running(
+        "macos-latest",
+        TEMP_TOOL,
+        "bash",
+        "timeout 5 shasum -a 256 \"$RUNNER_TEMP/tool/tool\"\nnice ls -l \"$RUNNER_TEMP/tool\"\nflock \"$RUNNER_TEMP/lock\" cp \"$RUNNER_TEMP/tool/tool\" dist",
+    ));
+    assert_eq!(read.runs, 0, "{:?}", read.problems);
+}
+
+#[test]
+fn invoke_expression_and_invoke_command_run_what_they_are_given() {
+    for script in [
+        "Invoke-Expression \"chmod +x $env:RUNNER_TEMP/tool/tool\"",
+        "iex \"$env:RUNNER_TEMP/tool/tool --version\"",
+        "Invoke-Command -ScriptBlock { chmod +x \"$env:RUNNER_TEMP/tool/tool\" }",
+        "icm { chmod 755 \"$env:RUNNER_TEMP/tool/tool\" }",
+        "pwsh -File \"$env:RUNNER_TEMP/tool/tool.ps1\"",
+        "powershell -NoProfile -File $env:RUNNER_TEMP/tool/tool.ps1 -Arg 1",
+    ] {
+        assert_caught(
+            &running("macos-latest", TEMP_TOOL, "pwsh", script),
+            LINUX_TOOL_ON_MAC,
+        );
+    }
+}
+
+#[test]
+fn a_run_after_a_cd_into_a_folder_the_rule_cannot_resolve_is_a_failure_not_nothing() {
+    for script in [
+        "cd \"$somewhere\"\n./tool --version",
+        "cd \"$somewhere\" && chmod +x tool",
+        "pushd \"$NOT_KNOWN/bin\"\nbin/tool",
+        "for out in a b; do cd \"$out\"; ./tool; done",
+    ] {
+        assert_caught(
+            &running("macos-latest", TEMP_TOOL, "bash", script),
+            "after a cd into a folder this rule cannot resolve",
+        );
+    }
+    // Nothing relative is run after it, or the folder is known again: nothing to say.
+    for script in [
+        "cd \"$somewhere\"\nls\nfind . -type f | sort",
+        "cd \"$somewhere\"\ncd \"$RUNNER_TEMP/other\"\n./tool",
+        "cd \"$somewhere\"\n\"$RUNNER_TEMP/other/tool\" --version",
+    ] {
+        let said = check(&running("macos-latest", TEMP_TOOL, "bash", script));
+        assert!(said.problems.is_empty(), "{script}: {:?}", said.problems);
+    }
+    // And a job with no download has nothing of a downloaded binary to run.
+    let none = BTreeMap::from([(
+        "fixture.yml".to_string(),
+        "name: Fixture\non: push\njobs:\n  use:\n    runs-on: macos-latest\n    steps:\n      - run: |\n          cd \"$somewhere\"\n          ./tool\n".to_string(),
+    )]);
+    assert!(
+        check(&none).problems.is_empty(),
+        "{:?}",
+        check(&none).problems
+    );
 }
 
 // --- and what it leaves alone, and what it says it cannot read -------------------------------
