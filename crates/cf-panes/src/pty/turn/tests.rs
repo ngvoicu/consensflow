@@ -531,18 +531,23 @@ mod windows {
         assert!(!names(&whole, "1002"), "{whole:?}");
         table.write(&key, b"\r").expect("go on");
         read_until(&table, &key, &output, "STOPPED#");
+        // A look that cannot read a process of the window says so, and the engine looks
+        // again: one that lasts is a failure, as is a command still told.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut unread = 0;
         loop {
-            let after = look(rest).expect("told");
-            if after.total == 0 {
+            let after = look(rest);
+            if after.as_ref().is_some_and(|after| after.total == 0) {
                 break;
             }
+            unread += usize::from(after.is_none());
             assert!(
                 std::time::Instant::now() < deadline,
-                "the stopped shell was still told: {after:?}"
+                "the stopped shell was still told, or the window never read ({unread} looks unread): {after:?}"
             );
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
+        eprintln!("looks unread after the stop: {unread}");
         table.kill(&key).expect("close the pane");
     }
 }
