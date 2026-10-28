@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_proto::agents::Harness;
-use cf_proto::models::Models;
+use cf_proto::models::ModelListing;
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
@@ -54,7 +54,7 @@ pub trait Adapter {
     /// lists them, with no model turn (CHF-03): or why it cannot. `fetch` is the human's
     /// Refresh: a harness that answers from a catalog it keeps (Pi) fetches it anew first,
     /// which nothing else asks of it. A harness ConsensFlow cannot ask says so.
-    fn models(&self, _fetch: bool) -> Work<'_, Result<Models, String>> {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
         Box::pin(async { Err("ConsensFlow cannot read this harness's models".to_owned()) })
     }
 

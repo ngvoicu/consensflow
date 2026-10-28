@@ -71,7 +71,6 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
         models: Rc::new(crate::models::ModelLists::new(
             Rc::new(crate::models::tests_support::NoAdapters),
             env_of_models,
-            Rc::new(cf_harness::testing::ManualTime::new(0)),
         )),
     });
     Rig {

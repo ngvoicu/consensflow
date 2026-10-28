@@ -1,18 +1,22 @@
-//! The harnesses' model lists, as the ledger's callers hold them.
+//! The harnesses' model listings, as the ledger's callers hold them.
 
-use cf_proto::models::ModelList;
+use cf_proto::models::ModelListing;
 
 use super::Ledger;
 use crate::{model_lists, LedgerError};
 
 impl Ledger {
-    /// The list of models kept for `harness` (`claude`), if one was ever tried.
-    pub fn model_list(&self, harness: &str) -> Result<Option<ModelList>, LedgerError> {
-        model_lists::model_list(&self.store, harness)
+    /// The model listing kept for `harness` (`claude`), if a read was ever tried.
+    pub fn model_listing(&self, harness: &str) -> Result<Option<ModelListing>, LedgerError> {
+        model_lists::model_listing(&self.store, harness)
     }
 
-    /// Keeps `list` as its harness's, in place of what was kept.
-    pub fn keep_model_list(&mut self, list: &ModelList) -> Result<(), LedgerError> {
-        model_lists::keep_model_list(&mut self.store, list)
+    /// Keeps `listing` as `harness`'s, in place of what was kept.
+    pub fn keep_model_listing(
+        &mut self,
+        harness: &str,
+        listing: &ModelListing,
+    ) -> Result<(), LedgerError> {
+        model_lists::keep_model_listing(&mut self.store, harness, listing)
     }
 }

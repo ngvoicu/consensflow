@@ -468,11 +468,7 @@ async fn run(
             open: system_opener(env.clone()),
             grants_of: crate::computer_use::grants_of(&env),
         },
-        models: Rc::new(ModelLists::new(
-            adapters,
-            env.clone(),
-            Rc::clone(&time) as _,
-        )),
+        models: Rc::new(ModelLists::new(adapters, env.clone())),
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);

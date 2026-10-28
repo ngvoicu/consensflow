@@ -6,17 +6,20 @@ use serde_json::json;
 use super::*;
 use crate::testing::{finished, ChildScript, Ends, ManualTime, ScriptedProcesses};
 
+/// When a test's list is read.
+const AT: i64 = 1_793_000_000_000;
+
 /// What Pi 1.4.0 answered `get_available_models` with on 2026-10-28, offline, a few rows of
 /// each provider kept (`tools/probes/chief-harness/models.py pi`), and with no login.
 const RECORDED: &str = include_str!("../../../tests/fixtures/models/pi-get-available-models.json");
 const SIGNED_OUT: &str =
     include_str!("../../../tests/fixtures/models/pi-get-available-models-signed-out.json");
 
-fn recorded() -> Models {
-    parse(&serde_json::from_str(RECORDED).unwrap()).unwrap()
+fn recorded() -> ModelListing {
+    parse(&serde_json::from_str(RECORDED).unwrap(), AT).unwrap()
 }
 
-fn efforts_of(models: &Models, model: &str) -> Vec<String> {
+fn efforts_of(models: &ModelListing, model: &str) -> Vec<String> {
     models.model(model).expect(model).efforts.clone()
 }
 
@@ -31,7 +34,7 @@ fn each_model_keeps_its_provider_apart_and_launches_as_both_joined() {
         "openrouter/anthropic/claude-fable-5"
     );
     assert_eq!(models.models.len(), 20);
-    assert!(!models.stale);
+    assert!(!models.is_stale());
     assert_eq!(models.how, HOW);
 }
 
@@ -71,12 +74,12 @@ fn a_contributor_model_pi_lists_is_marked_and_never_the_default() {
 
 #[test]
 fn pi_with_no_login_lists_no_model_and_says_why() {
-    let signed_out = parse(&serde_json::from_str(SIGNED_OUT).unwrap());
+    let signed_out = parse(&serde_json::from_str(SIGNED_OUT).unwrap(), AT);
     assert_eq!(
         signed_out,
         Err("Pi lists no model: it holds no login for any provider".to_owned())
     );
-    let refused = parse(&json!({ "success": false, "error": "bad" }));
+    let refused = parse(&json!({ "success": false, "error": "bad" }), AT);
     assert_eq!(
         refused,
         Err("pi refused get_available_models: bad".to_owned())
@@ -104,7 +107,7 @@ fn the_list_is_read_offline_with_nothing_of_pi_s_own() {
 fn listed_with(
     update: Option<Result<String, Failed>>,
     fetch: bool,
-) -> (Result<Models, String>, Vec<String>) {
+) -> (Result<ModelListing, String>, Vec<String>) {
     let folder = tempfile::tempdir().unwrap();
     let pi = crate::testing::fake_executable(&folder.path().join("pi"));
     let env = Env::from_vars([("PATH", pi.parent().unwrap().as_os_str())]);
@@ -134,11 +137,11 @@ fn listed_with(
 #[test]
 fn only_the_human_s_refresh_fetches_pi_s_catalogs_and_a_failed_fetch_leaves_a_stale_list() {
     let (listed, ran) = listed_with(None, false);
-    assert!(!listed.unwrap().stale);
+    assert!(!listed.unwrap().is_stale());
     assert!(ran.is_empty(), "nothing fetched: {ran:?}");
 
     let (listed, ran) = listed_with(Some(Ok(String::new())), true);
-    assert!(!listed.unwrap().stale);
+    assert!(!listed.unwrap().is_stale());
     assert_eq!(ran, ["pi update --models"]);
 
     let failed = Failed {
@@ -149,6 +152,11 @@ fn only_the_human_s_refresh_fetches_pi_s_catalogs_and_a_failed_fetch_leaves_a_st
     };
     let (listed, _) = listed_with(Some(Err(failed)), true);
     let listed = listed.unwrap();
-    assert!(listed.stale);
+    assert_eq!(
+        listed.freshness,
+        cf_proto::models::Freshness::Stale {
+            why: "Pi's own catalog: pi update --models failed: offline".to_owned()
+        }
+    );
     assert_eq!(listed.models.len(), 1, "the list Pi keeps");
 }

@@ -159,7 +159,6 @@ impl Player {
             models: Rc::new(cf_daemon::models::ModelLists::new(
                 Rc::new(NoAdapters),
                 self.world.env(),
-                Rc::new(cf_harness::testing::ManualTime::new(0)),
             )),
         });
         let (daemon_end, app_end) = duplex(256 * 1024);

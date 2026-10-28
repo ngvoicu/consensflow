@@ -21,7 +21,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
-use cf_proto::models::Models;
+use cf_proto::models::ModelListing;
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 
@@ -69,7 +69,7 @@ impl PiAdapter {
 }
 
 impl Adapter for PiAdapter {
-    fn models(&self, fetch: bool) -> Work<'_, Result<Models, String>> {
+    fn models(&self, fetch: bool) -> Work<'_, Result<ModelListing, String>> {
         Box::pin(super::models::listed(
             &self.env,
             &*self.processes,

@@ -16,11 +16,12 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
-use cf_proto::models::{ModelChoice, Models};
+use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::Value;
 
 use crate::detect::executable;
 use crate::seams::processes::{Limits, Processes, Program};
+use crate::seams::Time;
 
 /// How the list is read, as the human could run it.
 pub const HOW: &str = "devin models list --format json";
@@ -91,8 +92,8 @@ fn label_without(label: &str, effort: &str) -> String {
 }
 
 /// What the list says, its models in the order Devin lists them, each with its efforts
-/// from the lowest. Fails where it lists no model.
-pub fn parse(listed: &Value) -> Result<Models, String> {
+/// from the lowest, read at `at`. Fails where it lists no model.
+pub fn parse(listed: &Value, at: i64) -> Result<ModelListing, String> {
     let families = listed
         .get("families")
         .and_then(Value::as_array)
@@ -140,16 +141,16 @@ pub fn parse(listed: &Value) -> Result<Models, String> {
     if models.is_empty() {
         return Err("Devin lists no model".to_owned());
     }
-    Ok(Models {
-        models,
-        stale: false,
-        how: HOW.to_owned(),
-    })
+    Ok(ModelListing::read(models, at, HOW))
 }
 
 /// The models `program` lists, or why it could not say: Devin's own words where it ended
 /// with one (`Not logged in. Run devin auth login to authenticate.`).
-pub async fn read(processes: &dyn Processes, program: Program) -> Result<Models, String> {
+pub async fn read(
+    processes: &dyn Processes,
+    program: Program,
+    at: i64,
+) -> Result<ModelListing, String> {
     let listed = processes.run(program, LIMITS).await.map_err(|failed| {
         let said = failed.message.lines().skip(1).collect::<Vec<_>>().join(" ");
         let said = said.trim();
@@ -165,13 +166,18 @@ pub async fn read(processes: &dyn Processes, program: Program) -> Result<Models,
     })?;
     let listed: Value =
         serde_json::from_str(&listed).map_err(|error| format!("{HOW} said no JSON: {error}"))?;
-    parse(&listed)
+    parse(&listed, at)
 }
 
 /// The models the Devin installed here lists for its login.
-pub(crate) async fn listed(env: &Env, processes: &dyn Processes) -> Result<Models, String> {
+pub(crate) async fn listed(
+    env: &Env,
+    processes: &dyn Processes,
+    time: &dyn Time,
+) -> Result<ModelListing, String> {
     let executable = executable(Harness::Devin, env)?;
-    read(processes, program(PathBuf::from(executable), env)).await
+    let at = time.wall_ms();
+    read(processes, program(PathBuf::from(executable), env), at).await
 }
 
 #[cfg(test)]

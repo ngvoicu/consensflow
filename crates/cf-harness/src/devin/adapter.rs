@@ -55,7 +55,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
-use cf_proto::models::Models;
+use cf_proto::models::ModelListing;
 use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
@@ -261,10 +261,11 @@ impl DevinAdapter {
 const CLEAR_INPUT: [u8; 1] = [0x03];
 
 impl Adapter for DevinAdapter {
-    fn models(&self, _fetch: bool) -> Work<'_, Result<Models, String>> {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
         Box::pin(super::models::listed(
             &self.services.env,
             &*self.services.processes,
+            &*self.services.time,
         ))
     }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {

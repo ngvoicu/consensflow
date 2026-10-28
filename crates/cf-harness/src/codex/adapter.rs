@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
-use cf_proto::models::Models;
+use cf_proto::models::ModelListing;
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 
@@ -124,7 +124,7 @@ impl CodexAdapter {
 }
 
 impl Adapter for CodexAdapter {
-    fn models(&self, _fetch: bool) -> Work<'_, Result<Models, String>> {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
         Box::pin(super::models::listed(
             &self.services.env,
             &*self.services.processes,

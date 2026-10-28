@@ -1,8 +1,8 @@
 //! The models each harness lists, as the home keeps them (CHF-03): read from the harness
 //! itself ([`Adapter::models`]) at the first ask of this daemon's life and again at the
 //! human's Refresh, never in the background, one harness at a time; between, what the
-//! ledger kept answers. A read that fails keeps the list read before, marked stale, with
-//! the reason ([`ModelList::after`]).
+//! ledger kept answers. A read that fails keeps the listing read before, stale for its
+//! reason ([`ModelListing::after`]).
 //!
 //! Read at the first ask, not as the daemon starts: a daemon a test starts would run every
 //! harness its PATH and the system's folders find, and the human who opens no picker
@@ -15,17 +15,15 @@ use std::rc::Rc;
 use cf_base::env::Env;
 use cf_engine::seams::Adapters;
 use cf_harness::detect::harness_path;
-use cf_harness::seams::Time;
 use cf_ledger::Ledger;
 use cf_proto::agents::Harness;
-use cf_proto::models::ModelList;
+use cf_proto::models::ModelListing;
 use tokio::sync::Mutex;
 
 /// The harnesses' model lists of this daemon's life.
 pub struct ModelLists {
     adapters: Rc<dyn Adapters>,
     env: Env,
-    time: Rc<dyn Time>,
     /// The harnesses read since the daemon started.
     read: RefCell<HashSet<Harness>>,
     /// Held through each read: one harness at a time (two Pi probes at once have hung).
@@ -33,17 +31,16 @@ pub struct ModelLists {
 }
 
 impl ModelLists {
-    pub fn new(adapters: Rc<dyn Adapters>, env: Env, time: Rc<dyn Time>) -> Self {
+    pub fn new(adapters: Rc<dyn Adapters>, env: Env) -> Self {
         Self {
             adapters,
             env,
-            time,
             read: RefCell::new(HashSet::new()),
             reading: Mutex::new(()),
         }
     }
 
-    /// The list of `harness`, read from it first where this daemon has not read it yet or
+    /// The listing of `harness`, read from it first where this daemon has not read it yet or
     /// `refresh` asks (the human's Refresh, which also has a harness fetch the catalog it
     /// keeps), and kept. Fails where the harness is not installed here, or the ledger
     /// fails.
@@ -52,14 +49,14 @@ impl ModelLists {
         ledger: &RefCell<Ledger>,
         harness: Harness,
         refresh: bool,
-    ) -> Result<ModelList, String> {
+    ) -> Result<ModelListing, String> {
         if harness_path(harness, &self.env).is_none() {
             return Err(format!("{} is not installed here", harness.as_str()));
         }
         let _turn = self.reading.lock().await;
         let kept = ledger
             .borrow()
-            .model_list(harness.as_str())
+            .model_listing(harness.as_str())
             .map_err(|failed| failed.to_string())?;
         if !refresh && self.read.borrow().contains(&harness) {
             if let Some(kept) = kept {
@@ -70,15 +67,13 @@ impl ModelLists {
             .adapters
             .adapter(harness.kind())
             .ok_or_else(|| format!("{} has no adapter", harness.as_str()))?;
-        let at = self.time.wall_ms();
-        let read = adapter.models(refresh).await;
-        let list = ModelList::after(harness.as_str(), kept, at, read);
+        let listing = ModelListing::after(kept, adapter.models(refresh).await);
         ledger
             .borrow_mut()
-            .keep_model_list(&list)
+            .keep_model_listing(harness.as_str(), &listing)
             .map_err(|failed| failed.to_string())?;
         self.read.borrow_mut().insert(harness);
-        Ok(list)
+        Ok(listing)
     }
 }
 

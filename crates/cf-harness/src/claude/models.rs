@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use cf_base::env::Env;
 use cf_base::home::config_root;
 use cf_proto::agents::Harness;
-use cf_proto::models::{ModelChoice, Models};
+use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
 use crate::detect::executable;
@@ -52,8 +52,9 @@ pub fn program(executable: PathBuf, env: &Env, config: &Path) -> Program {
     }
 }
 
-/// What the `initialize` answer's `response` lists. Fails where it lists no model.
-pub fn parse(response: &Value) -> Result<Models, String> {
+/// What the `initialize` answer's `response` lists, read at `at`. Fails where it lists no
+/// model.
+pub fn parse(response: &Value, at: i64) -> Result<ModelListing, String> {
     let rows = response
         .get("models")
         .and_then(Value::as_array)
@@ -88,11 +89,7 @@ pub fn parse(response: &Value) -> Result<Models, String> {
     if models.is_empty() {
         return Err("Claude Code lists no model".to_owned());
     }
-    Ok(Models {
-        models,
-        stale: false,
-        how: HOW.to_owned(),
-    })
+    Ok(ModelListing::read(models, at, HOW))
 }
 
 /// The strings of a list.
@@ -109,7 +106,8 @@ pub async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,
-) -> Result<Models, String> {
+) -> Result<ModelListing, String> {
+    let at = time.wall_ms();
     let request = json!({
         "type": "control_request",
         "request_id": "models",
@@ -134,7 +132,7 @@ pub async fn read(
         let said = response["error"].as_str().unwrap_or("no reason given");
         return Err(format!("claude -p refused initialize: {said}"));
     }
-    parse(&response["response"])
+    parse(&response["response"], at)
 }
 
 /// The models the Claude Code installed here lists, read in ConsensFlow's own config
@@ -143,7 +141,7 @@ pub(crate) async fn listed(
     env: &Env,
     processes: &dyn Processes,
     time: &dyn Time,
-) -> Result<Models, String> {
+) -> Result<ModelListing, String> {
     let executable = executable(Harness::Claude, env)?;
     let config = config_root(env)
         .ok_or("ConsensFlow has no home to read Claude Code's models in")?

@@ -5,6 +5,9 @@ use serde_json::json;
 use super::*;
 use crate::testing::{ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
 
+/// When a test's list is read.
+const AT: i64 = 1_793_000_000_000;
+
 /// What Claude Code 2.1.312 answered `initialize` with on 2026-10-28, signed out
 /// (`tools/probes/chief-harness/models.py claude`), its `account` block dropped.
 const RECORDED: &str = include_str!("../../../tests/fixtures/models/claude-initialize.json");
@@ -15,7 +18,7 @@ fn recorded() -> Value {
 
 #[test]
 fn each_model_is_its_resolved_id_with_its_efforts_and_the_default_pointer_marks_one() {
-    let models = parse(&recorded()).unwrap();
+    let models = parse(&recorded(), AT).unwrap();
     let ids: Vec<&str> = models.models.iter().map(|model| &*model.id).collect();
     assert_eq!(
         ids,
@@ -32,7 +35,7 @@ fn each_model_is_its_resolved_id_with_its_efforts_and_the_default_pointer_marks_
     assert_eq!(opus.efforts, ["low", "medium", "high", "xhigh", "max"]);
     assert!(opus.marked_default, "`default` resolves to it");
     assert!(models.models[1..].iter().all(|model| !model.marked_default));
-    assert!(!models.stale);
+    assert!(!models.is_stale());
     assert_eq!(models.how, HOW);
     assert_eq!(
         models.default_model().map(|model| &*model.id),
@@ -42,13 +45,16 @@ fn each_model_is_its_resolved_id_with_its_efforts_and_the_default_pointer_marks_
 
 #[test]
 fn a_row_with_no_effort_or_disabled_says_so_and_a_disabled_one_is_never_the_default() {
-    let models = parse(&json!({ "models": [
+    let models = parse(
+        &json!({ "models": [
         { "value": "default", "resolvedModel": "claude-fable-5-1" },
         { "value": "fable", "resolvedModel": "claude-fable-5-1", "displayName": "Fable",
           "disabled": true, "supportedEffortLevels": ["low"] },
         { "value": "haiku", "resolvedModel": "claude-haiku-5-5", "supportsEffort": false,
           "supportedEffortLevels": ["low"] },
-    ] }))
+    ] }),
+        AT,
+    )
     .unwrap();
     assert!(models.models[0].disabled && models.models[0].marked_default);
     assert!(models.models[1].efforts.is_empty());
@@ -60,8 +66,8 @@ fn a_row_with_no_effort_or_disabled_says_so_and_a_disabled_one_is_never_the_defa
 
 #[test]
 fn an_answer_with_no_model_is_no_list() {
-    assert!(parse(&json!({})).is_err());
-    assert!(parse(&json!({ "models": [{ "value": "default" }] })).is_err());
+    assert!(parse(&json!({}), AT).is_err());
+    assert!(parse(&json!({ "models": [{ "value": "default" }] }), AT).is_err());
 }
 
 #[test]
@@ -89,7 +95,7 @@ fn the_list_is_read_in_the_config_folder_it_is_given_never_the_human_s() {
 }
 
 /// What a read of a scripted `claude` writing `lines` came to.
-fn read_of(lines: &[String]) -> (Result<Models, String>, Vec<String>) {
+fn read_of(lines: &[String]) -> (Result<ModelListing, String>, Vec<String>) {
     let processes = Rc::new(ScriptedProcesses::default());
     processes.child(
         "claude",

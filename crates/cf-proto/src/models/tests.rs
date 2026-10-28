@@ -1,11 +1,7 @@
 use super::*;
 
-fn listed(models: Vec<ModelChoice>) -> Models {
-    Models {
-        models,
-        stale: false,
-        how: "a test".to_owned(),
-    }
+fn listed(models: Vec<ModelChoice>) -> ModelListing {
+    ModelListing::read(models, 10, "a test")
 }
 
 fn marked(id: &str) -> ModelChoice {
@@ -74,14 +70,18 @@ fn a_list_of_contributor_models_alone_has_no_default() {
 
 #[test]
 fn a_stale_list_gives_no_default_whatever_it_marks() {
-    let models = Models {
-        stale: true,
-        ..listed(vec![
-            marked("gpt-6.1-sol"),
-            ModelChoice::new("gpt-5.5", "5.5"),
-        ])
-    };
+    let models = listed(vec![
+        marked("gpt-6.1-sol"),
+        ModelChoice::new("gpt-5.5", "5.5"),
+    ])
+    .stale("the list Codex ships");
     assert_eq!(models.default_model(), None);
+    assert_eq!(
+        models.freshness,
+        Freshness::Stale {
+            why: "the list Codex ships".to_owned()
+        }
+    );
 }
 
 #[test]
@@ -139,53 +139,48 @@ fn an_effort_inside_the_id_launches_the_exact_id_listed_never_a_join() {
 }
 
 #[test]
-fn a_failed_try_keeps_the_list_read_before_marked_stale_with_its_reason() {
+fn a_failed_read_keeps_the_listing_read_before_stale_for_its_reason() {
     let read = listed(vec![marked("swe-2")]);
-    let first = ModelList::after("devin", None, 10, Ok(read.clone()));
-    assert_eq!(
-        (
-            first.read_at,
-            first.tried_at,
-            first.stale,
-            first.failure.clone()
-        ),
-        (Some(10), 10, false, None)
-    );
-    let second = ModelList::after(
-        "devin",
-        Some(first.clone()),
-        20,
-        Err("Not logged in".to_owned()),
-    );
+    let first = ModelListing::after(None, Ok(read.clone()));
+    assert_eq!(first, read);
+    assert_eq!((first.read_at, first.is_stale()), (Some(10), false));
+    let second = ModelListing::after(Some(first), Err("Not logged in".to_owned()));
     assert_eq!(second.models, read.models);
-    assert_eq!(second.how, "a test");
+    assert_eq!((second.read_at, second.how.as_str()), (Some(10), "a test"));
     assert_eq!(
-        (second.read_at, second.tried_at, second.stale),
-        (Some(10), 20, true)
+        second.freshness,
+        Freshness::Stale {
+            why: "Not logged in".to_owned()
+        }
     );
-    assert_eq!(second.failure.as_deref(), Some("Not logged in"));
-    assert_eq!(second.models().default_model(), None, "stale: no default");
+    assert_eq!(second.default_model(), None, "stale: no default");
 
-    let third = ModelList::after("devin", Some(second), 30, Ok(read));
+    let third = ModelListing::after(Some(second), Ok(listed(vec![marked("swe-3")])));
     assert_eq!(
-        (third.stale, third.failure, third.read_at),
-        (false, None, Some(30))
+        (third.is_stale(), third.models[0].id.as_str()),
+        (false, "swe-3")
     );
 }
 
 #[test]
-fn a_failed_first_try_keeps_an_empty_list_with_its_reason() {
-    let list = ModelList::after("devin", None, 5, Err("Not logged in".to_owned()));
-    assert!(list.models.is_empty());
-    assert_eq!((list.read_at, list.stale), (None, true));
-    assert_eq!(list.failure.as_deref(), Some("Not logged in"));
+fn a_failed_first_read_keeps_an_empty_listing_stale_for_its_reason() {
+    let listing = ModelListing::after(None, Err("Not logged in".to_owned()));
+    assert!(listing.models.is_empty());
+    assert_eq!((listing.read_at, listing.is_stale()), (None, true));
 }
 
 #[test]
-fn another_harness_s_list_is_never_kept_for_this_one() {
-    let claude = ModelList::after("claude", None, 1, Ok(listed(vec![marked("opus")])));
-    let devin = ModelList::after("devin", Some(claude), 2, Err("no".to_owned()));
-    assert!(devin.models.is_empty());
+fn a_listing_s_json_says_its_freshness_by_state() {
+    let fresh = serde_json::to_value(listed(Vec::new())).unwrap();
+    assert_eq!(
+        fresh,
+        serde_json::json!({ "models": [], "readAt": 10, "freshness": { "state": "fresh" }, "how": "a test" })
+    );
+    let stale = serde_json::to_value(listed(Vec::new()).stale("offline")).unwrap();
+    assert_eq!(
+        stale["freshness"],
+        serde_json::json!({ "state": "stale", "why": "offline" })
+    );
 }
 
 #[test]

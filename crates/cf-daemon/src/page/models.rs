@@ -1,6 +1,6 @@
 //! `models.get`: the models a harness lists, for the chief's picker and the staff chains'
-//! editor (CHF-03), as the home keeps them ([`crate::models::ModelLists`]): the list,
-//! whether it is stale and why, when and how it was read, the model a harness is started
+//! editor (CHF-03), as the home keeps them ([`crate::models::ModelLists`]): the listing
+//! (its models, when and how it was read, and why it is stale where it is), the model a harness is started
 //! on where nothing names one (never a contributor model, never from a stale list), and
 //! the words a picker shows beside a contributor model.
 
@@ -16,10 +16,11 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let name = body.text("harness");
     let harness = Harness::from_name(&name).ok_or_else(|| format!("{name:?} is no harness"))?;
     let refresh = body.get("refresh") == Some(&Value::Bool(true));
-    let list = page.models.get(&page.ledger, harness, refresh).await?;
-    let default = list.models().default_model().map(ModelChoice::model);
+    let listing = page.models.get(&page.ledger, harness, refresh).await?;
+    let default = listing.default_model().map(ModelChoice::model);
     merged(json!({
-        "list": list,
+        "harness": harness.as_str(),
+        "listing": listing,
         "default": default,
         "contributorWarning": CONTRIBUTOR_WARNING,
     }))

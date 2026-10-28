@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_proto::agents::Harness;
-use cf_proto::models::{ModelChoice, Models};
+use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
 use super::paths::codex_home;
@@ -48,7 +48,7 @@ pub fn program(executable: PathBuf, env: &Env) -> Program {
 /// What the pages of `model/list` list, the hidden models left out. Stale where `fetched`
 /// (when the app-server's copy was fetched, if it kept one) is not within [`FRESH_MS`] of
 /// `at`. Fails where it lists no model.
-pub fn parse(pages: &[Value], fetched: Option<i64>, at: i64) -> Result<Models, String> {
+pub fn parse(pages: &[Value], fetched: Option<i64>, at: i64) -> Result<ModelListing, String> {
     let text = |row: &Value, name: &str| row.get(name).and_then(Value::as_str).map(str::to_owned);
     let models: Vec<ModelChoice> = pages
         .iter()
@@ -82,10 +82,13 @@ pub fn parse(pages: &[Value], fetched: Option<i64>, at: i64) -> Result<Models, S
     if models.is_empty() {
         return Err("Codex lists no model".to_owned());
     }
-    Ok(Models {
-        models,
-        stale: fetched.is_none_or(|fetched| at - fetched > FRESH_MS),
-        how: HOW.to_owned(),
+    let listing = ModelListing::read(models, at, HOW);
+    Ok(match fetched {
+        None => listing.stale("the list Codex ships: it holds no copy of the account's"),
+        Some(fetched) if at - fetched > FRESH_MS => {
+            listing.stale("Codex's copy of the account's list, which it could not fetch again")
+        }
+        Some(_) => listing,
     })
 }
 
@@ -159,7 +162,7 @@ pub(crate) async fn listed(
     env: &Env,
     processes: &dyn Processes,
     time: &dyn Time,
-) -> Result<Models, String> {
+) -> Result<ModelListing, String> {
     let executable = executable(Harness::Codex, env)?;
     let at = time.wall_ms();
     let pages = pages(processes, time, program(PathBuf::from(executable), env)).await?;

@@ -142,7 +142,9 @@ fn env(harness: Harness, home: &Path, scratch: &Path) -> Result<Value> {
 /// What one harness's list came to.
 fn checks_of(harness: Harness, listed: &Value, log: &Log) -> Vec<Check> {
     let who = harness.name();
-    let models = listed["models"].as_array().cloned().unwrap_or_default();
+    let listing = &listed["listing"];
+    let models = listing["models"].as_array().cloned().unwrap_or_default();
+    let freshness = &listing["freshness"];
     let ids: Vec<String> = models
         .iter()
         .map(|model| match model["provider"].as_str() {
@@ -151,10 +153,10 @@ fn checks_of(harness: Harness, listed: &Value, log: &Log) -> Vec<Check> {
         })
         .collect();
     log.say(format!(
-        "{who}: {} models by {}, stale {}, default {}; first: {}",
+        "{who}: {} models by {}, freshness {}, default {}; first: {}",
         ids.len(),
-        live::text(&listed["how"]),
-        listed["stale"],
+        live::text(&listing["how"]),
+        freshness,
         listed["default"],
         ids.iter().take(6).cloned().collect::<Vec<_>>().join(", ")
     ));
@@ -181,8 +183,8 @@ fn checks_of(harness: Harness, listed: &Value, log: &Log) -> Vec<Check> {
         Check::new(
             who,
             "the account's list, not stale",
-            listed["stale"] == false,
-            format!("stale {}", listed["stale"]),
+            freshness["state"] == "fresh",
+            format!("{freshness}"),
         ),
         Check::new(
             who,

@@ -4,7 +4,7 @@
 //!
 //! **A contributor model is never a default:** its provider may train on what it sees
 //! (Meta says "your content … may be used for product improvement" of Muse's
-//! `-contributor` models, which Pi lists too). [`Models::default_model`] never answers one,
+//! `-contributor` models, which Pi lists too). [`ModelListing::default_model`] never answers one,
 //! and [`warning`] is what a picker shows beside one.
 
 use std::collections::BTreeMap;
@@ -94,28 +94,84 @@ impl ModelChoice {
     }
 }
 
-/// What reading a harness's models answered.
+/// A harness's models, as one read of the harness listed them: what an adapter answers,
+/// what the home ledger keeps of each harness, and what the pickers choose from (the
+/// chief's, the staff chains' editor's, Muse's). The one model listing there is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Models {
+pub struct ModelListing {
     pub models: Vec<ModelChoice>,
-    /// The list is not the account's as of now: what the harness ships, or what it kept from
-    /// an earlier fetch it could not repeat. Kept, and never a default's source.
-    pub stale: bool,
-    /// How it was read: the command and the request, as the human could run them.
+    /// When the list was read, in milliseconds since the epoch; none where no read has
+    /// answered yet.
+    pub read_at: Option<i64>,
+    /// Whether the list is the account's as of `read_at`.
+    pub freshness: Freshness,
+    /// How it was read: the command and the request, as the human could run them; empty
+    /// where no read has answered.
     pub how: String,
 }
 
-impl Models {
+/// Whether a listing is the account's own as of when it was read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum Freshness {
+    /// The account's list, as the harness fetched or holds it now.
+    Fresh,
+    /// Not the account's as of now, and never a default's source: what the harness ships,
+    /// a copy it could not fetch again, or the list of an earlier read kept after a read
+    /// that failed. `why` says which, in words a picker shows.
+    Stale { why: String },
+}
+
+impl ModelListing {
+    /// A fresh listing of `models` read at `at`, `how`.
+    pub fn read(models: Vec<ModelChoice>, at: i64, how: &str) -> Self {
+        Self {
+            models,
+            read_at: Some(at),
+            freshness: Freshness::Fresh,
+            how: how.to_owned(),
+        }
+    }
+
+    /// This listing, stale for `why`.
+    #[must_use]
+    pub fn stale(self, why: impl Into<String>) -> Self {
+        Self {
+            freshness: Freshness::Stale { why: why.into() },
+            ..self
+        }
+    }
+
+    /// Whether it is stale.
+    pub fn is_stale(&self) -> bool {
+        matches!(self.freshness, Freshness::Stale { .. })
+    }
+
+    /// What is kept now that a read answered `read`: the answer, whole; or, where it
+    /// failed, the listing kept before (an empty one where there was none), stale for the
+    /// failure's reason.
+    pub fn after(kept: Option<ModelListing>, read: Result<ModelListing, String>) -> Self {
+        read.unwrap_or_else(|failure| {
+            kept.unwrap_or(Self {
+                models: Vec::new(),
+                read_at: None,
+                freshness: Freshness::Fresh,
+                how: String::new(),
+            })
+            .stale(failure)
+        })
+    }
+
     /// The model a harness is started on where nothing names one: the one the harness
     /// marks, unless it is a contributor model, then its twin that is not
     /// (`muse-spark-1.3` for `muse-spark-1.3-contributor`), else the first that is neither
     /// a contributor model nor disabled. None where every model is one of those: no default
-    /// is better than one its provider trains on. None too where the list is
-    /// [`Models::stale`]: it may name what the account no longer offers, and a window
-    /// launched on such a model fails at its first turn (T-816).
+    /// is better than one its provider trains on. None too where the listing is stale: it
+    /// may name what the account no longer offers, and a window launched on such a model
+    /// fails at its first turn (T-816).
     pub fn default_model(&self) -> Option<&ModelChoice> {
-        if self.stale {
+        if self.is_stale() {
             return None;
         }
         let usable = |model: &&ModelChoice| !model.contributor && !model.disabled;
@@ -141,80 +197,6 @@ impl Models {
 /// What a picker shows beside `model`: a warning for a contributor model, none else.
 pub fn warning(model: &ModelChoice) -> Option<&'static str> {
     model.contributor.then_some(CONTRIBUTOR_WARNING)
-}
-
-/// A harness's models as the home ledger keeps them: the last list read, when and how,
-/// and what became of the last try.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelList {
-    /// The harness, by the CLI's own name (`claude`).
-    pub harness: String,
-    /// The last list read; none if no read has ever answered.
-    pub models: Vec<ModelChoice>,
-    /// The list is not the account's as of now: the harness answered from what it ships or
-    /// kept ([`Models::stale`]), or the last try failed and this is an earlier read's.
-    pub stale: bool,
-    /// How the list was read ([`Models::how`]); empty where no read has answered.
-    pub how: String,
-    /// When the list was read, in milliseconds since the epoch; none where no read has
-    /// answered.
-    pub read_at: Option<i64>,
-    /// When it was last tried.
-    pub tried_at: i64,
-    /// Why the last try failed (`devin models list: Not logged in…`); none where it answered.
-    pub failure: Option<String>,
-}
-
-impl ModelList {
-    /// What the kept list is now that a try at `at` answered `read`: the answer, kept
-    /// whole; or, where it failed, the list kept from before (none where there was none),
-    /// marked stale, with the reason.
-    pub fn after(
-        harness: &str,
-        kept: Option<ModelList>,
-        at: i64,
-        read: Result<Models, String>,
-    ) -> Self {
-        match read {
-            Ok(read) => Self {
-                harness: harness.to_owned(),
-                models: read.models,
-                stale: read.stale,
-                how: read.how,
-                read_at: Some(at),
-                tried_at: at,
-                failure: None,
-            },
-            Err(failure) => {
-                let kept = kept.filter(|kept| kept.harness == harness);
-                Self {
-                    harness: harness.to_owned(),
-                    stale: true,
-                    tried_at: at,
-                    failure: Some(failure),
-                    ..kept.unwrap_or(Self {
-                        harness: harness.to_owned(),
-                        models: Vec::new(),
-                        stale: true,
-                        how: String::new(),
-                        read_at: None,
-                        tried_at: at,
-                        failure: None,
-                    })
-                }
-            }
-        }
-    }
-
-    /// The list as a read's answer: what a default is chosen from.
-    pub fn models(&self) -> Models {
-        Models {
-            models: self.models.clone(),
-            stale: self.stale,
-            how: self.how.clone(),
-        }
-    }
 }
 
 #[cfg(test)]

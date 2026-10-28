@@ -51,6 +51,8 @@ GONE = {
 }
 PROMPT = "Reply with exactly: CF_OK"
 HOME = os.path.expanduser("~")
+# The words of a line that names an account, which the probe never prints.
+ACCOUNT_WORDS = ("Logged in as", "Organization", "@")
 DROPPED = ("CONSENSFLOW_", "CLAUDE_CODE_", "ANTHROPIC_", "OPENAI_", "CODEX_", "PI_")
 
 
@@ -97,8 +99,24 @@ def run(argv, env, cwd, stdin=None):
 
 
 def failure(ran):
-    """The first words of a failure: the error output, else the output's error lines."""
-    text = (ran["err"] or "").strip()
+    """The first words of a failure: the error items of a JSON stream (Codex's), else the
+    error output, else the output's error lines."""
+    said = []
+    for line in (ran["out"] or "").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        item = event.get("item") if isinstance(event, dict) else None
+        if isinstance(item, dict) and item.get("type") == "error":
+            said.append(item.get("message", ""))
+        elif isinstance(event, dict) and event.get("type") in ("error", "turn.failed"):
+            said.append(json.dumps(event.get("message") or event.get("error"))[:200])
+    if said:
+        return " | ".join(said)[:600]
+    # A harness's banner can name the account (Devin's "Logged in as …"): never said.
+    text = "\n".join(line for line in (ran["err"] or "").splitlines()
+                     if not any(word in line for word in ACCOUNT_WORDS)).strip()
     if not text:
         lines = [l for l in (ran["out"] or "").splitlines() if "error" in l.lower()]
         text = " | ".join(lines[:2])
@@ -273,6 +291,8 @@ def devin(scratch, a, b):
     work = os.path.join(scratch, "work")
     os.makedirs(work)
     newest = {}
+    # As ConsensFlow launches Devin: print mode cannot ask about the folder's trust.
+    devin_ = [exe("devin"), "--respect-workspace-trust", "false"]
 
     def sessions():
         if not os.path.exists(store):
@@ -288,17 +308,17 @@ def devin(scratch, a, b):
         model = dict(rows).get(newest.get("id"))
         return {"sessions.model": model, "sessions": len(rows)}
 
-    started = run([exe("devin"), "-p", PROMPT, "--model", a], env, work)
+    started = run(devin_ + ["-p", PROMPT, "--model", a], env, work)
     rows = sessions()
     newest["id"] = rows[-1][0] if rows else None
     yield "start", started, record()
     for name, extra in [("R1 no flag", []), ("R2 --model B", ["--model", b]),
                         ("R3 gone model", ["--model", GONE["devin"]]), ("R1' no flag after", [])]:
-        ran = run([exe("devin"), "-r", newest["id"] or "none", "-p", PROMPT] + extra, env, work)
+        ran = run(devin_ + ["-r", newest["id"] or "none", "-p", PROMPT] + extra, env, work)
         yield name, ran, record()
     family = a.rsplit("-", 1)[0]
     before = {row[0] for row in sessions()}
-    ran = run([exe("devin"), "-p", PROMPT, "--model", family], env, work)
+    ran = run(devin_ + ["-p", PROMPT, "--model", family], env, work)
     fresh = [row for row in sessions() if row[0] not in before]
     newest["id"] = fresh[-1][0] if fresh else None
     yield "R4 --model %s (no effort)" % family, ran, record()

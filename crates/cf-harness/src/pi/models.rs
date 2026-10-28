@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
-use cf_proto::models::{ModelChoice, Models};
+use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
 use crate::detect::executable;
@@ -73,9 +73,9 @@ fn levels(model: &Value) -> Vec<String> {
         .collect()
 }
 
-/// What a `get_available_models` answer lists. Fails where Pi refused, or lists no model
-/// (it holds no login for any provider).
-pub fn parse(answer: &Value) -> Result<Models, String> {
+/// What a `get_available_models` answer lists, read at `at`. Fails where Pi refused, or
+/// lists no model (it holds no login for any provider).
+pub fn parse(answer: &Value, at: i64) -> Result<ModelListing, String> {
     if answer.get("success") == Some(&Value::Bool(false)) {
         let said = answer["error"].as_str().unwrap_or("no reason given");
         return Err(format!("pi refused get_available_models: {said}"));
@@ -100,11 +100,7 @@ pub fn parse(answer: &Value) -> Result<Models, String> {
     if models.is_empty() {
         return Err("Pi lists no model: it holds no login for any provider".to_owned());
     }
-    Ok(Models {
-        models,
-        stale: false,
-        how: HOW.to_owned(),
-    })
+    Ok(ModelListing::read(models, at, HOW))
 }
 
 /// The models `program` lists: one bounded conversation, no turn.
@@ -112,7 +108,8 @@ pub async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,
-) -> Result<Models, String> {
+) -> Result<ModelListing, String> {
+    let at = time.wall_ms();
     let request = json!({ "id": "models", "type": "get_available_models" });
     let answer = conversation(
         processes,
@@ -128,7 +125,7 @@ pub async fn read(
         },
     )
     .await?;
-    parse(&answer)
+    parse(&answer, at)
 }
 
 /// The models the Pi installed here lists. Where `fetch` (the human's Refresh), its
@@ -139,9 +136,9 @@ pub(crate) async fn listed(
     processes: &dyn Processes,
     time: &dyn Time,
     fetch: bool,
-) -> Result<Models, String> {
+) -> Result<ModelListing, String> {
     let executable = PathBuf::from(executable(Harness::Pi, env)?);
-    let mut stale = false;
+    let mut fetched = Ok(());
     if fetch {
         let update = Program {
             executable: executable.clone(),
@@ -149,10 +146,16 @@ pub(crate) async fn listed(
             cwd: None,
             env: env.clone(),
         };
-        stale = processes.run(update, UPDATE_LIMITS).await.is_err();
+        fetched = processes.run(update, UPDATE_LIMITS).await.map(|_| ());
     }
-    let models = read(processes, time, program(executable, env)).await?;
-    Ok(Models { stale, ..models })
+    let listing = read(processes, time, program(executable, env)).await?;
+    Ok(match fetched {
+        Ok(()) => listing,
+        Err(failed) => listing.stale(format!(
+            "Pi's own catalog: pi update --models failed: {}",
+            failed.message.lines().last().unwrap_or_default()
+        )),
+    })
 }
 
 #[cfg(test)]

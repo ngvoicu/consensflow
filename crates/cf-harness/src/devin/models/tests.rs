@@ -6,14 +6,17 @@ use serde_json::json;
 use super::*;
 use crate::testing::{finished, ScriptedProcesses};
 
+/// When a test's list is read.
+const AT: i64 = 1_793_000_000_000;
+
 /// What Devin 3000.11.228 listed on 2026-10-28 for a Pro login, six families of 45 kept
 /// (`tools/probes/chief-harness/models.py devin`), and what it said signed out.
 const RECORDED: &str = include_str!("../../../tests/fixtures/models/devin-models-list.json");
 const SIGNED_OUT: &str =
     include_str!("../../../tests/fixtures/models/devin-models-list-signed-out.json");
 
-fn recorded() -> Models {
-    parse(&serde_json::from_str(RECORDED).unwrap()).unwrap()
+fn recorded() -> ModelListing {
+    parse(&serde_json::from_str(RECORDED).unwrap(), AT).unwrap()
 }
 
 #[test]
@@ -90,19 +93,20 @@ fn a_model_with_no_effort_is_its_variant_and_fusion_is_left_out() {
             "kimi-k3"
         ]
     );
-    assert!(!models.stale);
+    assert!(!models.is_stale());
     assert_eq!(
         models.default_model().map(|model| &*model.id),
         Some("adaptive")
     );
 }
 
-fn devin_run(answer: Result<String, Failed>) -> Result<Models, String> {
+fn devin_run(answer: Result<String, Failed>) -> Result<ModelListing, String> {
     let processes = Rc::new(ScriptedProcesses::default());
     processes.run_answer("devin models list --format json", answer);
     finished(Box::pin(read(
         &*processes,
         program(PathBuf::from("devin"), &Env::default()),
+        AT,
     )))
 }
 

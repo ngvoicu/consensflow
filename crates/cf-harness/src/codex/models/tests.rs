@@ -43,7 +43,7 @@ fn the_account_s_list_has_its_models_efforts_and_default_and_no_hidden_one() {
     );
     assert!(sol.default_effort.is_some());
     assert!(sol.marked_default);
-    assert!(!models.stale);
+    assert!(!models.is_stale());
     assert_eq!(
         models.default_model().map(|model| &*model.id),
         Some("gpt-6.1-sol")
@@ -53,14 +53,19 @@ fn the_account_s_list_has_its_models_efforts_and_default_and_no_hidden_one() {
 #[test]
 fn a_list_from_no_copy_of_the_account_s_or_an_old_copy_is_stale_and_gives_no_default() {
     let bundled = parse(&[page(BUNDLED)], None, AT).unwrap();
-    assert!(bundled.stale);
+    assert_eq!(
+        bundled.freshness,
+        cf_proto::models::Freshness::Stale {
+            why: "the list Codex ships: it holds no copy of the account's".to_owned()
+        }
+    );
     assert!(bundled.model("gpt-5.5").is_some(), "what Codex ships");
     assert_eq!(bundled.default_model(), None);
 
     let old = parse(&[page(SIGNED_IN)], Some(AT - FRESH_MS - 1), AT).unwrap();
-    assert!(old.stale);
+    assert!(old.is_stale());
     let fresh = parse(&[page(SIGNED_IN)], Some(AT - FRESH_MS), AT).unwrap();
-    assert!(!fresh.stale);
+    assert!(!fresh.is_stale());
 }
 
 #[test]
