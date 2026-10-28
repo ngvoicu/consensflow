@@ -125,6 +125,8 @@ fn the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean()
     // rebuilding to look at them again costs minutes. A passing one tidies up
     // (`CONSENSFLOW_SMOKE_KEEP=1` has it keep the machine too).
     let machine = Machine::new(Path::new(PASTE_READER), patience)?;
+    // The app built is of the live app's identity: what is started is a copy of the smoke's.
+    let bundle = bundle::smoke_copy(&bundle, &machine.root)?;
     let outcome = drive(&bundle, &machine, patience, &mut std::io::stdout());
     let keep = own_var("CONSENSFLOW_SMOKE_KEEP").as_deref() == Some("1");
     machine.say_where_kept(&mut std::io::stderr(), outcome.is_err() || keep);

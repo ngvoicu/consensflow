@@ -28,19 +28,20 @@ fn the_releases_the_update_goes_to_are_the_bridge_whose_daemon_and_setup_are_nod
 #[test]
 fn a_build_is_given_the_override_of_the_runs_public_key_and_of_the_version_where_it_is_the_update()
 {
+    // Every build is of the smoke's identity, never of the live app's.
     assert_eq!(
         override_config("KEY", None),
-        json!({ "plugins": { "updater": { "pubkey": "KEY" } } })
+        json!({ "identifier": "dev.ngvoicu.consensflow.smoke", "plugins": { "updater": { "pubkey": "KEY" } } })
     );
     let with_version = override_config("KEY", Some("3.0.0-alpha.82"));
     assert_eq!(
         with_version,
-        json!({ "plugins": { "updater": { "pubkey": "KEY" } }, "version": "3.0.0-alpha.82" })
+        json!({ "identifier": "dev.ngvoicu.consensflow.smoke", "plugins": { "updater": { "pubkey": "KEY" } }, "version": "3.0.0-alpha.82" })
     );
     // Where it is written, the version is the last of its keys.
     assert_eq!(
         with_version.to_string(),
-        r#"{"plugins":{"updater":{"pubkey":"KEY"}},"version":"3.0.0-alpha.82"}"#
+        r#"{"identifier":"dev.ngvoicu.consensflow.smoke","plugins":{"updater":{"pubkey":"KEY"}},"version":"3.0.0-alpha.82"}"#
     );
 }
 
@@ -228,7 +229,7 @@ mod with_programs {
         );
         assert_eq!(
             fs::read_to_string(into.join(MARK)).unwrap(),
-            "v3.0.0-alpha.82\n"
+            "v3.0.0-alpha.82 dev.ngvoicu.consensflow.smoke\n"
         );
         assert!(!PathBuf::from(format!("{}.tar", into.display())).exists());
         assert_eq!(
@@ -261,7 +262,56 @@ mod with_programs {
         );
         assert_eq!(
             fs::read_to_string(into.join(MARK)).unwrap(),
-            "v3.0.0-alpha.84\n"
+            "v3.0.0-alpha.84 dev.ngvoicu.consensflow.smoke\n"
+        );
+    }
+
+    /// A release checks that the installed app and its update are of the live app's
+    /// identity, word for word: its export checks the smoke's, which its build is given,
+    /// and nothing else of it changes. An export an older run made, with the check as the
+    /// tag has it, is made again.
+    #[test]
+    fn a_release_is_exported_to_check_for_the_smokes_identity_where_it_checked_the_live_apps() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("repo");
+        let source = repo.join("app").join("src-tauri").join("src");
+        fs::create_dir_all(&source).unwrap();
+        let check = "fn installed(id: &str) -> bool {\n    \
+                     if id != \"dev.ngvoicu.consensflow\" { return false; }\n    \
+                     id != \"dev.ngvoicu.consensflow\" || id == \"dev.ngvoicu.consensflow\"\n}\n";
+        fs::write(source.join("update_install.rs"), check).unwrap();
+        fs::write(
+            source.join("lib.rs"),
+            "const ID: &str = \"dev.ngvoicu.consensflow\";\n",
+        )
+        .unwrap();
+        let git = Repo::new(&repo);
+        git.git(&["add", "-A"]);
+        git.commit("the release", Some("v3.0.0-alpha.82"));
+        let env = Env::from_process();
+        let into = folder.path().join("flip-source");
+        let exported = into.join("app").join("src-tauri").join("src");
+
+        // An export from before the smoke had an identity of its own: the tag's tree, marked by its tag.
+        fs::create_dir_all(&exported).unwrap();
+        fs::write(exported.join("update_install.rs"), check).unwrap();
+        fs::write(into.join(MARK), "v3.0.0-alpha.82\n").unwrap();
+        export_release(&repo, &into, "v3.0.0-alpha.82", &env).unwrap();
+        assert_eq!(
+            fs::read_to_string(exported.join("update_install.rs")).unwrap(),
+            check.replace(
+                "!= \"dev.ngvoicu.consensflow\"",
+                "!= \"dev.ngvoicu.consensflow.smoke\""
+            )
+        );
+        assert_eq!(
+            fs::read_to_string(exported.join("lib.rs")).unwrap(),
+            "const ID: &str = \"dev.ngvoicu.consensflow\";\n",
+            "what is not the update's check is the tag's"
+        );
+        assert_eq!(
+            fs::read_to_string(into.join(MARK)).unwrap(),
+            "v3.0.0-alpha.82 dev.ngvoicu.consensflow.smoke\n"
         );
     }
 
@@ -373,7 +423,7 @@ mod with_programs {
         );
         assert_eq!(
             fs::read_to_string(&override_file).unwrap(),
-            "{\n  \"plugins\": {\n    \"updater\": {\n      \"pubkey\": \"RUNKEY\"\n    }\n  },\n  \"version\": \"3.0.0-alpha.83\"\n}\n"
+            "{\n  \"identifier\": \"dev.ngvoicu.consensflow.smoke\",\n  \"plugins\": {\n    \"updater\": {\n      \"pubkey\": \"RUNKEY\"\n    }\n  },\n  \"version\": \"3.0.0-alpha.83\"\n}\n"
         );
     }
 
@@ -417,6 +467,37 @@ mod with_programs {
             1,
             "nothing after it ran"
         );
+    }
+
+    /// A checkout named to build that checks for the live app's identity is built from
+    /// no more: its app would refuse every update of the smoke's identity.
+    #[test]
+    fn a_checkout_that_checks_for_the_live_apps_identity_is_not_built() {
+        let folder = tempfile::tempdir().unwrap();
+        let (tree, calls, env) = checkout_with_programs(folder.path(), 0);
+        let source = tree.join("app").join("src-tauri").join("src");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("update_install.rs"),
+            "if id != \"dev.ngvoicu.consensflow\" {}\n",
+        )
+        .unwrap();
+        let said = build_app(
+            &Build {
+                checkout: &tree,
+                work: &folder.path().join("work"),
+                public_key: "RUNKEY",
+                version: None,
+            },
+            &env,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            said.contains("checks for the live app's identity"),
+            "{said}"
+        );
+        assert!(!calls.exists(), "nothing ran");
     }
 
     #[test]

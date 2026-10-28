@@ -506,7 +506,7 @@ runs = ["smoke-kit"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/processes.rs"
 find = '''
-        if under.is_empty() && !alive(root) {
+        if running.is_empty() {
             return;
         }
 '''
@@ -522,14 +522,14 @@ runs = ["smoke-app"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/app.rs"
 find = '''
-        for pid in pids {
-            kill_group(pid);
+            for process in &seen {
+                kill_group(process, first.pid());
 '''
 replace = '''
-        self.close_input();
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        for pid in pids {
-            kill_group(pid);
+            self.close_input();
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            for process in &seen {
+                kill_group(process, first.pid());
 '''
 
 [[plant]]

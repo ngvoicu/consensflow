@@ -273,6 +273,12 @@ impl Run {
         self
     }
 
+    /// Refuses a program that is an app of the live app's identity, before anything starts.
+    fn startable(&self) -> Result<()> {
+        cf_base::bundle::program_startable_by_a_test(std::path::Path::new(&self.program))
+            .map_err(Error::LiveApp)
+    }
+
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
@@ -305,6 +311,7 @@ impl Run {
     /// Only a program that did not start is an error: a code other than 0 is an
     /// answer, for the case to read.
     pub fn run(self) -> Result<Ran> {
+        self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
         let mut command = self.command();
         command
@@ -354,6 +361,7 @@ impl Run {
     /// streams are pipes ([`Spawned`]), its input one too unless it was told to
     /// be closed. Ending it is the case's, or its owner's drop.
     pub fn spawn(self) -> Result<Spawned> {
+        self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
         let mut command = self.command();
         command

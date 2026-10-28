@@ -369,7 +369,7 @@ done"
         blocked_evidence(kase, &app, &first)
     }))
     .contains("two stand-in chief processes did not happen"));
-    crate::updater_smoke::processes::kill(third);
+    end(third);
     fs::remove_file(kase.sandbox.pids.join(format!("pi-{third}.pid"))).unwrap();
     // The page tells the install to go on, and the windows close.
     release_panes(&kase, &app, &[]).unwrap();
@@ -400,10 +400,10 @@ done"
         "{said}"
     );
     for pid in chiefs {
-        crate::updater_smoke::processes::kill(pid);
+        end(pid);
     }
     release_panes(&kase, &app, &chiefs).unwrap();
-    crate::updater_smoke::processes::kill(first.daemon.pid);
+    end(first.daemon.pid);
     kase.cleanup();
 
     // What the snapshot says is held to what the case needs of it.
@@ -473,4 +473,11 @@ fn the_installed_app_that_is_in_place_has_the_ledger_held_by_what_refuses_a_seco
     held_evidence(&mut kase).unwrap();
     assert_eq!(kase.probes.len(), 2);
     kase.cleanup();
+}
+
+/// Ends the process `pid` a test found, as it is now.
+fn end(pid: u32) {
+    if let Some(started) = cf_process::Started::of(pid) {
+        crate::updater_smoke::processes::kill(&started);
+    }
 }

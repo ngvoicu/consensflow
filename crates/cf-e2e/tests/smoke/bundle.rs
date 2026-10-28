@@ -122,6 +122,62 @@ pub fn node_in(app: &Path) -> Result<Vec<PathBuf>> {
     Ok(found)
 }
 
+/// Runs `program` with `args` to its end, or says what it said when it failed.
+fn ran(program: &str, args: &[&std::ffi::OsStr]) -> Result {
+    let ran = Run::new(program).args(args).run()?;
+    if ran.code == Some(0) {
+        return Ok(());
+    }
+    Err(Error::Build(format!(
+        "{program} {} failed: {}",
+        args.iter()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" "),
+        ran.stderr.trim()
+    )))
+}
+
+/// The copy of `bundle` the smoke starts, in `into`: the bundle whole, of the smoke's
+/// identity and sealed again as it was (ad hoc, keeping its entitlements, its flags and
+/// its hardened runtime). The bundle built is of the live app's identity, and to macOS a
+/// copy started with it is the live app, which a test never starts ([`cf_base::bundle`]).
+pub fn smoke_copy(bundle: &Bundle, into: &Path) -> Result<Bundle> {
+    let name = bundle
+        .app
+        .file_name()
+        .unwrap_or_else(|| "ConsensFlow.app".as_ref());
+    let copy = into.join(name);
+    ran(
+        "/usr/bin/ditto",
+        &[bundle.app.as_os_str(), copy.as_os_str()],
+    )?;
+    let plist = copy.join("Contents").join("Info.plist");
+    ran(
+        "/usr/bin/plutil",
+        &["-convert".as_ref(), "xml1".as_ref(), plist.as_os_str()],
+    )?;
+    let text = std::fs::read_to_string(&plist)
+        .map_err(|source| Error::Build(format!("could not read {}: {source}", plist.display())))?;
+    let smoke = cf_base::bundle::with_identity(&text, cf_base::bundle::SMOKE)
+        .ok_or_else(|| Error::Build(format!("{} names no identity to replace", plist.display())))?;
+    std::fs::write(&plist, smoke)
+        .map_err(|source| Error::Build(format!("could not write {}: {source}", plist.display())))?;
+    ran(
+        "/usr/bin/codesign",
+        &[
+            "--force".as_ref(),
+            "--deep".as_ref(),
+            "--sign".as_ref(),
+            "-".as_ref(),
+            "--preserve-metadata=entitlements,flags,runtime".as_ref(),
+            copy.as_os_str(),
+        ],
+    )?;
+    cf_base::bundle::startable_by_a_test(&copy).map_err(Error::LiveApp)?;
+    locate(&copy)
+}
+
 /// Says the bundle holds no Node, or which of it it does.
 pub fn assert_no_node(app: &Path) -> Result {
     let found = node_in(app)?;
@@ -285,5 +341,67 @@ mod tests {
             files::write(&app.join("Contents").join("Resources").join(name), "").unwrap();
         }
         assert_eq!(node_in(&app).unwrap(), Vec::<PathBuf>::new());
+    }
+
+    /// The smoke starts a copy of the bundle built, of its own identity, never the bundle:
+    /// the copy is whole, sealed, and the bundle is left as it was.
+    #[test]
+    fn the_smoke_starts_a_sealed_copy_of_its_own_identity_and_leaves_the_bundle_as_it_was() {
+        let root = tempfile::tempdir().unwrap();
+        let app = root.path().join("built").join("ConsensFlow.app");
+        let program = app.join("Contents").join("MacOS").join("app");
+        std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+        std::fs::copy("/bin/echo", &program).unwrap();
+        std::fs::create_dir_all(cf_of(&app).parent().unwrap()).unwrap();
+        std::fs::copy("/bin/echo", cf_of(&app)).unwrap();
+        let release = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
+             <key>CFBundleExecutable</key><string>app</string>\
+             <key>CFBundleIdentifier</key><string>{}</string>\
+             <key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n",
+            cf_base::bundle::RELEASE
+        );
+        files::write(&app.join("Contents").join("Info.plist"), &release).unwrap();
+        ran(
+            "/usr/bin/codesign",
+            &[
+                "--force".as_ref(),
+                "--deep".as_ref(),
+                "--sign".as_ref(),
+                "-".as_ref(),
+                app.as_os_str(),
+            ],
+        )
+        .unwrap();
+        let built = locate(&app).unwrap();
+        assert!(cf_base::bundle::startable_by_a_test(&app).is_err());
+
+        let into = root.path().join("machine");
+        std::fs::create_dir_all(&into).unwrap();
+        let copy = smoke_copy(&built, &into).unwrap();
+        assert_eq!(copy.app, into.join("ConsensFlow.app"));
+        assert_eq!(
+            copy.binary,
+            copy.app.join("Contents").join("MacOS").join("app")
+        );
+        assert_eq!(
+            cf_base::bundle::startable_by_a_test(&copy.app).as_deref(),
+            Ok(cf_base::bundle::SMOKE)
+        );
+        ran(
+            "/usr/bin/codesign",
+            &[
+                "--verify".as_ref(),
+                "--deep".as_ref(),
+                "--strict".as_ref(),
+                copy.app.as_os_str(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(app.join("Contents").join("Info.plist")).unwrap(),
+            release,
+            "the bundle built is left as it was"
+        );
     }
 }

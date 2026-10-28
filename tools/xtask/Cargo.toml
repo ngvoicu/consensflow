@@ -64,7 +64,8 @@ plist.workspace = true
 memchr.workspace = true
 tempfile.workspace = true
 
-# The smoke's input to an app is a FIFO, which is ended by signal and by group.
+# The smoke's input to an app is a FIFO, and the stops' tests raise signals (what the smoke ends,
+# it ends as cf_process::Started).
 # Both calls are safe in nix, where libc's are not (this crate forbids unsafe).
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs", "signal"] }

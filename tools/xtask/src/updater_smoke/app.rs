@@ -7,7 +7,6 @@
 //! is a FIFO this side keeps open: the restarted app inherits its read end, and
 //! closing the write end is the quit that both read as the end of input.
 
-use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -16,10 +15,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use cf_base::env::Env;
+use cf_process::Started;
 use serde_json::{json, Value};
 
 use super::evidence::tail;
-use super::processes::{alive, kill_group, kill_tree, signal_of, Waits};
+use super::processes::{kill_group, kill_tree, signal_of, Waits};
 use super::sandbox::{make_fifo, open_fifo, Ends};
 use super::say::Say;
 use super::{Error, Result};
@@ -83,8 +83,18 @@ struct Reports {
     /// The failures the case did not expect.
     failures: Vec<Event>,
     stderr: String,
-    /// The pids the app has been: the one that was started and each the page reported.
-    pids: BTreeSet<u32>,
+    /// The processes the app has been: the one that was started and each the page reported
+    /// that is one of its own (`own`).
+    seen: Vec<Started>,
+}
+
+/// Whether the process `pid` a report names is one the app has been: one that began
+/// since the app the smoke started (`first`) did, in the group it was started as the
+/// leader of (an updated app, which Tauri's restart starts, is in it too). A number a
+/// report says may be any process's: one that ran before the app (the live app beside the
+/// smoke), or is in another group, is none of the app's.
+fn own(pid: u32, first: &Started) -> Option<Started> {
+    Started::of(pid).filter(|seen| seen.began_since(first) && seen.group() == Some(first.pid()))
 }
 
 /// How the process that was started ended.
@@ -105,6 +115,8 @@ impl From<ExitStatus> for Exit {
 
 struct Inner {
     reports: Arc<Mutex<Reports>>,
+    /// The process that was started, as it was seen as it started.
+    first: Option<Started>,
     child: Mutex<Option<Child>>,
     control: Mutex<Option<File>>,
     waits: Waits,
@@ -132,7 +144,13 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// Reads the app's output to its end: each line that is a report is kept, and
 /// said as it comes.
-fn read_reports(stream: impl Read, reports: &Mutex<Reports>, expected: &[String], say: &Say) {
+fn read_reports(
+    stream: impl Read,
+    reports: &Mutex<Reports>,
+    first: Option<Started>,
+    expected: &[String],
+    say: &Say,
+) {
     let mut lines = BufReader::new(stream);
     let mut raw = Vec::new();
     loop {
@@ -151,7 +169,10 @@ fn read_reports(stream: impl Read, reports: &Mutex<Reports>, expected: &[String]
             Ok(parsed) => {
                 let event = Event(parsed);
                 say.out(format!("updater probe {}", event.json()));
-                kept.pids.extend(event.pid());
+                let seen = first.and_then(|first| own(event.pid()?, &first));
+                if let Some(seen) = seen.filter(|seen| !kept.seen.contains(seen)) {
+                    kept.seen.push(seen);
+                }
                 if FAILURES.contains(&event.name())
                     && !expected.iter().any(|name| name == event.name())
                 {
@@ -180,17 +201,20 @@ fn read_errors(mut stream: impl Read, reports: &Mutex<Reports>) {
 }
 
 /// Starts the app at `launch.binary` in `launch.cwd`, as its own process group, on a FIFO of its own for its input.
+/// An app of the live app's identity is never started: xtask's start refuses it ([`cf_base::bundle`]).
 pub fn launch_app(launch: &Launch, say: &Say) -> Result<App> {
     let fifo = make_fifo(launch.cwd)?;
     let Ends { input, control } = open_fifo(&fifo)?;
     let invocation = Invocation::new(launch.binary, launch.cwd);
     let mut child = process::spawn(&invocation, launch.env, Stdio::from(input), true)?;
     let reports = Arc::new(Mutex::new(Reports::default()));
-    locked(&reports).pids.insert(child.id());
+    // Not yet reaped, its number is its own.
+    let first = Started::of(child.id());
+    locked(&reports).seen.extend(first);
     let expected: Vec<String> = launch.expected.iter().map(ToString::to_string).collect();
     if let Some(stdout) = child.stdout.take() {
         let (reports, say) = (Arc::clone(&reports), say.clone());
-        thread::spawn(move || read_reports(stdout, &reports, &expected, &say));
+        thread::spawn(move || read_reports(stdout, &reports, first, &expected, &say));
     }
     if let Some(stderr) = child.stderr.take() {
         let reports = Arc::clone(&reports);
@@ -198,6 +222,7 @@ pub fn launch_app(launch: &Launch, say: &Say) -> Result<App> {
     }
     Ok(App(Arc::new(Inner {
         reports,
+        first,
         child: Mutex::new(Some(child)),
         control: Mutex::new(Some(control)),
         waits: launch.waits,
@@ -264,8 +289,8 @@ impl App {
 
     /// Whether any process the app has been (the original and the restarted) still runs.
     pub fn any_alive(&self) -> bool {
-        let pids: Vec<u32> = locked(&self.0.reports).pids.iter().copied().collect();
-        pids.into_iter().any(alive)
+        let seen = locked(&self.0.reports).seen.clone();
+        seen.iter().any(Started::is_running)
     }
 
     /// How the process that was started ended, which is waited for.
@@ -284,12 +309,20 @@ impl App {
     /// input is closed last: an app that reads it quits at its end, so closing it
     /// first leaves the app free to go by its own quit before the kill reaches it.
     pub fn kill_recorded(&self) {
-        let pids: Vec<u32> = locked(&self.0.reports).pids.iter().copied().collect();
-        for pid in pids {
-            kill_group(pid);
-            kill_tree(pid);
+        let seen = locked(&self.0.reports).seen.clone();
+        if let Some(first) = &self.0.first {
+            for process in &seen {
+                kill_group(process, first.pid());
+                kill_tree(process);
+            }
         }
         self.close_input();
+    }
+
+    /// The process that was started, as it was seen as it started: what the processes the
+    /// case ends began since.
+    pub fn first(&self) -> Option<Started> {
+        self.0.first
     }
 }
 

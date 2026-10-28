@@ -264,3 +264,20 @@ fn a_file_or_a_tree_is_taken_away_where_it_is_and_nothing_is_done_where_it_is_no
     remove_all(&file).unwrap();
     assert!(!file.exists());
 }
+
+/// A bundle of the live app's identity is no bundle of the smoke's: the smoke builds
+/// each app it runs with its own identity, and refuses a built one that has the live
+/// app's (one a run of the smoke kept from before it had one, say).
+#[test]
+fn a_bundle_of_the_live_apps_identity_is_refused() {
+    let folder = tempfile::tempdir().unwrap();
+    let release = fake_bundle(
+        folder.path(),
+        &Fake {
+            identity: "dev.ngvoicu.consensflow",
+            ..Fake::default()
+        },
+    );
+    let said = said(inspect_bundle(&release, "FROM_APP"));
+    assert!(said.contains("the live app's identity"), "{said}");
+}

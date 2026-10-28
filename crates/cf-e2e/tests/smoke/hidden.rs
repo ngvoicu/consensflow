@@ -64,6 +64,8 @@ fn the_built_app_reads_its_windows_while_it_is_hidden() -> Outcome {
     // not hold says where it is as the machine goes (`Machine`'s drop), and a step that
     // could not be taken says it here.
     let machine = Machine::with_harness(Path::new(PASTE_READER), patience, HARNESS)?;
+    // The app built is of the live app's identity: what is started is a copy of the smoke's.
+    let bundle = bundle::smoke_copy(&bundle, &machine.root)?;
     let outcome = drive(&bundle, &machine, patience, &mut std::io::stdout());
     let keep = own_var("CONSENSFLOW_SMOKE_KEEP").as_deref() == Some("1");
     machine.say_where_kept(&mut std::io::stderr(), outcome.is_err() || keep);

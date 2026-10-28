@@ -1,6 +1,7 @@
 //! What the process table says, which is the evidence the smoke has of the app,
 //! of its daemon and of what outlives either. Only `ps` is asked, and only of
 //! processes the smoke started: the app's, its daemon's and the windows' stand-ins.
+//! What it ends it ends as a process seen (`Started`: its number and when it began).
 
 use std::path::Path;
 use std::process::ExitStatus;
@@ -8,7 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
-use cf_process::Ending;
+use cf_process::{Ending, Started};
 
 use super::{Error, Result};
 use crate::process::{self, Invocation};
@@ -91,38 +92,46 @@ pub fn descendants(table: &[Row], root: u32) -> Vec<u32> {
     found
 }
 
-/// Ends the process `pid`, at once: one that is already gone is no failure.
-pub fn kill(pid: u32) {
-    cf_process::terminate(pid, Ending::Forced);
+/// Ends the process `started`, at once, where it is still that process: one that is
+/// gone, or whose number another has taken since, is sent nothing. Nothing is ended by
+/// its number alone: a number the smoke read (a report's, a stand-in's file) may be any
+/// process's, the live app's among them.
+pub fn kill(started: &Started) {
+    started.end(Ending::Forced);
 }
 
-/// Ends the process group that `pid` leads, at once: one that is already gone is
-/// no failure. A pid that names more than a group (0 is this program's own, 1 is
-/// none, -1 is every process) ends nothing.
-pub fn kill_group(pid: u32) {
-    #[cfg(unix)]
-    if let Some(leader) = i32::try_from(pid).ok().filter(|leader| *leader > 1) {
-        let group = nix::unistd::Pid::from_raw(-leader);
-        let _ = nix::sys::signal::kill(group, nix::sys::signal::Signal::SIGKILL);
-    }
-    #[cfg(not(unix))]
-    let _ = pid;
+/// Ends the process group `group`, at once, where `member` is still the process seen and
+/// in it: a group no process the smoke saw is in is sent nothing, nor one that names more
+/// than a group (0 is this program's own, 1 is none).
+pub fn kill_group(member: &Started, group: u32) {
+    member.end_group(group, Ending::Forced);
 }
 
 /// Ends `root` and everything under it, round after round until nothing is left.
 /// A process group is not enough where a chain of processes keeps making the next
 /// (two programs handing a command to each other for ever did, once): what is
-/// under the app is found by the table, and ended before it makes another.
-pub fn kill_tree(root: u32) {
+/// under the app is found by the table, and ended before it makes another. What is
+/// under it is looked for under what of it still runs, and only what began since
+/// `root` did is taken for it: a number that is now another's is under nothing of it.
+pub fn kill_tree(root: &Started) {
+    let mut known = vec![*root];
     for _ in 0..ROUNDS {
-        let under = process_table()
-            .map(|table| descendants(&table, root))
-            .unwrap_or_default();
-        if under.is_empty() && !alive(root) {
+        let table = process_table().unwrap_or_default();
+        let running: Vec<Started> = known.iter().copied().filter(Started::is_running).collect();
+        for member in &running {
+            for pid in descendants(&table, member.pid()) {
+                let found = Started::of(pid).filter(|found| found.began_since(root));
+                if let Some(found) = found.filter(|found| !known.contains(found)) {
+                    known.push(found);
+                }
+            }
+        }
+        let running: Vec<Started> = known.iter().copied().filter(Started::is_running).collect();
+        if running.is_empty() {
             return;
         }
-        for pid in std::iter::once(root).chain(under) {
-            kill(pid);
+        for member in &running {
+            kill(member);
         }
     }
 }

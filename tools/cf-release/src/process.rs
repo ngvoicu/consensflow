@@ -32,11 +32,22 @@ pub enum Unstarted {
     NotFound { program: String },
     #[error("could not start {program}: {cause}")]
     Refused { program: String, cause: io::Error },
+    /// The program is an app of the live app's identity, which no tool starts
+    /// (`cf_base::bundle`).
+    #[error("{0}")]
+    LiveApp(String),
+}
+
+/// Refuses a program that is an app of the live app's identity, before anything starts.
+fn startable(program: &OsStr) -> Result<(), Unstarted> {
+    cf_base::bundle::program_startable_by_a_test(std::path::Path::new(program))
+        .map_err(Unstarted::LiveApp)
 }
 
 /// Runs `program` with `args` to its end, its output going where this one's
 /// does: the code it exited with.
 pub fn run(program: &OsStr, args: &[OsString], env: &Env) -> Result<i32, Unstarted> {
+    startable(program)?;
     command(program, args, env)
         .status()
         .map(|status| code(&status))
@@ -47,6 +58,7 @@ pub fn run(program: &OsStr, args: &[OsString], env: &Env) -> Result<i32, Unstart
 /// code is an answer here, for the caller to read, and only a program that did
 /// not start is an error. Its input is closed.
 pub fn capture(program: &OsStr, args: &[OsString], env: &Env) -> Result<Output, Unstarted> {
+    startable(program)?;
     let output = command(program, args, env)
         .stdin(Stdio::null())
         .output()
@@ -153,5 +165,43 @@ mod tests {
             )
         );
         assert!(!said.contains("hunter2"), "{said}");
+    }
+
+    /// No program of an app of the live app's identity is started, either way; one of the
+    /// smoke's is (2026-10-28: a copy of the app of that identity came to the front over
+    /// the live app).
+    #[cfg(unix)]
+    #[test]
+    fn no_app_of_the_live_apps_identity_is_started() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let app_of = |identity: &str| {
+            let app = root.path().join(identity).join("ConsensFlow.app");
+            let macos = app.join("Contents").join("MacOS");
+            std::fs::create_dir_all(&macos).unwrap();
+            std::fs::write(
+                app.join("Contents").join("Info.plist"),
+                format!("<plist><dict><key>CFBundleIdentifier</key><string>{identity}</string></dict></plist>"),
+            )
+            .unwrap();
+            let ran = root.path().join(format!("{identity}.ran"));
+            let program = macos.join("app");
+            std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            (program, ran)
+        };
+        let env = Env::from_vars([("PATH", "/usr/bin:/bin")]);
+        let (live, ran) = app_of("dev.ngvoicu.consensflow");
+        let said = run(live.as_os_str(), &[], &env).unwrap_err().to_string();
+        assert!(said.contains("the live app's identity"), "{said}");
+        let said = capture(live.as_os_str(), &[], &env)
+            .unwrap_err()
+            .to_string();
+        assert!(said.contains("the live app's identity"), "{said}");
+        assert!(!ran.exists(), "the live app's program ran");
+        let (smoke, ran) = app_of("dev.ngvoicu.consensflow.smoke");
+        assert_eq!(capture(smoke.as_os_str(), &[], &env).unwrap().code, 0);
+        assert!(ran.exists());
     }
 }

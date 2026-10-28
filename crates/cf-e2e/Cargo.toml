@@ -83,6 +83,8 @@ path = "src/bin/smoke_paste_reader.rs"
 required-features = ["test-support"]
 
 [dependencies]
+# The app bundles a case may start: none of the live app's identity.
+cf-base.workspace = true
 # What a program the rig starts is left of its descriptors: its streams alone.
 cf-process.workspace = true
 # The time the stand-in agent writes in its records.

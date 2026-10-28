@@ -295,12 +295,13 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
             let executable = std::env::current_exe().map_err(|e| e.to_string())?;
             let target = tauri_plugin_updater::extract_path_from_executable(&executable)
                 .map_err(|e| e.to_string())?;
+            let identity = worker.config().identifier.clone();
             let manager = worker.state::<UpdateManager>();
             let panes = std::sync::Arc::clone(&worker.state::<AppRuntime>().panes);
             let permit = manager.install(&panes, |bytes, version| {
                 publish(&worker);
                 let directory = manager.preferences.parent().ok_or("Invalid preferences path")?.join("updates");
-                crate::update_install::install_archive(&target, bytes, version, &directory)?;
+                crate::update_install::install_archive(&target, bytes, version, &directory, &identity)?;
                 swapped_in_worker.store(true, std::sync::atomic::Ordering::Release);
                 Ok(())
             })?;

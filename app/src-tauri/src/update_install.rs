@@ -44,15 +44,15 @@ pub(crate) fn plist_value(tools: &Tools, app: &Path, field: &str) -> Result<Stri
         .map_err(|e| e.to_string())
 }
 
-/// What a bundle must be to replace the installed app: this app, at the
-/// version the feed offered; the `cf` a window runs; and a code signature that
+/// What a bundle must be to replace the installed app: this app (`identity`,
+/// the bundle identity this build was made with), at the version the feed offered; the `cf` a window runs; and a code signature that
 /// verifies. (The archive's own signature was verified before its bytes came
 /// here.) Nothing of Node's is asked for, and none is shipped: the releases
 /// before this one did, and an app of any of them takes a bundle that ships
 /// none by this same check. `cli/package.json` is not read either: the plist
 /// names the version.
-fn validate_bundle(tools: &Tools, app: &Path, version: &str) -> Result<(), String> {
-    if plist_value(tools, app, "CFBundleIdentifier")? != "dev.ngvoicu.consensflow"
+fn validate_bundle(tools: &Tools, app: &Path, version: &str, identity: &str) -> Result<(), String> {
+    if plist_value(tools, app, "CFBundleIdentifier")? != identity
         || plist_value(tools, app, "CFBundleShortVersionString")? != version
         || plist_value(tools, app, "CFBundleVersion")? != version
     {
@@ -82,11 +82,15 @@ fn stage_update(directory: &Path) -> Result<tempfile::TempDir, String> {
         .map_err(|e| format!("Could not stage the update in ConsensFlow home: {e}"))
 }
 
+/// Installs the update in `bytes` over the bundle `app`, which must be one of
+/// `identity`, the identity this build was made with: the release's, or a test
+/// build's, which takes only updates of its own and never the release's.
 pub(crate) fn install_archive(
     app: &Path,
     bytes: &[u8],
     version: &str,
     directory: &Path,
+    identity: &str,
 ) -> Result<(), String> {
     let tools = Tools::system();
     if app.extension().and_then(|s| s.to_str()) != Some("app")
@@ -94,7 +98,7 @@ pub(crate) fn install_archive(
             .map_err(|e| e.to_string())?
             .file_type()
             .is_symlink()
-        || plist_value(&tools, app, "CFBundleIdentifier")? != "dev.ngvoicu.consensflow"
+        || plist_value(&tools, app, "CFBundleIdentifier")? != identity
     {
         return Err(
             "Install a packaged ConsensFlow app in a writable folder before updating".into(),
@@ -130,7 +134,7 @@ pub(crate) fn install_archive(
         }
     }
     let candidate = staging.path().join("ConsensFlow.app");
-    validate_bundle(&tools, &candidate, version)?;
+    validate_bundle(&tools, &candidate, version, identity)?;
     let old = CString::new(app.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     let new = CString::new(candidate.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     // RENAME_SWAP is atomic on the same filesystem; cross-volume installs
@@ -168,9 +172,22 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
+    /// The release's identity, which every bundle of these tests has but one test's.
+    const RELEASE: &str = "dev.ngvoicu.consensflow";
+
     fn install_fixture(app: &Path, bytes: &[u8], version: &str) -> Result<(), String> {
+        install_fixture_as(app, bytes, version, RELEASE)
+    }
+
+    /// The install as a build of `identity` makes it.
+    fn install_fixture_as(
+        app: &Path,
+        bytes: &[u8],
+        version: &str,
+        identity: &str,
+    ) -> Result<(), String> {
         let home = tempfile::tempdir().unwrap();
-        install_archive(app, bytes, version, &home.path().join("updates"))
+        install_archive(app, bytes, version, &home.path().join("updates"), identity)
     }
 
     /// What a bundle of the releases before this one ships besides the app and
@@ -195,13 +212,13 @@ mod tests {
     }
 
     fn bundle(parent: &Path, version: &str) -> std::path::PathBuf {
-        bundle_of(parent, version, "dev.ngvoicu.consensflow", false)
+        bundle_of(parent, version, RELEASE, false)
     }
 
     /// A bundle laid out as the releases before this one were: with Node, the
     /// CLI's sources and their `package.json` beside the app and its `cf`.
     fn older_bundle(parent: &Path, version: &str) -> std::path::PathBuf {
-        bundle_of(parent, version, "dev.ngvoicu.consensflow", true)
+        bundle_of(parent, version, RELEASE, true)
     }
 
     fn bundle_of(
@@ -349,6 +366,37 @@ mod tests {
         );
     }
 
+    /// A build of another identity than the release's (a smoke's, which runs beside
+    /// the live app and must never be taken for it) updates as the release does: to a
+    /// bundle of its own identity, and never to one of the release's.
+    #[test]
+    fn an_app_of_another_identity_takes_only_an_update_of_its_own() {
+        const SMOKE: &str = "dev.ngvoicu.consensflow.smoke";
+        let old = tempfile::tempdir().unwrap();
+        let own = tempfile::tempdir().unwrap();
+        let release = tempfile::tempdir().unwrap();
+        let app = bundle_of(old.path(), "3.0.0-alpha.35", SMOKE, false);
+        let theirs = bundle(release.path(), "3.0.0-alpha.36");
+        let next = bundle_of(own.path(), "3.0.0-alpha.36", SMOKE, false);
+        let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
+        assert!(
+            error.contains("Install a packaged"),
+            "the release took a smoke's app: {error}"
+        );
+        let error =
+            install_fixture_as(&app, &archive(&theirs), "3.0.0-alpha.36", SMOKE).unwrap_err();
+        assert!(error.contains("identity or version"), "{error}");
+        install_fixture_as(&app, &archive(&next), "3.0.0-alpha.36", SMOKE).unwrap();
+        assert_eq!(
+            plist_value(&Tools::system(), &app, "CFBundleIdentifier").unwrap(),
+            SMOKE
+        );
+        assert_eq!(
+            plist_value(&Tools::system(), &app, "CFBundleShortVersionString").unwrap(),
+            "3.0.0-alpha.36"
+        );
+    }
+
     #[test]
     fn archive_links_are_refused_before_any_swap() {
         let old = tempfile::tempdir().unwrap();
@@ -434,7 +482,7 @@ mod tests {
             plutil: &plutil,
             codesign: &codesign,
         };
-        retried(|| validate_bundle(&tools, &app, "3.0.6")).unwrap();
+        retried(|| validate_bundle(&tools, &app, "3.0.6", RELEASE)).unwrap();
         let said = fs::read_to_string(&said).unwrap();
         assert!(said.contains("plutil clear\n"), "{said}");
         assert!(said.contains("codesign clear\n"), "{said}");

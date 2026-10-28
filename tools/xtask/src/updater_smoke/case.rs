@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_base::env::Env;
+use cf_process::Started;
 
 use super::app::{launch_app, App, Launch};
 use super::build::Release;
@@ -241,6 +242,9 @@ impl<'a> Case<'a> {
         if let Some(app) = &self.app {
             app.kill_recorded();
         }
+        // A stand-in's file says a number: what has it now is ended only where it began
+        // since the app that started the stand-in did.
+        let first = self.app.as_ref().and_then(App::first);
         let pids: BTreeSet<u32> = self
             .sandbox
             .recorded_pids()
@@ -248,7 +252,11 @@ impl<'a> Case<'a> {
             .into_iter()
             .collect();
         for pid in pids {
-            super::processes::kill(pid);
+            let started =
+                Started::of(pid).filter(|seen| first.is_some_and(|first| seen.began_since(&first)));
+            if let Some(started) = started {
+                super::processes::kill(&started);
+            }
         }
         self.feed.close();
         if !self.finished || self.inputs.keep {

@@ -480,6 +480,7 @@ dependencies = [
 name = "cf-e2e"
 version = "3.0.6-alpha.3"
 dependencies = [
+ "cf-base",
  "cf-e2e",
  "cf-panes",
  "cf-process",

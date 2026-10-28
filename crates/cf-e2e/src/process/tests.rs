@@ -593,3 +593,48 @@ mod shell {
         assert_eq!(group_of(shared.id()), group_of(std::process::id()));
     }
 }
+
+/// An app of the live app's identity, in a bundle of `identity` under `root`, whose program
+/// leaves a file when it runs: the program, and the file.
+#[cfg(unix)]
+fn app_of(root: &std::path::Path, identity: &str) -> (PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let app = root.join(identity).join("ConsensFlow.app");
+    let macos = app.join("Contents").join("MacOS");
+    std::fs::create_dir_all(&macos).unwrap();
+    std::fs::write(
+        app.join("Contents").join("Info.plist"),
+        format!(
+            "<plist><dict><key>CFBundleIdentifier</key><string>{identity}</string></dict></plist>"
+        ),
+    )
+    .unwrap();
+    let ran = root.join(format!("{identity}.ran"));
+    let program = macos.join("app");
+    std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (program, ran)
+}
+
+/// No case starts the program of an app of the live app's identity, either way it starts one,
+/// and one of the smoke's is started as any program is (2026-10-28: a copy of the app of that
+/// identity came to the front over the live app).
+#[cfg(unix)]
+#[test]
+fn no_case_starts_an_app_of_the_live_apps_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let (live, ran) = app_of(root.path(), "dev.ngvoicu.consensflow");
+    let refused = Run::new(&live).run().unwrap_err().to_string();
+    assert!(refused.contains("the live app's identity"), "{refused}");
+    let refused = Run::new(&live)
+        .spawn()
+        .err()
+        .map(|it| it.to_string())
+        .unwrap_or_default();
+    assert!(refused.contains("the live app's identity"), "{refused}");
+    assert!(!ran.exists(), "the live app's program ran");
+    let (smoke, ran) = app_of(root.path(), "dev.ngvoicu.consensflow.smoke");
+    assert_eq!(Run::new(&smoke).run().unwrap().code, Some(0));
+    assert!(ran.exists(), "the smoke's program did not run");
+}
