@@ -365,9 +365,14 @@ impl InputArbiter {
         let state = self.pane_state(pane)?;
         let mut state = lock_state(&state)?;
         if state.generation == pane.generation {
-            state.unsent = unsent_after(state.unsent, bytes);
-            state.typed += 1;
-            state.typed_at = Some(Instant::now());
+            let read = keys_of(state.unsent, bytes);
+            state.unsent = read.unsent;
+            // A write that holds no key (what the terminal reports of itself) is no key
+            // of the human's: the adapter's wait for their last key does not start again.
+            if read.keyed {
+                state.typed += 1;
+                state.typed_at = Some(Instant::now());
+            }
         }
         Ok(())
     }
@@ -488,22 +493,57 @@ fn validate_generation(state: &PaneInputState, pane: &PaneKey) -> Result<(), Arb
     }
 }
 
+/// What a write of the human's path holds: how many characters its keys leave unsent
+/// in the window's input box, and whether it holds any key at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Keys {
+    unsent: usize,
+    keyed: bool,
+}
+
 /// How many characters the human's keys leave unsent in a window's input
-/// box, as near as keys tell: each character typed or pasted counts one,
+/// box, as near as keys tell ([`keys_of`]).
+#[cfg(test)]
+fn unsent_after(unsent: usize, bytes: &[u8]) -> usize {
+    keys_of(unsent, bytes).unsent
+}
+
+/// What `bytes`, a write of the human's path, hold, `unsent` characters left unsent
+/// before it, as near as keys tell: each character typed or pasted counts one,
 /// Backspace takes one off, and Enter (sent), Ctrl+C or Ctrl+U (the line
 /// cleared) leave none. Ctrl+V counts one, for what it pastes from the
 /// clipboard (an image's placeholder, in Claude Code). A bracketed paste
 /// counts its characters, its line breaks included. Other escape sequences
-/// (arrows, function keys, Alt+Enter's new line, mouse reports) and control
-/// keys change nothing, and nor does a string the terminal reports in (OSC,
-/// DCS, APC, PM, SOS), to its BEL or ST (T-839).
-fn unsent_after(mut unsent: usize, bytes: &[u8]) -> usize {
+/// (arrows, function keys, Alt+Enter's new line) and control keys change
+/// nothing. What the terminal reports of itself is no key (T-839): a string
+/// (OSC, DCS, APC, PM, SOS), to its BEL or ST; a mouse report (`CSI <`, and the
+/// legacy `CSI M` with its three bytes); a focus report (`CSI I`, `CSI O`).
+fn keys_of(mut unsent: usize, bytes: &[u8]) -> Keys {
     const PASTE_START: &[u8] = b"\x1b[200~";
     const PASTE_END: &[u8] = b"\x1b[201~";
     let characters = |text: &[u8]| text.iter().filter(|byte| *byte & 0xC0 != 0x80).count();
+    let mut keyed = false;
     let mut at = 0;
     while at < bytes.len() {
         let rest = &bytes[at..];
+        match rest[0] {
+            0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {
+                at += 2 + string_end(&rest[2..]);
+                continue;
+            }
+            0x1b if rest.starts_with(b"\x1b[M") => {
+                at += 6.min(rest.len());
+                continue;
+            }
+            0x1b if rest.starts_with(b"\x1b[<")
+                || rest.starts_with(b"\x1b[I")
+                || rest.starts_with(b"\x1b[O") =>
+            {
+                at += csi_end(rest);
+                continue;
+            }
+            _ => keyed = true,
+        }
         match rest[0] {
             b'\r' | b'\n' | 0x03 | 0x15 => unsent = 0,
             0x7f | 0x08 => unsent = unsent.saturating_sub(1),
@@ -518,16 +558,9 @@ fn unsent_after(mut unsent: usize, bytes: &[u8]) -> usize {
                 at += PASTE_START.len() + (end + PASTE_END.len()).min(text.len());
                 continue;
             }
-            0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {
-                at += 2 + string_end(&rest[2..]);
-                continue;
-            }
             0x1b => {
                 at += match rest.get(1) {
-                    Some(b'[') => rest[2..]
-                        .iter()
-                        .position(|byte| (0x40..=0x7e).contains(byte))
-                        .map_or(rest.len(), |end| end + 3),
+                    Some(b'[') => csi_end(rest),
                     Some(b'O') => 3.min(rest.len()),
                     Some(_) => 2,
                     None => 1,
@@ -540,7 +573,16 @@ fn unsent_after(mut unsent: usize, bytes: &[u8]) -> usize {
         }
         at += 1;
     }
-    unsent
+    Keys { unsent, keyed }
+}
+
+/// How many bytes of `rest`, which begins with a CSI (`ESC [`), are that sequence:
+/// to its final byte, or all of them where the write ends first.
+fn csi_end(rest: &[u8]) -> usize {
+    rest[2..]
+        .iter()
+        .position(|byte| (0x40..=0x7e).contains(byte))
+        .map_or(rest.len(), |end| end + 3)
 }
 
 /// How many bytes of `body`, a terminal string's after its opening, are the string
@@ -977,6 +1019,52 @@ mod tests {
             super::unsent_after(0, b"\x16"),
             1,
             "Ctrl+V pastes from the clipboard"
+        );
+    }
+
+    /// What a terminal reports of itself on the human's path is no key either: the count
+    /// of the human's writes stays, and so does the time since their last key, which an
+    /// adapter waits a second past. A program that asks its terminal every few seconds
+    /// restarted that wait at each answer, and a paste read empty raced it (T-839,
+    /// Calliope's T-844).
+    #[test]
+    fn a_terminals_report_moves_neither_the_count_of_keys_nor_the_time_since_the_last() {
+        let key = PaneKey::new("reports", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"x")
+            .expect("a key");
+        std::thread::sleep(Duration::from_millis(30));
+        let reports: [&[u8]; 6] = [
+            b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
+            b"\x1bP>|xterm.js(6.0.0)\x1b\\",
+            b"\x1b[<35;80;24M",
+            b"\x1b[M #!",
+            b"\x1b[I",
+            b"\x1b[O",
+        ];
+        for report in reports {
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, report)
+                .expect("a report");
+        }
+        let read = arbiter.snapshot(&key).expect("snapshot");
+        assert_eq!(read.typed, 1, "the reports are no keys");
+        assert!(
+            read.typed_quiet_ms.is_some_and(|quiet| quiet >= 30),
+            "the time since the last key goes on: {:?}",
+            read.typed_quiet_ms
+        );
+        assert!(read.unsent, "the key typed is still there");
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"\x1b[A")
+            .expect("an arrow");
+        assert_eq!(
+            arbiter.snapshot(&key).expect("snapshot").typed,
+            2,
+            "an arrow is a key"
         );
     }
 

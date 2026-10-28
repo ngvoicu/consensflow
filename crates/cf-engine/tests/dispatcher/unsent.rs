@@ -6,7 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use cf_engine::testing::Context;
-use cf_harness::contract::{Held, Readiness};
+use cf_harness::contract::{FirstMessage, Held, Readiness};
 use serde_json::{json, Value};
 
 use crate::fixtures::Tiers;
@@ -175,4 +175,113 @@ fn a_message_held_for_a_box_that_cannot_be_read_says_so_and_tells_its_requester(
         .filter(|note| note.contains("not sent"))
         .collect();
     assert_eq!(chief.len(), 1, "the requester of T-1 hears it: {chief:?}");
+}
+
+/// A chief at rest whose worker's result is held for words typed in its window: the
+/// adapter answers as `held` says at each look, and the test's context.
+fn a_result_held_at_the_chief<'a>(
+    context: &'a Context,
+    held: &Rc<Cell<Option<Held>>>,
+) -> Tiers<'a> {
+    let tiers = Tiers::new(context, &["zeus", "diana"]);
+    // As Claude Code's: a window's first message too is pasted once it is up.
+    context.adapter.first.set(FirstMessage::Delivered);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // The worker has its brief; from now on the window the result goes to holds it.
+    let asked = Rc::clone(held);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        Ok(asked
+            .take()
+            .map_or(Readiness::Held(Held::Unsent), Readiness::Held))
+    }));
+    *context.adapter.box_words.borrow_mut() = Some("half a thought".to_owned());
+    context.adapter.answer("zeus", "Parser done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(context.dispatcher.holding(tiers.id("chief")).unwrap());
+    tiers
+}
+
+/// The notes the human was told of a hold for words typed and not sent.
+fn told_unsent(tiers: &Tiers) -> Vec<String> {
+    tiers
+        .notes("human")
+        .into_iter()
+        .filter(|note| note.contains("not sent"))
+        .collect()
+}
+
+/// A look held for another reason (a snapshot that failed, on a loaded Mac) does not
+/// start the ten minutes again: the hold is told at ten minutes from its first look
+/// (Calliope's T-844).
+#[test]
+fn a_hold_a_failed_snapshot_interrupts_is_still_told_at_ten_minutes() {
+    let context = Context::new();
+    let once = Rc::new(Cell::new(None));
+    let tiers = a_result_held_at_the_chief(&context, &once);
+    held_for(&context, 5);
+    once.set(Some(Held::Because(
+        "the window cannot be read: no answer".to_owned(),
+    )));
+    held_for(&context, 1);
+    held_for(&context, 5);
+    assert_eq!(told_unsent(&tiers).len(), 1, "{:?}", tiers.notes("human"));
+}
+
+/// A daemon that restarts does not tell the human again of a hold it told them of
+/// (Calliope's T-844): its note is found among theirs.
+#[test]
+fn a_hold_told_before_a_restart_is_not_told_again_after_it() {
+    let context = Context::new();
+    let never = Rc::new(Cell::new(None));
+    let tiers = a_result_held_at_the_chief(&context, &never);
+    held_for(&context, 11);
+    assert_eq!(told_unsent(&tiers).len(), 1);
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    for _ in 0..3 {
+        context.advance(11 * 60_000);
+        after.pass().unwrap();
+    }
+    let result = context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .find(|message| message.kind == "result")
+        .unwrap();
+    // Owed to the window the restart opened, as its first message, and held there.
+    assert_eq!(result.state, "delivering", "still held");
+    assert_eq!(told_unsent(&tiers).len(), 1, "{:?}", tiers.notes("human"));
+}
+
+/// The requester of the held message's task, a member's window, is told how many
+/// characters the box shows, never any of them (Calliope's T-844).
+#[test]
+fn the_requester_is_told_how_many_characters_the_box_shows_and_none_of_them() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsent))));
+    *context.adapter.box_words.borrow_mut() = Some("half a thought".to_owned());
+    let worker = tiers.assignee(1);
+    context.tell(tiers.project.id, &worker, 1, "One more case.");
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    held_for(&context, 11);
+    let human = told_unsent(&tiers);
+    assert_eq!(human.len(), 1, "{human:?}");
+    assert!(human[0].contains("\"ha…\" (14 characters)"), "{}", human[0]);
+    let chief: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.contains("not sent"))
+        .collect();
+    assert_eq!(chief.len(), 1, "{chief:?}");
+    assert!(chief[0].contains("shows 14 characters"), "{}", chief[0]);
+    assert!(!chief[0].contains("ha…"), "{}", chief[0]);
 }
