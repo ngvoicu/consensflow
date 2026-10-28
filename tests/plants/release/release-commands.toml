@@ -149,7 +149,7 @@ replace = "if newest.is_some() {"
 
 [[plant]]
 name = "release: a run is taken as it is before it ends"
-meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -231,7 +231,7 @@ replace = "                    finish_by_hand(tag, branch)"
 
 [[plant]]
 name = "release: release alpha's dry run tags"
-meant = "a_dry_run_watches_ci_and_starts_and_tags_nothing"
+meant = "a_dry_run_watches_ci_says_it_would_trial_and_tag_and_starts_and_tags_nothing"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -261,7 +261,7 @@ replace = "if stable_after.as_str().is_empty() {"
 
 [[plant]]
 name = "release: the tag's message is not the notes"
-meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -273,7 +273,7 @@ replace = '''
 
 [[plant]]
 name = "release: the tag goes to upstream alone"
-meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -794,3 +794,151 @@ runs = ["release-commands"]
 file = "tools/xtask/src/release/github.rs"
 find = "Err(Refusal::NeverRan(_)) if looks < self.pace.appear_attempts => {"
 replace = "Err(Refusal::NeverRan(_)) if looks > self.pace.appear_attempts => {"
+
+# The trial: a hand run of the Release workflow on the release commit, watched green before the tag.
+
+[[plant]]
+name = "release: the trial is not started"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    release.trial(&commit)?;"
+replace = ""
+
+[[plant]]
+name = "release: a trial that did not end green is taken"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    release.trial(&commit)?;"
+replace = "    let _ = release.trial(&commit);"
+
+[[plant]]
+name = "release: the trial is run after the tag"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = '''
+    release.trial(&commit)?;
+'''
+replace = ""
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    release.tag_and_push(&tag, &notes, &commit)?;"
+replace = '''
+    release.tag_and_push(&tag, &notes, &commit)?;
+    release.trial(&commit)?;'''
+
+[[plant]]
+name = "release: the trial is asked for on a branch the signing keys' environment does not admit"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+            "--ref",
+            "main",'''
+replace = '''
+            "--ref",
+            "HEAD",'''
+
+[[plant]]
+name = "release: a hand run gh refuses to start is let by"
+meant = "a_hand_run_that_gh_cannot_start_stops_it_with_what_gh_said_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+            "--ref",
+            "main",
+        ])?;'''
+replace = '''
+            "--ref",
+            "main",
+        ])
+        .unwrap_or_default();'''
+
+[[plant]]
+name = "release: the hand run of before is taken for the trial"
+meant = "an_older_hand_run_of_the_same_commit_is_not_taken_for_the_trial"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+        let before = self.newest_run("release.yml", Some(commit), Some("workflow_dispatch"))?;'''
+replace = "        let before = None;"
+
+[[plant]]
+name = "release: main is not asked again before the hand run"
+meant = "main_that_moved_while_ci_was_watched_is_not_trialled_for_a_hand_run_is_of_main_s_head"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    let head = release.main_as_upstream_has_it()?;"
+replace = "    let head = commit.clone();"
+
+[[plant]]
+name = "release: main that moved with the checkout is trialled"
+meant = "main_that_moved_while_ci_was_watched_is_not_trialled_for_a_hand_run_is_of_main_s_head"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    if head != commit {"
+replace = "    if head.is_empty() {"
+
+[[plant]]
+name = "release: a failed step is not named"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "                .filter(|(_, conclusion)| !passed(conclusion))"
+replace = "                .filter(|_| false)"
+
+[[plant]]
+name = "release: a job that ended cancelled or timed out is not named"
+meant = "a_trial_cancelled_with_no_step_to_name_is_refused_with_its_jobs"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "        for job in self.jobs.iter().filter(|job| !passed(&job.conclusion)) {"
+replace = '''
+        for job in self.jobs.iter().filter(|job| job.conclusion == "failure") {'''
+
+[[plant]]
+name = "release: a step that was skipped is named as failed"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+        let passed = |conclusion: &str| matches!(conclusion, "success" | "skipped" | "neutral");'''
+replace = '''
+        let passed = |conclusion: &str| matches!(conclusion, "success");'''
+
+[[plant]]
+name = "release: the address of a red run is not said"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                format!("{}; {address}", failed.join(", "))'''
+replace = '''
+                failed.join(", ")'''

@@ -27,9 +27,12 @@
 //!    until it did, by the tag's gate's own rule (a run by the push or by hand),
 //!    before any tag. A CI run that fails leaves the branch and no tag,
 //!    and says how to rerun it and finish by hand, or start over. There is no
-//!    Release dry run (the `release` environment admits `main` and `v*` tags
-//!    alone): the tag's own Release run builds, signs and smoke-tests both
-//!    platforms' packages before it publishes.
+//!    hand run of the Release workflow before the tag, as `release alpha` has
+//!    (the `release` environment, which holds the signing keys, admits `main` and
+//!    `v*` tags alone, not `release/*`): the tag's own Release run builds, signs
+//!    and smoke-tests both platforms' packages before it publishes, and the
+//!    commit is the alpha's with the version alone changed, the alpha having
+//!    had its hand run and its tag's run.
 //! 6. The tag `vX.Y.Z` on the version commit, with the notes, pushed to origin
 //!    and upstream; its Release run checks CI's green gate of that commit (its
 //!    `gate` job), and is watched to its end; both feeds read until they serve

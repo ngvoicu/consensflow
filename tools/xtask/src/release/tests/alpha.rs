@@ -1,7 +1,7 @@
 //! `release alpha`, run on a checkout with real remotes and GitHub as a script.
 
 use super::fake::{git, Fake, World};
-use super::{advice, not_on_upstream, refusal};
+use super::{advice, not_on_upstream, red_run, refusal};
 use crate::release::{alpha, Error, Options};
 
 const ALPHA: &str = "3.0.6-alpha.1";
@@ -26,7 +26,8 @@ fn released(world: &World, fake: &mut Fake, dry_run: bool) -> (Result<String, Er
 }
 
 #[test]
-fn an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone() {
+fn an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone()
+{
     let (world, mut fake) = ready();
     // Runs show a look late and end after two, and the feed serves the
     // release on the third read: each is waited for.
@@ -55,7 +56,9 @@ fn an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone() {
     );
     assert_eq!(fake.serves("feed-alpha").as_deref(), Some(ALPHA));
     assert_eq!(fake.feeds["feed-stable"], stable);
-    // CI asked as the tag's gate asks it, then the tag to origin before upstream, then the release.
+    // CI asked as the tag's gate asks it, then the hand run of the Release workflow on
+    // main (the one branch the `release` environment admits besides tags) watched to
+    // its end, then the tag to origin before upstream, then the release.
     let ci = fake
         .when(&format!(
             "gh api repos/ngvoicu/consensflow/actions/workflows/ci.yml/runs?head_sha={head}&"
@@ -64,20 +67,40 @@ fn an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone() {
     let jobs = fake
         .when("gh api repos/ngvoicu/consensflow/actions/runs/1000/jobs?")
         .unwrap();
+    let lines = fake.lines();
+    let dispatched = lines
+        .iter()
+        .position(|line| {
+            line == "gh workflow run release.yml --repo ngvoicu/consensflow --ref main"
+        })
+        .unwrap();
+    let trial_ended = lines
+        .iter()
+        .rposition(|line| line.starts_with("gh run view 1001 "))
+        .unwrap();
     let origin = fake.when(&format!("git push -q origin {tag}")).unwrap();
     let upstream = fake.when(&format!("git push -q upstream {tag}")).unwrap();
     assert!(
-        ci < jobs && jobs < origin && origin < upstream,
-        "{:#?}",
-        fake.lines()
+        ci < jobs
+            && jobs < dispatched
+            && dispatched < trial_ended
+            && trial_ended < origin
+            && origin < upstream,
+        "{lines:#?}"
     );
-    // CI is the gate: no Release dry run is started, and the tag's run is the one Release run.
-    assert!(
-        fake.when("gh workflow run").is_none(),
-        "{:#?}",
-        fake.lines()
+    // One hand run, on this commit, and the tag's run is the one push run of the workflow.
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("gh workflow run"))
+            .count(),
+        1
     );
-    assert!(fake.runs_of("release.yml", "workflow_dispatch").is_empty());
+    let trials = fake.runs_of("release.yml", "workflow_dispatch");
+    assert_eq!(
+        (trials.len(), trials[0].id, &trials[0].commit),
+        (1, 1001, &head)
+    );
     assert_eq!(fake.runs_of("release.yml", "push").len(), 1);
     assert!(fake.pauses > 0);
     for line in [
@@ -86,7 +109,9 @@ fn an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone() {
             &head[..8]
         ),
         &format!("ci: run 1000 passed {} on both platforms", &head[..8]),
-        "release run 1001: success",
+        "trial: run 1001 of release.yml, until it ends",
+        "trial run 1001: success",
+        "release run 1002: success",
         "feed-alpha serves 3.0.6-alpha.1",
     ] {
         assert!(said.contains(line), "{line}: {said}");
@@ -94,17 +119,19 @@ fn an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone() {
 }
 
 #[test]
-fn a_dry_run_watches_ci_and_starts_and_tags_nothing() {
+fn a_dry_run_watches_ci_says_it_would_trial_and_tag_and_starts_and_tags_nothing() {
     let (world, mut fake) = ready();
     let head = world.head();
     let (outcome, _) = released(&world, &mut fake, true);
     let done = outcome.unwrap();
-    assert!(
-        done.starts_with(&format!(
-            "dry run: every check passed; v{ALPHA} would be tagged on {}",
-            &head[..8]
-        )),
-        "{done}"
+    assert_eq!(
+        done,
+        format!(
+            "dry run: every check passed; a hand run of release.yml would be started on {short}, \
+             and once it ended green v{ALPHA} would be tagged on it with {} and pushed to origin and upstream\n",
+            world.notes.display(),
+            short = &head[..8]
+        )
     );
     assert!(
         fake.when("gh api repos/ngvoicu/consensflow/actions/runs/1000/jobs?")
@@ -469,9 +496,12 @@ fn a_release_run_that_fails_says_to_rerun_it_and_a_run_again_says_the_same() {
     let said = refusal(released(&world, &mut fake, false).0);
     assert_eq!(
         said,
-        format!(
-            "release run 1001 ended failure: {tag} stays on upstream; {}",
-            advice(&tag, Some(1001))
+        red_run(
+            "release",
+            1002,
+            "failure",
+            "job mac ended failure, job windows / build ended failure",
+            &format!("{tag} stays on upstream; {}", advice(&tag, Some(1002)))
         )
     );
     assert_eq!(fake.serves("feed-alpha").as_deref(), Some("3.0.5"));
@@ -482,7 +512,7 @@ fn a_release_run_that_fails_says_to_rerun_it_and_a_run_again_says_the_same() {
         format!(
             "{tag} is already on upstream, on {}, so its Release run started; {}",
             &world.head()[..8],
-            advice(&tag, Some(1001))
+            advice(&tag, Some(1002))
         )
     );
 }
@@ -495,7 +525,181 @@ fn an_older_release_run_of_the_same_commit_is_not_taken_for_the_new_one() {
     fake.conclusions.insert(("release.yml", "push"), "failure");
     fake.unlisted_for = 1;
     let said = refusal(released(&world, &mut fake, false).0);
-    assert!(said.starts_with("release run 1002 ended failure"), "{said}");
+    // 1001 is the older run, 1002 the trial, 1003 the tag's.
+    assert!(said.starts_with("release run 1003 ended failure"), "{said}");
+}
+
+/// The hand run that fails at `step` of `job`, as the Release workflow's would.
+fn trial_fails_at(fake: &mut Fake, ended: &'static str, job: &'static str, step: &'static str) {
+    fake.conclusions
+        .insert(("release.yml", "workflow_dispatch"), ended);
+    fake.failed_steps
+        .insert(("release.yml", "workflow_dispatch"), (job, step));
+}
+
+#[test]
+fn a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged() {
+    for (job, step, ended) in [
+        ("mac", "The signed app passes the packaged smoke", "failure"),
+        ("mac", "Sign and notarize the app and its DMG", "failure"),
+        ("windows / build", "Build the app", "timed_out"),
+    ] {
+        let (world, mut fake) = ready();
+        trial_fails_at(&mut fake, ended, job, step);
+        let said = refusal(released(&world, &mut fake, false).0);
+        assert_eq!(
+            said,
+            red_run(
+                "trial",
+                1001,
+                ended,
+                &format!("job {job}, step \"{step}\" ended {ended}"),
+                "nothing after it was done"
+            )
+        );
+        // The run's address is the one to read it at, and the tag's run never started.
+        assert!(said.contains("https://github.com/ngvoicu/consensflow/actions/runs/1001"));
+        assert_eq!(
+            fake.runs.len(),
+            2,
+            "CI's run and the trial: {:#?}",
+            fake.runs
+        );
+        nothing_tagged(&world, &fake);
+        assert_eq!(fake.serves("feed-alpha").as_deref(), Some("3.0.5"));
+    }
+}
+
+#[test]
+fn a_trial_cancelled_with_no_step_to_name_is_refused_with_its_jobs() {
+    let (world, mut fake) = ready();
+    fake.conclusions
+        .insert(("release.yml", "workflow_dispatch"), "cancelled");
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        red_run(
+            "trial",
+            1001,
+            "cancelled",
+            "job mac ended cancelled, job windows / build ended cancelled",
+            "nothing after it was done"
+        )
+    );
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn an_older_hand_run_of_the_same_commit_is_not_taken_for_the_trial() {
+    let (world, mut fake) = ready();
+    // A green hand run of this commit from before; the trial fails, and shows a look late.
+    fake.start("release.yml", &world.head(), "workflow_dispatch");
+    trial_fails_at(
+        &mut fake,
+        "failure",
+        "mac",
+        "The signed app passes the packaged smoke",
+    );
+    fake.unlisted_for = 1;
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert!(said.starts_with("trial run 1002 ended failure"), "{said}");
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn a_hand_run_that_gh_cannot_start_stops_it_with_what_gh_said_and_nothing_is_tagged() {
+    let (world, mut fake) = ready();
+    fake.dispatch_fails = true;
+    match released(&world, &mut fake, false).0 {
+        Err(Error::Program {
+            command,
+            code,
+            said,
+        }) => {
+            assert_eq!(
+                command,
+                "gh workflow run release.yml --repo ngvoicu/consensflow --ref main"
+            );
+            assert_eq!(code, 1);
+            assert!(said.contains("HTTP 403"), "{said}");
+        }
+        other => panic!("not gh's refusal: {other:?}"),
+    }
+    assert!(fake.runs_of("release.yml", "workflow_dispatch").is_empty());
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn a_trial_github_never_lists_is_refused_and_nothing_is_tagged() {
+    let (world, mut fake) = ready();
+    fake.hand_runs_start = false;
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "trial: no new run of release.yml appeared on {}: nothing after it was done",
+            &world.head()[..8]
+        )
+    );
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn main_that_moved_while_ci_was_watched_is_not_trialled_for_a_hand_run_is_of_main_s_head() {
+    // Upstream's main moves on alone, or the checkout's with both remotes' ones.
+    for together in [false, true] {
+        let (world, mut fake) = ready();
+        let (root, upstream) = (world.root.clone(), world.upstream.clone());
+        fake.after_ci = Some(Box::new(move || {
+            let author = [
+                "-c",
+                "user.name=Other",
+                "-c",
+                "user.email=o@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ];
+            let landing = [
+                &author[..],
+                &["commit", "-q", "--allow-empty", "-m", "a landing"],
+            ]
+            .concat();
+            if together {
+                git(&root, &landing);
+                for remote in ["origin", "upstream"] {
+                    git(&root, &["push", "-q", remote, "main"]);
+                }
+            } else {
+                let other = tempfile::tempdir().unwrap();
+                let clone = other.path().join("clone");
+                git(
+                    other.path(),
+                    &["clone", "-q", &upstream.to_string_lossy(), "clone"],
+                );
+                git(&clone, &landing);
+                git(&clone, &["push", "-q", "origin", "main"]);
+            }
+        }));
+        let said = refusal(released(&world, &mut fake, false).0);
+        if together {
+            assert!(
+                said.starts_with(&format!(
+                    "main moved on from {} to ",
+                    &world.commit_of("HEAD~1")[..8]
+                )),
+                "{said}"
+            );
+        } else {
+            assert!(said.contains("push or pull until they are one"), "{said}");
+        }
+        // No hand run was asked for, since it would be of the new head, and nothing was tagged.
+        assert!(
+            fake.when("gh workflow run").is_none(),
+            "{:#?}",
+            fake.lines()
+        );
+        nothing_tagged(&world, &fake);
+    }
 }
 
 #[test]
@@ -506,15 +710,16 @@ fn a_feed_alpha_that_never_serves_the_alpha_after_a_green_run_says_the_release_i
     assert_eq!(
         said,
         format!(
-            "release run 1001 ended green, its own check of the feeds with it, yet feed-alpha does not serve \
+            "release run 1002 ended green, its own check of the feeds with it, yet feed-alpha does not serve \
              {ALPHA} after 5 reads (it serves 3.0.5): the release is published, and GitHub's download links \
              can lag; read it again in a few minutes, \
              `curl -sL https://github.com/ngvoicu/consensflow/releases/download/feed-alpha/latest.json`, \
              and run nothing again"
         )
     );
-    // One look at each of the two runs while it goes on, and a wait between each two of five reads.
-    assert_eq!(fake.pauses, 2 + 4);
+    // One look at each of the three runs (CI's, the trial's and the tag's) while it goes on,
+    // and a wait between each two of five reads.
+    assert_eq!(fake.pauses, 3 + 4);
 }
 
 #[test]
@@ -526,7 +731,7 @@ fn a_feed_stable_the_alpha_moved_fails_the_release() {
         said,
         format!(
             "feed-stable serves {ALPHA}, and served 3.0.5 before {ALPHA} was released: \
-             an alpha never moves it; read the publish job of run 1001"
+             an alpha never moves it; read the publish job of run 1002"
         )
     );
 }
@@ -544,7 +749,7 @@ fn a_feed_stable_that_answers_no_release_after_a_green_run_says_the_release_is_p
             said,
             format!(
                 "feed-stable answered no release in 5 reads ({last}): an outage of the feed or of GitHub, \
-                 not a version to change; release run 1001 ended green, so the release is published; \
+                 not a version to change; release run 1002 ended green, so the release is published; \
                  read feed-stable by hand, \
                  `curl -sL https://github.com/ngvoicu/consensflow/releases/download/feed-stable/latest.json`, \
                  which served 3.0.5 before it, and run nothing again"

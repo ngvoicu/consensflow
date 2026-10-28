@@ -1,7 +1,9 @@
 //! What the release's tests run on: a checkout in a temporary tree with two
 //! bare repositories for its remotes, `origin` and `upstream`, which `git`
 //! really pushes to; and a GitHub that is a script. `gh` lists, shows and
-//! starts runs the test sets up, and answers `gh api` for CI's runs of a commit
+//! starts runs the test sets up (`gh workflow run` starts a hand run of the
+//! Release workflow, the trial, which publishes nothing and may end red at a
+//! step the test names), and answers `gh api` for CI's runs of a commit
 //! and a run's jobs as the Actions API does; a push of `main` or of a `release/` branch to
 //! upstream starts CI, a push of a tag starts the Release run, which (when it
 //! ends green) puts the version
@@ -237,6 +239,9 @@ pub struct FakeRun {
     pub event: String,
     pub conclusion: String,
     pub jobs: Vec<(String, String)>,
+    /// The steps a job of it has that matter to what is said: the job, the
+    /// step, how it ended. A job with none lists none, as one cancelled whole does.
+    pub steps: Vec<(String, String, String)>,
     /// The looks at it before it has ended.
     pub running_for: u32,
     /// The lists of runs it is not yet in.
@@ -255,6 +260,9 @@ pub struct Fake {
     pub feed_lag: u32,
     /// How each run of a workflow by an event ends; `success` where none is named.
     pub conclusions: BTreeMap<(&'static str, &'static str), &'static str>,
+    /// The job and the step that fail a run of a workflow by an event that does
+    /// not end `success`, which the other job of a Release run then does not share.
+    pub failed_steps: BTreeMap<(&'static str, &'static str), (&'static str, &'static str)>,
     /// The jobs of a CI run.
     pub ci_jobs: Vec<(&'static str, &'static str)>,
     /// The looks at a new run before it ends, and the lists it is not yet in.
@@ -281,6 +289,12 @@ pub struct Fake {
     pub tag_fetch_fails: bool,
     /// Whether a tag pushed to upstream starts its Release run.
     pub tags_start_runs: bool,
+    /// Whether a hand run `gh workflow run` asks for starts, and whether
+    /// `gh` refuses to ask for it (a token that may not dispatch).
+    pub hand_runs_start: bool,
+    pub dispatch_fails: bool,
+    /// What happens once CI's run of the commit has been watched: main moves on, say.
+    pub after_ci: Option<Box<dyn FnOnce()>>,
     /// Whether a `release/` branch pushed to upstream starts CI on it, and
     /// whether someone runs CI on it by hand as well, beside the push's run.
     pub branches_start_ci: bool,
@@ -307,6 +321,7 @@ impl Fake {
             waiting: Vec::new(),
             feed_lag: 0,
             conclusions: BTreeMap::new(),
+            failed_steps: BTreeMap::new(),
             ci_jobs: vec![
                 ("gate (macos-latest)", "success"),
                 ("gate (windows-latest)", "success"),
@@ -323,6 +338,9 @@ impl Fake {
             failing_after_the_tag: Vec::new(),
             tag_fetch_fails: false,
             tags_start_runs: true,
+            hand_runs_start: true,
+            dispatch_fails: false,
+            after_ci: None,
             branches_start_ci: true,
             branch_ci_by_hand: false,
             gh_fails: false,
@@ -373,17 +391,40 @@ impl Fake {
         let conclusion = key
             .and_then(|key| self.conclusions.get(&key).copied())
             .unwrap_or("success");
+        // The job a named step fails is the only one that does; with none named, every job shares the run's end.
+        let failed = key
+            .and_then(|key| self.failed_steps.get(&key).copied())
+            .filter(|_| conclusion != "success");
         let jobs = if workflow == "ci.yml" {
             self.ci_jobs
                 .iter()
                 .map(|(job, ended)| ((*job).to_owned(), (*ended).to_owned()))
                 .collect()
         } else {
-            vec![
-                ("mac".to_owned(), conclusion.to_owned()),
-                ("windows / build".to_owned(), conclusion.to_owned()),
-            ]
+            ["mac", "windows / build"]
+                .into_iter()
+                .map(|job| {
+                    let ended = match failed {
+                        Some((named, _)) if named != job => "success",
+                        _ => conclusion,
+                    };
+                    (job.to_owned(), ended.to_owned())
+                })
+                .collect()
         };
+        // The step that failed, with the one before it that passed and the one after it that did not run.
+        let steps = failed
+            .map(|(job, step)| {
+                [
+                    ("Build the release tool", "success"),
+                    (step, conclusion),
+                    ("Sign the update bundle", "skipped"),
+                ]
+                .into_iter()
+                .map(|(name, ended)| (job.to_owned(), name.to_owned(), ended.to_owned()))
+                .collect()
+            })
+            .unwrap_or_default();
         let id = 1000 + self.runs.len() as u64;
         self.runs.push(FakeRun {
             id,
@@ -392,6 +433,7 @@ impl Fake {
             event: event.to_owned(),
             conclusion: conclusion.to_owned(),
             jobs,
+            steps,
             running_for: self.running_for,
             unlisted_for: self.unlisted_for,
         });
@@ -465,6 +507,26 @@ impl Fake {
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
         match words.as_slice() {
             ["api", path] => said(&self.api(path)),
+            ["workflow", "run", workflow, ..] => {
+                assert_eq!(
+                    *workflow, "release.yml",
+                    "only the Release workflow is run by hand"
+                );
+                if self.dispatch_fails {
+                    return Captured {
+                        code: 1,
+                        stdout: String::new(),
+                        stderr: "HTTP 403: Resource not accessible by personal access token"
+                            .to_owned(),
+                    };
+                }
+                if self.hand_runs_start {
+                    let commit =
+                        self.upstream_commit(&flag("--ref").expect("a hand run is on a branch"));
+                    self.start("release.yml", &commit, "workflow_dispatch");
+                }
+                said("")
+            }
             ["run", "list", ..] => {
                 let workflow = flag("--workflow").unwrap();
                 let (commit, event) = (flag("--commit"), flag("--event"));
@@ -500,7 +562,15 @@ impl Fake {
                 let jobs: Vec<_> = run
                     .jobs
                     .iter()
-                    .map(|(name, ended)| json!({ "name": name, "conclusion": ended }))
+                    .map(|(name, ended)| {
+                        let steps: Vec<_> = run
+                            .steps
+                            .iter()
+                            .filter(|(job, ..)| job == name)
+                            .map(|(_, step, ended)| json!({ "name": step, "conclusion": ended }))
+                            .collect();
+                        json!({ "name": name, "conclusion": ended, "steps": steps })
+                    })
                     .collect();
                 said(
                     &json!({ "status": status, "conclusion": conclusion, "jobs": jobs })
@@ -568,7 +638,12 @@ impl Fake {
             .filter(|_| page == 1)
             .map(|(name, ended)| json!({ "name": name, "conclusion": ended }))
             .collect();
-        json!({ "total_count": jobs.len(), "jobs": jobs }).to_string()
+        let answer = json!({ "total_count": jobs.len(), "jobs": jobs }).to_string();
+        // The jobs are the last thing the verdict on CI asks.
+        if let Some(then) = self.after_ci.take() {
+            then();
+        }
+        answer
     }
 
     fn curl(&mut self, address: &str) -> Captured {

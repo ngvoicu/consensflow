@@ -38,11 +38,29 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
     release.ci_passed(&commit, Left::Nothing)?;
     if options.dry_run {
         return Ok(format!(
-            "dry run: every check passed; {tag} would be tagged on {} with {} and pushed to origin and upstream\n",
+            "dry run: every check passed; a hand run of release.yml would be started on {}, and once it \
+             ended green {tag} would be tagged on it with {} and pushed to origin and upstream\n",
             short(&commit),
             notes.display()
         ));
     }
+
+    // The same jobs as the tag's run, tried first: a tag whose run fails is
+    // never moved, so what it would fail on is found out before there is one.
+    // A hand run is of main's head, and CI may have been waited for a long
+    // while: main must still be the commit CI passed, as upstream has it, or
+    // the run would be of something else.
+    let head = release.main_as_upstream_has_it()?;
+    if head != commit {
+        return Err(refused(format!(
+            "main moved on from {} to {} while CI was watched: a hand run is of main's head, and this release \
+             is of {}; run again",
+            short(&commit),
+            short(&head),
+            short(&commit)
+        )));
+    }
+    release.trial(&commit)?;
 
     let before = release.newest_run("release.yml", Some(&commit), Some("push"))?;
     release.tag_and_push(&tag, &notes, &commit)?;

@@ -3,7 +3,7 @@
 //! and never writes main, whether main moved on from the alpha or not.
 
 use super::fake::{git, git_says_yes, latest, version_files, write, Fake, World};
-use super::{advice, not_on_upstream, refusal};
+use super::{advice, not_on_upstream, red_run, refusal};
 use crate::release::{promote, Error, Options};
 
 const ALPHA: &str = "3.0.6-alpha.1";
@@ -144,7 +144,8 @@ fn a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_writ
             );
         }
         // The branch's push ran CI on the version commit, watched green before the tag;
-        // nothing is started by hand.
+        // nothing is started by hand: a hand run of the Release workflow holds the signing
+        // keys, and the `release` environment admits main and v* tags, not release/*.
         assert!(
             fake.when("gh workflow run").is_none(),
             "{:#?}",
@@ -527,9 +528,12 @@ fn a_release_run_that_fails_says_to_rerun_it_and_a_run_again_names_the_same_run(
     let run = fake.runs_of("release.yml", "push")[0].id;
     assert_eq!(
         said,
-        format!(
-            "release run {run} ended failure: {tag} stays on upstream; {}",
-            advice(&tag, Some(run))
+        red_run(
+            "release",
+            run,
+            "failure",
+            "job mac ended failure, job windows / build ended failure",
+            &format!("{tag} stays on upstream; {}", advice(&tag, Some(run)))
         )
     );
     let promoted_commit = git(&world.upstream, &["rev-parse", BRANCH]);

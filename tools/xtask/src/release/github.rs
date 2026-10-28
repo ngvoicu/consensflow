@@ -6,6 +6,11 @@
 //! before it was asked for, then looked at until it has ended. `gh run watch`
 //! can return before a run ends, so only the run's own status is read.
 //!
+//! A hand run of the Release workflow (the trial, [`Release::trial`]) is started
+//! with `gh workflow run` and watched the same way, by the event that started it.
+//! A watched run that does not end green is refused with what failed in it, the
+//! job and the step, and the address to read it at.
+//!
 //! CI is not watched by its newest run: whether it passed a commit is asked as
 //! the release's own gate asks it (cf-release's `ci_passed::verdict`, through
 //! `gh api`), so that a commit the command tags is one the tag's run takes, and
@@ -127,12 +132,64 @@ enum Read {
     Unreachable(String),
 }
 
+/// A job of a run: how it ended, and each of its steps by its name and how it ended.
+struct Job {
+    name: String,
+    conclusion: String,
+    steps: Vec<(String, String)>,
+}
+
 /// What a run says of itself.
 struct Status {
     status: String,
     conclusion: String,
-    /// Each job, by its name, and how it ended.
-    jobs: Vec<(String, String)>,
+    jobs: Vec<Job>,
+}
+
+impl Status {
+    /// What did not pass in the run, as a person looks for it: each job that did
+    /// not, and the steps of it that did not, or the job alone when it names none
+    /// (a job cancelled whole has no step that ended).
+    fn failures(&self) -> Vec<String> {
+        let passed = |conclusion: &str| matches!(conclusion, "success" | "skipped" | "neutral");
+        let mut failed = Vec::new();
+        for job in self.jobs.iter().filter(|job| !passed(&job.conclusion)) {
+            let steps: Vec<_> = job
+                .steps
+                .iter()
+                .filter(|(_, conclusion)| !passed(conclusion))
+                .collect();
+            if steps.is_empty() {
+                failed.push(format!(
+                    "job {} ended {}",
+                    job.name,
+                    how_it_ended(&job.conclusion)
+                ));
+            }
+            for (step, conclusion) in steps {
+                failed.push(format!(
+                    "job {}, step \"{step}\" ended {}",
+                    job.name,
+                    how_it_ended(conclusion)
+                ));
+            }
+        }
+        failed
+    }
+}
+
+/// How a job or a step ended, as it is said: one that GitHub gives no conclusion ended without one.
+fn how_it_ended(conclusion: &str) -> &str {
+    if conclusion.is_empty() {
+        "without a conclusion"
+    } else {
+        conclusion
+    }
+}
+
+/// Where a run is read on GitHub.
+fn run_address(id: u64) -> String {
+    format!("https://github.com/{REPOSITORY}/actions/runs/{id}")
 }
 
 impl Release<'_> {
@@ -204,7 +261,20 @@ impl Release<'_> {
             .and_then(Value::as_array)
             .ok_or_else(|| answer("it lists no jobs".into()))?
             .iter()
-            .map(|job| (text(job, "name"), text(job, "conclusion")))
+            .map(|job| Job {
+                name: text(job, "name"),
+                conclusion: text(job, "conclusion"),
+                steps: job
+                    .get("steps")
+                    .and_then(Value::as_array)
+                    .map(|steps| {
+                        steps
+                            .iter()
+                            .map(|step| (text(step, "name"), text(step, "conclusion")))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
             .collect();
         Ok(Status {
             status: text(&run, "status"),
@@ -244,17 +314,61 @@ impl Release<'_> {
             self.system.pause(self.pace.poll);
         };
         self.say(&format!("{label} run {id}: {}", ended.conclusion));
-        for (job, conclusion) in &ended.jobs {
-            self.say(&format!("  {job} {conclusion}"));
+        for job in &ended.jobs {
+            self.say(&format!("  {} {}", job.name, job.conclusion));
         }
         if ended.conclusion != "success" {
+            let address = run_address(id);
+            let failed = ended.failures();
+            let at = if failed.is_empty() {
+                address
+            } else {
+                format!("{}; {address}", failed.join(", "))
+            };
             return Err(refused(format!(
-                "{label} run {id} ended {}: {}",
+                "{label} run {id} ended {} ({at}): {}",
                 ended.conclusion,
                 watched.left.then(Some(id))
             )));
         }
         Ok(id)
+    }
+
+    /// A hand run of the Release workflow on `commit`, started and watched to its
+    /// end: the Mac job builds, signs and smoke-tests the app as the tag's run
+    /// will, the Windows job builds, and nothing is published (only the push of a
+    /// tag publishes). What would fail the tag's run fails this one first, with no
+    /// tag made: a tag whose run failed is left behind, and a tag is never moved or
+    /// pushed again, so its version would be spent.
+    ///
+    /// A hand run is of a branch's head, not of a commit, and `main` is the only
+    /// branch the `release` environment (which holds the signing keys) admits
+    /// besides tags: `commit` must be main's head, which the caller has just seen.
+    /// A run of another commit would not be the one watched, which is looked for by
+    /// the commit. The run, once it ends green.
+    pub(super) fn trial(&mut self, commit: &str) -> Result<u64, Error> {
+        let before = self.newest_run("release.yml", Some(commit), Some("workflow_dispatch"))?;
+        self.gh(&[
+            "workflow",
+            "run",
+            "release.yml",
+            "--repo",
+            REPOSITORY,
+            "--ref",
+            "main",
+        ])?;
+        self.say(&format!(
+            "trial: a hand run of release.yml asked for, on main at {}",
+            short(commit)
+        ));
+        self.watch(&Watched {
+            label: "trial",
+            workflow: "release.yml",
+            commit,
+            event: Some("workflow_dispatch"),
+            before,
+            left: Left::Nothing,
+        })
     }
 
     /// Waits until CI's full gate passed `commit` on both platforms, by the

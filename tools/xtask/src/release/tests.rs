@@ -28,6 +28,15 @@ fn refusal(outcome: Result<String, Error>) -> String {
     }
 }
 
+/// What a refusal says of a watched run `run` (a `label`: `trial`, `release`) that
+/// ended `ended`: what failed in it and where to read it, then what to do about
+/// what was left (`then`).
+fn red_run(label: &str, run: u64, ended: &str, failed: &str, then: &str) -> String {
+    format!(
+        "{label} run {run} ended {ended} ({failed}; https://github.com/ngvoicu/consensflow/actions/runs/{run}): {then}"
+    )
+}
+
 /// What a refusal says to do about `tag` on upstream, whose Release run is `run`,
 /// written out as a person reads it.
 fn advice(tag: &str, run: Option<u64>) -> String {
