@@ -24,6 +24,8 @@ pacing-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch
 pacing-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter"]
 # A Claude chief whose cancelled compact left `/compact` in its box (the regression's).
 pacing-compact = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "a_claude_chief_whose_compact_the_human_cancelled_is_at_rest_and_is_handed_its_workers_result_alone"]
+pacing-rig-lists = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "reports::a_platform_attribute_in_a_suites_list_sits_on_the_mod_line_it_gates"]
+pacing-gate-steps = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "check::tests::"]
 
 [[plant]]
 name = "pacing reader: a message Claude takes into a turn under way is no item, and its arrival never shows"
@@ -495,3 +497,70 @@ runs = ["pacing-kit"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = "                if told {"
 replace = "                if told && false {"
+
+[[plant]]
+name = "pacing review: lists: a platform attribute sits above the path of the mod it gates"
+meant = "a_platform_attribute_in_a_suites_list_sits_on_the_mod_line_it_gates"
+runs = ["pacing-rig-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions.rs"
+find = '''
+#[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
+#[cfg(unix)]'''
+replace = '''
+#[cfg(unix)]
+#[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]'''
+
+[[plant]]
+name = "pacing review: urgent: the head an urgent row lets go is not looked at again before its paste"
+meant = "the_head_an_urgent_row_lets_go_at_the_first_rest_is_still_looked_at_before_its_paste"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = '''
+            record.delivery.borrow_mut().paced = Some(Paced {
+                message: message.id,
+                frontier: rest.frontier,
+                rest_ms,
+                typed_quiet_ms: None,'''
+replace = '''
+            let _ = Some(Paced {
+                message: message.id,
+                frontier: rest.frontier,
+                rest_ms,
+                typed_quiet_ms: None,'''
+
+[[plant]]
+name = "pacing review: held: a message that left the head of its queue is still held back"
+meant = "a_held_message_that_leaves_the_head_of_its_queue_is_held_back_no_more"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    .is_some_and(|held| Some(held.message) != head)"
+replace = "                    .is_some_and(|held| Some(held.message) != head && false)"
+
+[[plant]]
+name = "pacing review: paced kit: the gate's kit runs without the pacing on"
+meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable"
+runs = ["pacing-gate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = '''
+        .var(PACED_VARIABLE, "1"),'''
+replace = ","
+
+[[plant]]
+name = "pacing review: paced kit: CI's checks job runs the kit without the pacing on"
+meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable"
+runs = ["pacing-gate-steps"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+        env:
+          CF_KIT_PACED: 1'''
+replace = ""
