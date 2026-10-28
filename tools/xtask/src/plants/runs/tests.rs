@@ -1566,6 +1566,7 @@ fn crate_plant(
         prepare: Vec::new(),
         requires: Vec::new(),
         platforms: Vec::new(),
+        harnesses: Vec::new(),
         edits: vec![Edit {
             file: "src/lib.rs".into(),
             find: "    1\n".into(),
@@ -1783,6 +1784,7 @@ fn tried_by(command: Vec<String>) -> (tempfile::TempDir, Context, crate::plants:
         prepare: Vec::new(),
         requires: Vec::new(),
         platforms: Vec::new(),
+        harnesses: Vec::new(),
         edits: vec![Edit {
             file: "a.rs".into(),
             find: "one".into(),
@@ -1883,6 +1885,7 @@ fn every_command_of_a_plant_runs_and_one_whose_test_target_is_gone_is_said_for_i
         prepare: Vec::new(),
         requires: Vec::new(),
         platforms: Vec::new(),
+        harnesses: Vec::new(),
         edits: vec![Edit {
             file: "src/lib.rs".into(),
             find: "    1\n}\n\n#[cfg".into(),
@@ -1984,6 +1987,7 @@ fn flagged(name: &str, meant: &str, command: Vec<String>) -> crate::plants::kit:
         prepare: Vec::new(),
         requires: Vec::new(),
         platforms: Vec::new(),
+        harnesses: Vec::new(),
         edits: vec![Edit {
             file: "flag.mjs".into(),
             find: "planted = false".into(),

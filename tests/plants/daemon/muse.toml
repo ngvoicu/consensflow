@@ -27,7 +27,8 @@ muse-window-args = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "
 muse-unsent = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::window::"]
 muse-first-message = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "first_message::"]
 muse-hook-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "dispatch", "muses_session_hook"]
-# The rig's cases on the machine's Muse (none where it has none: they pass, saying why).
+# The rig's cases on the machine's Muse (none where it has none: they pass, saying why, so
+# their plants say `harnesses = ["muse"]` and are not run there: T-829).
 muse-rig-resume = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::a_muse_worker_cut"]
 muse-rig-take-back = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::an_interrupt_before"]
 muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
@@ -1094,6 +1095,7 @@ replace = '''        Harness::Muse => None,'''
 name = "muse rig: a resumed Muse window never starts, so its note is never pasted"
 meant = "a_muse_worker_cut_by_the_app_s_quit_is_resumed_on_its_session_with_the_note_pasted_once_up"
 runs = ["muse-rig-resume"]
+harnesses = ["muse"]
 builds = true
 platforms = ["macos"]
 
@@ -1111,6 +1113,7 @@ replace = '''            if self.session.borrow().is_some() {
 name = "muse rig: a taken-back brief stays in the box under the resume's"
 meant = "an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_in_alone"
 runs = ["muse-rig-take-back"]
+harnesses = ["muse"]
 builds = true
 platforms = ["macos"]
 

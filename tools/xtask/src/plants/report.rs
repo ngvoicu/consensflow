@@ -181,14 +181,20 @@ pub fn tail(output: &str, count: usize) -> &str {
 }
 
 /// How many plants were caught of those chosen and run here, how many were unstable,
-/// and how many were for other systems and skipped, where any were.
-pub fn totals(caught: usize, run: usize, unstable: usize, skipped: usize) -> String {
+/// how many were for other systems and skipped, and how many were not run for a
+/// harness the machine lacks, where any were.
+pub fn totals(caught: usize, run: usize, unstable: usize, skipped: usize, absent: usize) -> String {
     let mut said = format!("{caught} of {run} plants caught");
     if unstable > 0 {
         said.push_str(&format!(", {unstable} unstable"));
     }
     if skipped > 0 {
         said.push_str(&format!(", {skipped} skipped (platform)"));
+    }
+    if absent > 0 {
+        said.push_str(&format!(
+            ", {absent} not run (a harness this machine lacks)"
+        ));
     }
     said
 }
@@ -201,6 +207,12 @@ pub fn skipped(name: &str, platforms: &[String], here: &str) -> String {
         "SKIPPED (platform)",
         platforms.join(", ")
     )
+}
+
+/// The line of a plant whose runs need a harness the machine lacks, `why` in words,
+/// which is not run: neither caught nor missed.
+pub fn absent(name: &str, why: &str) -> String {
+    format!("{:<16}   {name}: not run: {why}", "SKIPPED (absent)")
 }
 
 #[cfg(test)]
