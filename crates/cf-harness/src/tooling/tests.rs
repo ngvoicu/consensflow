@@ -656,3 +656,35 @@ fn the_input_box_is_read_as_the_adapter_reads_it_and_a_harness_with_no_reader_re
         assert_eq!(read(kind, &[RULE, "❯", RULE]), Value::Null, "{kind}");
     }
 }
+
+#[test]
+fn the_unsent_question_answers_the_adapters_decision_of_a_snapshot() {
+    let decide = |kind: &str, bottom: &[&str], quiet: u64| {
+        answer(&ask(
+            "unsent",
+            json!({ "kind": kind, "snapshot": {
+                "ok": true, "unsent": true, "typed": 4, "bottom": bottom,
+                "typedQuietMs": quiet, "outputQuietMs": quiet / 2,
+            }}),
+        ))
+        .unwrap()
+    };
+    const RULE: &str = "────────────────────────────────────────";
+    assert_eq!(
+        decide("claude-code", &[RULE, "❯", RULE], 2_000),
+        json!({ "readEmpty": 4 })
+    );
+    assert_eq!(
+        decide("claude-code", &[RULE, "❯", RULE], 200),
+        json!("held"),
+        "a key too recent"
+    );
+    assert_eq!(
+        decide("claude-code", &[RULE, "❯ probe words", RULE], 2_000),
+        json!("held")
+    );
+    assert_eq!(decide("codex", &[RULE, "❯", RULE], 2_000), json!("held"));
+    assert!(answer(&ask("unsent", json!({ "kind": "claude-code" })))
+        .unwrap_err()
+        .contains("no snapshot"));
+}

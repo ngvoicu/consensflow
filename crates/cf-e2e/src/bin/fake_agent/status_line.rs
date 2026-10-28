@@ -86,7 +86,7 @@ impl StatusLine {
         format!(
             "#!/bin/bash\n\
              git -C \"$PWD\" --no-optional-locks branch --show-current 2>/dev/null\n\
-             for _ in $(seq {}); do\n  kill -0 \"$PPID\" 2>/dev/null || exit 0\n  sleep 0.1\ndone\n",
+             for _ in $(seq {}); do\n  kill -0 \"$PPID\" 2>/dev/null || exit 0\n  /bin/sleep 0.1\ndone\n",
             self.tenths()
         )
     }

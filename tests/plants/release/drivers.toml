@@ -645,3 +645,27 @@ replace = """
     WINDOW_VARIABLES
         .into_iter()
         .skip(1)"""
+
+# The app linted for Windows before a landing (T-836): CI's Windows checks denied an unused import in a
+# Windows-only test of the app's that the gate never linted (3.0.6-alpha.3's integration B).
+[[plant]]
+name = "drivers: check does not lint the app for Windows"
+meant = "the_steps_are_the_gates_in_order_and_each_runs_where_and_as_its_own_command_does"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = """
+        steps.push(at("cargo", &["xtask", "clippy-windows", "app"]));"""
+replace = ""
+
+[[plant]]
+name = "drivers: a Windows-only test of the app imports what it does not use"
+meant = "unused_imports"
+runs = ["windows-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/portable/tests.rs"
+find = "        use std::process::Stdio;\n\n        const CREATE_NO_WINDOW"
+replace = "        use std::process::{Command, Stdio};\n\n        const CREATE_NO_WINDOW"
+

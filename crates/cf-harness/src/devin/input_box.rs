@@ -7,6 +7,9 @@
 
 use crate::shared::input_box::{boxed, Cursor, InputBox};
 
+/// The prompt mark the box's first line begins with.
+pub(crate) const MARK: char = '❭';
+
 /// The hint an empty box shows.
 const HINT: &str = "Ask Devin to build features, fix bugs, or work on your code";
 
@@ -15,7 +18,7 @@ const HINT: &str = "Ask Devin to build features, fix bugs, or work on your code"
 /// cursor says it holds only a hint (whatever its words, which a Devin update may
 /// change), or where it shows the hint's words of 3000.11.92, a second signal.
 pub(crate) fn read(screen: &[String], cursor: Option<Cursor>) -> Option<InputBox> {
-    let boxed = boxed(screen, '❭')?;
+    let boxed = boxed(screen, MARK)?;
     let (typed, more) = (boxed.typed, boxed.more);
     Some(
         if boxed.only_a_hint(cursor) || (!more && (typed.is_empty() || typed == HINT)) {

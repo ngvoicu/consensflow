@@ -288,7 +288,7 @@ fn a_reader_of_a_terminal_that_never_goes_quiet_ends_once_the_program_has_gone()
     let table = PaneTable::closing_within(Duration::from_millis(500));
     let (key, reader) = open(
         &table,
-        "while kill -0 $PPID 2>/dev/null; do printf .; sleep 0.02; done",
+        "while kill -0 $PPID 2>/dev/null; do printf .; /bin/sleep 0.02; done",
     );
     let gone = Arc::new(AtomicBool::new(false));
     let said = Arc::clone(&gone);

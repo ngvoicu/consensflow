@@ -1,0 +1,36 @@
+{
+ "ok": true,
+ "unsent": true,
+ "typed": 18,
+ "typedQuietMs": 3005,
+ "outputQuietMs": 2985,
+ "cursor": {
+  "line": 18,
+  "col": 2,
+  "shown": true,
+  "plainAfter": 0
+ },
+ "bottom": [
+  " ▐▛███▛█   Claude Code v2.1.312",
+  "▝▜██████▀  Sonnet 5.5 · Claude Max",
+  " ▝▝   ▝▝   ~/work",
+  "",
+  "  Get to finished work sooner with Opus 5.5. Switch anytime with /model.",
+  "  1 more notice hidden",
+  "",
+  "❯ Reply with exactly the word RESTEDOK and nothing else.",
+  "",
+  "⏺ RESTEDOK",
+  "",
+  "✻ Cogitated for 2s · done 10:48 PM",
+  "",
+  "❯ /recap",
+  "  ⎿  There's no real task underway yet. Your only request so far was to reply with the word RESTEDOK, which I did. Next,",
+  "     tell me what you'd like to work on in this directory.",
+  "",
+  "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+  "❯",
+  "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+  "  ⏵⏵ bypass permissions on (shift+tab to cycle)"
+ ]
+}

@@ -26,7 +26,7 @@ use crate::{cf, checkout, files, pattern, serial, Error, Result};
 /// How long the daemon and the pane host have to say they are ready: they are
 /// started for the first time on a cold machine, and Node, whose time this was,
 /// was given none.
-const READY: Duration = Duration::from_secs(60);
+pub(super) const READY: Duration = Duration::from_secs(60);
 
 /// What the pane host says first of all.
 const HOST_KIND: &str = "consensflow-bridge";

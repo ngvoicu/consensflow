@@ -107,7 +107,7 @@ mod tests {
         let fd = stray.fd();
         let mut command = std::process::Command::new("/bin/sh");
         command.arg("-c").arg(format!(
-            "exec {fd}</dev/null; echo ready; while kill -0 $PPID 2>/dev/null; do sleep 0.2; done"
+            "exec {fd}</dev/null; echo ready; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done"
         ));
         command.stdout(std::process::Stdio::piped());
         crate::hold_only_the_streams(&mut command);
