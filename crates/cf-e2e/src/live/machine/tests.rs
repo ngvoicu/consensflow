@@ -519,8 +519,10 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
         serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
             .unwrap();
     let root = home.path().join(".consensflow-candidate").join("live");
+    // As Claude Code keeps a folder: on Windows with `/` for `\`.
     assert_eq!(
-        held["projects"][root.to_string_lossy().as_ref()]["hasTrustDialogAccepted"],
+        held["projects"][claude_project_key(&root.to_string_lossy()).as_str()]
+            ["hasTrustDialogAccepted"],
         true,
         "{held}"
     );
