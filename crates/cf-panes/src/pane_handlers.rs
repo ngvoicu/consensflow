@@ -636,10 +636,6 @@ mod tests {
         .is_err());
     }
 
-    /// Over the bridge as the daemon speaks it: its own keys are not the
-    /// human's unsent text, so they hold neither a paste nor a native send,
-    /// and the snapshot says nothing is unsent.
-    #[cfg(unix)]
     /// The human's last writes are said as how long ago, how many bytes and of what kinds
     /// (Calliope's T-844, T-883).
     #[test]
@@ -680,6 +676,10 @@ mod tests {
         );
     }
 
+    /// Over the bridge as the daemon speaks it: its own keys are not the
+    /// human's unsent text, so they hold neither a paste nor a native send,
+    /// and the snapshot says nothing is unsent.
+    #[cfg(unix)]
     #[test]
     fn the_daemons_own_keys_hold_no_paste_and_no_claim() {
         use std::io::{BufRead, BufReader, Write};
