@@ -1968,20 +1968,18 @@ runs = ["tem-panes-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background.rs"
-find = """                shells.contains(&member.key)
-                    || (member.parent.is_none()"""
-replace = """                false
-                    || (member.parent.is_none()"""
+find = '            .filter(|member| shells.contains(&member.key))'
+replace = '            .filter(|member| member.parent.is_some() && !shells.contains(&member.key))'
 
 [[plant]]
-name = "turn-end-min host: what began after the rest with no parent is no command where there are no groups"
+name = "turn-end-min host: what a shell left when it was ended is a command where there are no groups"
 meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
 runs = ["tem-panes-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background.rs"
-find = '                    || (member.parent.is_none() && !protected.contains(&member.key))'
-replace = '                    || false'
+find = '            .filter(|member| shells.contains(&member.key))'
+replace = '            .filter(|member| shells.contains(&member.key) || member.parent.is_none())'
 
 [[plant]]
 name = "turn-end-min host: where there are no groups the launch is not left out"

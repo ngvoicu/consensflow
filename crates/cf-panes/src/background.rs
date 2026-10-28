@@ -231,20 +231,29 @@ impl Baseline {
     /// The commands of a window whose platform has no groups (a Windows job object): what
     /// began after the rest `since`, where it is one kept, else after the window's launch,
     /// that is the work a turn's is proved by ([`work`]: a shell the harness started, and a
-    /// chain of processes that run down from it), and what began after it and has no parent
-    /// in the tree, which no chain proves anybody's; never what is the harness's own
-    /// ([`Baseline::protected`]). Claude Code runs every command so (Git Bash's `bash.exe`
-    /// for a Bash call's, a Monitor's and a background job's), and its servers as the
-    /// programs they are (`node`, `uvx`, or behind a `cmd.exe /c`, which is no shell here):
-    /// the processes it started for its own are none of them, whenever they began. No start
-    /// is read against a monitor's call: where no rest proves them, the window's launch,
-    /// before any command of it, is what is left out, and nothing later is.
+    /// chain of processes that run down from it while it runs); never what is the harness's
+    /// own ([`Baseline::protected`]). Claude Code runs every command so (Git Bash's
+    /// `bash.exe` for a Bash call's, a Monitor's and a background job's), and its servers as
+    /// the programs they are (`node`, `uvx`, or behind a `cmd.exe /c`, which is no shell
+    /// here): the processes it started for its own are none of them, whenever they began. No
+    /// start is read against a monitor's call: where no rest proves them, the window's
+    /// launch, before any command of it, is what is left out, and nothing later is.
     ///
-    /// Limits, each a process counted that is none, which holds a monitor whose command has
-    /// ended until a later look or Finish, never one left out: a server the user wraps in
-    /// `bash` or `powershell` and the harness starts after the rest; a shell a server
-    /// started for its own (a server of commands) while it runs; a process a command started
-    /// and left, whose shell has ended, while it runs on.
+    /// **The shell is the command** (T-906's live `tell` on zeewin2). Claude Code 2.1.312
+    /// ends a command on Windows by its shell's number alone: its tree kill asks `ps` for the
+    /// children and signals the group (`process.kill(-pid)`), neither of which native
+    /// Windows has, and falls back to the shell. A Monitor's `exec sleep 611` in Git Bash is
+    /// a `sleep.exe` of its own, under the shell, which runs on with no parent once the shell
+    /// is ended; so does what a Bash call the human interrupted was running. What runs on so
+    /// is left running, as a job a command detached is ([`work`]), and the window's close
+    /// ends it; it is no command, or a monitor whose notice was Claude Code's would be held
+    /// for as long as it runs. A command that printed such a notice runs still, its shell
+    /// with it (Git Bash keeps the shell while what it `exec`s runs).
+    ///
+    /// Limits: a server the user wraps in `bash` or `powershell` and the harness starts after
+    /// the rest, and a shell a server started for its own while it runs, are counted, which
+    /// holds a monitor until a later look or Finish; a command that printed a notice and then
+    /// ended its shell, leaving what it started to run on, is not.
     fn chained(&self, tree: &[Member], since: Option<u64>) -> Vec<Member> {
         let rest = since.and_then(|number| self.rests.iter().find(|(kept, _)| *kept == number));
         let left_out = rest.map_or(&self.launch, |(_, rest)| rest);
@@ -256,10 +265,7 @@ impl Baseline {
         let shells = work::turns(&started, &protected);
         started
             .into_iter()
-            .filter(|member| {
-                shells.contains(&member.key)
-                    || (member.parent.is_none() && !protected.contains(&member.key))
-            })
+            .filter(|member| shells.contains(&member.key))
             .cloned()
             .collect()
     }

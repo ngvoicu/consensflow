@@ -625,12 +625,24 @@ fn where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and
         member(42, "sleep.exe 611", "sleep.exe", of(41)),
         // What the server behind `cmd.exe` started: the server's.
         member(43, "bash.exe -c git status", "bash.exe", of(13)),
-        // What a command left when its shell ended: no chain says whose it is.
-        member(44, "python.exe -m http.server", "python.exe", None),
     ]);
-    assert_eq!(commands(&baseline, &running), Some(vec![41, 42, 44]));
-    // Claude Code ends the monitor's command as it writes its notice: none runs then.
-    assert_eq!(commands(&baseline, &resting), Some(vec![]));
+    assert_eq!(commands(&baseline, &running), Some(vec![41, 42]));
+    // Claude Code ends the monitor's command as it writes its notice, by its shell's number
+    // (T-906): the `sleep.exe` the shell `exec`ed runs on, with no parent, and is no command.
+    let mut ended = resting.clone();
+    ended.push(member(42, "sleep.exe 611", "sleep.exe", None));
+    assert_eq!(commands(&baseline, &ended), Some(vec![]));
+    // Nor is what an interrupted Bash call was running, or what a command detached.
+    ended.extend([
+        member(
+            44,
+            "node.exe -e setTimeout(() => {}, 300000)",
+            "node.exe",
+            None,
+        ),
+        member(45, "python.exe -m http.server", "python.exe", None),
+    ]);
+    assert_eq!(commands(&baseline, &ended), Some(vec![]));
 }
 
 #[test]
