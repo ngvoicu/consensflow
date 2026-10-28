@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use cf_e2e::live::ask::{self, Record};
 use cf_e2e::live::claude::{record, runs, transcript_file, Status};
 use cf_e2e::live::members::{end_chosen, find, Account, Ended, Identity, ThisMachine};
+use cf_e2e::live::window::raw_end;
 use cf_e2e::live::window::{Open, Window, ANSWER, READY};
 use cf_e2e::live::{seconds, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
@@ -200,6 +201,15 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
     said.say(change(before, &again.recorded()));
     said.say(reading(run.read(&session).as_ref()));
     said.say(format!("its screen: {}", again.tail()));
+    if !drew {
+        // A screen that reads blank is a window that printed nothing, or one that printed what the
+        // screen does not keep (the console host's own bytes): the end of what it printed says which.
+        let end = raw_end(&again.printed(), 6, 160);
+        said.say(format!(
+            "it printed {} bytes; the end of them: {:?}",
+            end.bytes, end.lines
+        ));
+    }
 
     // A message as the daemon pastes one: does the window take it, and alone?
     again.paste(&again.given(SECOND)?)?;
