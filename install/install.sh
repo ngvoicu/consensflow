@@ -215,9 +215,11 @@ install_goes_on() {
 }
 
 # Whether $1 is a folder (never a link) on the volume of the folder $2 it is in:
-# a volume mounted at it makes it another one's.
+# a volume mounted at it makes it another one's. $2 is read through a link (stat
+# -L): an install folder that is a link to another volume is that volume's, and
+# its leftovers are the folder's own.
 plain_folder() {
-    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]
+    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]
 }
 
 # Why the app at $1 ($2 in the words) is not a whole, checked ConsensFlow of the

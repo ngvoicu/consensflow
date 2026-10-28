@@ -1273,6 +1273,46 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       })
     }
 
+    test("an install folder that is a link to another volume is swept as any: its leftovers are the folder's own", async () => {
+      const at = freshCase()
+      const dead = await deadPid()
+      // The folder the app goes into is on a volume of its own, and --dir names a link to it.
+      const volume = path.join(at.dir, 'volume')
+      const detach = attachVolume(volume)
+      try {
+        const real = path.join(volume, 'Applications')
+        mkdirSync(real)
+        const leftover = path.join(real, `.ConsensFlow.app.installing.${dead}`)
+        renameSync(fakeApp(real, '3.0.7'), leftover)
+        const link = path.join(at.dir, 'Apps')
+        symlinkSync(real, link)
+        const ran = await install(at, ['--version', '3.0.7'], {
+          env: { CONSENSFLOW_INSTALL_DIR: link },
+        })
+        assert.equal(ran.status, 0, ran.out)
+        assert.doesNotMatch(ran.out, /on the volume of/)
+        assert.match(
+          ran.out,
+          new RegExp(`removed ${exact(path.join(link, `.ConsensFlow.app.installing.${dead}`))}`),
+        )
+        assert.ok(!existsSync(leftover), 'the leftover is gone')
+        assert.equal(
+          spawnSync(
+            '/usr/libexec/PlistBuddy',
+            [
+              '-c',
+              'Print :CFBundleShortVersionString',
+              path.join(link, 'ConsensFlow.app/Contents/Info.plist'),
+            ],
+            { encoding: 'utf8' },
+          ).stdout.trim(),
+          '3.0.7',
+        )
+      } finally {
+        detach()
+      }
+    })
+
     test('a volume mounted at the very name of a leftover is left alone, and its files with it', async () => {
       const at = freshCase()
       fakeApp(at.apps, '3.0.7-alpha.1')
