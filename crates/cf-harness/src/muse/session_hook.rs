@@ -119,6 +119,18 @@ pub(crate) fn last_said(said: &Path) -> Option<(String, i64)> {
     })
 }
 
+/// Whether a launch's word of its window's sessions, `said`, names `session`: the hook
+/// greeted it with the window's role text at its first prompt. A session a `/clear`
+/// started is never named (Muse runs no SessionStart hook for it).
+pub(crate) fn greeted(said: &Path, session: &str) -> bool {
+    fs::read_to_string(said).is_ok_and(|text| {
+        text.lines().any(|line| {
+            serde_json::from_str::<Value>(line)
+                .is_ok_and(|said| said.get("session").and_then(Value::as_str) == Some(session))
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

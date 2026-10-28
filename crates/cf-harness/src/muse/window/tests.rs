@@ -383,6 +383,8 @@ fn a_window_follows_the_session_its_hook_says_it_resumed_into() {
     );
     window.follow(older);
     assert_eq!(finished(window.observe()).unwrap().switched, None);
+    // Its hook greeted it with the role as it began: the engine says nothing more.
+    assert!(window.greeted(older));
 }
 
 #[test]
@@ -437,4 +439,9 @@ fn a_window_cleared_with_no_hook_and_no_word_of_its_process_is_followed_by_its_l
     );
     window.follow(&cleared);
     assert_eq!(finished(window.observe()).unwrap().switched, None);
+    // No hook greeted it, so it began with no role text: the engine says the role
+    // (T-829). The session the window opened on, which its hook greeted, was given it.
+    assert!(!window.greeted(&cleared));
+    home.hook_said(&session, "startup");
+    assert!(window.greeted(&session));
 }

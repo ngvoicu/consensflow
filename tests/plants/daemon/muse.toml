@@ -39,6 +39,7 @@ muse-live-approval = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "l
 muse-live-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "plan::"]
 muse-live-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
 muse-plant-runner = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::"]
+muse-role-cleared = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::cleared"]
 muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
 muse-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record_state"]
 muse-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
@@ -2843,3 +2844,78 @@ runs = ["muse-plant-runner"]
 file = "tools/xtask/src/plants/kit.rs"
 find = '''                bin.join(format!("muse-bin-{}", version.trim())).is_file()'''
 replace = '''                !version.is_empty() || bin.is_dir()'''
+
+[[plant]]
+name = "muse: a session no hook greeted is given no role"
+meant = "a_session_no_hook_greeted_is_given_the_role_first_and_one_a_hook_greeted_nothing"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''            return self.greet_switched(project, participant, record, session);'''
+replace = '''            return Ok(());'''
+
+[[plant]]
+name = "muse: a session a hook greeted is given the role again"
+meant = "a_session_no_hook_greeted_is_given_the_role_first_and_one_a_hook_greeted_nothing"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if window.is_none_or(|window| window.greeted(session)) || self.prelude_waits(record)? {'''
+replace = '''        if window.is_none() || self.prelude_waits(record)? {'''
+
+[[plant]]
+name = "muse: a told prelude keeps a later /clear from its role"
+meant = "a_session_no_hook_greeted_is_given_the_role_first_and_one_a_hook_greeted_nothing"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if self.owed(record)?.is_some() {
+            return Ok(true);
+        }'''
+replace = '''        if record.delivery.borrow().prelude.is_some() {
+            return Ok(true);
+        }'''
+
+[[plant]]
+name = "muse: a session told the role as it is is told it again"
+meant = "a_session_no_hook_greeted_is_given_the_role_first_and_one_a_hook_greeted_nothing"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            if told.is_some_and(|told| told == role.instructions) {'''
+replace = '''            if told.is_some_and(|told| told.is_empty()) {'''
+
+[[plant]]
+name = "muse: a harness that keeps its first instructions is told the role at a switch"
+meant = "a_harness_that_keeps_its_first_instructions_is_given_nothing_at_a_switch"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            .filter(|adapter| !adapter.keeps_first_instructions())'''
+replace = '''            .filter(|_| true)'''
+
+[[plant]]
+name = "muse: a Muse window takes every session for one its hook greeted"
+meant = "a_window_cleared_with_no_hook_and_no_word_of_its_process_is_followed_by_its_log"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''        greeted(&self.said, session)'''
+replace = '''        let _ = greeted(&self.said, session);
+        true'''
+
+[[plant]]
+name = "muse: the hook's file is taken to name no session"
+meant = "a_window_follows_the_session_its_hook_says_it_resumed_into"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                .is_ok_and(|said| said.get("session").and_then(Value::as_str) == Some(session))'''
+replace = '''                .is_ok_and(|said| said.get("session").and_then(Value::as_str) == Some(""))'''

@@ -144,6 +144,12 @@ impl Window for FakeWindow {
         *self.session.borrow_mut() = session.to_owned();
     }
 
+    fn greeted(&self, session: &str) -> bool {
+        self.fake.of_launch(&self.launch, |agent| {
+            !agent.ungreeted.iter().any(|ungreeted| ungreeted == session)
+        })
+    }
+
     fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
         let args = json!([{ "launch": self.bag() }]);
         let at = self.call("started", args.clone());

@@ -75,6 +75,9 @@ pub struct FakeAgent {
     pub failure: Option<String>,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
+    /// The conversations the window was switched to that no hook of its harness greeted
+    /// with its role text (`Window::greeted`, Muse's `/clear`).
+    pub ungreeted: Vec<String>,
     /// Each conversation's record, once the window switched away from it.
     pub records: HashMap<String, Vec<Item>>,
     /// Whether each of those records, read with no window open, reads at rest: as the
@@ -1011,6 +1014,7 @@ impl Asked {
             failed,
             failure,
             shows: None,
+            ungreeted: Vec::new(),
             records: HashMap::new(),
             records_settled: HashMap::new(),
             stored: HashMap::new(),

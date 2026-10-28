@@ -1217,7 +1217,8 @@ impl Dispatcher {
             }
             part.left_at_work = None;
             drop(part);
-            return self.follow(participant, record, session);
+            self.follow(participant, record, session)?;
+            return self.greet_switched(project, participant, record, session);
         }
         self.record_quota(record, &owner, observed.quota.clone());
         self.tell_drift(project, participant, record, &observed)?;

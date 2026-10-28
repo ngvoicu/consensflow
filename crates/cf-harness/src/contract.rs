@@ -365,6 +365,14 @@ pub trait Window {
     /// The window shows `session` now (a `/clear` or `/resume` in it): later
     /// looks follow it there.
     fn follow(&self, session: &str);
+    /// Whether the session `session`, which the window was switched to, was given the
+    /// window's role text as it began: by a hook of the harness's that greets every
+    /// session (Claude Code's SessionStart, a `/clear` too). No where none did (Muse
+    /// Code's `/clear` runs no hook, 1.4.13 and 1.4.14): the engine says the role
+    /// itself. Yes from a harness that says no more.
+    fn greeted(&self, _session: &str) -> bool {
+        true
+    }
     /// The conversation the window started on, where its harness says it
     /// itself; none where ConsensFlow named it. A window that waits for its
     /// harness to say it gives up by [`Launch::first_message_ms`], if not

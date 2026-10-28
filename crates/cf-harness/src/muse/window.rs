@@ -11,8 +11,8 @@
 //! window resumes from inside (`/resume`) is the hook's word, written down at its first
 //! prompt (`session_hook`); one a `/clear` starts is said by its log alone, which names
 //! the session it was started from (`previous_session_stream`), for Muse 1.4.13 runs no
-//! SessionStart hook for it, so ConsensFlow cannot give it its role text. The window is
-//! followed there.
+//! SessionStart hook for it: the window is followed there, and says the session was not
+//! greeted (`greeted`), so the engine gives it its role text first.
 //!
 //! Every message, the first of a fresh or a resumed window too, is pasted once the
 //! prompt shows (`ready`), and Enter sends it; one pasted while a turn works
@@ -39,7 +39,7 @@ use serde_json::Value;
 
 use super::paths::{begun_ms, cleared_into, opened_by, Heads};
 use super::screen;
-use super::session_hook::last_said;
+use super::session_hook::{greeted, last_said};
 use crate::contract::{
     Admission, Held, Observed, Over, Pane, PaneHost, Readiness, Records, Window, Work,
 };
@@ -179,6 +179,12 @@ impl Window for MuseWindow {
 
     fn follow(&self, session: &str) {
         *self.session.borrow_mut() = Some(session.to_owned());
+    }
+
+    /// Its hook greeted the session where it wrote it down; one a `/clear` started it
+    /// never does.
+    fn greeted(&self, session: &str) -> bool {
+        greeted(&self.said, session)
     }
 
     /// A window that knows its session (a resumed one) is started; a fresh one waits
