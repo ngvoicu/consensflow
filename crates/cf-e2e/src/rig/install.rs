@@ -81,6 +81,14 @@ pub(super) fn environment(
         // then holds everything its rigs write.
         env.push(("TMPDIR".to_owned(), text(&std::env::temp_dir())));
     }
+    if config.muse.is_some() {
+        // Muse takes a data folder reached through a link for unsafe (`/tmp` on a Mac, where
+        // a plant run makes its rigs: Muse 1.4.14 then writes no `route_facts`, and a fresh
+        // window never learns its session, T-829): the same folder, by its real path.
+        let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let data = real.join("home").join(".local").join("share");
+        env.push(("XDG_DATA_HOME".to_owned(), text(&data)));
+    }
     env.push(("CF_TEST_HARNESS".to_owned(), text(&config.stand_in)));
     if let Some(codex) = &config.codex {
         // The stand-in Codex's own: what it runs, what it writes down, how its
@@ -200,11 +208,13 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
         }
         Some((install, crate::muse::Run::Live { real_home })) => {
             crate::muse::seed_live_home(&home, real_home)?;
+            // By its real path, as `environment` gives the rig's Muse data folder.
+            let rig_home = std::fs::canonicalize(&home).unwrap_or_else(|_| home.clone());
             crate::muse::write_live_stand_in(
                 &own,
                 install,
                 real_home,
-                &home,
+                &rig_home,
                 &root.join("muse-argv.log"),
             )?;
         }
@@ -283,6 +293,31 @@ mod tests {
         assert_eq!(get("CF_TEST_NO_SUCH"), "");
         // Nothing of the machine's own gets in.
         assert!(!env.iter().any(|(name, _)| name == "CONSENSFLOW_URL"));
+    }
+
+    /// T-829: a rig made under `/tmp` (a plant run's folder) reaches it through the link
+    /// `/tmp` is on a Mac, and Muse 1.4.14 takes a data folder reached so for unsafe: it
+    /// writes no `route_facts`, and a fresh window never learns its session. A rig that runs
+    /// Muse gives every program its data folder by its real path, the same folder.
+    #[cfg(unix)]
+    #[test]
+    fn a_rig_that_runs_muse_names_its_data_folder_by_its_real_path() {
+        let folder = tempfile::tempdir().unwrap();
+        let real = folder.path().join("real");
+        std::fs::create_dir_all(real.join("home").join(".local").join("share")).unwrap();
+        let linked = folder.path().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let muse = crate::muse::Installed {
+            binary: PathBuf::from("/bin/muse-bin-1.4.14"),
+            version: "1.4.14".to_owned(),
+        };
+        let with = config().muse(muse, 10);
+        let env = environment(&linked, &linked.join("fake-bin"), &with, None);
+        let data = std::fs::canonicalize(real.join("home").join(".local").join("share")).unwrap();
+        assert_eq!(var(&env, "XDG_DATA_HOME"), data.to_string_lossy());
+        // A rig without Muse says nothing of it.
+        let env = environment(&linked, &linked.join("fake-bin"), &config(), None);
+        assert_eq!(var(&env, "XDG_DATA_HOME"), "");
     }
 
     #[test]

@@ -788,7 +788,7 @@ replace = '''
 # The window's command line: full permission.
 [[plant]]
 name = "muse: a window opens out of full permission"
-meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_its_first_message_last"
+meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_no_message_on_its_command_line"
 runs = ["muse-window-args"]
 
 [[plant.edit]]
@@ -822,7 +822,7 @@ replace = '''            argv.extend(invocation.args);
 # The window's command line: a key in its environment would move it off the human's login.
 [[plant]]
 name = "muse: a window keeps META_API_KEY"
-meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_its_first_message_last"
+meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_no_message_on_its_command_line"
 runs = ["muse-window-args"]
 
 [[plant.edit]]
@@ -833,7 +833,7 @@ replace = '''                drop_env: &[],'''
 # The window's command line: Muse's own flag for its effort.
 [[plant]]
 name = "muse: an effort goes in under another flag"
-meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_its_first_message_last"
+meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_no_message_on_its_command_line"
 runs = ["muse-window-args"]
 
 [[plant.edit]]
@@ -855,7 +855,7 @@ replace = '''    Ok(if binary.is_file() && false {'''
 # What a launch runs: with the launcher's update off.
 [[plant]]
 name = "muse: a window runs with its update on"
-meant = "a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_its_first_message_last"
+meant = "a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no_message_on_its_command_line"
 runs = ["muse-lib"]
 
 [[plant.edit]]
@@ -1000,7 +1000,7 @@ replace = '''        Harness::Muse => crate::muse::read_input_box(screen, cursor
 # The window: one at the picker of a session held elsewhere is unfit for work.
 [[plant]]
 name = "muse: a window at the picker of a session held elsewhere is held, not unfit"
-meant = "a_resume_muse_will_not_make_for_another_window_holds_the_session_says_so_and_pastes_nothing"
+meant = "a_resume_muse_will_not_make_for_another_window_is_unfit_in_muse_s_words_and_takes_nothing"
 runs = ["muse-unsent"]
 
 [[plant.edit]]
@@ -1093,7 +1093,7 @@ replace = '''            Servers::Unknown'''
 # The launch's folder, where its role and its sessions file are written.
 [[plant]]
 name = "muse: a Muse launch has no folder of its own"
-meant = "a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_its_first_message_last"
+meant = "a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no_message_on_its_command_line"
 runs = ["muse-lib"]
 
 [[plant.edit]]
@@ -1280,7 +1280,7 @@ replace = '''
 # The window's command line: a window of a model that is no contributor model runs out of contributor mode (T-802: a fresh Muse profile's saved default is on).
 [[plant]]
 name = "muse: a window runs in Muse's saved contributor mode"
-meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_its_first_message_last"
+meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_no_message_on_its_command_line"
 runs = ["muse-window-args"]
 
 [[plant.edit]]
