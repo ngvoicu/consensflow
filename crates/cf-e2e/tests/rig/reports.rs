@@ -844,6 +844,61 @@ fn every_rig_the_suites_of_the_rig_the_regressions_and_the_load_start_is_judged_
     Ok(())
 }
 
+/// A `#[cfg(...)]` in a suite's list of modules sits on the `mod` line it gates, after the
+/// module's `#[path]`: put above the `#[path]`, a module added in its place in the list goes
+/// between the two and takes the attribute (`4b5f3b1ca` moved the Unix-only attribute of
+/// the Devin case onto the Codex case before it, and the Devin case went to Windows, where
+/// its stand-in has no `/bin/sh`: Calliope's re-check of `a0aecd192`, T-854). And each
+/// `#[path]` names the file of the module under it.
+#[test]
+fn a_platform_attribute_in_a_suites_list_sits_on_the_mod_line_it_gates() -> Outcome {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut wrong = Vec::new();
+    let mut gated = 0;
+    for file in ["rig.rs", "regressions.rs"] {
+        let text = fs::read_to_string(tests.join(file))?;
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        for (at, line) in lines.iter().enumerate() {
+            let next = lines.get(at + 1).copied().unwrap_or("");
+            if line.starts_with("#[cfg(") {
+                gated += 1;
+                if !next.starts_with("mod ") {
+                    wrong.push(format!(
+                        "{file}:{}: {line} is followed by {next:?}, not the mod it gates",
+                        at + 1
+                    ));
+                }
+            }
+            if let Some(path) = line
+                .strip_prefix("#[path = \"")
+                .and_then(|rest| rest.strip_suffix("\"]"))
+            {
+                let stem = Path::new(path)
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("");
+                let module = lines[at + 1..]
+                    .iter()
+                    .find(|line| !line.starts_with("#["))
+                    .copied()
+                    .unwrap_or("");
+                if module != format!("mod {stem};") {
+                    wrong.push(format!(
+                        "{file}:{}: {line} is the path of {module:?}",
+                        at + 1
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        gated > 5,
+        "only {gated} attributes were found: the scan is blind"
+    );
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    Ok(())
+}
+
 /// A file of a suite, in the shape main's folder-trust cases have: a helper that starts a
 /// rig and hands it on, a case that takes its rig from it, and the app quit and started
 /// again, a helper that takes a rig and gives one back.

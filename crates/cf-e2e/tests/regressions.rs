@@ -31,18 +31,18 @@ mod a_brief_could_not_be_edited_once_added;
 mod a_builds_daemon_held_a_workers_task;
 #[path = "regressions/a_cancelled_compact_held_the_chief_and_took_its_next_message.rs"]
 mod a_cancelled_compact_held_the_chief_and_took_its_next_message;
-#[cfg(unix)]
 #[path = "regressions/a_cf_a_build_took_away_left_a_window_none.rs"]
-mod a_cf_a_build_took_away_left_a_window_none;
 #[cfg(unix)]
+mod a_cf_a_build_took_away_left_a_window_none;
 #[path = "regressions/a_close_waited_for_a_codex_chiefs_server_to_end.rs"]
+#[cfg(unix)]
 mod a_close_waited_for_a_codex_chiefs_server_to_end;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
-#[cfg(unix)]
 #[path = "regressions/a_codex_chiefs_lost_turn_end_held_its_next_result.rs"]
 mod a_codex_chiefs_lost_turn_end_held_its_next_result;
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
+#[cfg(unix)]
 mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 #[path = "regressions/a_command_that_never_exits_held_a_workers_result.rs"]
 mod a_command_that_never_exits_held_a_workers_result;
@@ -111,16 +111,16 @@ mod an_idle_quit_with_a_message_queued_read_as_a_cut_turn;
 #[path = "regressions/claude_continues_by_itself_after_its_limit.rs"]
 mod claude_continues_by_itself_after_its_limit;
 // The stand-in's status line is a `bash`.
-#[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
+#[cfg(unix)]
 mod claude_status_line_taken_for_background_work;
 // The stand-in Codex is a script, so Unix's; and the Finder's PATH is a Mac's.
-#[cfg(unix)]
 #[path = "regressions/codex_in_homebrew_taken_for_not_installed.rs"]
+#[cfg(unix)]
 mod codex_in_homebrew_taken_for_not_installed;
 // The stand-in Codex is a script, so Unix's: Windows has no window of it to resume.
-#[cfg(unix)]
 #[path = "regressions/codex_role_on_resume.rs"]
+#[cfg(unix)]
 mod codex_role_on_resume;
 #[path = "regressions/devin_notes_twice.rs"]
 mod devin_notes_twice;
@@ -136,8 +136,8 @@ mod idle_compaction_read_as_a_cut_turn;
 mod keys_cleared_with_escape_held_every_delivery;
 // Windows keeps the limit the report documents (a job object has no process
 // groups or parents to look at), so there is nothing there to assert.
-#[cfg(unix)]
 #[path = "regressions/mcp_servers_held_a_workers_result.rs"]
+#[cfg(unix)]
 mod mcp_servers_held_a_workers_result;
 #[path = "regressions/opencode_updated_itself_to_2.rs"]
 mod opencode_updated_itself_to_2;
@@ -157,8 +157,8 @@ mod tasks_left_paused_by_a_close_and_resume;
 mod tell_refused_for_a_queued_task;
 #[path = "regressions/the_finished_column_could_not_be_cleared_while_its_tasks_were_needed.rs"]
 mod the_finished_column_could_not_be_cleared_while_its_tasks_were_needed;
-#[cfg(unix)]
 #[path = "regressions/whole_history_across_a_compaction_and_a_switch.rs"]
+#[cfg(unix)]
 mod whole_history_across_a_compaction_and_a_switch;
 
 use std::time::Duration;

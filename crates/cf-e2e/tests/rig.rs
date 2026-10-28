@@ -101,8 +101,8 @@ mod devin_stamped;
 mod help;
 #[path = "rig/homes.rs"]
 mod homes;
-#[cfg(unix)]
 #[path = "rig/kept_config.rs"]
+#[cfg(unix)]
 mod kept_config;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
@@ -124,8 +124,8 @@ mod printed_output;
 mod reports;
 #[path = "rig/specs.rs"]
 mod specs;
-#[cfg(unix)]
 #[path = "rig/specs_codex.rs"]
+#[cfg(unix)]
 mod specs_codex;
 #[path = "rig/stand_in_codex.rs"]
 mod stand_in_codex;
