@@ -7,9 +7,11 @@
 //! installed, and a smoke that passes against it says nothing about the source
 //! in this tree.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use cf_e2e::process::Run;
+use cf_e2e::shipped::{Answer, Shipped};
 use cf_e2e::{checkout, Error, Result};
 
 /// What builds the bundle the smoke runs on, for the messages that say there is none.
@@ -33,6 +35,8 @@ pub struct Bundle {
     pub binary: PathBuf,
     /// The command a window runs, which is also the daemon the app starts.
     pub cf: PathBuf,
+    /// Leave to start it, where it is the bundle the release ships ([`to_start`]).
+    pub shipped: Option<Shipped>,
 }
 
 /// The `cf` of the bundle at `app`.
@@ -77,6 +81,7 @@ pub fn locate(app: &Path) -> Result<Bundle> {
         app: app.to_path_buf(),
         binary,
         cf,
+        shipped: None,
     })
 }
 
@@ -139,7 +144,7 @@ fn ran(program: &str, args: &[&std::ffi::OsStr]) -> Result {
 }
 
 /// The copy of `bundle` the smoke starts, in `into`: the bundle whole, of the smoke's
-/// identity and sealed again as it was (ad hoc, keeping its entitlements, its flags and
+/// identity and name, with no icon of the product's, and sealed again as it was (ad hoc, keeping its entitlements, its flags and
 /// its hardened runtime). The bundle built is of the live app's identity, and to macOS a
 /// copy started with it is the live app, which a test never starts ([`cf_base::bundle`]).
 pub fn smoke_copy(bundle: &Bundle, into: &Path) -> Result<Bundle> {
@@ -147,6 +152,10 @@ pub fn smoke_copy(bundle: &Bundle, into: &Path) -> Result<Bundle> {
         .app
         .file_name()
         .unwrap_or_else(|| "ConsensFlow.app".as_ref());
+    // At the path with no link in it: Tauri finds no resources of an app started through one, and
+    // macOS's temporary folder is under /var, a link to /private/var.
+    let into = std::fs::canonicalize(into)
+        .map_err(|source| Error::Build(format!("could not find {}: {source}", into.display())))?;
     let copy = into.join(name);
     ran(
         "/usr/bin/ditto",
@@ -163,6 +172,19 @@ pub fn smoke_copy(bundle: &Bundle, into: &Path) -> Result<Bundle> {
         .ok_or_else(|| Error::Build(format!("{} names no identity to replace", plist.display())))?;
     std::fs::write(&plist, smoke)
         .map_err(|source| Error::Build(format!("could not write {}: {source}", plist.display())))?;
+    // It goes by the smoke's name, and shows no icon of the product's.
+    if let Some(icon) = cf_base::bundle::icon_of(&copy, &text) {
+        if icon.exists() {
+            std::fs::remove_file(&icon).map_err(|source| {
+                Error::Build(format!("could not take out {}: {source}", icon.display()))
+            })?;
+        }
+    }
+    for edit in cf_base::bundle::smoke_name_edits(&text) {
+        let mut words: Vec<&std::ffi::OsStr> = edit.iter().map(|word| word.as_ref()).collect();
+        words.push(plist.as_os_str());
+        ran("/usr/bin/plutil", &words)?;
+    }
     ran(
         "/usr/bin/codesign",
         &[
@@ -176,6 +198,48 @@ pub fn smoke_copy(bundle: &Bundle, into: &Path) -> Result<Bundle> {
     )?;
     cf_base::bundle::startable_by_a_test(&copy).map_err(Error::LiveApp)?;
     locate(&copy)
+}
+
+/// What the smoke starts of `bundle`: the bundle as it ships, on GitHub's runner where the
+/// release run asks for it (`CONSENSFLOW_SMOKE_SHIPPED=1`) and no live app runs; everywhere
+/// else a copy of the smoke's identity in `into` ([`smoke_copy`]), and why, where the shipped
+/// one was asked for.
+pub fn to_start(bundle: &Bundle, into: &Path) -> Result<Bundle> {
+    match cf_e2e::shipped::ask(&bundle.app)? {
+        Answer::Shipped(leave) => Ok(Bundle {
+            shipped: Some(leave),
+            ..bundle.clone()
+        }),
+        Answer::Copy(why) => {
+            if let Some(why) = why {
+                let _ = writeln!(std::io::stderr(), "smoke: {why}");
+            }
+            smoke_copy(bundle, into)
+        }
+    }
+}
+
+/// The app's program as a run starts it: with leave for the bundle the release ships, where
+/// it is that one.
+pub fn run_of(bundle: &Bundle) -> Run {
+    let run = Run::new(&bundle.binary);
+    match &bundle.shipped {
+        Some(leave) => run.shipped(leave),
+        None => run,
+    }
+}
+
+/// Says the bundle's seal holds (`codesign --verify --deep --strict`), as it must after a run.
+pub fn assert_sealed(app: &Path) -> Result {
+    ran(
+        "/usr/bin/codesign",
+        &[
+            "--verify".as_ref(),
+            "--deep".as_ref(),
+            "--strict".as_ref(),
+            app.as_os_str(),
+        ],
+    )
 }
 
 /// Says the bundle holds no Node, or which of it it does.
@@ -358,10 +422,18 @@ mod tests {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
              <key>CFBundleExecutable</key><string>app</string>\
              <key>CFBundleIdentifier</key><string>{}</string>\
+             <key>CFBundleName</key><string>ConsensFlow</string>\
+             <key>CFBundleDisplayName</key><string>ConsensFlow</string>\
+             <key>CFBundleIconFile</key><string>icon.icns</string>\
              <key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n",
             cf_base::bundle::RELEASE
         );
         files::write(&app.join("Contents").join("Info.plist"), &release).unwrap();
+        files::write(
+            &app.join("Contents/Resources/icon.icns"),
+            "the product's icon",
+        )
+        .unwrap();
         ran(
             "/usr/bin/codesign",
             &[
@@ -379,7 +451,15 @@ mod tests {
         let into = root.path().join("machine");
         std::fs::create_dir_all(&into).unwrap();
         let copy = smoke_copy(&built, &into).unwrap();
-        assert_eq!(copy.app, into.join("ConsensFlow.app"));
+        // At the path with no link in it: Tauri finds no resources of an app started through one
+        // (macOS's temporary folder is under /var, a link to /private/var).
+        assert_eq!(
+            copy.app,
+            std::fs::canonicalize(&into)
+                .unwrap()
+                .join("ConsensFlow.app")
+        );
+        assert_eq!(std::fs::canonicalize(&copy.binary).unwrap(), copy.binary);
         assert_eq!(
             copy.binary,
             copy.app.join("Contents").join("MacOS").join("app")
@@ -398,10 +478,19 @@ mod tests {
             ],
         )
         .unwrap();
+        // It goes by the smoke's name, and has no icon of the product's.
+        let copied = std::fs::read_to_string(copy.app.join("Contents").join("Info.plist")).unwrap();
+        assert!(
+            copied.matches("<string>ConsensFlow Smoke</string>").count() == 2
+                && !copied.contains("CFBundleIconFile"),
+            "{copied}"
+        );
+        assert!(!copy.app.join("Contents/Resources/icon.icns").exists());
         assert_eq!(
             std::fs::read_to_string(app.join("Contents").join("Info.plist")).unwrap(),
             release,
             "the bundle built is left as it was"
         );
+        assert!(app.join("Contents/Resources/icon.icns").exists());
     }
 }

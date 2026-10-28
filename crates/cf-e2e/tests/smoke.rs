@@ -51,7 +51,7 @@ use std::time::Duration;
 
 use cf_e2e::agents_proof::{self, Daemon as Target};
 use cf_e2e::daemon_log::{self, Kind};
-use cf_e2e::process::{is_alive, own_var, Run};
+use cf_e2e::process::{is_alive, own_var};
 use cf_e2e::{files, http};
 use regex::Regex;
 use serde_json::{json, Value};
@@ -125,12 +125,15 @@ fn the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean()
     // rebuilding to look at them again costs minutes. A passing one tidies up
     // (`CONSENSFLOW_SMOKE_KEEP=1` has it keep the machine too).
     let machine = Machine::new(Path::new(PASTE_READER), patience)?;
-    // The app built is of the live app's identity: what is started is a copy of the smoke's.
-    let bundle = bundle::smoke_copy(&bundle, &machine.root)?;
+    // The app built is of the live app's identity: what is started is a copy of the smoke's,
+    // but on GitHub's runner where the release run asks for the bundle as it ships.
+    let bundle = bundle::to_start(&bundle, &machine.root)?;
     let outcome = drive(&bundle, &machine, patience, &mut std::io::stdout());
     let keep = own_var("CONSENSFLOW_SMOKE_KEEP").as_deref() == Some("1");
     machine.say_where_kept(&mut std::io::stderr(), outcome.is_err() || keep);
     outcome?;
+    // Its seal holds after it ran: nothing it did wrote into the bundle.
+    bundle::assert_sealed(&bundle.app)?;
     if !keep {
         machine.cleanup()?;
     }
@@ -148,7 +151,7 @@ fn drive(
     said: &mut impl Write,
 ) -> Outcome {
     let mut app = App::start(
-        Run::new(&bundle.binary)
+        bundle::run_of(bundle)
             .vars(machine.vars())
             .cwd(&machine.root),
         &machine.root,

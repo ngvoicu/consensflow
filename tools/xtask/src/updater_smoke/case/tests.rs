@@ -481,3 +481,43 @@ fn end(pid: u32) {
         crate::updater_smoke::processes::kill(&started);
     }
 }
+
+/// A stand-in's file is bound to the process that wrote it: the number it says is ended where
+/// the process that has it began since the app and no later than the file was written, and not
+/// where it began after (the stand-in ended, and another took its number), nor where it began
+/// before the app (one that ran beside the smoke, as the live app does).
+#[cfg(unix)]
+#[test]
+fn a_stand_ins_file_names_only_the_process_that_wrote_it() {
+    let sleep = crate::process::Invocation::new("/bin/sleep", std::path::Path::new(".")).arg("60");
+    let mut app =
+        crate::process::spawn(&sleep, &Env::default(), std::process::Stdio::null(), false).unwrap();
+    let mut stand_in =
+        crate::process::spawn(&sleep, &Env::default(), std::process::Stdio::null(), false).unwrap();
+    let first = cf_process::Started::of(app.id()).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("claude-1.pid");
+    fs::write(&file, stand_in.id().to_string()).unwrap();
+    let written = fs::metadata(&file).unwrap().modified().unwrap();
+    let before = std::time::UNIX_EPOCH + Duration::from_secs(1);
+    let ended = [
+        stand_in_to_end(stand_in.id(), written, Some(&first)).is_some(),
+        stand_in_to_end(stand_in.id(), before, Some(&first)).is_some(),
+        stand_in_to_end(stand_in.id(), written, None).is_some(),
+    ];
+    let elder = cf_process::Started::of(stand_in.id()).unwrap();
+    let older_than_the_app = stand_in_to_end(app.id(), written, Some(&elder)).is_some();
+    for child in [&mut app, &mut stand_in] {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    assert_eq!(
+        ended,
+        [true, false, false],
+        "written after, written before, no app"
+    );
+    assert!(
+        !older_than_the_app,
+        "a process older than the app was taken for a stand-in"
+    );
+}

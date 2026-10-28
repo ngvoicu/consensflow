@@ -107,6 +107,19 @@ pub fn kill_group(member: &Started, group: u32) {
     member.end_group(group, Ending::Forced);
 }
 
+/// Ends the process group `child` leads, at once: a child this program started and holds
+/// un-reaped, whose number, and its group's, are no other's while it is held, whether it runs
+/// or has ended and waits to be reaped (a zombie, which the system says nothing else of).
+pub fn kill_held_group(child: &std::process::Child) {
+    #[cfg(unix)]
+    if let Some(leader) = i32::try_from(child.id()).ok().filter(|leader| *leader > 1) {
+        let group = nix::unistd::Pid::from_raw(-leader);
+        let _ = nix::sys::signal::kill(group, nix::sys::signal::Signal::SIGKILL);
+    }
+    #[cfg(not(unix))]
+    let _ = child;
+}
+
 /// Ends `root` and everything under it, round after round until nothing is left.
 /// A process group is not enough where a chain of processes keeps making the next
 /// (two programs handing a command to each other for ever did, once): what is

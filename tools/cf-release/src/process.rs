@@ -39,15 +39,15 @@ pub enum Unstarted {
 }
 
 /// Refuses a program that is an app of the live app's identity, before anything starts.
-fn startable(program: &OsStr) -> Result<(), Unstarted> {
-    cf_base::bundle::program_startable_by_a_test(std::path::Path::new(program))
+fn startable(program: &OsStr, args: &[OsString]) -> Result<(), Unstarted> {
+    cf_base::bundle::command_startable_by_a_test(std::path::Path::new(program), args)
         .map_err(Unstarted::LiveApp)
 }
 
 /// Runs `program` with `args` to its end, its output going where this one's
 /// does: the code it exited with.
 pub fn run(program: &OsStr, args: &[OsString], env: &Env) -> Result<i32, Unstarted> {
-    startable(program)?;
+    startable(program, args)?;
     command(program, args, env)
         .status()
         .map(|status| code(&status))
@@ -58,7 +58,7 @@ pub fn run(program: &OsStr, args: &[OsString], env: &Env) -> Result<i32, Unstart
 /// code is an answer here, for the caller to read, and only a program that did
 /// not start is an error. Its input is closed.
 pub fn capture(program: &OsStr, args: &[OsString], env: &Env) -> Result<Output, Unstarted> {
-    startable(program)?;
+    startable(program, args)?;
     let output = command(program, args, env)
         .stdin(Stdio::null())
         .output()
@@ -203,5 +203,26 @@ mod tests {
         let (smoke, ran) = app_of("dev.ngvoicu.consensflow.smoke");
         assert_eq!(capture(smoke.as_os_str(), &[], &env).unwrap().code, 0);
         assert!(ran.exists());
+        // A program that reaches apps by its words, told to reach the live app: never started.
+        let ran = root.path().join("osascript.ran");
+        let osascript = root.path().join("osascript");
+        std::fs::write(
+            &osascript,
+            format!("#!/bin/sh\ntouch '{}'\n", ran.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&osascript, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let quit = [
+            OsString::from("-e"),
+            OsString::from("tell application id \"dev.ngvoicu.consensflow\" to quit"),
+        ];
+        let said = capture(osascript.as_os_str(), &quit, &env)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            said.contains("a test reaches no app but the smoke's"),
+            "{said}"
+        );
+        assert!(!ran.exists(), "the stand-in for osascript ran");
     }
 }

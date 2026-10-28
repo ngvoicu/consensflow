@@ -19,7 +19,7 @@ use cf_process::Started;
 use serde_json::{json, Value};
 
 use super::evidence::tail;
-use super::processes::{kill_group, kill_tree, signal_of, Waits};
+use super::processes::{kill_group, kill_held_group, kill_tree, signal_of, Waits};
 use super::sandbox::{make_fifo, open_fifo, Ends};
 use super::say::Say;
 use super::{Error, Result};
@@ -299,6 +299,12 @@ impl App {
         let Some(mut started) = child.take() else {
             return Err(Error::new("the app's exit was asked for twice"));
         };
+        // Once no process the app has been runs, it has ended and is held un-reaped: what is left
+        // of its group goes now, while the group's number is its own, and then it is reaped.
+        let seen = locked(&self.0.reports).seen.clone();
+        if !seen.iter().any(Started::is_running) {
+            kill_held_group(&started);
+        }
         started
             .wait()
             .map(Exit::from)
@@ -309,6 +315,10 @@ impl App {
     /// input is closed last: an app that reads it quits at its end, so closing it
     /// first leaves the app free to go by its own quit before the kill reaches it.
     pub fn kill_recorded(&self) {
+        // The group of the child still held: its number is its own, ended or not.
+        if let Some(child) = locked(&self.0.child).as_ref() {
+            kill_held_group(child);
+        }
         let seen = locked(&self.0.reports).seen.clone();
         if let Some(first) = &self.0.first {
             for process in &seen {

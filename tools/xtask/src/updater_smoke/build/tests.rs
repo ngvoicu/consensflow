@@ -278,7 +278,7 @@ mod with_programs {
         fs::create_dir_all(&source).unwrap();
         let check = "fn installed(id: &str) -> bool {\n    \
                      if id != \"dev.ngvoicu.consensflow\" { return false; }\n    \
-                     id != \"dev.ngvoicu.consensflow\" || id == \"dev.ngvoicu.consensflow\"\n}\n";
+                     id != \"dev.ngvoicu.consensflow\"\n}\n";
         fs::write(source.join("update_install.rs"), check).unwrap();
         fs::write(
             source.join("lib.rs"),
@@ -313,6 +313,42 @@ mod with_programs {
             fs::read_to_string(into.join(MARK)).unwrap(),
             "v3.0.0-alpha.82 dev.ngvoicu.consensflow.smoke\n"
         );
+    }
+
+    /// A release that checks the live app's identity by another spelling than the one the
+    /// export rewrites (a const) is refused, the line named: its app would refuse every update
+    /// of the smoke's for a reason that is not the one a case is about. Its tests' words are its
+    /// own, and refuse nothing.
+    #[test]
+    fn a_release_whose_check_is_left_naming_the_live_apps_identity_is_not_exported() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("repo");
+        let source = repo.join("app").join("src-tauri").join("src");
+        fs::create_dir_all(&source).unwrap();
+        let check = "const ID: &str = \"dev.ngvoicu.consensflow\";\n\
+                     fn installed(id: &str) -> bool {\n    id == ID\n}\n\
+                     #[cfg(test)]\nmod tests {\n    const ID: &str = \"dev.ngvoicu.consensflow\";\n}\n";
+        fs::write(source.join("update_install.rs"), check).unwrap();
+        let git = Repo::new(&repo);
+        git.git(&["add", "-A"]);
+        git.commit("the release", Some("v3.0.0-alpha.90"));
+        let into = folder.path().join("flip-source");
+        let said = export_release(&repo, &into, "v3.0.0-alpha.90", &Env::from_process())
+            .unwrap_err()
+            .to_string();
+        assert!(said.contains("update_install.rs:1"), "{said}");
+        assert!(said.contains("the live app's identity"), "{said}");
+        assert!(
+            !into.join(MARK).exists(),
+            "an export it refused is not marked as made"
+        );
+        // Its tests alone name it: exported.
+        let tests_only = "fn installed(id: &str) -> bool {\n    id != \"dev.ngvoicu.consensflow\"\n}\n\
+                          #[cfg(test)]\nmod tests {\n    const ID: &str = \"dev.ngvoicu.consensflow\";\n}\n";
+        fs::write(source.join("update_install.rs"), tests_only).unwrap();
+        git.git(&["add", "-A"]);
+        git.commit("the next", Some("v3.0.0-alpha.91"));
+        export_release(&repo, &into, "v3.0.0-alpha.91", &Env::from_process()).unwrap();
     }
 
     #[test]
@@ -359,12 +395,30 @@ mod with_programs {
             "echo \"$(basename \"$0\") $* in $(pwd) offline=$CARGO_NET_OFFLINE tauri=${{TAURI_SIGNING_PRIVATE_KEY:-none}} apple=${{APPLE_ID:-none}}\" >> '{}'",
             calls.display()
         );
+        // What a build of the product leaves of its plist and its icon.
+        let plist = folder.join("Info.plist");
+        fs::write(
+            &plist,
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict>\
+             <key>CFBundleExecutable</key><string>app</string>\
+             <key>CFBundleIdentifier</key><string>dev.ngvoicu.consensflow.smoke</string>\
+             <key>CFBundleName</key><string>ConsensFlow</string>\
+             <key>CFBundleDisplayName</key><string>ConsensFlow</string>\
+             <key>CFBundleIconFile</key><string>icon.icns</string>\
+             <key>CFBundlePackageType</key><string>APPL</string></dict></plist>",
+        )
+        .unwrap();
+        let contents = built_app(&tree).join("Contents");
         program(
             &tree.join("app").join("node_modules").join(".bin"),
             "tauri",
             &format!(
-                "{record}\nmkdir -p '{macos}'\ncat \"$5\" > '{macos}/app'",
-                macos = built_app(&tree).join("Contents").join("MacOS").display()
+                "{record}\nmkdir -p '{macos}' '{resources}'\ncat \"$5\" > '{macos}/app'\n\
+                 cp '{plist}' '{contents}/Info.plist'\nprintf icon > '{resources}/icon.icns'",
+                macos = contents.join("MacOS").display(),
+                resources = contents.join("Resources").display(),
+                plist = plist.display(),
+                contents = contents.display(),
             ),
         );
         program(
@@ -399,6 +453,17 @@ mod with_programs {
         )
         .unwrap();
         assert_eq!(built, built_app(&tree));
+        // It goes by the smoke's name and has no icon of the product's, sealed again.
+        for field in ["CFBundleName", "CFBundleDisplayName"] {
+            assert_eq!(
+                crate::updater_smoke::bundle::plist_value(&built, field).unwrap(),
+                "ConsensFlow Smoke",
+                "{field}"
+            );
+        }
+        assert!(crate::updater_smoke::bundle::plist_value(&built, "CFBundleIconFile").is_err());
+        assert!(!built.join("Contents/Resources/icon.icns").exists());
+        crate::updater_smoke::bundle::verify_seal(&built, &env).unwrap();
         let app = tree.join("app");
         let there = |program: &str, args: &str| {
             format!(

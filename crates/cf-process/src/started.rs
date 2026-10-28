@@ -60,6 +60,17 @@ impl Started {
         }
     }
 
+    /// Whether it began no later than `time`: a process that wrote a file was running when the
+    /// file was last written, and one that began after that is another that took its number.
+    /// False where the system does not say when it began on the clock (Windows).
+    pub fn began_by(&self, time: std::time::SystemTime) -> bool {
+        let Ok(since_epoch) = time.duration_since(std::time::UNIX_EPOCH) else {
+            return false;
+        };
+        let at = u64::try_from(since_epoch.as_micros()).unwrap_or(u64::MAX);
+        began_at(self).is_some_and(|began| began <= at)
+    }
+
     /// What the system says of it now, where it is still the process seen.
     #[cfg(unix)]
     fn now(&self) -> Option<crate::table::Process> {
@@ -134,6 +145,39 @@ impl Started {
     }
 }
 
+/// When `started` began, in microseconds since the epoch: macOS says it so; Linux says it in
+/// clock ticks since the machine started, which `/proc/stat` says the time of.
+#[cfg(target_os = "macos")]
+fn began_at(started: &Started) -> Option<u64> {
+    Some(started.identity.born)
+}
+
+/// As on macOS, from the ticks since the machine started and when it started.
+#[cfg(target_os = "linux")]
+fn began_at(started: &Started) -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    let booted: u64 = stat
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()?;
+    #[allow(unsafe_code)]
+    // SAFETY: sysconf takes a number and reads no memory of ours.
+    let ticks = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
+    if ticks == 0 {
+        return None;
+    }
+    let after_boot = started.identity.born.checked_mul(1_000_000)? / ticks;
+    booted.checked_mul(1_000_000)?.checked_add(after_boot)
+}
+
+/// No other system says.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn began_at(_started: &Started) -> Option<u64> {
+    None
+}
+
 #[cfg(unix)]
 fn signal(how: Ending) -> i32 {
     match how {
@@ -200,6 +244,19 @@ mod tests {
         assert!(since.end(Ending::Forced));
         assert!(gone_within(later.id(), Duration::from_secs(10)));
         later.wait().unwrap();
+    }
+
+    /// A process began by a time after its start, and not by one before it: this test's own,
+    /// by the time a file it writes now is written, and not by the epoch's first second.
+    #[test]
+    fn a_process_began_by_a_time_after_its_start_and_not_before_it() {
+        let own = Started::of(std::process::id()).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let written = folder.path().join("written");
+        std::fs::write(&written, "now").unwrap();
+        let now = std::fs::metadata(&written).unwrap().modified().unwrap();
+        assert!(own.began_by(now));
+        assert!(!own.began_by(std::time::UNIX_EPOCH + Duration::from_secs(1)));
     }
 
     /// Only this user's processes are seen, and none that is not there.

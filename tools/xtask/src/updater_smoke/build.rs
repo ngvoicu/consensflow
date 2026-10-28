@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use cf_base::env::Env;
 use serde_json::{json, Value};
 
-use super::bundle::{remove_all, under, IDENTITY};
+use super::bundle::{name_as_the_smokes, remove_all, under, IDENTITY};
 use super::evidence::Kind;
 use super::signing::{clean_env, tauri_bin};
 use super::versions::flip_tag;
@@ -233,6 +233,7 @@ pub fn build_app(build: &Build, env: &Env) -> Result<PathBuf> {
         &product_key_of(build.checkout)?,
         &format!("the app built from {}", build.checkout.display()),
     )?;
+    name_as_the_smokes(&built, &env)?;
     Ok(built)
 }
 
@@ -248,14 +249,33 @@ const LIVE_IDENTITY_CHECK: &str = "!= \"dev.ngvoicu.consensflow\"";
 
 /// The check of the export of a release: the smoke's identity where the release names
 /// the live app's (the releases before the app took its own identity from its build).
-/// Nothing else of the release is changed.
+/// Nothing else of the release is changed, and a release that still names the live app's
+/// identity outside its tests once that is done is refused, the line named.
 fn check_for_the_smokes_identity(into: &Path) -> Result {
     let check = under(into, &UPDATE_CHECK);
     let Ok(text) = fs::read_to_string(&check) else {
         return Ok(());
     };
     let smoke = format!("!= \"{IDENTITY}\"");
-    fs::write(&check, text.replace(LIVE_IDENTITY_CHECK, &smoke)).map_err(files("write", &check))
+    let patched = text.replace(LIVE_IDENTITY_CHECK, &smoke);
+    // What its tests say is their own: the check is what comes before them.
+    let checked = patched.split("#[cfg(test)]").next().unwrap_or_default();
+    let release = format!("\"{}\"", cf_base::bundle::RELEASE);
+    if let Some((at, line)) = checked
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains(&release))
+    {
+        return Err(Error::new(format!(
+            "{}:{}: the release still names the live app's identity where the export rewrites \
+             its check ({}), and its app would take no update of the smoke's: rewrite this \
+             spelling of it too",
+            check.display(),
+            at + 1,
+            line.trim()
+        )));
+    }
+    fs::write(&check, patched).map_err(files("write", &check))
 }
 
 /// What a build offline cannot fetch, and the checkout it is built in is given

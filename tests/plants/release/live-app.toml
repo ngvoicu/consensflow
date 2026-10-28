@@ -15,6 +15,8 @@ started = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-process", "
 live-app-rules = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "--no-fail-fast", "-p", "xtask", "--test", "live_app"]
 smoke-export = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::build", "updater_smoke::tests::"]
 app-update-identity = ["cargo", "xtask", "app", "test", "update_install::"]
+rig-shipped = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--lib", "--", "shipped::"]
+app-builds = ["cargo", "xtask", "app", "test", "tests::a_"]
 packaged-copy = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--test", "smoke", "--", "bundle::"]
 
 [[plant]]
@@ -62,7 +64,7 @@ runs = ["release-process"]
 file = "tools/cf-release/src/process.rs"
 find = '''
 pub fn capture(program: &OsStr, args: &[OsString], env: &Env) -> Result<Output, Unstarted> {
-    startable(program)?;'''
+    startable(program, args)?;'''
 replace = '''
 pub fn capture(program: &OsStr, args: &[OsString], env: &Env) -> Result<Output, Unstarted> {'''
 
@@ -172,3 +174,186 @@ fn start(program: &std::path::Path) {
     let _ = std::process::Command::new(program).spawn();
 }
 const NOT_A_BUNDLE: &str ='''
+
+[[plant]]
+name = "live app: a stand-in's file names whatever process took its number since"
+meant = "a_stand_ins_file_names_only_the_process_that_wrote_it"
+runs = ["smoke-case"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/case.rs"
+find = ".filter(|seen| seen.began_by(written) && first.is_some_and(|first| seen.began_since(first)))"
+replace = ".filter(|seen| first.is_some_and(|first| seen.began_since(first)))"
+
+[[plant]]
+name = "live app: a process is taken to have begun by any time"
+meant = "a_process_began_by_a_time_after_its_start_and_not_before_it"
+runs = ["started"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/started.rs"
+find = "began_at(self).is_some_and(|began| began <= at)"
+replace = "began_at(self).is_some_and(|began| began <= at) || at > 0"
+
+[[plant]]
+name = "live app: a program of a bundle whose plist names no identity is started"
+meant = "a_test_starts_no_bundle_of_the_live_apps_identity_nor_one_that_names_none"
+runs = ["bundle-gate"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/bundle.rs"
+find = '''
+        Some(app) if app.join("Contents").join("Info.plist").exists() => {
+            startable_by_a_test(&app).map(|_| ())
+        }'''
+replace = '''
+        Some(app) if app.join("Contents").join("Info.plist").exists() => {
+            startable_by_a_test(&app).map(|_| ()).or_else(|said| {
+                if said.contains("names no identity") || said.contains("cannot be read") {
+                    Ok(())
+                } else {
+                    Err(said)
+                }
+            })
+        }'''
+
+[[plant]]
+name = "live app: a test starts the Candidate"
+meant = "a_test_starts_no_bundle_of_the_live_apps_identity_nor_one_that_names_none"
+runs = ["bundle-gate"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/bundle.rs"
+find = "    if identity != SMOKE {"
+replace = "    if identity != SMOKE && false {"
+
+[[plant]]
+name = "live app: a program that reaches apps by its words is started whatever they name"
+meant = "a_program_that_reaches_apps_by_its_words_names_none_but_the_smokes"
+runs = ["bundle-gate"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/bundle.rs"
+find = "    if !BY_WORDS.contains(&name) {"
+replace = "    if !BY_WORDS.contains(&name) || true {"
+
+[[plant]]
+name = "live app: a smoke's build starts on the Candidate's home"
+meant = "a_smoke_build_starts_only_on_the_home_its_smoke_names"
+runs = ["app-builds"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    if identifier == cf_base::bundle::SMOKE {"
+replace = "    if identifier == cf_base::bundle::SMOKE && false {"
+
+[[plant]]
+name = "live app: a test build's window reads as the live app's"
+meant = "a_window_says_which_build_it_is_when_it_is_not_the_releases"
+runs = ["app-builds"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''
+    if identifier == PRODUCTION_IDENTIFIER {
+        return name.to_owned();
+    }'''
+replace = '''
+    if identifier == PRODUCTION_IDENTIFIER || true {
+        return name.to_owned();
+    }'''
+
+[[plant]]
+name = "live app: a release left naming the live app's identity is exported"
+meant = "a_release_whose_check_is_left_naming_the_live_apps_identity_is_not_exported"
+runs = ["smoke-export"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = "    if let Some((at, line)) = checked"
+replace = "    if let Some((at, line)) = checked.get(..0).unwrap_or_default()"
+
+[[plant]]
+name = "live app: an updater smoke's build goes by the product's name and icon"
+meant = "an_app_is_built_with_the_trees_own_scripts_and_cli_the_override_and_a_clean_environment"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = "    name_as_the_smokes(&built, &env)?;"
+replace = ""
+
+[[plant]]
+name = "live app: the packaged smoke's copy goes by the product's name"
+meant = "the_smoke_starts_a_sealed_copy_of_its_own_identity_and_leaves_the_bundle_as_it_was"
+runs = ["packaged-copy"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/bundle.rs"
+find = "    for edit in cf_base::bundle::smoke_name_edits(&text) {"
+replace = "    for edit in cf_base::bundle::smoke_name_edits(&text).into_iter().skip(9) {"
+
+[[plant]]
+name = "live app: the shipped bundle is started where a live app runs"
+meant = "the_shipped_bundle_is_started_only_where_asked_on_the_runner_with_no_live_app"
+runs = ["rig-shipped"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/shipped.rs"
+find = "    if let Some((bundle, identity)) = live {"
+replace = "    if let Some((bundle, identity)) = live.filter(|_| false) {"
+
+[[plant]]
+name = "live app: leave for one bundle starts another"
+meant = "the_shipped_bundle_is_started_only_with_leave_for_it"
+runs = ["rig-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = "cf_base::bundle::bundle_of(program).is_some_and(|bundle| bundle == app)"
+replace = "cf_base::bundle::bundle_of(program).is_some_and(|bundle| bundle == app || !app.as_os_str().is_empty())"
+
+[[plant]]
+name = "live app: what an ended app left in its group is not ended"
+meant = "what_an_app_that_ended_left_in_its_group_is_ended"
+runs = ["smoke-app"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/app.rs"
+find = "            kill_held_group(child);"
+replace = "            let _ = child;"
+
+[[plant]]
+name = "live app: the release run smokes a copy, not the bundle it ships"
+meant = "the_release_run_smokes_the_bundle_it_ships_and_checks_its_seal_after"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+          CONSENSFLOW_SMOKE_SHIPPED: "1"
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "live app: a tool ends what pgrep finds"
+meant = "no_test_or_tool_reaches_an_app_by_its_name_or_its_identity"
+runs = ["live-app-rules"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "const NOT_A_BUNDLE: &str ="
+replace = '''#[allow(dead_code)]
+const END: &str = "kill $(pgrep -f ConsensFlow)";
+const NOT_A_BUNDLE: &str ='''
+
+[[plant]]
+name = "live app: the packaged smoke's copy is started through a link"
+meant = "the_smoke_starts_a_sealed_copy_of_its_own_identity_and_leaves_the_bundle_as_it_was"
+runs = ["packaged-copy"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/bundle.rs"
+find = "    let into = std::fs::canonicalize(into)"
+replace = "    let into = Ok::<_, std::io::Error>(into.to_path_buf())"

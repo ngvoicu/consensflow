@@ -637,4 +637,69 @@ fn no_case_starts_an_app_of_the_live_apps_identity() {
     let (smoke, ran) = app_of(root.path(), "dev.ngvoicu.consensflow.smoke");
     assert_eq!(Run::new(&smoke).run().unwrap().code, Some(0));
     assert!(ran.exists(), "the smoke's program did not run");
+    // A program that reaches apps by its words, told to reach the live app: never started.
+    let (osascript, ran) = reaching_stand_in(root.path(), "osascript");
+    for refused in [
+        Run::new(&osascript)
+            .args([
+                "-e",
+                "tell application id \"dev.ngvoicu.consensflow\" to quit",
+            ])
+            .run()
+            .err(),
+        Run::new(&osascript)
+            .args([
+                "-e",
+                "tell application id \"dev.ngvoicu.consensflow\" to quit",
+            ])
+            .spawn()
+            .err(),
+    ] {
+        let refused = refused.map(|it| it.to_string()).unwrap_or_default();
+        assert!(
+            refused.contains("a test reaches no app but the smoke's"),
+            "{refused}"
+        );
+    }
+    assert!(!ran.exists(), "the stand-in for osascript ran");
+}
+
+/// A stand-in named `name` in `folder`, which leaves `ran` when it runs: what a program that
+/// reaches apps by its words would do, done harmlessly, should a refusal fail to come.
+#[cfg(unix)]
+fn reaching_stand_in(
+    folder: &std::path::Path,
+    name: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ran = folder.join(format!("{name}.ran"));
+    let program = folder.join(name);
+    std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (program, ran)
+}
+
+/// The bundle the release ships is started only with leave for it ([`crate::shipped`]), and
+/// leave for one bundle is none for another.
+#[cfg(unix)]
+#[test]
+fn the_shipped_bundle_is_started_only_with_leave_for_it() {
+    let root = tempfile::tempdir().unwrap();
+    let (live, ran) = app_of(root.path(), "dev.ngvoicu.consensflow");
+    let app = cf_base::bundle::bundle_of(&live).unwrap();
+    let elsewhere = crate::shipped::Shipped::for_a_test(&root.path().join("Other.app"));
+    let refused = Run::new(&live)
+        .shipped(&elsewhere)
+        .run()
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("the live app's identity"), "{refused}");
+    assert!(!ran.exists());
+    let leave = crate::shipped::Shipped::for_a_test(&app);
+    assert_eq!(Run::new(&live).shipped(&leave).run().unwrap().code, Some(0));
+    assert!(
+        ran.exists(),
+        "the shipped bundle was not started with leave for it"
+    );
 }

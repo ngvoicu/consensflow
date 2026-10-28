@@ -122,16 +122,22 @@ jobs:
       # The app as it ships, signed under the Developer ID with hardened
       # runtime and no entitlement: what could stop its page or its daemon from
       # starting under that signature is shown here and by no build signed ad
-      # hoc. It runs once, and the smoke holds the daemon that started to the
-      # bundle's own cf.
+      # hoc. Everywhere else the smoke starts a copy of the smoke's identity,
+      # which no live app is taken for; CONSENSFLOW_SMOKE_SHIPPED has it start
+      # this bundle itself, which it does on GitHub's runner alone and only
+      # where no ConsensFlow of a live identity runs (the run says so where it
+      # falls back to a copy). It runs once, the smoke holds the daemon that
+      # started to the bundle's own cf, and it verifies the bundle's seal after.
       - name: The signed app passes the packaged smoke
         env:
           CONSENSFLOW_SMOKE_APP: ${{ github.workspace }}/app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+          CONSENSFLOW_SMOKE_SHIPPED: "1"
         run: npm run smoke
       # The update bundle, signed in the one step that sees the key (it has no
       # password): the app as installed apps unpack it, files and folders under
       # ConsensFlow.app only, in plain ustar, as Tauri's own bundle was. Its
-      # seal must still hold after the smoke ran it.
+      # seal must still hold after the smoke ran this very bundle (the smoke
+      # says so, and so does the check here).
       - name: Sign the update bundle
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

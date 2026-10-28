@@ -22,9 +22,11 @@ fn root() -> PathBuf {
 }
 
 /// Whether a line of code reaches an app by its name or its identity: `open -a` and
-/// `open -b`, AppleScript's `tell application` (and JavaScript's `Application(…)`),
-/// AppKit's running applications found by identity, Launch Services' opening, and the
-/// programs and the signal that end processes by name or every one.
+/// `open -b`, and `open` of an `.app`; AppleScript's `tell application` (and `tell app`,
+/// `launch application`, JavaScript's `Application(…)`); AppKit's running applications
+/// found by identity; Launch Services' opening; launchd's `launchctl`; and what ends
+/// processes by name or every one (`killall`, `pkill`, `pgrep` handing its numbers to
+/// `kill`, and the signal to -1).
 fn reaches_by_name(code: &str) -> bool {
     let lower = code.to_lowercase();
     let delimited = |at: usize, len: usize| {
@@ -37,33 +39,33 @@ fn reaches_by_name(code: &str) -> bool {
         code.match_indices(word)
             .any(|(at, _)| delimited(at, word.len()))
     };
+    let quote = |it: Option<char>| it.is_some_and(|it| it == '"' || it == '\'' || it == ' ');
     let open_by_name = code.match_indices("open").any(|(at, _)| {
         delimited(at, 4) && {
             let near: String = code[at + 4..].chars().take(40).collect();
             ["-a", "-b"].iter().any(|flag| {
                 near.match_indices(flag).any(|(found, _)| {
-                    let before = near[..found].chars().next_back();
-                    let after = near[found + 2..].chars().next();
-                    let quote = |it: Option<char>| {
-                        it.is_some_and(|it| it == '"' || it == '\'' || it == ' ')
-                    };
-                    quote(before) && quote(after)
+                    quote(near[..found].chars().next_back())
+                        && quote(near[found + 2..].chars().next())
                 })
             })
         }
     });
-    let every_process = [
-        "kill(-1",
-        "kill (-1",
-        "kill -1",
-        "kill -9 -1",
-        "kill -KILL -1",
-        "kill -s KILL -1",
-    ]
-    .iter()
-    .any(|it| code.contains(it));
+    // `open` as a program, with an app among its words: `open X.app`, `"/usr/bin/open", app.app`.
+    let opener = code.contains("\"/usr/bin/open\"")
+        || code.contains("\"open\"")
+        || code.contains("'open'")
+        || code.starts_with("open ")
+        || ["| open ", "; open ", "&& open ", "$(open ", "`open "]
+            .iter()
+            .any(|it| code.contains(it));
+    let open_an_app = opener && code.contains(".app");
     open_by_name
+        || open_an_app
         || lower.contains("tell application")
+        || lower.contains("tell app ")
+        || lower.contains("tell app \"")
+        || lower.contains("launch application")
         || code.contains("Application(\"")
         || code.contains("Application('")
         || code.contains("WithBundleIdentifier")
@@ -71,10 +73,84 @@ fn reaches_by_name(code: &str) -> bool {
         || code
             .match_indices("LSOpen")
             .any(|(at, _)| code[at + 6..].starts_with(|it: char| it.is_ascii_uppercase()))
+        || words("launchctl")
         || words("killall")
         || words("pkill")
-        || every_process
+        || (words("pgrep") && words("kill"))
+        || signals_every_process(code)
 }
+
+/// Whether a line signals every process: `kill -1`, `kill -9 -1`, `kill -s KILL -1`,
+/// `kill(-1, …)`, `kill(Pid::from_raw(-1), …)`. A signal to a number (`kill -15 "$pid"`) is not.
+fn signals_every_process(code: &str) -> bool {
+    if ["kill(-1", "kill (-1", "Pid::from_raw(-1)"]
+        .iter()
+        .any(|it| code.contains(it))
+    {
+        return true;
+    }
+    code.match_indices("kill").any(|(at, _)| {
+        let before = code[..at].chars().next_back();
+        if before.is_some_and(|it| it.is_alphanumeric() || it == '_') {
+            return false;
+        }
+        let words: Vec<&str> = code[at + 4..]
+            .split(|it: char| it.is_whitespace() || matches!(it, '"' | '\'' | ',' | '[' | ']'))
+            .filter(|word| !word.is_empty())
+            .take(3)
+            .collect();
+        match words.as_slice() {
+            ["-1", ..] => true,
+            ["-s", _, "-1", ..] => true,
+            [signal, "-1", ..] => signal.starts_with('-'),
+            _ => false,
+        }
+    })
+}
+
+/// Whether a line spells the live app's path, or the installed Candidate's: an app a test
+/// never touches.
+fn spells_an_installed_app(code: &str) -> bool {
+    ["/Applications/ConsensFlow", "~/Applications/ConsensFlow"]
+        .iter()
+        .any(|path| {
+            code.match_indices(path).any(|(at, _)| {
+                code[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|it| !(it.is_alphanumeric() || matches!(it, '_' | '.' | '-' | '/')))
+            })
+        })
+}
+
+/// The files that spell an installed app's path, and why that touches nothing: each spells it
+/// as data a test reads, never as an app it starts.
+const SPELLING_INSTALLED: [(&str, &str); 6] = [
+    (
+        "app/src-tauri/src/daemon_command/tests.rs",
+        "the cf a daemon command is made for",
+    ),
+    (
+        "crates/cf-e2e/src/shipped.rs",
+        "the bundles a fake process table shows running",
+    ),
+    (
+        "crates/cf-e2e/tests/smoke/app.rs",
+        "a line of an app's log the smoke reads",
+    ),
+    (
+        "tools/xtask/src/candidate/tests.rs",
+        "the rows of a fake process table the Candidate command reads the live app in",
+    ),
+    (
+        "tools/xtask/src/updater_smoke/case/tests/inputs.rs",
+        "the paths the updater smoke refuses as the user's installed app",
+    ),
+    (
+        "crates/cf-engine/src/role_change/tests.rs",
+        "the cf a role text is written with",
+    ),
+];
 
 /// The files whose words are rules of the kind, or plants of them: they name what they refuse.
 const RULES: [&str; 4] = [
@@ -83,6 +159,25 @@ const RULES: [&str; 4] = [
     "crates/cf-e2e/src/live/members/descent/tests.rs",
     "crates/cf-evals/tests/long_run/signals.rs",
 ];
+
+/// The starts held to `cf_base::bundle`, whose tests hand a stand-in the very words they
+/// refuse: what they say below their tests' start is the refusal's, and is not read.
+const REFUSING: [&str; 3] = [
+    "tools/xtask/src/process.rs",
+    "tools/cf-release/src/process.rs",
+    "crates/cf-e2e/src/process/tests.rs",
+];
+
+/// What of `text`, the file at `path`, a rule reads: all of it, but for [`REFUSING`]'s tests.
+fn read_of<'a>(path: &str, text: &'a str) -> &'a str {
+    if !REFUSING.contains(&path) {
+        return text;
+    }
+    if path.ends_with("/tests.rs") {
+        return "";
+    }
+    text.split("\n#[cfg(test)]").next().unwrap_or_default()
+}
 
 /// The files of the tools and of the rig that start a program a caller names (std's
 /// `Command::new` of a value, not of a name written there), and what holds them to no app
@@ -102,8 +197,9 @@ const STARTERS: [(&str, &str); 3] = [
     ),
 ];
 
-/// What a file calls to hold what it starts to no app of the live app's identity.
-const GATE: &str = "program_startable_by_a_test";
+/// What a file calls to hold what it starts to no app a test may not start
+/// (`command_startable_by_a_test`, or the program's half alone).
+const GATE: &str = "_startable_by_a_test";
 
 /// Whether `relative` is of the tests and the tools: everything of `tools`, `tests`,
 /// `bin` and the app's scripts, the end-to-end and the evals crates, and the tests and
@@ -114,6 +210,7 @@ fn of_tests_and_tools(relative: &str) -> bool {
         "tests/",
         "bin/",
         "app/scripts/",
+        ".github/",
         "crates/cf-e2e/",
         "crates/cf-evals/",
     ]
@@ -147,16 +244,7 @@ fn files() -> Vec<(String, String)> {
                 .and_then(|name| name.to_str())
                 .unwrap_or("");
             if path.is_dir() {
-                if ![
-                    "target",
-                    "node_modules",
-                    ".git",
-                    "golden",
-                    "goldens",
-                    "fixtures",
-                ]
-                .contains(&name)
-                {
+                if !["target", "node_modules", ".git", "golden", "goldens"].contains(&name) {
                     walk(root, &path, found);
                 }
                 continue;
@@ -165,7 +253,11 @@ fn files() -> Vec<(String, String)> {
                 .extension()
                 .and_then(|kind| kind.to_str())
                 .unwrap_or("");
-            if !["rs", "mjs", "js", "cjs", "sh", "toml", "ps1"].contains(&kind) {
+            if ![
+                "rs", "mjs", "js", "cjs", "sh", "toml", "ps1", "py", "yml", "yaml", "json",
+            ]
+            .contains(&kind)
+            {
                 continue;
             }
             let relative = path
@@ -182,7 +274,7 @@ fn files() -> Vec<(String, String)> {
     }
     let root = root();
     let mut found = Vec::new();
-    for folder in ["tools", "tests", "bin", "app", "crates"] {
+    for folder in ["tools", "tests", "bin", "app", "crates", ".github"] {
         walk(&root, &root.join(folder), &mut found);
     }
     found.sort();
@@ -234,7 +326,18 @@ fn what_reaches_an_app_by_its_name_or_its_identity_is_found() {
         "killall ConsensFlow",
         r#"Command::new("pkill").arg("-f").arg("app")"#,
         "kill -9 -1",
+        "kill -1",
+        "kill -s KILL -1",
         "libc::kill(-1, libc::SIGKILL)",
+        "nix::sys::signal::kill(Pid::from_raw(-1), Signal::SIGKILL)",
+        r#"osascript -e 'tell app "ConsensFlow" to quit'"#,
+        r#"osascript -e 'launch application "ConsensFlow"'"#,
+        "pgrep -f ConsensFlow | xargs kill",
+        "kill $(pgrep -f app)",
+        "launchctl kickstart -k gui/501/dev.ngvoicu.consensflow",
+        "open /Applications/Some.app",
+        r#"Invocation::new("/usr/bin/open", root).arg("dist/ConsensFlow.app")"#,
+        "subprocess.run(['open', '-g', 'build/ConsensFlow.app'])",
     ] {
         assert_eq!(reaching_by_name(line).len(), 1, "{line}");
     }
@@ -244,9 +347,27 @@ fn what_reaches_an_app_by_its_name_or_its_identity_is_found() {
         "/usr/bin/open https://github.com/ngvoicu/consensflow/releases",
         "// osascript -e 'tell application id \"x\" to quit' is what is refused",
         "kill(-leader, signal)",
+        "kill -15 \"$pid\"",
+        "kill -TERM \"$child\" 2>/dev/null",
         "Developer ID Application: Name (TEAM)",
+        "let (code, found) = run(\"pgrep\", &[\"-f\", word])?;",
+        "fs::File::open(&path)",
     ] {
         assert_eq!(reaching_by_name(line), [], "{line}");
+    }
+    for line in [
+        "/Applications/ConsensFlow.app/Contents/MacOS/app",
+        "\"/Applications/ConsensFlow.app\"",
+        "~/Applications/ConsensFlow Candidate.app",
+    ] {
+        assert!(spells_an_installed_app(line), "{line}");
+    }
+    for line in [
+        "/box/Applications/ConsensFlow.app",
+        "/Users/someone/Applications/ConsensFlow.app",
+        "/Applications/Utilities/Some.app",
+    ] {
+        assert!(!spells_an_installed_app(line), "{line}");
     }
     assert!(starts_what_it_is_given(
         "let mut command = Command::new(program);"
@@ -282,7 +403,7 @@ fn no_test_or_tool_reaches_an_app_by_its_name_or_its_identity() {
         .iter()
         .filter(|(path, _)| !RULES.contains(&path.as_str()))
         .flat_map(|(path, text)| {
-            reaching_by_name(text)
+            reaching_by_name(read_of(path, text))
                 .into_iter()
                 .map(move |(at, line)| format!("{path}:{at}: {line}"))
         })
@@ -328,5 +449,33 @@ fn every_start_of_the_tools_and_the_rig_of_a_program_it_is_given_refuses_the_liv
         "these start a program they are given and are held to nothing: call \
          cf_base::bundle::{GATE} before it starts, as xtask's process and the rig's Run do:\n{}",
         unheld.join("\n")
+    );
+}
+
+#[test]
+fn no_test_or_tool_spells_an_installed_apps_path() {
+    let found: Vec<String> = files()
+        .iter()
+        .filter(|(path, _)| {
+            !RULES.contains(&path.as_str())
+                && !SPELLING_INSTALLED.iter().any(|(listed, _)| listed == path)
+        })
+        .flat_map(|(path, text)| {
+            text.lines()
+                .enumerate()
+                .filter(|(_, line)| {
+                    let code = line.trim_start();
+                    !code.starts_with("//")
+                        && !code.starts_with('#')
+                        && spells_an_installed_app(code)
+                })
+                .map(move |(at, line)| format!("{path}:{}: {}", at + 1, line.trim()))
+        })
+        .collect();
+    assert!(
+        found.is_empty(),
+        "these spell the live app's path, or the installed Candidate's, which no test or tool \
+         touches:\n{}",
+        found.join("\n")
     );
 }

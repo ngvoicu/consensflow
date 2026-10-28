@@ -119,9 +119,10 @@ pub enum Failure {
     LiveApp(String),
 }
 
-/// Refuses a program that is an app of the live app's identity, before anything starts.
+/// Refuses a program that is an app a test may not start, or reaches one by its words,
+/// before anything starts.
 fn startable(invocation: &Invocation) -> Result<(), Failure> {
-    cf_base::bundle::program_startable_by_a_test(Path::new(&invocation.program))
+    cf_base::bundle::command_startable_by_a_test(Path::new(&invocation.program), &invocation.args)
         .map_err(Failure::LiveApp)
 }
 
@@ -229,6 +230,22 @@ fn failure(invocation: &Invocation, cause: io::Error) -> Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in named `name` in `folder`, which leaves `ran` when it runs: what a program that
+    /// reaches apps by its words would do, done harmlessly, should a refusal fail to come.
+    #[cfg(unix)]
+    fn reaching_stand_in(
+        folder: &std::path::Path,
+        name: &str,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let ran = folder.join(format!("{name}.ran"));
+        let program = folder.join(name);
+        std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (program, ran)
+    }
 
     #[test]
     fn a_command_line_is_shown_with_what_has_a_space_in_it_quoted() {
@@ -437,5 +454,20 @@ mod tests {
         let (smoke, ran) = app_of("dev.ngvoicu.consensflow.smoke");
         assert_eq!(capture(&smoke, &env).unwrap().code, 0);
         assert!(ran.exists(), "the smoke's program did not run");
+        // A program that reaches apps by its words, told to reach the live app: never started.
+        let (osascript, ran) = reaching_stand_in(root.path(), "osascript");
+        let quit = Invocation::new(&osascript, root.path()).args([
+            "-e",
+            "tell application id \"dev.ngvoicu.consensflow\" to quit",
+        ]);
+        let refused = capture(&quit, &env)
+            .err()
+            .map(|it| it.to_string())
+            .unwrap_or_default();
+        assert!(
+            refused.contains("a test reaches no app but the smoke's"),
+            "{refused}"
+        );
+        assert!(!ran.exists(), "the stand-in for osascript ran");
     }
 }

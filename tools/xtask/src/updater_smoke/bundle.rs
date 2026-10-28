@@ -61,6 +61,32 @@ pub fn run(program: &str, args: &[OsString], env: &Env) -> Result<String> {
     Ok(ran.stdout)
 }
 
+/// Has the bundle a smoke built go by the smoke's name, with no icon of the product's (its
+/// window comes to the front as it starts, and must not read as the live app's), and seals
+/// it again as it was signed: ad hoc, keeping its entitlements, flags and runtime.
+pub fn name_as_the_smokes(app: &Path, env: &Env) -> Result {
+    let plist = under(app, &["Contents", "Info.plist"]);
+    let text = fs::read_to_string(&plist).map_err(files("read", &plist))?;
+    if let Some(icon) = cf_base::bundle::icon_of(app, &text) {
+        if icon.exists() {
+            fs::remove_file(&icon).map_err(files("take out", &icon))?;
+        }
+    }
+    for edit in cf_base::bundle::smoke_name_edits(&text) {
+        let mut words: Vec<OsString> = edit.iter().map(OsString::from).collect();
+        words.push(plist.clone().into_os_string());
+        run("/usr/bin/plutil", &words, env)?;
+    }
+    let mut seal: Vec<OsString> = ["--force", "--deep", "--sign", "-"]
+        .iter()
+        .map(OsString::from)
+        .collect();
+    seal.push("--preserve-metadata=entitlements,flags,runtime".into());
+    seal.push(app.as_os_str().to_os_string());
+    run("/usr/bin/codesign", &seal, env)?;
+    Ok(())
+}
+
 /// A field of the bundle's `Info.plist`.
 pub fn plist_value(app: &Path, field: &str) -> Result<String> {
     let file = under(app, &["Contents", "Info.plist"]);

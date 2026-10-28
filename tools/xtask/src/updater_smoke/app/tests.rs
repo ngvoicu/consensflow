@@ -353,6 +353,47 @@ fn a_pid_a_report_names_that_the_smoke_did_not_start_is_never_ended() {
     assert!(still, "a process the smoke did not start was ended");
 }
 
+/// An app that has ended, and is not reaped, is no process the system says (a zombie): what
+/// it left in its group is ended all the same, by the group of the child the smoke still holds.
+#[test]
+fn what_an_app_that_ended_left_in_its_group_is_ended() {
+    let stand = Stand::new();
+    let marker = stand.folder.path().join("left");
+    let app = stand.start(
+        &format!("/bin/sleep 60 &\necho $! > '{}'\nexit 0", marker.display()),
+        &[],
+    );
+    let _kills = Kills(app.clone());
+    let left: u32 = crate::updater_smoke::processes::until(
+        "the sleep is left",
+        Duration::from_secs(60),
+        || {
+            Ok(fs::read_to_string(&marker)
+                .ok()
+                .and_then(|text| text.trim().parse().ok()))
+        },
+    )
+    .unwrap();
+    // The app has ended, its child is held un-reaped: a zombie.
+    crate::updater_smoke::processes::until("the app ends", Duration::from_secs(60), || {
+        Ok((!app.any_alive()).then_some(()))
+    })
+    .unwrap();
+    assert!(alive(left));
+    app.kill_recorded();
+    let gone = crate::updater_smoke::processes::until(
+        "what it left is ended",
+        Duration::from_secs(10),
+        || Ok((!alive(left)).then_some(())),
+    );
+    if gone.is_err() {
+        if let Some(started) = cf_process::Started::of(left) {
+            crate::updater_smoke::processes::kill(&started);
+        }
+    }
+    gone.unwrap();
+}
+
 #[test]
 fn a_report_names_a_pid_only_when_it_says_one_that_is_a_process() {
     let event = |text: &str| Event(serde_json::from_str(text).unwrap());
