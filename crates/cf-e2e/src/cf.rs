@@ -387,18 +387,18 @@ mod tests {
         };
         files::write(&named("cf"), "").unwrap();
         files::write(&named("consensflow-bridge"), "").unwrap();
-        // A build would fail at once: no compiler is there.
-        let ran = Run::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "cf::tests::helper_says_the_programs_under_test",
-                "--ignored",
-                "--nocapture",
-            ])
-            .var(BUILT, folder.path())
-            .var("RUSTC", folder.path().join("no-rustc"))
-            .run()
-            .unwrap();
+        // A build would fail at once: no compiler is there. The case starts nothing and builds
+        // nothing: a verb of cf's time is more than it takes.
+        let ran = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "cf::tests::helper_says_the_programs_under_test",
+            crate::process::LIMIT,
+        )
+        .args(["--ignored", "--nocapture"])
+        .var(BUILT, folder.path())
+        .var("RUSTC", folder.path().join("no-rustc"))
+        .run()
+        .unwrap();
         assert_eq!(ran.code, Some(0), "{}", ran.output());
         assert!(
             ran.stdout
@@ -521,16 +521,17 @@ mod tests {
             let asking: Vec<_> = (0..count)
                 .map(|_| {
                     scope.spawn(|| {
-                        let mut process = Run::new(std::env::current_exe().unwrap())
-                            .args([
-                                "--exact",
-                                "cf::tests::helper_asks_for_the_cf_of_a_run",
-                                "--ignored",
-                                "--nocapture",
-                            ])
-                            .var("PATH", own_var("PATH").unwrap_or_default())
-                            .var(ROOT, root)
-                            .var(CARGO, script);
+                        // Each process takes its turn behind the others' builds: as long
+                        // as all of them may take, each a program held to a verb of cf's time.
+                        let mut process = crate::process::case_of(
+                            std::env::current_exe().unwrap(),
+                            "cf::tests::helper_asks_for_the_cf_of_a_run",
+                            crate::process::LIMIT * u32::try_from(count).unwrap_or(u32::MAX),
+                        )
+                        .args(["--ignored", "--nocapture"])
+                        .var("PATH", own_var("PATH").unwrap_or_default())
+                        .var(ROOT, root)
+                        .var(CARGO, script);
                         if let Some(run) = run {
                             process = process.var(RUN, run);
                         }
