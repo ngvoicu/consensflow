@@ -194,6 +194,7 @@ fn check_steps() -> Vec<String> {
     }
     steps.extend([
         "cargo test --workspace --exclude app --exclude xtask".to_string(),
+        "cargo test --package cf-engine --test dispatcher".to_string(),
         own_tests,
         "cargo test --offline --".to_string(),
     ]);

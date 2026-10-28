@@ -4,7 +4,8 @@
 //! own.
 //!
 //! The steps are rustfmt; clippy for the workspace, for the app and for
-//! Windows; the tests of the workspace, of xtask and of the app; the plants of
+//! Windows; the tests of the workspace, the engine's kit again with the gate's
+//! pacing on in every case (`CF_KIT_PACED`), the tests of xtask and of the app; the plants of
 //! every family, each checked to still apply to the sources (`cargo xtask
 //! plants <family> --check`); then the linter, the build of the native `cf` (the
 //! `bin/cf` the page's Playwright suite runs, `npm run test:ui`, which is no part
@@ -92,6 +93,10 @@ fn run(context: &Context, args: &[OsString], console: &mut Console) -> Result<i3
 
 /// What `check` runs, in order. `archiver` is the program cc-rs runs as the
 /// archiver in the lint for Windows, which `windows` leaves out.
+/// The variable that turns the gate's pacing on in every case of the engine's kit
+/// (`cf_engine::testing::PACED_VARIABLE`): the paced kit's step sets it.
+const PACED_VARIABLE: &str = "CF_KIT_PACED";
+
 fn steps(
     context: &Context,
     archiver: &Path,
@@ -133,6 +138,13 @@ fn steps(
                 "xtask",
             ],
         ),
+        // The engine's kit again, with the gate's pacing on in every case: what a case that
+        // asks for no settle would hide (T-842: the P1 a withheld Enter left).
+        at(
+            "cargo",
+            &["test", "--package", "cf-engine", "--test", "dispatcher"],
+        )
+        .var(PACED_VARIABLE, "1"),
         at("cargo", &["test", "--package", "xtask", "--target-dir"])
             .arg(context.path(XTASK_TARGET)),
         app::test(context, &[]),
@@ -233,6 +245,7 @@ mod tests {
                  --workspace --exclude app -- -D warnings"
                     .to_string(),
                 "cargo test --workspace --exclude app --exclude xtask".to_string(),
+                "cargo test --package cf-engine --test dispatcher".to_string(),
                 format!("cargo test --package xtask --target-dir {own_target}"),
                 "cargo test --offline --".to_string(),
                 "cargo xtask plants cli --check".to_string(),
@@ -252,6 +265,7 @@ mod tests {
                 root.clone(),
                 root.clone(),
                 app.clone(),
+                root.clone(),
                 root.clone(),
                 root.clone(),
                 root.clone(),
@@ -277,6 +291,7 @@ mod tests {
                     "AR_x86_64_pc_windows_msvc".to_string()
                 ],
                 vec![],
+                vec![PACED_VARIABLE.to_string()],
                 vec![],
                 vec!["TAURI_CONFIG".to_string()],
                 vec![],
@@ -309,7 +324,7 @@ mod tests {
         let steps = steps(&context, &archiver, false, &families());
         assert_eq!(steps[3], clippy_windows::lint(&context, &[], &archiver));
         assert_eq!(steps[2], app::clippy(&context, &[]));
-        assert_eq!(steps[6], app::test(&context, &[]));
+        assert_eq!(steps[7], app::test(&context, &[]));
     }
 
     #[test]
@@ -317,7 +332,7 @@ mod tests {
         let context = context();
         let steps = steps(&context, Path::new("xtask"), true, &families());
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
-        assert_eq!(lines.len(), 12);
+        assert_eq!(lines.len(), 13);
         assert!(lines
             .iter()
             .all(|line| !line.contains("x86_64-pc-windows-msvc")));
@@ -331,7 +346,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            lines[5..],
+            lines[6..],
             [
                 "cargo test --offline --",
                 "cargo xtask plants cli --check",
@@ -341,6 +356,40 @@ mod tests {
                 "cargo xtask build-cf --offline",
                 "npm test"
             ]
+        );
+    }
+
+    /// The kit with the gate's pacing on every case (CF_KIT_PACED, T-842: it found the P1 the
+    /// plain run hid) is a step of CI's `checks` job too, as the gate runs it, beside the
+    /// plain kit of the `workspace` job (Calliope's re-check of `a0aecd192`, T-854).
+    #[test]
+    fn the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable() {
+        let context = context();
+        let steps = steps(&context, Path::new("xtask"), false, &families());
+        let paced: Vec<_> = steps
+            .iter()
+            .filter(|step| variables(step) == [PACED_VARIABLE])
+            .collect();
+        assert_eq!(paced.len(), 1, "one step of the gate runs the paced kit");
+        let run = paced[0].display();
+        assert_eq!(run, "cargo test --package cf-engine --test dispatcher");
+        let workflow = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/ci.yml"),
+        )
+        .unwrap();
+        let checks: String = workflow
+            .lines()
+            .skip_while(|line| *line != "  checks:")
+            .skip(1)
+            .take_while(|line| !(line.starts_with("  ") && !line.starts_with("   ")))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let step = format!(
+            "      - run: {run}\n        env:\n          {PACED_VARIABLE}: 1\n        timeout-minutes: "
+        );
+        assert!(
+            checks.contains(&step),
+            "ci.yml's checks job runs the paced kit as the gate does:\n{step}"
         );
     }
 
