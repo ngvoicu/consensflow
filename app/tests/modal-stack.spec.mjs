@@ -8,9 +8,12 @@ import { specsOf } from './specs-fixtures.mjs'
  * it, so a modal that paints nothing (a box with no size, no words, or no opacity) over another
  * veils it with nothing on top: what is under it looks disabled, and reads fine. The page keeps
  * none: every dialog it opens, in whatever order, paints, and whatever is open is covered only by
- * a dialog that opened later. `veils` is the check; the page's routes to its dialogs (the
- * Specs viewer's button, the project menu, Settings, the menu's Check for updates, Project
- * settings) each run through it, and so does every `<dialog>` of the page opened by name.
+ * a dialog that opened later. Nor does any state of the page (the daemon down, a project closed,
+ * the window out of focus, an update that never answers) touch an open modal: a dialog sits under
+ * `body`, which no such state reaches, so it is never inert, never faded or filtered, and takes
+ * its clicks. `veils` is the check; the page's routes to its dialogs (the Specs viewer's button,
+ * the project menu, Settings, the menu's Check for updates, Project settings) each run through
+ * it, and so does every `<dialog>` of the page opened by name.
  */
 let ui
 let refused
@@ -89,6 +92,7 @@ async function open(page, data = model()) {
   await page.addInitScript((data) => {
     window.__listeners = new Map()
     window.__calls = []
+    window.__model = data
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
@@ -139,6 +143,8 @@ async function open(page, data = model()) {
         const handle = operations[args.operation]
         return handle ? handle(args.body) : { ok: true }
       }
+      // An updater that never answers: the status of a check that is still on its way.
+      if (command === 'update_status' && window.__updatesHang) return new Promise(() => {})
       if (command.startsWith('update_')) return { ok: false, error: 'not in this test' }
       return { ok: true }
     }
@@ -170,7 +176,9 @@ async function open(page, data = model()) {
  * What is wrong with the modals open now, each as a sentence; none where all is well. Run in the
  * page. Every open modal paints (a box of some size, shown, not transparent, with words in it),
  * and is covered by no one but a modal opened after it, which paints too: the one on top is the
- * one hit at its own centre.
+ * one hit at its own centre. None is inert (itself or under an inert ancestor), takes no clicks
+ * (`pointer-events`, which its ancestors hand down), is faded or filtered; and the first control
+ * of the one on top is hit where it is drawn.
  */
 function veils() {
   const modals = [...document.querySelectorAll('dialog[open]')].sort(
@@ -206,7 +214,43 @@ function veils() {
         `${name(dialog)} is covered by ${cover ? name(cover) : (hit?.tagName ?? 'nothing')}`,
       )
     }
+    for (let above = dialog; above; above = above.parentElement) {
+      if (above.inert) {
+        said.push(`${name(dialog)} is inert${above === dialog ? '' : `, under ${above.localName}`}`)
+        break
+      }
+    }
+    const style = getComputedStyle(dialog)
+    if (style.pointerEvents === 'none') {
+      said.push(`${name(dialog)} takes no clicks (pointer-events: none)`)
+    }
+    if (Number(style.opacity) < 1) said.push(`${name(dialog)} is faded (opacity ${style.opacity})`)
+    if (style.filter !== 'none') said.push(`${name(dialog)} is filtered (${style.filter})`)
   })
+  // The first control of the one on top that is in view (a dialog that scrolls has others
+  // below its fold): where it is drawn, it is the one hit.
+  const top = modals.at(-1)
+  const room = top?.getBoundingClientRect()
+  const inView = (button) => {
+    const box = button.getBoundingClientRect()
+    return (
+      !button.disabled &&
+      box.width > 0 &&
+      box.height > 0 &&
+      box.x >= room.x &&
+      box.y >= room.y &&
+      box.right <= Math.min(room.right, innerWidth) &&
+      box.bottom <= Math.min(room.bottom, innerHeight)
+    )
+  }
+  const control = [...(top?.querySelectorAll('button') ?? [])].find(inView)
+  if (control) {
+    const box = control.getBoundingClientRect()
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+    if (hit !== null && !control.contains(hit)) {
+      said.push(`${name(top)}'s first control is covered by ${hit.localName}`)
+    }
+  }
   return said
 }
 
@@ -379,5 +423,168 @@ test.describe('the page keeps no veil', () => {
     await viewer.getByRole('button', { name: 'Refresh' }).click()
     await expect.poll(reads).toBe(before + 1)
     await expect(viewer.locator('.registry-heading')).toHaveText('Spec Registry')
+  })
+})
+
+test.describe('no state of the page touches an open modal', () => {
+  /** The viewer open on harbour, as the board's button opens it. */
+  async function openViewer(page) {
+    await open(page)
+    await page.locator('#specs-button').click()
+    const viewer = page.locator(`#${VIEWER}`)
+    await expect(viewer.locator('.registry-heading')).toHaveText('Spec Registry')
+    return viewer
+  }
+
+  /**
+   * The viewer takes the clicks of a human: a file of the tree is chosen and shown, and the page
+   * says nothing of a veil. A click that something covers does not go through (the click waits
+   * for its target to be hit, and fails when it never is).
+   */
+  async function takesClicks(page, viewer, path) {
+    await viewer.locator(`.tree-file[data-path="${path}"]`).click({ timeout: 3_000 })
+    await expect(viewer.locator('.specs-path')).toHaveText(path)
+    expect(await seen(page)).toEqual([])
+  }
+
+  test('senses an open modal made inert, faded, filtered or deaf, by itself or by an ancestor', async ({
+    page,
+  }) => {
+    const viewer = await openViewer(page)
+    expect(await seen(page)).toEqual([])
+    for (const [what, plant, said] of [
+      [
+        'inert body',
+        () => {
+          document.body.inert = true
+        },
+        `${VIEWER} is inert, under body`,
+      ],
+      [
+        'inert dialog',
+        () => {
+          document.getElementById('specs-viewer-dialog').inert = true
+        },
+        `${VIEWER} is inert`,
+      ],
+      [
+        'deaf body',
+        () => {
+          document.body.style.pointerEvents = 'none'
+        },
+        `${VIEWER} takes no clicks (pointer-events: none)`,
+      ],
+      [
+        'faded dialog',
+        () => {
+          document.getElementById('specs-viewer-dialog').style.opacity = '0.4'
+        },
+        `${VIEWER} is faded (opacity 0.4)`,
+      ],
+      [
+        'filtered dialog',
+        () => {
+          document.getElementById('specs-viewer-dialog').style.filter = 'grayscale(1)'
+        },
+        `${VIEWER} is filtered (grayscale(1))`,
+      ],
+    ]) {
+      await page.evaluate(plant)
+      expect(await seen(page), what).toContain(said)
+      await page.reload()
+      await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+      await page.locator('#specs-button').click()
+      await expect(viewer).toBeVisible()
+    }
+  })
+
+  test('the daemon stopping and coming back leaves the viewer as it was, and the banner is behind it', async ({
+    page,
+  }) => {
+    const viewer = await openViewer(page)
+    const down = page.locator('#daemon-down')
+    await page.evaluate(() =>
+      window.__listeners.get('daemon-status')({
+        payload: { available: false, cause: 'it stopped', retrying: true },
+      }),
+    )
+    await expect(down).toBeVisible()
+    await expect(down).toContainText('The daemon is not running. It stopped. Starting it again…')
+    // The notice is the page's, under the modal's backdrop: the viewer is untouched by it.
+    expect(await seen(page)).toEqual([])
+    await takesClicks(page, viewer, 'user-auth/SPEC.md')
+    // The daemon refusing everything while it restarts: what the viewer asks is refused in its
+    // own words, and Refresh and Close still answer.
+    await page.evaluate(() => {
+      window.__model.specs[1] = undefined
+    })
+    await viewer.getByRole('button', { name: 'Refresh' }).click()
+    await expect(viewer.locator('.specs-note, .specs-refusal').first()).toBeVisible()
+    expect(await seen(page)).toEqual([])
+    await page.evaluate(() =>
+      window.__listeners.get('daemon-status')({ payload: { available: true } }),
+    )
+    await expect(down).toBeHidden()
+    expect(await seen(page)).toEqual([])
+    await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(viewer).toBeHidden()
+  })
+
+  test('a project closed behind it, or paused, leaves it whole: its board dims, the viewer does not', async ({
+    page,
+  }) => {
+    const viewer = await openViewer(page)
+    await page.evaluate(() => {
+      window.__model.projects[0].state = 'suspended'
+      window.__model.boards[1].project.state = 'suspended'
+      return window.__listeners.get('state-changed')({ payload: {} })
+    })
+    await expect(page.locator('.main')).toHaveAttribute('data-suspended', 'true')
+    expect(await page.locator('.main .kanban').evaluate((el) => getComputedStyle(el).opacity)).toBe(
+      '0.45',
+    )
+    await takesClicks(page, viewer, 'user-auth/SPEC.md')
+    // A divider dragged while it is open: the window is resizing, and the dock takes no pointer.
+    await page.evaluate(() => {
+      document.querySelector('.main').dataset.resizing = 'true'
+    })
+    await takesClicks(page, viewer, 'registry.md')
+    await page.evaluate(() => {
+      delete document.querySelector('.main').dataset.resizing
+    })
+    await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(viewer).toBeHidden()
+  })
+
+  test('the window out of focus and back leaves it whole', async ({ page }) => {
+    const viewer = await openViewer(page)
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('blur'))
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await takesClicks(page, viewer, 'user-auth/SPEC.md')
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await takesClicks(page, viewer, 'registry.md')
+    await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(viewer).toBeHidden()
+  })
+
+  test('an update that never answers is no busy state the viewer waits on: it closes, and so does the updater over it', async ({
+    page,
+  }) => {
+    const viewer = await openViewer(page)
+    await page.evaluate(() => {
+      window.__updatesHang = true
+      return window.__listeners.get('check-updates')({})
+    })
+    const updates = page.locator('#updates-dialog')
+    await expect(updates).toBeVisible()
+    expect(await stack(page)).toEqual([VIEWER, 'updates-dialog'])
+    expect(await seen(page)).toEqual([])
+    await page.locator('#updates-close').click({ timeout: 3_000 })
+    await expect(updates).toBeHidden()
+    await takesClicks(page, viewer, 'user-auth/SPEC.md')
+    await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(viewer).toBeHidden()
   })
 })
