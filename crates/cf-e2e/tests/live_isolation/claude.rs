@@ -56,15 +56,23 @@ impl Throwaway {
     /// Whether the login is as it was copied: a harness that refreshed it has left
     /// the owner's own copy behind.
     pub fn check(&self, who: &str) -> Check {
-        let now = fs::read(self.folder.path().join(self.file)).unwrap_or_default();
+        let now = fs::read(self.folder.path().join(self.file)).ok();
+        // Claude's login is judged by its tokens, as the kit judges its own copy: Claude Code
+        // writes what it learns of the account beside them. Another harness's is held to every
+        // byte.
+        let changed = if self.file == ".credentials.json" {
+            cf_e2e::live::login::refreshed_since(&self.copy, now.as_deref()).is_some()
+        } else {
+            now.as_deref() != Some(self.copy.as_slice())
+        };
         Check::new(
             who,
             "the login copied is as it was",
-            now == self.copy,
-            if now == self.copy {
-                "unchanged".to_owned()
-            } else {
+            !changed,
+            if changed {
                 "REFRESHED during the run: the owner's own login may now be stale".to_owned()
+            } else {
+                "unchanged".to_owned()
             },
         )
     }
@@ -157,4 +165,62 @@ pub fn owners_unchanged(home: &Path, folder: &str, before: &[(String, String)]) 
             format!("changed: {}", changed.join(", "))
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// A login as the machine keeps it, wrapped as a config folder's `.credentials.json` holds it.
+    fn login(access: &str, refresh: &str) -> Vec<u8> {
+        serde_json::to_vec(&json!({ "claudeAiOauth": {
+            "accessToken": access, "refreshToken": refresh, "expiresAt": 1_800_000_000_000_i64,
+            "scopes": ["user:inference"], "subscriptionType": "max",
+        } }))
+        .unwrap()
+    }
+
+    fn now(throwaway: &Throwaway, bytes: &[u8]) -> Check {
+        fs::write(throwaway.path().join(".credentials.json"), bytes).unwrap();
+        throwaway.check("claude")
+    }
+
+    // Claude Code 2.1.310 on Windows wrote `subscriptionTypeSource` beside the tokens of the
+    // copy in every window it opened (zeewin2, 2026-10-28, `live held-typed`): the kit's own
+    // login copy says the tokens were not refreshed, and this check said they were.
+    #[test]
+    fn a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is() {
+        let copied = login("ACCESS-1", "REFRESH-1");
+        let throwaway = Throwaway::holding(".credentials.json", copied.clone()).unwrap();
+        assert!(now(&throwaway, &copied).ok);
+        let mut learned: serde_json::Value = serde_json::from_slice(&copied).unwrap();
+        learned["claudeAiOauth"]["subscriptionTypeSource"] = json!("oauth");
+        let learned = serde_json::to_vec(&learned).unwrap();
+        assert!(now(&throwaway, &learned).ok);
+        let refreshed = now(&throwaway, &login("ACCESS-2", "REFRESH-2"));
+        assert!(!refreshed.ok);
+        assert!(refreshed.detail.contains("REFRESHED"), "{refreshed:?}");
+        // Neither the check nor its words say a token.
+        assert!(
+            !format!("{refreshed:?}").contains("ACCESS"),
+            "{refreshed:?}"
+        );
+        // A file that is gone is a copy that was lost.
+        fs::remove_file(throwaway.path().join(".credentials.json")).unwrap();
+        assert!(!throwaway.check("claude").ok);
+    }
+
+    // Codex's login is a file of another shape, and its copy is held to every byte.
+    #[test]
+    fn a_login_that_is_no_claudes_is_held_to_every_byte() {
+        let throwaway = Throwaway::holding("auth.json", br#"{"tokens":{"a":1}}"#.to_vec()).unwrap();
+        fs::write(
+            throwaway.path().join("auth.json"),
+            br#"{"tokens":{"a":1},"x":2}"#,
+        )
+        .unwrap();
+        assert!(!throwaway.check("codex").ok);
+    }
 }

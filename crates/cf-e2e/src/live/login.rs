@@ -491,6 +491,40 @@ impl Copy {
     }
 }
 
+impl Copy {
+    /// Whether the copy was refreshed or lost, in words: the hazard a run is failed for.
+    fn refreshed(&self) -> Option<String> {
+        match self {
+            Self::Kept | Self::Rewritten(_) => None,
+            Self::Refreshed(fields) if fields.is_empty() => Some(
+                "the run's Claude Code wrote a different login in the folder's .credentials.json"
+                    .to_owned(),
+            ),
+            Self::Refreshed(fields) => Some(format!(
+                "the run's Claude Code wrote a different login in the folder's .credentials.json \
+                 (it changed {})",
+                fields.join(", ")
+            )),
+            Self::Lost => {
+                Some("the folder's .credentials.json is gone or no longer holds a login".to_owned())
+            }
+        }
+    }
+}
+
+/// Whether the run's Claude Code refreshed or lost a login that a suite copied into a config folder
+/// of its own (`copied`: the text of the `.credentials.json` it wrote there; `now`: that file as it
+/// is, none where it is gone), in words, never a token. The suites that make their own folder
+/// ([`machine_login`]) judge it as a [`Login`] judges its own: by the fields that differ, so that
+/// what Claude Code writes of the account beside the tokens is no refresh.
+pub fn refreshed_since(copied: &[u8], now: Option<&[u8]>) -> Option<String> {
+    let parse = |bytes: &[u8]| serde_json::from_slice::<Value>(bytes).ok();
+    let Some(copied) = parse(copied).and_then(|json| json.get("claudeAiOauth").cloned()) else {
+        return Some("the copy of the login is no login".to_owned());
+    };
+    Copy::of(&copied, now.and_then(parse).as_ref()).refreshed()
+}
+
 impl Made {
     /// What the folder's `.credentials.json` is of the login that was copied.
     fn copy(&self) -> Copy {
@@ -502,21 +536,7 @@ impl Made {
 
     /// Whether the copy was refreshed or lost, in words: the hazard `finish` fails the run for.
     fn refreshed(&self) -> Option<String> {
-        match self.copy() {
-            Copy::Kept | Copy::Rewritten(_) => None,
-            Copy::Refreshed(fields) if fields.is_empty() => Some(
-                "the run's Claude Code wrote a different login in the folder's .credentials.json"
-                    .to_owned(),
-            ),
-            Copy::Refreshed(fields) => Some(format!(
-                "the run's Claude Code wrote a different login in the folder's .credentials.json \
-                 (it changed {})",
-                fields.join(", ")
-            )),
-            Copy::Lost => {
-                Some("the folder's .credentials.json is gone or no longer holds a login".to_owned())
-            }
-        }
+        self.copy().refreshed()
     }
 
     /// What Claude Code wrote of the login besides its tokens, if it did, in words: no failure,

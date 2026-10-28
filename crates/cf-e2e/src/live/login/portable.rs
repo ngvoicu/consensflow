@@ -191,3 +191,31 @@ fn a_copy_only_rewritten_beside_its_tokens_is_no_failure_and_a_refreshed_one_nam
         assert!(!text.contains("SECRET"), "{text}");
     }
 }
+
+#[test]
+fn a_suites_copy_is_refreshed_when_its_tokens_changed_or_it_is_gone_and_never_for_the_rest() {
+    let copied = wrapped(&login("ACCESS-1", "REFRESH-1", 1_800_000_000_000)).to_string();
+    let now = |oauth: &Value| wrapped(oauth).to_string();
+    let same = login("ACCESS-1", "REFRESH-1", 1_800_000_000_000);
+    assert_eq!(
+        refreshed_since(copied.as_bytes(), Some(now(&same).as_bytes())),
+        None
+    );
+    let mut learned = same.clone();
+    learned["subscriptionTypeSource"] = json!("oauth");
+    assert_eq!(
+        refreshed_since(copied.as_bytes(), Some(now(&learned).as_bytes())),
+        None
+    );
+    let other = login("ACCESS-2", "REFRESH-2", 1_800_000_999_000);
+    let said = refreshed_since(copied.as_bytes(), Some(now(&other).as_bytes())).unwrap();
+    assert!(
+        said.contains("accessToken, expiresAt, refreshToken"),
+        "{said}"
+    );
+    assert!(!said.contains("ACCESS-"), "{said}");
+    assert!(refreshed_since(copied.as_bytes(), None)
+        .unwrap()
+        .contains("gone"));
+    assert!(refreshed_since(b"not a login", Some(copied.as_bytes())).is_some());
+}

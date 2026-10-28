@@ -13,6 +13,7 @@ live-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::ma
 live-login = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login"]
 live-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::tests"]
 live-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "stand_in::"]
+live-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_held_typed", "--", "isolation::"]
 
 [[plant]]
 name = "windows live: a window of a fake model is started on the real Claude all the same"
@@ -156,3 +157,40 @@ runs = ["live-trust"]
 file = "crates/cf-e2e/src/live/machine.rs"
 find = '''            .strip_prefix(r"\\?\")'''
 replace = '''            .strip_prefix(r"nothing")'''
+
+# T-858: the suites that make their own Claude config folder (`live held-typed`, `live escape-unsent`,
+# through `live_isolation/claude.rs`) judged the copy by its bytes, and Claude Code 2.1.310 writes what
+# it learns of the account beside the tokens (zeewin2: `subscriptionTypeSource`), so every run said the
+# login was refreshed.
+[[plant]]
+name = "windows live: a suite's copy of the login is held to every byte of Claude's file"
+meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
+runs = ["live-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_isolation/claude.rs"
+find = '''        let changed = if self.file == ".credentials.json" {'''
+replace = '''        let changed = if false {'''
+
+[[plant]]
+name = "windows live: a suite's copy that Claude Code lost is not a refreshed one"
+meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
+runs = ["live-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            Self::Lost => {
+                Some("the folder's .credentials.json is gone or no longer holds a login".to_owned())
+            }'''
+replace = '''            Self::Lost => None,'''
+
+[[plant]]
+name = "windows live: a suite's copy rewritten beside its tokens is a refreshed one"
+meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
+runs = ["live-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            Self::Kept | Self::Rewritten(_) => None,'''
+replace = '''            Self::Kept => None,
+            Self::Rewritten(_) => Some("rewritten".to_owned()),'''
