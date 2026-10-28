@@ -101,8 +101,8 @@ runs = ["live-trust"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''        folder.replace('\\', "/")'''
-replace = '''        folder.to_owned()'''
+find = '''            .replace('\\', "/")'''
+replace = '''            .replace('\u{0}', "/")'''
 
 [[plant]]
 name = "windows live: a stand-in that is a cmd of the run's own is named by a shim of itself"
