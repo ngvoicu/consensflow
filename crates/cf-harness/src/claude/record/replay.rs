@@ -422,13 +422,14 @@ fn date_parse(value: Option<&Value>) -> Result<f64, String> {
     Ok(ms)
 }
 
-/// The model families a launch's alias runs on by itself: `opusplan`, with or without a context
-/// suffix (`opusplan[1m]`), plans on Opus and works on Sonnet. Any other name is one model, or an
-/// alias that is repointed (which is news, told once), and names none.
+/// The model families a launch's alias runs on by itself, with or without a context suffix
+/// (`opusplan[1m]`): `opusplan` plans on Opus and works on Sonnet, and `default` is Opus, and
+/// Sonnet past half the limit on Max. Any other name is one model, or an alias that is repointed
+/// (which is news, told once), and names none.
 fn alias_families(launch_model: &str) -> &'static [&'static str] {
     let name = launch_model.trim().to_ascii_lowercase();
     match name.split('[').next().unwrap_or_default() {
-        "opusplan" => &["opus", "sonnet"],
+        "opusplan" | "default" => &["opus", "sonnet"],
         _ => &[],
     }
 }

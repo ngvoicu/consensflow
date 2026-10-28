@@ -347,3 +347,63 @@ fn a_flip_between_the_models_an_alias_runs_on_is_no_drift_where_the_launch_names
     ];
     assert!(models_of(&fallback, &launched("opusplan")).0.is_some());
 }
+
+/// Opus in plan mode and Sonnet at work, then Opus again: the flips of an alias that runs on two.
+fn flips() -> Vec<Value> {
+    vec![
+        hello(),
+        on("claude-opus-5-5", "a1", "u1", "m1"),
+        user("u2", json!("a1"), json!("Go")),
+        on("claude-sonnet-5-5", "a2", "u2", "m2"),
+        user("u3", json!("a2"), json!("Plan")),
+        on("claude-opus-5-5", "a3", "u3", "m3"),
+    ]
+}
+
+fn drift_after(stage: &mut Stage, options: &Options) -> Option<ModelMoved> {
+    match &*stage.look_told(options) {
+        Reading::Known(record) => record.model_drift.as_deref().cloned(),
+        other => panic!("not known: {other:?}"),
+    }
+}
+
+#[test]
+fn a_look_launched_with_no_model_reads_the_flips_again_where_an_earlier_one_named_the_alias() {
+    // The reader is kept per conversation and told the launch's model by each look (T-853): a
+    // later window on the conversation launched with another model, or none, is not an
+    // `opusplan` window, and its Opus-to-Sonnet changes are told.
+    let mut stage = Stage::new();
+    stage.write(&flips());
+    let alias = Options {
+        launch_model: Some("opusplan".to_owned()),
+        ..Options::default()
+    };
+    assert_eq!(drift_after(&mut stage, &alias), None);
+    let drift = drift_after(&mut stage, &Options::default()).expect("a drift to tell");
+    assert_eq!(pair(&drift), ("claude-sonnet-5-5", "claude-opus-5-5"));
+    // And an alias named again is no news again.
+    assert_eq!(drift_after(&mut stage, &alias), None);
+}
+
+#[test]
+fn the_default_alias_flips_between_opus_and_sonnet_by_design_too() {
+    // Claude Code's `default` model is Opus, and Sonnet past half the limit on Max (T-853).
+    let named = |model: &str| Options {
+        launch_model: Some(model.to_owned()),
+        ..Options::default()
+    };
+    assert_eq!(models_of(&flips(), &named("default")), (None, None));
+    assert_eq!(models_of(&flips(), &named("Default")), (None, None));
+    // A model it does not run on is still news.
+    let other = [
+        hello(),
+        on("claude-opus-5-5", "a1", "u1", "m1"),
+        user("u2", json!("a1"), json!("Go")),
+        on("claude-haiku-5-5", "a2", "u2", "m2"),
+    ];
+    let (_, drift) = models_of(&other, &named("default"));
+    assert_eq!(
+        pair(&drift.expect("outside the alias")),
+        ("claude-opus-5-5", "claude-haiku-5-5")
+    );
+}

@@ -139,15 +139,15 @@ impl Look for Relaunched {
             self.at.store(at, Ordering::Relaxed);
             self.reader.retell(|state| state.relaunched(at));
         }
-        // A look told which model the launch named, and not the one the reader knows: its drifts
-        // are read again, for what an alias runs on is no drift (T-841).
-        if let Some(model) = options.launch_model.as_deref() {
-            if let Ok(mut known) = self.launched.lock() {
-                if known.as_deref() != Some(model) {
-                    let model: Arc<str> = Arc::from(model);
-                    *known = Some(Arc::clone(&model));
-                    self.reader.retell(|state| state.launched_on(model));
-                }
+        // A look told a launch model other than the reader knows, none included (the reader is
+        // kept per conversation, and a later window on it may be launched with another model or
+        // none): its drifts are read again, for what an alias runs on is no drift (T-841, T-853).
+        let model = options.launch_model.as_deref();
+        if let Ok(mut known) = self.launched.lock() {
+            if known.as_deref() != model {
+                let model: Option<Arc<str>> = model.map(Arc::from);
+                known.clone_from(&model);
+                self.reader.retell(|state| state.launched_on(model));
             }
         }
         self.reader.look(options, now_ms)
@@ -283,10 +283,10 @@ impl Transcript {
         }
     }
 
-    /// Told the model the window's launch named: false, since what was read of the models
-    /// was read without it.
-    fn launched_on(&mut self, model: Arc<str>) -> bool {
-        self.launch_model = Some(model);
+    /// Told the model the window's launch named, if it named one: false, since what was read of
+    /// the models was read without it.
+    fn launched_on(&mut self, model: Option<Arc<str>>) -> bool {
+        self.launch_model = model;
         false
     }
 
