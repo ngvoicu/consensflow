@@ -24,7 +24,7 @@ pacing-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch
 pacing-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter"]
 # A Claude chief whose cancelled compact left `/compact` in its box (the regression's).
 pacing-compact = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "a_claude_chief_whose_compact_the_human_cancelled_is_at_rest_and_is_handed_its_workers_result_alone"]
-pacing-rig-lists = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "reports::a_platform_attribute_in_a_suites_list_sits_on_the_mod_line_it_gates"]
+pacing-rig-lists = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "reports::a_platform_attribute_in_a_suites_list_sits_on_the_mod_line_it_gates", "reports::the_rule_of_a_suites_list_reads_a_cfg_attr_and_a_path_with_a_comment_after_it"]
 pacing-gate-steps = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "check::tests::"]
 
 [[plant]]
@@ -511,6 +511,39 @@ find = '''
 replace = '''
 #[cfg(unix)]
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]'''
+
+[[plant]]
+name = "pacing review: lists: the rule reads no cfg_attr"
+meant = "the_rule_of_a_suites_list_reads_a_cfg_attr_and_a_path_with_a_comment_after_it"
+runs = ["pacing-rig-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/reports.rs"
+find = 'if line.starts_with("#[cfg") {'
+replace = 'if line.starts_with("#[cfg(") {'
+
+[[plant]]
+name = "pacing review: lists: the rule skips a path with a comment after it"
+meant = "the_rule_of_a_suites_list_reads_a_cfg_attr_and_a_path_with_a_comment_after_it"
+runs = ["pacing-rig-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/reports.rs"
+find = '''
+            .and_then(|rest| rest.split_once("\"]"))
+            .map(|(path, _)| path)'''
+replace = '''
+            .and_then(|rest| rest.strip_suffix("\"]"))'''
+
+[[plant]]
+name = "pacing review: lists: the rule reads no path of the lists and says nothing"
+meant = "a_platform_attribute_in_a_suites_list_sits_on_the_mod_line_it_gates"
+runs = ["pacing-rig-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/reports.rs"
+find = '.strip_prefix("#[path = \"")'
+replace = '.strip_prefix("#[path= \"")'
 
 [[plant]]
 name = "pacing review: urgent: the head an urgent row lets go is not looked at again before its paste"

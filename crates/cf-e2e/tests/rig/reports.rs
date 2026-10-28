@@ -844,6 +844,60 @@ fn every_rig_the_suites_of_the_rig_the_regressions_and_the_load_start_is_judged_
     Ok(())
 }
 
+/// What a suite's list of modules holds out of place, with how many platform attributes
+/// and `#[path]`s the scan read, so that a scan that reads none is told from a list with
+/// nothing wrong.
+struct Misplaced {
+    wrong: Vec<String>,
+    gated: usize,
+    paths: usize,
+}
+
+fn misplaced(file: &str, text: &str) -> Misplaced {
+    let mut found = Misplaced {
+        wrong: Vec::new(),
+        gated: 0,
+        paths: 0,
+    };
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    for (at, line) in lines.iter().enumerate() {
+        let next = lines.get(at + 1).copied().unwrap_or("");
+        // `#[cfg(` and `#[cfg_attr(` alike.
+        if line.starts_with("#[cfg") {
+            found.gated += 1;
+            if !next.starts_with("mod ") {
+                found.wrong.push(format!(
+                    "{file}:{}: {line} is followed by {next:?}, not the mod it gates",
+                    at + 1
+                ));
+            }
+        }
+        if let Some(path) = line
+            .strip_prefix("#[path = \"")
+            .and_then(|rest| rest.split_once("\"]"))
+            .map(|(path, _)| path)
+        {
+            found.paths += 1;
+            let stem = Path::new(path)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("");
+            let module = lines[at + 1..]
+                .iter()
+                .find(|line| !line.starts_with("#["))
+                .copied()
+                .unwrap_or("");
+            if module != format!("mod {stem};") {
+                found.wrong.push(format!(
+                    "{file}:{}: {line} is the path of {module:?}",
+                    at + 1
+                ));
+            }
+        }
+    }
+    found
+}
+
 /// A `#[cfg(...)]` in a suite's list of modules sits on the `mod` line it gates, after the
 /// module's `#[path]`: put above the `#[path]`, a module added in its place in the list goes
 /// between the two and takes the attribute (`4b5f3b1ca` moved the Unix-only attribute of
@@ -853,50 +907,45 @@ fn every_rig_the_suites_of_the_rig_the_regressions_and_the_load_start_is_judged_
 #[test]
 fn a_platform_attribute_in_a_suites_list_sits_on_the_mod_line_it_gates() -> Outcome {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-    let mut wrong = Vec::new();
-    let mut gated = 0;
+    let (mut wrong, mut gated, mut paths) = (Vec::new(), 0, 0);
     for file in ["rig.rs", "regressions.rs"] {
-        let text = fs::read_to_string(tests.join(file))?;
-        let lines: Vec<&str> = text.lines().map(str::trim).collect();
-        for (at, line) in lines.iter().enumerate() {
-            let next = lines.get(at + 1).copied().unwrap_or("");
-            if line.starts_with("#[cfg(") {
-                gated += 1;
-                if !next.starts_with("mod ") {
-                    wrong.push(format!(
-                        "{file}:{}: {line} is followed by {next:?}, not the mod it gates",
-                        at + 1
-                    ));
-                }
-            }
-            if let Some(path) = line
-                .strip_prefix("#[path = \"")
-                .and_then(|rest| rest.strip_suffix("\"]"))
-            {
-                let stem = Path::new(path)
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("");
-                let module = lines[at + 1..]
-                    .iter()
-                    .find(|line| !line.starts_with("#["))
-                    .copied()
-                    .unwrap_or("");
-                if module != format!("mod {stem};") {
-                    wrong.push(format!(
-                        "{file}:{}: {line} is the path of {module:?}",
-                        at + 1
-                    ));
-                }
-            }
-        }
+        let found = misplaced(file, &fs::read_to_string(tests.join(file))?);
+        wrong.extend(found.wrong);
+        gated += found.gated;
+        paths += found.paths;
     }
     assert!(
         gated > 5,
         "only {gated} attributes were found: the scan is blind"
     );
+    assert!(
+        paths > 50,
+        "only {paths} paths were found: the scan is blind"
+    );
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     Ok(())
+}
+
+/// The rule's scan reads the shapes an attribute can take besides `#[cfg(...)]`: a
+/// `#[cfg_attr(...)]` gates as much, and a `#[path]` with a comment after it on its line
+/// names a file all the same (Calliope's re-check of `a93215905`, T-872).
+#[test]
+fn the_rule_of_a_suites_list_reads_a_cfg_attr_and_a_path_with_a_comment_after_it() {
+    let list = "\
+#[cfg_attr(windows, ignore)]
+#[path = \"regressions/one.rs\"]
+mod one;
+#[path = \"regressions/two.rs\"] // the Devin case
+mod three;
+";
+    let found = misplaced("list.rs", list);
+    assert_eq!((found.gated, found.paths), (1, 2), "{:?}", found.wrong);
+    assert_eq!(
+        found.wrong.len(),
+        2,
+        "the cfg_attr above its path and the path of another module: {:?}",
+        found.wrong
+    );
 }
 
 /// A file of a suite, in the shape main's folder-trust cases have: a helper that starts a
