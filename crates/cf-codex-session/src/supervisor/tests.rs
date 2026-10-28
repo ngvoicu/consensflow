@@ -133,6 +133,8 @@ fn says_why_codexs_server_could_not_start_with_what_it_wrote_and_leaves_nothing_
 /// two holds it for good: a listener closed here would go on answering. Here a descriptor of the
 /// test's own is left in that moment while the server starts, and the server says whether it
 /// has it. Its number is the one the system gives (the shell's own are its streams and 255).
+/// The look comes before the answer is written: inside a redirect /bin/sh holds a copy of its
+/// output at 10, and a stray given 10 read as held (the gate of 2026-10-28, T-794).
 #[cfg(target_os = "macos")]
 #[test]
 fn codexs_programs_hold_nothing_of_the_windows_but_their_streams() {
@@ -145,7 +147,7 @@ fn codexs_programs_hold_nothing_of_the_windows_but_their_streams() {
     fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
     let held = home.dir.path().join("held");
     let codex = home.codex(&format!(
-        "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi > '{}'\nexit 1",
+        "if [ -e /dev/fd/{} ]; then held=held; else held=clear; fi\necho $held > '{}'\nexit 1",
         stray.as_raw_fd(),
         held.display()
     ));
