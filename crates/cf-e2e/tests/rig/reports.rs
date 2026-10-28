@@ -966,13 +966,22 @@ fn the_scan_counts_a_rig_a_helper_hands_on_and_none_a_helper_gives_back_or_a_ref
     Ok(())
 }
 
-/// CI's gate job as a list of steps, each one's lines as written, the comments
-/// and the list's dash left out.
+/// The steps of CI's daemons job, the job whose cases keep the reports, each one's lines
+/// as written, the comments and the list's dash left out. (The packaged job uploads the
+/// machines of its own failed smoke: not these.)
 fn ci_steps() -> Result<Vec<Vec<String>>, Box<dyn std::error::Error>> {
     let workflow = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/ci.yml");
     let mut steps: Vec<Vec<String>> = Vec::new();
+    let mut inside = false;
     for line in fs::read_to_string(workflow)?.lines() {
         if line.trim_start().starts_with('#') {
+            continue;
+        }
+        // A job is a key at two spaces; the daemons job is one, and the next ends it.
+        if line.starts_with("  ") && !line.starts_with("   ") && line.trim_end().ends_with(':') {
+            inside = line.trim() == "daemons:";
+        }
+        if !inside {
             continue;
         }
         if line.starts_with("      - ") {
