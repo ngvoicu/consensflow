@@ -213,8 +213,13 @@ mod tests {
                 if entry.path().is_dir() {
                     folders.push(entry.path());
                 } else {
+                    // Named with `/` between folders, on Windows too (T-829, zeewin2).
                     let name = entry.path().strip_prefix(&scratch).unwrap().to_owned();
-                    found.push(name.display().to_string());
+                    let parts: Vec<String> = name
+                        .components()
+                        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                        .collect();
+                    found.push(parts.join("/"));
                 }
             }
         }
