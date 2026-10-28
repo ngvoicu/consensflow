@@ -17,7 +17,8 @@
 //! the flags that shut the human's MCP servers and browser out, and
 //! [`shimmed_claude`] also plays the windows of the agents the rig stands in for
 //! ([`shimmed_claude_with_servers`] gives the real ones the MCP servers a file
-//! names, and no others).
+//! names, and no others). On Windows each is a `.cmd` and a Node script
+//! ([`windows_wrapper`]).
 
 mod path;
 #[cfg(test)]
@@ -35,7 +36,9 @@ use crate::rig::{ClaudeConfig, Config};
 use crate::{checkout, files, Error, Result};
 
 pub use path::{command, working_command};
-pub use wrapper::{isolated_claude, shimmed_claude, shimmed_claude_with_servers, ISOLATION};
+pub use wrapper::{
+    isolated_claude, shimmed_claude, shimmed_claude_with_servers, windows_wrapper, ISOLATION,
+};
 
 /// What the `.cmd` of a command a window opens on says on Windows, which opens a
 /// window only on the shape of an npm shim (`"<program>" "<script>" %*`): the
@@ -304,11 +307,11 @@ const REPORTS: &str = "app/src-tauri/target/live-reports";
 /// the one the daemon reads Claude's records in as well; where the run was given a
 /// folder of its own for it (`--claude-config`: one its caller made and copied a login
 /// into), they keep their config there instead. A Claude that has neither (a stand-in,
-/// or the machine's on Windows) reads its config where `CLAUDE_CONFIG_DIR` does not
-/// point, so a rig that has it has the variable unset. The windows have a locale that
-/// draws their screens, and the user's name, which a harness may ask the system's
-/// keychain by; on Windows they also have the machine's own folders for settings and
-/// programs ([`WINDOWS`]).
+/// or a machine's whose login is none the kit can copy) reads its config where
+/// `CLAUDE_CONFIG_DIR` does not point, so a rig that has it has the variable unset. The
+/// windows have a locale that draws their screens, and the user's name, which a harness
+/// may ask the system's keychain by; on Windows they also have the machine's own folders
+/// for settings and programs ([`WINDOWS`]).
 ///
 /// Either config is seeded first with the trust a person's own has for the run's folders
 /// ([`seed_claude_trust`]).
@@ -362,9 +365,31 @@ pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
     if !held["projects"].is_object() {
         held["projects"] = serde_json::json!({});
     }
-    let root = live_root(home).to_string_lossy().into_owned();
+    let root = claude_project_key(&live_root(home).to_string_lossy());
     held["projects"][&root]["hasTrustDialogAccepted"] = serde_json::Value::Bool(true);
     files::write(&file, held.to_string())
+}
+
+/// A folder as Claude Code keeps it in the record of its projects (the keys of `projects` in
+/// its `.claude.json`): on Windows with `/` where the system writes `\` (its own
+/// `normalizePathForConfigKey`, read in 2.1.312; on zeewin and zeewin2 a suite that looked for
+/// a yes under the system's separator found none), as the system writes it elsewhere.
+pub fn claude_project_key(folder: &str) -> String {
+    project_key(folder, cfg!(windows))
+}
+
+/// [`claude_project_key`] for a system that is Windows (`windows`) or is not. A folder the
+/// system canonicalized has Windows' verbatim prefix (`\\?\C:\Users\…`), which Claude Code never
+/// sees in the folder it works in.
+fn project_key(folder: &str, windows: bool) -> String {
+    if windows {
+        folder
+            .strip_prefix(r"\\?\")
+            .unwrap_or(folder)
+            .replace('\\', "/")
+    } else {
+        folder.to_owned()
+    }
 }
 
 /// `config`, whose Pi windows keep their login, settings and sessions in `agent_dir`

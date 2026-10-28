@@ -48,7 +48,8 @@
 //! Keychain alone, and a throwaway `CLAUDE_CONFIG_DIR` opens on "Not logged in", so
 //! [`login::Login`] copies the login (`claudeAiOauth` only, never the MCP servers'
 //! tokens) from the Keychain item `Claude Code-credentials` of the user's own account
-//! (`-a $USER`: the item of the account `unknown` is a dead one) into a folder of the
+//! (`-a $USER`: the item of the account `unknown` is a dead one), or, on Linux and on
+//! Windows, from `~/.claude/.credentials.json` (T-835), into a folder of the
 //! run's own, mode 600, with the first-run dialogs answered, and removes the whole
 //! folder when the run is over, however it ends. A suite does nothing for it: the
 //! `Installed` that [`machine::installed`] (and so [`Log::found`]) gives for Claude
@@ -60,8 +61,10 @@
 //! within two hours (a refresh by the copy would log the person out of the Keychain's),
 //! says it loudly if the copy was refreshed all the same, and fails if the person's
 //! `settings.json` changed, or `~/.claude.json`, `history.jsonl` or `projects` gained
-//! anything of the run's folders. Windows and a machine with no login to copy are as
-//! they were. `--keep` never keeps the folder, which holds a login: it copies the
+//! anything of the run's folders. A run with no home to look for the login in has none to
+//! copy, and is as it was. On Windows each Claude window starts through a `.cmd` and a Node
+//! script ([`machine::windows_wrapper`]), where the shell scripts of the other machines are.
+//! `--keep` never keeps the folder, which holds a login: it copies the
 //! conversations and sessions Claude Code kept there into the kept home first
 //! ([`login::Login`], `<kept home>/home/.claude`: the rig's root, where `--keep` says the home stays). The evals (`cf-evals`) are held to the same: their
 //! Claude windows run on a throwaway folder of this kind, and a run states how long it takes,
@@ -112,8 +115,9 @@ use crate::rig::Rig;
 use crate::{files, Error, Result};
 
 pub use machine::{
-    codex, command, installed, isolated_claude, rig, rig_with_claude_config, rig_with_stand_ins,
-    shimmed_claude, shimmed_claude_with_servers, working_command, Harness, Installed, ISOLATION,
+    claude_project_key, codex, command, installed, isolated_claude, rig, rig_with_claude_config,
+    rig_with_stand_ins, shimmed_claude, shimmed_claude_with_servers, windows_wrapper,
+    working_command, Harness, Installed, ISOLATION,
 };
 pub use who::{between, Who};
 

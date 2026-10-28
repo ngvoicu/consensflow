@@ -167,7 +167,8 @@ fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec
 /// stand-in agent writes its conversations in. On Windows it has the shape of an
 /// npm shim ([`stand_in::window_shim`]), which is how a window opens on it: it
 /// names the stand-in as both program and script, and the stand-in knows its own
-/// file when it is given it first. The stand-in `devin` beside it, where the rig
+/// file when it is given it first; a stand-in that is a `.cmd` of that shape already
+/// (a live run's wrapper) is the shim itself ([`stand_in::window_command`]). The stand-in `devin` beside it, where the rig
 /// has one, the stand-in `opencode` (of a 1.x, or of an OpenCode 2) likewise, and
 /// the stand-in `codex`. The folder they are in, which the `PATH` names.
 /// As the Finder starts it, they are where each harness installs itself instead
@@ -202,7 +203,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
 fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
     let shim = dir.join(stand_in::program_name(name));
     if cfg!(windows) {
-        files::write_executable(&shim, stand_in::window_shim(program))
+        files::write_executable(&shim, stand_in::window_command(program)?)
     } else {
         files::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))
     }

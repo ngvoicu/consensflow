@@ -48,7 +48,7 @@ use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
-use cf_e2e::{Error, Result};
+use cf_e2e::Result;
 use isolation::{claude_login, owners_claude, owners_unchanged, Throwaway};
 use serde_json::{json, Value};
 
@@ -337,11 +337,6 @@ fn a_chief_at_rest_that_claude_shows_its_suggestion_and_recap_is_handed_its_work
 ) -> Result {
     let log = Log::begin("live held-typed")?;
     ask::prepare()?;
-    if !cfg!(target_os = "macos") {
-        return Err(Error::Daemon(
-            "Claude Code runs live here on macOS alone: its login is the Keychain's".to_owned(),
-        ));
-    }
     let install = log.found(Harness::Claude)?;
     let home = live::machine::home()?;
     let before = owners_claude(&home, FOLDER);

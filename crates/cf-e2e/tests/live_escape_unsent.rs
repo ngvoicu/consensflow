@@ -41,8 +41,8 @@
 //!
 //! Isolation. Claude Code runs on a throwaway `CLAUDE_CONFIG_DIR` (mode 700) that
 //! holds a copy of the owner's login, the `claudeAiOauth` of the Keychain item of the
-//! user's account (`security find-generic-password -a "$USER"`; the item with no
-//! account is a stale one), never printed, refused where its token ends within two
+//! user's account on a Mac (`security find-generic-password -a "$USER"`; the item with no
+//! account is a stale one) and of `~/.claude/.credentials.json` elsewhere, never printed, refused where its token ends within two
 //! hours, and a `.claude.json` that says onboarding is done (else Claude opens on its
 //! theme dialog). The copy is compared afterwards (a refresh is said, as a failure),
 //! and the folder deleted on every way out. The owner's `~/.claude/settings.json` must
@@ -58,11 +58,10 @@
 //! cargo xtask live escape-unsent devin codex          the ones named, in that order
 //! ```
 //!
-//! Claude Code runs in it on macOS alone: its login is read from the Keychain, and a
-//! live Claude window starts through a wrapper that is a shell script. The others run
-//! on Windows too (`windows-from-tree.sh … cargo xtask live escape-unsent devin`):
-//! there, the throwaway folder is the user's own in the temporary folder, as Windows
-//! gives it, with no mode of its own.
+//! Every harness runs in it on Windows too (`windows-from-tree.sh … cargo xtask live
+//! escape-unsent claude`): there Claude Code's login is read from
+//! `%USERPROFILE%\.claude\.credentials.json`, and the throwaway folder is the user's own in
+//! the temporary folder, as Windows gives it, with no mode of its own.
 
 #[path = "live_isolation/claude.rs"]
 mod isolation;
@@ -620,11 +619,6 @@ fn keys_left_in_a_dialog_with_escape_hold_no_delivery_to_a_window_whose_box_is_e
         .collect::<Result<_>>()?;
     let home = live::machine::home()?;
     let claude = harnesses.contains(&Harness::Claude);
-    if claude && !cfg!(target_os = "macos") {
-        return Err(Error::Daemon(
-            "Claude Code runs live here on macOS alone: its login is the Keychain's".to_owned(),
-        ));
-    }
     let owners_before = claude.then(|| owners_claude(&home, FOLDER));
     let claude_config = claude
         .then(|| {

@@ -429,6 +429,9 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
     );
 }
 
+// Windows makes the shim as a `.cmd` and a Node script, by what the product's code says a
+// window of the real program opens on (the wrapper's own tests; the live suites run it).
+#[cfg(unix)]
 #[test]
 fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has_them_write_where_the_real_one_does(
 ) {
@@ -440,11 +443,6 @@ fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has
         folder.path(),
         Path::new("/the/fake-agent"),
     );
-    if cfg!(windows) {
-        // A shim is a shell script: on Windows there is none to start.
-        assert!(made.unwrap_err().to_string().contains("macOS and Linux"));
-        return;
-    }
     let debug = format!("{:?}", made.unwrap());
     let shim = folder.path().join("claude-shimmed");
     assert!(
@@ -521,8 +519,10 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
         serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
             .unwrap();
     let root = home.path().join(".consensflow-candidate").join("live");
+    // As Claude Code keeps a folder: on Windows with `/` for `\`.
     assert_eq!(
-        held["projects"][root.to_string_lossy().as_ref()]["hasTrustDialogAccepted"],
+        held["projects"][claude_project_key(&root.to_string_lossy()).as_str()]
+            ["hasTrustDialogAccepted"],
         true,
         "{held}"
     );
@@ -548,6 +548,44 @@ fn a_config_seeded_in_an_empty_folder_holds_the_trust_alone() {
     assert_eq!(
         held["projects"].as_object().map(|projects| projects.len()),
         Some(1)
+    );
+}
+
+#[test]
+fn claude_code_keeps_a_folder_on_windows_with_forward_slashes_and_elsewhere_as_it_is() {
+    let folder = r"C:\Users\AGV\.consensflow-candidate\live";
+    assert_eq!(
+        project_key(folder, true),
+        "C:/Users/AGV/.consensflow-candidate/live"
+    );
+    // The verbatim prefix a canonical path has on Windows is not part of the folder.
+    assert_eq!(
+        project_key(r"\\?\C:\Users\AGV\live", true),
+        "C:/Users/AGV/live"
+    );
+    // A backslash is a character of a name on the other systems.
+    assert_eq!(project_key(folder, false), folder);
+    assert_eq!(project_key("/home/me/live", true), "/home/me/live");
+    assert_eq!(claude_project_key("/home/me/live"), "/home/me/live");
+}
+
+#[cfg(windows)]
+#[test]
+fn the_live_root_is_trusted_on_windows_by_the_key_claude_code_looks_it_up_by() {
+    let config = tempfile::tempdir().unwrap();
+    seed_claude_trust(config.path(), Path::new(r"C:\Users\AGV")).unwrap();
+    let held: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
+            .unwrap();
+    let projects = held["projects"].as_object().unwrap();
+    assert_eq!(
+        projects.keys().collect::<Vec<_>>(),
+        ["C:/Users/AGV/.consensflow-candidate/live"],
+        "{held}"
+    );
+    assert_eq!(
+        projects["C:/Users/AGV/.consensflow-candidate/live"]["hasTrustDialogAccepted"],
+        true
     );
 }
 

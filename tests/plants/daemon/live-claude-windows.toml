@@ -1,0 +1,320 @@
+# The live kit runs Claude Code on Windows (T-835, T-611's re-add). A Windows machine had no copy of
+# Claude's login (`live/login.rs`: none there), so a live run's Claude windows ran on the owner's own
+# config, and the wrapper and the shim, which are shell scripts, refused Windows
+# (`live/machine/wrapper.rs`), so no suite that starts Claude could run there. Now the login is read from
+# `%USERPROFILE%\.claude\.credentials.json` as on Linux and copied into a config folder of the run's own,
+# and each wrapper is a `.cmd` in npm's shape that names Node and a script written beside it (the shape
+# cf-evals wrote for itself, now the kit's), which starts the real Claude with the isolation flags, or the
+# stand-in for a window of a fake model. One plant takes one rule out; a test of it fails. Every name holds
+# `windows live`.
+
+[run]
+live-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
+live-login = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login"]
+live-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::tests"]
+live-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "stand_in::"]
+live-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_held_typed", "--", "isolation::"]
+live-mcp-server = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server"]
+live-monitor-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_server_left_its_group"]
+live-rig-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
+live-claude-table = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::claude"]
+live-members-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command"]
+live-monitor-wait-host = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_platform_with_no_groups"]
+
+[[plant]]
+name = "windows live: a window of a fake model is started on the real Claude all the same"
+meant = "the_script_starts_the_stand_in_for_a_window_of_a_fake_model_and_ends_as_the_program_does"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''            "const [file, ...args] = fake ? stand_in : real".to_owned(),'''
+replace = '''            "const [file, ...args] = real".to_owned(),'''
+
+[[plant]]
+name = "windows live: the chief's stand-in model is not the stand-in's on Windows"
+meant = "the_script_of_a_shim_starts_the_stand_in_for_the_model_of_one_and_the_real_program_for_every_other"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''                [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL]'''
+replace = '''                [STAND_IN_WORKER_MODEL]'''
+
+[[plant]]
+name = "windows live: the window's words go before the flags the wrapper adds"
+meant = "the_script_starts_the_real_program_with_its_flags_first_and_every_word_the_window_gave_it"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''        "const child = spawn(file, [...args, ...process.argv.slice(2)], { stdio: 'inherit' })"'''
+replace = '''        "const child = spawn(file, [...process.argv.slice(2), ...args], { stdio: 'inherit' })"'''
+
+[[plant]]
+name = "windows live: the wrapper ends 0 whatever the program ended with"
+meant = "the_script_starts_the_stand_in_for_a_window_of_a_fake_model_and_ends_as_the_program_does"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''        "child.on('exit', (code) => process.exit(code ?? 1))".to_owned(),'''
+replace = '''        "child.on('exit', (code) => process.exit(0))".to_owned(),'''
+
+[[plant]]
+name = "windows live: the real Claude is started without the flags that shut the human's servers out"
+meant = "the_real_claude_is_started_with_its_servers_file_first_and_the_flags_that_shut_the_rest_out"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''    words.extend(ISOLATION.map(str::to_owned));'''
+replace = '''    words.extend(ISOLATION.map(str::to_owned).into_iter().take(0));'''
+
+[[plant]]
+name = "windows live: the wrapper's cmd does not pass the window's arguments on"
+meant = "a_windows_wrapper_is_a_cmd_in_the_shape_of_an_npm_shim_that_names_node_and_the_script_it_runs"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''        "@echo off\r\nREM {why}\r\n\"{}\" \"{}\" %*\r\n",'''
+replace = '''        "@echo off\r\nREM {why}\r\n\"{}\" \"{}\"\r\n",'''
+
+[[plant]]
+name = "windows live: a folder of the run written with Windows' separator is the owner's"
+meant = "a_folder_of_a_run_is_known_by_the_separator_windows_wrote_it_with_as_well_as_by_ours"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''    let path = path.replace('\\', "/");'''
+replace = '''    let path = path.to_owned();'''
+
+[[plant]]
+name = "windows live: a machine that is not a Mac has no login file below its home"
+meant = "the_login_is_in_the_keychain_on_a_mac_and_in_a_file_of_the_users_claude_folder_elsewhere"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        Some(Self::File(home?.join(".claude").join(".credentials.json")))'''
+replace = '''        Some(Self::File(home?.join(".claude.json")))'''
+
+[[plant]]
+name = "windows live: the key Claude Code keeps a Windows folder by has the system's separator"
+meant = "claude_code_keeps_a_folder_on_windows_with_forward_slashes_and_elsewhere_as_it_is"
+runs = ["live-trust"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''            .replace('\\', "/")'''
+replace = '''            .replace('\u{0}', "/")'''
+
+[[plant]]
+name = "windows live: a stand-in that is a cmd of the run's own is named by a shim of itself"
+meant = "a_stand_in_that_is_a_cmd_of_the_runs_own_is_the_shim_already_and_any_other_is_named_by_one"
+runs = ["live-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/stand_in.rs"
+find = '''    if is_cmd {'''
+replace = '''    if false && is_cmd {'''
+
+# The copy of the login is judged by the fields that differ: a run's Claude Code on Windows wrote
+# the file again (zeewin2, 2026-10-27), and a refresh is a change of the tokens, never of what
+# Claude Code learns of the account beside them.
+[[plant]]
+name = "windows live: a copy rewritten beside its tokens is taken for a refresh"
+meant = "what_a_run_left_of_the_copy_is_told_by_the_names_of_the_fields_that_differ"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            (true, false) => Self::Rewritten(others),'''
+replace = '''            (true, false) => Self::Refreshed(others),'''
+
+[[plant]]
+name = "windows live: a refreshed copy is taken for a rewritten one"
+meant = "what_a_run_left_of_the_copy_is_told_by_the_names_of_the_fields_that_differ"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            (false, _) => Self::Refreshed(tokens.into_iter().chain(others).collect()),'''
+replace = '''            (false, _) => Self::Rewritten(tokens.into_iter().chain(others).collect()),'''
+
+[[plant]]
+name = "windows live: when the access token ends is not a token of the login"
+meant = "what_a_run_left_of_the_copy_is_told_by_the_names_of_the_fields_that_differ"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''const TOKENS: [&str; 3] = ["accessToken", "refreshToken", "expiresAt"];'''
+replace = '''const TOKENS: [&str; 3] = ["accessToken", "refreshToken", "refreshToken"];'''
+
+[[plant]]
+name = "windows live: the verbatim prefix of a canonical Windows path stays in the key"
+meant = "claude_code_keeps_a_folder_on_windows_with_forward_slashes_and_elsewhere_as_it_is"
+runs = ["live-trust"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''            .strip_prefix(r"\\?\")'''
+replace = '''            .strip_prefix(r"nothing")'''
+
+# T-858: the suites that make their own Claude config folder (`live held-typed`, `live escape-unsent`,
+# through `live_isolation/claude.rs`) judged the copy by its bytes, and Claude Code 2.1.310 writes what
+# it learns of the account beside the tokens (zeewin2: `subscriptionTypeSource`), so every run said the
+# login was refreshed.
+[[plant]]
+name = "windows live: a suite's copy of the login is held to every byte of Claude's file"
+meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
+runs = ["live-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_isolation/claude.rs"
+find = '''        let changed = if self.file == ".credentials.json" {'''
+replace = '''        let changed = if false {'''
+
+[[plant]]
+name = "windows live: a suite's copy that Claude Code lost is not a refreshed one"
+meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
+runs = ["live-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            Self::Lost => {
+                Some("the folder's .credentials.json is gone or no longer holds a login".to_owned())
+            }'''
+replace = '''            Self::Lost => None,'''
+
+[[plant]]
+name = "windows live: a suite's copy rewritten beside its tokens is a refreshed one"
+meant = "a_copy_claude_code_wrote_other_fields_of_is_not_a_refreshed_one_and_a_refreshed_one_is"
+runs = ["live-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            Self::Kept | Self::Rewritten(_) => None,'''
+replace = '''            Self::Kept => None,
+            Self::Rewritten(_) => Some("rewritten".to_owned()),'''
+
+# T-858: `live monitor-wait` and `live mcp` ran their MCP server on `python3`, which a Windows machine
+# may have only as the Store's alias (zeewin2: exit 9009), and whose `os.setsid` has no Windows. The
+# server is a Node program there, and none leaves a group.
+[[plant]]
+name = "windows live: the Node server answers an initialize with a protocol version of its own"
+meant = "it_answers_what_claude_asks_to_list_it_with_the_version_it_asked_for_and_no_tool"
+runs = ["live-mcp-server"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mcp_server.rs"
+find = '''          protocolVersion: request.params?.protocolVersion ?? '2024-11-05','''
+replace = '''          protocolVersion: '2024-11-05','''
+
+[[plant]]
+name = "windows live: the Node server answers a request it does not know with a result"
+meant = "it_answers_what_claude_asks_to_list_it_with_the_version_it_asked_for_and_no_tool"
+runs = ["live-mcp-server"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mcp_server.rs"
+find = '''      return answer(request.id, { error: { code: -32601, message: 'no such method' } })'''
+replace = '''      return answer(request.id, { result: {} })'''
+
+[[plant]]
+name = "windows live: a Node server is written to leave a group it cannot leave"
+meant = "a_runtime_that_cannot_leave_a_group_writes_the_one_server_that_stays_and_says_so"
+runs = ["live-mcp-server"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mcp_server.rs"
+find = '''        matches!(self, Self::Python(_))'''
+replace = '''        true'''
+
+[[plant]]
+name = "windows live: where no server can leave a group, the check still wants one that did"
+meant = "a_server_left_its_group_when_it_leads_one_of_its_own_and_where_none_can_leave_none_was_to"
+runs = ["live-monitor-wait"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''    !leaves || (detached.is_some() && group == detached)'''
+replace = '''    detached.is_some() && group == detached'''
+
+# T-858: on Windows `pane.commands` answers `null` by design (no process groups: cf-proto's panes.rs), so the
+# five checks of `live monitor-wait` that read what the host finds in the window failed at every run (zeewin2,
+# 2026-10-28: 9 of 14 held, the reader's). They are replaced there by the one that holds the host to its
+# documented answer.
+[[plant]]
+name = "windows live: a platform that tells commands loses the checks that read them"
+meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+runs = ["live-monitor-wait-host"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''    if tells {
+        return checks;
+    }'''
+replace = '''    if false {
+        return checks;
+    }'''
+
+[[plant]]
+name = "windows live: a platform that tells no command keeps the checks that read them"
+meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+runs = ["live-monitor-wait-host"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''        .filter(|check| !READ_COMMANDS.contains(&check.what.as_str()))'''
+replace = '''        .filter(|check| !READ_COMMANDS.is_empty() || check.what.is_empty())'''
+
+[[plant]]
+name = "windows live: a host that counted a command where it cannot tell passes"
+meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+runs = ["live-monitor-wait-host"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''        !seen.is_empty() && seen.iter().all(Option::is_none),'''
+replace = '''        true,'''
+
+# T-858: `live resume-cut` on Windows: a resumed Claude window's screen read blank for 120 s though it had
+# printed its whole prompt (zeewin2): Claude titles its window with a string ended by ST, and the rig's
+# `plain` took the title to end at the next BEL, which came 2,000 bytes later.
+[[plant]]
+name = "windows live: a title ended by the string terminator takes the screen after it"
+meant = "a_title_ended_by_the_string_terminator_ends_there_and_takes_none_of_what_follows"
+runs = ["live-rig-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = '''(?:\x07|\x1b\\)")'''
+replace = '''\x07")'''
+
+# `live reopened` on Windows stopped at 'could not start `ps`': the processes of a long command are read
+# from the machine's own table there.
+[[plant]]
+name = "windows live: the processes that hold a word are those that start with it"
+meant = "the_processes_of_a_machines_table_that_hold_a_word_are_the_ones_whose_command_line_does"
+runs = ["live-claude-table"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/claude.rs"
+find = '''        .filter(|process| process.command.contains(text))'''
+replace = '''        .filter(|process| process.command.starts_with(text))'''
+
+# `live reopened` on Windows (zeewin2): T-1's command ran and the check waited 120 s for it, for the node of a
+# Windows table is a quoted path with its `.exe`.
+[[plant]]
+name = "windows live: the node of the command is the one a line starts with by a bare name"
+meant = "the_node_of_a_windows_table_is_the_command_too_by_its_quoted_path_and_its_exe"
+runs = ["live-members-command"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = '''                .is_some_and(|found| ends_with_program(&found[1], "node"))'''
+replace = '''                .is_some_and(|found| found[1].ends_with("node"))'''
