@@ -575,6 +575,41 @@ fn a_tells_turn_that_ended_with_a_monitor_that_said_it_ended_is_told_once_a_look
 }
 
 #[test]
+fn a_tells_turn_whose_host_cannot_tell_the_windows_commands_is_not_told_over_until_a_look_finds_none(
+) {
+    // T-906 (T-858's live `tell` on zeewin2): Windows' host answered that it cannot tell
+    // the window's commands, and the paused task's turn, its Monitor's notice come, was
+    // never told over. Nothing is told blind: told once a look finds no command.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.background.commands_run(None);
+    answers_and_goes_on(&context, &told);
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        FINAL,
+        pending(1, 1),
+        vec![monitor("ticks", Source::Command, Some(End::Expired))],
+    );
+    for _ in 0..8 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    assert!(context.background.looks() >= 2, "it looked");
+    assert_eq!(
+        kept_notes(&context, project),
+        Vec::<String>::new(),
+        "where the host cannot tell, nothing says the turn is over"
+    );
+    context.background.commands_run(Some(0));
+    for _ in 0..2 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+}
+
+#[test]
 fn a_tells_turn_whose_monitor_command_still_runs_is_told_when_it_has_ended() {
     let context = Context::new();
     let (project, told) = told_at_work(&context);

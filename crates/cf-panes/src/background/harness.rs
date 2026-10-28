@@ -52,18 +52,19 @@ use super::{descending_from, Member, ProcessKey};
 /// group of the window's program, which leads it: the window's group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Kept {
-    /// The window's group.
-    pub group: i32,
+    /// The window's group: none on a platform with no groups (a Windows job object),
+    /// where nothing is the harness's by where it is, and its commands are told by
+    /// their chain ([`super::Baseline::commands`]).
+    pub group: Option<i32>,
     /// How its harness keeps its servers, which is known: a window whose harness
     /// is not known to keep them in a way has no `Kept`.
     pub servers: Servers,
 }
 
 impl Kept {
-    /// What `servers` says of a window whose program leads `group`: none where it
-    /// says it is not known, and where the platform has no groups.
+    /// What `servers` says of a window whose program leads `group`, which is none where
+    /// the platform has no groups: none where it says it is not known.
     pub fn of(servers: Servers, group: Option<i32>) -> Option<Self> {
-        let group = group?;
         (!servers.is_unknown()).then_some(Self { group, servers })
     }
 }
@@ -139,7 +140,7 @@ fn descends_from_a_server(
 /// none of them: the command it was started by has ended, which ended its monitor by its
 /// status.
 pub(super) fn commands(
-    kept: Kept,
+    group: i32,
     tree: &[Member],
     rest: &HashSet<ProcessKey>,
     before: &dyn Fn(&Member) -> bool,
@@ -147,9 +148,9 @@ pub(super) fn commands(
     tree.iter()
         .filter(|member| !rest.contains(&member.key))
         .filter(|member| !before(member))
-        .filter(|member| member.group != Some(kept.group))
+        .filter(|member| member.group != Some(group))
         .filter(|member| match member.parent {
-            Some(parent) => i32::try_from(parent.pid) == Ok(kept.group),
+            Some(parent) => i32::try_from(parent.pid) == Ok(group),
             None => member.group == i32::try_from(member.key.pid).ok(),
         })
         .cloned()
@@ -159,10 +160,14 @@ pub(super) fn commands(
 /// Whether `member` is a server in the way the harness keeps them.
 fn is_server(kept: Kept, launch: &HashSet<ProcessKey>, member: &Member) -> bool {
     match kept.servers {
-        Servers::InGroup => member.group == Some(kept.group),
+        // Where the platform has no groups, no process is a server by where it is.
+        Servers::InGroup => kept.group.is_some() && member.group == kept.group,
         // A process whose group could not be read is not known to be outside the window's.
         Servers::AtLaunch => {
-            launch.contains(&member.key) && member.group.is_some_and(|group| group != kept.group)
+            launch.contains(&member.key)
+                && kept
+                    .group
+                    .is_some_and(|window| member.group.is_some_and(|group| group != window))
         }
         Servers::Unknown => false,
     }
@@ -171,7 +176,8 @@ fn is_server(kept: Kept, launch: &HashSet<ProcessKey>, member: &Member) -> bool 
 /// Whether `member` is the window's program: it leads the window's group, so the
 /// group's number is its own.
 fn leads(kept: Kept, member: &Member) -> bool {
-    i32::try_from(member.key.pid) == Ok(kept.group)
+    kept.group
+        .is_some_and(|group| i32::try_from(member.key.pid) == Ok(group))
 }
 
 /// The processes of `tree` that are programs of `harness`'s own, and what descends

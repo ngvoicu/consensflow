@@ -546,7 +546,7 @@ fn the_commands_are_not_told_of_a_window_whose_servers_are_not_in_its_group() {
     for kept in [
         None,
         Kept::of(Servers::AtLaunch, Some(10)),
-        Kept::of(Servers::InGroup, None),
+        Kept::of(Servers::AtLaunch, None),
     ] {
         assert_eq!(commands(&marked(&[], kept, None), &tree), None, "{kept:?}");
     }
@@ -589,6 +589,78 @@ fn what_ran_at_the_rest_a_look_names_is_no_command_and_what_began_after_it_is() 
     let mut untold = marked(&[], None, None);
     assert_eq!(untold.rest(&resting, &[]), None);
     assert!(!untold.tells_commands());
+}
+
+/// The window of a Claude Code on Windows, whose job has no groups (T-906): the program, an
+/// MCP server it started as the program it is, and one npm put behind a `cmd.exe /c`.
+fn windows_at_rest() -> Vec<Member> {
+    vec![
+        member(10, "claude.exe", "claude.exe", None),
+        member(11, "node.exe server.js", "node.exe", of(10)),
+        member(12, "cmd.exe /c npx -y mcp-server", "cmd.exe", of(10)),
+        member(13, "node.exe mcp-server", "node.exe", of(12)),
+    ]
+}
+
+#[test]
+fn where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is() {
+    // T-906: Windows' host answered that it cannot tell, and a monitor whose command
+    // Claude Code had ended held its task until Finish.
+    let baseline = marked(
+        &[member(10, "claude.exe", "claude.exe", None)],
+        Kept::of(Servers::InGroup, None),
+        Some("claude"),
+    );
+    assert!(baseline.tells_commands());
+    let resting = windows_at_rest();
+    assert_eq!(
+        commands(&baseline, &resting),
+        Some(vec![]),
+        "no server is one"
+    );
+    let mut running = resting.clone();
+    running.extend([
+        // A Monitor's command: the shell Claude Code started, and what it runs.
+        member(41, "bash.exe -c exec sleep 611", "bash.exe", of(10)),
+        member(42, "sleep.exe 611", "sleep.exe", of(41)),
+        // What the server behind `cmd.exe` started: the server's.
+        member(43, "bash.exe -c git status", "bash.exe", of(13)),
+        // What a command left when its shell ended: no chain says whose it is.
+        member(44, "python.exe -m http.server", "python.exe", None),
+    ]);
+    assert_eq!(commands(&baseline, &running), Some(vec![41, 42, 44]));
+    // Claude Code ends the monitor's command as it writes its notice: none runs then.
+    assert_eq!(commands(&baseline, &resting), Some(vec![]));
+}
+
+#[test]
+fn where_the_platform_has_no_groups_what_ran_at_the_rest_a_look_names_is_no_command() {
+    let mut baseline = marked(
+        &[member(10, "claude.exe", "claude.exe", None)],
+        Kept::of(Servers::InGroup, None),
+        Some("claude"),
+    );
+    // A shell the harness started before the rest, which runs on: a server the user
+    // wrapped in `bash`, started after the launch.
+    let mut resting = windows_at_rest();
+    resting.push(member(20, "bash.exe -c ./serve.sh", "bash.exe", of(10)));
+    let rest = baseline.rest(&resting, &[]);
+    assert!(
+        rest.is_some(),
+        "a rest kept where the platform has no groups"
+    );
+    let mut running = resting.clone();
+    running.push(member(41, "bash.exe -c exec sleep 611", "bash.exe", of(10)));
+    assert_eq!(commands_since(&baseline, &running, rest), Some(vec![41]));
+    // A look that names no rest, or one not kept, leaves out the launch alone.
+    assert_eq!(
+        commands_since(&baseline, &running, None),
+        Some(vec![20, 41])
+    );
+    assert_eq!(
+        commands_since(&baseline, &running, rest.map(|rest| rest + 1)),
+        Some(vec![20, 41])
+    );
 }
 
 /// [`commands`], less what ran at the rest `since`.

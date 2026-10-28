@@ -57,7 +57,8 @@ use windows_sys::Wdk::System::Threading::{
     NtQueryInformationProcess, ProcessBasicInformation, ProcessCommandLineInformation,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_MORE_DATA, FILETIME, HANDLE, UNICODE_STRING, WAIT_OBJECT_0,
+    CloseHandle, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, FILETIME, HANDLE, UNICODE_STRING,
+    WAIT_OBJECT_0,
 };
 use windows_sys::Win32::System::JobObjects::{
     CreateJobObjectW, IsProcessInJob, JobObjectBasicProcessIdList,
@@ -140,6 +141,25 @@ impl JobObject {
         Ok(members_of(self.hold(ps)?.iter()))
     }
 
+    /// [`JobObject::members`], where every process the job lists that is still there and
+    /// still the job's could be looked at: none where one could not be opened, asked of, or
+    /// its start or its path read (a protected process, another user's), which a look at the window's
+    /// commands is not to leave out unsaid (T-906: such a process may be a monitor's
+    /// command).
+    pub fn readable_members(&self) -> io::Result<Option<Vec<Member>>> {
+        let mut held = Vec::new();
+        for pid in self.process_ids()? {
+            match self.look_at(pid) {
+                // A program whose path could not be read is not known to be no shell.
+                Looked::Held(one) if !one.member.exe.is_empty() => held.push(one),
+                Looked::Gone => {}
+                Looked::Held(_) | Looked::Unreadable => return Ok(None),
+            }
+        }
+        repair_cygwin_parents(&mut held, &ps_w);
+        Ok(Some(members_of(held.iter())))
+    }
+
     /// The processes of the job, each held open, and each the one the job holds: the
     /// number the system lists may be another's by the time it is opened, and the
     /// handle is asked, not the number. The parents of Git Bash's programs are mended
@@ -148,13 +168,16 @@ impl JobObject {
         let mut held: Vec<Held> = self
             .process_ids()?
             .into_iter()
-            .filter_map(|pid| self.hold_one(pid))
+            .filter_map(|pid| match self.look_at(pid) {
+                Looked::Held(one) => Some(one),
+                Looked::Gone | Looked::Unreadable => None,
+            })
             .collect();
         repair_cygwin_parents(&mut held, ps);
         Ok(held)
     }
 
-    fn hold_one(&self, pid: u32) -> Option<Held> {
+    fn look_at(&self, pid: u32) -> Looked {
         // SAFETY: the rights a look at a process, and the wait that says it has gone,
         // need; the handle is closed by `Process`.
         let handle = unsafe {
@@ -165,27 +188,36 @@ impl JobObject {
             )
         };
         if handle.is_null() {
-            return None;
+            // A number no process has any more is refused as no parameter: it ended since
+            // the list. Any other refusal is of a process that is there.
+            return match io::Error::last_os_error().raw_os_error() {
+                Some(code) if code == ERROR_INVALID_PARAMETER as i32 => Looked::Gone,
+                _ => Looked::Unreadable,
+            };
         }
         let process = Process(handle);
         // One that ended since the list is no process of the job: its object is still
         // there to open while another handle to it is.
         if process.gone() {
-            return None;
+            return Looked::Gone;
         }
         let mut inside = 0;
         // SAFETY: both handles are open, and `inside` is writable.
         let asked = unsafe { IsProcessInJob(process.0, self.handle, &mut inside) };
-        if asked == 0 || inside == 0 {
-            return None;
+        if asked == 0 {
+            return Looked::Unreadable;
         }
+        // Its number is another's now, which is no process of the job.
+        if inside == 0 {
+            return Looked::Gone;
+        }
+        let Some(began) = began(&process) else {
+            return Looked::Unreadable;
+        };
         let exe = image_path(&process).unwrap_or_default();
-        Some(Held {
+        Looked::Held(Held {
             member: Member {
-                key: ProcessKey {
-                    pid,
-                    began: began(&process)?,
-                },
+                key: ProcessKey { pid, began },
                 command: command_line(&process).unwrap_or_default(),
                 program: exe
                     .rsplit(['\\', '/'])
@@ -254,6 +286,14 @@ impl Drop for JobObject {
         // SAFETY: the handle is ours and closed once; kill-on-close ends the tree.
         unsafe { CloseHandle(self.handle) };
     }
+}
+
+/// What a look at a number the job listed found: the process, held; that it is no
+/// process of the job any more; or a process there that could not be read.
+enum Looked {
+    Held(Held),
+    Gone,
+    Unreadable,
 }
 
 /// A process of the job, held open: what was read of it is of the process the handle

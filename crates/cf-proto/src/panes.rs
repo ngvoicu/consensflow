@@ -155,8 +155,11 @@ pub struct Background {
 /// agent so (a Bash call, a Monitor's, a background job's, in the foreground or not, and
 /// what one `exec`s keeps the group), and its hooks and status line, a moment each; its
 /// MCP servers and helpers stay in the window's group. The host tells them only of a
-/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]),
-/// on a platform with groups: nowhere else does a group say what a process is. It is
+/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]).
+/// On a platform with no groups (a Windows job object) a command is what a chain proves
+/// the agent's, as the turn's work is (`cf-panes`' `background`): a shell the harness
+/// started after the rest the request names, or the window's launch, and what runs down
+/// from it, and what began since with no parent in the tree (T-906). It is
 /// `null` too where a process of the window cannot be read (another user's, as a command
 /// that `exec`s `sudo` becomes), which may be a command: the answer says so then
 /// ([`CommandsAnswer`]). What ran at the rest the request

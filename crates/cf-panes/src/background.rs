@@ -171,8 +171,9 @@ impl Baseline {
     }
 
     /// Whether the host can tell the commands of the window's harness: a window whose
-    /// harness keeps its servers in the window's group, as the daemon said at a mark, on a
-    /// platform with groups. Asked before the tree is walked (Calliope on 472b1d96).
+    /// harness keeps its servers in the window's group, as the daemon said at a mark (by
+    /// their groups where the platform has them, by their chains where it has none:
+    /// [`Baseline::commands`]). Asked before the tree is walked (Calliope on 472b1d96).
     pub fn tells_commands(&self) -> bool {
         self.commands_kept().is_some()
     }
@@ -206,6 +207,10 @@ impl Baseline {
     /// before the monitors were called (the pane's clock: [`clock`]): none where the host
     /// cannot tell them (`cf_proto::panes::Commands`). A rest no longer kept, or never kept,
     /// leaves nothing out.
+    ///
+    /// **Where the platform has no groups** (a Windows job object, T-906) no process is a
+    /// command by its group, and they are told by their chain instead
+    /// ([`Baseline::chained`]).
     pub fn commands(
         &self,
         tree: &[Member],
@@ -213,11 +218,50 @@ impl Baseline {
         before: &dyn Fn(&Member) -> bool,
     ) -> Option<Background> {
         let kept = self.commands_kept()?;
+        let Some(group) = kept.group else {
+            return Some(listed(self.chained(tree, since)));
+        };
         let empty = HashSet::new();
         let rest = since
             .and_then(|since| self.rests.iter().find(|(number, _)| *number == since))
             .map_or(&empty, |(_, rest)| rest);
-        Some(listed(harness::commands(kept, tree, rest, before)))
+        Some(listed(harness::commands(group, tree, rest, before)))
+    }
+
+    /// The commands of a window whose platform has no groups (a Windows job object): what
+    /// began after the rest `since`, where it is one kept, else after the window's launch,
+    /// that is the work a turn's is proved by ([`work`]: a shell the harness started, and a
+    /// chain of processes that run down from it), and what began after it and has no parent
+    /// in the tree, which no chain proves anybody's; never what is the harness's own
+    /// ([`Baseline::protected`]). Claude Code runs every command so (Git Bash's `bash.exe`
+    /// for a Bash call's, a Monitor's and a background job's), and its servers as the
+    /// programs they are (`node`, `uvx`, or behind a `cmd.exe /c`, which is no shell here):
+    /// the processes it started for its own are none of them, whenever they began. No start
+    /// is read against a monitor's call: where no rest proves them, the window's launch,
+    /// before any command of it, is what is left out, and nothing later is.
+    ///
+    /// Limits, each a process counted that is none, which holds a monitor whose command has
+    /// ended until a later look or Finish, never one left out: a server the user wraps in
+    /// `bash` or `powershell` and the harness starts after the rest; a shell a server
+    /// started for its own (a server of commands) while it runs; a process a command started
+    /// and left, whose shell has ended, while it runs on.
+    fn chained(&self, tree: &[Member], since: Option<u64>) -> Vec<Member> {
+        let rest = since.and_then(|number| self.rests.iter().find(|(kept, _)| *kept == number));
+        let left_out = rest.map_or(&self.launch, |(_, rest)| rest);
+        let protected = self.protected(tree);
+        let started: Vec<&Member> = tree
+            .iter()
+            .filter(|member| !left_out.contains(&member.key))
+            .collect();
+        let shells = work::turns(&started, &protected);
+        started
+            .into_iter()
+            .filter(|member| {
+                shells.contains(&member.key)
+                    || (member.parent.is_none() && !protected.contains(&member.key))
+            })
+            .cloned()
+            .collect()
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is

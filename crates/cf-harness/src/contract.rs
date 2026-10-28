@@ -76,7 +76,9 @@ pub trait Adapter {
     /// own ([`Servers::InGroup`]). Codex's supervisor opens its servers with the
     /// window, each in a group of its own, under the harness's own process, which
     /// starts the agent's commands ([`Servers::AtLaunch`]). Windows has no process
-    /// groups to tell by, and OpenCode and Devin have not been probed.
+    /// groups to tell by: there a server is no process by where it is, and a command is
+    /// what a chain proves (`cf-panes`' `background`). OpenCode and Devin have not been
+    /// probed.
     fn servers(&self) -> Servers {
         Servers::Unknown
     }
