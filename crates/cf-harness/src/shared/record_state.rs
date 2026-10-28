@@ -10,18 +10,25 @@ use std::sync::Arc;
 use crate::contract::{Observed, Waiting};
 use crate::records::{Quota, Reading, Record, Settlement};
 
-/// What a record says of the window's quota, as the engine is told it: a window whose harness
-/// moved its model on its own is not used on it unasked, so the move reads as the hold only the
-/// human can end (MUS-24). It comes before a refusal the same record shows (Muse moved the model
-/// after the 402 of T-705's recordings): the human who fixes the billing and tries again is told
-/// besides that the window runs on a model nobody chose, or that refusal's handled mark would
-/// let the engine paste into it. Every harness's look says it, however it builds its own
-/// `Observed`: Claude's adds its status to the record and called this too late (T-841).
-pub(crate) fn quota_of(record: &Record) -> Option<Arc<Quota>> {
+/// What a window says of its quota, as the engine is told it, from three sources in one
+/// precedence: a move of its model, then what the harness says of the window now (`live`: a
+/// retry status, a wire log), then what its record kept.
+///
+/// A window whose harness moved its model on its own is not used on it unasked, so the move
+/// reads as the hold only the human can end (MUS-24). It comes before a refusal the same record
+/// shows (Muse moved the model after the 402 of T-705's recordings): the human who fixes the
+/// billing and tries again is told besides that the window runs on a model nobody chose, or that
+/// refusal's handled mark would let the engine paste into it. What the window says now stands
+/// over its record's refusal, which it may have left behind, and a window that says nothing
+/// keeps the record's own: Claude's adapter lost the move, Devin's replaced the record's quota
+/// with the wire's even where that was none, and OpenCode's let a retry outrank a move (T-841,
+/// T-853).
+fn quota_of(record: &Record, live: Option<Arc<Quota>>) -> Option<Arc<Quota>> {
     record
         .model_moved
         .as_ref()
         .map(|moved| Arc::new(moved.as_quota()))
+        .or(live)
         .or_else(|| record.quota.clone())
 }
 
@@ -30,6 +37,14 @@ pub(crate) fn quota_of(record: &Record) -> Option<Arc<Quota>> {
 /// unnamed, which each harness says of its own window. A record that could
 /// not be read says nothing: settled, and empty.
 pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
+    observed_from(reading, None)
+}
+
+/// The one place a look is built from a record and the live word beside it: every adapter takes
+/// it for what the record says (`items`, `failed`, `settled`, `quota`), and sets what only its
+/// own window knows (`waiting`, `over`, `took_back`, `at_prompt`, a switch) on it. A record that
+/// could not be read says nothing of its own, and the live quota stands.
+pub(crate) fn observed_from(reading: Arc<Reading>, live: Option<Arc<Quota>>) -> Observed {
     let (settled, failed, quota) = match &*reading {
         Reading::Known(record) => {
             let empty = record.items.is_empty() && !record.in_flight;
@@ -37,10 +52,10 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
                 record.settlement == Settlement::Settled
                     || (record.settlement != Settlement::InFlight && empty),
                 record.failed,
-                quota_of(record),
+                quota_of(record, live),
             )
         }
-        Reading::Unknown(_) | Reading::Missing(_) => (true, false, None),
+        Reading::Unknown(_) | Reading::Missing(_) => (true, false, live),
     };
     Observed {
         reading: Some(reading),

@@ -74,7 +74,7 @@ use crate::records::{Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
-use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
+use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{pane, specmint, window_args};
 
@@ -685,9 +685,9 @@ impl Window for DevinWindow {
             .await;
             let wire = wire?;
             self.looked.set(self.history().map(|seen| seen.prompts));
-            let mut observed = record_state(reading);
+            // What Devin's wire says of its quota is the live word beside the record's.
+            let mut observed = observed_from(reading, wire.quota);
             observed.waiting = dialog_waiting(observed.reading.as_deref());
-            observed.quota = wire.quota;
             if self.begun_on_the_store(&observed) {
                 observed.settled = false;
             }

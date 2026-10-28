@@ -74,7 +74,7 @@ use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
 use crate::shared::left_open::LeftOpen;
-use crate::shared::record_state::{quota_of, switched_to};
+use crate::shared::record_state::{observed_from, switched_to};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
 use crate::shared::{pane, specmint, window_args};
@@ -482,27 +482,23 @@ impl Window for ClaudeWindow {
             let session = self.session.borrow().clone();
             let options = told(self.relaunched.as_ref(), self.model.as_deref(), &session);
             let reading = self.records.look(Harness::Claude, &session, &options).await;
-            let (empty, settled, failed, quota, agents) = match &*reading {
+            let (empty, settled, agents) = match &*reading {
                 Reading::Known(record) => (
                     record.items.is_empty(),
                     record.settlement == Settlement::Settled,
-                    record.failed,
-                    quota_of(record),
                     record.pending.agents > 0,
                 ),
-                Reading::Unknown(_) | Reading::Missing(_) => (true, false, false, None, false),
+                Reading::Unknown(_) | Reading::Missing(_) => (true, false, false),
             };
+            // What the record says of the failure and the quota is the one place's
+            // (`observed_from`); what Claude's own status says of the window is set on it.
             let observed = |settled, over, waiting, took_back, at_prompt| Observed {
-                reading: Some(Arc::clone(&reading)),
                 settled,
                 over,
                 waiting,
-                failed,
-                quota: quota.clone(),
-                switched: None,
-                unnamed: false,
                 took_back,
                 at_prompt,
+                ..observed_from(Arc::clone(&reading), None)
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {
