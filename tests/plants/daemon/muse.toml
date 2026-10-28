@@ -40,6 +40,7 @@ muse-live-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live
 muse-live-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
 muse-plant-runner = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::"]
 muse-role-cleared = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::cleared"]
+muse-rig-env = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install"]
 muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
 muse-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record_state"]
 muse-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
@@ -2919,3 +2920,13 @@ runs = ["muse-unsent"]
 file = "crates/cf-harness/src/muse/session_hook.rs"
 find = '''                .is_ok_and(|said| said.get("session").and_then(Value::as_str) == Some(session))'''
 replace = '''                .is_ok_and(|said| said.get("session").and_then(Value::as_str) == Some(""))'''
+
+[[plant]]
+name = "muse: a rig that runs Muse gives its data folder by the link it was made through"
+meant = "a_rig_that_runs_muse_names_its_data_folder_by_its_real_path"
+runs = ["muse-rig-env"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/install.rs"
+find = '''        let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());'''
+replace = '''        let real = root.to_path_buf();'''
