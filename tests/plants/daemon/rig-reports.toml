@@ -907,3 +907,13 @@ replace = """
         .inheriting_env();
     let _ = nested::case_of;"""
 
+[[plant]]
+name = "rig reports: the bound of a nested rig case leaves out the copies of its programs"
+meant = "a_nested_rig_case_is_given_as_long_as_a_rigs_start_and_close_may_take"
+runs = ["reports-nested-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/nested.rs"
+find = "2 * bundle::COPY_WAIT.as_secs() + 2 * READY.as_secs() + 2 * EXIT.as_secs() + GONE.as_secs(),"
+replace = "2 * READY.as_secs() + 2 * EXIT.as_secs() + GONE.as_secs(),"
+

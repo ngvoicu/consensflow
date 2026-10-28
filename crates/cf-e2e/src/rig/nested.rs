@@ -6,10 +6,11 @@
 //! ([`crate::process::LIMIT`]): a case that starts a rig may take as long as the rig's own waits
 //! let it, and those are longer (the daemon and the pane host each have a minute to say they are
 //! ready). And it builds nothing: the programs under test are the ones this run has
-//! ([`crate::cf::BUILT`]), so it neither runs cargo again nor waits on a build's lock behind
-//! the run's other cases. Both held a nested case on main's CI after 3.0.6-alpha.3's integration
-//! B: on a runner of three processors, with the run's other rig cases beside it, the case was
-//! still in its builds and the copy of its `cf` at the 30 s and was ended (T-848).
+//! ([`crate::cf::BUILT`]), so it runs no cargo of its own, nor waits on the build lock where
+//! other processes build (nextest's). A nested case on main's CI after 3.0.6-alpha.3's
+//! integration B ran cargo for `cf` and the pane host and copied both into its home, on a runner
+//! of three processors beside the run's other rig cases, and was ended at the 30 s; on a Mac at
+//! a load of 80 one was ended between its copy of `cf` and its pane host's (T-848).
 
 use std::path::Path;
 use std::time::Duration;
@@ -58,7 +59,10 @@ mod tests {
     /// verb of `cf` is given.
     #[test]
     fn a_nested_rig_case_is_given_as_long_as_a_rigs_start_and_close_may_take() {
-        assert!(RIG_BOUND >= 2 * READY + 2 * EXIT + GONE, "{RIG_BOUND:?}");
+        assert!(
+            RIG_BOUND >= 2 * bundle::COPY_WAIT + 2 * READY + 2 * EXIT + GONE,
+            "{RIG_BOUND:?}"
+        );
         assert!(RIG_BOUND > crate::process::LIMIT, "{RIG_BOUND:?}");
     }
 }
