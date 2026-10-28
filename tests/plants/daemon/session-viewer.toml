@@ -199,11 +199,10 @@ runs = ["viewer-ledger-held-apart"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
-find = '''    for table in compaction::made("TABLE") {
-        tables.remove(table);
-    }
-'''
-replace = ""
+find = '''    let made: Vec<&str> = compaction::made("TABLE")
+        .chain([model_list::TABLE])
+        .collect();'''
+replace = '''    let made: Vec<&str> = [model_list::TABLE].into_iter().collect();'''
 
 [[plant]]
 name = "session viewer: the players of Node's recordings keep the indexes of migration 0020 in the schema they compare"

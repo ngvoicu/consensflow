@@ -1,0 +1,307 @@
+# The harnesses' model listings (CHF-03, chief-harness spec, T-727): each harness lists its
+# models with no model turn (`Adapter::models`, crates/cf-harness/src/{claude,codex,pi,devin}/models.rs
+# over shared/one_shot.rs), one `ModelListing` type (crates/cf-proto/src/models.rs) whose default is
+# never a contributor model, a disabled one or one of a stale listing, kept in the home ledger
+# (migration 0025, crates/cf-ledger/src/model_lists.rs), and read by the daemon at the first ask of
+# its life and at the human's Refresh, one harness at a time (crates/cf-daemon/src/models.rs).
+# Phases 1 to 3 of the spec add their own plants here.
+#
+# Every name holds `listing:`, so `npm run plants:daemon -- "listing:"` runs them all.
+
+[run]
+ch-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "models::"]
+ch-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "models::"]
+ch-one-shot = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::one_shot::"]
+ch-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "model_lists"]
+ch-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::model_list"]
+ch-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "models::"]
+
+[[plant]]
+name = 'listing: a stale listing gives a default'
+meant = "a_stale_list_gives_no_default_whatever_it_marks"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '        if self.is_stale() {'
+replace = '        if self.is_stale() && false {'
+
+[[plant]]
+name = 'listing: a contributor model may be the default'
+meant = "the_marked_model_is_the_default_unless_it_is_a_contributor_model_then_its_twin"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '        let usable = |model: &&ModelChoice| !model.contributor && !model.disabled;'
+replace = '        let usable = |model: &&ModelChoice| !model.disabled;'
+
+[[plant]]
+name = 'listing: a disabled model may be the default'
+meant = "with_no_twin_the_default_is_the_first_model_that_is_no_contributor_and_not_disabled"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '        let usable = |model: &&ModelChoice| !model.contributor && !model.disabled;'
+replace = '        let usable = |model: &&ModelChoice| !model.contributor;'
+
+[[plant]]
+name = 'listing: a contributor model is not known by its id'
+meant = "a_contributor_model_is_known_by_its_id_and_warned_of"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '            contributor: id.ends_with("-contributor"),'
+replace = '            contributor: false,'
+
+[[plant]]
+name = "listing: Pi's provider is not joined to its id for --model"
+meant = "pi_s_provider_and_id_are_joined_for_the_launch_at_the_first_slash_only"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '            Some(provider) => format!("{provider}/{}", self.id),'
+replace = '            Some(_) => self.id.clone(),'
+
+[[plant]]
+name = 'listing: an effort inside the id is launched by a join'
+meant = "an_effort_inside_the_id_launches_the_exact_id_listed_never_a_join"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '            .and_then(|effort| self.launch_ids.get(effort))'
+replace = '            .and_then(|effort| self.launch_ids.get(effort).filter(|_| false))'
+
+[[plant]]
+name = 'listing: a failed read drops the listing kept before'
+meant = "a_failed_read_keeps_the_listing_read_before_stale_for_its_reason"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '            kept.unwrap_or(Self {'
+replace = '            kept.filter(|_| false).unwrap_or(Self {'
+
+[[plant]]
+name = 'listing: claude: the default pointer is listed as a model'
+meant = "each_model_is_its_resolved_id_with_its_efforts_and_the_default_pointer_marks_one"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '.filter(|value| value != "default")'
+replace = '.filter(|_| true)'
+
+[[plant]]
+name = 'listing: claude: a model is its alias, not its resolved id'
+meant = "each_model_is_its_resolved_id_with_its_efforts_and_the_default_pointer_marks_one"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '        let id = text(row, "resolvedModel").unwrap_or(value);'
+replace = '        let id = value;'
+
+[[plant]]
+name = 'listing: claude: a disabled row is not marked'
+meant = "a_row_with_no_effort_or_disabled_says_so_and_a_disabled_one_is_never_the_default"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '            disabled: row.get("disabled") == Some(&Value::Bool(true)),'
+replace = '            disabled: false,'
+
+[[plant]]
+name = 'listing: claude: the read runs in no config folder of its own'
+meant = "the_list_is_read_in_the_config_folder_it_is_given_never_the_human_s"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '.with_var("CLAUDE_CONFIG_DIR", &config.to_string_lossy())'
+replace = '.with_var("CLAUDE_CONFIG_DIR_NOT", &config.to_string_lossy())'
+
+[[plant]]
+name = 'listing: codex: a hidden model is listed'
+meant = "the_account_s_list_has_its_models_efforts_and_default_and_no_hidden_one"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = '        .filter(|row| row.get("hidden") != Some(&Value::Bool(true)))'
+replace = '        .filter(|_| true)'
+
+[[plant]]
+name = "listing: codex: an old copy of the account's list is fresh"
+meant = "a_list_from_no_copy_of_the_account_s_or_an_old_copy_is_stale_and_gives_no_default"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = '        Some(fetched) if at - fetched > FRESH_MS => {'
+replace = '        Some(fetched) if at - fetched > FRESH_MS && false => {'
+
+[[plant]]
+name = 'listing: codex: the list Codex ships is fresh'
+meant = "a_list_from_no_copy_of_the_account_s_or_an_old_copy_is_stale_and_gives_no_default"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = "        None => listing.stale(\"the list Codex ships: it holds no copy of the account's\"),"
+replace = '        None => listing,'
+
+[[plant]]
+name = 'listing: codex: only the first page of model/list is read'
+meant = "a_read_initializes_then_asks_each_page_until_no_cursor"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = '            if !cursor.is_string() {'
+replace = '            if true {'
+
+[[plant]]
+name = 'listing: pi: xhigh and max are taken where the map names none'
+meant = "the_levels_are_pi_s_own_rule_of_reasoning_and_the_thinking_map"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '            None => !matches!(*level, "xhigh" | "max"),'
+replace = '            None => true,'
+
+[[plant]]
+name = 'listing: pi: the provider is not kept apart'
+meant = "each_model_keeps_its_provider_apart_and_launches_as_both_joined"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '                provider: Some(provider),'
+replace = '                provider: Some(provider).filter(|_| false),'
+
+[[plant]]
+name = 'listing: pi: every read fetches the catalogs'
+meant = "only_the_human_s_refresh_fetches_pi_s_catalogs_and_a_failed_fetch_leaves_a_stale_list"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '    if fetch {'
+replace = '    if fetch || true {'
+
+[[plant]]
+name = 'listing: pi: the list is read online'
+meant = "the_list_is_read_offline_with_nothing_of_pi_s_own"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '        env: env.clone().with_var("PI_OFFLINE", "1"),'
+replace = '        env: env.clone(),'
+
+[[plant]]
+name = 'listing: devin: the fusion family is listed'
+meant = "a_model_with_no_effort_is_its_variant_and_fusion_is_left_out"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = '    for family in families.iter().filter(|family| !fusion(family)) {'
+replace = '    for family in families.iter().filter(|_| true) {'
+
+[[plant]]
+name = "listing: devin: an effort's id is joined, not the exact one listed"
+meant = "each_model_keeps_the_exact_id_of_each_effort_its_efforts_from_the_lowest"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = '                models[at].launch_ids.insert(effort.to_owned(), uid);'
+replace = '                { let joined = format!("{}-{effort}", models[at].id); models[at].launch_ids.insert(effort.to_owned(), joined); }'
+
+[[plant]]
+name = 'listing: devin: no suffix is read past'
+meant = "a_variant_s_effort_is_read_past_the_suffixes_from_its_end"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = '        .take_while(|word| SUFFIXES.contains(word))'
+replace = '        .take_while(|_| false)'
+
+[[plant]]
+name = 'listing: one shot: the first line is the answer'
+meant = "the_answer_is_the_line_taken_for_it_past_what_comes_between_and_the_program_is_ended"
+runs = ["ch-one-shot"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/one_shot.rs"
+find = '        if answers(&answer) {'
+replace = '        if answers(&answer) || true {'
+
+[[plant]]
+name = 'listing: ledger: a stale listing is kept fresh'
+meant = "a_harness_s_listing_is_kept_whole_and_a_failed_read_keeps_the_one_before_stale"
+runs = ["ch-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model_lists.rs"
+find = '        Freshness::Stale { why } => Some(why.as_str()),'
+replace = '        Freshness::Stale { .. } => None::<&str>,'
+
+[[plant]]
+name = "listing: ledger: the players compare the model list table with Node's"
+meant = "takes_the_model_list_table_and_its_schema_out_and_nothing_else"
+runs = ["ch-ledger-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '        .chain([model_list::TABLE])'
+replace = '        .chain(["no such table"])'
+
+[[plant]]
+name = 'listing: daemon: every ask reads the harness again'
+meant = "a_harness_is_read_at_the_first_ask_of_a_daemon_s_life_then_kept_and_read_again_at_refresh"
+runs = ["ch-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '        if !refresh && self.read.borrow().contains(&harness) {'
+replace = '        if false {'
+
+[[plant]]
+name = 'listing: daemon: a harness not installed here is asked'
+meant = "a_harness_not_installed_here_is_never_asked"
+runs = ["ch-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '        if harness_path(harness, &self.env).is_none() {'
+replace = '        if false {'
+
+[[plant]]
+name = 'listing: daemon: two harnesses are read at once'
+meant = "two_harnesses_are_read_one_after_the_other"
+runs = ["ch-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '        let _turn = self.reading.lock().await;'
+replace = '        let _turn = ();'
+
+[[plant]]
+name = 'listing: daemon: a failed read drops the listing kept before'
+meant = "a_new_daemon_reads_again_at_its_first_ask_and_a_failure_keeps_the_listing_before_stale"
+runs = ["ch-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '        let listing = ModelListing::after(kept, adapter.models(refresh).await);'
+replace = '        let listing = ModelListing::after(kept.filter(|_| false), adapter.models(refresh).await);'
