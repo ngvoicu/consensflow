@@ -250,6 +250,18 @@ impl Members {
         }
     }
 
+    /// The Codex home the project's Codex windows keep their threads in: the
+    /// `CODEX_HOME` the rig gives them (the kit's home of the run's own,
+    /// [`super::isolation`]), and else `.codex` in its home.
+    pub fn codex_home(&self) -> PathBuf {
+        let var = |name: &str| self.rig.var(name).filter(|value| !value.is_empty());
+        match (var("CODEX_HOME"), var("HOME")) {
+            (Some(home), _) => PathBuf::from(home),
+            (None, Some(home)) => Path::new(home).join(".codex"),
+            (None, None) => PathBuf::from(".codex"),
+        }
+    }
+
     /// The tier the member `agent` was given when it was added.
     pub fn tier_of(&self, agent: &str) -> Option<&str> {
         self.tiers.get(agent).map(String::as_str)

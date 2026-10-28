@@ -8,6 +8,33 @@
 //! the latest switch and its connection still owns the window. The server
 //! numbers the requests it sends the TUI on its own, so only a response (a
 //! message with no `method`) ever answers a request of the TUI's.
+//!
+//! A main start is also where the window's role goes in: the broker gives it the
+//! window's developer instructions (`developerInstructions`, which replace what
+//! Codex's own configuration says for that thread, and so already hold that), so
+//! the role is on no command line. Nothing else is given them. A resumed or forked
+//! thread keeps the developer message it began with (probed on Codex 0.162.1 and
+//! 0.164.0), and a side thread (ephemeral, or of a source other than the user's) is
+//! no conversation of the window's. A sub-agent Codex spawns starts in the server,
+//! never through here: Codex 0.164.0 gives it the developer instructions of the
+//! thread that spawned it, as it did when they were configuration.
+//!
+//! A start is the window's own when it is durable (`ephemeral` false, or not
+//! said, which is the server's own default) and the user's (`threadSource`
+//! "user"); one that is ephemeral, or of another source, is a side thread. A
+//! start that is neither (no source, or an `ephemeral` that is no yes or no) is
+//! one the broker cannot tell: it goes as it came, with no role, and the window
+//! says so once to whoever reads its notes ([`Selection::unclassified`]), so that a
+//! Codex whose TUI changed how it starts a thread does not leave a window on its
+//! own instructions unseen.
+//!
+//! ConsensFlow's own variables (`CONSENSFLOW_URL`, `_TOKEN` and the rest) go to
+//! every thread the TUI starts, resumes or forks, in its `config`
+//! (`shell_environment_policy.set.<NAME>`), so that a user policy of
+//! `inherit = "core"` keeps them for the thread's commands: they are on no
+//! command line (the token is a secret). Probed on Codex 0.164.0 with
+//! `thread/shellCommand`: such a thread's commands have them, on a start and on a
+//! resume, and the user's own `exclude` still holds.
 
 use std::collections::HashMap;
 
@@ -97,13 +124,25 @@ pub(crate) struct Selection {
     idle: HashMap<String, bool>,
     /// Whether the window's first start is still to open in full-permission mode.
     fresh_bypass: bool,
+    /// The developer instructions every main start of the window is given: its
+    /// role. None for a window given none.
+    role: Option<String>,
+    /// ConsensFlow's own variables, each name with its value, which every thread
+    /// the TUI starts, resumes or forks is given for its commands.
+    shell_env: Vec<(String, String)>,
+    /// Whether the window has said that a start could not be told.
+    told_unclassified: bool,
     closed: bool,
     /// Whether the broker's own connection to Codex is initialized.
     ready: bool,
 }
 
 impl Selection {
-    pub(crate) fn new(fresh_bypass: bool) -> Self {
+    pub(crate) fn new(
+        fresh_bypass: bool,
+        role: Option<String>,
+        shell_env: Vec<(String, String)>,
+    ) -> Self {
         Self {
             selected: None,
             empty: false,
@@ -112,6 +151,9 @@ impl Selection {
             revision: 0,
             idle: HashMap::new(),
             fresh_bypass,
+            role,
+            shell_env,
+            told_unclassified: false,
             closed: false,
             ready: false,
         }
@@ -193,7 +235,9 @@ impl Selection {
 
     /// What a TUI connection said to Codex. Remembers it if it may change the
     /// window's thread or permissions, and returns the message to send in its
-    /// place when the first start must open in full-permission mode.
+    /// place: a start, resume or fork given ConsensFlow's variables for its
+    /// commands, and a main start given the window's role too, and opened in
+    /// full-permission mode while the first start must be.
     pub(crate) fn tui_said(
         &mut self,
         client: ClientId,
@@ -210,16 +254,13 @@ impl Selection {
         // The TUI's own resume and fork name their workspace roots: a list, or
         // since Codex 0.159 null, so it is the field being there that counts.
         let roots = params.contains_key("runtimeWorkspaceRoots");
-        let main_start = method == Some("thread/start")
-            && params.get("ephemeral") == Some(&Value::Bool(false))
-            && user;
+        let main_start = method == Some("thread/start") && start_kind(params) == Start::Main;
         let main_resume = method == Some("thread/resume") && roots;
         let main_fork = method == Some("thread/fork")
             && params.get("ephemeral") != Some(&Value::Bool(true))
             && user
             && roots;
         let id = message.get("id").cloned();
-        let mut rewritten = None;
         if main_start || main_resume || main_fork {
             // The window shows none while it switches; an error answer goes back to what it showed.
             let prior = if self.switching {
@@ -241,10 +282,21 @@ impl Selection {
                     main_resume,
                 },
             );
-            if main_start && self.fresh_bypass {
-                rewritten = Some(with_full_permissions(message));
-            }
         }
+        let bypass = main_start && self.fresh_bypass;
+        let role = self.role.as_deref().filter(|_| main_start);
+        let env = matches!(
+            method,
+            Some("thread/start" | "thread/resume" | "thread/fork")
+        ) && !self.shell_env.is_empty();
+        let rewritten = (bypass || role.is_some() || env).then(|| {
+            rewritten_start(
+                message,
+                bypass,
+                role,
+                if env { &self.shell_env } else { &[] },
+            )
+        });
         let names_selected = self.selected.is_some()
             && params.get("threadId").and_then(Value::as_str) == self.selected.as_deref();
         if method == Some("thread/settings/update")
@@ -391,17 +443,96 @@ fn status_is_idle(thread: Option<&Value>) -> bool {
         == Some("idle")
 }
 
-/// `message` with its params opening the thread in full-permission mode, the
-/// way it goes out: keys in the order JavaScript wrote them.
-fn with_full_permissions(message: &Value) -> Value {
+/// What kind of thread a TUI's `thread/start` with `params` begins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Start {
+    /// The window's own: durable, and the user's.
+    Main,
+    /// A side thread: ephemeral, or of another source.
+    Side,
+    /// One the broker cannot tell, and why.
+    Unclassified(&'static str),
+}
+
+/// What kind of thread a `thread/start` with `params` begins. An `ephemeral` not
+/// said is false, as the server takes it.
+pub(crate) fn start_kind(params: &Map<String, Value>) -> Start {
+    let ephemeral = match params.get("ephemeral") {
+        None | Some(Value::Null) => Some(false),
+        Some(Value::Bool(ephemeral)) => Some(*ephemeral),
+        Some(_) => None,
+    };
+    match (ephemeral, params.get("threadSource")) {
+        (Some(true), _) => Start::Side,
+        (None, _) => Start::Unclassified("its `ephemeral` is neither true nor false"),
+        (Some(false), Some(Value::String(source))) if source == "user" => Start::Main,
+        (Some(false), Some(Value::String(_))) => Start::Side,
+        (Some(false), _) => Start::Unclassified("it names no `threadSource`"),
+    }
+}
+
+impl Selection {
+    /// Why the window's role was not given to `message`, a TUI's start the broker
+    /// cannot tell for the window's own or a side thread: said once a window, and
+    /// only where the window has a role to give. None for anything else.
+    pub(crate) fn unclassified(&mut self, message: &Value) -> Option<&'static str> {
+        if self.told_unclassified
+            || self.role.is_none()
+            || message.get("method").and_then(Value::as_str) != Some("thread/start")
+        {
+            return None;
+        }
+        let none = Map::new();
+        let params = message
+            .get("params")
+            .and_then(Value::as_object)
+            .unwrap_or(&none);
+        let Start::Unclassified(why) = start_kind(params) else {
+            return None;
+        };
+        self.told_unclassified = true;
+        Some(why)
+    }
+}
+
+/// The start, resume or fork `message` as it goes out: its params opening the
+/// thread in full-permission mode where `bypass` says so, with `role` as its
+/// developer instructions in place of any it had, and with `env`, ConsensFlow's
+/// variables, set for its commands in its `config` over what that said of them;
+/// keys in the order JavaScript wrote them.
+fn rewritten_start(
+    message: &Value,
+    bypass: bool,
+    role: Option<&str>,
+    env: &[(String, String)],
+) -> Value {
     let mut params = message
         .get("params")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    params.insert("approvalPolicy".into(), "never".into());
-    params.insert("sandbox".into(), "danger-full-access".into());
-    params.insert("permissions".into(), Value::Null);
+    if bypass {
+        params.insert("approvalPolicy".into(), "never".into());
+        params.insert("sandbox".into(), "danger-full-access".into());
+        params.insert("permissions".into(), Value::Null);
+    }
+    if let Some(role) = role {
+        params.insert("developerInstructions".into(), role.into());
+    }
+    if !env.is_empty() {
+        let mut config = params
+            .get("config")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        for (name, value) in env {
+            config.insert(
+                format!("shell_environment_policy.set.{name}"),
+                value.as_str().into(),
+            );
+        }
+        params.insert("config".into(), Value::Object(config));
+    }
     let mut message = message.clone();
     if let Some(object) = message.as_object_mut() {
         object.insert("params".into(), Value::Object(params));

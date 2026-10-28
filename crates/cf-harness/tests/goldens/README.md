@@ -334,3 +334,27 @@ and the hash that names a bundle of an extension is `$HASH`.
   refused for a log that is not there, and for one that cannot be read`, steps 8 and
   10, where Node refused the message as the conversation unavailable and Rust as
   another conversation displayed, the torn line saying nothing.
+
+- **A Codex window's role is on no command line** (2026-10-26, T-698). Node gave a
+  Codex window its role as `-c developer_instructions=<JSON>` on the supervisor's
+  command line, which the supervisor put on the app-server's and the TUI's as well:
+  every user of the machine reads a command line (`ps` is setuid root on macOS), and
+  a pattern that matched a role's words matched the window. The Rust adapter writes
+  the same text (Codex's own instructions, then the role) to
+  `integrations/codex/<launch>/developer-instructions.md`, 0600 in a folder 0700,
+  and names it in the window's environment (`CF_CODEX_ROLE_FILE`); the supervisor
+  reads it and its broker gives it to the TUI's main thread starts as their
+  `developerInstructions`. `launch/` moved for it in 93 steps of the Codex
+  scenarios, in both platforms' recordings: each launch's command line lost the
+  two words of the setting and nothing else, its environment gained the variable
+  after the bridge's, and its step's `tree` gained the launch's folder (and the
+  folders above it the scenario had not made yet) and the file, whose `text` is the
+  setting's JSON string read, where the file is new or its text changed; a step
+  that closes the window lost them again (`removed`), as `forget_launch` removes
+  them. The darwin rows were checked equal to what Rust reads, row for row; the
+  win32 rows were moved the same way, paths written with `/` and no mode, as the
+  recordings write every path. `no_codex_launch_of_either_platform_puts_its_role_on_a_command_line`
+  holds both files to it. The move is `tools/move_codex_role_goldens.py`, which
+  leaves a step already moved as it is: after a merge brings rows of the old shape,
+  run it on each file and let the scenarios test check it, rather than merging these
+  files by hand.

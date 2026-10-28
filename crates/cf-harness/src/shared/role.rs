@@ -3,7 +3,8 @@
 //! names its project's staff, and a shared file let a chief read another
 //! project's when two of them opened together. Role documents live outside
 //! every folder a harness discovers skills in by itself. Each harness's module
-//! says how its window loads the file; Codex is given the text itself.
+//! says how its window loads the file; Codex's is no skill, and its module writes
+//! it.
 
 use std::path::Path;
 

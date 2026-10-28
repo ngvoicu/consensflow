@@ -29,10 +29,9 @@ use crate::contract::LaunchId;
 use crate::devin::kept;
 use crate::shared::record::find::entries;
 
-/// The name Codex goes by under `integrations`. It keeps no files of a launch's
-/// own (no role, and the Specmint skill of a chief given specs is kept for every
-/// launch, [`super::specmint`]): its folder holds only what a build that kept the
-/// skill per launch left, which a start's sweep clears.
+/// The name Codex goes by under `integrations`. A launch's folder there holds the
+/// window's role, the file its broker reads (`crate::codex`'s `role`); the Specmint
+/// skill of a chief given specs is kept for every launch ([`super::specmint`]).
 pub(crate) const CODEX_FOLDER: &str = "codex";
 
 /// The harness folders a launch's files are in, in the order Node goes through
@@ -66,8 +65,9 @@ fn removed(failed: Vec<(String, io::Error)>) -> Result<(), NotRemoved> {
     }
 }
 
-/// The folder under `integrations` a harness keeps its launches' files in:
-/// Codex is given what it runs with, and keeps no role there ([`CODEX_FOLDER`]).
+/// The folder under `integrations` a harness keeps its launches' role skills in:
+/// Codex's role is no skill but a file of its own, which its module writes in
+/// [`CODEX_FOLDER`].
 pub(crate) fn harness_folder(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("claude"),

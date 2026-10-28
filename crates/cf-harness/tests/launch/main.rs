@@ -18,5 +18,6 @@ mod kept;
 mod opencode;
 mod pi;
 mod scenarios;
+mod secrets;
 mod servers;
 mod tables;
