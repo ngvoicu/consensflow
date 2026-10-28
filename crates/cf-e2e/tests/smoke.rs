@@ -405,7 +405,7 @@ fn drive(
     assert!(!second.timed_out, "the second cf ui never ended: {second}");
     assert_eq!(second.code, Some(1), "the second cf ui ended: {second}");
     assert!(
-        Regex::new(r"(?m)^cf: another ConsensFlow has .*consensflow\.db open$")?
+        Regex::new(r"(?m)^cf: another ConsensFlow has .*consensflow\.sqlite open$")?
             .is_match(&second.stderr),
         "the second cf ui was refused, but not for the ledger's lock: {}",
         second.stderr
