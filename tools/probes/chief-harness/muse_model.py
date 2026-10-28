@@ -20,6 +20,7 @@ empty, so an Enter that saves a default saves it in the throwaway, never the own
 """
 import glob, json, os, shutil, subprocess, sys, tempfile, time
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tuidrive  # noqa: E402
 
@@ -58,6 +59,12 @@ def model_lines(folder, seen):
 
             walk(entry, "")
             kind = entry.get("payload_type") or entry.get("record_type") or "?"
+            if "fail" in line or "error" in kind:
+                # How a turn failed: its kind, and its error's first words.
+                said = json.dumps(entry.get("payload"))
+                at = max(said.find("error"), 0)
+                found.append("%s:%d %s %s" % (os.path.basename(path), number, kind, said[at:at + 220]))
+                continue
             if "fail" in line or "error" in kind:
                 # How a turn failed, by its kind and its error's kind and first words.
                 said = json.dumps(entry.get("payload"))

@@ -277,11 +277,10 @@ def pi(scratch, a, b):
 def devin(scratch, a, b):
     own = os.path.join(scratch, "home")
     if WINDOWS:
-        roaming = os.path.join(scratch, "roaming")
-        copy_secret(os.path.join(os.environ["APPDATA"], "devin", "credentials.toml"),
-                    os.path.join(roaming, "devin", "credentials.toml"))
-        env = clean_env(APPDATA=roaming)
-        store = os.path.join(roaming, "devin", "cli", "sessions.db")
+        # Devin on Windows finds its folders by the system's known folders, not by APPDATA:
+        # a throwaway APPDATA leaves it on the owner's own login and store (2026-10-28, zeewin2:
+        # this probe's two sessions went into the owner's sessions.db). No throwaway holds it.
+        sys.exit("refusing: Devin on Windows cannot be kept to a throwaway config")
     else:
         copy_secret(os.path.join(HOME, ".local", "share", "devin", "credentials.toml"),
                     os.path.join(own, ".local", "share", "devin", "credentials.toml"))
