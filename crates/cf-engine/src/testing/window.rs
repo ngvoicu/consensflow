@@ -119,6 +119,16 @@ impl Window for FakeWindow {
         }
     }
 
+    /// A box is read empty where a line of the screen is its prompt mark alone, as
+    /// Claude Code and Muse Code draw an empty one.
+    fn box_read_empty(&self, snapshot: &Value) -> bool {
+        snapshot["bottom"].as_array().is_some_and(|lines| {
+            lines
+                .iter()
+                .any(|line| line.as_str().map(str::trim) == Some("❯"))
+        })
+    }
+
     fn shows_prompt(&self, screen: &[String]) -> bool {
         self.trusts.is_some() && holds(screen, TRUST_PROMPT) && self.toward_trust(screen).is_none()
     }

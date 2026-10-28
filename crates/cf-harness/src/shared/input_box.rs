@@ -86,6 +86,14 @@ pub fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Opt
     }
 }
 
+/// Whether `snapshot` (the pane host's of a `harness` window) shows its input box
+/// empty, as the harness's reader reads it ([`read`]): no where it shows no box.
+pub(crate) fn read_empty(harness: Harness, snapshot: &Value) -> bool {
+    bottom(snapshot).is_some_and(|screen| {
+        read(harness, &screen, Cursor::of(snapshot.get("cursor"))) == Some(InputBox::Empty)
+    })
+}
+
 /// [`shown`], of a `harness` window's screen as drawn now.
 pub(crate) async fn words_on_screen(
     host: &dyn PaneHost,

@@ -399,6 +399,15 @@ pub trait Window {
     fn shows_prompt(&self, _screen: &[String]) -> bool {
         false
     }
+    /// Whether `snapshot` (the pane host's of the window: its last lines and its cursor)
+    /// shows the window's input box empty, as its harness's own reader reads it: the box
+    /// holds nothing a key would have to empty, and the key that empties one does harm in
+    /// an empty box (Control-C there arms the quit of Claude Code and Muse Code, which a
+    /// second one ends, and stops a turn at work). False where the harness reads no box,
+    /// or reads it holding anything.
+    fn box_read_empty(&self, _snapshot: &Value) -> bool {
+        false
+    }
     /// The servers its harness's dialog of new servers on `screen` (the window's last
     /// lines) would use, as its lines name them; none where they show none.
     fn trust_servers(&self, _screen: &[String]) -> Vec<String> {

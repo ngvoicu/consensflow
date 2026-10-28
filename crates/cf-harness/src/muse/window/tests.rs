@@ -302,6 +302,69 @@ fn a_turn_taken_back_is_read_so_and_its_box_cleared_before_the_next_paste_only_w
 }
 
 #[test]
+fn a_turn_taken_back_whose_box_is_out_of_view_is_refused_in_words_and_nothing_is_pressed_or_pasted()
+{
+    let home = Home::new();
+    let session = v7(100);
+    home.log(&session, 40_085, &taken_back());
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
+    assert!(finished(window.observe()).unwrap().took_back);
+    // A put-back brief taller than the host's last lines: Muse keeps the box's tail in
+    // view under its rule, and its first line, with the mark, is out of it (T-829's probe,
+    // Muse 1.4.14, 45 lines in a 40-row window).
+    let mut tall = vec!["── Voice input (⌥ + v to start) ──────────────────────".to_owned()];
+    tall.extend((9..=45).map(|line| format!("  l{line:02}")));
+    tall.extend([RULE.to_owned(), "  echo · /work · YOLO".to_owned()]);
+    let host = ScriptedHost::default();
+    host.answer(
+        "pane.snapshot",
+        [Answer::Now(Ok(
+            json!({ "ok": true, "bottom": tall, "unsent": false, "typed": 0 }),
+        ))],
+    );
+    let refused = finished(window.deliver(&host, &pane(), "The next one.")).unwrap();
+    let Admission::Refused { reason } = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert!(
+        reason.contains("input box") && reason.contains("out of view"),
+        "{reason}"
+    );
+    assert_eq!(
+        asked(&host),
+        ["pane.snapshot"],
+        "nothing pressed, nothing pasted"
+    );
+    // Once the box shows whole again, it is cleared and the paste goes in.
+    host.answer("pane.snapshot", [at_prompt("Stop me before a word.")]);
+    host.answer("pane.input", [ok()]);
+    host.answer("pane.write_paste", [ok()]);
+    finished(window.deliver(&host, &pane(), "The next one.")).unwrap();
+    assert_eq!(
+        asked(&host),
+        ["pane.snapshot", "keys [3]", "paste The next one."]
+    );
+}
+
+#[test]
+fn the_engine_is_told_the_box_is_empty_only_where_muse_draws_it_empty() {
+    let home = Home::new();
+    let window = home.window(Some(&v7(100)));
+    let of = |answer: Answer| match answer {
+        Answer::Now(Ok(snapshot)) => snapshot,
+        _ => unreachable!(),
+    };
+    assert!(window.box_read_empty(&of(at_prompt(""))));
+    assert!(!window.box_read_empty(&of(at_prompt("half a sentence"))));
+    // A box whose first line is out of view, and a screen with no box: not empty.
+    let tall =
+        json!({ "ok": true, "bottom": ["── Voice input ──────────", "  l44", "  l45", RULE] });
+    assert!(!window.box_read_empty(&tall));
+    assert!(!window.box_read_empty(&of(snapshot(&PICKER))));
+}
+
+#[test]
 fn a_window_follows_the_session_its_hook_says_it_resumed_into() {
     let home = Home::new();
     let session = v7(100);

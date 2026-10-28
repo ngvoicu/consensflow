@@ -93,7 +93,7 @@ fn a_window_s_session_is_the_newest_its_process_opened_since_its_launch() {
     // UUIDv7s of 2026-10-27: 01a17bc7-6aab-… began at 0x01a17bc76aab ms.
     let launched = 0x01a1_7bc7_6aab_i64;
     assert_eq!(
-        opened_by(40_085, launched, &env),
+        opened_by(40_085, launched, &env, &Heads::default()),
         None,
         "no sessions folder"
     );
@@ -110,14 +110,20 @@ fn a_window_s_session_is_the_newest_its_process_opened_since_its_launch() {
         "01a17000-0000-7000-8000-000000000001",
         40_085,
     );
-    assert_eq!(opened_by(40_085, launched, &env), None);
+    assert_eq!(opened_by(40_085, launched, &env, &Heads::default()), None);
     let first = "01a17bc7-6ab0-7000-8000-000000000002";
     opened(&sessions, "2026/10/27", first, 40_085);
-    assert_eq!(opened_by(40_085, launched, &env).as_deref(), Some(first));
+    assert_eq!(
+        opened_by(40_085, launched, &env, &Heads::default()).as_deref(),
+        Some(first)
+    );
     // A session it opened later (a /clear) is the one it shows, a day later too.
     let cleared = "01a17bd0-0000-7000-8000-000000000003";
     opened(&sessions, "2026/10/28", cleared, 40_085);
-    assert_eq!(opened_by(40_085, launched, &env).as_deref(), Some(cleared));
+    assert_eq!(
+        opened_by(40_085, launched, &env, &Heads::default()).as_deref(),
+        Some(cleared)
+    );
     // An id that is no UUIDv7 says no time, and is never taken for the window's.
     opened(
         &sessions,
@@ -125,7 +131,10 @@ fn a_window_s_session_is_the_newest_its_process_opened_since_its_launch() {
         "f47ac10b-58cc-4372-a567-0e02b2c3d479",
         40_085,
     );
-    assert_eq!(opened_by(40_085, launched, &env).as_deref(), Some(cleared));
+    assert_eq!(
+        opened_by(40_085, launched, &env, &Heads::default()).as_deref(),
+        Some(cleared)
+    );
 }
 
 /// A session log under `day` started from `previous` by a `/clear`: no route facts.
@@ -152,7 +161,11 @@ fn a_window_that_was_cleared_shows_the_last_session_of_the_chain_started_from_it
     let launched = 0x01a1_7bc7_6aab_i64;
     let own = "01a17bc7-6ab0-7000-8000-000000000002";
     opened(&sessions, "2026/10/27", own, 40_085);
-    assert_eq!(cleared_into(own, launched, &env), own, "never cleared");
+    assert_eq!(
+        cleared_into(own, launched, &env, &Heads::default()),
+        own,
+        "never cleared"
+    );
     let first = "01a17bc8-0000-7000-8000-000000000003";
     let second = "01a17bc9-0000-7000-8000-000000000004";
     cleared(&sessions, "2026/10/27", first, own);
@@ -170,8 +183,43 @@ fn a_window_that_was_cleared_shows_the_last_session_of_the_chain_started_from_it
         "01a17000-0000-7000-8000-000000000006",
         second,
     );
-    assert_eq!(cleared_into(own, launched, &env), second);
-    assert_eq!(cleared_into(first, launched, &env), second);
+    assert_eq!(cleared_into(own, launched, &env, &Heads::default()), second);
+    assert_eq!(
+        cleared_into(first, launched, &env, &Heads::default()),
+        second
+    );
     // A cleared session's log names no process: it is never found by the pid.
-    assert_eq!(opened_by(40_085, launched, &env).as_deref(), Some(own));
+    assert_eq!(
+        opened_by(40_085, launched, &env, &Heads::default()).as_deref(),
+        Some(own)
+    );
+}
+
+#[test]
+fn a_head_that_names_its_process_or_its_previous_session_is_read_once_and_one_that_names_neither_again(
+) {
+    let home = tempfile::tempdir().unwrap();
+    let env = env_of(&[("XDG_DATA_HOME", home.path().to_str().unwrap())]);
+    let sessions = home.path().join("muse").join("sessions");
+    let launched = 0x01a1_7bc7_6aab_i64;
+    let heads = Heads::default();
+    // A log Muse has only begun names no process yet: it is read again at the next look.
+    let own = "01a17bc7-6ab0-7000-8000-000000000002";
+    let folder = sessions.join("2026/10/27").join(own);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("session.jsonl"), "{\"retained_frame\":true}\n").unwrap();
+    assert_eq!(opened_by(40_085, launched, &env, &heads), None);
+    opened(&sessions, "2026/10/27", own, 40_085);
+    assert_eq!(
+        opened_by(40_085, launched, &env, &heads).as_deref(),
+        Some(own)
+    );
+    // Once it names its process, its head never changes, and is not read again: a log
+    // rewritten since (none is, by Muse) still says what it said.
+    opened(&sessions, "2026/10/27", own, 1);
+    assert_eq!(
+        opened_by(40_085, launched, &env, &heads).as_deref(),
+        Some(own)
+    );
+    assert_eq!(opened_by(40_085, launched, &env, &Heads::default()), None);
 }

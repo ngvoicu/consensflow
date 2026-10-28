@@ -565,6 +565,10 @@ impl DevinWindow {
 impl Window for DevinWindow {
     fn opened(&self, _pid: Option<u32>) {}
 
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Devin, snapshot)
+    }
+
     /// The window is on `session` from now on: a switch to full permission begun for
     /// the conversation it was on is that one's, and another's time runs from the
     /// first look that finds it in the normal mode.

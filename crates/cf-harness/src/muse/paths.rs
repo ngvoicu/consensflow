@@ -11,6 +11,8 @@
 //!
 //! [`data_home`]: crate::shared::paths::data_home
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -89,10 +91,31 @@ const SKEW_MS: i64 = 5_000;
 /// process that opened it (`runtime.session.route_facts`), and the session it was
 /// started from, by a `/clear` in its window (`session.started`'s
 /// `previous_session_stream`).
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Head {
     pid: Option<u64>,
     previous: Option<String>,
+}
+
+/// The heads of the session logs a window has read, by session id ([`Head`]). A head
+/// that says where its session came from (its process, or the session a `/clear`
+/// started it from) never changes, so it is read once; one that says neither yet (a log
+/// Muse has only begun) is read again at the next look.
+#[derive(Default)]
+pub(crate) struct Heads(RefCell<HashMap<String, Head>>);
+
+impl Heads {
+    /// What the head of the session `id`'s log `log` says.
+    fn of(&self, id: &str, log: &Path) -> Head {
+        if let Some(known) = self.0.borrow().get(id) {
+            return known.clone();
+        }
+        let read = head(log);
+        if read.pid.is_some() || read.previous.is_some() {
+            self.0.borrow_mut().insert(id.to_owned(), read.clone());
+        }
+        read
+    }
 }
 
 /// The sessions begun since `launched_ms` (a time in ms since the epoch), each by its id
@@ -100,7 +123,7 @@ struct Head {
 /// the time they began in their first 48 bits) began no earlier, for a session older
 /// than a window's launch is never its own, though its process had the same pid. One
 /// whose id is no UUIDv7 began before 1.4 named them so.
-fn begun_since(launched_ms: i64, env: &Env) -> Vec<(String, Head)> {
+fn begun_since(launched_ms: i64, env: &Env, heads: &Heads) -> Vec<(String, Head)> {
     let Ok(root) = sessions(env) else {
         return Vec::new();
     };
@@ -111,7 +134,7 @@ fn begun_since(launched_ms: i64, env: &Env) -> Vec<(String, Head)> {
                 for entry in fs::read_dir(&day).into_iter().flatten().flatten() {
                     let name = entry.file_name().to_string_lossy().into_owned();
                     if begun_ms(&name).is_some_and(|ms| ms >= launched_ms - SKEW_MS) {
-                        let head = head(&entry.path().join(LOG));
+                        let head = heads.of(&name, &entry.path().join(LOG));
                         found.push((name, head));
                     }
                 }
@@ -127,8 +150,8 @@ fn begun_since(launched_ms: i64, env: &Env) -> Vec<(String, Head)> {
 /// TUI opens, a second in, and its SessionStart hook only at the window's first prompt
 /// (Muse 1.4.13, T-787's probe): a window opened with no first message would say nothing
 /// of itself until one came.
-pub(crate) fn opened_by(pid: u32, launched_ms: i64, env: &Env) -> Option<String> {
-    begun_since(launched_ms, env)
+pub(crate) fn opened_by(pid: u32, launched_ms: i64, env: &Env, heads: &Heads) -> Option<String> {
+    begun_since(launched_ms, env, heads)
         .into_iter()
         .rev()
         .find(|(_, head)| head.pid == Some(u64::from(pid)))
@@ -140,8 +163,8 @@ pub(crate) fn opened_by(pid: u32, launched_ms: i64, env: &Env) -> Option<String>
 /// one before (`previous_session_stream`), or `session` itself. A cleared session's log
 /// names no process, and Muse runs no SessionStart hook for it (Muse 1.4.13, T-787's
 /// probe on echo): the chain is the one word of it.
-pub(crate) fn cleared_into(session: &str, launched_ms: i64, env: &Env) -> String {
-    let begun = begun_since(launched_ms, env);
+pub(crate) fn cleared_into(session: &str, launched_ms: i64, env: &Env, heads: &Heads) -> String {
+    let begun = begun_since(launched_ms, env, heads);
     let mut shown = session.to_owned();
     // A chain is as long as the sessions begun, and a loop in it (no Muse writes one)
     // ends there.

@@ -499,6 +499,10 @@ impl Window for ClaudeWindow {
         super::trust::shows_prompt(screen)
     }
 
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Claude, snapshot)
+    }
+
     fn names_trust_choices(&self, screen: &[String]) -> bool {
         super::trust::names_choices(screen)
     }

@@ -1053,14 +1053,22 @@ impl Dispatcher {
     /// ([`DeliveryPart::uncleared`]), with the keys of its harness
     /// ([`Input::Pasted`]): whether the host took them, which is when the box
     /// counts as empty, and stays so until something goes in
-    /// ([`DeliveryPart::emptied`]).
+    /// ([`DeliveryPart::emptied`]). A box its harness reads empty on the screen
+    /// (the human emptied it) is pressed nothing and counts as empty: the key does
+    /// harm there, Control-C arming the quit of Claude Code and Muse Code, which a
+    /// paste between does not disarm in Muse (T-829's probe), and stopping a turn at
+    /// work.
     pub(crate) async fn clear_box(&self, record: &Record, pane: &Pane) -> bool {
         let Input::Pasted { clear } = record.window.borrow().input else {
             return true;
         };
-        let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
-        let answer = returning(self.seams.host.request("pane.input", body)).await;
-        let taken = answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)));
+        let taken = if self.box_read_empty(record, pane).await {
+            true
+        } else {
+            let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
+            let answer = returning(self.seams.host.request("pane.input", body)).await;
+            answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)))
+        };
         if taken {
             let mut part = record.delivery.borrow_mut();
             if part
@@ -1073,6 +1081,21 @@ impl Dispatcher {
             part.emptied = Some(pane.clone());
         }
         taken
+    }
+
+    /// Whether the window of `record` in `pane` shows its input box empty now, as its
+    /// harness reads it ([`cf_harness::contract::Window::box_read_empty`]): no where the
+    /// screen cannot be read.
+    async fn box_read_empty(&self, record: &Record, pane: &Pane) -> bool {
+        let Some(window) = record.window.borrow().window.clone() else {
+            return false;
+        };
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        returning(self.seams.host.request("pane.snapshot", body))
+            .await
+            .is_ok_and(|snapshot| {
+                snapshot.get("ok") == Some(&Value::Bool(true)) && window.box_read_empty(&snapshot)
+            })
     }
 
     /// A member's turn that failed while its task was not working (waiting on an

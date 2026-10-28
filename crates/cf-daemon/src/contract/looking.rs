@@ -130,6 +130,10 @@ impl Window for LookingWindow {
         self.window.follow(session);
     }
 
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        self.window.box_read_empty(snapshot)
+    }
+
     fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
         self.window.started(host)
     }

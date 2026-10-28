@@ -37,7 +37,7 @@ use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
 use serde_json::Value;
 
-use super::paths::{begun_ms, cleared_into, opened_by};
+use super::paths::{begun_ms, cleared_into, opened_by, Heads};
 use super::screen;
 use super::session_hook::last_said;
 use crate::contract::{
@@ -59,6 +59,10 @@ const HOLD: &str = "Muse has not said yet which session its window shows";
 /// What a window whose prompt is not drawn yet is held for.
 const STARTING: &str = "Muse has not shown its prompt yet";
 
+/// Why a paste waits while the message of a turn taken back is in a box the screen does
+/// not show whole.
+const OUT_OF_VIEW: &str = "the message of the turn Muse took back is still in its input box, whose first line is out of view: it is not cleared blind, and nothing is pasted behind it until the box shows whole (empty it in the window)";
+
 /// How often a window that names no session yet is looked at.
 const LOOK_EVERY: Duration = Duration::from_millis(250);
 
@@ -78,6 +82,10 @@ pub(super) struct MuseWindow {
     first_message_ms: i64,
     /// Its process, once its pane opened.
     pid: Cell<Option<u32>>,
+    /// The heads of the session logs read so far: each look walks the sessions begun
+    /// since the launch, and a head that said where its session came from is not read
+    /// again.
+    heads: Heads,
     /// The latest look read its turn taken back: the message is in its input box.
     restored: Cell<bool>,
     /// The human's keys left something unsent by the pane host's count, and the latest
@@ -101,6 +109,7 @@ impl MuseWindow {
             launched_ms: services.time.wall_ms(),
             first_message_ms,
             pid: Cell::default(),
+            heads: Heads::default(),
             restored: Cell::new(false),
             read_empty: Cell::default(),
         }
@@ -116,7 +125,7 @@ impl MuseWindow {
         let opened = self
             .pid
             .get()
-            .and_then(|pid| opened_by(pid, self.launched_ms, &self.env));
+            .and_then(|pid| opened_by(pid, self.launched_ms, &self.env, &self.heads));
         let said = match (last_said(&self.said), opened) {
             (Some((said, at)), Some(opened)) => {
                 Some(if begun_ms(&opened).is_some_and(|begun| begun > at) {
@@ -129,7 +138,12 @@ impl MuseWindow {
             (None, opened) => opened,
         };
         let from = said.or_else(|| self.session.borrow().clone())?;
-        Some(cleared_into(&from, self.launched_ms, &self.env))
+        Some(cleared_into(
+            &from,
+            self.launched_ms,
+            &self.env,
+            &self.heads,
+        ))
     }
 
     /// The window's last lines as the pane host draws them, and where its cursor is:
@@ -202,6 +216,10 @@ impl Window for MuseWindow {
         screen::shows_prompt(screen)
     }
 
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Muse, snapshot)
+    }
+
     fn ready<'a>(
         &'a self,
         host: &'a dyn PaneHost,
@@ -271,16 +289,27 @@ impl Window for MuseWindow {
             // A turn taken back put its message in the box, which this one would go in
             // after, to be sent as one: the box is emptied first, unless the engine just
             // did, and only where the screen shows it holding something (Control-C into
-            // an empty box at work stops the turn).
+            // an empty box at work stops the turn). A box the screen does not show whole
+            // (a brief taller than the host's last lines: Muse keeps the box's tail in
+            // view and scrolls its first line out, T-829's probe) is neither cleared
+            // blind nor pasted behind.
             if self.restored.get() && !host.cleared() {
                 let holds = Self::screen(host, pane)
                     .await
                     .and_then(|(lines, cursor)| screen::read(&lines, cursor));
-                if holds == Some(InputBox::Holds) {
-                    if let Err(cause) = pane::write_keys(host, pane, &CLEAR_INPUT).await {
-                        let reason =
-                            format!("the window's input box could not be cleared: {cause}");
-                        return Ok(Admission::Refused { reason });
+                match holds {
+                    Some(InputBox::Holds) => {
+                        if let Err(cause) = pane::write_keys(host, pane, &CLEAR_INPUT).await {
+                            let reason =
+                                format!("the window's input box could not be cleared: {cause}");
+                            return Ok(Admission::Refused { reason });
+                        }
+                    }
+                    Some(InputBox::Empty) => {}
+                    None => {
+                        return Ok(Admission::Refused {
+                            reason: OUT_OF_VIEW.to_owned(),
+                        })
                     }
                 }
             }

@@ -197,6 +197,57 @@ fn a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_p
     );
 }
 
+/// T-829 (Calliope's P2-1 of T-824): a box the human emptied since its paste's Enter
+/// was withheld is pressed no key. Control-C into an empty box at rest arms the quit of
+/// Claude Code and Muse Code, and a paste between does not disarm Muse's (T-829's probe,
+/// Muse 1.4.14): the box its harness reads empty counts as emptied, and the words go.
+#[test]
+fn a_box_its_harness_reads_empty_is_pressed_no_key_and_the_words_go_into_it() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.settled = true;
+        agent.arrive = false;
+    });
+    note(&context, project, "zeus-amber-pine", "Use tabs");
+    context.resume_task(project, 1, "Carry on");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    let seam = "adapter:claude-code";
+    let before = handed(&context, seam).len();
+    enter_again_with(&context, "p1-zeus-amber-pine", || {
+        context.pause_task(project, 1);
+    });
+    assert_eq!(enters(&context), 0, "no key that sends");
+    // The human emptied the box meanwhile: its harness reads it so.
+    context.host.set_snapshot(json!({
+        "outputQuietMs": 5_000,
+        "bottom": ["────────────────────", "❯", "────────────────────"],
+    }));
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.arrive = true);
+    context.resume_task(project, 1, "Carry on again");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(clears(&context), 0, "no Control-C into an empty box");
+    assert_eq!(
+        handed(&context, seam).len(),
+        before + 1,
+        "the words go, once"
+    );
+    assert_eq!(
+        context.adapter.cleared.borrow().last(),
+        Some(&true),
+        "told the box is empty, so the window presses nothing of its own"
+    );
+}
+
 /// The same of a continuation withdrawn while the screen was looked at: its task
 /// paused, or cancelled. What goes into the window next goes into an empty box.
 #[test]
