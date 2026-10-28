@@ -38,6 +38,11 @@ reqwest = { version = "0.13.4", default-features = false }
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# AppKit's dispatch of an event, run where an exception raised under it is caught (panics/appkit.rs).
+# The version Tauri's crates are built with (Cargo.lock holds one copy, `exception` already on).
+objc2 = { version = "0.6.4", features = ["exception"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
 # The page's WebView2, told to load the page again when its process fails (page_crash.rs).

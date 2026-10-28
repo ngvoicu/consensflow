@@ -21,6 +21,7 @@ mod file_drop;
 mod launcher;
 #[cfg(windows)]
 mod page_crash;
+mod panics;
 // Only the Windows app loads a failed page again; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod page_reloads;
@@ -420,7 +421,11 @@ impl<R: Runtime> PageBuilder<R> for tauri::Builder<R> {
 pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
     builder
         .manage(file_drop::Dropped::default())
-        .on_window_event(file_drop::hear)
+        .on_window_event(|window, event| {
+            panics::contained("the app's handler of a window's event", || {
+                file_drop::hear(window, event);
+            });
+        })
         .invoke_handler(page_commands())
 }
 
@@ -450,6 +455,12 @@ pub fn run() {
     for name in inherited_session_variables(names.iter().map(String::as_str)) {
         std::env::remove_var(name);
     }
+    // Every panic from here on is written down, and on macOS AppKit's dispatch of an event
+    // ends what unwinds out of it there, before tao's frame aborts the app (panics.rs). Once
+    // the home is settled, so a candidate's panic is never written in the live home.
+    panics::record_in(error_log);
+    #[cfg(target_os = "macos")]
+    panics::appkit::guard_event_dispatch();
     if let Some(log) = error_log() {
         redirect_stderr(&log);
     }
@@ -459,6 +470,20 @@ pub fn run() {
             .plugin(tauri_plugin_updater::Builder::new().build()),
     )
     .setup(|app| {
+        let teller = app.handle().clone();
+        panics::tell_with(move || {
+            let shown = teller.clone();
+            // Shown from the event loop, after the dispatch that stopped the error has ended.
+            let _ = teller.run_on_main_thread(move || {
+                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                shown
+                    .dialog()
+                    .message(panics::told(error_log().as_deref()))
+                    .title("ConsensFlow kept running")
+                    .kind(MessageDialogKind::Warning)
+                    .show(|_| {});
+            });
+        });
         app.manage(AppRuntime::start(app.handle()));
         // The terminal's command names this bundle's `cf`, whichever build wrote it.
         launcher::repair_in_background(app.handle());
@@ -491,9 +516,15 @@ pub fn run() {
     .expect("error while building the ConsensFlow app");
 
     app.run(|handle, event| {
-        if matches!(event, RunEvent::Exit) {
-            at_exit(|| handle.state::<AppRuntime>().shutdown());
-        }
+        panics::contained("the app's handler of its event loop", || {
+            if matches!(event, RunEvent::Exit) {
+                at_exit(|| {
+                    if let Some(runtime) = handle.try_state::<AppRuntime>() {
+                        runtime.shutdown();
+                    }
+                });
+            }
+        });
     });
 }
 
