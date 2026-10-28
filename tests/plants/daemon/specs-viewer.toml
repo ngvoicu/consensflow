@@ -52,6 +52,9 @@ viewer-html = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/
 viewer-hostile = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "a hostile spec"]
 viewer-policy = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "the app's policy|makes no request leave"]
 viewer-refresh = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "Refresh"]
+# The page's modals, in the browser: a viewer opened in the task that shut it, and the rest of what holds
+# an open modal whole (`app/tests/modal-stack.spec.mjs`).
+viewer-modals = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/modal-stack.spec.mjs", "-g", "task that shut it"]
 viewer-colours = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "in the page's colours"]
 
 # --- the daemon: the names a path is made of ---
@@ -1010,8 +1013,8 @@ runs = ["viewer-arranging", "viewer-registry"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-folder.js"
-find = "        .join('|') === COLUMNS.join('|') &&"
-replace = "        .join('|') !== '' &&"
+find = "  return places.includes(-1) ? null : places"
+replace = "  return places"
 
 [[plant]]
 name = "specs viewer: the registry's rule is read by a pattern that reads a line again and again"
@@ -1020,8 +1023,31 @@ runs = ["viewer-arranging"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-folder.js"
-find = "      isRule(lines[at + 1] ?? '', COLUMNS.length),"
-replace = "      /^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$/.test(lines[at + 1] ?? ''),"
+find = "isRule(lines[at + 1] ?? '', COLUMNS.length),"
+replace = "/^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$/.test(lines[at + 1] ?? ''),"
+
+[[plant]]
+name = "specs viewer: the registry's columns are read by their place, not by their names"
+meant = "reads its columns by their names, in whatever order, each as it is named"
+runs = ["viewer-arranging", "viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "      COLUMNS.map((column, place) => [column, said[places[place]] ?? '']),"
+replace = "      COLUMNS.map((column, place) => [column, said[place] ?? '']),"
+
+[[plant]]
+name = "specs viewer: a viewer opened in the task that shut it is emptied by the close that follows"
+meant = "keeps a viewer opened in the task that shut it as full as one opened later"
+runs = ["viewer-modals"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = '''    dialog.addEventListener('close', () => {
+      if (dialog.open) return
+'''
+replace = '''    dialog.addEventListener('close', () => {
+'''
 
 [[plant]]
 name = "specs viewer: the registry's cell of escaped pipes is copied again at each pipe"

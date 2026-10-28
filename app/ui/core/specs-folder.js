@@ -179,29 +179,41 @@ function cells(row) {
 const RULE_CELL = /^:?-+:?$/
 
 /**
+ * Where each of `COLUMNS` is in a table's head `line`, by its name (in any case): none where the
+ * line is not the head of such a table, that is, where it has other cells than the six, or one
+ * of them twice or not at all.
+ */
+function columnsOf(line) {
+  if (!line.includes('|')) return null
+  const named = cells(line).map((cell) => cell.toLowerCase())
+  if (named.length !== COLUMNS.length) return null
+  const places = COLUMNS.map((column) => named.indexOf(column))
+  return places.includes(-1) ? null : places
+}
+
+/**
  * The registry as Specmint writes it: its heading, and each row of its table of
  * `ID | Title | Status | Priority | Progress | Updated`, the progress read as
- * done of total where it says so. None where the text holds no such table: the
- * viewer shows it as the markdown it is. Each line is read once, in time that
- * grows with its length alone: its cells are split and trimmed, and each cell
- * is held to a pattern that cannot read a character twice.
+ * done of total where it says so. The columns are read by their names, in whatever order
+ * the head gives them (a kluris registry has Progress before Priority). None where the text
+ * holds no such table: the viewer shows it as the markdown it is. Each line is read once, in
+ * time that grows with its length alone: its cells are split and trimmed, and each cell is
+ * held to a pattern that cannot read a character twice.
  */
 export function readRegistry(text) {
   const lines = text.split(/\r?\n/)
   const head = lines.findIndex(
-    (line, at) =>
-      line.includes('|') &&
-      cells(line)
-        .map((cell) => cell.toLowerCase())
-        .join('|') === COLUMNS.join('|') &&
-      isRule(lines[at + 1] ?? '', COLUMNS.length),
+    (line, at) => columnsOf(line) !== null && isRule(lines[at + 1] ?? '', COLUMNS.length),
   )
   if (head === -1) return null
+  const places = columnsOf(lines[head])
   const heading = lines.slice(0, head).find((line) => /^\s*#{1,6}\s+/.test(line))
   const rows = []
   for (let at = head + 2; at < lines.length && lines[at].includes('|'); at += 1) {
     const said = cells(lines[at])
-    const row = Object.fromEntries(COLUMNS.map((column, place) => [column, said[place] ?? '']))
+    const row = Object.fromEntries(
+      COLUMNS.map((column, place) => [column, said[places[place]] ?? '']),
+    )
     const progress = /^(\d+)\s*\/\s*(\d+)$/.exec(row.progress)
     row.done = progress === null ? null : Number(progress[1])
     row.total = progress === null ? null : Number(progress[2])

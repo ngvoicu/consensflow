@@ -133,6 +133,22 @@ button:disabled { opacity: .45; cursor: default; }
   font-size: 13px;
 }
 .daemon-down strong { color: var(--buoy); }
+/* Over an open modal (core/app.js, `placeDaemonDown`): a notice of its own at the top of the
+   window, opaque, for the dialog's backdrop is under it. */
+.daemon-down:popover-open {
+  position: fixed;
+  inset: 12px 12px auto;
+  width: fit-content;
+  max-width: min(760px, calc(100vw - 24px));
+  margin: 0 auto;
+  border: 1px solid rgba(255, 120, 104, .6);
+  border-left: 4px solid var(--buoy);
+  border-radius: 8px;
+  background: linear-gradient(rgba(255, 120, 104, .14), rgba(255, 120, 104, .14)), var(--panel-raised);
+  color: var(--foam);
+  box-shadow: 0 8px 24px var(--shadow);
+  overflow: visible;
+}
 
 /* Projects. */
 .sidebar {

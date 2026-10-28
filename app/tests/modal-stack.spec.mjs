@@ -498,36 +498,95 @@ test.describe('no state of the page touches an open modal', () => {
     }
   })
 
-  test('the daemon stopping and coming back leaves the viewer as it was, and the banner is behind it', async ({
+  /** Whether `selector`'s element is what is hit at its own centre: nothing is drawn over it. */
+  const shownOver = (page, selector) =>
+    page.evaluate((selector) => {
+      const element = document.querySelector(selector)
+      const box = element.getBoundingClientRect()
+      return element.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+      )
+    }, selector)
+
+  /** The colour of the pixel at (`x`, `y`) of the page as it is drawn, decoded in a page of its own. */
+  async function pixelAt(page, x, y) {
+    const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 } })
+    const scratch = await page.context().newPage()
+    try {
+      return await scratch.evaluate(async (base64) => {
+        const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
+        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }))
+        const canvas = new OffscreenCanvas(1, 1)
+        const context = canvas.getContext('2d')
+        context.drawImage(bitmap, 0, 0)
+        return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3)
+      }, png.toString('base64'))
+    } finally {
+      await scratch.close()
+    }
+  }
+
+  /**
+   * Whether the notice is drawn as it is styled, not under a dialog or its backdrop: the middle of
+   * its left border is `--buoy` (255, 120, 104), which a backdrop over it would darken to about
+   * (104, 55, 51). A notice drawn over a modal is inert with the page, so nothing hits it.
+   */
+  async function drawn(page, selector) {
+    const box = await page.locator(selector).boundingBox()
+    const colour = await pixelAt(page, box.x + 1, box.y + box.height / 2)
+    return [255, 120, 104].every((channel, at) => Math.abs(colour[at] - channel) <= 14)
+  }
+
+  const daemonStatus = (page, payload) =>
+    page.evaluate((payload) => window.__listeners.get('daemon-status')({ payload }), payload)
+
+  test('the daemon stopping and coming back leaves the viewer as it was, and its notice is drawn over it', async ({
     page,
   }) => {
     const viewer = await openViewer(page)
     const down = page.locator('#daemon-down')
-    await page.evaluate(() =>
-      window.__listeners.get('daemon-status')({
-        payload: { available: false, cause: 'it stopped', retrying: true },
-      }),
-    )
-    await expect(down).toBeVisible()
+    await daemonStatus(page, { available: false, cause: 'it stopped', retrying: true })
     await expect(down).toContainText('The daemon is not running. It stopped. Starting it again…')
-    // The notice is the page's, under the modal's backdrop: the viewer is untouched by it.
+    // Over the modal, in words: the human is told with any dialog open, and the viewer is untouched.
+    expect(await drawn(page, '#daemon-down')).toBe(true)
     expect(await seen(page)).toEqual([])
     await takesClicks(page, viewer, 'user-auth/SPEC.md')
+    // A modal opened after it goes under it: it is raised above the dialog that opened last.
+    await page.evaluate(() => document.querySelector('#settings-button').click())
+    expect(await stack(page)).toEqual([VIEWER, 'settings-dialog'])
+    expect(await drawn(page, '#daemon-down')).toBe(true)
+    expect(await seen(page)).toEqual([])
+    await page.evaluate(() => document.getElementById('settings-dialog').close())
     // The daemon refusing everything while it restarts: what the viewer asks is refused in its
     // own words, and Refresh and Close still answer.
     await page.evaluate(() => {
+      window.__kept = window.__model.specs[1]
       window.__model.specs[1] = undefined
     })
     await viewer.getByRole('button', { name: 'Refresh' }).click()
     await expect(viewer.locator('.specs-note, .specs-refusal').first()).toBeVisible()
     expect(await seen(page)).toEqual([])
-    await page.evaluate(() =>
-      window.__listeners.get('daemon-status')({ payload: { available: true } }),
-    )
+    expect(await drawn(page, '#daemon-down')).toBe(true)
+    await page.evaluate(() => {
+      window.__model.specs[1] = window.__kept
+    })
+    await daemonStatus(page, { available: true })
     await expect(down).toBeHidden()
     expect(await seen(page)).toEqual([])
+    // Down again with no dialog open: the notice is the page's line under the command bar, as ever.
+    await daemonStatus(page, { available: false, cause: 'it stopped', retrying: false })
+    await expect(down).toBeVisible()
     await viewer.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(viewer).toBeHidden()
+    await expect.poll(() => down.evaluate((line) => line.matches(':popover-open'))).toBe(false)
+    expect(await down.evaluate((line) => getComputedStyle(line).position)).not.toBe('fixed')
+    expect(await shownOver(page, '#daemon-down')).toBe(true)
+    // The viewer opened while it is down: the notice goes over it again.
+    await page.locator('#specs-button').click()
+    await expect(viewer).toBeVisible()
+    expect(await drawn(page, '#daemon-down')).toBe(true)
+    await daemonStatus(page, { available: true })
+    await expect(down).toBeHidden()
   })
 
   test('a project closed behind it, or paused, leaves it whole: its board dims, the viewer does not', async ({
