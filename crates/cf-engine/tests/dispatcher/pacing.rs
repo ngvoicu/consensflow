@@ -739,3 +739,81 @@ fn a_held_message_that_leaves_the_head_of_its_queue_is_held_back_no_more() {
     assert_eq!(context.message(asked.id).state, "cancelled");
     assert_eq!(context.dispatcher.held_back(chief), None);
 }
+
+/// Calliope's re-check of `a93215905` (T-872, P3, the chief's call): spared the settle, not
+/// the look, whole. A window whose harness says it is at work (Codex's broker) reads idle
+/// from its record and has no rest: an urgent head, or the head an urgent row waits behind,
+/// went with no look at all. It waits like any other, saying why, and goes at the first
+/// rest once its harness says the turn is over.
+#[test]
+fn an_urgent_head_waits_while_the_windows_harness_says_it_is_at_work() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    context.give(project, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = context.id(project, "chief");
+    context.adapter.with("chief", |agent| agent.at_work = true);
+    let urgent = |body: &str| {
+        context
+            .ledger
+            .borrow_mut()
+            .ask(
+                project,
+                &cf_ledger::NewQuestion {
+                    from: Some("zeus".to_owned()),
+                    to: "chief".to_owned(),
+                    body: Some(body.to_owned()),
+                    task: Some(1),
+                    urgent: true,
+                    ..cf_ledger::NewQuestion::default()
+                },
+            )
+            .unwrap()
+    };
+    let first = urgent("Stop: the grammar changed");
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.advance(SETTLE);
+    }
+    assert_eq!(
+        pasted(&context, "chief"),
+        Vec::<i64>::new(),
+        "the urgent head"
+    );
+    assert_eq!(context.message(first.id).attempts, 0, "no attempt is spent");
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.reason),
+        Some("its harness says it is at work".to_owned())
+    );
+    context.adapter.with("chief", |agent| agent.at_work = false);
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [first.id], "at the first rest");
+    context.adapter.answer("chief", "Stopped.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // The head an urgent row waits behind.
+    context.adapter.with("chief", |agent| agent.at_work = true);
+    let asked = context.ask(project, "zeus", "chief", 1, "Which format?");
+    let second = urgent("Stop again");
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.advance(SETTLE);
+    }
+    assert_eq!(
+        pasted(&context, "chief"),
+        [first.id],
+        "the head an urgent row waits behind"
+    );
+    assert_eq!(
+        context
+            .dispatcher
+            .held_back(chief)
+            .map(|held| (held.message, held.reason)),
+        Some((asked.id, "its harness says it is at work".to_owned()))
+    );
+    context.adapter.with("chief", |agent| agent.at_work = false);
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [first.id, asked.id]);
+    assert_eq!(context.message(second.id).state, "queued");
+}

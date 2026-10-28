@@ -271,10 +271,10 @@ impl Dispatcher {
         }
         let urgent = self.urgent_waits(record)?;
         let rest = record.delivery.borrow().rest.clone();
+        // An urgent row is spared the settle, never the rest: a window with none (its
+        // harness says it is at work, or its record could not be read) waits, and says why
+        // (Calliope's re-check of `a93215905`, T-872).
         let Some(rest) = rest else {
-            if urgent {
-                return Ok(Pace::Go);
-            }
             let unrest = record.delivery.borrow().unrest.clone();
             return Ok(Pace::Wait(
                 unrest.unwrap_or_else(|| "it has not read at rest yet".to_owned()),

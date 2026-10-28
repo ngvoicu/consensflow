@@ -597,3 +597,20 @@ find = '''
         env:
           CF_KIT_PACED: 1'''
 replace = ""
+
+[[plant]]
+name = "pacing review: urgent: a head an urgent row lets go with no rest goes with no look"
+meant = "an_urgent_head_waits_while_the_windows_harness_says_it_is_at_work"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = '''
+        let Some(rest) = rest else {
+            let unrest'''
+replace = '''
+        let Some(rest) = rest else {
+            if urgent {
+                return Ok(Pace::Go);
+            }
+            let unrest'''
