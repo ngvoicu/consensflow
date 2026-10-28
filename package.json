@@ -56,6 +56,7 @@
     "live:codex-interrupt": "cargo xtask live codex-interrupt",
     "live:asks": "cargo xtask live asks",
     "live:codex-resume": "cargo xtask live codex-resume",
+    "live:compacting": "cargo xtask live compacting",
     "live:terminal": "cargo xtask live terminal",
     "live:designer": "cargo xtask live designer",
     "live:approval": "cargo xtask live approval",

@@ -89,6 +89,7 @@ use std::rc::Rc;
 use cf_base::js;
 use cf_harness::contract::{Input, Observed, Pane};
 use cf_harness::records::{Reading, Role, Settlement};
+use cf_proto::panes::TAIL_LINES;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
@@ -98,6 +99,7 @@ use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
 use crate::seams::EngineError;
+use crate::shown::Shown;
 use crate::trust::Trusting;
 
 /// An Enter, pressed once more for a paste its window did not send.
@@ -217,14 +219,21 @@ impl Dispatcher {
                 return Ok(());
             }
             let waited = self.now() - delivering.since;
+            let at_work = self.reads_at_work(record, observed);
             // One handed over by a paste once its window was up is pressed Enter for
-            // once more, as any paste is; one its window read as it opened never is.
+            // once more, as any paste is; one its window read as it opened never is, nor
+            // one whose window is at work on it, or on what came before it.
             if delivering.late
                 && !delivering.entered_again
+                && !at_work
                 && waited > ENTER_AGAIN_MS
                 && self.pasted(record)
             {
                 return self.enter_again(record, delivering.message).await;
+            }
+            // The chief's window is the human's own, and its wait is told of by itself (T-629).
+            if at_work && !delivering.chief {
+                self.watch_work(record, &delivering).await?;
             }
             // The chief's window is the human's: however long it takes to
             // show its first message (the handoff), it is never closed for that.
@@ -233,23 +242,36 @@ impl Dispatcher {
             }
             // What the window shows is asked before it closes: the screen goes with it.
             let pane = record.window.borrow().pane.clone();
-            let (shown, settles) = self.look_before_giving_up(record, pane.as_ref()).await;
+            let shown = match pane.as_ref() {
+                Some(pane) => self.look_at(pane).await,
+                None => Shown::default(),
+            };
             // An exit that came while the host answered settled the launch already.
-            if !settles {
+            let on_its_way = record
+                .delivery
+                .borrow()
+                .delivering
+                .as_ref()
+                .is_some_and(|now| now.message == delivering.message);
+            if !on_its_way {
                 return Ok(());
             }
+            // A window at work, on it or on what came before it, did not lose it: its
+            // harness compacting its conversation first (T-901), or a turn its record
+            // reads in flight. It is given its whole time again, and told of once it has
+            // waited long (`at_work`).
+            let compacting = self.compacting(record, delivering.message, &shown);
+            if compacting || at_work {
+                return self.wait_on_work(record, delivering.message);
+            }
+            // Said of the window before it is closed.
+            let because = self.never_ready(record, &delivering, trust);
+            record.delivery.borrow_mut().delivering = None;
             let (this, held) = (Rc::clone(self), Rc::clone(record));
             let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
-            // A window delivered its first message once up that never took it was
-            // never ready for it (`hand_first`).
-            let because = if delivering.owed.is_some() {
-                "the window was never ready for its first message"
-            } else {
-                "the window never showed its first message"
-            };
             self.settle_failure(
                 delivering,
-                &self.unstarted_because(record, because, &shown),
+                &self.unstarted_because(record, &because, &shown),
                 false,
             )?;
             closing.await?;
@@ -259,6 +281,20 @@ impl Dispatcher {
         // that conversation's record says what came of it, the queued one's too.
         if let Some(left) = self.left(record, &delivering)? {
             return self.watch_left(record, delivering, &left).await;
+        }
+        // A paste that has waited long on a window at work is looked at for a
+        // compaction that never ends (`at_work`), whoever's queue has it.
+        if self.reads_at_work(record, observed) {
+            self.watch_work(record, &delivering).await?;
+            let on_its_way = record
+                .delivery
+                .borrow()
+                .delivering
+                .as_ref()
+                .is_some_and(|now| now.message == delivering.message);
+            if !on_its_way {
+                return Ok(());
+            }
         }
         if delivering.queued {
             return Ok(());
@@ -337,6 +373,29 @@ impl Dispatcher {
             "the harness record never showed it".to_owned()
         };
         self.settle_failure(delivering, &because, true)
+    }
+
+    /// Why a launch's first message is given up at the end of its time, its window at
+    /// rest: its window never showed it, or, where it was never handed over, was never
+    /// ready for it, in words that name what was waited for (T-863): the prompt its
+    /// harness's reader knows, where the window has drawn neither it nor a question of
+    /// its folder's trust (`trust`), else why its harness last said it was not ready.
+    fn never_ready(&self, record: &Record, delivering: &Delivering, trust: Trusting) -> String {
+        if delivering.owed.is_none() {
+            return "the window never showed its first message".to_owned();
+        }
+        let sign = self
+            .window_of(record)
+            .0
+            .and_then(|window| window.ready_sign().map(str::to_owned));
+        match (sign, &delivering.not_ready) {
+            (Some(sign), _) if trust == Trusting::Looking => format!(
+                "the window never showed the prompt its first message waits for, \
+                 a screen line with \"{sign}\""
+            ),
+            (_, Some(why)) => format!("the window was never ready for its first message: {why}"),
+            _ => "the window was never ready for its first message".to_owned(),
+        }
     }
 
     /// The conversation the message on its way was pasted into, where the window is on
@@ -543,7 +602,7 @@ impl Dispatcher {
         };
         self.entered_again(record, message, true);
         // A host that cannot say what the window does now says nothing of the paste.
-        let Some(snapshot) = self.snapshot_now(&pane).await else {
+        let Some(snapshot) = self.snapshot_now(&pane, false).await else {
             self.entered_again(record, message, false);
             self.unknown(record, NO_ANSWER);
             return Ok(());
@@ -652,9 +711,13 @@ impl Dispatcher {
 
     /// The pane host's word on the window now: none where it failed, or came too late
     /// ([`SLOW_READ_MS`]) to say what the window does now.
-    async fn snapshot_now(&self, pane: &Pane) -> Option<Value> {
+    /// With `tail`, the screen's last lines too.
+    async fn snapshot_now(&self, pane: &Pane, tail: bool) -> Option<Value> {
         let asked = self.now();
-        let body = json!({ "id": pane.id, "generation": pane.generation });
+        let mut body = json!({ "id": pane.id, "generation": pane.generation });
+        if tail {
+            body["tail"] = json!(TAIL_LINES);
+        }
         // `.catch(() => null)` made a promise of its own to wait on, a turn
         // after the host's answer.
         let snapshot = returning(self.seams.host.request("pane.snapshot", body))
@@ -682,12 +745,23 @@ impl Dispatcher {
         let (Some(window), Some(pane)) = (window, pane) else {
             return Ok(true);
         };
-        let Some(snapshot) = self.snapshot_now(&pane).await else {
+        let Some(snapshot) = self.snapshot_now(&pane, true).await else {
             self.unknown(record, NO_ANSWER);
             return Ok(false);
         };
         if js::truthy(snapshot.get("pasteInFlight")) {
             self.unknown(record, "its pane host is writing a paste into it still");
+            return Ok(false);
+        }
+        // A window whose harness compacts its conversation is at work, whatever its
+        // record says (Pi's says nothing until it is done, T-901): its record has its
+        // whole time from the compaction's end, and nothing goes again meanwhile.
+        if self.compacting(record, message, &Shown::from_snapshot(&snapshot)) {
+            if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
+                delivering.rested_since = None;
+                delivering.turned = true;
+            }
+            self.tell_waits_on_work(record, message)?;
             return Ok(false);
         }
         // A paste the host held while it was slow, written only now: the record has

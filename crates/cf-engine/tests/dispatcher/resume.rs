@@ -2512,7 +2512,7 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(
@@ -2566,7 +2566,7 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(

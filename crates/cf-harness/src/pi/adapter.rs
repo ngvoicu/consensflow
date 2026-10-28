@@ -39,7 +39,7 @@ use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
-use crate::shared::{specmint, window_args};
+use crate::shared::{compacting, specmint, window_args};
 
 /// Why a window that has not named its conversation waits.
 const HOLD: &str = "Pi has not said yet which conversation its window shows";
@@ -217,6 +217,12 @@ impl Window for PiWindow {
     /// Pi's own conversation is named by the extension, never by the window's
     /// process.
     fn opened(&self, _pid: Option<u32>) {}
+
+    /// Pi writes nothing of a compaction to its session until it is over, and compacts
+    /// before it records the prompt that set it off: its status line says it.
+    fn compacting(&self, screen: &[String]) -> bool {
+        compacting::drawn(screen, &compacting::PI)
+    }
 
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());

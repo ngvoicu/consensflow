@@ -1,0 +1,212 @@
+# A window at work is no window that lost what it was given (T-901). On 2026-10-28 (3.0.6-alpha.2)
+# a Codex window opened again on a long thread took the chief's tell from its broker and compacted
+# the thread before it wrote the tell ("• Compacting context (2m 57s • esc to interrupt)"); the
+# first message's three minutes ran out, the daemon failed it as "the window never showed its first
+# message" and closed the window, and the chief sent the words again from memory.
+#
+# - The engine reads a window at work by its record, a turn in flight in a conversation that holds
+#   one, or by its screen, its harness's status that it compacts (`Window::compacting`, read in
+#   `crates/cf-harness/src/shared/compacting.rs` for Claude Code, Codex and Pi): a launch's first
+#   message found so at the end of its time is given its time again, and a later paste is not
+#   pasted again while its window compacts (`arrival.rs`, `at_work.rs`). One that waits 15 min on a
+#   compaction, or a first message on a window at work on something else, is told once to whoever
+#   sent it and the human.
+# - A launch given up whose window never showed its prompt says which screen line was waited for,
+#   and one never ready says its harness's words for why (T-863, `arrival.rs`'s `never_ready`).
+# - Words told to a task's window that fail come back to whoever told them, word for word
+#   (`deliveries.rs`'s `words_back` and the told-words failure note).
+# - The stand-in Codex compacts at a turn's start for `COMPACT <seconds>` (`fake_codex/agent.rs`),
+#   and the live case reads a rollout's compaction before its message (`tests/live_compacting.rs`).
+#
+# The rig's case builds the native `cf` from the sources as planted, so its plant says `builds`.
+# Every name holds `compacting:`, so `npm run plants:daemon -- "compacting:"` runs them all.
+
+[run]
+cmp-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "compacting::"]
+cmp-engine-delivered = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "first_delivered::"]
+cmp-engine-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells::"]
+cmp-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::compacting::"]
+cmp-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_window_compacting_before_its_first_message_was_closed::"], builds = true }
+cmp-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-codex", "agent::"]
+cmp-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_compacting", "tests::"]
+
+[[plant]]
+name = "compacting: a first message's time runs out under a window at work (main's shape)"
+meant = "a_first_message_waits_for_a_window_compacting_past_its_launch_s_time_and_arrives_once_it_is_done"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            if compacting || at_work {"
+replace = "            if false {"
+
+[[plant]]
+name = "compacting: the rig's Codex window that compacts before its first message is closed (main's shape)"
+meant = "a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_done"
+runs = ["cmp-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            if compacting || at_work {"
+replace = "            if false {"
+
+[[plant]]
+name = "compacting: the screen's compaction is not read at the end of a first message's time"
+meant = "a_first_message_waits_for_a_compaction_its_screen_shows_though_its_record_reads_at_rest"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            let compacting = self.compacting(record, delivering.message, &shown);"
+replace = "            let compacting = self.compacting(record, delivering.message, &shown) && false;"
+
+[[plant]]
+name = "compacting: a record at work in its conversation reads as no work"
+meant = "a_window_owed_its_first_message_that_reads_at_work_is_waited_for_past_its_launch_s_time"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/at_work.rs"
+find = "                && !observed.items().is_empty()"
+replace = "                && false"
+
+[[plant]]
+name = "compacting: an empty record whose window reads busy is waited for as work"
+meant = "fails_a_launch_whose_first_message_never_arrives"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::fails_a_launch_whose_first_message_never_arrives"]]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/at_work.rs"
+find = "                && !observed.items().is_empty()"
+replace = "                && true"
+
+[[plant]]
+name = "compacting: a later paste goes again while its window compacts"
+meant = "a_later_message_is_not_pasted_again_while_its_window_compacts_at_rest_by_its_record"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if self.compacting(record, message, &Shown::from_snapshot(&snapshot)) {"
+replace = "        if self.compacting(record, message, &Shown::from_snapshot(&snapshot)) && false {"
+
+[[plant]]
+name = "compacting: a compaction that never ends is told to nobody"
+meant = "a_compaction_that_never_ends_is_told_once_to_the_requester_and_the_human_and_its_message_waits"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/at_work.rs"
+find = "        if waited < TOLD_AFTER_MS || !(compacting || launch) {"
+replace = "        if true {"
+
+[[plant]]
+name = "compacting: a compaction that never ends is told at every look"
+meant = "a_compaction_that_never_ends_is_told_once_to_the_requester_and_the_human_and_its_message_waits"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/at_work.rs"
+find = "        on_its_way(record, message, |delivering| delivering.work.told = true);"
+replace = "        on_its_way(record, message, |delivering| delivering.work.told = false);"
+
+[[plant]]
+name = "compacting: a launch given up for no prompt does not say which screen line it waited for"
+meant = "a_window_that_never_shows_the_prompt_its_first_message_waits_for_is_given_up_in_words_that_name_it"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            (Some(sign), _) if trust == Trusting::Looking => format!("
+replace = "            (Some(sign), _) if trust != Trusting::Looking => format!("
+
+[[plant]]
+name = "compacting: a launch given up as never ready does not say why its harness held it"
+meant = "a_window_never_ready_for_its_first_message_in_the_launch_s_time_is_given_up_and_its_brief_fails"
+runs = ["cmp-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                self.not_ready(record, first.message, held.sentence());"
+replace = ""
+
+[[plant]]
+name = "compacting: a tell that never reaches its window is not given back to its teller"
+meant = "words_told_to_a_window_that_never_reach_it_come_back_to_whoever_told_them_word_for_word"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        let tell = message.kind == \"question\""
+replace = "        let tell = false && message.kind == \"question\""
+
+[[plant]]
+name = "compacting: words told to a window that fail their task are not in their teller's note"
+meant = "words_that_never_reach_the_window_are_told_to_whoever_told_them_as_to_the_requester"
+runs = ["cmp-engine-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                    if teller == Some(to) {"
+replace = "                    if teller == Some(to) && false {"
+
+[[plant]]
+name = "compacting: Codex's status line while it compacts is not read"
+meant = "reads_codex_compacting_as_the_field_s_screen_drew_it"
+runs = ["cmp-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/compacting.rs"
+find = "pub(crate) const CODEX: [&str; 1] = [\"Compacting context (\"];"
+replace = "pub(crate) const CODEX: [&str; 1] = [\"Compacting the context (\"];"
+
+[[plant]]
+name = "compacting: Claude Code's status line while it compacts is not read"
+meant = "reads_claude_compacting_with_its_turning_glyph_or_none"
+runs = ["cmp-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/compacting.rs"
+find = "    \"Compacting conversation…\",\n"
+replace = ""
+
+[[plant]]
+name = "compacting: Pi's automatic compaction is not read"
+meant = "reads_each_of_pi_s_compactions"
+runs = ["cmp-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/compacting.rs"
+find = "    \"Auto-compacting... (escape to cancel)\",\n"
+replace = ""
+
+[[plant]]
+name = "compacting: a status line read anywhere in a line, a quote of it among them"
+meant = "reads_claude_compacting_with_its_turning_glyph_or_none"
+runs = ["cmp-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/compacting.rs"
+find = "        statuses.iter().any(|status| words.starts_with(status))"
+replace = "        statuses.iter().any(|status| line.contains(status))"
+
+[[plant]]
+name = "compacting: the stand-in Codex never compacts"
+meant = "a_message_that_says_compact_has_the_thread_compacted_that_long_first"
+runs = ["cmp-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = "        .map(Duration::from_secs)\n}"
+replace = "        .map(Duration::from_secs)\n        .filter(|_| false)\n}"
+
+[[plant]]
+name = "compacting: the live case reads a compaction after the message as before it"
+meant = "reads_the_compaction_its_turn_began_with_before_the_message_as_probed_on_codex_0_165"
+runs = ["cmp-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_compacting.rs"
+find = "        let compaction = records[began..message]"
+replace = "        let compaction = records[began..]"

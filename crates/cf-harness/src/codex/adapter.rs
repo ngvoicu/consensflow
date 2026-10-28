@@ -54,7 +54,7 @@ use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::resumable::transcript_kept;
-use crate::shared::{specmint, window_args};
+use crate::shared::{compacting, specmint, window_args};
 
 /// Codex's question tool (`request_user_input`) is behind a feature still
 /// marked under development; the broker answers a member's from the board.
@@ -304,6 +304,13 @@ impl CodexWindow {
 impl Window for CodexWindow {
     /// The thread is named by the broker, never by the window's process.
     fn opened(&self, _pid: Option<u32>) {}
+
+    /// Codex compacts a long thread at the start of a turn, its record an open turn
+    /// and nothing more until it is done, the message that began it written after:
+    /// its status line says it.
+    fn compacting(&self, screen: &[String]) -> bool {
+        compacting::drawn(screen, &compacting::CODEX)
+    }
 
     fn follow(&self, session: &str) {
         *self.thread.borrow_mut() = Some(session.to_owned());

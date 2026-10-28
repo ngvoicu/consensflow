@@ -40,6 +40,9 @@ mod a_close_waited_for_a_codex_chiefs_server_to_end;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
 #[cfg(unix)]
+#[path = "regressions/a_codex_window_compacting_before_its_first_message_was_closed.rs"]
+mod a_codex_window_compacting_before_its_first_message_was_closed;
+#[cfg(unix)]
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
 mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 #[path = "regressions/a_command_that_never_exits_held_a_workers_result.rs"]
