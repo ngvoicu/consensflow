@@ -150,8 +150,10 @@ impl JobObject {
         let mut held = Vec::new();
         for pid in self.process_ids()? {
             match self.look_at(pid) {
-                // A program whose path could not be read is not known to be no shell.
+                // A program whose path could not be read is not known to be no shell, unless
+                // it was ending as it was read.
                 Looked::Held(one) if !one.member.exe.is_empty() => held.push(one),
+                Looked::Held(one) if one.process.ends_soon() => {}
                 Looked::Gone => {}
                 Looked::Held(_) | Looked::Unreadable => return Ok(None),
             }
@@ -205,14 +207,14 @@ impl JobObject {
         // SAFETY: both handles are open, and `inside` is writable.
         let asked = unsafe { IsProcessInJob(process.0, self.handle, &mut inside) };
         if asked == 0 {
-            return Looked::Unreadable;
+            return process.unread();
         }
         // Its number is another's now, which is no process of the job.
         if inside == 0 {
             return Looked::Gone;
         }
         let Some(began) = began(&process) else {
-            return Looked::Unreadable;
+            return process.unread();
         };
         let exe = image_path(&process).unwrap_or_default();
         Looked::Held(Held {
@@ -230,7 +232,7 @@ impl JobObject {
                 parent: None,
             },
             parent: parent_of(&process),
-            _process: process,
+            process,
         })
     }
 
@@ -301,7 +303,7 @@ enum Looked {
 struct Held {
     /// Open for as long as what was read of it is: a number is this process's while its
     /// handle is, so a parent named by number in the same look is the process held under it.
-    _process: Process,
+    process: Process,
     member: Member,
     /// The number of the process that started it, as the system names it.
     parent: Option<u32>,
@@ -406,7 +408,29 @@ impl Process {
         // of no time only asks.
         unsafe { WaitForSingleObject(self.0, 0) == WAIT_OBJECT_0 }
     }
+
+    /// Whether the process ends within [`ENDING`]: one that was being ended as it was read
+    /// (T-906 on zeewin: a shell `Stop-Process` had ended, its path no longer to be read
+    /// while its last thread went) fails a read before its handle is signalled.
+    fn ends_soon(&self) -> bool {
+        // SAFETY: the handle is open, and was opened with the right to wait on it.
+        unsafe { WaitForSingleObject(self.0, ENDING) == WAIT_OBJECT_0 }
+    }
+
+    /// What a read of it that failed says: that it is gone, where it was ending, else that
+    /// a process there could not be read.
+    fn unread(&self) -> Looked {
+        if self.ends_soon() {
+            Looked::Gone
+        } else {
+            Looked::Unreadable
+        }
+    }
 }
+
+/// How long, in milliseconds, a look waits for a process whose read failed to end before
+/// it says the process could not be read.
+const ENDING: u32 = 200;
 
 impl Drop for Process {
     fn drop(&mut self) {
