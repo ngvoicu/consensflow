@@ -29,6 +29,7 @@ use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 mod agents;
+mod closed_at_rest;
 mod compact_cancelled;
 mod outside;
 mod relaunched;

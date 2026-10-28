@@ -23,8 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Over, Prepared,
-    Readiness, Skill, Trusts, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
+    Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -122,6 +122,9 @@ pub struct FakeAgent {
     /// Its record, read with no window open, cannot tell whether its turn was
     /// cut: Devin's, which reads a turn as going on only while its window shows it.
     pub cannot_tell_a_cut: bool,
+    /// The message its record shows a turn with no end began with, read with no
+    /// window open: none where it shows none.
+    pub opening: Option<Opening>,
     /// What its harness says of going on with the conversation, as its own record
     /// tells it: it holds it (`Some(true)`, as every harness did before it was
     /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
@@ -183,6 +186,9 @@ pub struct FakeAdapter {
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// What its windows' input boxes show (`unsent_words`): none, as an adapter
+    /// with no reader of its harness's box.
+    pub box_words: RefCell<Option<String>>,
     /// A `started` of the test's own, that fails some windows.
     pub started: RefCell<Option<Started>>,
     /// A `came_up` of the test's own, that says a window came up after all.
@@ -331,6 +337,7 @@ impl FakeAdapter {
             starts_given_up: RefCell::new(Vec::new()),
             items,
             ready: RefCell::new(None),
+            box_words: RefCell::new(None),
             started: RefCell::new(None),
             came_up: RefCell::new(None),
             prepare: RefCell::new(None),
@@ -582,6 +589,16 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.cannot_tell_a_cut = true);
     }
 
+    /// Its record, read with no window open, shows the turn it is in begun by the
+    /// message of `words`, which came at `at`, where a time is given.
+    pub fn turn_began_with(&self, handle: &str, at: Option<&str>, words: &str) {
+        let opening = Opening {
+            at: at.map(str::to_owned),
+            words: words.to_owned(),
+        };
+        self.with(handle, |agent| agent.opening = Some(opening.clone()));
+    }
+
     /// Its harness holds nothing of the window's conversation, as Codex holds
     /// nothing of a thread before its first turn.
     pub fn holds_nothing(&self, handle: &str) {
@@ -716,14 +733,17 @@ impl FakeAdapter {
 
     /// Whether the turn `session`'s record ends in was cut, as a harness reads it
     /// with no window open: none where no window had it, or its record cannot tell.
-    pub(super) fn cut_of(&self, session: &str) -> Option<bool> {
+    pub(super) fn cut_of(&self, session: &str) -> Option<TurnLeft> {
         let agents = self.agents.borrow();
         agents
             .iter()
             .rev()
             .find(|agent| agent.native == session)
             .filter(|agent| !agent.cannot_tell_a_cut)
-            .map(|agent| !agent.settled)
+            .map(|agent| match agent.settled {
+                true => TurnLeft::AtRest,
+                false => TurnLeft::Cut(agent.opening.clone()),
+            })
     }
 
     /// Whether the store of `session` says its window took a paste that begins with
@@ -984,6 +1004,7 @@ impl Asked {
             over: Over::No,
             busy_when_interrupted: false,
             cannot_tell_a_cut: false,
+            opening: None,
             resumable: Some(true),
             unreadable: None,
         };

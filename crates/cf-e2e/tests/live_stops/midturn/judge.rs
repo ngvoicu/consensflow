@@ -85,6 +85,9 @@ pub struct Seen {
     pub told_human: usize,
     pub told_requester: usize,
     pub task_state: String,
+    /// The closes the daemon asked of the window's pane since the pause: what a stop
+    /// it took for ignored did, read from the pane host, whatever the notes say.
+    pub closed: usize,
 }
 
 /// The checks of the stop: the daemon pressed, read the window at rest and paid
@@ -100,6 +103,7 @@ pub fn judge(case: &mut Account, seen: &Seen) {
         told_human,
         told_requester,
         task_state,
+        closed,
     } = seen;
     let rounds = rounds_of(presses);
     case.check(
@@ -159,6 +163,11 @@ pub fn judge(case: &mut Account, seen: &Seen) {
         "the task is paused",
         task_state == "paused",
         format!("the task is {task_state}"),
+    );
+    case.check(
+        "its window is open, as it was",
+        *closed == 0,
+        format!("{} asked of its pane", plural(*closed, "close")),
     );
 }
 
@@ -297,6 +306,7 @@ mod tests {
             told_human: 0,
             told_requester: 0,
             task_state: "paused".to_owned(),
+            closed: 0,
         };
         let end = Look {
             at: 9_400,
@@ -338,6 +348,7 @@ mod tests {
             told_human: 0,
             told_requester: 0,
             task_state: "paused".to_owned(),
+            closed: 0,
         }
     }
 
@@ -371,7 +382,11 @@ mod tests {
             case.lines()[4],
             "ok   the task is paused: the task is paused"
         );
-        assert_eq!(case.lines().len(), 5);
+        assert_eq!(
+            case.lines()[5],
+            "ok   its window is open, as it was: 0 closes asked of its pane"
+        );
+        assert_eq!(case.lines().len(), 6);
     }
 
     #[test]
@@ -428,6 +443,17 @@ mod tests {
         assert_eq!(
             case.lines()[4],
             "FAIL the task is paused: the task is working"
+        );
+        // A close is read from the pane host: no note need say it.
+        let closed = Seen {
+            closed: 1,
+            ..seen()
+        };
+        let case = judged(&closed);
+        assert!(!case.held());
+        assert_eq!(
+            case.lines()[5],
+            "FAIL its window is open, as it was: 1 close asked of its pane"
         );
     }
 

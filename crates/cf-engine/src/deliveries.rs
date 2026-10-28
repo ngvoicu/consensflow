@@ -129,6 +129,10 @@ pub(crate) struct DeliveryPart {
     /// what an item since then is held to (`take_unproven`), with no scan of the events.
     /// A start has none, and asks the ledger's `delivery_begun_at`.
     pub(crate) begun_at: Option<(i64, String)>,
+    /// The message held for what the human typed and has not sent, and when a look
+    /// first found it so, every look since finding it so too: past [`UNSENT_TOLD_MS`]
+    /// the human hears it, once a message (`unsent_told`, by its note).
+    pub(crate) unsent_since: Option<(i64, i64)>,
     /// What goes into the window before anything else of its queue, in this
     /// order and while it waits and may go: a launch that is to say a role
     /// first puts the replacement here, and the message it displaced after it
@@ -444,6 +448,7 @@ impl Dispatcher {
         if held == Some(Held::Unsent) {
             record.delivery.borrow_mut().emptied = None;
         }
+        self.unsent_held(record, &message, held.as_ref()).await?;
         if let Some(held) = held {
             // Said once a reason, so a wait is in the trace, not a mystery.
             let reason = format!("the window is not ready for a paste: {}", held.sentence());
@@ -759,6 +764,11 @@ impl Dispatcher {
         let Some(message) = self.seams.ledger.borrow().message(first.message)? else {
             return Ok(());
         };
+        let held = match &ready {
+            Readiness::Held(held) => Some(held),
+            Readiness::Ready | Readiness::Unfit(_) => None,
+        };
+        self.unsent_held(record, &message, held).await?;
         match ready {
             Readiness::Ready => self.came_up(record),
             Readiness::Held(held) => {
@@ -957,6 +967,135 @@ impl Dispatcher {
             owed: None,
             late: false,
         }
+    }
+
+    /// A look found `message` ready, or held (`held`): for what the human typed in
+    /// `record`'s window and has not sent, or for another reason. Every look asks the
+    /// window again, whatever the last one read; one held so from a first look on for
+    /// [`UNSENT_TOLD_MS`] is told to the human, once, with what the window's box shows
+    /// (T-839: three results waited two hours for words the screen showed nowhere, told
+    /// by the lane alone). Only a look that found it ready starts the time again: a look
+    /// held for another reason (a snapshot that failed or came late, on a loaded Mac)
+    /// leaves it running (Calliope's T-844). A hold told already, by this engine or by
+    /// one before a restart (its note to the human), is not told again.
+    async fn unsent_held(
+        &self,
+        record: &Record,
+        message: &MessageView,
+        held: Option<&Held>,
+    ) -> Result<(), EngineError> {
+        let now = self.now();
+        let since = {
+            let mut part = record.delivery.borrow_mut();
+            match (held, part.unsent_since) {
+                (None, _) => {
+                    part.unsent_since = None;
+                    return Ok(());
+                }
+                (Some(held), _) if *held != Held::Unsent => return Ok(()),
+                (_, Some((held, since))) if held == message.id => since,
+                _ => {
+                    part.unsent_since = Some((message.id, now));
+                    return Ok(());
+                }
+            }
+        };
+        if now - since < UNSENT_TOLD_MS || self.unsent_told(message)? {
+            return Ok(());
+        }
+        let words = match self.window_of(record) {
+            (Some(window), Some(pane)) => window.unsent_words(&*self.seams.host, &pane).await,
+            _ => None,
+        };
+        self.tell_unsent(message, now - since, words.as_deref())
+    }
+
+    /// Whether the human was told already that `message` waits for words typed in its
+    /// window: a note of the engine's to them since, which says so.
+    fn unsent_told(&self, message: &MessageView) -> Result<bool, EngineError> {
+        let project = self.known_project(message.project_id)?;
+        let Some(human) = project
+            .participants
+            .iter()
+            .find(|participant| participant.handle == "human")
+        else {
+            return Ok(false);
+        };
+        let told = self.seams.ledger.borrow().note_since(
+            human.id,
+            message.id,
+            &unsent_note_head(message),
+        )?;
+        Ok(told.is_some())
+    }
+
+    /// The human hears that `message` has waited `waited` milliseconds for words typed in
+    /// its window and not sent, and what the window's box shows of them (`words`, none
+    /// where it cannot be read); the requester of its task hears it too, unless that is
+    /// the human or the window's own.
+    fn tell_unsent(
+        &self,
+        message: &MessageView,
+        waited: i64,
+        words: Option<&str>,
+    ) -> Result<(), EngineError> {
+        let project = self.known_project(message.project_id)?;
+        // The human sees two characters of the box; a member's window, the count alone.
+        let shows = |shown: &dyn Fn(&str) -> String| match words.map(js::trim) {
+            Some("") => {
+                "its input box shows nothing, though keys typed there count as not sent".to_owned()
+            }
+            Some(words) => format!("its input box shows {}", shown(words)),
+            None => {
+                "its input box cannot be read on its screen, and keys typed there count as not sent"
+                    .to_owned()
+            }
+        };
+        let held = |shown: &dyn Fn(&str) -> String| {
+            format!(
+                "{} {} minutes for @{}'s window, held for words typed there and not sent: {}",
+                unsent_note_head(message),
+                waited / 60_000,
+                message.recipient,
+                shows(shown)
+            )
+        };
+        let note = |to: &str, body: String| {
+            self.seams.ledger.borrow_mut().note(
+                project.id,
+                &NewNote {
+                    from: None,
+                    to: to.to_owned(),
+                    task: message.task_number,
+                    body,
+                },
+            )
+        };
+        note(
+            "human",
+            format!(
+                "{}. Send or erase them in that window and it goes in.",
+                held(&masked)
+            ),
+        )?;
+        let requester = match message.task_number {
+            Some(number) => self
+                .seams
+                .ledger
+                .borrow()
+                .task(project.id, number)?
+                .map(|thread| thread.task.requester),
+            None => None,
+        };
+        if let Some(requester) =
+            requester.filter(|requester| requester != "human" && *requester != message.recipient)
+        {
+            note(
+                &requester,
+                format!("{}. The human is told.", held(&counted)),
+            )?;
+        }
+        Ok(())
     }
 
     /// A delivery waits this pass, `reason` said in the trace once per message.
@@ -1532,6 +1671,30 @@ impl Dispatcher {
 pub(crate) struct Why {
     pub(crate) said: String,
     pub(crate) key: String,
+}
+
+/// How long a message is held for words typed in its window and not sent before the
+/// human is told: past any pause of someone writing a long message, under the two
+/// hours the field case waited (T-839). The lane says it from the first look.
+pub(crate) const UNSENT_TOLD_MS: i64 = 10 * 60_000;
+
+/// How a note that `message` waits for words typed in its window begins: what finds
+/// it among the human's notes again, after a restart.
+fn unsent_note_head(message: &MessageView) -> String {
+    format!("m-{}, {}, has waited", message.id, described(message))
+}
+
+/// What a window's box holds, as the requester of the message held is told of it:
+/// how many characters, none of them.
+fn counted(words: &str) -> String {
+    format!("{} characters", words.chars().count())
+}
+
+/// What a window's box holds, as the human is told of it: its first two characters
+/// and how many there are, never the rest, which may be anything the human pasted.
+fn masked(words: &str) -> String {
+    let shown: String = words.chars().take(2).collect();
+    format!("\"{shown}…\" ({} characters)", words.chars().count())
 }
 
 /// How many of the messages last pasted into a window are read for what

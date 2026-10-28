@@ -415,6 +415,16 @@ pub trait Window {
         host: &'a dyn PaneHost,
         pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>>;
+    /// What the window's input box shows, for the human told of a delivery held for
+    /// words typed there and not sent ([`Held::Unsent`]): its words, empty where it
+    /// shows none, or none where no reader of the harness's reads a box on the screen.
+    fn unsent_words<'a>(
+        &'a self,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+    ) -> Work<'a, Option<String>> {
+        Box::pin(async { None })
+    }
     /// Whether the engine asks [`Window::ready`] of the window before it has drawn its
     /// screen too, only for a window that says it never will be fit for work
     /// ([`Readiness::Unfit`]), which is given up then: a harness whose readiness has
@@ -754,6 +764,59 @@ pub struct Waiting {
     pub reason: Option<String>,
 }
 
+/// What a conversation's record, read with no window open, says of the turn its
+/// window was left in ([`Records::turn_cut`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnLeft {
+    /// Its last turn ended: whatever background work it left running, and whatever
+    /// the harness's own notices of it queued, the window was at rest.
+    AtRest,
+    /// It was in a turn with no end: the one the message there began, where the
+    /// record holds it.
+    Cut(Option<Opening>),
+}
+
+/// The message a turn began with, as its record holds it: when it came, where the
+/// record says a time, and its words, its whitespace made single spaces and cut short.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opening {
+    /// `2026-10-15 20:41 UTC`.
+    pub at: Option<String>,
+    pub words: String,
+}
+
+/// How many characters of a turn's first message [`Opening`] keeps.
+const OPENING_WORDS: usize = 100;
+
+impl Opening {
+    /// The message the turn at the end of `items` began with: the last of the user's
+    /// (none of the harness's own, and no compaction's summary), if one is there. None
+    /// where the last word is a whole reply: that turn ended, and what holds the record
+    /// in flight is a message taken and not begun, which no item shows.
+    fn of(items: &[Item]) -> Option<Self> {
+        if last_word(items).is_some_and(|item| item.role == Role::Assistant && item.complete) {
+            return None;
+        }
+        let item = items
+            .iter()
+            .rev()
+            .find(|item| item.role == Role::User && !item.compaction)?;
+        let words: Vec<&str> = item.text.split_whitespace().collect();
+        let words = words.join(" ");
+        let mut kept: String = words.chars().take(OPENING_WORDS).collect();
+        if kept.len() < words.len() {
+            kept.push('…');
+        }
+        let at = item
+            .at
+            .as_ref()
+            .and_then(Value::as_str)
+            .and_then(|at| at.parse::<jiff::Timestamp>().ok())
+            .map(|at| at.strftime("%Y-%m-%d %H:%M UTC").to_string());
+        Some(Self { at, words: kept })
+    }
+}
+
 /// A harness's own record of a conversation, as the engine serves it to
 /// the windows: a worker that owns the readers reads it off the engine's
 /// thread, where a first look at a long transcript takes a second.
@@ -814,8 +877,11 @@ pub trait Records {
     }
 
     /// Whether `harness`'s record of `session`, read with no window open, ends in
-    /// a turn with no end (the turn the app's quit cut, or a Close): yes, or no
-    /// where it ends at rest, and none where the record cannot tell. Devin's
+    /// a turn with no end (the turn the app's quit cut, or a Close), with the message
+    /// that began it ([`TurnLeft::Cut`]); at rest where it ends at rest, or where all
+    /// that holds its turn is the harness's notices of background work
+    /// ([`Lines::held_by_notices`](crate::records::Lines)): background work is rest;
+    /// and none where the record cannot tell. Devin's
     /// cannot: it reads a turn as going on only while its window shows it working,
     /// and one whose last word is the message it was given as settled, which with
     /// no window open is a turn never answered as much as one at rest. Where no
@@ -823,7 +889,7 @@ pub trait Records {
     /// had queued and not begun went with them and is no turn: a Claude that quit
     /// idle with a message queued leaves no sign of its quit in its record, and was
     /// cut in nothing (T-442's three).
-    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
+    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<TurnLeft>> {
         Box::pin(async move {
             let options = Options {
                 relaunched: self.transcript_left(harness, session).await.ok().flatten(),
@@ -831,8 +897,9 @@ pub trait Records {
             };
             match &*self.look(harness, session, &options).await {
                 Reading::Known(record) => match record.settlement {
-                    Settlement::InFlight => Some(true),
-                    Settlement::Settled if ends_in_a_reply(record) => Some(false),
+                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),
+                    Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),
+                    Settlement::Settled if ends_in_a_reply(record) => Some(TurnLeft::AtRest),
                     Settlement::Settled | Settlement::Unknown => None,
                 },
                 _ => None,
@@ -849,9 +916,15 @@ fn ends_in_a_reply(record: &Record) -> bool {
 
 /// The last word of a conversation's `items`: its last item but what the harness
 /// put in it itself (Devin's system and custom messages, Pi's extensions' messages,
-/// a hook's context), which can come after a reply.
+/// a hook's context, a compaction's summary), which can come after a reply. An idle
+/// compaction's summary is no word of the user's: a record that ends in one after a
+/// reply ends at rest (the sites chief's of 2026-10-23, T-814; a chief's undecided
+/// record was given no note, a member's was told its turn was cut).
 fn last_word(items: &[Item]) -> Option<&Item> {
-    items.iter().rev().find(|item| item.role != Role::Custom)
+    items
+        .iter()
+        .rev()
+        .find(|item| item.role != Role::Custom && !item.compaction)
 }
 
 #[cfg(test)]

@@ -189,6 +189,16 @@ impl Window for FakeWindow {
         Box::pin(async move { came_up.and_then(|came_up| came_up()) })
     }
 
+    /// The test's word of what the box shows: no call of Node's fake.
+    fn unsent_words<'a>(
+        &'a self,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+    ) -> Work<'a, Option<String>> {
+        let words = self.fake.box_words.borrow().clone();
+        Box::pin(async move { words })
+    }
+
     fn ready<'a>(
         &'a self,
         _host: &'a dyn PaneHost,

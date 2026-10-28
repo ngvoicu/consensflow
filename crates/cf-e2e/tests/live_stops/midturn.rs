@@ -322,6 +322,12 @@ pub fn stop_it(
             .as_str()
             .unwrap_or("undefined")
             .to_owned(),
+        closed: members
+            .rig()
+            .kills()
+            .iter()
+            .filter(|kill| kill["id"] == window.id())
+            .count(),
     };
     judge(case, &seen);
     show(case, &seen, &watched, &events, handle);

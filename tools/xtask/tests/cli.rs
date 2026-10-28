@@ -191,6 +191,7 @@ fn check_steps() -> Vec<String> {
     ];
     if !cfg!(windows) {
         steps.push(for_windows.to_string());
+        steps.push("cargo xtask clippy-windows app".to_string());
     }
     steps.extend([
         "cargo test --workspace --exclude app --exclude xtask".to_string(),

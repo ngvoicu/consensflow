@@ -52,7 +52,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
 find = '''                Look::Work => {
-                    self.interrupt_for(project, participant, record, &stop)
+                    self.interrupt_for(project, participant, record, &stop, observed)
                         .await
                 }'''
 replace = '''                Look::Work => Ok(()),'''

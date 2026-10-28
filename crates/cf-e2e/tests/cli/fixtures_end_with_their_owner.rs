@@ -24,6 +24,13 @@
 //! terminal or a pipe of the test is ended by the hangup when the test is gone: neither is
 //! asked for. The rule reads Rust: the JavaScript tests start no program that runs on. The
 //! few strings it lets, and why, are in [`LET`].
+//!
+//! And a loop's wait names its program by its path (`/bin/sleep`), whatever else the loop
+//! looks at (T-837). A fixture runs on the PATH its test or the daemon gives it, the test's
+//! own folder alone at times, where a bare `sleep` is not found: each turn of the loop then
+//! fails at once and the loop spins, and what it writes of that is more than a program's
+//! output may be. The daemon's stand-in `claude` was ended for it, 200 ms after it began,
+//! and a slow machine's test looked later than that (CI, 2026-10-27).
 
 use std::fs;
 
@@ -46,11 +53,21 @@ const LONGEST_DEAF_SLEEP: f64 = 60.0;
 
 /// The strings that run on and are let: the file, a piece of the string, and why. Each is
 /// looked for, and one that is no longer there is to be taken out.
-const LET: [(&str, &str, &str); 5] = [
+const LET: [(&str, &str, &str); 7] = [
     (
         "crates/cf-e2e/tests/live_monitor_wait.rs",
         "cf-mark-noisy",
         "a prompt for a real model: the monitor it names ends at the timeout_ms the prompt gives it, 30 s",
+    ),
+    (
+        "crates/cf-e2e/tests/live_monitor_wait.rs",
+        "echo tick $i; sleep 5",
+        "a prompt for a real model, whose own shell runs the loop on the human's PATH; a Windows one's too",
+    ),
+    (
+        "crates/cf-e2e/tests/live_monitor_wait.rs",
+        "cf-mark-run",
+        "a prompt for a real model, as the one above",
     ),
     (
         "crates/cf-e2e/tests/live_stops/slow.rs",
@@ -314,16 +331,40 @@ fn unbounded(text: &str) -> Vec<&'static str> {
     found
 }
 
-/// Every string of Rust source `source` that runs on without an end of its own.
+/// Whether a loop of `text` (`while`, `until` or `for`, a placeholder before it or not)
+/// waits with a `sleep` the PATH is to find, between its `do` and its `done`: prose that
+/// says "for", "do" and "sleep" ends no loop.
+fn sleeps_by_name(text: &str) -> bool {
+    let (mut in_loop, mut in_body, mut by_name) = (false, false, false);
+    for word in words(text) {
+        match word.rsplit('}').next().unwrap_or_default() {
+            "while" | "until" | "for" => in_loop = true,
+            "do" if in_loop => in_body = true,
+            "sleep" if in_body => by_name = true,
+            "done" if by_name => return true,
+            "done" => (in_loop, in_body) = (false, false),
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Every string of Rust source `source` that runs on without an end of its own, or whose
+/// loop waits with a program by its name alone.
 fn unowned(source: &str) -> Vec<Found> {
     literals(source)
         .into_iter()
         .flat_map(|literal| {
-            unbounded(&literal.text).into_iter().map(move |what| Found {
-                line: literal.line,
-                what,
-                text: literal.text.clone(),
-            })
+            let by_name = sleeps_by_name(&literal.text)
+                .then_some("a loop that sleeps by a name its PATH may not find");
+            unbounded(&literal.text)
+                .into_iter()
+                .chain(by_name)
+                .map(move |what| Found {
+                    line: literal.line,
+                    what,
+                    text: literal.text.clone(),
+                })
         })
         .collect()
 }
@@ -371,6 +412,32 @@ fn a_script_that_runs_on_for_ever_is_found_and_one_that_looks_at_its_owner_or_en
 }
 
 #[test]
+fn a_loop_that_sleeps_by_a_bare_name_is_found_and_one_that_names_the_path_is_not() {
+    let by_name = [
+        "while kill -0 $PPID 2>/dev/null; do sleep 0.2; done",
+        "#!/bin/sh\n/bin/sleep 120 &\nwhile kill -0 $! && kill -0 $PPID; do sleep 0.2; done\n",
+        "trap '' TERM; {first}while {owner}; do sleep 0.2; done",
+        "for _ in $(seq 10); do\n  kill -0 \"$PPID\" || exit 0\n  sleep 0.1\ndone",
+        "until mkdir lock 2>/dev/null; do sleep 0.01; done",
+        "for i in 1 2 3; do echo tick $i; sleep 5; done; echo finished",
+    ];
+    for script in by_name {
+        assert!(sleeps_by_name(script), "{script}");
+    }
+    let by_path = [
+        "while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done",
+        "sleep 30 & wait",
+        "trap 'sleep 1; exit 0' TERM; while kill -0 $PPID 2>/dev/null; do /bin/sleep 0.05; done",
+        "i=0; while [ $i -lt 20000 ]; do printf x; i=$((i+1)); done; sleep 1",
+        "import time\nwhile True:\n    time.sleep(1)",
+        "Stop waiting for that command; do not run it again. Then run `sleep 15` and wait for it.",
+    ];
+    for script in by_path {
+        assert!(!sleeps_by_name(script), "{script}");
+    }
+}
+
+#[test]
 fn only_the_strings_of_code_are_read() {
     let source = "// while :; do :; done\n\
                   /// `trap '' TERM; while true; do :; done`\n\
@@ -413,7 +480,7 @@ fn no_string_of_a_test_in_the_workspace_runs_on_without_looking_at_its_owner() -
     }
     assert!(
         found.is_empty(),
-        "these fixtures run on when the test that started them is gone; have them look at their owner (`kill -0 $PPID 2>/dev/null`, or cf_base::fixture):\n{}",
+        "these fixtures run on when the test that started them is gone, or spin where their PATH has no `sleep`; have them look at their owner (`kill -0 $PPID 2>/dev/null`, or cf_base::fixture), and name the program they wait with by its path (`/bin/sleep`):\n{}",
         found.join("\n")
     );
     let stale: Vec<String> = LET

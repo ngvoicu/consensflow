@@ -249,11 +249,11 @@ runs = ["engine-approval"]
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
 find = '''
-                self.press_round(record, key);
+                self.press_round(record, key, observed);
                 self.press(record).await;
                 Ok(())'''
 replace = '''
-                self.press_round(record, key);
+                self.press_round(record, key, observed);
                 Ok(())'''
 
 # --- Codex's answers: the markup of its own screen is not relayed ---

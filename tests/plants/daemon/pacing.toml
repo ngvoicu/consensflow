@@ -513,6 +513,20 @@ replace = '''
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]'''
 
 [[plant]]
+name = "pacing merge: lists: the smoke stand-in's attribute sits above its path, as main wrote it"
+meant = "a_platform_attribute_in_a_suites_list_sits_on_the_mod_line_it_gates"
+runs = ["pacing-rig-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig.rs"
+find = '''
+#[path = "rig/smoke_stand_in.rs"]
+#[cfg(unix)]'''
+replace = '''
+#[cfg(unix)]
+#[path = "rig/smoke_stand_in.rs"]'''
+
+[[plant]]
 name = "pacing review: lists: the rule reads no cfg_attr"
 meant = "the_rule_of_a_suites_list_reads_a_cfg_attr_and_a_path_with_a_comment_after_it"
 runs = ["pacing-rig-lists"]

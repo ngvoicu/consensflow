@@ -30,6 +30,7 @@ mod jobs;
 mod launch;
 mod left;
 mod names;
+pub mod nested;
 mod observe;
 mod project;
 mod report;

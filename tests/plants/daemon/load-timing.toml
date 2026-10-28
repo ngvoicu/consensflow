@@ -395,5 +395,5 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/fixture.rs"
-find = '''{first}while {OWNER_THERE}; do sleep 0.2; done")'''
-replace = '''{first}while :; do sleep 0.2; done")'''
+find = '''{first}while {OWNER_THERE}; do /bin/sleep 0.2; done")'''
+replace = '''{first}while :; do /bin/sleep 0.2; done")'''

@@ -170,6 +170,35 @@ impl Host {
     }
 }
 
+/// The file the console host of the windows was loaded from: the `conpty.dll` Windows
+/// found, which stays loaded once it is the host ([`Host::load`]), or else the system's
+/// own, in `kernel32.dll`. What a test of a key is of: each host makes its own keys of
+/// the same bytes.
+#[cfg(test)]
+pub(crate) fn host_library() -> io::Result<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
+
+    Host::get()?;
+    let named = |library: &str| {
+        let name = wide(OsStr::new(library));
+        // SAFETY: a NUL-terminated name; the call only asks.
+        let module = unsafe { GetModuleHandleW(name.as_ptr()) };
+        (!module.is_null()).then_some(module)
+    };
+    let module = named("conpty.dll")
+        .or_else(|| named("kernel32.dll"))
+        .ok_or_else(io::Error::last_os_error)?;
+    let mut file = vec![0u16; 32_768];
+    // SAFETY: a loaded module, and a buffer of the length given.
+    let length = unsafe { GetModuleFileNameW(module, file.as_mut_ptr(), 32_768) };
+    if length == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    file.truncate(length as usize);
+    Ok(PathBuf::from(OsString::from_wide(&file)))
+}
+
 /// A pipe, neither of whose ends a program started inherits.
 fn pipe() -> io::Result<(File, File)> {
     let (mut read, mut write) = (ptr::null_mut(), ptr::null_mut());

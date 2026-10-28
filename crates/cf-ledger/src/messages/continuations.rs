@@ -40,9 +40,32 @@ const STOPPED: &str = "ConsensFlow stopped while you were working on ";
 /// queued for a window that never came.
 const QUIT: &str = "ConsensFlow quit while you were working on ";
 
+/// What a note of ConsensFlow's says of the turn its window was cut in, after the
+/// task it names: the turn ([`cut_turn`]).
+const IN_THE_TURN: &str = ", in ";
+
 /// The words of a continuation of task `number`.
 pub fn continuation(number: i64) -> String {
     format!("{STOPPED}{}. {RESUME_WORDS}", named(&[number]))
+}
+
+/// The words of a continuation of task `number` whose window was cut in `turn`
+/// ([`cut_turn`]), so that the window can tell whether that turn was one of its.
+pub fn continuation_in(number: i64, turn: &str) -> String {
+    format!(
+        "{STOPPED}{}{IN_THE_TURN}{turn}. {RESUME_WORDS}",
+        named(&[number])
+    )
+}
+
+/// The turn a window was cut in, as ConsensFlow's notes name it: when the message
+/// that began it came, where its record says, and its words (T-814: a chief told
+/// only that its turn was cut could not tell a false note from a true one).
+pub fn cut_turn(at: Option<&str>, words: &str) -> String {
+    match at {
+        Some(at) => format!("the turn that began at {at} with \"{words}\""),
+        None => format!("the turn that began with \"{words}\""),
+    }
 }
 
 /// The tasks a continuation names, in its words or in those of 3.0.5 and the
@@ -53,13 +76,41 @@ pub fn continuation_tasks(body: &str) -> Option<Vec<i64>> {
     let (start, rest) = [STOPPED, QUIT]
         .into_iter()
         .find_map(|start| Some((start, body.strip_prefix(start)?)))?;
-    let list = rest.strip_suffix(&format!(". {RESUME_WORDS}"))?;
+    let said = rest.strip_suffix(&format!(". {RESUME_WORDS}"))?;
+    // The turn comes after the tasks, in this build's words alone: no task's name
+    // holds the words that lead it.
+    let (list, turn) = match said.split_once(IN_THE_TURN) {
+        Some((list, turn)) if start == STOPPED && turn.starts_with("the turn that began ") => {
+            (list, Some(turn))
+        }
+        _ => (said, None),
+    };
     let tasks = list
         .split(", ")
         .map(|task| task.strip_prefix("T-")?.parse().ok())
         .collect::<Option<Vec<i64>>>()?;
-    let written = format!("{start}{}. {RESUME_WORDS}", named(&tasks));
+    let turn = turn
+        .map(|turn| format!("{IN_THE_TURN}{turn}"))
+        .unwrap_or_default();
+    let written = format!("{start}{}{turn}. {RESUME_WORDS}", named(&tasks));
     (written == body).then_some(tasks)
+}
+
+/// Withdraws `message` where it is a note of ConsensFlow's own still queued, with
+/// `reason`, as the log says: whether it was.
+pub(crate) fn withdraw_queued_note(
+    store: &mut Store,
+    message: &MessageView,
+    reason: &str,
+) -> Result<bool, LedgerError> {
+    let Some(now) = store.message(message.id)? else {
+        return Ok(false);
+    };
+    if now.kind != "note" || now.sender.is_some() || now.state != "queued" {
+        return Ok(false);
+    }
+    withdraw_each(store, now.project_id, &[now.id], reason)?;
+    Ok(true)
 }
 
 /// The tasks as a continuation names them.
@@ -302,6 +353,24 @@ mod tests {
     }
 
     #[test]
+    fn a_continuation_that_names_the_turn_it_was_cut_in_reads_back_whatever_that_turn_s_words() {
+        for turn in [
+            cut_turn(Some("2026-10-15 20:41 UTC"), "Write the parser"),
+            cut_turn(
+                None,
+                "[ConsensFlow m-3 · T-9 · task from @chief] Go on, in T-9, with \"x\".",
+            ),
+        ] {
+            let body = continuation_in(7, &turn);
+            assert_eq!(continuation_tasks(&body), Some(vec![7]), "{body}");
+        }
+        assert_eq!(
+            continuation_in(7, &cut_turn(Some("2026-10-15 20:41 UTC"), "Write the parser")),
+            "ConsensFlow stopped while you were working on T-7, in the turn that began at 2026-10-15 20:41 UTC with \"Write the parser\". Go on where you stopped."
+        );
+    }
+
+    #[test]
     fn no_other_note_is_taken_for_a_continuation() {
         for body in [
             "",
@@ -311,6 +380,8 @@ mod tests {
             "ConsensFlow stopped while you were working on T-1,T-2. Go on where you stopped.",
             "ConsensFlow stopped while you were working on . Go on where you stopped.",
             "Heads up. ConsensFlow stopped while you were working on T-1. Go on where you stopped.",
+            "ConsensFlow stopped while you were working on T-1, in a hurry. Go on where you stopped.",
+            "ConsensFlow quit while you were working on T-1, in the turn that began with \"x\". Go on where you stopped.",
         ] {
             assert_eq!(continuation_tasks(body), None, "{body:?}");
         }

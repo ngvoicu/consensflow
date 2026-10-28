@@ -116,6 +116,11 @@ pub struct Lines {
     /// input box, where what is pasted next goes in after it: Claude Code's compaction
     /// cancelled with Escape (its reader, T-483).
     pub put_back: bool,
+    /// The turn reads in flight only for the harness's own notices of background work it
+    /// queued after the turn ended, with nothing of a turn for them begun (Claude Code's
+    /// notifications, its reader): a turn is to begin for each while its program runs,
+    /// and none began where it no longer does (T-814).
+    pub held_by_notices: bool,
 }
 
 /// A monitor a turn armed that its harness has said no end of: its task's id, what its
