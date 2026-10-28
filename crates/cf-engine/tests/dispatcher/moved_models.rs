@@ -617,3 +617,71 @@ fn a_move_older_than_the_window_does_not_keep_the_requester_from_hearing_the_tas
         );
     }
 }
+
+#[test]
+fn a_refusal_that_landed_after_the_last_look_and_before_a_restart_is_held_when_the_resume_goes_on_into_it(
+) {
+    // T-853's P2-1: the refusal is the record's last word and nobody looked at it, so the Resume
+    // writes the reopened window no note (its record reads at rest) and gives it no words. Its
+    // first look reads a refusal dated before the window opened, which holds nothing: the task
+    // goes on, once, and the refusal that comes of it, dated after the open, holds the member.
+    let held: [fn(String) -> Quota; 2] = [
+        |at| Quota::Unavailable {
+            at: Some(at),
+            because: BECAUSE.to_owned(),
+        },
+        |at| fell_back(&at).as_quota(),
+    ];
+    for held in held {
+        let context = Context::new();
+        context.adapter.resumes_records.set(true);
+        context.adapter.rereads_failures.set(true);
+        let tiers = Tiers::new(&context, &["zeus"]);
+        tiers.open();
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let zeus = tiers.assignee(1);
+        context.advance(60_000);
+        context.adapter.refuse(&zeus, held(now(&context)));
+        // The quit, and the human's Resume a minute after it.
+        context.ledger.borrow_mut().suspend_for_restart().unwrap();
+        context.advance(60_000);
+        let after = context.make();
+        after.settle_after_restart().unwrap();
+        after.resume_project(tiers.project.id).unwrap();
+        let inbox = context.ledger.borrow().inbox(tiers.id(&zeus), 100).unwrap();
+        assert!(
+            inbox.iter().all(|message| message.kind == "task"),
+            "the Resume wrote no note of a cut turn: {:?}",
+            inbox
+                .iter()
+                .map(|message| (&message.kind, &message.body))
+                .collect::<Vec<_>>()
+        );
+        for _ in 0..8 {
+            after.pass().unwrap();
+        }
+        let resumed = |context: &Context| {
+            given(context, &zeus)
+                .iter()
+                .filter(|said| said.contains("Resumed:"))
+                .count()
+        };
+        assert_eq!(
+            resumed(&context),
+            1,
+            "the task goes on in the reopened window: {:?}",
+            placed(&tiers.task(1).task)
+        );
+        assert_eq!(tiers.out_until("zeus"), None, "nothing holds it yet");
+        // The window refuses again: dated after the open, it holds the member and tells the human.
+        context.advance(60_000);
+        context.adapter.refuse(&zeus, held(now(&context)));
+        for _ in 0..4 {
+            after.pass().unwrap();
+        }
+        assert!(tiers.out_until("zeus").is_some(), "held under the rule");
+        assert_eq!(tiers.task(1).task.state, "paused");
+        assert_eq!(human_notes(&tiers).len(), 1, "{:?}", human_notes(&tiers));
+    }
+}

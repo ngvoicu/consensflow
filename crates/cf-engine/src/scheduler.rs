@@ -508,16 +508,38 @@ impl Dispatcher {
                 .is_some_and(|quota| quota.level() == Level::Exhausted)
     }
 
-    /// Whether the turn a window's look says a refusal cut short is history: the refusal holds
-    /// a member for no time and is dated before the window opened, so the window was opened
-    /// on a conversation whose last turn it cut, and its words (a Resume's, a Try again's) were
-    /// given at the open. That turn is not the window's own to go on with, nor to fail the task
-    /// for: the look that follows its first turn says (T-841).
-    pub(crate) fn cut_before_open(&self, record: &Record, observed: &Observed) -> bool {
-        observed
-            .quota
-            .as_deref()
-            .is_some_and(|quota| self.older_than_the_window(record, quota))
+    /// Whether words were given to a window after the turn its record ends in: the failure
+    /// its look still reads is that turn's, and the words begin another, so the task does not
+    /// go on in place over them (the Resume's or Try again's paste into a window opened on a
+    /// conversation a refusal ended, whose reader clears the failure only once the paste lands
+    /// in the record: T-841). Decided on the words and not on the refusal's date: a window
+    /// nothing was given after the cut (a Resume that wrote no note, a window kept open) goes
+    /// on, and a refusal that comes of it is dated after the open (T-853).
+    ///
+    /// The task's last paste is found in the record (a message is `delivered` only once the
+    /// record shows it), and no turn of the window's own follows it. Words still on their way
+    /// leave the task queued, which `go_on` passes over.
+    pub(crate) fn words_since_the_cut(
+        &self,
+        participant: &ParticipantView,
+        observed: &Observed,
+    ) -> Result<bool, EngineError> {
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(participant.id, false)?;
+        let Some(thread) = task else {
+            return Ok(false);
+        };
+        let items = observed.items();
+        Ok(self
+            .delivered_at(participant.id, &thread, items)?
+            .is_some_and(|pasted| {
+                !items[pasted + 1..]
+                    .iter()
+                    .any(|item| item.role == Role::Assistant)
+            }))
     }
 
     /// What a window's harness says of its quota, as of this look. Low is

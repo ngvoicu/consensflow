@@ -1645,7 +1645,7 @@ runs = ["muse-moved"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-                if !self.cut_before_open(record, &observed) {
+                if !self.words_since_the_cut(participant, &observed)? {
 '''
 replace = '''
                 if true {

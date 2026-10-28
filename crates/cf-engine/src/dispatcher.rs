@@ -1257,9 +1257,9 @@ impl Dispatcher {
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
-            // Not a turn the window's open came after: its words are given already.
+            // Not over words given since the cut, which begin another turn.
             if self.cut_short(&observed) {
-                if !self.cut_before_open(record, &observed) {
+                if !self.words_since_the_cut(participant, &observed)? {
                     self.go_on(project, participant)?;
                 }
             } else {
