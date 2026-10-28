@@ -668,3 +668,74 @@ fn the_head_of_a_queue_an_urgent_row_waits_in_goes_at_the_first_rest() {
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [asked.id, urgent.id]);
 }
+
+/// Calliope's re-check of `a0aecd192` (T-854, P3): the head that goes at the first rest
+/// for the urgent row behind it is spared the settle, not the fresh look. A window its
+/// harness says went to work between the gate's look and the paste is given nothing.
+#[test]
+fn the_head_an_urgent_row_lets_go_at_the_first_rest_is_still_looked_at_before_its_paste() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    context.give(project, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let asked = context.ask(project, "zeus", "chief", 1, "Which format?");
+    context
+        .ledger
+        .borrow_mut()
+        .ask(
+            project,
+            &cf_ledger::NewQuestion {
+                from: Some("zeus".to_owned()),
+                to: "chief".to_owned(),
+                body: Some("Stop: the grammar changed".to_owned()),
+                task: Some(1),
+                urgent: true,
+                ..cf_ledger::NewQuestion::default()
+            },
+        )
+        .unwrap();
+    let adapter = Rc::downgrade(&context.adapter);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        if let Some(adapter) = adapter.upgrade() {
+            adapter.with("chief", |agent| agent.at_work = true);
+        }
+        Ok(Readiness::Ready)
+    }));
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+    assert_eq!(context.message(asked.id).attempts, 0, "no attempt is spent");
+    let chief = context.id(project, "chief");
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.reason),
+        Some("its harness says it is at work".to_owned())
+    );
+}
+
+/// Calliope's re-check of `a0aecd192` (T-854, P3): a message the gate held that leaves the
+/// head of its queue (its task cancelled by the chief, which is told nothing of it) is held
+/// back no more: what the board reads for the window is not a wait for it.
+#[test]
+fn a_held_message_that_leaves_the_head_of_its_queue_is_held_back_no_more() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    context.give(project, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = context.id(project, "chief");
+    let asked = context.ask(project, "zeus", "chief", 1, "Which format?");
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.message),
+        Some(asked.id),
+        "held for the settle"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(asked.id).state, "cancelled");
+    assert_eq!(context.dispatcher.held_back(chief), None);
+}

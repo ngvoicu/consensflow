@@ -1365,6 +1365,20 @@ impl Dispatcher {
                 self.queue_wake_up_if_due(project, participant)?;
             }
             let next = self.next_in_line(record)?;
+            // A hold is the head's: a message that left the head of its queue (withdrawn,
+            // its task paused or cancelled) is held back no more (Calliope's re-check of
+            // `a0aecd192`, T-854).
+            {
+                let mut part = record.delivery.borrow_mut();
+                let head = next.as_ref().map(|next| next.id);
+                if part
+                    .held
+                    .as_ref()
+                    .is_some_and(|held| Some(held.message) != head)
+                {
+                    part.held = None;
+                }
+            }
             if let Some(next) = next {
                 // Another task's message goes into a window of its own (`ownership`).
                 if let Some(owner) = self.barred(participant, record, &next) {

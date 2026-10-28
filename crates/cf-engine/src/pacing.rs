@@ -266,11 +266,15 @@ impl Dispatcher {
         message: &MessageView,
     ) -> Result<Pace, EngineError> {
         record.delivery.borrow_mut().paced = None;
-        if self.goes_at_rest(record, message)? {
+        if self.put_first(record, message) {
             return Ok(Pace::Go);
         }
+        let urgent = self.urgent_waits(record)?;
         let rest = record.delivery.borrow().rest.clone();
         let Some(rest) = rest else {
+            if urgent {
+                return Ok(Pace::Go);
+            }
             let unrest = record.delivery.borrow().unrest.clone();
             return Ok(Pace::Wait(
                 unrest.unwrap_or_else(|| "it has not read at rest yet".to_owned()),
@@ -281,6 +285,25 @@ impl Dispatcher {
             return Ok(Pace::Go);
         }
         let rest_ms = self.now() - rest.since;
+        // Spared the settle, not the fresh look: what the look before the paste reads is
+        // this rest (Calliope's re-check of `a0aecd192`, T-854).
+        if urgent {
+            let fallback = record
+                .window
+                .borrow()
+                .window
+                .as_ref()
+                .is_some_and(|window| !window.idle_word());
+            record.delivery.borrow_mut().paced = Some(Paced {
+                message: message.id,
+                frontier: rest.frontier,
+                rest_ms,
+                typed_quiet_ms: None,
+                output_quiet_ms: None,
+                fallback,
+            });
+            return Ok(Pace::Go);
+        }
         let seconds = settle as f64 / 1000.0;
         if rest_ms < settle && !self.seams.limits.settle_from_first_look {
             return Ok(Pace::Wait(format!(
@@ -336,18 +359,20 @@ impl Dispatcher {
         Ok(Pace::Go)
     }
 
-    /// What a launch put ahead of the window's queue, and an urgent row, go at the
-    /// window's first rest, as they went before the pacing; an urgent head is one of the
-    /// urgent rows its queue holds.
-    /// So does the head of a queue an urgent row waits in: the urgent row is not held
-    /// back behind the head's settle (T-842's P3: a member's question goes first).
-    fn goes_at_rest(&self, record: &Record, message: &MessageView) -> Result<bool, EngineError> {
+    /// What a launch put ahead of the window's queue goes at the window's first rest, as
+    /// it went before the pacing, with no fresh look.
+    fn put_first(&self, record: &Record, message: &MessageView) -> bool {
         let prelude = record.delivery.borrow().prelude.clone();
-        if prelude.is_some_and(|prelude| {
+        prelude.is_some_and(|prelude| {
             prelude.replacement == message.id || prelude.displaced == Some(message.id)
-        }) {
-            return Ok(true);
-        }
+        })
+    }
+
+    /// An urgent row waits in the window's queue: it goes at the window's first rest, and
+    /// so does the head, an urgent row itself or what goes before it, so that the urgent
+    /// row is not held back behind a settle (T-842's P3: a member's question goes first).
+    /// Spared the settle, not the fresh look before the paste.
+    fn urgent_waits(&self, record: &Record) -> Result<bool, EngineError> {
         Ok(self
             .seams
             .ledger
