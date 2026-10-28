@@ -224,7 +224,9 @@ fn a_host_that_refuses_ends_or_says_nothing_is_a_reason_and_no_list() {
 fn a_host_that_says_nothing_is_given_up_on_at_the_bound_and_ended() {
     // `muse serve` that never answers `model/list` (a login that hangs, a network that does not
     // come back): the read fails at 30 s in a sentence of its own, and the host is ended, asked
-    // and then forced, not left running (T-816: the live read alone held the path).
+    // and then forced, not left running (T-816: the live read alone held the path). Windows
+    // ends a process the moment it is asked, as the scripted host does there: nothing is left
+    // to force (T-829, zeewin2).
     let processes = Rc::new(ScriptedProcesses::default());
     let time = Rc::new(ManualTime::new(0));
     processes.child(
@@ -244,14 +246,18 @@ fn a_host_that_says_nothing_is_given_up_on_at_the_bound_and_ended() {
     let waits = time.waits(0);
     assert_eq!(waits, [30_000], "the bound is the one wait");
     assert!(time.fire_next(30_000));
-    assert!(driver.run().is_empty(), "asked to end, it goes on");
-    assert_eq!(
-        time.waits(0),
-        [2000, 4000],
-        "forced at two seconds, given up at four"
-    );
-    assert!(time.fire_next(32_000));
-    let settled = driver.run();
+    let settled = if cfg!(windows) {
+        driver.run()
+    } else {
+        assert!(driver.run().is_empty(), "asked to end, it goes on");
+        assert_eq!(
+            time.waits(0),
+            [2000, 4000],
+            "forced at two seconds, given up at four"
+        );
+        assert!(time.fire_next(32_000));
+        driver.run()
+    };
     assert_eq!(settled.len(), 1);
     assert_eq!(
         settled[0].1,
