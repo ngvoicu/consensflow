@@ -1632,6 +1632,7 @@ impl Dispatcher {
     /// wait for the reopen, `to`'s own where `of` names it (`waiting_for_the_reopen`,
     /// the words the ledger's give-up says them in: one fate, Calliope's P3-4 of T-414
     /// and of T-446), and how to reopen it.
+    #[allow(clippy::too_many_arguments)]
     fn tell_failed(
         &self,
         project: &ProjectView,

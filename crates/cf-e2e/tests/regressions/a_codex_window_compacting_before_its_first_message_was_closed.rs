@@ -53,7 +53,11 @@ fn worker_windows(rig: &Rig, project: &Project) -> Vec<Value> {
     let worker = format!("p{}-worker", project.id());
     rig.open_frames()
         .into_iter()
-        .filter(|frame| frame["id"].as_str().is_some_and(|id| id.starts_with(&worker)))
+        .filter(|frame| {
+            frame["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with(&worker))
+        })
         .collect()
 }
 
@@ -72,7 +76,10 @@ fn a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_d
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
-    let tier = added["member"]["tier"].as_str().unwrap_or("standard").to_owned();
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or("standard")
+        .to_owned();
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
 
     // T-1 gives the worker's thread a turn, and its window closes with it.
@@ -82,7 +89,10 @@ fn a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_d
     )?;
     rig.wait_for("T-1's result", secs(90), || Ok(results(&project)? >= 1))?;
     rig.wait_for("the worker's first window to close", secs(60), || {
-        let assignee = project.task(1)?["assignee"].as_str().unwrap_or_default().to_owned();
+        let assignee = project.task(1)?["assignee"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
         Ok(project.lane(&assignee)?["activity"]["state"] == "closed")
     })?;
 
@@ -109,7 +119,10 @@ fn a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_d
         .into_iter()
         .filter(|event| event["kind"] == "delivery.failed" || event["kind"] == "delivery.retried")
         .collect();
-    assert!(failed.is_empty(), "nothing failed or went again: {failed:?}");
+    assert!(
+        failed.is_empty(),
+        "nothing failed or went again: {failed:?}"
+    );
     assert_eq!(
         worker_windows(&rig, &project).len(),
         2,

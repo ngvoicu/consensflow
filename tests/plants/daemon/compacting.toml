@@ -143,7 +143,7 @@ replace = "        let tell = false && message.kind == \"question\""
 
 [[plant]]
 name = "compacting: words told to a window that fail their task are not in their teller's note"
-meant = "words_that_never_reach_the_window_are_told_to_whoever_told_them_as_to_the_requester"
+meant = "words_that_never_reach_the_window_fail_the_task_and_the_answer_to_the_brief_is_no_result"
 runs = ["cmp-engine-told"]
 
 [[plant.edit]]
@@ -169,7 +169,7 @@ runs = ["cmp-harness"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/compacting.rs"
 find = "    \"Compacting conversation…\",\n"
-replace = ""
+replace = "    \"Compacting the conversation…\",\n"
 
 [[plant]]
 name = "compacting: Pi's automatic compaction is not read"
@@ -179,7 +179,7 @@ runs = ["cmp-harness"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/compacting.rs"
 find = "    \"Auto-compacting... (escape to cancel)\",\n"
-replace = ""
+replace = "    \"Auto-compacting now... (escape to cancel)\",\n"
 
 [[plant]]
 name = "compacting: a status line read anywhere in a line, a quote of it among them"

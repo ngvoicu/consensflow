@@ -222,10 +222,9 @@ fn a_window_never_ready_for_its_first_message_in_the_launch_s_time_is_given_up_a
     );
     let chief = context.id(project, "chief");
     assert!(
-        context
-            .inbox(chief)
-            .iter()
-            .any(|message| message.body.contains("never ready for its first message: starting")),
+        context.inbox(chief).iter().any(|message| message
+            .body
+            .contains("never ready for its first message: starting")),
         "the chief hears why, in its harness's words for what it waited on"
     );
     context.close();

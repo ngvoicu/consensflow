@@ -54,7 +54,9 @@ fn handed_its_brief(context: &Context) -> (i64, i64) {
         .id;
     context.pass().unwrap();
     context.settle();
-    let before = context.adapter.item(Role::Assistant, "What the thread said before");
+    let before = context
+        .adapter
+        .item(Role::Assistant, "What the thread said before");
     context.adapter.with("zeus", |agent| {
         agent.arrive = false;
         agent.queued = true;
@@ -167,7 +169,7 @@ fn a_compaction_that_never_ends_is_told_once_to_the_requester_and_the_human_and_
          and nothing is pasted again meanwhile. If the compaction is stuck, look at that window."
     );
     let to_chief = notes(&context, chief);
-    assert_eq!(to_chief[before.0..], [told.clone()], "the requester, once");
+    assert_eq!(to_chief[before.0..], [told.as_str()], "the requester, once");
     let human = to_human(&context, project);
     assert_eq!(human.len(), before.1 + 1, "the human, once: {human:?}");
     assert_eq!(human[0], told);
@@ -292,8 +294,12 @@ fn a_window_owed_its_first_message_that_reads_at_work_is_waited_for_past_its_lau
     context.pass().unwrap();
     context.settle();
     // Opened again on its conversation, which it is at work in.
-    let before = context.adapter.item(Role::Assistant, "What the conversation said before");
-    context.adapter.with("zeus", |agent| agent.items.push(before));
+    let before = context
+        .adapter
+        .item(Role::Assistant, "What the conversation said before");
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.push(before));
     context.adapter.busy("zeus");
     passes(&context, 2);
     let killed = context.host.killed().len();
