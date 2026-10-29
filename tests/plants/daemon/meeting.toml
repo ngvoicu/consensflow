@@ -352,8 +352,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = '''              entry.meeting ? `Stop meeting (${(board.held ?? []).length})` : 'Start meeting','''
-replace = '''              entry.meeting ? 'Stop meeting' : 'Start meeting','''
+find = '''          entry.meeting ? `Stop meeting (${(board.held ?? []).length})` : 'Start meeting','''
+replace = '''          entry.meeting ? 'Stop meeting' : 'Start meeting','''
 
 [[plant]]
 name = "meeting page ui: the button asks the daemon for the meeting as it is"
@@ -363,8 +363,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = '''              () => this.#onMeeting(entry.participant, !entry.meeting),'''
-replace = '''              () => this.#onMeeting(entry.participant, entry.meeting),'''
+find = '''          () => this.#onMeeting(entry.participant, !entry.meeting),'''
+replace = '''          () => this.#onMeeting(entry.participant, entry.meeting),'''
 
 [[plant]]
 name = "meeting page ui: the Start is never a Stop"
