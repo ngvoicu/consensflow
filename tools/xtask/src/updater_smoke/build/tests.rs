@@ -452,7 +452,7 @@ mod with_programs {
         let first = commit_of(&git, "v3.0.0-alpha.82");
         assert_eq!(
             fs::read_to_string(into.join(MARK)).unwrap(),
-            format!("v3.0.0-alpha.82 {first}\n")
+            format!("v3.0.0-alpha.82 {first} {IDENTITY}\n")
         );
         assert_eq!(npm_runs(), 2);
 
@@ -481,7 +481,7 @@ mod with_programs {
         assert_ne!(moved, first);
         assert_eq!(
             fs::read_to_string(into.join(MARK)).unwrap(),
-            format!("v3.0.0-alpha.82 {moved}\n")
+            format!("v3.0.0-alpha.82 {moved} {IDENTITY}\n")
         );
     }
 

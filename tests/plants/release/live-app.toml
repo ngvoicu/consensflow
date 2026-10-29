@@ -17,6 +17,9 @@ smoke-export = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "
 app-update-identity = ["cargo", "xtask", "app", "test", "update_install::"]
 rig-shipped = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--lib", "--", "shipped::"]
 app-builds = ["cargo", "xtask", "app", "test", "tests::a_"]
+windows-gate = ["node", "--test", "tests/built-identity.test.mjs"]
+app-identity = ["cargo", "xtask", "app", "test", "identity"]
+app-daemon-wait = ["cargo", "xtask", "app", "test", "the_first_start_runs_apart_and_what_a_page_asks_waits_for_it"]
 packaged-copy = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--test", "smoke", "--", "bundle::"]
 
 [[plant]]
@@ -357,3 +360,112 @@ runs = ["packaged-copy"]
 file = "crates/cf-e2e/tests/smoke/bundle.rs"
 find = "    let into = std::fs::canonicalize(into)"
 replace = "    let into = Ok::<_, std::io::Error>(into.to_path_buf())"
+
+# Windows (T-951): no test starts a built app of the release's identity, which keeps its runtime in
+# the release's folder of the machine's user whatever LOCALAPPDATA says.
+[[plant]]
+name = "live app: the Windows smoke's gate takes an app of another identity"
+meant = "a test starts only an app of the smoke identity: not the release, nor one that says none"
+runs = ["windows-gate"]
+
+[[plant.edit]]
+file = "app/scripts/built-identity.mjs"
+find = "  if (identity === SMOKE) return null"
+replace = "  if (identity !== null) return null"
+
+[[plant]]
+name = "live app: the Windows smoke's gate takes an app that says no identity"
+meant = "an app says the identity its build was made with, and nothing where it says none"
+runs = ["windows-gate"]
+
+[[plant.edit]]
+file = "app/scripts/built-identity.mjs"
+find = "  return said.size === 1 ? [...said][0] : null"
+replace = "  return said.size === 1 ? [...said][0] : SMOKE"
+
+[[plant]]
+name = "live app: a Windows smoke's build is of the release's identity"
+meant = "a smoke's build is given the smoke identity, and an app-alone build no step before it"
+runs = ["windows-gate"]
+
+[[plant.edit]]
+file = "app/scripts/built-identity.mjs"
+find = ": { identifier: SMOKE }"
+replace = ": {}"
+
+[[plant]]
+name = "live app: the Windows smoke starts an app without reading its identity"
+meant = "every_windows_start_of_a_built_app_reads_its_identity_first"
+runs = ["live-app-rules"]
+
+[[plant.edit]]
+file = "app/scripts/windows-smoke.mjs"
+find = "const refused = refusalOf(exe)"
+replace = "const refused = null"
+
+[[plant]]
+name = "live app: the Windows desktop smoke runs an exe without reading its identity"
+meant = "every_windows_start_of_a_built_app_reads_its_identity_first"
+runs = ["live-app-rules"]
+
+[[plant.edit]]
+file = "app/scripts/windows-smoke-desktop.mjs"
+find = "const refused = refusalOf(exe)"
+replace = "const refused = null"
+
+[[plant]]
+name = "live app: a build takes no identity from what Tauri was given"
+meant = "a_build_reads_its_identity_from_its_files_and_from_what_tauri_was_given"
+runs = ["app-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/build/identity.rs"
+find = "    if let Some(text) = given {"
+replace = "    if let Some(text) = given.filter(|_| false) {"
+
+[[plant]]
+name = "live app: a build reads no file of its target"
+meant = "a_build_reads_its_identity_from_its_files_and_from_what_tauri_was_given"
+runs = ["app-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/build/identity.rs"
+find = "    if let Some(text) = read(&platform)? {"
+replace = "    if let Some(text) = read(&platform)?.filter(|_| false) {"
+
+[[plant]]
+name = "live app: the app's file says no identity a test reads"
+meant = "the_app_says_the_identity_its_build_was_made_with"
+runs = ["app-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''    "consensflow-built-identity:",'''
+replace = '''    "consensflow-built-identity=",'''
+
+[[plant]]
+name = "live app: the merge of Tauri's configuration keeps what a null takes away"
+meant = "a_build_is_of_the_identity_its_configuration_and_its_command_line_say"
+runs = ["app-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/build/identity.rs"
+find = "            if value.is_null() {"
+replace = "            if value.is_null() && false {"
+
+[[plant]]
+name = "live app: an agents screen opened as the app starts is refused as down"
+meant = "the_first_start_runs_apart_and_what_a_page_asks_waits_for_it"
+runs = ["app-daemon-wait"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''
+    pub(crate) fn roster(&self) -> Option<RosterHandle> {
+        let state = self
+            .settled
+            .wait_while(self.lock(), |state| !state.settled && !state.stopping)
+            .unwrap_or_else(|error| error.into_inner());'''
+replace = '''
+    pub(crate) fn roster(&self) -> Option<RosterHandle> {
+        let state = self.lock();'''

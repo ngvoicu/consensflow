@@ -53,8 +53,8 @@ runs = ["smoke-build"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/build.rs"
-find = '    let marked = format!("{tag} {commit}");'
-replace = '    let marked = format!("{tag}");'
+find = '    let marked = format!("{tag} {commit} {IDENTITY}");'
+replace = '    let marked = format!("{tag} {IDENTITY}");'
 
 [[plant]]
 name = "tauri-2-12: an export whose packages are a link or gone is taken as made"

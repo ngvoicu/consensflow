@@ -123,9 +123,60 @@ fn spells_an_installed_app(code: &str) -> bool {
         })
 }
 
+/// Whether a file names a built ConsensFlow of Windows: the exe a build leaves, or a release's
+/// portable one.
+fn names_a_built_windows_app(text: &str) -> bool {
+    text.contains("ConsensFlow.exe") || text.contains("-portable.exe")
+}
+
+/// Whether a file starts a program, any way the tests and the tools do.
+fn starts_a_program(text: &str) -> bool {
+    [
+        "spawn(",
+        "spawnSync(",
+        "execFile(",
+        "execFileSync(",
+        "Start-Process",
+        "Command::new(",
+        "Run::new(",
+        "Invocation::new(",
+    ]
+    .iter()
+    .any(|start| text.contains(start))
+}
+
+/// What a Windows start of a built app calls first: it refuses one that is not of the smoke
+/// identity, read off its file (app/scripts/built-identity.mjs).
+const WINDOWS_GATE: &str = "refusalOf(";
+
+/// The files that name a built Windows app and start programs, and why that starts no app of
+/// the release's on a machine someone uses.
+const STARTING_NO_BUILT_APP: [(&str, &str); 4] = [
+    (
+        ".github/workflows/windows-build.yml",
+        "the shipped exe's first start, on GitHub's runner, which holds no one's ConsensFlow",
+    ),
+    (
+        "app/src-tauri/src/portable/tests.rs",
+        "fake exes of a few bytes, which it packs and starts none of",
+    ),
+    (
+        "tests/install-ps1.test.mjs",
+        "a stand-in named ConsensFlow.exe, a copy of ping",
+    ),
+    (
+        "tools/cf-publish/src/testing/built.rs",
+        "the names of a release's files, which it starts none of",
+    ),
+];
+
 /// The files that spell an installed app's path, and why that touches nothing: each spells it
 /// as data a test reads, never as an app it starts.
-const SPELLING_INSTALLED: [(&str, &str); 6] = [
+const SPELLING_INSTALLED: [(&str, &str); 7] = [
+    (
+        "tools/xtask/src/updater_smoke/processes/tests.rs",
+        "a row of a fake process table: the live app, which the smoke takes for none of its own",
+    ),
     (
         "app/src-tauri/src/daemon_command/tests.rs",
         "the cf a daemon command is made for",
@@ -182,7 +233,7 @@ fn read_of<'a>(path: &str, text: &'a str) -> &'a str {
 /// The files of the tools and of the rig that start a program a caller names (std's
 /// `Command::new` of a value, not of a name written there), and what holds them to no app
 /// of the live app's identity: the gate each calls (`cf_base::bundle`), or what they start.
-const STARTERS: [(&str, &str); 3] = [
+const STARTERS: [(&str, &str); 4] = [
     (
         "tools/cf-publish/src/process.rs",
         "curl, gh and tar alone, which its callers name; it is built on serde_json and sha2 alone",
@@ -194,6 +245,10 @@ const STARTERS: [(&str, &str); 3] = [
     (
         "crates/cf-e2e/src/process/tests.rs",
         "the test's own program, started again",
+    ),
+    (
+        "tools/cf-publish/tests/release_build.rs",
+        "cargo, which builds the publisher the test runs",
     ),
 ];
 
@@ -477,5 +532,48 @@ fn no_test_or_tool_spells_an_installed_apps_path() {
         "these spell the live app's path, or the installed Candidate's, which no test or tool \
          touches:\n{}",
         found.join("\n")
+    );
+}
+
+/// No test starts a built ConsensFlow on Windows but one of the smoke identity: an app of the
+/// release's keeps its runtime in the release's folder of the machine's user, whatever the test
+/// sets `LOCALAPPDATA` to, and T-930's start of the CI exe on zeewin2 wrote into Gabriel's
+/// (2026-10-29, T-951). Every file of the tests and the tools that names a built Windows app and
+/// starts a program reads its identity first, or says why it starts no such app.
+#[test]
+fn every_windows_start_of_a_built_app_reads_its_identity_first() {
+    let files = files();
+    for read in [
+        "app/scripts/windows-smoke.mjs",
+        "app/scripts/windows-smoke-desktop.mjs",
+        ".github/workflows/windows-build.yml",
+    ] {
+        let (_, text) = files
+            .iter()
+            .find(|(path, _)| path == read)
+            .unwrap_or_else(|| panic!("{read} is not read"));
+        assert!(
+            names_a_built_windows_app(text) && starts_a_program(text),
+            "{read} is not read as a start of a built Windows app"
+        );
+    }
+    let unheld: Vec<&str> = files
+        .iter()
+        .filter(|(path, text)| {
+            !RULES.contains(&path.as_str())
+                && names_a_built_windows_app(text)
+                && starts_a_program(text)
+                && !text.contains(WINDOWS_GATE)
+                && !STARTING_NO_BUILT_APP
+                    .iter()
+                    .any(|(listed, _)| listed == path)
+        })
+        .map(|(path, _)| path.as_str())
+        .collect();
+    assert!(
+        unheld.is_empty(),
+        "these start a built Windows app and do not read its identity first: call {WINDOWS_GATE}exe) \
+         of app/scripts/built-identity.mjs before it starts, as the Windows smoke does:\n{}",
+        unheld.join("\n")
     );
 }

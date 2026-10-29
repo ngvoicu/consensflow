@@ -29,6 +29,10 @@ mod page_reloads;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
 pub mod runtime;
+// The build script's reading of the identity a build is made with, tested with the app's tests.
+#[cfg(test)]
+#[path = "../build/identity.rs"]
+mod built_identity;
 #[cfg(test)]
 mod test_manifest;
 #[cfg(test)]
@@ -227,6 +231,18 @@ fn selftest_report(event: String, data: Value) -> Value {
     }
     json!({"ok":true})
 }
+
+/// The identity this build was made with, kept in the app's own file in these
+/// words, where a test reads it without starting the app
+/// (app/scripts/built-identity.mjs): a Windows exe says it nowhere else, and one
+/// of the release's identity started by a test keeps its runtime in the
+/// release's folder of the machine's user, whatever the test sets `LOCALAPPDATA`
+/// to (T-951). `run` reads it, so that no linker leaves it out.
+pub static BUILT_IDENTITY: &str = concat!(
+    "consensflow-built-identity:",
+    env!("CONSENSFLOW_BUILT_IDENTITY"),
+    ";"
+);
 
 /// The installed release's bundle identity: the only build that may keep the
 /// live home, `~/.consensflow`.
@@ -473,6 +489,7 @@ pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    std::hint::black_box(BUILT_IDENTITY);
     let context = tauri::generate_context!();
     // Settled before any thread exists, so the updater and the daemon —
     // which inherits this environment, and passes it to every pane — all see
@@ -887,6 +904,21 @@ mod tests {
         );
         assert!(ran.status.success(), "{said}");
         assert!(said.contains("1 passed"), "the test did not run: {said}");
+    }
+
+    /// The app's file says the identity its build was made with, as Tauri's configuration says
+    /// it: a test build is the release's, given no `--config`.
+    #[test]
+    fn the_app_says_the_identity_its_build_was_made_with() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("the configuration");
+        assert_eq!(
+            BUILT_IDENTITY,
+            format!(
+                "consensflow-built-identity:{};",
+                config["identifier"].as_str().expect("an identifier")
+            )
+        );
     }
 
     #[test]

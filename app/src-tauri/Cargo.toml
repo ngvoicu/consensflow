@@ -10,6 +10,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
+# The identity a build is made with, read from Tauri's configuration as Tauri reads it.
+serde_json.workspace = true
 
 [dependencies]
 serde_json.workspace = true

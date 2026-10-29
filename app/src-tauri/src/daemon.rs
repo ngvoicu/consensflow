@@ -312,8 +312,15 @@ impl Daemon {
         }
     }
 
+    /// The daemon's handle, its address and the UI token, while it is up. Asked while the
+    /// first start is under way, it waits for the outcome, as a request does
+    /// ([`Self::connection`]): an agents screen opened as soon as the board shows is opened
+    /// once the daemon is up, not refused as down (T-951).
     pub(crate) fn roster(&self) -> Option<RosterHandle> {
-        let state = self.lock();
+        let state = self
+            .settled
+            .wait_while(self.lock(), |state| !state.settled && !state.stopping)
+            .unwrap_or_else(|error| error.into_inner());
         state
             .status
             .available
@@ -716,6 +723,19 @@ mod tests {
             answer.recv_timeout(Duration::from_millis(200)).is_err(),
             "a request did not wait for the start"
         );
+        // An agents screen opened meanwhile (Settings, then Agents, as soon as the board is
+        // shown) waits for the daemon too, and opens at its address: it was refused as "the
+        // daemon is not up" while the first start went on, for as long as a portable app's
+        // first start unpacks its runtime on Windows (T-930, T-951).
+        let screening = Arc::clone(&daemon);
+        let (screened, screen) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = screened.send(screening.roster().is_some());
+        });
+        assert!(
+            screen.recv_timeout(Duration::from_millis(200)).is_err(),
+            "an agents screen did not wait for the start"
+        );
 
         release.send(()).expect("let the start go on");
         assert_eq!(
@@ -723,6 +743,11 @@ mod tests {
             DaemonStatus::up()
         );
         assert_eq!(answer.recv_timeout(Duration::from_secs(5)), Ok(true));
+        assert_eq!(
+            screen.recv_timeout(Duration::from_secs(5)),
+            Ok(true),
+            "the agents screen opened at the daemon's address once it was up"
+        );
 
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         AppRuntime {

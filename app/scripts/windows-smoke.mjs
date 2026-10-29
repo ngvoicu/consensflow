@@ -12,7 +12,10 @@
  * Last, the page's renderer is crashed, and the page must come back by itself.
  *
  * It runs beside an installed ConsensFlow: its own home, its own WebView2
- * data folder, and the page reached over WebView2's remote debugging port.
+ * data folder, and the page reached over WebView2's remote debugging port. It
+ * starts only an app of the smoke identity (built-identity.mjs): one of the
+ * release's keeps its runtime in the release's own folder of the user, whatever
+ * the environment says, and on a machine someone uses that is their ConsensFlow's.
  * It needs a desktop session: over SSH, run it with windows-smoke-desktop.mjs, which
  * runs it from a scheduled task on the user's desktop.
  */
@@ -21,10 +24,16 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
+import { refusalOf } from './built-identity.mjs'
 
 const exe = process.argv[2]
 if (process.platform !== 'win32' || !exe) {
   console.error('usage (Windows only): node app/scripts/windows-smoke.mjs <ConsensFlow.exe>')
+  process.exit(2)
+}
+const refused = refusalOf(exe)
+if (refused) {
+  console.error(`windows smoke: ${refused}`)
   process.exit(2)
 }
 const PORT = 9333
@@ -127,15 +136,20 @@ try {
     await main.locator('#settings-button').click()
     await main.locator('[data-agents-page]', { hasText: new RegExp(`^${screen}$`) }).click()
     const dialog = main.getByRole('dialog', { name: screen })
+    // What the app said meanwhile: a refusal shows in the status line for a few seconds.
+    const said = new Set()
     const shown = await until(
       `${screen} in its dialog`,
       async () => {
+        const status = await main.locator('#status').innerText({ timeout: 1000 }).catch(() => '')
+        if (status.trim()) said.add(status.trim())
         const text = await dialog.frameLocator('iframe').locator('h1').innerText({ timeout: 1000 })
         return text.trim().startsWith(screen)
       },
       20_000,
     ).catch(() => false)
     check(shown, `${screen} opens in its dialog and shows its page`)
+    if (!shown) console.log(`the app said meanwhile: ${JSON.stringify([...said])}`)
     await main.keyboard.press('Escape')
   }
 
