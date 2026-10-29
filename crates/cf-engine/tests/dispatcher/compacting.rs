@@ -358,3 +358,165 @@ fn words_told_to_a_window_that_never_reach_it_come_back_to_whoever_told_them_wor
     );
     context.close();
 }
+
+/// A window opened again on its conversation that its record reads at work for good (a
+/// Claude Code whose status file says busy, and whose screen draws nothing the reader
+/// knows): its first message is never given up, nor pasted blind, and whoever gave it and
+/// the human are told once, at 15 min, that it waits on the window's work (Calliope's P3-4
+/// of T-917: main gave it up in its launch's time).
+#[test]
+fn a_first_message_on_a_window_at_work_for_good_is_told_of_once_and_never_given_up() {
+    let context = delivered();
+    let (project, brief) = handed_its_brief(&context);
+    context.adapter.busy("zeus");
+    at_its_prompt(&context);
+    let chief = context.id(project, "chief");
+    let before = (
+        notes(&context, chief).len(),
+        to_human(&context, project).len(),
+    );
+    for _ in 0..10 {
+        context.advance(LAUNCH_MS + 1_000);
+        passes(&context, 2);
+    }
+    let told = format!(
+        "@zeus's window has been at work for 15 min or more without taking m-{brief}, a task \
+         from @chief on T-1, its first message, which waits for it: it goes in once the window \
+         takes it, and nothing is pasted again meanwhile. If the window is stuck, look at it."
+    );
+    assert_eq!(
+        notes(&context, chief)[before.0..],
+        [told.as_str()],
+        "the requester, once"
+    );
+    let human = to_human(&context, project);
+    assert_eq!(human.len(), before.1 + 1, "the human, once: {human:?}");
+    assert_eq!(human[0], told);
+    for _ in 0..10 {
+        context.advance(LAUNCH_MS + 1_000);
+        passes(&context, 2);
+    }
+    assert_eq!(notes(&context, chief).len(), before.0 + 1, "told once");
+    assert_eq!(context.message(brief).state, "delivering", "never given up");
+    assert_eq!(context.task(project, 1).task.state, "queued");
+    assert_eq!(times_handed(&context, SEAM, brief), 1, "never pasted again");
+    context.close();
+}
+
+/// A later message that waited 15 min on a compaction is told of once, however many
+/// times it is pasted: each paste is a new hand-over of the same message (Calliope's
+/// P3-7 of T-917).
+#[test]
+fn a_message_told_of_for_a_compaction_is_not_told_of_again_when_it_is_pasted_again() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.pass().unwrap();
+    let before = context
+        .adapter
+        .item(Role::Assistant, "What the chief said before");
+    context.adapter.with("chief", |agent| {
+        agent.arrive = false;
+        agent.items.push(before);
+    });
+    let note = context.note(project, "zeus", "chief", "One more thing");
+    context.pass().unwrap();
+    let compacting_for = |minutes: i64| {
+        context.adapter.busy("chief");
+        compacting(&context);
+        for _ in 0..minutes {
+            context.advance(60_000);
+            passes(&context, 1);
+        }
+    };
+    compacting_for(16);
+    let told = |context: &Context| {
+        to_human(context, project)
+            .iter()
+            .filter(|said| said.contains("has been compacting"))
+            .count()
+    };
+    assert_eq!(told(&context), 1, "told once");
+    // Done, at rest with nothing shown: pasted again, and compacting again as long.
+    context.adapter.with("chief", |agent| agent.settled = true);
+    at_its_prompt(&context);
+    passes(&context, 1);
+    context.advance(31_000);
+    passes(&context, 1);
+    assert_eq!(context.message(note.id).attempts, 2, "pasted again");
+    compacting_for(16);
+    assert_eq!(told(&context), 1, "not told again for the same message");
+    context.close();
+}
+
+/// A launch whose window never came to rest with its screen drawn, so it was never asked
+/// whether it is ready, is given up in words that say so (Calliope's P3-7 of T-917: the
+/// default of `never_ready`).
+#[test]
+fn a_window_that_never_comes_to_rest_for_its_first_message_is_given_up_in_words_that_say_so() {
+    let context = delivered();
+    let project = context.with_staff(&["zeus"]).id;
+    let brief = context
+        .give(project, "zeus", "Parser")
+        .message
+        .expect("its brief")
+        .id;
+    context.pass().unwrap();
+    context.settle();
+    // Its record holds nothing, and its window never reads at rest.
+    context.adapter.busy("zeus");
+    passes(&context, 2);
+    context.advance(LAUNCH_MS + 1_000);
+    passes(&context, 3);
+    assert_eq!(
+        times_handed(&context, SEAM, brief),
+        0,
+        "nothing pasted blind"
+    );
+    assert_eq!(context.message(brief).state, "failed");
+    let chief = context.id(project, "chief");
+    let told = notes(&context, chief);
+    assert!(
+        told.iter().any(|note| note.starts_with(
+            "T-1 failed: the window was never ready for its first message: it never came to \
+             rest with its screen drawn"
+        )),
+        "{told:?}"
+    );
+    context.close();
+}
+
+/// The words that resume a paused task and never reach its window pause it again, and
+/// whoever resumed it has them back, word for word, as a tell's teller does (Calliope's
+/// P3-5 of T-917).
+#[test]
+fn the_words_that_resume_a_task_and_never_reach_its_window_come_back_word_for_word() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.give(project, "zeus", "Parser");
+    passes(&context, 2);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    passes(&context, 1);
+    context.adapter.answer("zeus", "Half a parser");
+    passes(&context, 2);
+    context.adapter.with("zeus", |agent| agent.admit = false);
+    let words = "Go on with the v2 grammar,\nand keep `the $(lexer)` as it is";
+    context.resume_task(project, 1, words);
+    for _ in 0..8 {
+        context.advance(31_000);
+        passes(&context, 1);
+    }
+    assert_eq!(
+        context.task(project, 1).task.state,
+        "paused",
+        "paused again"
+    );
+    let chief = context.id(project, "chief");
+    let back = notes(&context, chief);
+    assert!(
+        back.iter()
+            .any(|note| note.contains("not delivered") && note.contains(words)),
+        "whoever resumed it has them back, word for word: {back:?}"
+    );
+    context.close();
+}

@@ -26,6 +26,15 @@
 //! where its record reads at rest the message is then given up, or pasted again, as
 //! before. A window at work that never ends holds what waits for it until the human
 //! ends the turn or closes the window.
+//!
+//! The record's sign is not always there (Calliope's P3-3 and P3-4 of T-917). A window
+//! opened again on a conversation whose last turn the quit cut reads that turn settled
+//! while its record holds nothing new of the window's own (`LeftOpen`, in each adapter);
+//! a Codex that compacts at the start of the turn it takes there writes an open turn and
+//! nothing more, so only its screen says it is at work. And a window reads at work for as
+//! long as its harness's live status says it is busy: a Claude Code opened again whose
+//! status file never comes to rest holds its first message for good, told of once at
+//! [`TOLD_AFTER_MS`], where before it was given up in its launch's time.
 
 use std::rc::Rc;
 
@@ -59,8 +68,6 @@ pub(crate) struct OnWork {
     /// Since when a launch's first message has waited past its time on the window's
     /// work: its time is given again at each look that finds it at work.
     pub(crate) since: Option<i64>,
-    /// Whoever sent the message and the human were told it waits on the work.
-    pub(crate) told: bool,
 }
 
 impl Dispatcher {
@@ -120,7 +127,7 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let now = self.now();
         let waited = now - delivering.work.since.unwrap_or(delivering.since);
-        if delivering.work.told
+        if told_already(record, delivering.message)
             || waited < TOLD_AFTER_MS
             || delivering
                 .work
@@ -143,7 +150,8 @@ impl Dispatcher {
     /// Whoever sent the message on its way and the human are told, once, that it has
     /// waited [`TOLD_AFTER_MS`] or more on its window, which compacts its conversation
     /// still, or, a launch's first message, which is at work on something else. Nothing
-    /// is told of a message that waits less, or on a window at rest.
+    /// is told of a message that waits less, or on a window at rest. Once a message:
+    /// pasted again, it is a new hand-over of the same words (P3-7 of T-917).
     pub(crate) fn tell_waits_on_work(
         &self,
         record: &Record,
@@ -152,22 +160,20 @@ impl Dispatcher {
         let now = self.now();
         let Some((compacting, launch, waited)) = on_its_way(record, message, |delivering| {
             let from = delivering.work.since.unwrap_or(delivering.since);
-            (!delivering.work.told).then_some((
-                delivering.work.compacting,
-                delivering.launch,
-                now - from,
-            ))
-        })
-        .flatten() else {
+            (delivering.work.compacting, delivering.launch, now - from)
+        }) else {
             return Ok(());
         };
+        if told_already(record, message) {
+            return Ok(());
+        }
         if waited < TOLD_AFTER_MS || !(compacting || launch) {
             return Ok(());
         }
         let Some(found) = self.seams.ledger.borrow().message(message)? else {
             return Ok(());
         };
-        on_its_way(record, message, |delivering| delivering.work.told = true);
+        record.delivery.borrow_mut().told_work = Some(message);
         let window = &found.recipient;
         let what = described(&found);
         let minutes = TOLD_AFTER_MS / 60_000;
@@ -202,6 +208,11 @@ impl Dispatcher {
         self.changed();
         Ok(())
     }
+}
+
+/// Whether whoever sent `message` and the human were told it waits on its window's work.
+fn told_already(record: &Record, message: i64) -> bool {
+    record.delivery.borrow().told_work == Some(message)
 }
 
 /// What `change` makes of the message on its way into `record`'s window, where it is

@@ -394,7 +394,10 @@ impl Dispatcher {
                  a screen line with \"{sign}\""
             ),
             (_, Some(why)) => format!("the window was never ready for its first message: {why}"),
-            _ => "the window was never ready for its first message".to_owned(),
+            // Never asked whether it is ready: it never drew its screen and held still.
+            _ => "the window was never ready for its first message: it never came to rest \
+                  with its screen drawn"
+                .to_owned(),
         }
     }
 

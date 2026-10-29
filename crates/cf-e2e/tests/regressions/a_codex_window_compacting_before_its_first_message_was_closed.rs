@@ -129,14 +129,27 @@ fn a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_d
         "T-1's window and T-2's, which was kept"
     );
     let home = std::path::PathBuf::from(rig.var("CODEX_HOME").unwrap_or_default());
+    let words = format!("Reply with exactly: {ANSWER}");
     let mut briefs = 0;
+    let mut compacted = None;
     for found in rollout::rollouts(&home) {
-        briefs += rollout::said_by(&rollout::read(&found)?, "user")
+        let text = rollout::read(&found)?;
+        briefs += rollout::said_by(&text, "user")
             .iter()
-            .filter(|said| said.contains(&format!("Reply with exactly: {ANSWER}")))
+            .filter(|said| said.contains(&words))
             .count();
+        let turn = rollout::turn_taking(&rollout::records(&text), &words);
+        if turn.taken {
+            compacted = turn.compacted;
+        }
     }
     assert_eq!(briefs, 1, "the thread took T-2 once");
+    // The case is the field's only where the thread compacted before it took T-2, and for
+    // longer than the daemon gives a first message (Calliope's P3-6 of T-917).
+    assert!(
+        compacted.is_some_and(|took| took >= 15.0),
+        "the thread compacted before it took T-2: {compacted:?} s"
+    );
     rig.close()?;
     Ok(())
 }

@@ -108,8 +108,8 @@ runs = ["cmp-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/at_work.rs"
-find = "        on_its_way(record, message, |delivering| delivering.work.told = true);"
-replace = "        on_its_way(record, message, |delivering| delivering.work.told = false);"
+find = "        record.delivery.borrow_mut().told_work = Some(message);"
+replace = "        record.delivery.borrow_mut().told_work = None;"
 
 [[plant]]
 name = "compacting: a launch given up for no prompt does not say which screen line it waited for"
@@ -158,8 +158,8 @@ runs = ["cmp-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/compacting.rs"
-find = "pub(crate) const CODEX: [&str; 1] = [\"Compacting context (\"];"
-replace = "pub(crate) const CODEX: [&str; 1] = [\"Compacting the context (\"];"
+find = "    words: &[\"Compacting context (\"],"
+replace = "    words: &[\"Compacting the context (\"],"
 
 [[plant]]
 name = "compacting: Claude Code's status line while it compacts is not read"
@@ -168,8 +168,8 @@ runs = ["cmp-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/compacting.rs"
-find = "    \"Compacting conversation…\",\n"
-replace = "    \"Compacting the conversation…\",\n"
+find = "    words: &[\"Compacting conversation\", \"Running PreCompact hooks\"],"
+replace = "    words: &[\"Compacting the conversation\", \"Running PreCompact hooks\"],"
 
 [[plant]]
 name = "compacting: Pi's automatic compaction is not read"
@@ -178,8 +178,8 @@ runs = ["cmp-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/compacting.rs"
-find = "    \"Auto-compacting... (escape to cancel)\",\n"
-replace = "    \"Auto-compacting now... (escape to cancel)\",\n"
+find = "        \"Auto-compacting... (\","
+replace = "        \"Auto-compacting now... (\","
 
 [[plant]]
 name = "compacting: a status line read anywhere in a line, a quote of it among them"
@@ -188,8 +188,8 @@ runs = ["cmp-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/compacting.rs"
-find = "        statuses.iter().any(|status| words.starts_with(status))"
-replace = "        statuses.iter().any(|status| line.contains(status))"
+find = "            .any(|status| words.starts_with(status))"
+replace = "            .any(|status| line.contains(status))"
 
 [[plant]]
 name = "compacting: the stand-in Codex never compacts"
@@ -207,6 +207,105 @@ meant = "reads_the_compaction_its_turn_began_with_before_the_message_as_probed_o
 runs = ["cmp-live"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/tests/live_compacting.rs"
+file = "crates/cf-e2e/src/rollout.rs"
 find = "        let compaction = records[began..message]"
 replace = "        let compaction = records[began..]"
+
+[[plant]]
+name = "compacting: any run of signs before a status is taken for its glyph, a quote of it among them"
+meant = "reads_no_quote_of_a_status_line_as_compaction"
+runs = ["cmp-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/compacting.rs"
+find = '''
+        let line =
+            line.trim_start_matches(|c: char| c.is_whitespace() || statuses.frame.contains(&c));
+        let words = line
+            .strip_prefix(|c: char| statuses.glyphs.contains(&c))
+            .map_or(line, str::trim_start);'''
+replace = '''
+        let words = line.trim_start_matches(|c: char| !c.is_alphanumeric());'''
+
+[[plant]]
+name = "compacting: Pi's compaction is read only with Escape as the key that cancels it"
+meant = "reads_pi_s_compaction_whatever_key_cancels_it"
+runs = ["cmp-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/compacting.rs"
+find = "        \"Compacting context... (\","
+replace = "        \"Compacting context... (escape to cancel)\","
+
+[[plant]]
+name = "compacting: a message pasted again is told of again for the same compaction"
+meant = "a_message_told_of_for_a_compaction_is_not_told_of_again_when_it_is_pasted_again"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+        record.delivery.borrow_mut().delivering = None;
+        // A paste the harness record never showed after the whole window, the'''
+replace = '''
+        {
+            let mut part = record.delivery.borrow_mut();
+            part.delivering = None;
+            part.told_work = None;
+        }
+        // A paste the harness record never showed after the whole window, the'''
+
+[[plant]]
+name = "compacting: a first message on a window at work on other work is never told of"
+meant = "a_first_message_on_a_window_at_work_for_good_is_told_of_once_and_never_given_up"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/at_work.rs"
+find = "        if waited < TOLD_AFTER_MS || !(compacting || launch) {"
+replace = "        if waited < TOLD_AFTER_MS || !compacting {"
+
+[[plant]]
+name = "compacting: a launch never asked whether it is ready does not say why"
+meant = "a_window_that_never_comes_to_rest_for_its_first_message_is_given_up_in_words_that_say_so"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+            _ => "the window was never ready for its first message: it never came to rest \
+                  with its screen drawn"
+                .to_owned(),'''
+replace = '''
+            _ => "the window was never ready for its first message".to_owned(),'''
+
+[[plant]]
+name = "compacting: the words that resume a task and never reach its window are not given back"
+meant = "the_words_that_resume_a_task_and_never_reach_its_window_come_back_word_for_word"
+runs = ["cmp-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                return self.words_back(&project, message, because, true);"
+replace = "                return Ok(());"
+
+[[plant]]
+name = "compacting: the rig's case holds with a stand-in Codex that never compacts"
+meant = "a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_done"
+runs = ["cmp-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = "        .map(Duration::from_secs)\n}"
+replace = "        .map(Duration::from_secs)\n        .filter(|_| false)\n}"
+
+[[plant]]
+name = "compacting: Pi's status inside the rule above its input box is not read"
+meant = "reads_pi_compacting_on_a_screen_it_drew"
+runs = ["cmp-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/compacting.rs"
+find = "    frame: &['─'],"
+replace = "    frame: &[],"

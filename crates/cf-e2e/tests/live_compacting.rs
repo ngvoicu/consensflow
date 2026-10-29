@@ -32,7 +32,8 @@ use cf_e2e::live::codex::CodexHome;
 use cf_e2e::live::members::{find, is_over, last_result, member, stand_in_chief, Members, Plan};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{agents, installed, Harness, Log};
-use cf_e2e::{rollout, Result};
+use cf_e2e::rollout::{self, Turn};
+use cf_e2e::Result;
 use serde_json::Value;
 
 /// The stand-in for the chief's window.
@@ -52,16 +53,6 @@ const LAUNCH_MS: &str = "8000";
 /// the start of its next turn.
 const CONFIG: &str = "model_auto_compact_token_limit = 1000\n";
 
-/// What the follow-up's turn did, as its thread's rollout says it.
-#[derive(Debug, Clone, PartialEq)]
-struct Turn {
-    /// The follow-up's message was written after a compaction its turn began with, and
-    /// the seconds from the turn's start to the compaction's end.
-    compacted: Option<f64>,
-    /// The follow-up's message is in the rollout.
-    taken: bool,
-}
-
 /// What the check saw.
 #[derive(Debug, Clone, PartialEq)]
 struct Seen {
@@ -72,44 +63,6 @@ struct Seen {
     turn: Turn,
     state: String,
     screen: String,
-}
-
-/// The seconds of an RFC 3339 time.
-#[allow(clippy::cast_precision_loss)]
-fn seconds_of(at: &str) -> Option<f64> {
-    let at: jiff::Timestamp = at.parse().ok()?;
-    Some(at.as_millisecond() as f64 / 1000.0)
-}
-
-/// The turn of the rollout `records` that took the message holding `words`: whether a
-/// compaction came between its start and the message.
-fn turn_of(records: &[Value], words: &str) -> Turn {
-    let message = records.iter().position(|record| {
-        record["type"] == "response_item"
-            && record["payload"]["role"] == "user"
-            && record["payload"].to_string().contains(words)
-    });
-    let Some(message) = message else {
-        return Turn {
-            compacted: None,
-            taken: false,
-        };
-    };
-    let began = records[..message].iter().rposition(|record| {
-        record["type"] == "event_msg" && record["payload"]["type"] == "task_started"
-    });
-    let compacted = began.and_then(|began| {
-        let compaction = records[began..message]
-            .iter()
-            .find(|record| record["type"] == "compacted")?;
-        let from = seconds_of(records[began]["timestamp"].as_str()?)?;
-        let to = seconds_of(compaction["timestamp"].as_str()?)?;
-        Some(to - from)
-    });
-    Turn {
-        compacted,
-        taken: true,
-    }
 }
 
 /// What came of it, and the words that say so.
@@ -245,7 +198,7 @@ fn check(log: &Log) -> Result<Check> {
                     };
                     for found in rollout::rollouts(home.path()) {
                         let records = rollout::records(&rollout::read(&found)?);
-                        let this = turn_of(&records, "Reply with only: again");
+                        let this = rollout::turn_taking(&records, "Reply with only: again");
                         if this.taken {
                             turn = this;
                         }
@@ -334,20 +287,26 @@ mod tests {
 
     #[test]
     fn reads_the_compaction_its_turn_began_with_before_the_message_as_probed_on_codex_0_165() {
-        let turn = turn_of(&records(), "Reply with only: again");
+        let turn = rollout::turn_taking(&records(), "Reply with only: again");
         assert!(turn.taken);
         let took = turn.compacted.expect("compacted first");
         assert!((took - 2.159).abs() < 0.001, "{took}");
         // A message taken with no compaction before it, and one never taken.
         let mut plain = records();
         plain.remove(2);
-        assert_eq!(turn_of(&plain, "Reply with only: again").compacted, None);
+        assert_eq!(
+            rollout::turn_taking(&plain, "Reply with only: again").compacted,
+            None
+        );
         // A compaction after the message is not one its turn began with.
         let mut after = records();
         let compaction = after.remove(2);
         after.push(compaction);
-        assert_eq!(turn_of(&after, "Reply with only: again").compacted, None);
-        assert!(!turn_of(&records(), "Reply with only: elsewhere").taken);
+        assert_eq!(
+            rollout::turn_taking(&after, "Reply with only: again").compacted,
+            None
+        );
+        assert!(!rollout::turn_taking(&records(), "Reply with only: elsewhere").taken);
     }
 
     #[test]

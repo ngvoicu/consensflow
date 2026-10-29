@@ -19,35 +19,64 @@
 //! busy; OpenCode writes its compaction's user message and streams its summary as a
 //! turn of its own, which its record reads at work.
 //!
-//! Only a status line counts: its words begin the line, after the glyph that turns
-//! before them. What is done ("Conversation compacted", "• Context compacted") is not
-//! compacting, nor is a conversation that quotes these words in the middle of a line.
+//! Only a status line counts: its words begin the line, past whitespace, the frame its
+//! harness draws it in (Pi draws it inside the rule above its input box: "── ⠧ Compacting
+//! context... (escape to cancel) ──", `cargo xtask live compaction-screens pi`) and one of
+//! the glyphs its harness turns before them (Codex's bullet, which blinks hollow; Claude
+//! Code's star, a `*` off macOS; Pi's braille spinner). What is done ("Conversation compacted",
+//! "• Context compacted") is not compacting, nor is a line that quotes the words: a `cat`
+//! or `git diff` of these readers, a Markdown bullet or quote, a conversation's line that
+//! begins with anything else (Calliope's P2-1 of T-917).
 
-/// Whether one of `screen`'s lines (the window's last ones) is a status line that begins,
-/// past its glyph, with one of `statuses`.
-pub(crate) fn drawn(screen: &[String], statuses: &[&str]) -> bool {
+/// A harness's status lines while it compacts: what of the frame it draws them in may come
+/// first, the glyphs that may turn before them, and the words they begin with.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Statuses {
+    frame: &'static [char],
+    glyphs: &'static [char],
+    words: &'static [&'static str],
+}
+
+/// Whether one of `screen`'s lines (the window's last ones) is one of `statuses`.
+pub(crate) fn drawn(screen: &[String], statuses: &Statuses) -> bool {
     screen.iter().any(|line| {
-        let words = line.trim_start_matches(|c: char| !c.is_alphanumeric());
-        statuses.iter().any(|status| words.starts_with(status))
+        let line =
+            line.trim_start_matches(|c: char| c.is_whitespace() || statuses.frame.contains(&c));
+        let words = line
+            .strip_prefix(|c: char| statuses.glyphs.contains(&c))
+            .map_or(line, str::trim_start);
+        statuses
+            .words
+            .iter()
+            .any(|status| words.starts_with(status))
     })
 }
 
-/// Claude Code's statuses while it compacts.
-pub(crate) const CLAUDE: [&str; 3] = [
-    "Compacting conversation…",
-    "Compacting conversation...",
-    "Running PreCompact hooks…",
-];
+/// Claude Code's statuses while it compacts: the spinner's words, which its renderer ends
+/// with an ellipsis, and its hooks before it.
+pub(crate) const CLAUDE: Statuses = Statuses {
+    frame: &[],
+    glyphs: &['·', '✢', '✳', '✶', '✻', '✽', '*'],
+    words: &["Compacting conversation", "Running PreCompact hooks"],
+};
 
 /// Codex's.
-pub(crate) const CODEX: [&str; 1] = ["Compacting context ("];
+pub(crate) const CODEX: Statuses = Statuses {
+    frame: &[],
+    glyphs: &['•', '◦'],
+    words: &["Compacting context ("],
+};
 
-/// Pi's.
-pub(crate) const PI: [&str; 3] = [
-    "Compacting context... (escape to cancel)",
-    "Auto-compacting... (escape to cancel)",
-    "Context overflow detected, Auto-compacting... (escape to cancel)",
-];
+/// Pi's, up to the key that cancels, which is its keymap's (`keyText("app.interrupt")`).
+pub(crate) const PI: Statuses = Statuses {
+    frame: &['─'],
+    glyphs: &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
+    words: &[
+        "Compacting context... (",
+        "Auto-compacting... (",
+        "Context overflow detected, Auto-compacting... (",
+    ],
+};
 
 #[cfg(test)]
 mod tests;

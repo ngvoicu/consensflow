@@ -113,6 +113,9 @@ pub(crate) struct DeliveryPart {
     pub(crate) left_at_work: Option<(i64, usize, i64)>,
     /// The message a window not ready for a paste holds, told to the trace once.
     pub(crate) held: Option<i64>,
+    /// The message whose sender and the human were told it waits on the window's work
+    /// (`at_work`): once a message, however many times it is pasted.
+    pub(crate) told_work: Option<i64>,
     /// The message held for what the human typed and has not sent, and when a look
     /// first found it so, every look since finding it so too: past [`UNSENT_TOLD_MS`]
     /// the human hears it, once a message (`unsent_told`, by its note).
@@ -1401,7 +1404,7 @@ impl Dispatcher {
                     let paused_because = resumed_in_vain(message, because);
                     self.tell_stall(&project, &thread.task, &paused_because, because, None)?;
                 }
-                return Ok(());
+                return self.words_back(&project, message, because, true);
             }
         }
         let project = self.known_project(message.project_id)?;
@@ -1481,7 +1484,7 @@ impl Dispatcher {
             }
         }
         if !told_back {
-            self.words_back(&project, message, because)?;
+            self.words_back(&project, message, because, false)?;
         }
         self.tell_not_reached(&project, message, because, &waiting)
     }
@@ -1490,12 +1493,15 @@ impl Dispatcher {
     /// while its task waited) that will never reach it go back to whoever told them,
     /// word for word, so that nobody sends them again from memory (T-901: a tell into a
     /// window that was compacting failed, and its teller heard nothing of it, only the
-    /// human did, without the words). What the human told is theirs on the board already.
+    /// human did, without the words); and so do the words that `resumed` a paused task,
+    /// which paused it again (Calliope's P3-5 of T-917). What the human told is theirs on
+    /// the board already.
     fn words_back(
         &self,
         project: &ProjectView,
         message: &MessageView,
         because: &str,
+        resumed: bool,
     ) -> Result<(), EngineError> {
         let (Some(sender), Some(number)) = (
             message
@@ -1511,7 +1517,7 @@ impl Dispatcher {
         let tell = message.kind == "question"
             && message.urgent
             && assignee.as_deref() == Some(message.recipient.as_str());
-        if !tell && !is_told(message, assignee.as_deref()) {
+        if !resumed && !tell && !is_told(message, assignee.as_deref()) {
             return Ok(());
         }
         let lead = format!(
