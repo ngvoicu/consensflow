@@ -524,16 +524,19 @@ pub fn run() {
                         runtime.shutdown();
                     }
                 });
+                // An update's restart: its app is started here, not by Tauri (updates.rs).
+                #[cfg(target_os = "macos")]
+                updates::relaunch_installed(handle);
             }
         });
     });
 }
 
 /// The app's last code, on the main thread, as its event loop ends: `shutdown`, then every
-/// descriptor it holds made close-on-exec. After this Tauri ends the process, or starts the app an
-/// update installed: `app.restart()` called off the main thread (the update's install is an async
-/// command) only asks the loop to end, and Tauri starts the new app here, after this, with a bare
-/// `Command`. A descriptor of this app's that is not close-on-exec then (a socket or a pipe another
+/// descriptor it holds made close-on-exec. After this Tauri ends the process, or the app an update
+/// installed is started: `app.restart()` called off the main thread (the update's install is an
+/// async command) only asks the loop to end, and the new app is started here, after this
+/// (`updates::relaunch_installed`). A descriptor of this app's that is not close-on-exec then (a socket or a pipe another
 /// thread made in std's two steps, a file a framework opened so) would be the new app's for as
 /// long as it runs. A quit that is no restart loses nothing by it: the process ends.
 /// A shutdown that panics is written down by the hook and the marking still comes: the event

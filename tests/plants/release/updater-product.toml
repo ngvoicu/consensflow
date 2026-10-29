@@ -196,12 +196,12 @@ file = "app/src-tauri/src/daemon_command.rs"
 find = "    let mut command = Command::new(cf);"
 replace = '    let mut command = Command::new("/usr/bin/true");'
 
-# The new app holds nothing of the old one's: Tauri's restart starts it with a bare `Command`, and
-# the old app marks every descriptor close-on-exec first, in its last code (`at_exit`), and before
-# a restart Tauri starts on the spot (`restart_swept`). The last code's sweep taken out and the
-# install's restart called bare, the new app holds the two descriptors the smoke left the
-# installed app (descriptors.rs of the smoke). The restart called bare with the last code's sweep
-# in place is no fault: the restart is still swept.
+# The new app holds nothing of the old one's: the old app starts it at its event loop's end
+# holding only its streams (`relaunch_installed`, T-930), marks every descriptor close-on-exec
+# first, in its last code (`at_exit`), and before a restart Tauri starts on the spot
+# (`restart_swept`). The three taken out, the new app holds the two descriptors the smoke left the
+# installed app (descriptors.rs of the smoke). Any one of them left in place is no fault: the
+# restart still holds none.
 [[plant]]
 name = "updater product: the app restarts holding every descriptor it was left"
 meant = "the update installs and restarts"
@@ -222,3 +222,11 @@ replace = ""
 file = "app/src-tauri/src/updates.rs"
 find = "restart_swept(|| -> Value { app.restart() })"
 replace = "app.restart()"
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = """
+    command.args(args);
+    cf_process::hold_only_the_streams(&mut command);"""
+replace = """
+    command.args(args);"""

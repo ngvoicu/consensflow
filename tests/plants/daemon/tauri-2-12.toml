@@ -1,0 +1,67 @@
+# What the Tauri 2.12 upgrade keeps of the app's update restart (T-930). Since Tauri 2.12.2 its
+# restart starts a macOS app through LaunchServices (`open -n`): launchd's child, in a session of
+# its own, its input and output `/dev/null`. The updater smoke's app reads the smoke's FIFO, writes
+# its reports on its output and is ended with its process group, so the app an update installed is
+# started by the app itself at its event loop's end, as Tauri 2.11 did
+# (`app/src-tauri/src/updates.rs`, `relaunch_installed`). One plant takes one part of that out; a
+# test fails.
+#
+# Every name holds `tauri-2-12`, so `npm run plants:daemon -- "tauri-2-12:"` runs them all.
+
+[run]
+app-relaunch = ["cargo", "xtask", "app", "test", "an_installed_update_starts_with_this_apps_environment_input_and_arguments"]
+
+[[plant]]
+name = "tauri-2-12: the installed update is started as Tauri 2.12 starts it, through LaunchServices"
+meant = "an_installed_update_starts_with_this_apps_environment_input_and_arguments"
+runs = ["app-relaunch"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = """
+    let mut command = std::process::Command::new(app.join("Contents/MacOS").join(&executable));
+    command.args(args);"""
+replace = """
+    let mut command = std::process::Command::new("/usr/bin/open");
+    command.arg("-n").arg(app).arg("--args").args(args).stdin(std::process::Stdio::null());"""
+
+[[plant]]
+name = "tauri-2-12: the installed update is started without this app's input"
+meant = "an_installed_update_starts_with_this_apps_environment_input_and_arguments"
+runs = ["app-relaunch"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = """
+    command.args(args);
+    cf_process::hold_only_the_streams(&mut command);"""
+replace = """
+    command.args(args).stdin(std::process::Stdio::null());
+    cf_process::hold_only_the_streams(&mut command);"""
+
+[[plant]]
+name = "tauri-2-12: the installed update is started without this app's arguments"
+meant = "an_installed_update_starts_with_this_apps_environment_input_and_arguments"
+runs = ["app-relaunch"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = """
+    command.args(args);
+    cf_process::hold_only_the_streams(&mut command);"""
+replace = """
+    let _ = args;
+    cf_process::hold_only_the_streams(&mut command);"""
+
+[[plant]]
+name = "tauri-2-12: the installed update is started holding this app's descriptors"
+meant = "an_installed_update_starts_with_this_apps_environment_input_and_arguments"
+runs = ["app-relaunch"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = """
+    command.args(args);
+    cf_process::hold_only_the_streams(&mut command);"""
+replace = """
+    command.args(args);"""

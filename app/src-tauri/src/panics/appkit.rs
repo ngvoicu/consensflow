@@ -1,14 +1,16 @@
 //! AppKit's dispatch of an event, run so that what unwinds out of it ends there (T-908).
 //!
-//! tao 0.35 overrides `sendEvent:` of its application and its window classes with `extern "C"`
-//! functions (`platform_impl/macos/app.rs`, `window.rs`) that call AppKit's own. objc2's sends
-//! are `C-unwind`, so an Objective-C exception AppKit raises under them, or a panic of a
-//! `C-unwind` method AppKit calls (objc2's `define_class!`: muda's menu actions, wry's web view,
-//! the tray), unwinds up to tao's function, and Rust aborts there: AppKit's handler above it never
-//! runs, and nothing is told. So AppKit's own `-[NSApplication sendEvent:]` and
+//! tao 0.35 (Tauri 2.11) overrode `sendEvent:` of its application and its window classes with
+//! `extern "C"` functions (`platform_impl/macos/app.rs`, `window.rs`) that call AppKit's own.
+//! objc2's sends are `C-unwind`, so an Objective-C exception AppKit raised under them, or a panic
+//! of a `C-unwind` method AppKit calls (objc2's `define_class!`: muda's menu actions, wry's web
+//! view, the tray), unwound up to tao's function, and Rust aborted there: AppKit's handler above it
+//! never ran, and nothing was told. So AppKit's own `-[NSApplication sendEvent:]` and
 //! `-[NSWindow sendEvent:]`, which tao's call, are each replaced by one that runs it and catches
-//! what unwinds out of it, below tao's frame. (tao 0.37.2 made its application's `send_event`
-//! `C-unwind`, and so AppKit's handler would see it; Tauri 2.11 is on tao 0.35.)
+//! what unwinds out of it, below tao's frame. Since T-930 the app is on tao 0.37.2 (Tauri 2.12),
+//! whose Objective-C methods and run loop callbacks are all `C-unwind`: what unwinds would now
+//! pass through tao to AppKit's handler, which only logs it. The guard stays, and stops it below
+//! tao, where it is written down with its stack and the person is told.
 
 use std::ffi::CStr;
 use std::mem;

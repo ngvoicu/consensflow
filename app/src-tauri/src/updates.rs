@@ -308,13 +308,14 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
             if runtime.begin_shutdown() && !runtime.finish_shutdown() {
                 eprintln!("ConsensFlow update installed; internal drain failed or exceeded its five-second deadline. Restarting with no open panes.");
             }
-            Ok::<_, String>(permit)
+            Ok::<_, String>((permit, target))
         })
         .await;
         match installed {
-            Ok(Ok(_permit)) => {
+            Ok(Ok((_permit, target))) => {
                 // Admission stays closed through restart. The daemon has exited;
                 // a stalled bridge drain cannot keep the old process alive.
+                let _ = INSTALLED.set(target);
                 restart_swept(|| -> Value { app.restart() })
             }
             Ok(Err(error)) => command_error(&app, error),
@@ -331,15 +332,15 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
     }
 }
 
-/// Starts the app an update installed, by `restart` (Tauri's, which starts it with a bare
-/// `Command` and never returns), once every descriptor of this app's is close-on-exec, which a
-/// descriptor left inheritable would otherwise be the new app's for as long as it runs. Called
-/// off the main thread, as the install is, Tauri's restart only asks the event loop to end, and
-/// starts the new app on the main thread after the app's last code, which marks them all again
-/// (`at_exit`, lib.rs): that is the sweep the restart relies on. This one is for the two ways
-/// Tauri starts the new app without that: a restart called on the main thread, and one whose
-/// request to end the loop failed. The app is ending, and its own programs are started holding
-/// only their streams, so nothing here needs a descriptor passed on.
+/// Starts the app an update installed, by `restart` (Tauri's, which never returns), once every
+/// descriptor of this app's is close-on-exec, which a descriptor left inheritable would otherwise
+/// be the new app's for as long as it runs. Called off the main thread, as the install is,
+/// Tauri's restart only asks the event loop to end, and the loop's end starts the new app
+/// ([`relaunch_installed`]) after the app's last code, which marks them all again (`at_exit`,
+/// lib.rs). This one is for the ways Tauri starts the new app itself, without that: a restart
+/// called on the main thread, one whose request to end the loop failed, and one the relaunch
+/// could not start. The app is ending, and its own programs are started holding only their
+/// streams, so nothing here needs a descriptor passed on.
 #[cfg(target_os = "macos")]
 fn restart_swept<T>(restart: impl FnOnce() -> T) -> T {
     if let Err(failed) = cf_process::close_all_on_exec() {
@@ -348,6 +349,61 @@ fn restart_swept<T>(restart: impl FnOnce() -> T) -> T {
         );
     }
     restart()
+}
+
+/// The app an update installed at this one's path, once the install has swapped it in: the
+/// event loop's end starts it ([`relaunch_installed`]).
+#[cfg(target_os = "macos")]
+static INSTALLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Starts the app an update installed, as this one was started, and ends this process. Called
+/// at the event loop's end (lib.rs), after the app's last code and before Tauri's restart, which
+/// since Tauri 2.12.2 starts the new app through LaunchServices (`open -n`): launchd's child, in
+/// a session of its own, its input and output `/dev/null`. A self-test's app reads the smoke's
+/// FIFO and writes its reports on its output, and the smoke ends the app's process group: the
+/// app an update restarted so would hear nothing, say nothing, and outlive the smoke (T-930).
+/// This starts the bundle's executable itself, as Tauri 2.11 did: this app's environment,
+/// streams, process group and arguments, holding nothing of this app's but its streams. Returns
+/// where no update was installed, or where the new app could not be started: Tauri's restart
+/// then starts it as it does.
+#[cfg(target_os = "macos")]
+pub(crate) fn relaunch_installed<R: Runtime>(app: &AppHandle<R>) {
+    let Some(installed) = INSTALLED.get() else {
+        return;
+    };
+    match relaunch(installed, std::env::args_os().skip(1)) {
+        Ok(_) => {
+            app.cleanup_before_exit();
+            std::process::exit(0);
+        }
+        Err(error) => eprintln!(
+            "ConsensFlow could not start the installed update itself ({error}); Tauri's restart starts it"
+        ),
+    }
+}
+
+/// Starts the executable of the bundle at `app` (its Info.plist names it) with `args`, this
+/// process's environment and input, and nothing of its but the standard streams.
+#[cfg(target_os = "macos")]
+fn relaunch(
+    app: &Path,
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<std::process::Child, String> {
+    let tools = crate::update_install::Tools::system();
+    let executable = crate::update_install::plist_value(&tools, app, "CFBundleExecutable")?;
+    let mut parts = Path::new(&executable).components();
+    if !matches!(
+        (parts.next(), parts.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    ) {
+        return Err(format!(
+            "the bundle names no executable of its own: {executable:?}"
+        ));
+    }
+    let mut command = std::process::Command::new(app.join("Contents/MacOS").join(&executable));
+    command.args(args);
+    cf_process::hold_only_the_streams(&mut command);
+    command.spawn().map_err(|e| e.to_string())
 }
 
 fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
@@ -1143,5 +1199,106 @@ mod tests {
         );
         assert!(ran.status.success(), "{said}");
         assert!(said.contains("1 passed"), "the test did not run: {said}");
+    }
+
+    /// The app an update installed starts as this one was started: its environment (an app on a
+    /// `CONSENSFLOW_HOME` comes back on it), its input (a self-test's FIFO), its output (where a
+    /// self-test reports) and its arguments, and nothing else of this app's: a descriptor left
+    /// open and not close-on-exec is not the new app's. Tauri 2.12's restart, through
+    /// LaunchServices, gives it `/dev/null` for both streams (T-930). The bundle is a stand-in
+    /// whose executable writes what it was given; the relaunch runs in a process of its own, the
+    /// test's binary run again, given a home and an input of the test's.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_installed_update_starts_with_this_apps_environment_input_and_arguments() {
+        const BUNDLE: &str = "CONSENSFLOW_TEST_RELAUNCH_BUNDLE";
+        if let Some(bundle) = std::env::var_os(BUNDLE) {
+            use std::os::fd::AsRawFd;
+
+            let stray = std::fs::File::open("/dev/null").expect("a file");
+            // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+            assert_eq!(
+                unsafe { libc::fcntl(stray.as_raw_fd(), libc::F_SETFD, 0) },
+                0
+            );
+            let mut started = relaunch(
+                Path::new(&bundle),
+                [
+                    "--first".into(),
+                    "second word".into(),
+                    stray.as_raw_fd().to_string().into(),
+                ],
+            )
+            .expect("start the installed app");
+            assert!(started.wait().expect("the stand-in ends").success());
+            return;
+        }
+        let folder = tempfile::tempdir().expect("a folder");
+        let bundle = folder.path().join("Installed.app");
+        let programs = bundle.join("Contents/MacOS");
+        std::fs::create_dir_all(&programs).expect("the bundle's folders");
+        std::fs::write(
+            bundle.join("Contents/Info.plist"),
+            concat!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>"#,
+                "<key>CFBundleExecutable</key><string>stand-in</string></dict></plist>"
+            ),
+        )
+        .expect("the Info.plist");
+        let said = folder.path().join("said");
+        let stand_in = programs.join("stand-in");
+        std::fs::write(
+            &stand_in,
+            format!(
+                "#!/bin/sh\nheld='holds none'\nif [ -e \"/dev/fd/$3\" ]; then held='holds the stray'; fi\necho 'the stand-in on its output'\n{{ printf '%s\\n' \"$CONSENSFLOW_HOME\" \"$1\" \"$2\" \"$held\"; cat; }} > '{}.part'\nmv '{0}.part' '{0}'\n",
+                said.display()
+            ),
+        )
+        .expect("the stand-in");
+        std::fs::set_permissions(
+            &stand_in,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("make it runnable");
+        let input = folder.path().join("input");
+        std::fs::write(&input, "the smoke's input\n").expect("the input");
+        let home = folder.path().join("home of its own");
+        let ran = crate::testing::command(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "updates::tests::an_installed_update_starts_with_this_apps_environment_input_and_arguments",
+                "--nocapture",
+            ])
+            .env(BUNDLE, &bundle)
+            .env("CONSENSFLOW_HOME", &home)
+            .stdin(std::fs::File::open(&input).expect("open the input"))
+            .output()
+            .expect("run the test in a child");
+        let output = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ran.stdout),
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert!(ran.status.success(), "{output}");
+        assert!(
+            output.contains("1 passed"),
+            "the test did not run: {output}"
+        );
+        assert!(
+            output.contains("the stand-in on its output"),
+            "the installed app wrote elsewhere: {output}"
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !said.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let said = std::fs::read_to_string(&said).expect("the stand-in said what it was given");
+        assert_eq!(
+            said,
+            format!(
+                "{}\n--first\nsecond word\nholds none\nthe smoke's input\n",
+                home.display()
+            )
+        );
     }
 }
