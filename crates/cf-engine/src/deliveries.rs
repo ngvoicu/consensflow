@@ -105,6 +105,9 @@ pub struct HeldBack {
     /// Whether what holds it is words typed in its window and not sent ([`Held::Unsent`]):
     /// the human's note of a message held long says then what the window's box shows.
     pub unsent: bool,
+    /// Whether the trace has been told this reason: a chief's window read at work holds
+    /// its head quietly until the human is told (`held_not_at_rest`).
+    pub traced: bool,
 }
 
 /// The record's delivery part.
@@ -183,6 +186,10 @@ pub(crate) struct DeliveryPart {
     /// What the looks read of the window while the message on its way, or the last,
     /// was on its way (`arrival`), for its retry or failure to say.
     pub(crate) watched: Option<crate::arrival::Watched>,
+    /// The message at the head of a chief's queue while its window is not at rest, and
+    /// how many items its record held at the first such look: what it has written since
+    /// (`held_not_at_rest`).
+    pub(crate) head_items: Option<(i64, usize)>,
 }
 
 /// A paste whose Enter was withheld, left in its window's input box.
@@ -1123,13 +1130,14 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let was = record.delivery.borrow().held.clone();
         let held = match was.filter(|held| held.message == message) {
-            Some(held) if held.reason == reason => held,
+            Some(held) if held.reason == reason && held.traced => held,
             was => {
                 let held = HeldBack {
                     message,
                     reason: reason.to_owned(),
                     since_ms: was.map_or_else(|| self.now(), |was| was.since_ms),
                     unsent,
+                    traced: true,
                 };
                 record.delivery.borrow_mut().held = Some(held.clone());
                 self.trace_window(
@@ -1144,6 +1152,81 @@ impl Dispatcher {
             }
         };
         self.tell_if_held_long(record, held).await
+    }
+
+    /// A chief's window not at rest at this look, its project open: the message at the head
+    /// of its queue waits for it, on the clock every hold of that message runs on, and from
+    /// [`HELD_TOLD_MS`] the trace says why and the human is told once (`hold`), as of a
+    /// message held at a window at rest. Before then it is held quietly: a chief at work on
+    /// a turn of its own holds its queue a while every day. Its words say what holds it: a
+    /// screen not drawn, a dialog of the harness's own, or the window read at work, and then
+    /// whether its record has answered since the message became the head (a user's words,
+    /// and a whole answer after them) or its harness says it waits at its prompt, which a
+    /// window at work on a turn does not: ConsensFlow may misread it then (T-958: the field's chief read at
+    /// work for 54 hours while it answered the human, seven results queued, and nobody
+    /// was told).
+    pub(crate) async fn held_not_at_rest(
+        &self,
+        record: &Record,
+        observed: &Observed,
+        drawing: bool,
+    ) -> Result<(), EngineError> {
+        let Some(next) = self.next_in_line(record)? else {
+            let mut part = record.delivery.borrow_mut();
+            part.held = None;
+            part.head_items = None;
+            return Ok(());
+        };
+        let items = observed.items();
+        let from = {
+            let mut part = record.delivery.borrow_mut();
+            match part.head_items {
+                Some((message, from)) if message == next.id => from,
+                _ => {
+                    part.head_items = Some((next.id, items.len()));
+                    items.len()
+                }
+            }
+        };
+        let reason = if drawing {
+            "its window has not drawn its screen".to_owned()
+        } else if let Some(waiting) = &observed.waiting {
+            let shows = waiting
+                .reason
+                .as_deref()
+                .map_or_else(String::new, |reason| format!(": {reason}"));
+            format!("its window shows a dialog of its own{shows}")
+        } else if items.get(from..).is_some_and(answered) {
+            "its window reads at work, though its record has answered since this message came: ConsensFlow may be misreading it, and `cf inbox` shows what waits".to_owned()
+        } else if observed.at_prompt {
+            "its window reads at work, though its harness says it waits at its prompt: ConsensFlow may be misreading it, and `cf inbox` shows what waits".to_owned()
+        } else {
+            "its window reads at work".to_owned()
+        };
+        {
+            let mut part = record.delivery.borrow_mut();
+            let was = part.held.clone().filter(|held| held.message == next.id);
+            let since_ms = was.as_ref().map_or_else(|| self.now(), |was| was.since_ms);
+            if self.now() - since_ms < HELD_TOLD_MS {
+                part.held = Some(HeldBack {
+                    message: next.id,
+                    reason: reason.clone(),
+                    since_ms,
+                    unsent: false,
+                    traced: was.is_some_and(|was| was.traced && was.reason == reason),
+                });
+                return Ok(());
+            }
+        }
+        self.held_once(record, next.id, &reason).await
+    }
+
+    /// The message at the head of `record`'s queue held [`HELD_TOLD_MS`] or longer, whatever
+    /// holds it: what a chief's lane says while its window reads at work.
+    pub(crate) fn held_long(&self, record: &Record) -> Option<i64> {
+        let part = record.delivery.borrow();
+        let held = part.held.as_ref()?;
+        (self.now() - held.since_ms >= HELD_TOLD_MS).then_some(held.message)
     }
 
     /// Whether a key may be pressed into `pane` now: its screen says it printed
@@ -1714,6 +1797,18 @@ fn counted(words: &str) -> String {
 fn masked(words: &str) -> String {
     let shown: String = words.chars().take(2).collect();
     format!("\"{shown}…\" ({} characters)", words.chars().count())
+}
+
+/// Whether `items` hold a user's words and a whole answer after them: a turn taken.
+fn answered(items: &[cf_harness::records::Item]) -> bool {
+    items
+        .iter()
+        .position(|item| item.role == Role::User && !item.synthetic && !item.compaction)
+        .is_some_and(|asked| {
+            items[asked + 1..]
+                .iter()
+                .any(|item| item.role == Role::Assistant && item.complete && !item.synthetic)
+        })
 }
 
 /// How many of the messages last pasted into a window are read for what

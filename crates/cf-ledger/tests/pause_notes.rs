@@ -365,7 +365,7 @@ fn paused_answer(words: &str) -> String {
 }
 
 fn moved_answer(words: &str) -> String {
-    format!("T-1, paused when @zeus's turn on the words put to its window (m-5) began, has moved on since (resumed, or back on the board): its result will be its next complete answer, not this. What that turn ended with:\n\n{words}")
+    format!("T-1, paused when @zeus's turn on the words put to its window (m-5) began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume begins, and it is the one to decide. What the turn on those words ended with:\n\n{words}")
 }
 
 #[test]

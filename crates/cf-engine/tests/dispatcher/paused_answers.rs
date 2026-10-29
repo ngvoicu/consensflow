@@ -184,7 +184,7 @@ fn finish_takes_the_final_answer_of_a_paused_task_as_its_result() {
 /// The note T-1's paused turn left, as the words of a task that has moved on say it.
 fn moved_on_words(handle: &str, told: &MessageView) -> String {
     format!(
-        "T-1, paused when @{handle}'s turn on the words put to its window (m-{}) began, has moved on since (resumed, or back on the board): its result will be its next complete answer, not this. What that turn ended with:\n\n{FINAL}",
+        "T-1, paused when @{handle}'s turn on the words put to its window (m-{}) began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume begins, and it is the one to decide. What the turn on those words ended with:\n\n{FINAL}",
         told.id
     )
 }
@@ -224,6 +224,74 @@ fn a_resume_before_the_chief_read_the_note_keeps_it_in_words_true_of_the_resumed
         .filter(|text| text.contains(&moved_on_words("zeus", &told)))
         .collect();
     assert_eq!(pasted.len(), 1, "given once: {pasted:?}");
+}
+
+/// T-958 (Gabriel's other Mac, T-68): the chief resumed while the window was still on its
+/// turn on the tell, which ended with the full report; the note gave it, and the resumed
+/// turn wrote the report again, in other words, as the result. Each says which to decide:
+/// the note that it is not the result, and the result's paste that it is, naming the note.
+#[test]
+fn the_result_after_a_note_of_the_turn_on_a_tell_says_it_is_the_one_to_decide() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.adapter.busy("chief");
+    answers_then_goes_on_to_the_end(&context, &told);
+    context.pass().unwrap();
+    let note = kept_note(&context, project);
+    context.resume_task(project, 1, "Carry on with the brief");
+    assert!(
+        context.message(note.id).body.contains(
+            "This is not its result: that comes as a message of its own, the answer of the turn its resume begins, and it is the one to decide."
+        ),
+        "{}",
+        context.message(note.id).body
+    );
+    context.pass().unwrap();
+    context
+        .adapter
+        .answer("zeus", "The parser is done, said again in other words");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "done");
+    for _ in 0..4 {
+        chief_ends_its_turn(&context);
+    }
+    let pasted = given(&context, "chief");
+    let result = pasted
+        .iter()
+        .find(|text| text.contains(" · result from "))
+        .unwrap_or_else(|| panic!("the result is given: {pasted:?}"));
+    assert!(
+        result.contains(&format!(
+            "The turn on your words while T-1 was paused ended with a report too, given in m-{}: this result is the one to decide. Decide with: cf task accept T-1",
+            note.id
+        )),
+        "{result}"
+    );
+}
+
+/// A result whose task's window was told nothing while paused says nothing of a note.
+#[test]
+fn a_result_with_no_note_of_a_turn_on_a_tell_says_only_how_to_decide() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Done.");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let pasted = given(&context, "chief");
+    let result = pasted
+        .iter()
+        .find(|text| text.contains(" · result from "))
+        .unwrap_or_else(|| panic!("the result is given: {pasted:?}"));
+    assert!(
+        result.ends_with("\n\nDecide with: cf task accept T-1 · cf task reopen T-1 \"…\""),
+        "{result}"
+    );
 }
 
 #[test]

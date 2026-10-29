@@ -360,7 +360,7 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            Some(held) if held.reason == reason => held,"
+find = "            Some(held) if held.reason == reason && held.traced => held,"
 replace = "            Some(held) if held.reason == reason || true => held,"
 
 [[plant]]

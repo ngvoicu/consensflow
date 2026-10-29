@@ -28,7 +28,7 @@ const OPENING: usize = 15_000;
 /// `windowText` drops before the text reaches a window. Here the half is
 /// dropped at the cut, so what a window is given is the same.
 pub fn delivery_text(message: &MessageView, carried: &[MessageView]) -> String {
-    text_of(message, carried, "")
+    text_of(message, carried, "", None)
 }
 
 /// What a header says, after who the message is from, of a message a start gave back
@@ -39,11 +39,34 @@ pub const SENT_AGAIN: &str = " · sent again after a restart, it may be there al
 /// [`delivery_text`] of a message sent again after a restart ([`SENT_AGAIN`]): the
 /// word is in its header, after its marker, so its record proves it as any paste's.
 pub fn delivery_text_sent_again(message: &MessageView, carried: &[MessageView]) -> String {
-    text_of(message, carried, SENT_AGAIN)
+    delivery_text_beside(message, carried, true, None)
 }
 
-/// [`delivery_text`], `again` said at the end of its header.
-fn text_of(message: &MessageView, carried: &[MessageView], again: &str) -> String {
+/// [`delivery_text`] of a result whose task's requester was given, or is to be given, the
+/// answer of its window's turn on a tell in the note `told_in` (`cf-ledger`'s
+/// `paused_answers`): its footer says that this result is the one to decide (T-958). Sent
+/// again after a restart where `again`.
+pub fn delivery_text_beside(
+    message: &MessageView,
+    carried: &[MessageView],
+    again: bool,
+    told_in: Option<i64>,
+) -> String {
+    text_of(
+        message,
+        carried,
+        if again { SENT_AGAIN } else { "" },
+        told_in,
+    )
+}
+
+/// [`delivery_text`], `again` said at the end of its header, and `told_in` in its footer.
+fn text_of(
+    message: &MessageView,
+    carried: &[MessageView],
+    again: &str,
+    told_in: Option<i64>,
+) -> String {
     let id = message.id;
     let from = from_of(message);
     let task = message
@@ -62,7 +85,7 @@ fn text_of(message: &MessageView, carried: &[MessageView], again: &str) -> Strin
     format!(
         "[ConsensFlow m-{id}{task} · {} from {from}{again}]\n{body}{}",
         message.kind,
-        footer(message)
+        footer(message, told_in)
     )
 }
 
@@ -329,7 +352,7 @@ fn opening(body: &str) -> &str {
 /// dispatcher asks the ledger for the head of the queue again and begins the
 /// delivery before it writes this text, awaiting nothing between), and one
 /// already being pasted is in the window, where no check can take it back.
-fn footer(message: &MessageView) -> String {
+fn footer(message: &MessageView, told_in: Option<i64>) -> String {
     let id = message.id;
     match (message.kind.as_str(), message.task_number) {
         ("question", task) => {
@@ -356,7 +379,13 @@ fn footer(message: &MessageView) -> String {
             }
         }
         ("result", Some(task)) => {
-            format!("\n\nDecide with: cf task accept T-{task} · cf task reopen T-{task} \"…\"")
+            // The answer of the window's turn on a tell, given in a note before (T-958).
+            let beside = told_in.map_or_else(String::new, |note| {
+                format!("The turn on your words while T-{task} was paused ended with a report too, given in m-{note}: this result is the one to decide. ")
+            });
+            format!(
+                "\n\n{beside}Decide with: cf task accept T-{task} · cf task reopen T-{task} \"…\""
+            )
         }
         _ => String::new(),
     }
