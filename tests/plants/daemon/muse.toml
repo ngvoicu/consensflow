@@ -39,6 +39,10 @@ muse-live-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live
 muse-live-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
 muse-plant-runner = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::"]
 muse-role-cleared = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::cleared"]
+muse-role-came-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::tests"]
+muse-live-kit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::"]
+muse-e2e-files = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "files::"]
+muse-base-file = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::"]
 muse-rig-env = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install"]
 muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
 muse-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record_state"]
@@ -242,10 +246,10 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/paths.rs"
 find = '''
-    let base = match set(env, "XDG_DATA_HOME") {
+    Ok(PathBuf::from(match set(env, "XDG_DATA_HOME") {
 '''
 replace = '''
-    let base = match env.os("XDG_DATA_HOME").map(|data| data.to_string_lossy().into_owned()) {
+    Ok(PathBuf::from(match env.os("XDG_DATA_HOME").map(|data| data.to_string_lossy().into_owned()) {
 '''
 
 # The paths: a session's folder is named as the session is written, on a Mac's disk too,
@@ -860,8 +864,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''        env: vec![(NO_UPDATE.0.to_owned(), NO_UPDATE.1.to_owned())],'''
-replace = '''        env: Vec::new(),'''
+find = '''    let mut given = vec![(NO_UPDATE.0.to_owned(), NO_UPDATE.1.to_owned())];'''
+replace = '''    let mut given = Vec::new();'''
 
 # The hooks of a launch: the owner's go with it (`-c hooks=` takes their place for the run).
 [[plant]]
@@ -2849,22 +2853,8 @@ runs = ["muse-role-cleared"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''        if window.is_none_or(|window| window.greeted(session)) || self.prelude_waits(record)? {'''
-replace = '''        if window.is_none() || self.prelude_waits(record)? {'''
-
-[[plant]]
-name = "muse: a told prelude keeps a later /clear from its role"
-meant = "a_session_no_hook_greeted_is_given_the_role_first_and_one_a_hook_greeted_nothing"
-runs = ["muse-role-cleared"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
-find = '''        if self.owed(record)?.is_some() {
-            return Ok(true);
-        }'''
-replace = '''        if record.delivery.borrow().prelude.is_some() {
-            return Ok(true);
-        }'''
+find = '''        if window.is_none_or(|window| window.greeted(session))'''
+replace = '''        if window.is_none()'''
 
 [[plant]]
 name = "muse: a session told the role as it is is told it again"
@@ -2914,5 +2904,160 @@ runs = ["muse-rig-env"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/install.rs"
-find = '''        let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());'''
+find = '''        let real = files::real_path(root);'''
 replace = '''        let real = root.to_path_buf();'''
+
+# T-931: Calliope's review of T-829 (the greeting no launch prelude, a hold for the human, the live
+# rotation's report, real paths).
+
+[[plant]]
+name = "muse: the greeting is a launch's prelude, watched as one"
+meant = "a_member_at_work_long_after_a_switch_to_a_session_no_hook_greeted_keeps_its_window"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        record.delivery.borrow_mut().greeting = Some(note.id);'''
+replace = '''        record.delivery.borrow_mut().prelude = Some(Prelude {
+            replacement: note.id,
+            displaced: None,
+            chief: participant.role == "chief",
+            since: self.now(),
+            begun: false,
+        });'''
+
+[[plant]]
+name = "muse: the greeting does not go first"
+meant = "a_member_at_work_long_after_a_switch_to_a_session_no_hook_greeted_keeps_its_window"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change/prelude.rs"
+find = '''            if greeting.state == "queued" && !busy {'''
+replace = '''            if greeting.state == "queued" && !busy && false {'''
+
+[[plant]]
+name = "muse: a greeting whose session a hook greeted since still goes in"
+meant = "a_greeting_whose_session_a_hook_greeted_meanwhile_is_withdrawn_unsent"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if note.state == "queued" && self.greeted_since(record)? {'''
+replace = '''        if note.state == "queued" && self.greeted_since(record)? && false {'''
+
+[[plant]]
+name = "muse: a second switch before the greeting goes in writes another note"
+meant = "two_switches_before_the_greeting_goes_in_write_one_note"
+runs = ["muse-role-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            || self.greeting(record)?.is_some()
+'''
+replace = ''''''
+
+[[plant]]
+name = "muse: a hold for the human is not said on the board"
+meant = "a_window_held_for_the_human_waits_in_its_words_on_the_board_and_goes_on_once_it_lifts"
+runs = ["muse-withheld"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                Some(Held::ForHuman(words)) => Some(words.clone()),'''
+replace = '''                Some(Held::ForHuman(_)) => None,'''
+
+[[plant]]
+name = "muse: a taken-back brief out of view is held as the window starting"
+meant = "a_taken_back_brief_out_of_view_holds_the_window_for_the_human_until_it_shows_whole"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''                if self.restored.get() && screen::box_cut(&lines) {'''
+replace = '''                if self.restored.get() && screen::box_cut(&lines) && false {'''
+
+[[plant]]
+name = "muse: a live report says nothing of what it left out"
+meant = "a_run_that_left_a_harness_out_says_so_in_its_report"
+runs = ["muse-live-kit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mod.rs"
+find = '''        if names.is_empty() {'''
+replace = '''        if true {'''
+
+[[plant]]
+name = "muse: --claude-model names no harness asked for"
+meant = "the_harnesses_the_model_flags_name_are_the_ones_asked_for"
+runs = ["muse-live-kit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        named.push(Harness::Claude);
+'''
+replace = ''''''
+
+[[plant]]
+name = "muse: a run with no home to log in at can run every harness"
+meant = "a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks"
+runs = ["muse-live-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    let Some(home) = home else {'''
+replace = '''    let Some(home) = home.or(Some(PathBuf::new())) else {'''
+
+[[plant]]
+name = "muse: the kit's real path is a verbatim one on Windows"
+meant = "a_real_path_is_as_given_on_windows_whose_real_paths_are_verbatim_ones"
+runs = ["muse-e2e-files"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/files.rs"
+find = '''    if windows {
+        return path.to_path_buf();
+    }'''
+replace = '''    let _ = windows;'''
+
+[[plant]]
+name = "muse: the product's real path is a verbatim one on Windows"
+meant = "a_real_path_resolves_a_link_on_unix_and_is_as_given_on_windows_and_where_none_is_there"
+runs = ["muse-base-file"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file.rs"
+find = '''    if windows {
+        return path.to_path_buf();
+    }'''
+replace = '''    let _ = windows;'''
+
+[[plant]]
+name = "muse: a path not there yet is not resolved at all"
+meant = "a_real_path_resolves_a_link_on_unix_and_is_as_given_on_windows_and_where_none_is_there"
+runs = ["muse-base-file"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file.rs"
+find = '''            Some(name) => rest.push(name.to_owned()),'''
+replace = '''            Some(_) => break,'''
+
+[[plant]]
+name = "muse: a window's Muse is given its data folder through the link"
+meant = "a_data_folder_reached_through_a_link_is_given_to_muse_by_its_real_path"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''    (real != given).then(|| real.to_string_lossy().into_owned())'''
+replace = '''    (real != given && false).then(|| real.to_string_lossy().into_owned())'''
+
+[[plant]]
+name = "muse: Muse's sessions are read through the link"
+meant = "a_data_folder_reached_through_a_link_is_given_to_muse_by_its_real_path"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''    Ok(real_path(&data_home(env)?).join("muse"))'''
+replace = '''    Ok(data_home(env)?.join("muse"))'''
