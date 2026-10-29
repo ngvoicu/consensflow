@@ -481,3 +481,28 @@ fn a_chief_held_for_no_default_stays_held_across_a_restart_and_is_told_once() {
         .count();
     assert_eq!(told, 1);
 }
+
+/// A launch that ended before its window came up with no code of failure is no refusal of
+/// its harness's, whatever its screen shows: only a refusal ends a launch with one
+/// (Calliope's P1, T-955).
+#[test]
+fn a_launch_that_ended_with_code_0_before_it_came_up_keeps_its_model() {
+    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+    context.host.exits_showing(
+        Some(0),
+        None,
+        Some(&["Error: Unknown model: 'claude-opus-5'"]),
+    );
+    *context.host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+    let project = context.with_staff(&["zeus"]);
+    context.host.exits_showing(None, None, None);
+    context.pass().unwrap();
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), None)
+    );
+    assert!(to_human(&context, project.id)
+        .iter()
+        .all(|body| !body.contains("no longer available")));
+}

@@ -630,16 +630,6 @@ find = '                if let Some(gone) = self.gone_model(&participant, &shown
 replace = '                if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))?.filter(|_| false) {'
 
 [[plant]]
-name = 'chief: no default and the chief opens anyway'
-meant = "a_gone_model_the_harness_has_no_default_for_keeps_the_chief_closed_until_a_switch"
-runs = ["chm-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '        if participant.role == "chief" && crate::chief_model::held_for_no_default(participant) {'
-replace = '        if participant.role == "chief" && crate::chief_model::held_for_no_default(participant) && false {'
-
-[[plant]]
 name = 'chief: what waited for a held chief is not given back'
 meant = "what_waits_for_a_chief_held_on_a_gone_model_waits_for_the_chief_switched_in"
 runs = ["chm-dispatcher"]
@@ -800,7 +790,7 @@ replace = '            part.up = false;'
 
 [[plant]]
 name = "chief: a code-0 exit is taken for a launch's refusal"
-meant = "a_chief_that_came_up_and_ended_with_a_gone_models_words_on_its_screen_keeps_its_model"
+meant = "a_launch_that_ended_with_code_0_before_it_came_up_keeps_its_model"
 runs = ["chm-dispatcher"]
 
 [[plant.edit]]

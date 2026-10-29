@@ -1086,11 +1086,6 @@ impl Dispatcher {
         if project.state != "open" {
             return Ok(());
         }
-        // A chief whose model is gone with no other to start it on stays closed: its launch
-        // told the human, who switches it (CHF-06).
-        if participant.role == "chief" && crate::chief_model::held_for_no_default(participant) {
-            return Ok(());
-        }
         // A chief whose window keeps failing to start is tried again ever more slowly.
         let relaunch_at = record.window.borrow().relaunch.map(|relaunch| relaunch.at);
         if relaunch_at.is_some_and(|at| at > self.now()) {
