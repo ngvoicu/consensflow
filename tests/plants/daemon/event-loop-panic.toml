@@ -1,0 +1,269 @@
+# What the app does with a panic, and on macOS with an Objective-C exception, in the code the
+# system's event loop calls (T-908). On 2026-10-28 the live app (3.0.6-alpha.3) aborted in tao's
+# `extern "C"` `sendEvent:` with nothing in its log but "panic in a function that cannot unwind":
+# an exception AppKit raised under it, as far as can be told, unwound into tao's frame, and Rust
+# aborted there. Now every panic is written to the error log with its place and backtrace before
+# anything can abort, and an abort no panic began is said to be a foreign unwind
+# (`app/src-tauri/src/panics.rs`); the app's callbacks of the event loop stop a panic at their edge
+# and tell the person once; AppKit's own `-[NSApplication sendEvent:]` and `-[NSWindow sendEvent:]`
+# are run where an exception or a panic under them is caught below tao's frame
+# (`panics/appkit.rs`); and the update state is read on after a panic that held it.
+# One plant takes one rule out; a test fails.
+#
+# Every name holds `event-loop-panic`, so `npm run plants:daemon -- "event-loop-panic:"` runs them all.
+
+[run]
+app-panics = ["cargo", "xtask", "app", "test", "panics::"]
+app-update-state = ["cargo", "xtask", "app", "test", "the_update_state_is_read_after_a_panic_that_held_it"]
+app-at-exit = ["cargo", "xtask", "app", "test", "a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec"]
+
+[[plant]]
+name = "event-loop-panic: the app's panics are not written to its error log"
+meant = "a_panic_is_written_to_the_error_log_with_its_thread_place_and_backtrace"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "        write(&describe(info));"
+replace = "        let _ = describe;"
+
+[[plant]]
+name = "event-loop-panic: a panic is written without its backtrace"
+meant = "a_panic_is_written_to_the_error_log_with_its_thread_place_and_backtrace"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "        Backtrace::force_capture()"
+replace = "        Backtrace::disabled()"
+
+[[plant]]
+name = "event-loop-panic: a panic is written after the hook returns, too late for the abort it ends in"
+meant = "a_panic_that_ends_in_an_abort_is_written_before_it"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "        write(&describe(info));"
+replace = '''        let text = describe(info);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            write(&text);
+        });'''
+
+[[plant]]
+name = "event-loop-panic: an abort no panic began is not said to be a foreign unwind"
+meant = "an_objective_c_exception_into_a_function_that_cannot_unwind_is_said_to_be_one"
+runs = ["app-panics"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "    let note = if foreign {"
+replace = "    let note = if false && foreign {"
+
+[[plant]]
+name = "event-loop-panic: every abort is said to be a foreign unwind, a panic's too"
+meant = "a_panic_that_ends_in_an_abort_is_written_before_it"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "        && !earlier.is_some_and(|began| began.elapsed() < unwound_within());"
+replace = "        || earlier.is_some_and(|began| began.elapsed() > unwound_within());"
+
+[[plant]]
+name = "event-loop-panic: a callback's panic is not stopped at its edge"
+meant = "a_panic_in_a_callback_is_stopped_at_its_edge_and_told_once"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "    match panic::catch_unwind(AssertUnwindSafe(work)) {"
+replace = "    match Ok::<T, ()>(work()) {"
+
+[[plant]]
+name = "event-loop-panic: the person is told of every error stopped, not once"
+meant = "a_panic_in_a_callback_is_stopped_at_its_edge_and_told_once"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "    if TELLER.get().is_some() && !TOLD.swap(true, Ordering::AcqRel) {"
+replace = "    if TELLER.get().is_some() && !TOLD.swap(false, Ordering::AcqRel) {"
+
+[[plant]]
+name = "event-loop-panic: the person is never told an error was stopped"
+meant = "a_panic_in_a_callback_is_stopped_at_its_edge_and_told_once"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "            tell();"
+replace = "            let _ = tell;"
+
+[[plant]]
+name = "event-loop-panic: the guard is never put in the place of a class's sendEvent:"
+meant = "what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame"
+runs = ["app-panics"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics/appkit.rs"
+find = "                let replaced = method.set_implementation(mem::transmute::<SendEvent, Imp>(guard));"
+replace = "                let replaced = { let _ = guard; method.implementation() };"
+
+[[plant]]
+name = "event-loop-panic: an Objective-C exception under a guarded dispatch is not caught"
+meant = "what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame"
+runs = ["app-panics"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics/appkit.rs"
+find = "        exception::catch(AssertUnwindSafe(work))"
+replace = "        Ok::<(), Option<Retained<Exception>>>(work())"
+
+[[plant]]
+name = "event-loop-panic: a panic under a guarded dispatch goes on unwinding into tao's frame"
+meant = "what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame"
+runs = ["app-panics"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics/appkit.rs"
+find = "        Err(_) => Some(Unwound::Panicked),"
+replace = "        Err(unwound) => panic::resume_unwind(unwound),"
+
+[[plant]]
+name = "event-loop-panic: a class with no sendEvent: of its own has its superclass's guarded for it"
+meant = "appkits_dispatch_to_the_app_and_to_each_window_is_guarded"
+runs = ["app-panics"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics/appkit.rs"
+find = "        let Some(method) = methods.iter().find(|method| method.name() == selector) else {"
+replace = "        let Some(method) = class.instance_method(selector).filter(|_| methods.len() < usize::MAX) else {"
+
+[[plant]]
+name = "event-loop-panic: AppKit's dispatch of an event to a window is not guarded"
+meant = "appkits_dispatch_to_the_app_and_to_each_window_is_guarded"
+runs = ["app-panics"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics/appkit.rs"
+find = "    WINDOW.install(class!(NSWindow), window_send_event);"
+replace = "    let _ = window_send_event;"
+
+[[plant]]
+name = "event-loop-panic: the app does not record its panics from its start"
+meant = "the_app_records_its_panics_and_contains_its_callbacks_from_its_start"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    panics::record_in(error_log);"
+replace = "    let _ = error_log;"
+
+[[plant]]
+name = "event-loop-panic: the app does not guard AppKit's dispatch of its events"
+meant = "the_app_records_its_panics_and_contains_its_callbacks_from_its_start"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    panics::appkit::guard_event_dispatch();"
+replace = "    let _ = panics::appkit::guard_event_dispatch;"
+
+[[plant]]
+name = "event-loop-panic: the app's handler of its event loop is not contained"
+meant = "the_app_records_its_panics_and_contains_its_callbacks_from_its_start"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''        panics::contained("the app's handler of its event loop", || {'''
+replace = "        Some(()).map(|()| {"
+
+[[plant]]
+name = "event-loop-panic: the app's handler of a window's event is not contained"
+meant = "the_app_records_its_panics_and_contains_its_callbacks_from_its_start"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''            panics::contained("the app's handler of a window's event", || {'''
+replace = "            Some(()).map(|()| {"
+
+[[plant]]
+name = "event-loop-panic: the app's handler of its menu is not contained"
+meant = "the_app_records_its_panics_and_contains_its_callbacks_from_its_start"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = '''        crate::panics::contained("the app's handler of its menu", || {'''
+replace = "        Some(()).map(|()| {"
+
+[[plant]]
+name = "event-loop-panic: a panic while the update state was held makes every command after it panic"
+meant = "the_update_state_is_read_after_a_panic_that_held_it"
+runs = ["app-update-state"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "        self.state.lock().unwrap_or_else(PoisonError::into_inner)"
+replace = "        self.state.lock().unwrap()"
+
+# T-929, from Calliope's review of T-908 (T-926).
+
+[[plant]]
+name = "event-loop-panic: what the guard says of a stopped dispatch runs outside its catches"
+meant = "what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame"
+runs = ["app-panics"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics/appkit.rs"
+find = "        let said = caught(move || match unwound {"
+replace = "        let said = Some(()).map(move |()| match unwound {"
+
+[[plant]]
+name = "event-loop-panic: the person is told in the frame that stopped the error"
+meant = "a_panic_in_a_callback_is_stopped_at_its_edge_and_told_once"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = '''        let _ = std::thread::Builder::new()
+            .name("consensflow-tell".into())
+            .spawn(|| {'''
+replace = "        let _ = Some(()).map(|()| {"
+
+[[plant]]
+name = "event-loop-panic: a shutdown that panics skips marking the descriptors close-on-exec"
+meant = "a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec"
+runs = ["app-at-exit"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(shutdown));"
+replace = "    shutdown();"
+
+[[plant]]
+name = "event-loop-panic: a panic is stamped as it begins, so its backtrace's reading counts against the unwind after it"
+meant = "a_panic_that_ends_in_an_abort_is_written_before_it"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "    let earlier = LAST_PANIC.with(Cell::get);"
+replace = "    let earlier = LAST_PANIC.with(|last| last.replace(Some(Instant::now())));"
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "        LAST_PANIC.with(|last| last.set(Some(Instant::now())));"
+replace = ""

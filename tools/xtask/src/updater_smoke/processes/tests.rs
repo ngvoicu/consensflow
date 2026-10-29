@@ -185,3 +185,21 @@ mod on_unix {
         assert!(!alive(u32::MAX));
     }
 }
+
+/// The apps an update starts are the programs of the installed bundle's `Contents/MacOS/`,
+/// under either name of its folder: not its `cf`, nor another bundle's app.
+#[test]
+fn the_programs_of_a_bundle_are_found_under_either_name_of_its_folder() {
+    let table = parse_table(concat!(
+        "  11     1 S    /var/x/Applications/ConsensFlow.app/Contents/MacOS/app\n",
+        "  12     1 S    /private/var/x/Applications/ConsensFlow.app/Contents/MacOS/app --flag\n",
+        "  13    11 S    /var/x/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf ui --json\n",
+        "  14     1 S    /Applications/ConsensFlow.app/Contents/MacOS/app\n",
+        "  15     1 S    /var/x/Applications/ConsensFlow.app/Contents/MacOSX/app\n",
+    ));
+    let folders = [
+        "/var/x/Applications/ConsensFlow.app/Contents/MacOS/".to_string(),
+        "/private/var/x/Applications/ConsensFlow.app/Contents/MacOS/".to_string(),
+    ];
+    assert_eq!(started_from(&table, &folders), [11, 12]);
+}

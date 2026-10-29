@@ -21,6 +21,7 @@ mod file_drop;
 mod launcher;
 #[cfg(windows)]
 mod page_crash;
+mod panics;
 // Only the Windows app loads a failed page again; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod page_reloads;
@@ -462,7 +463,11 @@ impl<R: Runtime> PageBuilder<R> for tauri::Builder<R> {
 pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
     builder
         .manage(file_drop::Dropped::default())
-        .on_window_event(file_drop::hear)
+        .on_window_event(|window, event| {
+            panics::contained("the app's handler of a window's event", || {
+                file_drop::hear(window, event);
+            });
+        })
         .invoke_handler(page_commands())
 }
 
@@ -492,6 +497,12 @@ pub fn run() {
     for name in inherited_session_variables(names.iter().map(String::as_str)) {
         std::env::remove_var(name);
     }
+    // Every panic from here on is written down, and on macOS AppKit's dispatch of an event
+    // ends what unwinds out of it there, before tao's frame aborts the app (panics.rs). Once
+    // the home is settled, so a candidate's panic is never written in the live home.
+    panics::record_in(error_log);
+    #[cfg(target_os = "macos")]
+    panics::appkit::guard_event_dispatch();
     if let Some(log) = error_log() {
         redirect_stderr(&log);
     }
@@ -501,6 +512,21 @@ pub fn run() {
             .plugin(tauri_plugin_updater::Builder::new().build()),
     )
     .setup(|app| {
+        let teller = app.handle().clone();
+        panics::tell_with(move || {
+            let shown = teller.clone();
+            // Told on a thread of its own (panics::stopped), so this posts the dialog to the event
+            // loop, which shows it after the dispatch that stopped the error has ended.
+            let _ = teller.run_on_main_thread(move || {
+                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                shown
+                    .dialog()
+                    .message(panics::told(error_log().as_deref()))
+                    .title("ConsensFlow kept running")
+                    .kind(MessageDialogKind::Warning)
+                    .show(|_| {});
+            });
+        });
         app.manage(AppRuntime::start(app.handle()));
         // The terminal's command names this bundle's `cf`, whichever build wrote it.
         launcher::repair_in_background(app.handle());
@@ -534,21 +560,32 @@ pub fn run() {
     .expect("error while building the ConsensFlow app");
 
     app.run(|handle, event| {
-        if matches!(event, RunEvent::Exit) {
-            at_exit(|| handle.state::<AppRuntime>().shutdown());
-        }
+        panics::contained("the app's handler of its event loop", || {
+            if matches!(event, RunEvent::Exit) {
+                at_exit(|| {
+                    if let Some(runtime) = handle.try_state::<AppRuntime>() {
+                        runtime.shutdown();
+                    }
+                });
+                // An update's restart: its app is started here, not by Tauri (updates.rs).
+                #[cfg(target_os = "macos")]
+                updates::relaunch_installed(handle);
+            }
+        });
     });
 }
 
 /// The app's last code, on the main thread, as its event loop ends: `shutdown`, then every
-/// descriptor it holds made close-on-exec. After this Tauri ends the process, or starts the app an
-/// update installed: `app.restart()` called off the main thread (the update's install is an async
-/// command) only asks the loop to end, and Tauri starts the new app here, after this, with a bare
-/// `Command`. A descriptor of this app's that is not close-on-exec then (a socket or a pipe another
+/// descriptor it holds made close-on-exec. After this Tauri ends the process, or the app an update
+/// installed is started: `app.restart()` called off the main thread (the update's install is an
+/// async command) only asks the loop to end, and the new app is started here, after this
+/// (`updates::relaunch_installed`). A descriptor of this app's that is not close-on-exec then (a socket or a pipe another
 /// thread made in std's two steps, a file a framework opened so) would be the new app's for as
 /// long as it runs. A quit that is no restart loses nothing by it: the process ends.
+/// A shutdown that panics is written down by the hook and the marking still comes: the event
+/// loop's handler is contained, so a restart may follow it (T-929).
 fn at_exit(shutdown: impl FnOnce()) {
-    shutdown();
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(shutdown));
     #[cfg(target_os = "macos")]
     if let Err(failed) = cf_process::close_all_on_exec() {
         eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
@@ -562,6 +599,21 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     const HOME: &str = "/Users/test";
+
+    /// The Windows app links the C runtime statically, Tauri 2.12's default since tauri-build
+    /// 2.7, and its configuration says so (T-930, T-941): it needs no Visual C++ redistributable,
+    /// and a Tauri whose default moves does not move it.
+    #[test]
+    fn the_windows_app_links_its_c_runtime_statically() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("the configuration");
+        assert_eq!(
+            config["build"]["windows"]["staticVCRuntime"],
+            serde_json::Value::Bool(true),
+            "{}",
+            config["build"]
+        );
+    }
 
     #[test]
     fn the_installed_release_keeps_the_live_home() {
@@ -796,6 +848,45 @@ mod tests {
         ] {
             assert_eq!(window_title(name, identifier), title, "{identifier}");
         }
+    }
+
+    /// A shutdown that panics still leaves every descriptor close-on-exec: the event loop's
+    /// handler is contained, so a panic there no longer ends the app before a restart starts the
+    /// app an update installed, and the marking must come all the same (T-929).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec() {
+        const ENDED: &str = "CONSENSFLOW_TEST_AT_EXIT_PANICS";
+        if std::env::var_os(ENDED).is_some() {
+            use std::os::fd::AsRawFd;
+
+            let stray = std::fs::File::open("/dev/null").expect("a file");
+            let fd = stray.as_raw_fd();
+            // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+            at_exit(|| panic!("the shutdown of T-929 panics"));
+            // SAFETY: `fcntl` is asked the flags of a descriptor this test holds.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            assert_ne!(flags & libc::FD_CLOEXEC, 0, "left inheritable");
+            return;
+        }
+        let ran = crate::testing::command(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "tests::a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec",
+                "--nocapture",
+            ])
+            .env(ENDED, "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run the test in a child");
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ran.stdout),
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert!(ran.status.success(), "{said}");
+        assert!(said.contains("1 passed"), "the test did not run: {said}");
     }
 
     #[test]

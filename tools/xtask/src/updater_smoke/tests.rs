@@ -361,10 +361,23 @@ fn exports_the_bridges_source_from_its_tag_into_the_cache_and_says_where() {
             && !check.contains("!= \"dev.ngvoicu.consensflow\""),
         "{check}"
     );
+    assert!(source.join("app/src-tauri/src/update_install.rs").is_file());
+    // The mark names the tag and the commit it names, and the release has its own packages.
+    let commit = process::capture(
+        &process::Invocation::new("git", ".")
+            .args(["rev-parse"])
+            .arg(format!("{BRIDGE_TAG}^{{commit}}")),
+        &Env::from_process(),
+    )
+    .unwrap();
     assert_eq!(
         fs::read_to_string(source.join(".exported-from")).unwrap(),
-        format!("{BRIDGE_TAG} dev.ngvoicu.consensflow.smoke\n")
+        format!(
+            "{BRIDGE_TAG} {} dev.ngvoicu.consensflow.smoke\n",
+            commit.stdout.trim()
+        )
     );
+    assert!(source.join("app/node_modules/.bin/tauri").exists());
     // Nothing else was made: the run's folder is for a run that builds or runs.
     assert!(!cache
         .read_dir()

@@ -162,6 +162,55 @@ pub fn alive(pid: u32) -> bool {
     shown.code == 0 && !state.is_empty() && !state.starts_with('Z')
 }
 
+/// The pids in `table` whose command is a program of one of `folders` (each a folder's path
+/// ending in `/`): what the process table shows started from there.
+pub fn started_from(table: &[Row], folders: &[String]) -> Vec<u32> {
+    table
+        .iter()
+        .filter(|row| folders.iter().any(|folder| row.command.starts_with(folder)))
+        .map(|row| row.pid)
+        .collect()
+}
+
+/// How often a [`Watch`] reads the process table: often enough to see an app that starts and
+/// quits at once, which one with no input does.
+const WATCH_EVERY: Duration = Duration::from_millis(50);
+
+/// Every process started from some folders while it runs, read from the process table on a
+/// thread of its own: the smoke's count of the apps an update starts (T-941).
+pub struct Watch {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    seen: thread::JoinHandle<Result<std::collections::BTreeSet<u32>>>,
+}
+
+impl Watch {
+    /// Starts watching for programs of `folders` (see [`started_from`]).
+    pub fn start(folders: Vec<String>) -> Self {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = std::sync::Arc::clone(&stop);
+        let seen = thread::spawn(move || {
+            let mut seen = std::collections::BTreeSet::new();
+            loop {
+                let last = stopped.load(std::sync::atomic::Ordering::Acquire);
+                seen.extend(started_from(&process_table()?, &folders));
+                if last {
+                    return Ok(seen);
+                }
+                thread::sleep(WATCH_EVERY);
+            }
+        });
+        Self { stop, seen }
+    }
+
+    /// Stops watching, after one more look, and answers every pid it saw.
+    pub fn stop(self) -> Result<std::collections::BTreeSet<u32>> {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        self.seen
+            .join()
+            .map_err(|_| Error::new("the watch of the process table panicked".to_string()))?
+    }
+}
+
 /// Says a process is gone, which is what the ledger's lock needs of the daemon that held it.
 pub fn gone(pid: u32) -> bool {
     !alive(pid)
