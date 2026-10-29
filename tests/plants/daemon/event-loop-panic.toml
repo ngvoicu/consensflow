@@ -15,6 +15,7 @@
 [run]
 app-panics = ["cargo", "xtask", "app", "test", "panics::"]
 app-update-state = ["cargo", "xtask", "app", "test", "the_update_state_is_read_after_a_panic_that_held_it"]
+app-at-exit = ["cargo", "xtask", "app", "test", "a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec"]
 
 [[plant]]
 name = "event-loop-panic: the app's panics are not written to its error log"
@@ -23,8 +24,8 @@ runs = ["app-panics"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/panics.rs"
-find = "    panic::set_hook(Box::new(|info| write(&describe(info))));"
-replace = "    if false { panic::set_hook(Box::new(|info| write(&describe(info)))); }"
+find = "        write(&describe(info));"
+replace = "        let _ = describe;"
 
 [[plant]]
 name = "event-loop-panic: a panic is written without its backtrace"
@@ -43,14 +44,12 @@ runs = ["app-panics"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/panics.rs"
-find = "    panic::set_hook(Box::new(|info| write(&describe(info))));"
-replace = '''    panic::set_hook(Box::new(|info| {
-        let text = describe(info);
+find = "        write(&describe(info));"
+replace = '''        let text = describe(info);
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(300));
             write(&text);
-        });
-    }));'''
+        });'''
 
 [[plant]]
 name = "event-loop-panic: an abort no panic began is not said to be a foreign unwind"
@@ -70,8 +69,8 @@ runs = ["app-panics"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/panics.rs"
-find = "        message == CANNOT_UNWIND && !earlier.is_some_and(|began| began.elapsed() < UNWOUND_WITHIN);"
-replace = "        message == CANNOT_UNWIND || earlier.is_some_and(|began| began.elapsed() > UNWOUND_WITHIN);"
+find = "        && !earlier.is_some_and(|began| began.elapsed() < unwound_within());"
+replace = "        || earlier.is_some_and(|began| began.elapsed() > unwound_within());"
 
 [[plant]]
 name = "event-loop-panic: a callback's panic is not stopped at its edge"
@@ -90,8 +89,8 @@ runs = ["app-panics"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/panics.rs"
-find = "        if !TOLD.swap(true, Ordering::AcqRel) {"
-replace = "        if !TOLD.swap(false, Ordering::AcqRel) {"
+find = "    if TELLER.get().is_some() && !TOLD.swap(true, Ordering::AcqRel) {"
+replace = "    if TELLER.get().is_some() && !TOLD.swap(false, Ordering::AcqRel) {"
 
 [[plant]]
 name = "event-loop-panic: the person is never told an error was stopped"
@@ -122,8 +121,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/panics/appkit.rs"
-find = "            exception::catch(AssertUnwindSafe(|| unsafe { original(this, sel, event) }))"
-replace = "            Ok::<(), Option<Retained<Exception>>>(unsafe { original(this, sel, event) })"
+find = "        exception::catch(AssertUnwindSafe(work))"
+replace = "        Ok::<(), Option<Retained<Exception>>>(work())"
 
 [[plant]]
 name = "event-loop-panic: a panic under a guarded dispatch goes on unwinding into tao's frame"
@@ -133,8 +132,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/panics/appkit.rs"
-find = '            Err(_) => super::stopped(&format!("{} panicked", self.edge)),'
-replace = "            Err(unwound) => panic::resume_unwind(unwound),"
+find = "        Err(_) => Some(Unwound::Panicked),"
+replace = "        Err(unwound) => panic::resume_unwind(unwound),"
 
 [[plant]]
 name = "event-loop-panic: a class with no sendEvent: of its own has its superclass's guarded for it"
@@ -217,3 +216,54 @@ runs = ["app-update-state"]
 file = "app/src-tauri/src/updates.rs"
 find = "        self.state.lock().unwrap_or_else(PoisonError::into_inner)"
 replace = "        self.state.lock().unwrap()"
+
+# T-929, from Calliope's review of T-908 (T-926).
+
+[[plant]]
+name = "event-loop-panic: what the guard says of a stopped dispatch runs outside its catches"
+meant = "what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame"
+runs = ["app-panics"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics/appkit.rs"
+find = "        let said = caught(move || match unwound {"
+replace = "        let said = Some(()).map(move |()| match unwound {"
+
+[[plant]]
+name = "event-loop-panic: the person is told in the frame that stopped the error"
+meant = "a_panic_in_a_callback_is_stopped_at_its_edge_and_told_once"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = '''        let _ = std::thread::Builder::new()
+            .name("consensflow-tell".into())
+            .spawn(|| {'''
+replace = "        let _ = Some(()).map(|()| {"
+
+[[plant]]
+name = "event-loop-panic: a shutdown that panics skips marking the descriptors close-on-exec"
+meant = "a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec"
+runs = ["app-at-exit"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(shutdown));"
+replace = "    shutdown();"
+
+[[plant]]
+name = "event-loop-panic: a panic is stamped as it begins, so its backtrace's reading counts against the unwind after it"
+meant = "a_panic_that_ends_in_an_abort_is_written_before_it"
+runs = ["app-panics"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "    let earlier = LAST_PANIC.with(Cell::get);"
+replace = "    let earlier = LAST_PANIC.with(|last| last.replace(Some(Instant::now())));"
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "        LAST_PANIC.with(|last| last.set(Some(Instant::now())));"
+replace = ""

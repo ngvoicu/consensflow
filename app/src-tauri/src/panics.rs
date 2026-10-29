@@ -20,7 +20,7 @@ use std::cell::Cell;
 use std::io::Write;
 use std::panic::{self, AssertUnwindSafe, PanicHookInfo};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -30,11 +30,12 @@ pub(crate) mod appkit;
 /// What Rust says as it aborts an unwind that reached a function that cannot unwind.
 const CANNOT_UNWIND: &str = "panic in a function that cannot unwind";
 
-/// How soon after a panic of its thread such an abort is that panic's.
-const UNWOUND_WITHIN: Duration = Duration::from_secs(1);
+/// How soon after a panic of its thread such an abort is that panic's, in milliseconds: a
+/// second, and narrower in the tests that time it.
+static UNWOUND_WITHIN_MS: AtomicU64 = AtomicU64::new(1000);
 
 thread_local! {
-    /// When this thread's last panic began.
+    /// When this thread's last panic was written.
     static LAST_PANIC: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
@@ -55,7 +56,12 @@ static TOLD: AtomicBool = AtomicBool::new(false);
 /// ends in an abort is on disk before it. Called once, by `run`.
 pub(crate) fn record_in(log: impl Fn() -> Option<PathBuf> + Send + Sync + 'static) {
     let _ = LOG.set(Box::new(log));
-    panic::set_hook(Box::new(|info| write(&describe(info))));
+    panic::set_hook(Box::new(|info| {
+        write(&describe(info));
+        // Stamped once it is written, so the time its backtrace took to read is no part of the
+        // unwind it starts (T-929).
+        LAST_PANIC.with(|last| last.set(Some(Instant::now())));
+    }));
 }
 
 /// How the person is told, once, that the app stopped something and ran on.
@@ -88,16 +94,21 @@ pub(crate) fn contained<T>(edge: &str, work: impl FnOnce() -> T) -> Option<T> {
     }
 }
 
-/// Writes down what was stopped, and tells the person the first time.
+/// Writes down what was stopped, and tells the person the first time: on a thread of its own, so
+/// the telling is never run in the frame that stopped it, under the system's event dispatch.
 pub(crate) fn stopped(what: &str) {
     write(&format!(
         "{} consensflow: {what}; the app stopped it there and runs on\n",
         now()
     ));
-    if let Some(tell) = TELLER.get() {
-        if !TOLD.swap(true, Ordering::AcqRel) {
-            tell();
-        }
+    if TELLER.get().is_some() && !TOLD.swap(true, Ordering::AcqRel) {
+        let _ = std::thread::Builder::new()
+            .name("consensflow-tell".into())
+            .spawn(|| {
+                if let Some(tell) = TELLER.get() {
+                    tell();
+                }
+            });
     }
 }
 
@@ -111,9 +122,9 @@ fn describe(info: &PanicHookInfo<'_>) -> String {
         .map_or_else(|| "an unknown place".to_string(), ToString::to_string);
     let thread = std::thread::current();
     let name = thread.name().unwrap_or("unnamed");
-    let earlier = LAST_PANIC.with(|last| last.replace(Some(Instant::now())));
-    let foreign =
-        message == CANNOT_UNWIND && !earlier.is_some_and(|began| began.elapsed() < UNWOUND_WITHIN);
+    let earlier = LAST_PANIC.with(Cell::get);
+    let foreign = message == CANNOT_UNWIND
+        && !earlier.is_some_and(|began| began.elapsed() < unwound_within());
     let note = if foreign {
         "No panic began on this thread before it: what unwound was no Rust panic but a foreign \
          exception, most likely an Objective-C one the system's code raised.\n"
@@ -125,6 +136,10 @@ fn describe(info: &PanicHookInfo<'_>) -> String {
         now(),
         Backtrace::force_capture()
     )
+}
+
+fn unwound_within() -> Duration {
+    Duration::from_millis(UNWOUND_WITHIN_MS.load(Ordering::Relaxed))
 }
 
 fn now() -> String {

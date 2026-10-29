@@ -82,7 +82,9 @@ impl Guarded {
         true
     }
 
-    /// The class's own `sendEvent:`, and what unwound out of it stopped here.
+    /// The class's own `sendEvent:`, and what unwound out of it stopped here. Nothing unwinds out
+    /// of this: what is said of what was stopped (the exception's stack is read with sends that can
+    /// raise, and a write can panic) is run inside the same catches, as the dispatch was (T-929).
     ///
     /// # Safety
     ///
@@ -91,19 +93,43 @@ impl Guarded {
         let Some(original) = self.original.get().copied() else {
             return;
         };
-        let ran = panic::catch_unwind(AssertUnwindSafe(|| {
-            // SAFETY: the original is called as it would have been.
-            exception::catch(AssertUnwindSafe(|| unsafe { original(this, sel, event) }))
-        }));
-        match ran {
-            Ok(Ok(())) => {}
-            Ok(Err(exception)) => super::stopped(&format!(
-                "{} raised {}",
-                self.edge,
+        // SAFETY: the original is called as it would have been.
+        let Some(unwound) = caught(|| unsafe { original(this, sel, event) }) else {
+            return;
+        };
+        let edge = self.edge;
+        let said = caught(move || match unwound {
+            Unwound::Raised(exception) => super::stopped(&format!(
+                "{edge} raised {}",
                 described(exception.as_deref())
             )),
-            Err(_) => super::stopped(&format!("{} panicked", self.edge)),
+            Unwound::Panicked => super::stopped(&format!("{edge} panicked")),
+        });
+        if said.is_some() {
+            let _ = caught(|| {
+                super::stopped(&format!(
+                    "{edge} raised or panicked, and saying which raised or panicked in turn"
+                ));
+            });
         }
+    }
+}
+
+/// What unwound out of a call, and was caught.
+enum Unwound {
+    Raised(Option<Retained<Exception>>),
+    Panicked,
+}
+
+/// `work`, with an Objective-C exception or a panic that unwinds out of it caught: None when it
+/// returned.
+fn caught(work: impl FnOnce()) -> Option<Unwound> {
+    match panic::catch_unwind(AssertUnwindSafe(|| {
+        exception::catch(AssertUnwindSafe(work))
+    })) {
+        Ok(Ok(())) => None,
+        Ok(Err(exception)) => Some(Unwound::Raised(exception)),
+        Err(_) => Some(Unwound::Panicked),
     }
 }
 
