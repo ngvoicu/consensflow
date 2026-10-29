@@ -489,3 +489,12 @@ async fn pages_through_thousands_of_conversations_that_show_no_item_each_reply_h
         })
         .await;
 }
+
+#[test]
+fn a_page_of_a_list_is_at_most_half_the_frame_the_bridge_carries() {
+    // `state-list-grows-toward-frame-cap`: the replies above are held to `PAGE_BYTES`, so a
+    // bound raised past the frame passes them as it passes itself. It is half the frame:
+    // what the page reads beside a list (a refresh asks for several) stays clear of it.
+    let frame = cf_bridge::local::DEFAULT_MAX_FRAME_BYTES;
+    assert!(PAGE_BYTES * 2 <= frame, "{PAGE_BYTES} bytes a page, {frame} a frame");
+}

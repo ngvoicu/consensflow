@@ -170,6 +170,37 @@ fn a_workers_turn_that_ends_with_agents_pending_keeps_its_task_working_and_the_r
 }
 
 #[test]
+fn the_note_that_a_worker_goes_on_is_the_chiefs_before_the_result_and_nothing_is_said_after_it() {
+    // A3 of the field reports of 2026-10-15 (`field-reports-2026-10-15`): a worker's turn
+    // ended with its job running, and the notice of it (m-132) came after the result, when
+    // the chief had already decided on it. The notice comes with the turn that is held, the
+    // result with the turn that reports, and the result is the last the task says.
+    let context = Context::new();
+    let tiers = working(&context);
+    context
+        .adapter
+        .answer_leaving_agents("zeus", "Started three research agents");
+    context.pass().unwrap();
+    context.adapter.wake("zeus", NOTICE);
+    context.pass().unwrap();
+    context
+        .adapter
+        .answer("zeus", "All three are in: the parser is sound");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+
+    let mut said: Vec<(i64, String)> = context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .filter(|message| message.kind == "note" || message.kind == "result")
+        .map(|message| (message.id, message.kind))
+        .collect();
+    said.sort();
+    let kinds: Vec<&str> = said.iter().map(|(_, kind)| kind.as_str()).collect();
+    assert_eq!(kinds, ["note", "result"], "{said:?}");
+}
+
+#[test]
 fn a_reviewer_or_an_advisor_whose_turn_ends_with_agents_pending_is_held_as_a_worker_is() {
     // 2026-10-11's agents were an advisor's: the rule is no worker's alone.
     let context = Context::new();

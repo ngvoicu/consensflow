@@ -697,6 +697,18 @@ mod tests {
     /// What an installed app reads is a promise to it for as long as it is
     /// installed: the two feeds, pinned here, and the same two the release
     /// workflow moves (`app/feeds.json`, which `cf-publish` holds as it was built).
+    /// `windows-update-check-platform-not-found`: the feed's `latest.json` holds the
+    /// Mac's signed archive alone, so a platform that took the updater's own check failed
+    /// on it ("the platform `windows-x86_64` was not found in the response `platforms`
+    /// object"). Only the Mac installs an update itself; any other reads the feed for the
+    /// release and the page it is downloaded from, until a signed artifact for it is in
+    /// the feed.
+    #[test]
+    fn only_the_mac_installs_an_update_itself_and_any_other_platform_reads_the_feed_for_its_release_and_page(
+    ) {
+        assert_eq!(INSTALLS_IN_APP, cfg!(target_os = "macos"));
+    }
+
     /// The macOS updater and the Windows page both take their address from
     /// `Channel::endpoint`. The feeds of the apps before the flip release are
     /// not among them.
