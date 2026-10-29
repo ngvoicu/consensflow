@@ -39,6 +39,34 @@ fn devins_session_hook_answers_without_a_token_and_with_no_line_break() {
 }
 
 #[test]
+fn muses_session_hook_reads_its_files_from_its_command_line_and_writes_the_session_down() {
+    // Muse runs a hook with an environment of its own: nothing of the window's reaches it.
+    let dir = tempfile::tempdir().unwrap();
+    let role = dir.path().join("SKILL.md");
+    let said = dir.path().join("sessions.jsonl");
+    fs::write(&role, "# ConsensFlow worker\n").unwrap();
+    let ran = cf(
+        &[
+            "hook",
+            "muse-session",
+            role.to_str().unwrap(),
+            said.to_str().unwrap(),
+        ],
+        &[],
+        r#"{"hook_event_name":"SessionStart","session_id":"01a17bc7-6aab-75a0-bfae-b627eaa5ecd8","source":"resume"}"#,
+    );
+    assert_eq!(ran.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stdout),
+        r##"{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"# ConsensFlow worker\n"}}"##
+    );
+    assert_eq!(
+        fs::read_to_string(&said).unwrap(),
+        "{\"session\":\"01a17bc7-6aab-75a0-bfae-b627eaa5ecd8\",\"source\":\"resume\"}\n"
+    );
+}
+
+#[test]
 fn a_question_hook_with_no_window_says_nothing_and_succeeds() {
     let event =
         r#"{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Go?"}]}}"#;

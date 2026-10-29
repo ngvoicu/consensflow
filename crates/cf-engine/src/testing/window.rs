@@ -121,6 +121,16 @@ impl Window for FakeWindow {
         }
     }
 
+    /// A box is read empty where a line of the screen is its prompt mark alone, as
+    /// Claude Code and Muse Code draw an empty one.
+    fn box_read_empty(&self, snapshot: &Value) -> bool {
+        snapshot["bottom"].as_array().is_some_and(|lines| {
+            lines
+                .iter()
+                .any(|line| line.as_str().map(str::trim) == Some("❯"))
+        })
+    }
+
     fn shows_prompt(&self, screen: &[String]) -> bool {
         self.trusts.is_some() && holds(screen, TRUST_PROMPT) && self.toward_trust(screen).is_none()
     }
@@ -142,6 +152,12 @@ impl Window for FakeWindow {
 
     fn follow(&self, session: &str) {
         *self.session.borrow_mut() = session.to_owned();
+    }
+
+    fn greeted(&self, session: &str) -> bool {
+        self.fake.of_launch(&self.launch, |agent| {
+            !agent.ungreeted.iter().any(|ungreeted| ungreeted == session)
+        })
     }
 
     fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
@@ -424,6 +440,9 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             asking: false,
             failed: false,
             failure: agent.failure.clone(),
+            took_back: false,
+            model_moved: None,
+            model_drift: agent.model_drift.clone(),
             quota: None,
             settlement: Settlement::Unknown,
             pending: agent.pending,

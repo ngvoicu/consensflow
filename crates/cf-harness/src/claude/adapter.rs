@@ -89,7 +89,7 @@ use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, InputBox, Unsent};
 use crate::shared::left_open::LeftOpen;
-use crate::shared::record_state::switched_to;
+use crate::shared::record_state::{observed_from, switched_to};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
 use crate::shared::{compacting, pane, specmint, window_args};
@@ -167,7 +167,14 @@ impl Adapter for ClaudeAdapter {
             } else {
                 None
             };
-            let options = told(relaunched.as_ref(), &session);
+            let options = told(
+                relaunched.as_ref(),
+                launch
+                    .agent
+                    .and_then(|agent| agent.model)
+                    .filter(|model| !model.is_empty()),
+                &session,
+            );
             // A turn the old process left open, which the window has to be told
             // apart from by what the record holds later: it begins its own only
             // once it is delivered a message.
@@ -218,6 +225,11 @@ impl Adapter for ClaudeAdapter {
                     relaunched,
                     before: RefCell::new(holders.unwrap_or_default()),
                     shared: Cell::new(false),
+                    model: launch
+                        .agent
+                        .and_then(|agent| agent.model)
+                        .filter(|model| !model.is_empty())
+                        .map(str::to_owned),
                     trusts: trust::trusts(launch.directory),
                     directory: launch.directory.to_owned(),
                 }),
@@ -338,6 +350,9 @@ struct ClaudeWindow {
     /// Another Claude than the window's has shown its conversation since it
     /// opened (`Observed::shared`).
     shared: Cell<bool>,
+    /// The model the launch named, where it named one: an alias such as `opusplan` names the
+    /// models it runs on by itself, which the reader takes for no change of model (T-841).
+    model: Option<String>,
     /// What a yes to Claude Code's question about the window's folder trusts.
     trusts: Trusts,
     /// The window's folder, whose local settings keep what Claude Code was told of the
@@ -347,11 +362,12 @@ struct ClaudeWindow {
 
 /// What a look at `session` is told: where the window's program began writing,
 /// when the window was opened again on that conversation.
-fn told(relaunched: Option<&(String, Boundary)>, session: &str) -> Options {
+fn told(relaunched: Option<&(String, Boundary)>, model: Option<&str>, session: &str) -> Options {
     Options {
         relaunched: relaunched
             .filter(|(on, _)| on == session)
             .map(|(_, boundary)| boundary.clone()),
+        launch_model: model.map(str::to_owned),
         ..Options::default()
     }
 }
@@ -492,6 +508,10 @@ impl Window for ClaudeWindow {
 
     fn shows_prompt(&self, screen: &[String]) -> bool {
         super::trust::shows_prompt(screen)
+    }
+
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Claude, snapshot)
     }
 
     fn names_trust_choices(&self, screen: &[String]) -> bool {
@@ -640,30 +660,26 @@ impl Window for ClaudeWindow {
                 self.shared.set(true);
             }
             let session = self.session.borrow().clone();
-            let options = told(self.relaunched.as_ref(), &session);
+            let options = told(self.relaunched.as_ref(), self.model.as_deref(), &session);
             let reading = self.records.look(Harness::Claude, &session, &options).await;
-            let (empty, settled, failed, quota, agents) = match &*reading {
+            let (empty, settled, agents) = match &*reading {
                 Reading::Known(record) => (
                     record.items.is_empty(),
                     record.settlement == Settlement::Settled,
-                    record.failed,
-                    record.quota.clone(),
                     record.pending.agents > 0,
                 ),
-                Reading::Unknown(_) | Reading::Missing(_) => (true, false, false, None, false),
+                Reading::Unknown(_) | Reading::Missing(_) => (true, false, false),
             };
+            // What the record says of the failure and the quota is the one place's
+            // (`observed_from`); what Claude's own status says of the window is set on it.
             let observed = |settled, over, waiting, took_back, at_prompt| Observed {
-                reading: Some(Arc::clone(&reading)),
                 settled,
                 over,
                 waiting,
-                failed,
-                quota: quota.clone(),
-                switched: None,
-                unnamed: false,
                 took_back,
                 at_prompt,
                 shared: self.shared.get(),
+                ..observed_from(Arc::clone(&reading), None)
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {

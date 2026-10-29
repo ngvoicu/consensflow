@@ -799,7 +799,8 @@ const HERE: &str = std::env::consts::OS;
 
 /// Plants each of `plants` in turn and says how each ended: the status is 0 where
 /// every one run was caught. One for other systems than this one is said SKIPPED
-/// (platform), and is neither run nor counted.
+/// (platform), and one whose runs need a harness the machine lacks SKIPPED (absent):
+/// neither is run nor counted.
 pub fn run(
     context: &Context,
     family: &Family,
@@ -828,6 +829,7 @@ pub fn run(
     let mut wrong = 0;
     let mut unstable = 0;
     let mut skipped = 0;
+    let mut absent = 0;
     for plant in plants {
         if runner.stopped() {
             return stopped(&saved, out);
@@ -839,6 +841,16 @@ pub fn run(
                 "{}",
                 report::skipped(&plant.name, &plant.platforms, HERE)
             )?;
+            continue;
+        }
+        // Its runs would pass saying the harness is not there, and read as missed.
+        if let Some(why) = plant
+            .harnesses
+            .iter()
+            .find_map(|harness| runner.lacks(harness))
+        {
+            absent += 1;
+            writeln!(out, "{}", report::absent(&plant.name, &why))?;
             continue;
         }
         let started = Instant::now();
@@ -881,9 +893,13 @@ pub fn run(
             saved.display()
         )?;
     }
-    let run = plants.len() - skipped;
+    let run = plants.len() - skipped - absent;
     let caught = run.saturating_sub(wrong);
-    writeln!(out, "{}", report::totals(caught, run, unstable, skipped))?;
+    writeln!(
+        out,
+        "{}",
+        report::totals(caught, run, unstable, skipped, absent)
+    )?;
     Ok(i32::from(wrong != 0))
 }
 

@@ -44,7 +44,7 @@ fn the_app_pastes_into_claude_and_devin_and_no_other_harness() {
     let failed = pasted_into(&names(&["claud"])).unwrap_err().to_string();
     assert_eq!(
         failed,
-        "no harness is called claud: claude, opencode, pi, devin, codex"
+        "no harness is called claud: claude, opencode, pi, devin, codex, muse"
     );
 }
 

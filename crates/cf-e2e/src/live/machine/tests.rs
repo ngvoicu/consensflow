@@ -93,7 +93,10 @@ fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds
 #[test]
 fn the_harnesses_are_named_as_a_command_line_and_the_roster_name_them() {
     let names: Vec<_> = Harness::ALL.iter().map(|harness| harness.name()).collect();
-    assert_eq!(names, ["claude", "opencode", "pi", "devin", "codex"]);
+    assert_eq!(
+        names,
+        ["claude", "opencode", "pi", "devin", "codex", "muse"]
+    );
     for harness in Harness::ALL {
         assert_eq!(Harness::from_name(harness.name()), Some(harness));
     }
@@ -655,4 +658,51 @@ fn the_owners_own_claude_config_is_never_seeded() {
     }
     assert!(!home.path().join(".claude.json").exists());
     assert!(!owners.join(".claude.json").exists());
+}
+
+/// T-824's P2-3: a harness the machine lacks is left out of every seat and said, and
+/// one asked for by name that it lacks is the error.
+#[test]
+fn a_harness_the_machine_lacks_is_left_out_of_every_seat_with_why_unless_it_was_asked_for() {
+    let no_muse = |harness: Harness| {
+        (harness == Harness::Muse).then(|| "muse is in no folder of the PATH".to_owned())
+    };
+    let (kept, said) = seated(&[], no_muse).unwrap();
+    assert_eq!(
+        kept,
+        [
+            Harness::Claude,
+            Harness::OpenCode,
+            Harness::Pi,
+            Harness::Devin,
+            Harness::Codex
+        ]
+    );
+    assert_eq!(
+        said,
+        ["muse is left out of every seat: this machine cannot run it (muse is in no folder of the PATH)"]
+    );
+    assert_eq!(
+        seated(&[], |_| None).unwrap(),
+        (Harness::ALL.to_vec(), Vec::new())
+    );
+    let asked = seated(&[Harness::Pi, Harness::Muse], no_muse).unwrap_err();
+    assert_eq!(
+        asked,
+        "muse was asked for, and this machine cannot run it: muse is in no folder of the PATH"
+    );
+}
+
+/// T-931 P2-2: a run with no home to look for a login in cannot run a harness, as
+/// `installed` refuses it; it is not taken for one that can.
+#[test]
+fn a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks() {
+    let why = login_lacks(Harness::Muse, None, None, false).expect("lacking");
+    assert!(why.contains("home"), "{why}");
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".config").join("muse")).unwrap();
+    assert_eq!(
+        login_lacks(Harness::Muse, Some(home.path().to_path_buf()), None, false),
+        None
+    );
 }

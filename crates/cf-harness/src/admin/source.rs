@@ -67,6 +67,7 @@ pub(super) fn name(harness: Harness) -> &'static str {
         Harness::Opencode => "OpenCode",
         Harness::Pi => "Pi",
         Harness::Devin => "Devin",
+        Harness::Muse => "Muse Code",
     }
 }
 
@@ -78,17 +79,19 @@ fn feed(harness: Harness) -> &'static str {
         Harness::Opencode => "https://registry.npmjs.org/opencode-ai/latest",
         Harness::Pi => "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest",
         Harness::Devin => "https://static.devin.ai/cli/current/manifest.json",
+        // The manifest of the channel its launcher follows; read by [`muse_source`].
+        Harness::Muse => MUSE_CHANNELS,
     }
 }
 
-/// The npm package a harness is installed as (`NPM_PACKAGES`); Devin has none.
+/// The npm package a harness is installed as (`NPM_PACKAGES`); Devin and Muse have none.
 fn npm_package(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("@anthropic-ai/claude-code"),
         Harness::Codex => Some("@openai/codex"),
         Harness::Opencode => Some("opencode-ai"),
         Harness::Pi => Some("@earendil-works/pi-coding-agent"),
-        Harness::Devin => None,
+        Harness::Devin | Harness::Muse => None,
     }
 }
 
@@ -107,7 +110,8 @@ fn own_installer(harness: Harness) -> &'static [(&'static str, &'static [&'stati
             ("/.pi/agent/bin/", &["update"]),
         ],
         Harness::Devin => &[("/devin/cli/", &["update"])],
-        Harness::Claude => &[],
+        // Muse's launcher updates itself ([`muse_source`]).
+        Harness::Claude | Harness::Muse => &[],
     }
 }
 
@@ -167,6 +171,9 @@ pub fn release_source(harness: Harness, executable: &str, env: &Env) -> Source {
             update: Some(vec![executable.to_owned(), "update".to_owned()]),
         };
     }
+    if harness == Harness::Muse {
+        return muse_source(&real, env);
+    }
     let npm = |distribution: Option<String>, update: Option<Vec<String>>| Source {
         url: feed(harness).to_owned(),
         format: Format::Npm,
@@ -199,6 +206,30 @@ pub fn release_source(harness: Harness, executable: &str, env: &Env) -> Source {
         );
     }
     npm(None, None)
+}
+
+/// Where Muse's launcher asks for its releases: the manifest of a channel, the one
+/// `MUSE_CHANNEL` names, else `muse-stable` (`install.sh`'s launcher, 1.4.13).
+const MUSE_CHANNELS: &str = "https://api.meta.ai/muse-code/channels/muse-stable";
+
+/// Muse Code's release feed and install: the manifest of the channel its launcher
+/// follows (JSON, the release in `version`: `1.4.13-R6996.1`), and its own installer
+/// where its launcher is where the installer puts it (`.local/bin/muse`, or
+/// `Programs/muse` on Windows). No command updates it: the launcher updates itself
+/// hourly, unless `MUSE_NO_AUTO_UPDATE` says not to.
+fn muse_source(real: &str, env: &Env) -> Source {
+    let url = match crate::shared::paths::set(env, "MUSE_CHANNEL") {
+        Some(channel) => format!("https://api.meta.ai/muse-code/channels/{channel}"),
+        None => MUSE_CHANNELS.to_owned(),
+    };
+    let installed =
+        real.contains("/.local/bin/") || real.to_lowercase().contains("/programs/muse/");
+    Source {
+        url,
+        format: Format::Npm,
+        distribution: installed.then(|| format!("{}'s installer", name(Harness::Muse))),
+        update: None,
+    }
 }
 
 /// Whether the CLI at `real` (written with `/`) is the launcher of a Pi managed install in an

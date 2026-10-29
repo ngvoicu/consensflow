@@ -27,10 +27,38 @@ const TAIL: &str = ", or sooner if its account has quota again; it goes on by it
 /// A task held by an older build has its note so, delivered or not.
 const OLD_TAIL: &str = "; it goes on by itself then.";
 
+/// How a hold note of an unavailable account ends: nothing resets such an account.
+const TAIL_UNAVAILABLE: &str =
+    ", and nothing resets that; it goes on when the human says the account works again.";
+
+/// How a hold note of a window whose model its harness moved ends: nothing resets that
+/// either, and only the human's word for the member lets it go on (MUS-24).
+const TAIL_MOVED: &str = "; it goes on when the human says it may.";
+
+/// The words of a hold note of a window whose model moved on its own, `because`: the
+/// reader's words say who moved it, from what, to what.
+fn render_moved(number: i64, handle: &str, because: &str) -> String {
+    format!("T-{number} waits with @{handle}: {because}{TAIL_MOVED}")
+}
+
+/// The words of a hold note of an account that is unavailable for `because`
+/// (MUS-23): no time is named, for there is none.
+fn render_unavailable(number: i64, handle: &str, because: &str) -> String {
+    format!(
+        "T-{number} waits with @{handle}: its account is unavailable ({because}){TAIL_UNAVAILABLE}"
+    )
+}
+
 /// The words of a hold note: T-`number` waits with `handle`, who is out of
 /// quota until `until`, an ISO time.
 fn render(number: i64, handle: &str, until: &str) -> String {
     format!("T-{number} waits with @{handle}: out of quota until {until}{TAIL}")
+}
+
+/// What a requester is told when a task held for its window's moved model goes on: the
+/// human said it may (MUS-24), not that an account has quota again.
+pub(super) fn goes_on_moved(number: i64) -> String {
+    format!("T-{number} goes on: the human said its model may go on.")
 }
 
 /// What a requester is told when the task it was told waits goes on. It is
@@ -46,7 +74,9 @@ pub(super) fn goes_on(number: i64) -> String {
 /// ends so.
 fn is_hold_note(number: i64, body: &str) -> bool {
     body.starts_with(&format!("T-{number} waits with @"))
-        && [TAIL, OLD_TAIL].iter().any(|tail| body.ends_with(tail))
+        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE, TAIL_MOVED]
+            .iter()
+            .any(|tail| body.ends_with(tail))
 }
 
 /// Tells `to` that T-`number` is held with `handle` while its quota is out,
@@ -73,6 +103,52 @@ pub(crate) fn note_hold(
     )
 }
 
+/// Tells `to` that T-`number` is held with `handle` because its account is
+/// unavailable for `because`, which no time cures: the human's word does.
+pub(crate) fn note_hold_unavailable(
+    store: &mut Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    handle: &str,
+    because: &str,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            to,
+            body: &render_unavailable(number, handle, because),
+            task: Some(number),
+            kind: "note",
+            ..Sent::default()
+        },
+    )
+}
+
+/// Tells `to` that T-`number` is held with `handle` because its harness moved its window's
+/// model on its own, `because` (MUS-24): no time resets that, and the human's word does.
+pub(crate) fn note_hold_moved(
+    store: &mut Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    handle: &str,
+    because: &str,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            to,
+            body: &render_moved(number, handle, because),
+            task: Some(number),
+            kind: "note",
+            ..Sent::default()
+        },
+    )
+}
+
 /// A held task went on: its window got a turn through after the words that
 /// resumed it, or went on with it by itself. Its requester is told it goes on,
 /// once, if it was given a note that said it waits and has not been told it
@@ -92,13 +168,19 @@ pub(crate) fn tell_goes_on(store: &mut Store, task: &TaskRow) -> Result<(), Ledg
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let told = goes_on(task.number);
     let given = notes.iter().rposition(|(body, state)| {
         is_hold_note(task.number, body)
             && matches!(state.as_str(), "delivering" | "delivered" | "read")
     });
     let Some(given) = given else {
         return Ok(());
+    };
+    // Said in the words of the hold it corrects: a model that moved is let go on by the human,
+    // not an account that has quota again.
+    let told = if notes[given].0.ends_with(TAIL_MOVED) {
+        goes_on_moved(task.number)
+    } else {
+        goes_on(task.number)
     };
     if notes[given..].iter().any(|(body, _)| *body == told) {
         return Ok(());
@@ -109,7 +191,7 @@ pub(crate) fn tell_goes_on(store: &mut Store, task: &TaskRow) -> Result<(), Ledg
         task.project_id,
         &Sent {
             to: &requester.handle,
-            body: &goes_on(task.number),
+            body: &told,
             task: Some(task.number),
             kind: "note",
             ..Sent::default()

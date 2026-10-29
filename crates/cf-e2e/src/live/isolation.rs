@@ -18,11 +18,14 @@
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
 //!
-//! **Muse Code** (`wt/muse-harness`, not on this base) is one more row for the day it
-//! lands: `XDG_DATA_HOME` and `XDG_CONFIG_HOME` scratch folders with the login reachable
-//! read-only ([`Seed::Reach`] is how Devin's reaches the other tools' folders), and
-//! `MUSE_NO_AUTO_UPDATE=1`, `MUSE_LOGIN=0` as plain values beside those folders, in the plan
-//! of a `Harness::Muse` arm of [`Isolation::of_machine_lasting`]. **OpenCode**, which a later change takes out of
+//! **Muse Code** has no row yet: its live cases run the rig's own Muse launcher
+//! ([`crate::muse::write_live_stand_in`]), which gives each window `XDG_CONFIG_HOME` and
+//! `XDG_DATA_HOME` in the rig's home, a copy of the login's metadata there, and the person's
+//! home for the keychain alone. The row to come is `XDG_DATA_HOME` and `XDG_CONFIG_HOME`
+//! scratch folders with the login reachable read-only ([`Seed::Reach`] is how Devin's reaches
+//! the other tools' folders), and `MUSE_NO_AUTO_UPDATE=1`, `MUSE_LOGIN=0` as plain values
+//! beside those folders, in the plan of a `Harness::Muse` arm of
+//! [`Isolation::of_machine_lasting`]. **OpenCode**, which a later change takes out of
 //! ConsensFlow, keeps running on the owner's folders: Devin's scratch reaches them.
 //!
 //! **A login that refreshes.** A refresh token is used once, so a copy that refreshes leaves
@@ -632,6 +635,7 @@ const fn proper(harness: Harness) -> &'static str {
         Harness::Pi => "Pi",
         Harness::Devin => "Devin",
         Harness::Codex => "Codex",
+        Harness::Muse => "Muse Code",
     }
 }
 

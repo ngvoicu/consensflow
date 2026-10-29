@@ -361,6 +361,14 @@ pub trait Window {
     /// The window shows `session` now (a `/clear` or `/resume` in it): later
     /// looks follow it there.
     fn follow(&self, session: &str);
+    /// Whether the session `session`, which the window was switched to, was given the
+    /// window's role text as it began: by a hook of the harness's that greets every
+    /// session (Claude Code's SessionStart, a `/clear` too). No where none did (Muse
+    /// Code's `/clear` runs no hook, 1.4.13 and 1.4.14): the engine says the role
+    /// itself. Yes from a harness that says no more.
+    fn greeted(&self, _session: &str) -> bool {
+        true
+    }
     /// The conversation the window started on, where its harness says it
     /// itself; none where ConsensFlow named it. A window that waits for its
     /// harness to say it gives up by [`Launch::first_message_ms`], if not
@@ -393,6 +401,15 @@ pub trait Window {
     /// Whether `screen` (the window's last lines) is its harness's prompt: the
     /// window is past any question it asks as it starts.
     fn shows_prompt(&self, _screen: &[String]) -> bool {
+        false
+    }
+    /// Whether `snapshot` (the pane host's of the window: its last lines and its cursor)
+    /// shows the window's input box empty, as its harness's own reader reads it: the box
+    /// holds nothing a key would have to empty, and the key that empties one does harm in
+    /// an empty box (Control-C there arms the quit of Claude Code and Muse Code, which a
+    /// second one ends, and stops a turn at work). False where the harness reads no box,
+    /// or reads it holding anything.
+    fn box_read_empty(&self, _snapshot: &Value) -> bool {
         false
     }
     /// The servers its harness's dialog of new servers on `screen` (the window's last
@@ -634,6 +651,11 @@ pub enum Held {
     /// A harness that said no more than "not yet" (Devin's `false`).
     Unsaid,
     Because(String),
+    /// Held for what only the human can do in the window, said in these words: the board
+    /// shows them as the window's wait, and readiness is asked again at every look, so the
+    /// hold lifts by itself once the human has done it (Muse's taken-back brief in a box
+    /// whose first line is out of view, T-931 P2-1).
+    ForHuman(String),
 }
 
 impl Held {
@@ -643,7 +665,7 @@ impl Held {
             Held::Unsent => "you have typed in this window and not sent it",
             Held::ShowsAnother => "the window shows another conversation",
             Held::Unsaid => "a paste is on its way",
-            Held::Because(reason) => reason,
+            Held::Because(reason) | Held::ForHuman(reason) => reason,
         }
     }
 }
@@ -761,6 +783,15 @@ impl Observed {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => record.pending,
             Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Pending::default(),
+        }
+    }
+
+    /// The model the conversation's records say changed with none of its harness's own word
+    /// for it ([`Record::model_drift`]): none where it could not be read.
+    pub fn model_drift(&self) -> Option<&Arc<crate::records::ModelMoved>> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.model_drift.as_ref(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => None,
         }
     }
 

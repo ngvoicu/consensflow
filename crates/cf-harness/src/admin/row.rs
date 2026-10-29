@@ -101,8 +101,8 @@ pub enum Setup {
     UpdateRequired {
         reason: String,
     },
-    /// The CLI is newer than ConsensFlow supports yet (OpenCode 2), and no
-    /// update is the way out.
+    /// The CLI is newer than ConsensFlow supports yet (OpenCode 2), or one no
+    /// window is opened on yet (Muse Code), and no update is the way out.
     NotSupportedYet {
         reason: String,
     },

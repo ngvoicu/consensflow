@@ -69,15 +69,15 @@ fn each_refusal_is_said_in_the_order_node_checked_and_the_file_is_left_as_it_was
         ),
         (
             json!({ "name": "zed", "harness": "kimi", "model": "m" }),
-            "unknown harness \"kimi\"; expected claude, codex, pi, opencode, devin",
+            "unknown harness \"kimi\"; expected claude, codex, pi, opencode, devin, muse",
         ),
         (
             json!({ "name": "zed", "harness": "claude-code", "model": "m" }),
-            "unknown harness \"claude-code\"; expected claude, codex, pi, opencode, devin",
+            "unknown harness \"claude-code\"; expected claude, codex, pi, opencode, devin, muse",
         ),
         (
             json!({ "name": "zed", "model": "m" }),
-            "unknown harness undefined; expected claude, codex, pi, opencode, devin",
+            "unknown harness undefined; expected claude, codex, pi, opencode, devin, muse",
         ),
         (
             json!({ "name": "zed", "harness": "codex", "model": "m", "designer": "yes" }),

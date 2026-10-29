@@ -126,6 +126,10 @@ pub(crate) struct DeliveryPart {
     pub(crate) unread: Option<Unread>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
+    /// A message waits for what only the human can do in the window, in the window's words
+    /// ([`Held::ForHuman`]): the board says them as the window's wait, and the window is
+    /// asked again at every look.
+    pub(crate) for_human: Option<String>,
     /// For the message on its way, pasted into a conversation the window left: how many
     /// items that conversation's record held while it read a turn at work, and since when
     /// it has held as many (`arrival`'s `watch_left`).
@@ -158,6 +162,11 @@ pub(crate) struct DeliveryPart {
     /// ([`Dispatcher::owed`]). Each launch says it anew, and none that opened a
     /// window leaves it as it was.
     pub(crate) prelude: Option<Prelude>,
+    /// The note that gives the role to a session no hook greeted, the window switched to
+    /// it (`Dispatcher::greet_switched`): it goes first while it waits
+    /// ([`Dispatcher::next_in_line`]), and is no launch's prelude: nothing of a launch's
+    /// watch is on it (the time a launch has, the close of a window it never gets into).
+    pub(crate) greeting: Option<i64>,
     /// The failed turn whose note is settled: the message the window had last
     /// been given, and to whom the failure was told or found told
     /// ([`Dispatcher::untold_failure`]). The ledger says the same after a restart.
@@ -465,7 +474,14 @@ impl Dispatcher {
         // the engine emptied holds the human's words now, which an interrupt of ours
         // may put back there: it is no longer known empty (Calliope's review of
         // 2026-10-21, round 12).
-        record.delivery.borrow_mut().unsent = held == Some(Held::Unsent);
+        {
+            let mut part = record.delivery.borrow_mut();
+            part.unsent = held == Some(Held::Unsent);
+            part.for_human = match &held {
+                Some(Held::ForHuman(words)) => Some(words.clone()),
+                _ => None,
+            };
+        }
         if held == Some(Held::Unsent) {
             record.delivery.borrow_mut().emptied = None;
         }
@@ -795,6 +811,10 @@ impl Dispatcher {
                 {
                     let mut part = record.delivery.borrow_mut();
                     part.unsent = unsent;
+                    part.for_human = match &held {
+                        Held::ForHuman(words) => Some(words.clone()),
+                        _ => None,
+                    };
                     // What the human typed is theirs to send: the launch's time is not
                     // spent while it waits for them, as it is not while the window asks
                     // whether to trust its folder (`trust`), and the box holds their
@@ -1200,14 +1220,22 @@ impl Dispatcher {
     /// ([`DeliveryPart::uncleared`]), with the keys of its harness
     /// ([`Input::Pasted`]): whether the host took them, which is when the box
     /// counts as empty, and stays so until something goes in
-    /// ([`DeliveryPart::emptied`]).
+    /// ([`DeliveryPart::emptied`]). A box its harness reads empty on the screen
+    /// (the human emptied it) is pressed nothing and counts as empty: the key does
+    /// harm there, Control-C arming the quit of Claude Code and Muse Code, which a
+    /// paste between does not disarm in Muse (T-829's probe), and stopping a turn at
+    /// work.
     pub(crate) async fn clear_box(&self, record: &Record, pane: &Pane) -> bool {
         let Input::Pasted { clear } = record.window.borrow().input else {
             return true;
         };
-        let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
-        let answer = returning(self.seams.host.request("pane.input", body)).await;
-        let taken = answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)));
+        let taken = if self.box_read_empty(record, pane).await {
+            true
+        } else {
+            let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
+            let answer = returning(self.seams.host.request("pane.input", body)).await;
+            answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)))
+        };
         if taken {
             let mut part = record.delivery.borrow_mut();
             if part
@@ -1220,6 +1248,21 @@ impl Dispatcher {
             part.emptied = Some(pane.clone());
         }
         taken
+    }
+
+    /// Whether the window of `record` in `pane` shows its input box empty now, as its
+    /// harness reads it ([`cf_harness::contract::Window::box_read_empty`]): no where the
+    /// screen cannot be read.
+    async fn box_read_empty(&self, record: &Record, pane: &Pane) -> bool {
+        let Some(window) = record.window.borrow().window.clone() else {
+            return false;
+        };
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        returning(self.seams.host.request("pane.snapshot", body))
+            .await
+            .is_ok_and(|snapshot| {
+                snapshot.get("ok") == Some(&Value::Bool(true)) && window.box_read_empty(&snapshot)
+            })
     }
 
     /// A member's turn that failed while its task was not working (waiting on an

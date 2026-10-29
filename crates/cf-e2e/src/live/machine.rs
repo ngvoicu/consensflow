@@ -1,5 +1,5 @@
 //! This machine, as a live run meets it: the harnesses it has (Claude Code,
-//! OpenCode, Pi, Devin and Codex), found as a shell finds them with the home
+//! OpenCode, Pi, Devin, Codex and Muse Code), found as a shell finds them with the home
 //! each reads its login from, and the rig whose windows run them.
 //!
 //! A window never reads its login where the person keeps it, or writes its sessions
@@ -50,7 +50,7 @@ pub use wrapper::{
 /// as both.
 pub use crate::stand_in::window_shim;
 
-/// A harness the live tests run: the five of ConsensFlow's.
+/// A harness the live tests run: the six of ConsensFlow's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Harness {
     Claude,
@@ -58,18 +58,20 @@ pub enum Harness {
     Pi,
     Devin,
     Codex,
+    Muse,
 }
 
 impl Harness {
     /// Every harness, in the order the live approval test rotates them through
     /// its positions: each is the chief of one project and the one after it
     /// is that project's worker.
-    pub const ALL: [Harness; 5] = [
+    pub const ALL: [Harness; 6] = [
         Harness::Claude,
         Harness::OpenCode,
         Harness::Pi,
         Harness::Devin,
         Harness::Codex,
+        Harness::Muse,
     ];
 
     /// What it is called on a command line, and what its command is called.
@@ -80,6 +82,7 @@ impl Harness {
             Self::Pi => "pi",
             Self::Devin => "devin",
             Self::Codex => "codex",
+            Self::Muse => "muse",
         }
     }
 
@@ -107,6 +110,9 @@ impl Harness {
             Self::Pi => &[".pi"],
             Self::Devin => &[".config/devin", ".local/share/devin"],
             Self::Codex => &[""],
+            // Muse keeps its login's metadata in its config folder and the secret in the
+            // system's keychain, which the run's windows reach by the user's name.
+            Self::Muse => &[".config/muse"],
         }
     }
 
@@ -118,6 +124,7 @@ impl Harness {
             Self::Pi => "log in by running `pi` once",
             Self::Devin => "log in with `devin auth login`",
             Self::Codex => "log in with `codex login`, or name its home in CODEX_HOME",
+            Self::Muse => "log in with `muse login`",
         }
     }
 }
@@ -581,6 +588,67 @@ fn with_homes(mut installed: Installed) -> Result<Installed> {
         installed = installed.with_isolation(Arc::new(isolation));
     }
     Ok(installed)
+}
+
+/// Why this machine cannot run `harness`'s windows, in words: its program is in no
+/// folder of the `PATH`, or it keeps no login where it reads one. None where it can
+/// ([`installed`] finds it then).
+pub fn lacks(harness: Harness) -> Option<String> {
+    if let Err(missing) = command(harness.name()) {
+        return Some(missing.to_string());
+    }
+    let home = home_of(
+        harness,
+        own_var("CODEX_HOME"),
+        own_var("HOME").or_else(|| own_var("USERPROFILE")),
+    );
+    login_lacks(harness, home, own_var("APPDATA").as_deref(), cfg!(windows))
+}
+
+/// Why `harness` cannot run for want of a login, its home `home` (none where the run has
+/// none to look in), as [`installed`] would refuse it.
+fn login_lacks(
+    harness: Harness,
+    home: Option<PathBuf>,
+    appdata: Option<&str>,
+    windows: bool,
+) -> Option<String> {
+    let Some(home) = home else {
+        return Some(
+            "this run has neither a home nor CODEX_HOME to look for its login in".to_owned(),
+        );
+    };
+    let places = login_places(harness, &home, appdata, windows);
+    (!has_login(&places)).then(|| no_login(harness, &places).to_string())
+}
+
+/// The harnesses a live run that rotates its seats over every harness seats: each of
+/// [`Harness::ALL`] the machine has, in that order, and the words that say why each one
+/// it lacks (`lacks`) is left out of every seat (Muse Code on a machine with none, as
+/// the Windows machines are today: T-824's P2-3). One the run was limited to by name
+/// (`named`) that the machine lacks is the error, in the same words: it was asked for.
+pub fn seated(
+    named: &[Harness],
+    lacks: impl Fn(Harness) -> Option<String>,
+) -> std::result::Result<(Vec<Harness>, Vec<String>), String> {
+    let mut seated = Vec::new();
+    let mut left_out = Vec::new();
+    for harness in Harness::ALL {
+        match lacks(harness) {
+            None => seated.push(harness),
+            Some(why) if named.contains(&harness) => {
+                return Err(format!(
+                    "{} was asked for, and this machine cannot run it: {why}",
+                    harness.name()
+                ));
+            }
+            Some(why) => left_out.push(format!(
+                "{} is left out of every seat: this machine cannot run it ({why})",
+                harness.name()
+            )),
+        }
+    }
+    Ok((seated, left_out))
 }
 
 /// The machine's Codex: [`installed`] for the harness the image designer runs on.

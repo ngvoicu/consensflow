@@ -24,6 +24,10 @@ pub fn efforts(harness: Harness) -> &'static [&'static str] {
         // Devin writes the level into its model id (claude-opus-5-5-max): an agent
         // names the family and one of these, and the launch joins them.
         Harness::Devin => &["low", "medium", "high", "xhigh", "max"],
+        // muse --help (1.4.13): "Meta reasoning effort:
+        // none|minimal|low|medium|high|xhigh|max|ultra"; its docs say the Meta provider
+        // refuses `none`. Each model takes its own range of these (`model/list`, MUS-15).
+        Harness::Muse => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
     }
 }
 

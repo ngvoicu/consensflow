@@ -17,6 +17,7 @@
 //! Node's dispatcher had no such harness, so no trace holds these.
 
 mod chief_launch;
+mod cleared;
 mod fresh;
 mod identity;
 mod launch;
