@@ -9,6 +9,8 @@ use cf_engine::testing::Context;
 use cf_ledger::MessageView;
 
 use super::recorded;
+use crate::chiefs::to_human;
+use crate::resume::at_work;
 
 /// The words that tell the note that gives a cleared session its role.
 const BEGAN_WITHOUT: &str = "began without your ConsensFlow role instructions";
@@ -95,4 +97,142 @@ fn a_harness_that_keeps_its_first_instructions_is_given_nothing_at_a_switch() {
         context.pass().unwrap();
     }
     assert!(greetings(&context, chief).is_empty());
+}
+
+/// The panes the host was asked to kill, by their ids.
+fn killed(context: &Context) -> Vec<String> {
+    context
+        .host
+        .killed()
+        .into_iter()
+        .map(|pane| pane.id)
+        .collect()
+}
+
+/// T-931 P1-1: the greeting is no launch. A member that switched to a session no hook
+/// greeted and is at work there past the time a launch has (180 s) keeps its window, and
+/// the human is told nothing; the role goes in once the window rests.
+#[test]
+fn a_member_at_work_long_after_a_switch_to_a_session_no_hook_greeted_keeps_its_window() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let zeus = context.id(tiers.project.id, "zeus-amber-pine");
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context
+        .adapter
+        .switch_to("zeus-amber-pine", "native-cleared");
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.settled = false);
+    context.pass().unwrap();
+    assert_eq!(greetings(&context, zeus).len(), 1, "the role is written");
+    for _ in 0..4 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    assert!(killed(&context).is_empty(), "{:?}", killed(&context));
+    let told = to_human(&context, tiers.project.id);
+    assert!(
+        !told.iter().any(|body| body.contains("could not start")),
+        "{told:?}"
+    );
+    // At rest, it is given the role.
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.settled = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let note = context.message(greetings(&context, zeus)[0].id);
+    assert_eq!(note.state, "delivered");
+}
+
+/// T-931 P1-1: a chief whose window exits with the greeting still to go closes its
+/// project, as any chief's exit does; no launch is tried again for it.
+#[test]
+fn a_chief_that_exits_with_its_greeting_queued_suspends_its_project() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    context.adapter.with("chief", |agent| agent.settled = false);
+    context.pass().unwrap();
+    assert_eq!(greetings(&context, chief).len(), 1);
+    context.exit("chief");
+    context.pass().unwrap();
+    assert_eq!(context.project(project.id).state, "suspended");
+    let told = to_human(&context, project.id);
+    assert!(
+        !told.iter().any(|body| body.contains("could not start")),
+        "{told:?}"
+    );
+}
+
+/// T-931 P1-1: a greeting that never gets in is given up as a message is, and the
+/// chief's window, which is up, stays open: no launch failed.
+#[test]
+fn a_greeting_the_chief_s_window_refuses_fails_and_the_window_stays_open() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    context.adapter.with("chief", |agent| agent.admit = false);
+    for _ in 0..8 {
+        context.advance(5_000);
+        context.pass().unwrap();
+    }
+    let note = context.message(greetings(&context, chief)[0].id);
+    assert_eq!(note.state, "failed", "{note:?}");
+    assert!(killed(&context).is_empty(), "{:?}", killed(&context));
+    assert_eq!(context.project(project.id).state, "open");
+    let told = to_human(&context, project.id);
+    assert!(
+        !told.iter().any(|body| body.contains("could not start")),
+        "{told:?}"
+    );
+}
+
+/// T-931 P3-4: a greeting is decided at the switch, and read again before it goes in. A
+/// harness whose hook greeted the session meanwhile (a later Muse that runs its
+/// SessionStart hook on a `/clear`, at the first prompt) has the note withdrawn: the
+/// session is not told its role twice.
+#[test]
+fn a_greeting_whose_session_a_hook_greeted_meanwhile_is_withdrawn_unsent() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    context.adapter.with("chief", |agent| agent.settled = false);
+    context.pass().unwrap();
+    let note = greetings(&context, chief)[0].id;
+    assert_eq!(context.message(note).state, "queued");
+    // The hook spoke at the session's first prompt.
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.clear();
+        agent.settled = true;
+    });
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note).state, "cancelled");
+    assert!(
+        !crate::withheld_enter::handed(&context, "adapter:claude-code")
+            .iter()
+            .any(|text| text.contains(BEGAN_WITHOUT)),
+        "never pasted"
+    );
 }

@@ -754,7 +754,13 @@ impl Dispatcher {
         // What a launch that was to say the role first still owed the window
         // that exited: the role it was never told.
         let owed = self.owed(&record)?;
-        record.delivery.borrow_mut().prelude = None;
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.prelude = None;
+            // A greeting still to go was the exited window's session's: the next launch
+            // withdraws it with every role note that waits (`withdraw_replacements`).
+            delivery.greeting = None;
+        }
         // The task the window was given, whose requester hears what its close ended.
         let owner = record.window.borrow().owner;
         let said_yes = trust::yes_at_exit(&record, &shown);

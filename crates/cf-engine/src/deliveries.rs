@@ -113,6 +113,11 @@ pub(crate) struct DeliveryPart {
     /// ([`Dispatcher::owed`]). Each launch says it anew, and none that opened a
     /// window leaves it as it was.
     pub(crate) prelude: Option<Prelude>,
+    /// The note that gives the role to a session no hook greeted, the window switched to
+    /// it (`Dispatcher::greet_switched`): it goes first while it waits
+    /// ([`Dispatcher::next_in_line`]), and is no launch's prelude: nothing of a launch's
+    /// watch is on it (the time a launch has, the close of a window it never gets into).
+    pub(crate) greeting: Option<i64>,
     /// The failed turn whose note is settled: the message the window had last
     /// been given, and to whom the failure was told or found told
     /// ([`Dispatcher::untold_failure`]). The ledger says the same after a restart.
