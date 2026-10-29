@@ -112,7 +112,7 @@ runs = ["feeds"]
 
 [[plant.edit]]
 file = "tools/cf-publish/src/checks.rs"
-find = 'for path in assets.all().into_iter().chain(["SHA256SUMS"]) {'
+find = 'for path in assets.all().into_iter().chain([SUMS, SIGNATURE]) {'
 replace = "for path in [assets.archive.as_str()] {"
 
 [[plant]]

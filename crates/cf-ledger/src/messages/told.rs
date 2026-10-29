@@ -4,7 +4,7 @@
 //! an answer. While the brief waits for its paste, they ride in it, after the
 //! brief (`carrying`); once the brief is on its way (a launch has begun), they go
 //! in as the window's next message, and what the window answers is its task's
-//! result only once it has had them ([`told_waiting`]): its `cf task done` is
+//! result only once it has had them ([`notes_waiting`]): its `cf task done` is
 //! refused till then. Several go in the order
 //! they were told, whatever order the human passes them on in
 //! ([`behind_held_words`]); words that will never reach the window fail their
@@ -25,6 +25,7 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::carrying::{adopt, carried_into};
+use super::continuations::continuation_tasks;
 use super::pauses::tell_kept;
 use super::{known_message, message_task, messages};
 use crate::model::{self, LedgerError, HELD_TASK_STATES, MAX_BODY, MEMBER_ROLES};
@@ -109,23 +110,36 @@ pub(crate) fn tell_queued(
     })
 }
 
-/// Whether words told to a window about its task are still on their way to it:
-/// queued, held for the human, or being pasted. The window's answer is not the
-/// task's result until they are in, whether read from it or given by its
-/// `cf task done` (`record_result`).
-pub(crate) fn told_waiting(
+/// Whether a note to a window about its task is still on its way to it: queued,
+/// held for the human, or being pasted, whoever wrote it. The window's answer is not
+/// the task's result until each is in, whether read from it or given by its
+/// `cf task done` (`record_result`): its own receipt says so, never words that quote
+/// it. Told words are such notes, and so are ConsensFlow's own: a start lets go of a
+/// note that rode in a paste an earlier build began (`release_stranded`, migration
+/// 0019), and the words it rode in go in again alone, their answer before it (gap 4 of
+/// the Devin arrival gaps, 2026-10-18). A continuation is none: the move of its task
+/// out of the work withdraws it (`continuations`). An urgent note is a tell, which
+/// pauses the task.
+pub(crate) fn notes_waiting(
     store: &Store,
     participant_id: i64,
     task_id: i64,
 ) -> Result<bool, LedgerError> {
-    Ok(store
+    // ConsensFlow's own words alone are read, to tell a continuation by them.
+    let waiting: Vec<Option<String>> = store
         .db
-        .prepare(&format!(
-            "SELECT 1 FROM message m WHERE m.task_id = ? AND m.recipient_id = ? AND {}
-               AND m.state IN ('queued', 'gated', 'delivering')",
-            told("m")
-        ))?
-        .exists(params![task_id, participant_id])?)
+        .prepare(
+            "SELECT CASE WHEN m.sender_id IS NULL THEN m.body END FROM message m
+              WHERE m.task_id = ? AND m.recipient_id = ?
+                AND m.kind = 'note' AND m.urgent = 0
+                AND m.state IN ('queued', 'gated', 'delivering')",
+        )?
+        .query_map(params![task_id, participant_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(waiting.iter().any(|own| {
+        own.as_deref()
+            .is_none_or(|body| continuation_tasks(body).is_none())
+    }))
 }
 
 /// Told words `message`, given up for good, fail their task while it still waits

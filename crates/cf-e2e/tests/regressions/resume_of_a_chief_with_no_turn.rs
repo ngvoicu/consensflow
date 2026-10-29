@@ -187,6 +187,22 @@ fn a_codex_chief_that_never_had_a_turn_is_opened_afresh_with_the_role_it_has_now
     files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
     let project = Project::open(&rig, "codex-chief", json!({}))?;
     wait_for_the_chief(&rig, &project)?;
+    // A Codex window's role is the file its environment names, which goes with it.
+    let role_of = |window: &Value| -> Result<String, Box<dyn Error>> {
+        let file = window["env"]["CF_CODEX_ROLE_FILE"]
+            .as_str()
+            .ok_or("the window's environment names no role file")?;
+        Ok(std::fs::read_to_string(file)?)
+    };
+    let first = windows_of(&rig, &project)
+        .into_iter()
+        .next()
+        .ok_or("the chief's window was never opened")?;
+    assert_eq!(
+        role_of(&first)?.matches(SECTION).count(),
+        0,
+        "its first window began with specs off"
+    );
     let said = rig.page(
         "project.specs",
         json!({ "project": project.id(), "on": true, "folder": "docs/specs", "variant": "tdd" }),
@@ -196,16 +212,17 @@ fn a_codex_chief_that_never_had_a_turn_is_opened_afresh_with_the_role_it_has_now
     let (before, again) = closed_and_resumed(&rig, &project)?;
 
     assert_eq!(resumed_on(&again), None, "there was no thread to resume");
-    assert_eq!(
-        before["argv"].to_string().matches(SECTION).count(),
-        0,
-        "its first window began with specs off"
-    );
+    assert_eq!(before["argv"].to_string().matches(SECTION).count(), 0);
     let line = again["argv"].to_string();
     assert_eq!(
         line.matches(SECTION).count(),
+        0,
+        "nothing of the role on the command line: {line}"
+    );
+    assert_eq!(
+        role_of(&again)?.matches(SECTION).count(),
         1,
-        "the role as it is now, once, on the command line: {line}"
+        "the role as it is now, once, in its file"
     );
     assert!(!line.contains(REPLACES), "no message of a role: {line}");
     stays_open(&rig, &project, &again)?;

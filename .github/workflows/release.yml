@@ -7,6 +7,10 @@
 #
 # (upstream: the GitHub remote; origin is the NAS mirror, which runs nothing.)
 #
+# The release's SHA256SUMS is signed with the same update key in a job of its
+# own (`sign`), for the one-line installers of install/, which hold a download
+# to it; the publisher publishes no release whose sums are not signed.
+#
 # The tag names the source version (package.json, Cargo.toml and
 # tauri.conf.json agree; prepare-update checks all three). Its message becomes
 # the notes; a tag without one gets the commits since the previous release.
@@ -59,6 +63,10 @@ jobs:
     # admits v* tags and main. No third-party action runs here; Rust comes
     # from the runner's own rustup.
     environment: release
+    # What the files it built hash to, which the sign job holds them to: any job of
+    # the run can replace an artifact of it, and no job can forge another's output.
+    outputs:
+      listing: ${{ steps.listing.outputs.listing }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -188,11 +196,24 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" != push ]; then dry=(--dry-run); fi
           app/src-tauri/target/release/cf-publish feeds plan --version "$version" \
             --archive "$out/$archive" ${dry[@]+"${dry[@]}"}
+      # The SHA-256 of the list of what is uploaded, each file's SHA-256 by its
+      # path, sorted: the job's output, which the sign job holds the download to.
+      - name: What the Mac's files hash to
+        id: listing
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/release"
+          listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do shasum -b -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)
+          echo "listing=$listing" >> "$GITHUB_OUTPUT"
+          echo "the Mac's files hash to $listing"
       - uses: actions/upload-artifact@v7
         with:
           name: ConsensFlow-mac
           path: ${{ runner.temp }}/release/
           if-no-files-found: error
+          # Every file the listing above holds, a hidden one too: upload-artifact leaves
+          # those out unless told, and the sign job would refuse a listing it cannot match.
+          include-hidden-files: true
 
   windows:
     uses: ./.github/workflows/windows-build.yml
@@ -267,11 +288,173 @@ jobs:
           path: app/src-tauri/target/release/cf-publish
           if-no-files-found: error
 
+  # The same publisher built for macOS, where the sign job runs it (`cf-publish
+  # sums`): a binary built on Linux does not run on a Mac. Built as the publisher
+  # job builds it, where there is no token and no secret, its SHA-256 this job's
+  # output, which the sign job checks the binary it downloads against.
+  publisher-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup update stable --no-self-update && rustup default stable
+      - name: Build cf-publish for macOS, and say what it hashes to
+        id: build
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p cf-publish
+          sha256=$(shasum -a 256 app/src-tauri/target/release/cf-publish | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "cf-publish for macOS hashes to $sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cf-publish-macos
+          path: app/src-tauri/target/release/cf-publish
+          if-no-files-found: error
+
+  # The signature the one-line installers (install/install.sh and install.ps1)
+  # check a release by: a download through curl or PowerShell skips Gatekeeper
+  # and SmartScreen, and the Windows files carry no Authenticode signature. The
+  # release's SHA256SUMS, as the publisher writes it (`cf-publish sums`, the
+  # binary the publisher job built, checked against its hash), is signed with the
+  # update key, the one the Mac job signs the update bundle with, under a name
+  # that says the release (ConsensFlow_<version>_SHA256SUMS), which the
+  # signature's trusted comment carries and the installers hold it to. The key is
+  # in the one step that signs; the job's token can write nothing. The signature
+  # is checked as the installers check it before it leaves the job, and the
+  # publish job publishes only the SHA256SUMS it signed, whose signature holds
+  # under the update key (tools/cf-publish/src/sums.rs).
+  #
+  # What is signed is held to what was built: the files downloaded must hash to
+  # the listing the Mac and Windows jobs gave as outputs, which no other job can
+  # forge, as an artifact can be replaced by any job of the run. What the job
+  # signed it gives as outputs too, which the publish job holds its download of
+  # SHA256SUMS and the signature to. A hand run signs and checks too, and uploads
+  # nothing signed: that is the trial of the steps, and nothing signed by it
+  # leaves the runner.
+  sign:
+    needs: [mac, windows, publisher-macos]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+    outputs:
+      sums: ${{ steps.signed.outputs.sums }}
+      signature: ${{ steps.signed.outputs.signature }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      # Tauri's signer as the lockfile names it, and no install script of any package.
+      - run: npm ci --prefix app --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-mac
+          path: ${{ runner.temp }}/built/mac
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-windows
+          path: ${{ runner.temp }}/built/windows
+      # Each job's files as it listed them, then the folder they are signed in.
+      - name: The files are the ones the Mac and Windows jobs built
+        env:
+          MAC_LISTING: ${{ needs.mac.outputs.listing }}
+          WINDOWS_LISTING: ${{ needs.windows.outputs.listing }}
+        run: |
+          set -euo pipefail
+          for job in mac windows; do
+            out="$RUNNER_TEMP/built/$job"
+            listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do shasum -b -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)
+            if [ "$job" = mac ]; then want="$MAC_LISTING"; else want="$WINDOWS_LISTING"; fi
+            if [ -z "$want" ] || [ "$listing" != "$want" ]; then
+              echo "the $job job's files downloaded hash to $listing, and the job that built them says ${want:-nothing}" >&2
+              exit 1
+            fi
+          done
+          mkdir "$RUNNER_TEMP/dist"
+          cp -R "$RUNNER_TEMP/built/mac/." "$RUNNER_TEMP/dist/"
+          cp -R "$RUNNER_TEMP/built/windows/." "$RUNNER_TEMP/dist/"
+      # The publisher built for macOS, for its `sums`, checked against its job's hash as the publish job checks its own.
+      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool
+      - name: The publisher is the binary that was built
+        env:
+          BUILT_SHA256: ${{ needs.publisher-macos.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/sums-tool/cf-publish"
+          got=$(shasum -a 256 "$tool" | cut -d' ' -f1)
+          if [ -z "$BUILT_SHA256" ] || [ "$got" != "$BUILT_SHA256" ]; then
+            echo "the publisher downloaded hashes to $got, and the job that built it says ${BUILT_SHA256:-nothing}" >&2
+            exit 1
+          fi
+          chmod +x "$tool"
+      - name: The sums of the release, and the copy that is signed
+        id: sums
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/package.json').version")
+          signed=$("$RUNNER_TEMP/sums-tool/cf-publish" sums --dir . --version "$version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+      - name: Sign the sums
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+          SIGNED: ${{ steps.sums.outputs.signed }}
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/app/node_modules/.bin/tauri" signer sign "$SIGNED"
+      # As Node's crypto checks it, and as install.sh's own check does.
+      - name: The installers take the signature
+        env:
+          VERSION: ${{ steps.sums.outputs.version }}
+          SIGNED: ${{ steps.sums.outputs.signed }}
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/signature"
+          cp SHA256SUMS "$RUNNER_TEMP/signature/SHA256SUMS"
+          cp "$SIGNED.sig" "$RUNNER_TEMP/signature/SHA256SUMS.sig"
+          node "$GITHUB_WORKSPACE/install/check-signature.mjs" --dir "$RUNNER_TEMP/signature" --version "$VERSION"
+      - name: What was signed hashes to
+        id: signed
+        working-directory: ${{ runner.temp }}/signature
+        run: |
+          set -euo pipefail
+          echo "sums=$(shasum -a 256 SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "signature=$(shasum -a 256 SHA256SUMS.sig | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      # Only a tag's run hands the signature on: the publish job, which needs it,
+      # runs for nothing else.
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ConsensFlow-signature
+          path: ${{ runner.temp }}/signature/
+          include-hidden-files: true
+          if-no-files-found: error
+
   publish:
     # Only the push of a tag publishes. A hand run is a workflow_dispatch, and
     # is on a tag whenever someone picks one to run it on.
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [mac, windows, gate, publisher]
+    needs: [mac, windows, gate, publisher, sign]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -283,12 +466,39 @@ jobs:
     # and shasum; the only action is GitHub's own download-artifact, which fetches
     # the files. The token reaches the two steps that run the binary, and no other.
     steps:
-      # The files the Mac and Windows jobs built.
+      # The files the Mac and Windows jobs built, each into a folder of its own, and
+      # the sign job's SHA256SUMS and its signature into the folder published from.
       - uses: actions/download-artifact@v8
         with:
-          pattern: ConsensFlow-*
+          name: ConsensFlow-mac
+          path: ${{ runner.temp }}/built/mac
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-windows
+          path: ${{ runner.temp }}/built/windows
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-signature
           path: ${{ runner.temp }}/dist
-          merge-multiple: true
+      # Every file of each job as it listed it (the notes, which SHA256SUMS does not
+      # list, among them), then the folder published from.
+      - name: The files are the ones the Mac and Windows jobs built, to be published
+        env:
+          MAC_LISTING: ${{ needs.mac.outputs.listing }}
+          WINDOWS_LISTING: ${{ needs.windows.outputs.listing }}
+        run: |
+          set -euo pipefail
+          for job in mac windows; do
+            out="$RUNNER_TEMP/built/$job"
+            listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do shasum -b -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)
+            if [ "$job" = mac ]; then want="$MAC_LISTING"; else want="$WINDOWS_LISTING"; fi
+            if [ -z "$want" ] || [ "$listing" != "$want" ]; then
+              echo "the $job job's files downloaded hash to $listing, and the job that built them says ${want:-nothing}: nothing is published" >&2
+              exit 1
+            fi
+          done
+          cp -R "$RUNNER_TEMP/built/mac/." "$RUNNER_TEMP/dist/"
+          cp -R "$RUNNER_TEMP/built/windows/." "$RUNNER_TEMP/dist/"
       # The publisher, in a folder of its own: it is not one of the release's files.
       - uses: actions/download-artifact@v8
         with:
@@ -309,6 +519,24 @@ jobs:
           fi
           echo "the publisher is the binary that was built: $got"
           chmod +x "$publisher"
+      # SHA256SUMS and its signature as the sign job made them: an artifact can
+      # have been replaced since; the sign job's outputs cannot.
+      - name: The sums and their signature are the sign job's
+        working-directory: ${{ runner.temp }}/dist
+        env:
+          SUMS_SHA256: ${{ needs.sign.outputs.sums }}
+          SIGNATURE_SHA256: ${{ needs.sign.outputs.signature }}
+        run: |
+          set -euo pipefail
+          for file in SHA256SUMS SHA256SUMS.sig; do
+            if [ "$file" = SHA256SUMS ]; then want="$SUMS_SHA256"; else want="$SIGNATURE_SHA256"; fi
+            got=$(shasum -a 256 "$file" | cut -d' ' -f1)
+            if [ -z "$want" ] || [ "$got" != "$want" ]; then
+              echo "$file downloaded hashes to $got, and the sign job says ${want:-nothing}" >&2
+              exit 1
+            fi
+          done
+          echo "SHA256SUMS and its signature are the ones the sign job made"
       # Versioned files first, then the rolling feeds installed apps read: a
       # feed naming an archive that is not up yet would fail every check. It is
       # cf-publish's, in this order: the rule's refusals before anything moves

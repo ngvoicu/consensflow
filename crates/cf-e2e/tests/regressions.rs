@@ -39,6 +39,10 @@ mod a_cf_a_build_took_away_left_a_window_none;
 mod a_close_waited_for_a_codex_chiefs_server_to_end;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
+// The stand-in Codex is a script, so Unix's, and so are `ps` and `pgrep`.
+#[cfg(unix)]
+#[path = "regressions/a_codex_windows_role_was_on_its_command_line.rs"]
+mod a_codex_windows_role_was_on_its_command_line;
 #[cfg(unix)]
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
 mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
@@ -155,6 +159,8 @@ mod rows_a_paste_carried_pasted_again_after_a_restart;
 mod tasks_left_paused_by_a_close_and_resume;
 #[path = "regressions/tell_refused_for_a_queued_task.rs"]
 mod tell_refused_for_a_queued_task;
+#[path = "regressions/the_chiefs_job_was_killed_as_a_workers_turn_ended.rs"]
+mod the_chiefs_job_was_killed_as_a_workers_turn_ended;
 #[path = "regressions/the_finished_column_could_not_be_cleared_while_its_tasks_were_needed.rs"]
 mod the_finished_column_could_not_be_cleared_while_its_tasks_were_needed;
 #[cfg(unix)]

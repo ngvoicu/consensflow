@@ -312,15 +312,17 @@ impl Dispatcher {
             )?;
             return Ok(Turn::Open);
         }
-        // Words told to the window before it was up are on their way to it (the brief was
-        // in flight when they were told): they go in next, and the answer to them is the
-        // result. This answer is neither the result nor a hold, and the requester is told
-        // nothing of it (field-306's B3; Calliope's L1 on the merge, T-370).
+        // Notes to the window about the task are on their way to it: words told before it
+        // was up (the brief was in flight when they were told), or ConsensFlow's own that a
+        // start let go of from a paste they rode in (Devin arrival gap 4). They go in next,
+        // and the answer to them is the result. This answer is neither the result nor a
+        // hold, and the requester is told nothing of it (field-306's B3; Calliope's L1 on
+        // the merge, T-370).
         let told = self
             .seams
             .ledger
             .borrow()
-            .told_waiting(participant.id, thread.task.id)?;
+            .notes_waiting(participant.id, thread.task.id)?;
         if told {
             return Ok(Turn::Open);
         }
@@ -437,11 +439,12 @@ impl Dispatcher {
     /// take the answer; nothing is recorded and nothing ends: the record's word stands,
     /// and Finish is the requester's. `said` is the record after the task's message.
     ///
-    /// Words told to the window that wait to go in (`told_waiting`) tell nothing: Finish
-    /// refuses then (`words-on-their-way`), and their own path speaks for them (the
-    /// chief's call on Calliope's P3-6, T-621). A job still running is no finished turn,
-    /// though Claude Code says it waits at its prompt (its `shell` status reads idle):
-    /// the count of what the turn left running stands between them (her P3-5).
+    /// Notes to the window about the task that wait to go in (`notes_waiting`: told words,
+    /// or ConsensFlow's own) tell nothing: Finish refuses then (`words-on-their-way`), and
+    /// their own path speaks for them (the chief's call on Calliope's P3-6, T-621). A job
+    /// still running is no finished turn, though Claude Code says it waits at its prompt
+    /// (its `shell` status reads idle): the count of what the turn left running stands
+    /// between them (her P3-5).
     fn looks_finished(
         &self,
         project: &ProjectView,
@@ -465,7 +468,7 @@ impl Dispatcher {
                 .seams
                 .ledger
                 .borrow()
-                .told_waiting(participant.id, thread.task.id)?;
+                .notes_waiting(participant.id, thread.task.id)?;
         let since = {
             let mut held = record.held.borrow_mut();
             if !looks {

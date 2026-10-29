@@ -725,7 +725,7 @@ fn drive_chief_at_rest_with_a_job(mut members: Members, log: &Log) -> Result<Acc
 /// The worker is cut in a command, the app is quit and started again, and the human's
 /// Resume brings the worker back, told so once; it goes on, and its result reaches the
 /// chief.
-fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account> {
+fn drive_worker(mut members: Members, worker: Harness, agent: &str, log: &Log) -> Result<Account> {
     let mut case = Account::new();
     case.say(format!("trust: {}", members.trust().unwrap_or("none")));
     members.add(agent, &[])?;
@@ -836,9 +836,48 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
     );
     let told_once = notes_saying(&members, &handle, &words)?.len() == 1;
     case.check("told once", told_once, "one note, not more");
+    if let (Harness::Devin, Some(note)) = (worker, &told) {
+        // A resumed Devin window was given the note behind `/bypass`: its close keeps what
+        // its launch proves of it, with the session Devin's own wire log names (gap 5 of
+        // the Devin arrival gaps, `cf_harness::devin::kept`).
+        let header = format!("[ConsensFlow m-{} ", note["id"]);
+        let kept = find(
+            log,
+            "the worker's close to keep its note",
+            TOLD,
+            LOOK,
+            || Ok(kept_with(&members, &header).filter(|sessions| !sessions.is_empty())),
+        )?;
+        case.check(
+            "its close keeps the note it was given behind /bypass",
+            kept.is_some(),
+            kept.map_or_else(
+                || "nothing kept".to_owned(),
+                |sessions| {
+                    format!(
+                        "kept for the session its wire log named: {}",
+                        sessions.len()
+                    )
+                },
+            ),
+        );
+    }
     end_in_window(&members, agent, &mut case)?;
     case.closed(members.close());
     Ok(case)
+}
+
+/// The sessions of what was kept of a Devin launch whose prompt begins with `header`, in
+/// the home's `integrations/devin-kept`: none where nothing is.
+fn kept_with(members: &Members, header: &str) -> Option<Vec<Value>> {
+    let folder = members.home().join("integrations").join("devin-kept");
+    std::fs::read_dir(folder).ok()?.find_map(|entry| {
+        let said: Value = serde_json::from_slice(&std::fs::read(entry.ok()?.path()).ok()?).ok()?;
+        said["prompt"]
+            .as_str()
+            .is_some_and(|prompt| prompt.starts_with(header))
+            .then(|| said["sessions"].as_array().cloned().unwrap_or_default())
+    })
 }
 
 /// Runs the check on `plan`, `drive` its case: what the case saw, which holds when
@@ -936,7 +975,7 @@ fn a_window_the_quit_cut_in_a_turn_comes_back_on_the_humans_resume_told_so_once_
         let agent = plan.roster[1]["id"].as_str().unwrap_or_default().to_owned();
         let scoped = log.scoped(format!("{} worker", worker.name()));
         let case = run(&plan, &scoped, |members| {
-            drive_worker(members, &agent, &scoped)
+            drive_worker(members, worker, &agent, &scoped)
         });
         checks.push(checked(
             worker,

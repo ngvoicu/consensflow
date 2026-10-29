@@ -666,7 +666,7 @@ meant = "a_launchs_first_message_behind_bypass_is_read_as_the_prompt_it_ran_howe
 runs = ["harness-devin"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/record/wires.rs"
+file = "crates/cf-harness/src/devin/kept.rs"
 find = '''
         Ok(prompt) => Ok(prompt
             .strip_prefix(BYPASS)

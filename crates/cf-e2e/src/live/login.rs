@@ -14,13 +14,14 @@
 //! the item `Claude Code-credentials` of the account that is the user's name: the
 //! Keychain also holds one for the account `unknown`, from a run that had no `USER`,
 //! which holds no refresh token and is long expired, and a lookup that names no
-//! account returns that one. On another Unix it is `~/.claude/.credentials.json`.
+//! account returns that one. On Linux and on Windows it is
+//! `~/.claude/.credentials.json` (`%USERPROFILE%\.claude\.credentials.json`).
 //! Either is a JSON text that holds the login (`claudeAiOauth`) and the OAuth
 //! tokens of the person's MCP servers (`mcpOAuth`): only the login is copied, into
-//! the folder's `.credentials.json` (mode 600), where a Claude Code with
-//! `CLAUDE_CONFIG_DIR` set reads it. Nothing is ever written to the Keychain, and
-//! nothing is ever printed of the login. Windows has no copy: its runs are as they
-//! were, on the person's own config.
+//! the folder's `.credentials.json` (mode 600 where the system has a mode; the user's
+//! own temporary folder on Windows), where a Claude Code with `CLAUDE_CONFIG_DIR` set
+//! reads it. Nothing is ever written to the Keychain, and nothing is ever printed of
+//! the login.
 //!
 //! **A fresh config folder** opens Claude Code on its first-run dialogs; the folder
 //! is given the one file that answers them (`.claude.json`, with the onboarding
@@ -40,7 +41,8 @@
 //! items it had. Nothing refreshes it by hand, here or anywhere.
 //!
 //! **What the run is held to** ([`ClaudeConfig::finish`], when its rig ends): the
-//! person's `~/.claude/settings.json` is as it was; `~/.claude.json` has no project
+//! person's login (the Keychain item's `claudeAiOauth`, never its other tokens) is as it
+//! was; `~/.claude/settings.json` is as it was; `~/.claude.json` has no project
 //! of the run's folders that it did not have; `~/.claude/history.jsonl` has no
 //! prompt typed in one; `~/.claude/projects` has no conversation of one. (Not the
 //! whole of `~/.claude.json`: the person's own Claude Code sessions write the rest
@@ -83,6 +85,12 @@ const SERVICE: &str = "Claude Code-credentials";
 /// needs ([`Login::of_machine_lasting`]): an eval is hours long.
 pub const LEFT: Duration = Duration::from_secs(2 * 60 * 60);
 
+/// The user's own home on this machine: `HOME`, else `USERPROFILE` (Windows' own), as the rest
+/// of the live kit finds it ([`super::machine::home`]); none where the run has neither.
+fn machine_home() -> Option<PathBuf> {
+    super::machine::home().ok()
+}
+
 /// What the folder of a run starts with in `.claude.json`: the first-run dialogs
 /// answered, and the notice of the default permission mode seen, which would
 /// otherwise be drawn above the prompt that the windows' readers read.
@@ -98,23 +106,23 @@ const PREFIX: &str = "consensflow-live-claude-";
 enum Source {
     /// The login Keychain, as the item of the user's own account.
     Keychain,
-    /// A file, where Claude Code on Linux keeps it.
+    /// A file, where Claude Code on Linux and on Windows keeps it.
     File(PathBuf),
 }
 
 impl Source {
-    /// Where this machine keeps it; none on Windows, where a run is as it was.
+    /// Where this machine keeps it.
     fn of_machine() -> Option<Self> {
-        if cfg!(target_os = "macos") {
-            Some(Self::Keychain)
-        } else if cfg!(unix) {
-            let home = own_var("HOME").filter(|home| !home.is_empty())?;
-            Some(Self::File(
-                Path::new(&home).join(".claude").join(".credentials.json"),
-            ))
-        } else {
-            None
+        Self::on(cfg!(target_os = "macos"), machine_home())
+    }
+
+    /// Where a machine keeps it: the Keychain on a Mac (`macos`), else the file below the
+    /// user's `home` (none where the run has no home to look in).
+    fn on(macos: bool, home: Option<PathBuf>) -> Option<Self> {
+        if macos {
+            return Some(Self::Keychain);
         }
+        Some(Self::File(home?.join(".claude").join(".credentials.json")))
     }
 
     /// What it holds, as its text; never said anywhere.
@@ -222,7 +230,7 @@ fn oauth(text: &str, now: i64, left: Duration) -> Result<Value> {
 }
 
 /// A span as hours and minutes: `1 h 12 min`, `45 min`.
-fn span(span: Duration) -> String {
+pub(super) fn span(span: Duration) -> String {
     let minutes = span.as_secs() / 60;
     match (minutes / 60, minutes % 60) {
         (0, minutes) => format!("{minutes} min"),
@@ -277,6 +285,8 @@ fn gained(before: &BTreeSet<String>, now: &BTreeSet<String>) -> Vec<String> {
 /// (`~/.consensflow-candidate/live/…`), the evals' (`~/.consensflow-candidate/evals/…`: the
 /// workspace of every eval), or in the home of a rig.
 fn is_run_folder(path: &str) -> bool {
+    // Windows writes a folder with its own separator in some places and with ours in others.
+    let path = path.replace('\\', "/");
     path.contains("/.consensflow-candidate/live/")
         || path.contains("/.consensflow-candidate/evals/")
         || path.contains("consensflow-integration-")
@@ -290,7 +300,7 @@ fn is_run_name(name: &str) -> bool {
 }
 
 /// The hash of `bytes`, as hexadecimal.
-fn digest(bytes: &[u8]) -> String {
+pub(super) fn digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -418,21 +428,101 @@ struct Made {
     services: Option<BTreeSet<String>>,
 }
 
-impl Made {
-    /// Whether the folder's `.credentials.json` is as it was copied, and if not, how.
+/// The fields of a login that a refresh changes: the tokens, and when the access token ends. A
+/// refresh cannot leave all three as they were, so a login whose three are as they were copied
+/// was not refreshed, whatever else Claude Code wrote beside them.
+const TOKENS: [&str; 3] = ["accessToken", "refreshToken", "expiresAt"];
+
+/// What a run's Claude Code left of the copy of the login in its folder, judged by the names of
+/// the fields that differ (never their values).
+#[derive(Debug, PartialEq, Eq)]
+enum Copy {
+    /// The login as it was copied.
+    Kept,
+    /// Claude Code wrote other fields of the login (`subscriptionType`, `rateLimitTier`: what it
+    /// learns of the account) and left its tokens as they were: the machine's login is not stale.
+    Rewritten(Vec<String>),
+    /// A token was changed: Claude Code refreshed the copy, and the refresh token the machine keeps
+    /// may be used up. The names of the fields that differ; none where the login itself is gone.
+    Refreshed(Vec<String>),
+    /// The folder's `.credentials.json` is gone or holds no JSON.
+    Lost,
+}
+
+impl Copy {
+    /// What `now`, the folder's `.credentials.json` as it is (none where it is gone or no JSON), is
+    /// of the login `copied`.
+    fn of(copied: &Value, now: Option<&Value>) -> Self {
+        let Some(now) = now else {
+            return Self::Lost;
+        };
+        let Some(now) = now.get("claudeAiOauth").and_then(Value::as_object) else {
+            return Self::Refreshed(Vec::new());
+        };
+        let Some(copied) = copied.as_object() else {
+            return Self::Refreshed(Vec::new());
+        };
+        let mut names: Vec<&String> = copied.keys().chain(now.keys()).collect();
+        names.sort();
+        names.dedup();
+        let (tokens, others): (Vec<String>, Vec<String>) = names
+            .into_iter()
+            .filter(|name| copied.get(*name) != now.get(*name))
+            .cloned()
+            .partition(|name| TOKENS.contains(&name.as_str()));
+        match (tokens.is_empty(), others.is_empty()) {
+            (false, _) => Self::Refreshed(tokens.into_iter().chain(others).collect()),
+            (true, false) => Self::Rewritten(others),
+            (true, true) => Self::Kept,
+        }
+    }
+}
+
+impl Copy {
+    /// Whether the copy was refreshed or lost, in words: the hazard a run is failed for.
     fn refreshed(&self) -> Option<String> {
-        let now = fs::read_to_string(self.folder.path().join(".credentials.json"))
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-        match now {
-            Some(now) if now["claudeAiOauth"] == self.oauth => None,
-            Some(_) => Some(
+        match self {
+            Self::Kept | Self::Rewritten(_) => None,
+            Self::Refreshed(fields) if fields.is_empty() => Some(
                 "the run's Claude Code wrote a different login in the folder's .credentials.json"
                     .to_owned(),
             ),
-            None => {
+            Self::Refreshed(fields) => Some(format!(
+                "the run's Claude Code wrote a different login in the folder's .credentials.json \
+                 (it changed {})",
+                fields.join(", ")
+            )),
+            Self::Lost => {
                 Some("the folder's .credentials.json is gone or no longer holds a login".to_owned())
             }
+        }
+    }
+}
+
+impl Made {
+    /// What the folder's `.credentials.json` is of the login that was copied.
+    fn copy(&self) -> Copy {
+        let now = fs::read_to_string(self.folder.path().join(".credentials.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+        Copy::of(&self.oauth, now.as_ref())
+    }
+
+    /// Whether the copy was refreshed or lost, in words: the hazard `finish` fails the run for.
+    fn refreshed(&self) -> Option<String> {
+        self.copy().refreshed()
+    }
+
+    /// What Claude Code wrote of the login besides its tokens, if it did, in words: no failure,
+    /// but a thing for whoever reads the output to know the copy is not byte for byte.
+    fn rewritten(&self) -> Option<String> {
+        match self.copy() {
+            Copy::Rewritten(fields) => Some(format!(
+                "the run's Claude Code wrote {} of the login in the folder's .credentials.json and \
+                 left its tokens as they were copied: the machine's login was not refreshed",
+                fields.join(", ")
+            )),
+            _ => None,
         }
     }
 }
@@ -451,19 +541,20 @@ pub struct Login {
 }
 
 impl Login {
-    /// The login of this machine's Claude Code, for a live suite on it ([`LEFT`]); none on
-    /// Windows, where a run is on the person's own config.
+    /// The login of this machine's Claude Code, for a live suite on it ([`LEFT`]); none where
+    /// the run has no home to look for it in.
     pub fn of_machine() -> Option<Self> {
         Self::of_machine_lasting(LEFT)
     }
 
     /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
     /// included: the folder is made only if the access token lasts that much more (an eval, hours
-    /// long, states its own length; the live suites' is [`LEFT`]). None on Windows.
+    /// long, states its own length; the live suites' is [`LEFT`]). None where the run has no home
+    /// to look for it in.
     pub fn of_machine_lasting(left: Duration) -> Option<Self> {
         let source = Source::of_machine()?;
-        let home = own_var("HOME").filter(|home| !home.is_empty())?;
-        let mut login = Self::new(source, PathBuf::from(home), std::env::temp_dir());
+        let home = machine_home()?;
+        let mut login = Self::new(source, home, std::env::temp_dir());
         login.left = left;
         Some(login)
     }
@@ -485,7 +576,7 @@ impl Login {
             return Ok(made.folder.path().to_path_buf());
         }
         let oauth = oauth(&self.source.read()?, now, self.left)?;
-        sweep(&self.parent);
+        sweep(&self.parent, PREFIX);
         let folder = tempfile::Builder::new()
             .prefix(&format!("{PREFIX}{}-", std::process::id()))
             .tempdir_in(&self.parent)
@@ -513,7 +604,7 @@ impl Login {
 
 /// Makes the folder `path` the user's alone (mode 700): a temporary folder is made with the
 /// permissions the user's umask leaves, which let others in.
-fn private_folder(path: &Path) -> Result {
+pub(super) fn private_folder(path: &Path) -> Result {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -526,7 +617,7 @@ fn private_folder(path: &Path) -> Result {
 }
 
 /// Makes `path` hold `text`, readable by the user alone (mode 600).
-fn write_private(path: &Path, text: &str) -> Result {
+pub(super) fn write_private(path: &Path, text: &str) -> Result {
     private(path, text).map_err(Error::file("write", path))
 }
 
@@ -582,17 +673,17 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
     Ok(())
 }
 
-/// Takes away the folders of runs that were killed before they could (`PREFIX`, the id of
+/// Takes away the folders of runs that were killed before they could (`prefix`, the id of
 /// the process, and a random word), in `parent`: a folder whose process is gone is nobody's,
 /// and holds a login. A process that is there keeps its own.
-fn sweep(parent: &Path) {
+pub(super) fn sweep(parent: &Path, prefix: &str) {
     let Ok(entries) = fs::read_dir(parent) else {
         return;
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let owner = name
-            .strip_prefix(PREFIX)
+            .strip_prefix(prefix)
             .and_then(|rest| rest.split('-').next())
             .and_then(|id| id.parse::<u32>().ok());
         let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
@@ -611,6 +702,33 @@ impl fmt::Debug for Login {
             .field("source", &self.source)
             .field("folder", &made.as_ref().map(|made| made.folder.path()))
             .finish_non_exhaustive()
+    }
+}
+
+impl Login {
+    /// Whether the login this machine keeps is no longer the one that was copied (the same item
+    /// holds the person's MCP servers' tokens, which their own servers refresh all day: only
+    /// the login is held to it, and of the login its [`TOKENS`], as the copy is: Claude Code
+    /// writes what it learns of the account beside them): the run's, or their own Claude
+    /// Code's refresh in between.
+    fn owner_login_changed(&self, copied: &Value) -> Option<String> {
+        let now = self
+            .source
+            .read()
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|login| login.get("claudeAiOauth").cloned());
+        let kept = now.is_some_and(|now| {
+            TOKENS
+                .iter()
+                .all(|field| now.get(field) == copied.get(field))
+        });
+        (!kept).then(|| {
+            format!(
+                "the owner's Claude login in {} is not as it was",
+                self.source.described()
+            )
+        })
     }
 }
 
@@ -636,12 +754,25 @@ impl ClaudeConfig for Login {
         let Some(made) = made.as_ref() else {
             return Ok(());
         };
-        let touched = self.owner.changes_since(&made.owner);
+        let mut touched = self.owner.changes_since(&made.owner);
+        touched.extend(self.owner_login_changed(&made.oauth));
+        if let Some(note) = made.rewritten() {
+            let _ = writeln!(io::stderr(), "note: {note}");
+        }
         let mut refreshed: Vec<String> = made.refreshed().into_iter().collect();
         if let (Some(before), Some(now)) = (&made.services, keychain_services()) {
             refreshed.extend(gained(before, &now));
         }
         if touched.is_empty() && refreshed.is_empty() {
+            // What was checked, with a hash that says nothing of what the files hold.
+            let hash = |text: &str| digest(text.as_bytes())[..12].to_owned();
+            let _ = writeln!(
+                io::stderr(),
+                "the owner's Claude setup is as it was: login in {} {}, ~/.claude/settings.json {}; the copy of the login in the run's folder is as it was copied",
+                self.source.described(),
+                hash(&made.oauth.to_string()),
+                made.owner.settings.as_deref().map_or("none".to_owned(), |hash| hash[..12].to_owned())
+            );
             return Ok(());
         }
         let said = said(&touched, &refreshed);
@@ -679,5 +810,7 @@ fn said(touched: &[String], refreshed: &[String]) -> String {
     said
 }
 
+#[cfg(test)]
+mod portable;
 #[cfg(test)]
 mod tests;

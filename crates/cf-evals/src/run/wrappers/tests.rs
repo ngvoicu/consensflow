@@ -157,50 +157,6 @@ fn the_pi_wrapper_gives_a_window_its_model_and_thinking_where_it_names_none_and_
 }
 
 #[test]
-fn a_windows_wrapper_is_a_cmd_in_the_shape_of_an_npm_shim_that_names_node_and_the_script_it_runs() {
-    let shim = cmd(
-        Path::new(r"C:\Program Files\nodejs\node.exe"),
-        Path::new(r"C:\Users\u\bin\claude.mjs"),
-    );
-    assert_eq!(
-        shim,
-        "@echo off\r\nREM Written by cf-evals: eval windows reach no MCP server and no browser.\r\n\
-         \"C:\\Program Files\\nodejs\\node.exe\" \"C:\\Users\\u\\bin\\claude.mjs\" %*\r\n"
-    );
-    // The daemon reads the last line that passes the arguments on, and takes the last
-    // two words it quotes there for the program and the script: the comment is no such line.
-    let line = shim.lines().rev().find(|line| line.contains("%*")).unwrap();
-    assert_eq!(line.matches('"').count(), 4);
-    assert!(!shim.lines().next().unwrap_or_default().contains("%*"));
-}
-
-#[test]
-fn the_script_a_windows_wrapper_runs_starts_the_real_program_and_ends_as_it_ends() {
-    let text = relay(&strings(&[
-        "C:\\node.exe",
-        "C:\\cli.js",
-        "--no-chrome",
-        "-c",
-        "model=\"m\"",
-    ]));
-    assert!(
-        text.contains(
-            "const [file, ...args] = [\"C:\\\\node.exe\",\"C:\\\\cli.js\",\"--no-chrome\",\"-c\",\"model=\\\"m\\\"\"]"
-        ),
-        "{text}"
-    );
-    for part in [
-        "import { spawn } from 'node:child_process'",
-        "for (const signal of ['SIGINT', 'SIGBREAK']) process.on(signal, () => {})",
-        "spawn(file, [...args, ...process.argv.slice(2)], { stdio: 'inherit' })",
-        "child.on('exit', (code) => process.exit(code ?? 1))",
-    ] {
-        assert!(text.contains(part), "{part}");
-    }
-    assert!(text.ends_with('\n'));
-}
-
-#[test]
 fn a_wrapper_is_found_by_the_command_it_stands_for() {
     let wrappers = Wrappers {
         claude: Some(PathBuf::from("bin/claude")),

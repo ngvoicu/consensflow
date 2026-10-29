@@ -33,7 +33,6 @@ mod closing;
 mod command;
 mod descent;
 mod door;
-mod leftovers;
 mod plan;
 #[cfg(test)]
 mod tests;
@@ -54,7 +53,6 @@ use crate::rig::{Config, Project, Rig};
 use crate::{files, Error, Result};
 
 use board::task_number;
-use leftovers::Leftovers;
 
 pub use account::{clock, plural, plus, plus_maybe, squash, Account};
 pub use board::{
@@ -106,9 +104,6 @@ pub struct Members {
     folder: PathBuf,
     trust: Option<&'static str>,
     tiers: BTreeMap<String, String>,
-    /// What the real harnesses kept of the folder in places of their own: it goes
-    /// when the project does, unless it is to be kept.
-    _leftovers: Leftovers,
     /// Where the shim that starts Claude Code is, which the windows run through.
     _shims: TempDir,
 }
@@ -138,6 +133,20 @@ impl Members {
             .iter()
             .map(|harness| log.found(*harness))
             .collect::<Result<Vec<_>>>()?;
+        for file in &plan.home_files {
+            let isolation = installs
+                .iter()
+                .find(|install| install.harness() == file.harness)
+                .and_then(|install| install.isolation())
+                .ok_or_else(|| {
+                    Error::Daemon(format!(
+                        "{}'s windows run on no home of the run's own to put {} in",
+                        file.harness.name(),
+                        file.name
+                    ))
+                })?;
+            isolation.write(file.variable, &file.name, &file.text)?;
+        }
         let shims = tempfile::tempdir().map_err(|source| Error::File {
             action: "make a folder in",
             path: std::env::temp_dir(),
@@ -172,7 +181,6 @@ impl Members {
             None => None,
         };
         let project = Project::open(&rig, &plan.chief, json!({ "directory": folder }))?.id();
-        let leftovers = Leftovers::of(&harnesses, rig.var("HOME"), &folder);
         Ok(Self {
             rig,
             config,
@@ -181,7 +189,6 @@ impl Members {
             folder,
             trust,
             tiers: BTreeMap::new(),
-            _leftovers: leftovers,
             _shims: shims,
         })
     }
@@ -240,6 +247,18 @@ impl Members {
             (Some(config), _) => PathBuf::from(config),
             (None, Some(home)) => Path::new(home).join(".claude"),
             (None, None) => PathBuf::from(".claude"),
+        }
+    }
+
+    /// The Codex home the project's Codex windows keep their threads in: the
+    /// `CODEX_HOME` the rig gives them (the kit's home of the run's own,
+    /// [`super::isolation`]), and else `.codex` in its home.
+    pub fn codex_home(&self) -> PathBuf {
+        let var = |name: &str| self.rig.var(name).filter(|value| !value.is_empty());
+        match (var("CODEX_HOME"), var("HOME")) {
+            (Some(home), _) => PathBuf::from(home),
+            (None, Some(home)) => Path::new(home).join(".codex"),
+            (None, None) => PathBuf::from(".codex"),
         }
     }
 
@@ -453,7 +472,6 @@ impl Members {
             folder,
             trust,
             tiers,
-            _leftovers,
             _shims,
         } = self;
         rig.kill_daemon();
@@ -473,9 +491,13 @@ impl Members {
             folder,
             trust,
             tiers,
-            _leftovers,
             _shims,
         })
+    }
+
+    /// The daemon's home, where the launches' files are.
+    pub fn home(&self) -> PathBuf {
+        self.rig.home()
     }
 
     /// Ends the rig: the daemon, the pane host and their windows, and the

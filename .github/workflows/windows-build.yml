@@ -10,6 +10,11 @@ name: Windows build
 on:
   workflow_dispatch:
   workflow_call:
+    # What the files hash to, which the release's sign job holds its download to.
+    outputs:
+      listing:
+        description: The SHA-256 of the list of the files uploaded, each file's SHA-256 by its path, sorted
+        value: ${{ jobs.windows.outputs.listing }}
 
 permissions:
   contents: read
@@ -18,6 +23,8 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    outputs:
+      listing: ${{ steps.listing.outputs.listing }}
     defaults:
       run:
         shell: bash
@@ -123,10 +130,24 @@ jobs:
           "the portable exe unpacked $runtime with its console host, its daemon came up from it (cf.exe), and its cf.exe runs the CLI"
           exit 0
 
+      # The two files people download, in a folder of their own, laid out as the
+      # release's are (nsis/, portable/), and the SHA-256 of their list.
+      - name: The files people download, and what they hash to
+        id: listing
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/windows-artifact"
+          mkdir -p "$out/nsis" "$out/portable"
+          cp app/src-tauri/target/release/bundle/nsis/*-setup.exe "$out/nsis/"
+          cp app/src-tauri/target/release/bundle/portable/*-portable.exe "$out/portable/"
+          listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do shasum -b -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)
+          echo "listing=$listing" >> "$GITHUB_OUTPUT"
+          echo "the Windows files hash to $listing"
       - uses: actions/upload-artifact@v7
         with:
           name: ConsensFlow-windows
-          path: |
-            app/src-tauri/target/release/bundle/nsis/*-setup.exe
-            app/src-tauri/target/release/bundle/portable/*-portable.exe
+          path: ${{ runner.temp }}/windows-artifact/
           if-no-files-found: error
+          # Every file the listing holds, a hidden one too (upload-artifact leaves those out
+          # unless told): the release's sign job holds the download to that listing.
+          include-hidden-files: true

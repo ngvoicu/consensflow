@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::members::{Machine, Running, ThisMachine};
 use crate::process::Run;
 use crate::{Error, Result};
 
@@ -340,9 +341,12 @@ pub struct Process {
     pub command: String,
 }
 
-/// The processes whose command line holds `text`, from `ps`. For macOS and
-/// Linux: a machine with no `ps` is an error.
+/// The processes whose command line holds `text`: from `ps` on macOS and Linux (a machine with
+/// no `ps` is an error), from Windows' own process table there ([`ThisMachine`]).
 pub fn processes_with(text: &str) -> Result<Vec<Process>> {
+    if cfg!(windows) {
+        return Ok(holding(ThisMachine.processes()?, text));
+    }
     let ran = Run::new("ps")
         .args(["-axo", "pid=,ppid=,command="])
         .inheriting_env()
@@ -355,6 +359,18 @@ pub fn processes_with(text: &str) -> Result<Vec<Process>> {
         });
     }
     Ok(listed(&ran.stdout, text))
+}
+
+/// The processes of `all`, a machine's table, whose command line holds `text`.
+fn holding(all: Vec<Running>, text: &str) -> Vec<Process> {
+    all.into_iter()
+        .filter(|process| process.command.contains(text))
+        .map(|process| Process {
+            pid: process.identity.pid,
+            ppid: process.ppid,
+            command: process.command,
+        })
+        .collect()
 }
 
 /// The processes of a listing `ps -axo pid=,ppid=,command=` made whose command

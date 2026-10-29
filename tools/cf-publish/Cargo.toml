@@ -23,12 +23,16 @@ name = "fake-gh"
 path = "src/bin/fake_gh.rs"
 required-features = ["test-support"]
 
-# These two are the whole of what this crate is built with, and
+# These three are the whole of what this crate is built with, and
 # tests/closure.rs holds the lockfile's closure of them to a list: this binary
 # runs where the repository's write token is. Nothing else may be added,
 # dev-dependencies included (Cargo.lock lists those too): the tests make their
-# own temporary folders, and the errors are written by hand.
+# own temporary folders, and the errors are written by hand. minisign-verify,
+# which depends on nothing, is the crate the app's updater checks its updates
+# with (through tauri-plugin-updater): the publisher checks the signature of
+# SHA256SUMS with it before it publishes.
 [dependencies]
+minisign-verify.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 

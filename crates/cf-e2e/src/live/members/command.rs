@@ -163,13 +163,18 @@ fn ends_with_program(before: &str, program: &str) -> bool {
 }
 
 /// The processes of `found` that are the `node -e` of the command: the program
-/// Node (by its name, with or without the folder it is in), then `-e`.
+/// Node first (named bare or by a path, quoted or not, with a slash or a backslash, with or
+/// without `.exe`, in any case: [`ends_with_program`]), then `-e`.
 fn of_node(found: Vec<Process>) -> Vec<Process> {
-    static NODE: OnceLock<Regex> = OnceLock::new();
-    let node = pattern::once(&NODE, r"^(\S*/)?node\s+-e\s");
+    static FIRST: OnceLock<Regex> = OnceLock::new();
+    let first = pattern::once(&FIRST, r#"^("[^"]*"|\S+)\s+-e\s"#);
     found
         .into_iter()
-        .filter(|process| node.is_match(&process.command))
+        .filter(|process| {
+            first
+                .captures(&process.command)
+                .is_some_and(|found| ends_with_program(&found[1], "node"))
+        })
         .collect()
 }
 
@@ -409,6 +414,35 @@ mod tests {
         ];
         let node: Vec<u32> = of_node(found).iter().map(|process| process.pid).collect();
         assert_eq!(node, [10, 11]);
+    }
+
+    // Windows' table gives the program as a quoted path with its `.exe` (zeewin2, 2026-10-28: `live
+    // reopened` waited 120 s for a command that ran, because only `node -e` and a path with a slash
+    // were taken for it).
+    #[test]
+    fn the_node_of_a_windows_table_is_the_command_too_by_its_quoted_path_and_its_exe() {
+        let found = vec![
+            process(
+                20,
+                1,
+                r#""C:\Program Files\nodejs\node.exe" -e "setTimeout(() => {}, 300000)" cf-x"#,
+            ),
+            process(
+                21,
+                1,
+                r#"C:\nodejs\NODE.EXE -e "setTimeout(() => {}, 1)" cf-x"#,
+            ),
+            process(22, 1, r#""C:\Program Files\Git\bin\bash.exe" -e "x" cf-x"#),
+            process(
+                23,
+                1,
+                r#""C:\Users\AGV\.local\bin\claude.exe" --resume Run: node -e "x" cf-x"#,
+            ),
+            process(24, 1, r#""C:\nodejs\nodemon.exe" -e js cf-x"#),
+            process(25, 1, r#""C:\nodejs\node.exe" script.js cf-x"#),
+        ];
+        let node: Vec<u32> = of_node(found).iter().map(|process| process.pid).collect();
+        assert_eq!(node, [20, 21]);
     }
 
     #[test]

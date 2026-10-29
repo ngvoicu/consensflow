@@ -248,3 +248,33 @@ fn the_processes_of_the_machine_are_listed_with_this_one_among_them() {
     let found = processes_with("").unwrap();
     assert!(found.iter().any(|process| process.pid == own), "{found:?}");
 }
+
+#[test]
+fn the_processes_of_a_machines_table_that_hold_a_word_are_the_ones_whose_command_line_does() {
+    use super::super::members::{Identity, Running};
+    let running = |pid: u32, ppid: u32, command: &str| Running {
+        identity: Identity { pid, started: 1 },
+        ppid,
+        command: command.to_owned(),
+        exe: None,
+    };
+    let table = vec![
+        running(
+            10,
+            1,
+            r#"C:\Program Files\nodejs\node.exe -e "setTimeout(() => {}, 300000)" cf-mark-7"#,
+        ),
+        running(11, 10, "cmd.exe /c something else"),
+        running(12, 1, "claude --resume cf-mark-7-not-this"),
+    ];
+    let found = holding(table, "cf-mark-7");
+    assert_eq!(
+        found
+            .iter()
+            .map(|process| (process.pid, process.ppid))
+            .collect::<Vec<_>>(),
+        [(10, 1), (12, 1)]
+    );
+    assert!(found[0].command.ends_with("cf-mark-7"));
+    assert!(holding(Vec::new(), "x").is_empty());
+}

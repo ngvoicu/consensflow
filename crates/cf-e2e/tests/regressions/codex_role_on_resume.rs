@@ -6,9 +6,10 @@
 //! and every other harness's chief was told of them. Codex's never was: it found
 //! the owner's own Specmint skill by itself, used the folder Specmint names and
 //! not the project's, and gave the writing of the spec to a worker as a task, again
-//! and again. ConsensFlow gives a Codex window its role as `-c
-//! developer_instructions=…` at each launch, and a resumed thread keeps the
-//! developer message it began with: the chief's record held the one message of its
+//! and again. ConsensFlow gave a Codex window its role as `-c
+//! developer_instructions=…` at each launch (since T-698, a file the window's broker
+//! gives a thread as it starts), and a resumed thread keeps the developer message it
+//! began with: the chief's record held the one message of its
 //! start with specs off, and none after the Resume. So any change of a role since a
 //! Codex thread began never reached it. The report is the issue
 //! `issues/codex-resume-keeps-first-instructions.md` in consensflow-sme.
@@ -30,7 +31,7 @@
 //! The review of that fix found the note was the launch's first message
 //! (2026-10-14): the role was then on the window's command line twice, which
 //! Windows has no room for with a large staff, and the message the launch would
-//! have begun with lost its place. The window opens with no first message now, and
+//! have begun with lost its place. (Since T-698 the role is on no command line.) The window opens with no first message now, and
 //! the note goes in by paste once it is up, ahead of everything else.
 
 use std::fs;
@@ -204,12 +205,16 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
 
     chief.is_given_specs("tdd")?;
     let resumed = chief.is_resumed(2)?;
-    // The window's command line has the role once, as it always had: the note that
-    // says it again goes in by paste once the window is up (on Windows a command
-    // line has room for the role once, and not for twice a large staff's).
+    // The window's command line has nothing of the role: its role's file holds the
+    // section (and is given to no resumed thread), and the note that says it again
+    // goes in by paste once the window is up.
     let line = resumed["argv"].to_string();
-    assert_eq!(line.matches(SECTION).count(), 1, "{line}");
+    assert_eq!(line.matches(SECTION).count(), 0, "{line}");
     assert!(!line.contains(REPLACES), "no message of a role: {line}");
+    let file = resumed["env"]["CF_CODEX_ROLE_FILE"]
+        .as_str()
+        .ok_or("the window's environment names no role file")?;
+    assert_eq!(fs::read_to_string(file)?.matches(SECTION).count(), 1);
     rig.wait_for(
         "the chief's own record to hold the section",
         secs(60),

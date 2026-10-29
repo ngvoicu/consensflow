@@ -274,6 +274,92 @@ fn a_humans_message_behind_bypass_is_read_as_it_was_stored() {
     }
 }
 
+/// Gap 5 of the Devin arrival gaps: a start sweeps the launches' folders before it
+/// settles what was on its way, and a first message Devin stored with `/bypass` kept
+/// was read as stored, the paste unseen. The sweep keeps what each launch proves of it
+/// (`devin::kept`), which is read as the launch's own folder was: for the sessions its
+/// log named alone, and only while it is kept; its going is a change the reader reads.
+#[test]
+fn a_first_message_behind_bypass_is_read_from_what_a_start_kept_of_its_swept_launch() {
+    const LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
+    const OTHER: &str = "22222222-2222-4222-8222-222222222222";
+    let stored = format!("/bypass {MEMBER}");
+    let staged = Staged::new();
+    staged.launched_behind_bypass(LAUNCH, SESSION, MEMBER);
+    // Another session's launch, given what this one stored: no proof for this one.
+    staged.launched_behind_bypass(OTHER, "other-session", CHIEF);
+    staged.chain(&[
+        json!({ "message_id": "u-1", "role": "user", "content": stored }),
+        json!({ "message_id": "u-2", "role": "user", "content": format!("/bypass {CHIEF}") }),
+    ]);
+    let home = staged
+        .root
+        .path()
+        .join("home")
+        .to_string_lossy()
+        .into_owned();
+    let mut reader = staged.reader();
+    let shown = |reading: &Reading| match reading {
+        Reading::Known(record) => record
+            .items
+            .iter()
+            .map(|item| item.text.to_string())
+            .collect::<Vec<_>>(),
+        other => panic!("unread: {other:?}"),
+    };
+    assert_eq!(
+        shown(&look(&mut reader)),
+        [MEMBER.to_owned(), format!("/bypass {CHIEF}")]
+    );
+    assert_eq!(
+        crate::shared::launch_files::sweep_launches(&home).unwrap(),
+        2
+    );
+    assert!(!staged.launch(LAUNCH).exists());
+    // A reader of the new start, and the one that read before the sweep.
+    assert_eq!(
+        texts(&staged),
+        [MEMBER.to_owned(), format!("/bypass {CHIEF}")]
+    );
+    assert_eq!(
+        shown(&look(&mut reader)),
+        [MEMBER.to_owned(), format!("/bypass {CHIEF}")]
+    );
+    // Settled, what was kept goes, and the stored message reads as stored again.
+    assert!(crate::devin::forget_kept(&home).is_empty());
+    assert_eq!(
+        shown(&look(&mut reader)),
+        [stored.clone(), format!("/bypass {CHIEF}")]
+    );
+    assert_eq!(texts(&staged), [stored, format!("/bypass {CHIEF}")]);
+}
+
+/// Calliope's P3 on T-697: a kept file no reader can read failed every Devin session's
+/// record, where it proves one session alone. It is passed over, and the rest is read.
+#[cfg(unix)]
+#[test]
+fn a_kept_file_no_reader_can_read_fails_no_session() {
+    use std::os::unix::fs::PermissionsExt;
+    const LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
+    const OTHER: &str = "22222222-2222-4222-8222-222222222222";
+    let staged = Staged::new();
+    staged.launched_behind_bypass(LAUNCH, SESSION, MEMBER);
+    staged.launched_behind_bypass(OTHER, "other-session", CHIEF);
+    staged.chain(&[
+        json!({ "message_id": "u-1", "role": "user", "content": format!("/bypass {MEMBER}") }),
+    ]);
+    let home = staged.root.path().join("home");
+    crate::shared::launch_files::sweep_launches(&home.to_string_lossy()).unwrap();
+    let other = home.join(format!("integrations/devin-kept/{OTHER}.json"));
+    fs::set_permissions(&other, fs::Permissions::from_mode(0o000)).unwrap();
+    let reading = look(&mut staged.reader());
+    fs::set_permissions(&other, fs::Permissions::from_mode(0o600)).unwrap();
+    let Reading::Known(record) = &*reading else {
+        panic!("unread: {reading:?}");
+    };
+    assert_eq!(record.items[0].text.as_ref(), MEMBER);
+}
+
 #[test]
 fn requests_are_told_apart_as_javascript_keys_them() {
     // Two requests, each answered with a turn's end: the first reply is

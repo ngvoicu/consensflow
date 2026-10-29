@@ -34,7 +34,7 @@ pub(crate) fn task_id(w: &World, number: i64) -> i64 {
 /// Whether words told to `session`'s window about T-`number` are still on their way.
 pub(crate) fn waiting(w: &World, session: &str, number: i64) -> bool {
     w.ledger
-        .told_waiting(w.id(session), task_id(w, number))
+        .notes_waiting(w.id(session), task_id(w, number))
         .unwrap()
 }
 

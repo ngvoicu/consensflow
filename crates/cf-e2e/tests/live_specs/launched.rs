@@ -119,8 +119,7 @@ pub fn skill_called(file_text: &str) -> Option<String> {
 }
 
 /// Where a window was given its role text, by what its `pane.open` says: a file
-/// (Claude's, OpenCode's and Devin's), or the text itself (Pi's, and Codex's as
-/// the developer's instructions).
+/// (Claude's, OpenCode's, Devin's and Codex's), or the text itself (Pi's).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoleText {
     File(String),
@@ -128,10 +127,9 @@ pub enum RoleText {
 }
 
 /// How the window of `frame` (a `pane.open` request) was given its role: Claude
-/// appends a file to its system prompt, Pi appends the text, Codex is given it as
-/// developer instructions (a JSON string in a setting of its command line), Devin
-/// reads the file its environment names, and OpenCode has it as the last of the
-/// instructions its configuration lists.
+/// appends a file to its system prompt, Pi appends the text, Codex's broker and
+/// Devin read the file their environment names, and OpenCode has it as the last of
+/// the instructions its configuration lists.
 pub fn role_of(frame: &Value) -> Option<RoleText> {
     let argv: Vec<&str> = frame["argv"]
         .as_array()
@@ -151,15 +149,10 @@ pub fn role_of(frame: &Value) -> Option<RoleText> {
     if let Some(text) = after("--append-system-prompt") {
         return Some(RoleText::Inline(text));
     }
-    if let Some(setting) = argv
-        .iter()
-        .find_map(|word| word.strip_prefix("developer_instructions="))
-    {
-        let text: String = serde_json::from_str(setting).ok()?;
-        return Some(RoleText::Inline(text));
-    }
-    if let Some(file) = frame["env"]["CF_DEVIN_ROLE_FILE"].as_str() {
-        return Some(RoleText::File(file.to_owned()));
+    for named in ["CF_CODEX_ROLE_FILE", "CF_DEVIN_ROLE_FILE"] {
+        if let Some(file) = frame["env"][named].as_str() {
+            return Some(RoleText::File(file.to_owned()));
+        }
     }
     let configuration: Value =
         serde_json::from_str(frame["env"]["OPENCODE_CONFIG_CONTENT"].as_str()?).ok()?;
@@ -169,15 +162,12 @@ pub fn role_of(frame: &Value) -> Option<RoleText> {
 
 /// That no word of the window's launch (its command line and its environment)
 /// names a Specmint skill: a window of no specs is given none beside its role.
-/// (Codex's developer instructions are no word of this: they hold what Codex
-/// itself says of the human's own skills.)
 pub fn carries_no_skill(frame: &Value) -> Result<(), String> {
     let argv = frame["argv"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
-        .filter(|word| !word.starts_with("developer_instructions="))
         .map(|word| ("command line", word.to_owned()));
     let env = frame["env"]
         .as_object()

@@ -51,6 +51,21 @@ pub fn program_name(name: &str) -> String {
     }
 }
 
+/// What the `.cmd` of the command a window opens on says on Windows, for the stand-in
+/// `program`: [`window_shim`] naming it, but for a `.cmd` of the run's own (a live
+/// wrapper), which is the shim already, in the shape a window opens on, and is
+/// handed on as it is.
+pub fn window_command(program: &Path) -> Result<String> {
+    let is_cmd = program
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("cmd"));
+    if is_cmd {
+        files::read_string(program)
+    } else {
+        Ok(window_shim(program))
+    }
+}
+
 /// What the `.cmd` of a command a window opens on says on Windows. The pane
 /// host starts a file with each argument quoted the way programs read them,
 /// which cmd.exe does not, so the daemon opens a window on a `.cmd` only as
@@ -115,6 +130,24 @@ mod tests {
             "@echo off\r\n\"C:\\Program Files\\cf\\fake-agent.exe\" \
              \"C:\\Program Files\\cf\\fake-agent.exe\" %*\r\n"
         );
+    }
+
+    #[test]
+    fn a_stand_in_that_is_a_cmd_of_the_runs_own_is_the_shim_already_and_any_other_is_named_by_one()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let wrapper = root.path().join("claude-shimmed.cmd");
+        let text = "@echo off\r\n\"C:\\node.exe\" \"C:\\relay.mjs\" %*\r\n";
+        fs::write(&wrapper, text).unwrap();
+        assert_eq!(window_command(&wrapper).unwrap(), text);
+        // The extension is a Windows file's, whatever its case.
+        let upper = root.path().join("CLAUDE.CMD");
+        fs::write(&upper, text).unwrap();
+        assert_eq!(window_command(&upper).unwrap(), text);
+        let agent = Path::new("/bin/fake-agent");
+        assert_eq!(window_command(agent).unwrap(), window_shim(agent));
+        // A `.cmd` that is not there is an error, not a shim of nothing.
+        assert!(window_command(&root.path().join("gone.cmd")).is_err());
     }
 
     /// Run by the shell and not started as a program: a script that has just

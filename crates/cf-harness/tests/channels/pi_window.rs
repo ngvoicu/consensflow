@@ -37,6 +37,10 @@ pub struct Window {
     extension: JoinHandle<()>,
     /// The first failure of the extension's own work.
     failed: Rc<RefCell<Option<String>>>,
+    /// The modes the inbox, each record taken and the acknowledgement folder had, as
+    /// the extension found them (Unix).
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub modes: Rc<RefCell<Vec<[u32; 3]>>>,
 }
 
 impl Window {
@@ -46,13 +50,15 @@ impl Window {
         let inbox = root.path().join("inbox");
         let ack = root.path().join("ack");
         let failed = Rc::new(RefCell::new(None));
+        let modes = Rc::new(RefCell::new(Vec::new()));
         let extension = spawn_local({
             let (inbox, ack, failed) = (inbox.clone(), ack.clone(), Rc::clone(&failed));
+            let modes = Rc::clone(&modes);
             async move {
                 let mut looks = tokio::time::interval(LOOK);
                 loop {
                     looks.tick().await;
-                    if let Err(cause) = take(&inbox, &ack, &answers) {
+                    if let Err(cause) = take(&inbox, &ack, &answers, &modes) {
                         failed.borrow_mut().get_or_insert(cause.to_string());
                     }
                 }
@@ -64,6 +70,7 @@ impl Window {
             ack,
             extension,
             failed,
+            modes,
         }
     }
 
@@ -87,7 +94,12 @@ impl Drop for Window {
 
 /// Every record in the inbox, taken and answered, then removed. An inbox that
 /// is not a folder holds none.
-fn take(inbox: &Path, ack: &Path, answers: &Answers) -> io::Result<()> {
+fn take(
+    inbox: &Path,
+    ack: &Path,
+    answers: &Answers,
+    modes: &RefCell<Vec<[u32; 3]>>,
+) -> io::Result<()> {
     let Ok(entries) = fs::read_dir(inbox) else {
         return Ok(());
     };
@@ -96,6 +108,17 @@ fn take(inbox: &Path, ack: &Path, answers: &Answers) -> io::Result<()> {
         if !entry.file_name().to_string_lossy().ends_with(".json") {
             continue;
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode =
+                |at: &Path| fs::metadata(at).map_or(0, |found| found.permissions().mode() & 0o777);
+            modes
+                .borrow_mut()
+                .push([mode(inbox), mode(&entry.path()), mode(ack)]);
+        }
+        #[cfg(not(unix))]
+        let _ = modes;
         let record: Value = serde_json::from_slice(&fs::read(entry.path())?)?;
         let id = record["id"].as_str().unwrap_or_default();
         fs::create_dir_all(ack)?;

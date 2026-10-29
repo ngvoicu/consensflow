@@ -88,6 +88,25 @@ is signed and notarized by Apple, so it opens like any other app.
 The first time you run it, SmartScreen asks, because the app is not signed
 yet: choose **More info → Run anyway**.
 
+**From a terminal** (releases from 3.0.7-alpha.1 on)
+
+```sh
+curl -fsSL https://consensflow.ngvoicu.dev/install.sh | sh          # macOS
+```
+
+```powershell
+irm https://consensflow.ngvoicu.dev/install.ps1 | iex               # Windows
+```
+
+Each installs the latest release (`sh -s -- --alpha`, or
+`$env:CONSENSFLOW_CHANNEL = 'alpha'` first, for the latest alpha; `--help` says
+the rest). It installs nothing until the release's `SHA256SUMS` carries the
+signature of ConsensFlow's update key for that release and the download matches
+it, and on a Mac until the app's Developer ID signature and notarization hold.
+An installed ConsensFlow is upgraded where it is, once it has quit; a newer one
+is kept, unless `--version` names the release. The scripts are `install/` in
+this repository.
+
 Everything ConsensFlow needs comes with it. The only other things to install
 are the harnesses you want to use.
 

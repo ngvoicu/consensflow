@@ -5,9 +5,15 @@
 //! only reads its input (`cat`) is marked failed by Claude, which waits for the
 //! answer to its `initialize`; this one answers it, with the protocol version the
 //! client asked for, and a list with no tool in it.
+//!
+//! It is a Python program where the machine has process groups to leave (macOS and Linux:
+//! `python3`), and a Node program on Windows, which has neither a `python3` that runs (the
+//! Store's alias of one ends 9009, zeewin2, 2026-10-28) nor a group a server could leave
+//! with `setsid`: the harnesses there need Node already ([`Runtime`]).
 
 use std::path::{Path, PathBuf};
 
+use crate::live::{command, working_command};
 use crate::process::{is_alive, started};
 use crate::{files, Result};
 use serde_json::json;
@@ -67,28 +73,110 @@ for line in sys.stdin:
     print(json.dumps({"jsonrpc": "2.0", "id": ident, "result": result}), flush=True)
 "#;
 
+/// The same server as a Node program, for a machine that has no `python3` that runs (Windows),
+/// and so no process group to leave either: it takes no `leave-group`. It ends with its input.
+const NODE_SCRIPT: &str = r#"import { writeFileSync } from 'node:fs'
+import { createInterface } from 'node:readline'
+
+writeFileSync(process.argv[2], String(process.pid))
+
+const answer = (id, body) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, ...body })}\n`)
+
+createInterface({ input: process.stdin }).on('line', (line) => {
+  let request
+  try {
+    request = JSON.parse(line)
+  } catch {
+    return
+  }
+  if (request === null || typeof request !== 'object' || request.id == null) return
+  switch (request.method) {
+    case 'initialize':
+      return answer(request.id, {
+        result: {
+          protocolVersion: request.params?.protocolVersion ?? '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'cf-quiet', version: '1' },
+        },
+      })
+    case 'tools/list':
+      return answer(request.id, { result: { tools: [] } })
+    case 'ping':
+      return answer(request.id, { result: {} })
+    default:
+      return answer(request.id, { error: { code: -32601, message: 'no such method' } })
+  }
+})
+"#;
+
+/// The program a server runs on: `python3` for the shell-script machines, where a server can
+/// leave its process group, and Node for Windows, where it cannot and where there may be no
+/// Python that runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Runtime {
+    Python(PathBuf),
+    Node(PathBuf),
+}
+
+impl Runtime {
+    /// The one this machine runs the server on, found as a shell finds it: a `python3` that
+    /// runs where there are process groups, Node on Windows. A machine without it is an error.
+    pub fn of_machine() -> Result<Self> {
+        if cfg!(windows) {
+            command("node").map(Self::Node)
+        } else {
+            working_command("python3", &["--version"]).map(Self::Python)
+        }
+    }
+
+    /// The interpreter's program.
+    pub fn program(&self) -> &Path {
+        match self {
+            Self::Python(program) | Self::Node(program) => program,
+        }
+    }
+
+    /// What the server's file is called, and what it says.
+    fn script(&self) -> (&'static str, &'static str) {
+        match self {
+            Self::Python(_) => ("quiet-server.py", SCRIPT),
+            Self::Node(_) => ("quiet-server.mjs", NODE_SCRIPT),
+        }
+    }
+
+    /// Whether a server of this program can leave the process group it is started in.
+    pub fn can_leave_group(&self) -> bool {
+        matches!(self, Self::Python(_))
+    }
+}
+
 /// The server written in a folder: its program, the configuration Claude is
 /// given it by (`--mcp-config`), and the file its process id is written to.
 pub struct Server {
     config: PathBuf,
     pid_file: PathBuf,
+    leaves: bool,
 }
 
 impl Server {
-    /// Writes the server's program and its configuration in `folder`, run by the
-    /// interpreter `python`.
-    pub fn write(folder: &Path, python: &Path) -> Result<Self> {
-        Self::write_as(folder, python, &[(NAME, STEM, false)])
+    /// Writes the server's program and its configuration in `folder`, run by `runtime`.
+    pub fn write(folder: &Path, runtime: &Runtime) -> Result<Self> {
+        Self::write_as(folder, runtime, &[(NAME, STEM, false)])
     }
 
     /// Writes the server, and one more that leaves the window's process group as it
     /// starts (`setsid`), as a server or helper of an owner's may, both in one
     /// configuration: the server returned is the one that stays in the group, and
-    /// [`Server::detached_pid`] says the other's process.
-    pub fn write_leaving_group(folder: &Path, python: &Path) -> Result<Self> {
+    /// [`Server::detached_pid`] says the other's process. Where `runtime` cannot leave a
+    /// group (Windows') there is only the server that stays, and [`Server::leaves_group`]
+    /// says so.
+    pub fn write_leaving_group(folder: &Path, runtime: &Runtime) -> Result<Self> {
+        if !runtime.can_leave_group() {
+            return Self::write(folder, runtime);
+        }
         let server = Self::write_as(
             folder,
-            python,
+            runtime,
             &[(NAME, STEM, false), (DETACHED_NAME, DETACHED_STEM, true)],
         )?;
         let _ = std::fs::remove_file(folder.join(format!("{DETACHED_STEM}.pid")));
@@ -98,20 +186,26 @@ impl Server {
     /// Writes the program and one configuration of `servers` (each its name, the stem of
     /// its process id's file, and whether it leaves the group) in `folder`: the first is
     /// the server returned.
-    fn write_as(folder: &Path, python: &Path, servers: &[(&str, &str, bool)]) -> Result<Self> {
-        let script = folder.join(format!("{STEM}.py"));
+    fn write_as(folder: &Path, runtime: &Runtime, servers: &[(&str, &str, bool)]) -> Result<Self> {
+        let (file, source) = runtime.script();
+        let script = folder.join(file);
         let config = folder.join("mcp.json");
         let pid_file = folder.join(format!("{}.pid", servers[0].1));
-        files::write(&script, SCRIPT)?;
+        files::write(&script, source)?;
         let entries: Vec<(&str, PathBuf, bool)> = servers
             .iter()
             .map(|(name, stem, leaves)| (*name, folder.join(format!("{stem}.pid")), *leaves))
             .collect();
         files::write(
             &config,
-            format!("{}\n", configuration(python, &script, &entries)),
+            format!("{}\n", configuration(runtime.program(), &script, &entries)),
         )?;
-        let server = Self { config, pid_file };
+        let leaves = servers.iter().any(|(_, _, leaves)| *leaves);
+        let server = Self {
+            config,
+            pid_file,
+            leaves,
+        };
         // A server of an earlier run has left its file, and says nothing of this one.
         server.forget();
         Ok(server)
@@ -137,6 +231,12 @@ impl Server {
     /// Whether its process is there now.
     pub fn runs(&self) -> bool {
         self.pid().is_some_and(is_alive)
+    }
+
+    /// Whether a server was written that leaves the window's process group: the machine can
+    /// ([`Runtime::can_leave_group`]).
+    pub fn leaves_group(&self) -> bool {
+        self.leaves
     }
 
     /// The process of the server written beside it that left the window's group, once it
@@ -206,7 +306,7 @@ mod tests {
     #[test]
     fn the_server_that_leaves_the_group_is_told_so_beside_the_one_that_stays() {
         let folder = tempfile::tempdir().unwrap();
-        let server = Server::write_leaving_group(folder.path(), Path::new("python3")).unwrap();
+        let server = Server::write_leaving_group(folder.path(), &python()).unwrap();
         let said: Value =
             serde_json::from_str(&std::fs::read_to_string(server.config()).unwrap()).unwrap();
         let args = |name: &str| said["mcpServers"][name]["args"].clone();
@@ -232,13 +332,13 @@ mod tests {
     #[test]
     fn a_server_that_has_not_started_has_no_process_and_is_not_running() {
         let folder = tempfile::tempdir().unwrap();
-        let server = Server::write(folder.path(), Path::new("python3")).unwrap();
+        let server = Server::write(folder.path(), &python()).unwrap();
         assert_eq!(server.pid(), None);
         assert!(!server.runs());
         assert!(server.config().is_file());
         // What an earlier run's server left is taken away: it says nothing of this run.
         std::fs::write(folder.path().join("quiet-server.pid"), "4242").unwrap();
-        let again = Server::write(folder.path(), Path::new("python3")).unwrap();
+        let again = Server::write(folder.path(), &python()).unwrap();
         assert_eq!(again.pid(), None);
         // And so is what a window wrote that the run did not mean to look at.
         std::fs::write(folder.path().join("quiet-server.pid"), "4243").unwrap();
@@ -247,15 +347,13 @@ mod tests {
         assert_eq!(again.pid(), None);
     }
 
-    /// What the server answers to `lines`, one request a line, and the process it
-    /// wrote: none where this machine has no `python3` that runs (a Windows machine
-    /// may have only the Store's alias of one).
-    fn answers(lines: &[&str]) -> Option<(Vec<Value>, String)> {
-        let python = live::working_command("python3", &["--version"]).ok()?;
+    /// What the server of `runtime` answers to `lines`, one request a line, and the process it
+    /// wrote.
+    fn answers(runtime: &Runtime, lines: &[&str]) -> (Vec<Value>, String) {
         let folder = tempfile::tempdir().unwrap();
-        let server = Server::write(folder.path(), &python).unwrap();
-        let script = folder.path().join("quiet-server.py");
-        let ran = Run::new(python)
+        let server = Server::write(folder.path(), runtime).unwrap();
+        let script = folder.path().join(runtime.script().0);
+        let ran = Run::new(runtime.program())
             .arg(script)
             .arg(folder.path().join("quiet-server.pid"))
             .inheriting_env()
@@ -270,34 +368,75 @@ mod tests {
             .collect();
         let pid = files::read_string(&folder.path().join("quiet-server.pid")).unwrap();
         assert_eq!(server.pid(), pid.trim().parse().ok());
-        Some((said, pid))
+        (said, pid)
+    }
+
+    /// Every runtime this machine has, for a test of what any of them answers: a Windows machine
+    /// may have only the Store's alias of a `python3`, which does not run.
+    fn runtimes() -> Vec<Runtime> {
+        let python = live::working_command("python3", &["--version"]).map(Runtime::Python);
+        let node = live::command("node").map(Runtime::Node);
+        [python.ok(), node.ok()].into_iter().flatten().collect()
+    }
+
+    fn python() -> Runtime {
+        Runtime::Python(PathBuf::from("python3"))
     }
 
     #[test]
     fn it_answers_what_claude_asks_to_list_it_with_the_version_it_asked_for_and_no_tool() {
-        let Some((said, pid)) = answers(&[
-            r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"9"}}}"#,
-            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
-            r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
-            "not json at all",
-            r#"{"jsonrpc":"2.0","id":3,"method":"resources/list"}"#,
-        ]) else {
-            return;
-        };
-        // The notification and the line that was no request are not answered.
-        assert_eq!(said.len(), 4, "{said:?}");
-        assert_eq!(said[0]["id"], 0);
-        assert_eq!(said[0]["result"]["protocolVersion"], "2025-06-18");
-        assert_eq!(said[0]["result"]["capabilities"], json!({ "tools": {} }));
-        assert_eq!(said[0]["result"]["serverInfo"]["name"], NAME);
+        for runtime in runtimes() {
+            let (said, pid) = answers(
+                &runtime,
+                &[
+                    r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"9"}}}"#,
+                    r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                    r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+                    r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
+                    "not json at all",
+                    r#"{"jsonrpc":"2.0","id":3,"method":"resources/list"}"#,
+                ],
+            );
+            // The notification and the line that was no request are not answered.
+            assert_eq!(said.len(), 4, "{said:?}");
+            assert_eq!(said[0]["id"], 0);
+            assert_eq!(said[0]["result"]["protocolVersion"], "2025-06-18");
+            assert_eq!(said[0]["result"]["capabilities"], json!({ "tools": {} }));
+            assert_eq!(said[0]["result"]["serverInfo"]["name"], NAME);
+            assert_eq!(
+                said[1],
+                json!({ "jsonrpc": "2.0", "id": 1, "result": { "tools": [] } })
+            );
+            assert_eq!(said[2], json!({ "jsonrpc": "2.0", "id": 2, "result": {} }));
+            assert_eq!(said[3]["id"], 3);
+            assert_eq!(said[3]["error"]["code"], -32601);
+            assert!(pid.trim().parse::<u32>().is_ok(), "{pid:?}");
+        }
+    }
+
+    #[test]
+    fn a_runtime_that_cannot_leave_a_group_writes_the_one_server_that_stays_and_says_so() {
+        let folder = tempfile::tempdir().unwrap();
+        let node = Runtime::Node(PathBuf::from("node"));
+        assert!(!node.can_leave_group());
+        let server = Server::write_leaving_group(folder.path(), &node).unwrap();
+        assert!(!server.leaves_group());
+        let said: Value =
+            serde_json::from_str(&std::fs::read_to_string(server.config()).unwrap()).unwrap();
+        assert_eq!(said["mcpServers"].as_object().unwrap().len(), 1, "{said}");
         assert_eq!(
-            said[1],
-            json!({ "jsonrpc": "2.0", "id": 1, "result": { "tools": [] } })
+            said["mcpServers"][NAME]["args"],
+            json!([
+                folder.path().join("quiet-server.mjs"),
+                folder.path().join("quiet-server.pid")
+            ])
         );
-        assert_eq!(said[2], json!({ "jsonrpc": "2.0", "id": 2, "result": {} }));
-        assert_eq!(said[3]["id"], 3);
-        assert_eq!(said[3]["error"]["code"], -32601);
-        assert!(pid.trim().parse::<u32>().is_ok(), "{pid:?}");
+        assert_eq!(said["mcpServers"][NAME]["command"], "node");
+        assert!(folder.path().join("quiet-server.mjs").is_file());
+        assert!(!folder.path().join("quiet-server.py").exists());
+        // Python's leaves it, and says so.
+        let leaving = Server::write_leaving_group(folder.path(), &python()).unwrap();
+        assert!(leaving.leaves_group());
+        assert!(python().can_leave_group());
     }
 }

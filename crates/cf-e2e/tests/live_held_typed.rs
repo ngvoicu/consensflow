@@ -33,11 +33,10 @@
 //! cargo xtask live held-typed
 //! ```
 //!
-//! Isolation is `live escape-unsent`'s (`live_isolation/claude.rs`), with the
-//! prompt suggestion and the recap on (as they are unless turned off).
-
-#[path = "live_isolation/claude.rs"]
-mod isolation;
+//! Isolation is the kit's, as every live case's: Claude Code runs on the run's own config
+//! folder with a copy of the owner's login (`live::login`), which the kit checks with the
+//! owner's setup when the rig ends; the run writes the prompt suggestion and the recap on
+//! (as they are unless turned off) into that folder's `settings.json` before the rig starts.
 
 use std::fs;
 use std::path::Path;
@@ -49,7 +48,6 @@ use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
-use isolation::{claude_login, owners_claude, owners_unchanged, Throwaway};
 use serde_json::{json, Value};
 
 /// The stand-in for Claude, which the rig puts first on the `PATH` of its windows:
@@ -337,27 +335,25 @@ fn a_chief_at_rest_that_claude_shows_its_suggestion_and_recap_is_handed_its_work
 ) -> Result {
     let log = Log::begin("live held-typed")?;
     ask::prepare()?;
-    if !cfg!(target_os = "macos") {
-        return Err(Error::Daemon(
-            "Claude Code runs live here on macOS alone: its login is the Keychain's".to_owned(),
-        ));
-    }
     let install = log.found(Harness::Claude)?;
-    let home = live::machine::home()?;
-    let before = owners_claude(&home, FOLDER);
+    // The kit's config folder of the run, made here and the same one the rig is given.
+    let config = install
+        .claude_config()
+        .ok_or_else(|| {
+            Error::Daemon("Claude Code has no config folder of the run's own".to_owned())
+        })?
+        .folder()?;
     let settings = json!({ "promptSuggestionEnabled": true, "awaySummaryEnabled": true });
-    let config = Throwaway::holding(".credentials.json", claude_login()?)?
-        .with(".claude.json", r#"{"hasCompletedOnboarding":true}"#)?
-        .with("settings.json", &settings.to_string())?;
-    let rig = Rig::start(live::rig_with_claude_config(
-        std::slice::from_ref(&install),
-        FAKE_AGENT,
-        config.path(),
-    ))?;
+    fs::write(config.join("settings.json"), settings.to_string())
+        .map_err(|failed| Error::Daemon(format!("the run's Claude settings.json: {failed}")))?;
+    let rig = Rig::start(live::rig(std::slice::from_ref(&install), FAKE_AGENT))?;
     let mut checks = probe(&rig, &install, &log)
         .unwrap_or_else(|failed| vec![Check::failed("claude", "probed", failed.to_string())]);
     rig.close()?;
-    checks.push(config.check("claude"));
-    checks.push(owners_unchanged(&home, FOLDER, &before));
+    checks.push(Check::passed(
+        "owner",
+        "the owner's Claude setup and the login copied",
+        "as they were when the rig ended (the kit's check)".to_owned(),
+    ));
     report::conclude(&log, "what the window came to", &checks)
 }

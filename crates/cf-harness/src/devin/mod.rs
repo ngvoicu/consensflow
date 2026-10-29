@@ -7,6 +7,7 @@ mod channel;
 mod history;
 pub(crate) mod input_box;
 mod install;
+pub(crate) mod kept;
 pub(crate) mod paths;
 mod question_hook;
 pub mod record;
@@ -25,5 +26,6 @@ pub(crate) use install::native_config;
 pub(crate) use install::{minimum_version, supported_version};
 
 pub use adapter::DevinAdapter;
+pub use kept::forget_kept;
 pub use question_hook::question_hook;
 pub use session_hook::session_hook;

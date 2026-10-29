@@ -39,36 +39,29 @@
 //! is ever taken in a picker (no Enter there): `/model` with a choice saves the
 //! owner's settings.
 //!
-//! Isolation. Claude Code runs on a throwaway `CLAUDE_CONFIG_DIR` (mode 700) that
-//! holds a copy of the owner's login, the `claudeAiOauth` of the Keychain item of the
-//! user's account (`security find-generic-password -a "$USER"`; the item with no
-//! account is a stale one), never printed, refused where its token ends within two
-//! hours, and a `.claude.json` that says onboarding is done (else Claude opens on its
-//! theme dialog). The copy is compared afterwards (a refresh is said, as a failure),
-//! and the folder deleted on every way out. The owner's `~/.claude/settings.json` must
-//! hash the same after the run, and `history.jsonl`, `projects/` and `.claude.json`'s
-//! projects gain nothing that names the run's folder (`.claude.json` changes by
-//! itself, and is not hashed). Claude's windows are shut out of MCP servers and the
-//! browser (`--strict-mcp-config --no-chrome`).
-//! Codex runs on a throwaway `CODEX_HOME` holding a copy of `auth.json` only,
-//! compared the same way, with every MCP server switched off.
+//! Isolation. Every harness runs on a home of the run's own, which the kit makes for
+//! its windows and checks when the rig ends ([`cf_e2e::live::login`] for Claude Code,
+//! [`cf_e2e::live::isolation`] for the others): Claude Code on a throwaway
+//! `CLAUDE_CONFIG_DIR` holding the owner's login, from the Keychain on a Mac and from
+//! `~/.claude/.credentials.json` elsewhere (refused where its token ends within two
+//! hours); Codex on a `CODEX_HOME` holding `auth.json` only; Pi and
+//! Devin on the folders they keep their logins in. A copy that was refreshed, or a file
+//! of the owner's that changed (Claude's `settings.json`, `history.jsonl`, `projects/`,
+//! `.claude.json`'s projects; Codex's `config.toml`; Pi's and Devin's settings and
+//! sessions), fails the run, naming the file. Claude's windows are shut out of MCP servers
+//! and the browser (`--strict-mcp-config --no-chrome`), and Codex's of every MCP server.
 //!
 //! ```text
 //! cargo xtask live escape-unsent                      every harness, Claude last
 //! cargo xtask live escape-unsent devin codex          the ones named, in that order
 //! ```
 //!
-//! Claude Code runs in it on macOS alone: its login is read from the Keychain, and a
-//! live Claude window starts through a wrapper that is a shell script. The others run
-//! on Windows too (`windows-from-tree.sh … cargo xtask live escape-unsent devin`):
-//! there, the throwaway folder is the user's own in the temporary folder, as Windows
-//! gives it, with no mode of its own.
+//! Every harness runs in it on Windows too (`windows-from-tree.sh … cargo xtask live
+//! escape-unsent claude`): there Claude Code's login is read from
+//! `%USERPROFILE%\.claude\.credentials.json`, and the throwaway folder is the user's own in
+//! the temporary folder, as Windows gives it, with no mode of its own.
 
-#[path = "live_isolation/claude.rs"]
-mod isolation;
-
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -77,7 +70,6 @@ use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, agents, ask, codex, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
-use isolation::{claude_login, owners_claude, owners_unchanged, Throwaway};
 use regex::Regex;
 use serde_json::{json, Value};
 
@@ -483,14 +475,9 @@ fn delivered(window: &Window, left: &Read) -> Result<Check> {
 }
 
 /// Codex's TUI, opened bare in a folder of its own on its cheap model, its MCP
-/// servers off, on the throwaway `codex_home`; its question about trusting the
-/// folder answered with Enter (a yes kept in the throwaway folder).
-fn open_codex<'r>(
-    rig: &'r Rig,
-    install: &Installed,
-    codex_home: &Path,
-    log: &Log,
-) -> Result<Pane<'r>> {
+/// servers off, on the run's own Codex home (the rig's `CODEX_HOME`); its question about
+/// trusting the folder answered with Enter (a yes kept in that home).
+fn open_codex<'r>(rig: &'r Rig, install: &Installed, log: &Log) -> Result<Pane<'r>> {
     let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
     let workspace = live::machine::live_folder_in(&home, &format!("{FOLDER}/codex"))?;
     let agent = agents::agent(Harness::Codex);
@@ -511,7 +498,7 @@ fn open_codex<'r>(
         "pane.open",
         json!({
             "id": id, "generation": 1, "cwd": workspace, "argv": argv,
-            "env": { "CODEX_HOME": codex_home }, "dropEnv": [],
+            "env": {}, "dropEnv": [],
             "size": { "rows": 40, "cols": 120 },
         }),
     )?;
@@ -539,17 +526,12 @@ fn open_codex<'r>(
 }
 
 /// The steps of one window of `install`'s, and what they came to.
-fn probe(
-    rig: &Rig,
-    install: &Installed,
-    codex_home: Option<&Path>,
-    log: &Log,
-) -> Result<Vec<Check>> {
+fn probe(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
     let harness = install.harness();
     let name = harness.name();
-    let pane = match codex_home {
-        Some(codex_home) => open_codex(rig, install, codex_home, log)?,
-        None => {
+    let pane = match harness {
+        Harness::Codex => open_codex(rig, install, log)?,
+        _ => {
             let window = Open::new(
                 rig,
                 install,
@@ -618,39 +600,12 @@ fn keys_left_in_a_dialog_with_escape_hold_no_delivery_to_a_window_whose_box_is_e
         .iter()
         .map(|harness| log.found(*harness))
         .collect::<Result<_>>()?;
-    let home = live::machine::home()?;
-    let claude = harnesses.contains(&Harness::Claude);
-    if claude && !cfg!(target_os = "macos") {
-        return Err(Error::Daemon(
-            "Claude Code runs live here on macOS alone: its login is the Keychain's".to_owned(),
-        ));
-    }
-    let owners_before = claude.then(|| owners_claude(&home, FOLDER));
-    let claude_config = claude
-        .then(|| {
-            Throwaway::holding(".credentials.json", claude_login()?)?
-                .with(".claude.json", r#"{"hasCompletedOnboarding":true}"#)
-        })
-        .transpose()?;
-    let codex_home = harnesses
-        .contains(&Harness::Codex)
-        .then(|| {
-            let auth = fs::read(home.join(".codex/auth.json"))
-                .map_err(|failed| Error::Daemon(format!("Codex's auth.json: {failed}")))?;
-            Throwaway::holding("auth.json", auth)
-        })
-        .transpose()?;
-    let config = match &claude_config {
-        Some(folder) => live::rig_with_claude_config(&installs, FAKE_AGENT, folder.path()),
-        None => live::rig(&installs, FAKE_AGENT),
-    };
-    let rig = Rig::start(config)?;
+    // Every harness runs on a home of the run's own, with a copy of the owner's login and
+    // nothing else of theirs, which the kit makes and checks when the rig ends.
+    let rig = Rig::start(live::rig(&installs, FAKE_AGENT))?;
     let mut checks = Vec::new();
     for install in &installs {
-        let codex = (install.harness() == Harness::Codex)
-            .then(|| codex_home.as_ref().map(Throwaway::path))
-            .flatten();
-        match probe(&rig, install, codex, &log) {
+        match probe(&rig, install, &log) {
             Ok(found) => checks.extend(found),
             Err(failed) => checks.push(Check::failed(
                 install.harness().name(),
@@ -660,14 +615,10 @@ fn keys_left_in_a_dialog_with_escape_hold_no_delivery_to_a_window_whose_box_is_e
         }
     }
     rig.close()?;
-    if let Some(folder) = &claude_config {
-        checks.push(folder.check("claude"));
-    }
-    if let Some(folder) = &codex_home {
-        checks.push(folder.check("codex"));
-    }
-    if let Some(before) = &owners_before {
-        checks.push(owners_unchanged(&home, FOLDER, before));
-    }
+    checks.push(Check::passed(
+        "owner",
+        "the owner's setup and the logins copied",
+        "as they were when the rig ended (the kit's check)".to_owned(),
+    ));
     report::conclude(&log, "what each window came to", &checks)
 }
