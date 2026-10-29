@@ -268,8 +268,8 @@ mod shell {
             .filter(|(_, value)| value.is_none())
             .map(|(name, _)| name.to_string_lossy().into_owned())
             .collect();
-        // Cargo sets these for the test that runs this.
-        for given in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME", "CARGO_CRATE_NAME"] {
+        // Cargo sets these for the test that runs this (CARGO_CRATE_NAME is for the compiler's).
+        for given in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME"] {
             assert!(taken.iter().any(|name| name == given), "{given}: {taken:?}");
         }
         // What is the user's or the system's stays: the build the test is part of has it too.
