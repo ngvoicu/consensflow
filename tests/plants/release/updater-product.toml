@@ -230,3 +230,32 @@ find = """
     cf_process::hold_only_the_streams(&mut command);"""
 replace = """
     command.args(args);"""
+
+# The update's app is started once (T-941): after the app's own start of it the exit follows, or
+# Tauri's restart starts it a second time, launchd's child with no input, which quits at once and
+# says nothing; the smoke counts the programs started from the bundle. And the install keeps the
+# app it swapped in, or the app's own start never happens and Tauri's alone does, with none of the
+# app's streams.
+[[plant]]
+name = "updater product: the installed app's start of the update is not followed by its exit"
+meant = "the update installs and restarts"
+runs = ["smoke-own-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "        || std::process::exit(0),"
+replace = "        || {},"
+
+[[plant]]
+name = "updater product: the install does not keep the app it swapped in"
+meant = "the update installs and restarts"
+runs = ["smoke-own-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "                let _ = INSTALLED.set(target);"
+replace = "                let _ = target;"

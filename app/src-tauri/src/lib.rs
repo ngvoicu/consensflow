@@ -557,6 +557,21 @@ mod tests {
 
     const HOME: &str = "/Users/test";
 
+    /// The Windows app links the C runtime statically, Tauri 2.12's default since tauri-build
+    /// 2.7, and its configuration says so (T-930, T-941): it needs no Visual C++ redistributable,
+    /// and a Tauri whose default moves does not move it.
+    #[test]
+    fn the_windows_app_links_its_c_runtime_statically() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("the configuration");
+        assert_eq!(
+            config["build"]["windows"]["staticVCRuntime"],
+            serde_json::Value::Bool(true),
+            "{}",
+            config["build"]
+        );
+    }
+
     #[test]
     fn the_installed_release_keeps_the_live_home() {
         assert_eq!(

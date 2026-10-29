@@ -42,3 +42,46 @@ replace = 'const SHARED: [&[&str]; 3] = [&["node_modules"], &["app", "node_modul
 file = "tools/xtask/src/updater_smoke/build.rs"
 find = '        if folder.join("package-lock.json").is_file() {'
 replace = '        if folder.join("package-lock.json").is_file() && locked.len() > 9 {'
+
+# An export is made once for the commit its tag names, with packages of its own, a platform
+# package npm's cache lacked named, and a Tauri CLI that runs (T-941).
+
+[[plant]]
+name = "tauri-2-12: an export is kept for its tag's name alone"
+meant = "an_export_is_kept_only_for_its_tags_commit_and_with_its_own_packages"
+runs = ["smoke-build"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = '    let marked = format!("{tag} {commit}");'
+replace = '    let marked = format!("{tag}");'
+
+[[plant]]
+name = "tauri-2-12: an export whose packages are a link or gone is taken as made"
+meant = "an_export_is_kept_only_for_its_tags_commit_and_with_its_own_packages"
+runs = ["smoke-build"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = "        && has_its_own_packages(into)"
+replace = "        && (has_its_own_packages(into) || true)"
+
+[[plant]]
+name = "tauri-2-12: an export is made with its platform's packages left out by npm"
+meant = "a_release_whose_platform_package_npm_has_not_kept_is_refused_naming_it"
+runs = ["smoke-build"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = "                missing.is_empty(),"
+replace = "                missing.is_empty() || !missing.is_empty(),"
+
+[[plant]]
+name = "tauri-2-12: an export is made whose own Tauri CLI does not run"
+meant = "a_release_whose_own_tauri_cli_does_not_run_is_refused_with_its_words"
+runs = ["smoke-build"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = "            Ok(ran) if ran.code == 0 => None,"
+replace = "            Ok(ran) if ran.code == 0 || ran.code != 0 => None,"

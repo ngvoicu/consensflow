@@ -196,14 +196,23 @@ mod with_programs {
     }
 
     /// An `npm` that writes what it was asked, and where, into `calls`, and ends with
-    /// `status`; where it ends well it leaves the folder's `node_modules`, as `npm ci` does.
+    /// `status`; where it ends well it leaves the folder's `node_modules`, as `npm ci` does,
+    /// with a Tauri CLI that says its version.
     fn npm_in(folder: &Path, status: i32) -> (Env, PathBuf) {
+        npm_with_cli(folder, status, "echo tauri-cli 2.11.4")
+    }
+
+    /// `npm_in`, its Tauri CLI the script `cli`.
+    fn npm_with_cli(folder: &Path, status: i32, cli: &str) -> (Env, PathBuf) {
         let calls = folder.join("npm-calls");
         program(
             &folder.join("programs"),
             "npm",
             &format!(
-                "echo \"npm $* in $(pwd)\" >> '{}'\n[ {status} -eq 0 ] && mkdir -p node_modules/own\nexit {status}",
+                "echo \"npm $* in $(pwd)\" >> '{}'\n[ {status} -eq 0 ] || exit {status}\n\
+                 mkdir -p node_modules/own node_modules/.bin\n\
+                 printf '%s\\n' '#!/bin/sh' '{cli}' > node_modules/.bin/tauri\n\
+                 chmod +x node_modules/.bin/tauri",
                 calls.display()
             ),
         );
@@ -226,12 +235,17 @@ mod with_programs {
     /// A repository whose tag `v3.0.0-alpha.82` holds a lock in its root and its app, and
     /// whose own folder holds node modules and the download cache.
     fn repo_with_a_release(repo: &Path) -> Repo<'_> {
+        repo_with_a_release_locking(repo, "{}")
+    }
+
+    /// `repo_with_a_release`, the app's lock at the tag `app_lock`.
+    fn repo_with_a_release_locking<'a>(repo: &'a Path, app_lock: &str) -> Repo<'a> {
         fs::create_dir_all(repo.join("app")).unwrap();
         let git = Repo::new(repo);
         fs::write(repo.join("biome.json"), "{}").unwrap();
         fs::write(repo.join("package-lock.json"), "{}").unwrap();
         fs::write(repo.join("app").join("package.json"), "{\"name\":\"old\"}").unwrap();
-        fs::write(repo.join("app").join("package-lock.json"), "{}").unwrap();
+        fs::write(repo.join("app").join("package-lock.json"), app_lock).unwrap();
         git.git(&["add", "-A"]);
         git.commit("the release", Some("v3.0.0-alpha.82"));
         fs::write(repo.join("app").join("package.json"), "{\"name\":\"new\"}").unwrap();
@@ -267,7 +281,7 @@ mod with_programs {
         );
         assert_eq!(
             fs::read_to_string(into.join(MARK)).unwrap(),
-            "v3.0.0-alpha.82\n"
+            format!("v3.0.0-alpha.82 {}\n", commit_of(&git, "v3.0.0-alpha.82"))
         );
         assert!(!PathBuf::from(format!("{}.tar", into.display())).exists());
         // Its packages are its own locks', installed from npm's cache, in each folder that has one.
@@ -315,7 +329,131 @@ mod with_programs {
         );
         assert_eq!(
             fs::read_to_string(into.join(MARK)).unwrap(),
-            "v3.0.0-alpha.84\n"
+            format!("v3.0.0-alpha.84 {}\n", commit_of(&git, "v3.0.0-alpha.84"))
+        );
+    }
+
+    /// The commit a tag of `git` names.
+    fn commit_of(git: &Repo, tag: &str) -> String {
+        git.git(&["rev-parse", &format!("{tag}^{{commit}}")])
+            .trim()
+            .to_string()
+    }
+
+    /// An export is made once for the commit its tag named, with packages of its own (T-941):
+    /// its mark names the tag and that commit, a tag moved to another commit makes it again, and
+    /// so does an export whose packages are a link (as the smoke made them before) or gone.
+    #[test]
+    fn an_export_is_kept_only_for_its_tags_commit_and_with_its_own_packages() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("repo");
+        let git = repo_with_a_release(&repo);
+        let (env, calls) = npm_in(folder.path(), 0);
+        let into = folder.path().join("exports").join("flip-source");
+        fs::create_dir_all(into.parent().unwrap()).unwrap();
+        let npm_runs = || fs::read_to_string(&calls).unwrap().lines().count();
+
+        export_release(&repo, &into, "v3.0.0-alpha.82", &env).unwrap();
+        let first = commit_of(&git, "v3.0.0-alpha.82");
+        assert_eq!(
+            fs::read_to_string(into.join(MARK)).unwrap(),
+            format!("v3.0.0-alpha.82 {first}\n")
+        );
+        assert_eq!(npm_runs(), 2);
+
+        // Packages that are a link, not the release's own: made again.
+        let packages = into.join("app").join("node_modules");
+        fs::remove_dir_all(&packages).unwrap();
+        link_dir(&repo.join("app").join("node_modules"), &packages).unwrap();
+        export_release(&repo, &into, "v3.0.0-alpha.82", &env).unwrap();
+        assert_eq!(npm_runs(), 4);
+        assert!(!fs::symlink_metadata(&packages).unwrap().is_symlink());
+
+        // Packages gone: made again.
+        fs::remove_dir_all(into.join("node_modules")).unwrap();
+        export_release(&repo, &into, "v3.0.0-alpha.82", &env).unwrap();
+        assert_eq!(npm_runs(), 6);
+
+        // The tag moved to another commit: made again, from that commit.
+        git.git(&["tag", "-f", "v3.0.0-alpha.82", "HEAD"]);
+        export_release(&repo, &into, "v3.0.0-alpha.82", &env).unwrap();
+        assert_eq!(npm_runs(), 8);
+        assert_eq!(
+            fs::read_to_string(into.join("app").join("package.json")).unwrap(),
+            "{\"name\":\"new\"}"
+        );
+        let moved = commit_of(&git, "v3.0.0-alpha.82");
+        assert_ne!(moved, first);
+        assert_eq!(
+            fs::read_to_string(into.join(MARK)).unwrap(),
+            format!("v3.0.0-alpha.82 {moved}\n")
+        );
+    }
+
+    /// `npm ci --offline` skips an optional package npm's cache lacks and ends well: the
+    /// Tauri CLI's native one is optional in every lock. The export names the package this
+    /// platform needs and is refused unmarked (T-941); the packages of other platforms are not
+    /// asked for.
+    #[test]
+    fn a_release_whose_platform_package_npm_has_not_kept_is_refused_naming_it() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("repo");
+        let (os, cpu) = npm_platform();
+        let native = format!("@tauri-apps/cli-{os}-{cpu}");
+        let lock = serde_json::json!({
+            "packages": {
+                "": {"name": "app"},
+                "node_modules/@tauri-apps/cli": {"version": "2.11.4"},
+                format!("node_modules/{native}"): {"optional": true, "os": [os], "cpu": [cpu]},
+                "node_modules/@tauri-apps/cli-elsewhere": {"optional": true, "os": ["plan9"]},
+            }
+        });
+        repo_with_a_release_locking(&repo, &lock.to_string());
+        let into = folder.path().join("exports").join("flip-source");
+        fs::create_dir_all(into.parent().unwrap()).unwrap();
+        let (env, _) = npm_with_cli(
+            folder.path(),
+            0,
+            "echo Cannot find native binding >&2; exit 1",
+        );
+        let said = export_release(&repo, &into, "v3.0.0-alpha.82", &env)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            said.contains(&native) && !said.contains("cli-elsewhere"),
+            "{said}"
+        );
+        assert!(
+            !into.join(MARK).exists(),
+            "an export that failed is not kept"
+        );
+    }
+
+    /// The export's own Tauri CLI must run, or the export is refused unmarked with what the CLI
+    /// said, whatever npm thought it installed (T-941).
+    #[test]
+    fn a_release_whose_own_tauri_cli_does_not_run_is_refused_with_its_words() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("repo");
+        repo_with_a_release(&repo);
+        let into = folder.path().join("exports").join("flip-source");
+        fs::create_dir_all(into.parent().unwrap()).unwrap();
+        let (env, _) = npm_with_cli(
+            folder.path(),
+            0,
+            "echo the binding of this platform is not here >&2; exit 1",
+        );
+        let said = export_release(&repo, &into, "v3.0.0-alpha.82", &env)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            said.contains("the Tauri CLI of the release v3.0.0-alpha.82 does not run")
+                && said.contains("the binding of this platform is not here"),
+            "{said}"
+        );
+        assert!(
+            !into.join(MARK).exists(),
+            "an export that failed is not kept"
         );
     }
 

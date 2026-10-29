@@ -368,14 +368,34 @@ static INSTALLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// then starts it as it does.
 #[cfg(target_os = "macos")]
 pub(crate) fn relaunch_installed<R: Runtime>(app: &AppHandle<R>) {
-    let Some(installed) = INSTALLED.get() else {
+    relaunch_once(
+        INSTALLED.get().map(PathBuf::as_path),
+        || app.cleanup_before_exit(),
+        |installed| relaunch(installed, std::env::args_os().skip(1)).map(drop),
+        || std::process::exit(0),
+    );
+}
+
+/// The installed app is started once, by `start`, or not at all here (T-941): Tauri's cleanup
+/// runs first, a panic of it stopped and said, and a start that succeeds is followed by `exit`
+/// and nothing else, so Tauri's restart, which runs where this returns, never starts it a second
+/// time. Where nothing was installed nothing runs; where the start fails it is said, and this
+/// returns.
+#[cfg(target_os = "macos")]
+fn relaunch_once(
+    installed: Option<&Path>,
+    cleanup: impl FnOnce(),
+    start: impl FnOnce(&Path) -> Result<(), String>,
+    exit: impl FnOnce(),
+) {
+    let Some(installed) = installed else {
         return;
     };
-    match relaunch(installed, std::env::args_os().skip(1)) {
-        Ok(_) => {
-            app.cleanup_before_exit();
-            std::process::exit(0);
-        }
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)).is_err() {
+        eprintln!("ConsensFlow's cleanup before starting the installed update panicked");
+    }
+    match start(installed) {
+        Ok(()) => exit(),
         Err(error) => eprintln!(
             "ConsensFlow could not start the installed update itself ({error}); Tauri's restart starts it"
         ),
@@ -1299,6 +1319,59 @@ mod tests {
                 "{}\n--first\nsecond word\nholds none\nthe smoke's input\n",
                 home.display()
             )
+        );
+    }
+
+    /// The steps of the event loop's end for an update: `relaunch_once` run contained, as
+    /// lib.rs runs it, then Tauri's restart, which starts the app where `exit` was not reached.
+    /// A start of ours and Tauri's restart each start the installed app.
+    #[cfg(target_os = "macos")]
+    fn ended(
+        installed: Option<&Path>,
+        cleanup_panics: bool,
+        started: Result<(), String>,
+    ) -> Vec<&'static str> {
+        let steps = std::cell::RefCell::new(Vec::new());
+        let exited = std::cell::Cell::new(false);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            relaunch_once(
+                installed,
+                || {
+                    steps.borrow_mut().push("cleanup");
+                    assert!(!cleanup_panics, "Tauri's cleanup panics");
+                },
+                |_| {
+                    steps.borrow_mut().push("start");
+                    started
+                },
+                || {
+                    steps.borrow_mut().push("exit");
+                    exited.set(true);
+                },
+            );
+        }));
+        if !exited.get() {
+            steps.borrow_mut().push("Tauri's restart");
+        }
+        steps.into_inner()
+    }
+
+    /// The installed app is started once (T-941): where nothing was installed nothing of the
+    /// app's runs and Tauri's restart is left as it is; a start is followed by the exit alone,
+    /// even where Tauri's cleanup panicked; a start that fails leaves the start to Tauri.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do() {
+        let app = Path::new("/Applications/ConsensFlow.app");
+        assert_eq!(ended(None, false, Ok(())), ["Tauri's restart"]);
+        assert_eq!(
+            ended(Some(app), false, Ok(())),
+            ["cleanup", "start", "exit"]
+        );
+        assert_eq!(ended(Some(app), true, Ok(())), ["cleanup", "start", "exit"]);
+        assert_eq!(
+            ended(Some(app), false, Err("no executable".into())),
+            ["cleanup", "start", "Tauri's restart"]
         );
     }
 }

@@ -10,6 +10,8 @@
 
 [run]
 app-relaunch = ["cargo", "xtask", "app", "test", "an_installed_update_starts_with_this_apps_environment_input_and_arguments"]
+app-relaunch-once = ["cargo", "xtask", "app", "test", "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do"]
+app-static-crt = ["cargo", "xtask", "app", "test", "the_windows_app_links_its_c_runtime_statically"]
 
 [[plant]]
 name = "tauri-2-12: the installed update is started as Tauri 2.12 starts it, through LaunchServices"
@@ -65,3 +67,78 @@ find = """
     cf_process::hold_only_the_streams(&mut command);"""
 replace = """
     command.args(args);"""
+
+# The installed app is started once (T-941): Tauri's cleanup runs before the start, a panic of it
+# stopped, and a start is followed by the exit alone, so Tauri's restart never starts it again.
+
+[[plant]]
+name = "tauri-2-12: Tauri's cleanup runs between the installed update's start and the exit, as before T-941"
+meant = "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do"
+runs = ["app-relaunch-once"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = """
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)).is_err() {
+        eprintln!("ConsensFlow's cleanup before starting the installed update panicked");
+    }
+    match start(installed) {
+        Ok(()) => exit(),"""
+replace = """
+    match start(installed) {
+        Ok(()) => {
+            cleanup();
+            exit()
+        }"""
+
+[[plant]]
+name = "tauri-2-12: a panic of Tauri's cleanup before the installed update's start is not stopped"
+meant = "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do"
+runs = ["app-relaunch-once"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = """
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)).is_err() {
+        eprintln!("ConsensFlow's cleanup before starting the installed update panicked");
+    }"""
+replace = """
+    cleanup();"""
+
+[[plant]]
+name = "tauri-2-12: the installed update's start is not followed by the exit"
+meant = "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do"
+runs = ["app-relaunch-once"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "        Ok(()) => exit(),"
+replace = "        Ok(()) => drop(exit),"
+
+[[plant]]
+name = "tauri-2-12: the app starts an update where none was installed"
+meant = "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do"
+runs = ["app-relaunch-once"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = """
+    let Some(installed) = installed else {
+        return;
+    };
+    if std::panic::catch_unwind"""
+replace = """
+    let installed = installed.unwrap_or(Path::new("/"));
+    if std::panic::catch_unwind"""
+
+# The Windows app links its C runtime statically, and its configuration says so (T-941).
+
+[[plant]]
+name = "tauri-2-12: the Windows app is configured to link its C runtime dynamically"
+meant = "the_windows_app_links_its_c_runtime_statically"
+runs = ["app-static-crt"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = '"staticVCRuntime": true'
+replace = '"staticVCRuntime": false'

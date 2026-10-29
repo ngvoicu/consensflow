@@ -226,7 +226,7 @@ pub fn build_app(build: &Build, env: &Env) -> Result<PathBuf> {
     Ok(built)
 }
 
-/// The mark an export leaves: the tag it was made from.
+/// The mark an export leaves: the tag it was made from and the commit that tag named then.
 const MARK: &str = ".exported-from";
 
 /// What a build offline cannot fetch, and the checkout it is built in is given
@@ -238,12 +238,49 @@ const SHARED: [&[&str]; 1] = [&["app", ".cache"]];
 /// lock is given the packages it names, by `npm ci --offline`.
 const LOCKED: [&[&str]; 2] = [&[], &["app"]];
 
+/// This machine as npm's locks name a platform: its `os` (`darwin`, `win32`, `linux`) and its
+/// `cpu` (`arm64`, `x64`).
+pub fn npm_platform() -> (&'static str, &'static str) {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        other => other,
+    };
+    let cpu = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        "x86" => "ia32",
+        other => other,
+    };
+    (os, cpu)
+}
+
 /// The checkout of a release, exported from its tag (or any commit) into `into`
 /// (once: a tag does not change), given the download cache of `repo` and the npm
 /// packages of its own locks to build from.
 pub fn export_release(repo: &Path, into: &Path, tag: &str, env: &Env) -> Result<PathBuf> {
+    // The commit the tag names now: a tag moved since the export was made makes it again.
+    let named = process::capture(
+        &Invocation::new("git", repo)
+            .args(["rev-parse", "--verify"])
+            .arg(format!("{tag}^{{commit}}")),
+        env,
+    )?;
+    let commit = named.stdout.trim();
+    if named.code != 0 || commit.is_empty() {
+        let said = match named.stderr.trim() {
+            "" => format!("git rev-parse ended with status {}", named.code),
+            said => said.to_string(),
+        };
+        return Err(Error::new(format!(
+            "the release {tag} is not in this repository (git fetch --tags): {said}"
+        )));
+    }
+    let marked = format!("{tag} {commit}");
     let mark = into.join(MARK);
-    if fs::read_to_string(&mark).is_ok_and(|text| text.trim() == tag) {
+    if fs::read_to_string(&mark).is_ok_and(|text| text.trim() == marked)
+        && has_its_own_packages(into)
+    {
         return Ok(into.to_path_buf());
     }
     remove_all(into)?;
@@ -252,7 +289,7 @@ pub fn export_release(repo: &Path, into: &Path, tag: &str, env: &Env) -> Result<
     let exported = Invocation::new("git", repo)
         .args(["archive", "--format=tar", "--output"])
         .arg(&archive)
-        .arg(tag);
+        .arg(commit);
     let exported = process::capture(&exported, env)?;
     if exported.code != 0 {
         let said = exported.stderr.trim();
@@ -310,10 +347,98 @@ pub fn export_release(repo: &Path, into: &Path, tag: &str, env: &Env) -> Result<
                     folder.display()
                 ))
             })?;
+            // `npm ci --offline` skips an optional package its cache lacks and ends well; the
+            // Tauri CLI's native package is optional in every lock (T-941).
+            let missing = missing_for_this_platform(&folder)?;
+            ensure!(
+                missing.is_empty(),
+                "the npm packages of the release {tag} for this machine are not in npm's cache, \
+                 and `npm ci --offline` left them out as optional: {}: `npm ci` in {} online once \
+                 puts them there",
+                missing.join(", "),
+                folder.display()
+            );
         }
     }
-    fs::write(&mark, format!("{tag}\n")).map_err(files("write", &mark))?;
+    // The release's own Tauri CLI runs, or nothing of the release is built with it.
+    if under(into, &["app", "package-lock.json"]).is_file() {
+        let cli = Invocation::new(tauri_bin(into), into.join("app")).arg("--version");
+        let said = match process::capture(&cli, env) {
+            Ok(ran) if ran.code == 0 => None,
+            Ok(ran) => Some(format!("{} {}", ran.stderr.trim(), ran.stdout.trim())),
+            Err(cause) => Some(cause.to_string()),
+        };
+        if let Some(said) = said {
+            return Err(Error::new(format!(
+                "the Tauri CLI of the release {tag} does not run ({}): {}",
+                said.trim(),
+                into.display()
+            )));
+        }
+    }
+    fs::write(&mark, format!("{marked}\n")).map_err(files("write", &mark))?;
     Ok(into.to_path_buf())
+}
+
+/// Whether each folder of the export at `into` that has a lock has packages of its own: a
+/// folder, neither gone nor a link (as the smoke made them before T-930).
+fn has_its_own_packages(into: &Path) -> bool {
+    LOCKED.iter().all(|locked| {
+        let folder = under(into, locked);
+        !folder.join("package-lock.json").is_file()
+            || fs::symlink_metadata(folder.join("node_modules")).is_ok_and(|meta| meta.is_dir())
+    })
+}
+
+/// The packages of a platform (those whose lock entry names an `os` or a `cpu`) that the lock in
+/// `folder` names for this machine and its `node_modules` holds not: what `npm ci --offline`
+/// leaves out without a word, being optional, when npm's cache lacks them.
+fn missing_for_this_platform(folder: &Path) -> Result<Vec<String>> {
+    let file = folder.join("package-lock.json");
+    let text = fs::read_to_string(&file).map_err(files("read", &file))?;
+    let lock: Value = serde_json::from_str(&text)
+        .map_err(|cause| Error::new(format!("{} is no lock: {cause}", file.display())))?;
+    let (os, cpu) = npm_platform();
+    let mut missing = Vec::new();
+    for (path, package) in lock
+        .get("packages")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        let Some((_, name)) = path.rsplit_once("node_modules/") else {
+            continue;
+        };
+        let names_a_platform = package.get("os").is_some() || package.get("cpu").is_some();
+        if package.get("optional") == Some(&Value::Bool(true))
+            && names_a_platform
+            && for_this(package.get("os"), os)
+            && for_this(package.get("cpu"), cpu)
+            && !folder.join(path).exists()
+        {
+            missing.push(name.to_string());
+        }
+    }
+    Ok(missing)
+}
+
+/// Whether a lock entry's `os` or `cpu` list takes `value`: no list takes every one, `!x`
+/// refuses x, and a list of names takes those.
+fn for_this(list: Option<&Value>, value: &str) -> bool {
+    let words: Vec<&str> = list
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if words
+        .iter()
+        .any(|word| word.strip_prefix('!') == Some(value))
+    {
+        return false;
+    }
+    let named: Vec<&&str> = words.iter().filter(|word| !word.starts_with('!')).collect();
+    named.is_empty() || named.iter().any(|word| **word == value)
 }
 
 /// A link at `link` to the folder `target`.
