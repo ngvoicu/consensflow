@@ -615,10 +615,10 @@ fn a_fresh_ledger_is_made_at_0022_with_main_s_migrations_first_and_the_resume_s_
     assert_eq!(version, SCHEMA_VERSION as i64);
 }
 
-/// What alpha.2 left, version 22 with the Resume's 0021 and 0022, opens at 24: 0023,
-/// then the exit proof's 0024, whose column proves no conversation's program gone
-/// (what the daemon that wrote it knew went with it). A second open migrates nothing
-/// again.
+/// What alpha.2 left, version 22 with the Resume's 0021 and 0022, opens at this
+/// build's version: 0023, then the exit proof's 0024, whose column proves no
+/// conversation's program gone (what the daemon that wrote it knew went with it), and
+/// what comes after them. A second open migrates nothing again.
 #[test]
 fn a_ledger_at_the_resume_s_0022_migrates_to_the_exit_proof_s_0024_proving_nothing_gone() {
     let dir = tempfile::tempdir().expect("a folder");
@@ -647,9 +647,38 @@ fn a_ledger_at_the_resume_s_0022_migrates_to_the_exit_proof_s_0024_proving_nothi
     assert_eq!(proven(&file), (22, None));
 
     drop(open_ledger(&file, Options::default()).expect("migrated and open"));
-    assert_eq!(proven(&file), (24, Some(0)));
+    let now = SCHEMA_VERSION as i64;
+    assert_eq!(proven(&file), (now, Some(0)));
     let schema = schema_of(&file);
     drop(open_ledger(&file, Options::default()).expect("and open again"));
-    assert_eq!(proven(&file), (24, Some(0)));
+    assert_eq!(proven(&file), (now, Some(0)));
     assert_eq!(schema_of(&file), schema, "nothing migrated again");
+}
+
+/// What alpha.3 left, version 24 with the exit proof's 0024, opens at 25 with the
+/// meeting's 0025: no project of it is in a meeting (3.0.7 chief-meeting, CMT-11).
+#[test]
+fn a_ledger_at_the_exit_proofs_0024_migrates_to_the_meetings_0025_with_no_meeting_on() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let file = left_at(&dir, &MIGRATIONS[..24]);
+    let meeting = |file: &PathBuf| -> (i64, Option<Option<String>>) {
+        let db = Connection::open(file).expect("the file");
+        let version = db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("a version");
+        let at = db
+            .query_row("SELECT meeting_at FROM project WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .ok();
+        (version, at)
+    };
+    assert_eq!(meeting(&file), (24, None));
+    let ledger = open_ledger(&file, Options::default()).expect("migrated and open");
+    assert_eq!(
+        ledger.project(1).expect("a read").expect("app").meeting,
+        None
+    );
+    drop(ledger);
+    assert_eq!(meeting(&file), (25, Some(None)));
 }

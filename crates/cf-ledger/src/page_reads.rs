@@ -185,6 +185,14 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
             })
         })
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    // What a meeting with the chief holds, cut as a gated message is.
+    let held = crate::meeting::held(store, project_id)?
+        .into_iter()
+        .map(|mut message| {
+            message.body = cut(&message.body, BAY_EXCERPT);
+            message
+        })
+        .collect();
     let handles: HashSet<&str> = project
         .participants
         .iter()
@@ -235,6 +243,7 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
             .collect(),
         project,
         gated,
+        held,
         resume,
     })
 }

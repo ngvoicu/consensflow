@@ -243,6 +243,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "history.part",
     "computer_use.get",
     "computer_use.open",
+    "project.meeting",
 ];
 
 #[tauri::command]
