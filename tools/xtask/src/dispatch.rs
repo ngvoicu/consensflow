@@ -19,7 +19,8 @@ use crate::context::{self, Context};
 use crate::process;
 use crate::{
     app, bench, candidate, check, ci_times, clippy_windows, departures, evals, live, plants,
-    portable, release, scrub_transcript, sidecar, smoke, specmint, suites, windows,
+    portable, release, scrub_transcript, sidecar, smoke, specmint, suites, unreachable_pub,
+    windows,
 };
 
 /// A command of xtask.
@@ -94,6 +95,7 @@ pub fn commands() -> Vec<&'static Command> {
         scrub_transcript::COMMANDS,
         specmint::COMMANDS,
         departures::COMMANDS,
+        unreachable_pub::COMMANDS,
         bench::COMMANDS,
         plants::COMMANDS,
         smoke::COMMANDS,

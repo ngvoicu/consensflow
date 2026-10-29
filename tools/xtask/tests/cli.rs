@@ -136,6 +136,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "clippy-windows",
         "--as-archiver",
         "departures",
+        "unreachable-pub",
         "bench records-memory",
         "check",
         "smoke",
@@ -187,6 +188,7 @@ fn check_steps() -> Vec<String> {
     let mut steps = vec![
         "cargo fmt --all --check".to_string(),
         "cargo clippy --workspace --exclude app --all-targets -- -D warnings".to_string(),
+        "cargo xtask unreachable-pub".to_string(),
         "cargo clippy --offline --all-targets -- -D warnings".to_string(),
     ];
     if !cfg!(windows) {
