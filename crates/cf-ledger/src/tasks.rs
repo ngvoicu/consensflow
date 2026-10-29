@@ -30,14 +30,14 @@ pub(crate) use finishing::{
 pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};
 pub(crate) use own_steps::withdrawn_late;
-pub(crate) use releasing::let_go;
 pub use pausing::resumed_in_vain;
 pub(crate) use pausing::{
     clear_hold, go_on_in_window, held_for_context, held_tasks_due, hold_for_context, hold_task,
-    pause_again, pause_task,
-    pause_with_project, paused_task, resume_task, resume_with_project, stop_asked_by, stop_of,
-    take_over_pause, task_in_hand, tell_it_goes_on, told_since_paused, unmark_pause,
+    pause_again, pause_task, pause_with_project, paused_task, resume_task, resume_with_project,
+    stop_asked_by, stop_of, take_over_pause, task_in_hand, tell_it_goes_on, told_since_paused,
+    unmark_pause,
 };
+pub(crate) use releasing::let_go;
 
 /// What a paused task's window is told when it goes on: the human's Resume
 /// and the daemon's alike.
