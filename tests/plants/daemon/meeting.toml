@@ -8,7 +8,9 @@
 # queued during a meeting, and the calls count again from its end. The human's Start and Stop
 # (the page's `project.meeting`) are logged once each, a closed project's refused; the Close and
 # the daemon's start after a quit end it; the app forwards the page's Start and Stop, and each
-# wakes the dispatcher. One plant takes one rule out; a test of it fails. The
+# wakes the dispatcher. A task's thread and the chief's history say, in the place of a message
+# the meeting (or a closed project) holds, that it waits, in one sentence with the refusal's and
+# never a byte of its text (T-942). One plant takes one rule out; a test of it fails. The
 # `meeting rig:` plants say `builds` and run the cases of the rig (a real daemon, the real pane
 # host, a stand-in chief). Every name holds `meeting`.
 
@@ -19,6 +21,11 @@ meeting-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "me
 meeting-kit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "meeting::"]
 # The chief's reads through the agents' API.
 meeting-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::tests::meeting"]
+# What a window of a closed project reads in a task's thread, and in the chief's history (T-942).
+meeting-thread-closed = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::tests::while_the_project_is_closed"]
+meeting-history-closed = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::history::tests::while_the_project_is_closed"]
+# What `cf task get` prints of a thread, and what it says it received (T-942).
+meeting-cf-thread = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests"]
 # The page's operation, over the bridge.
 meeting-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::meeting"]
 # The names of the page's operations, which the app forwards, and which of them wake the dispatcher.
@@ -459,3 +466,120 @@ builds = true
 file = "crates/cf-ledger/src/projects.rs"
 find = "        end_every_meeting(store)?;"
 replace = "        let _ = end_every_meeting;"
+
+# --- T-942: a thread and the history say where a held message is, and none of its words ---
+
+[[plant]]
+name = "meeting thread: a message the meeting holds is left out of the thread, saying nothing"
+meant = "a_thread_says_in_the_place_of_what_a_meeting_holds_that_it_waits_and_gives_none_of_its_text"
+runs = ["meeting-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            Some(until) => Some(Self::in_words_of(until, message)),'''
+replace = '''            Some(_) => None,'''
+
+[[plant]]
+name = "meeting thread: the held message's own words are in the thread"
+meant = "a_thread_says_in_the_place_of_what_a_meeting_holds_that_it_waits_and_gives_none_of_its_text"
+runs = ["meeting-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            body: until.note(message.id),'''
+replace = '''            body: message.body.clone(),'''
+
+[[plant]]
+name = "meeting thread: a held question keeps its options in the thread"
+meant = "a_thread_says_in_the_place_of_what_a_meeting_holds_that_it_waits_and_gives_none_of_its_text"
+runs = ["meeting-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            questions: Value::Null,
+            choices: Value::Null,
+            ..message'''
+replace = '''            ..message'''
+
+[[plant]]
+name = "meeting thread: the line does not say that the message comes"
+meant = "a_thread_says_in_the_place_of_what_a_meeting_holds_that_it_waits_and_gives_none_of_its_text"
+runs = ["meeting-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''        format!("m-{id} waits {until}: it comes to you then")'''
+replace = '''        format!("m-{id} waits {until}")'''
+
+[[plant]]
+name = "meeting thread: a brief the meeting holds is put in the thread"
+meant = "a_brief_a_meeting_holds_is_not_in_the_thread_so_cf_prints_the_chief_its_body"
+runs = ["meeting-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            Some(_) if matches!(message.kind.as_str(), "answer" | "task") => None,'''
+replace = '''            Some(_) if matches!(message.kind.as_str(), "answer") => None,'''
+
+[[plant]]
+name = "meeting thread: an answer that waits is put in the thread, for cf to take as received"
+meant = "while_the_project_is_closed_a_message_no_window_was_handed_is_left_out_of_the_thread"
+runs = ["meeting-thread-closed"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            Some(_) if matches!(message.kind.as_str(), "answer" | "task") => None,'''
+replace = '''            Some(_) if matches!(message.kind.as_str(), "task") => None,'''
+
+[[plant]]
+name = "meeting thread: a closed project's thread says nothing of what waits for the Resume"
+meant = "while_the_project_is_closed_a_note_no_window_was_handed_is_in_the_thread_as_a_line_that_says_it_waits"
+runs = ["meeting-thread-closed"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            Some(until) => Some(Self::in_words_of(until, message)),'''
+replace = '''            Some(Until::Resume) => None,
+            Some(until) => Some(Self::in_words_of(until, message)),'''
+
+[[plant]]
+name = "meeting history: the chief's history says the short words of the list, not the line"
+meant = "the_history_says_of_what_a_meeting_holds_the_line_a_thread_does"
+runs = ["meeting-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            body: until.note(message.id),'''
+replace = '''            body: until.preview().to_owned(),'''
+
+[[plant]]
+name = "meeting history: a closed project's history says the short words, not the line"
+meant = "while_the_project_is_closed_a_page_reads_out_none_of_a_message_no_window_was_handed"
+runs = ["meeting-history-closed"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            body: until.note(message.id),'''
+replace = '''            body: until.preview().to_owned(),'''
+
+[[plant]]
+name = "meeting cf: a thread's print receives any queued message, not only an answer"
+meant = "a_thread_prints_the_line_that_stands_where_a_waiting_message_is_and_receives_nothing"
+runs = ["meeting-cf-thread"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/lines.rs"
+find = '''        .filter(|message| message.get("kind").and_then(Value::as_str) == Some("answer"))
+        .filter_map(waiting)'''
+replace = '''        .filter_map(waiting)'''
+
+[[plant]]
+name = "meeting rig: the chief's cf thread leaves a held result out"
+meant = "a_meeting_started_on_the_page_holds_the_chiefs_messages_and_its_stop_lets_them_go_question_first"
+runs = ["meeting-rig-held"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''            Some(until) => Some(Self::in_words_of(until, message)),'''
+replace = '''            Some(_) => None,'''

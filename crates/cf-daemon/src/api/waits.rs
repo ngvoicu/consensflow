@@ -18,6 +18,11 @@
 //! chief-meeting, CMT-14): what is queued for the chief and the meeting holds
 //! (the ledger's `held_by_meeting`) is not the chief's to read until the meeting
 //! ends, as it is not typed into its window; the chief is told it waits for that.
+//!
+//! Where a read lists or shows such a message it says so in its place, in one
+//! sentence ([`Until::note`], and [`Until::refusal`] for `cf inbox read`): a task's
+//! thread and the chief's history carry the note as the message's body, where before
+//! a thread left the message out and said nothing (T-942).
 
 use cf_ledger::MessageView;
 use serde_json::Value;
@@ -51,13 +56,26 @@ impl Until {
         }
     }
 
-    /// What the reader is told message `id` waits for, refused its text.
-    pub fn refusal(self, id: i64) -> String {
+    /// What is said of message `id`, its text kept back: that it waits, for what, and
+    /// that it comes. The refusal and the note a thread has in its place are this
+    /// one sentence.
+    fn said_of(self, id: i64) -> String {
         let until = match self {
             Self::Resume => "until the human resumes the project",
             Self::MeetingEnds => "until your meeting with the human ends",
         };
-        format!("m-{id} waits {until}: it comes to you then. Do not ask for it again now.")
+        format!("m-{id} waits {until}: it comes to you then")
+    }
+
+    /// What the reader is told message `id` waits for, refused its text.
+    pub fn refusal(self, id: i64) -> String {
+        format!("{}. Do not ask for it again now.", self.said_of(id))
+    }
+
+    /// The line that stands in a thread or a history where message `id` is, its text
+    /// being kept back.
+    pub fn note(self, id: i64) -> String {
+        format!("({})", self.said_of(id))
     }
 }
 
@@ -151,17 +169,37 @@ impl<'a> Waits<'a> {
         summary
     }
 
-    /// `message` for a reader that reads its gist (the chief's history): its body
-    /// what it waits for, where its text waits.
+    /// `message` for a reader that reads its gist (the chief's history): its body the
+    /// line that says it waits, where its text waits.
     pub fn shown(&self, message: MessageView) -> MessageView {
-        if let Some(until) = self.until(&message) {
-            return MessageView {
-                body: until.preview().to_owned(),
-                questions: Value::Null,
-                choices: Value::Null,
-                ..message
-            };
+        match self.until(&message) {
+            Some(until) => Self::in_words_of(until, message),
+            None => message,
         }
-        message
+    }
+
+    /// `message` as a task's thread has it for this reader: as it is, or, where its
+    /// text waits, in a line that says so ([`Waits::shown`]). Two kinds are left out
+    /// of the thread as they were before it said anything, because a line in their
+    /// place would do harm: `cf task get` takes a queued answer it printed for
+    /// received (`waiting_answers`), and it prints no brief under the head once the
+    /// thread has a task message for the window that holds it (`brief_under_head`;
+    /// that a brief waits is said in the task's title, `brief_waits` of the task route).
+    pub fn in_thread(&self, message: MessageView) -> Option<MessageView> {
+        match self.until(&message) {
+            None => Some(message),
+            Some(_) if matches!(message.kind.as_str(), "answer" | "task") => None,
+            Some(until) => Some(Self::in_words_of(until, message)),
+        }
+    }
+
+    /// `message` with the line that says it waits for `until` in the place of its words.
+    fn in_words_of(until: Until, message: MessageView) -> MessageView {
+        MessageView {
+            body: until.note(message.id),
+            questions: Value::Null,
+            choices: Value::Null,
+            ..message
+        }
     }
 }

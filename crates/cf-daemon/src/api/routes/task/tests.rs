@@ -14,8 +14,8 @@ use serde_json::{json, Value};
 
 use super::{items_of, whole};
 use crate::api::routes::tests::support::{
-    answered_question, api, gated_brief, gated_brief_of, open_task, project_is, state_of,
-    working_question, working_task,
+    answered_question, api, gated_brief, gated_brief_of, note_for_zeus, open_task, project_is,
+    state_of, working_question, working_task,
 };
 use crate::api::waits::WAITS;
 use crate::testing::{scene, Scene};
@@ -453,6 +453,57 @@ async fn while_the_project_is_closed_a_message_no_window_was_handed_is_left_out_
     let (_, said) = get(&scene, &scene.zeus, "1").await;
     assert!(thread(&said).contains(&answer.id));
     assert_eq!(state_of(&scene, 1), "waiting", "nothing was received");
+}
+
+/// T-942: a message left out of a thread said nothing to a reader who could still read
+/// the task. While the project is closed, a note no window was handed is in the thread, and
+/// its body says it waits for the Resume: none of its text. The chief, who wrote it, reads
+/// it as ever, and so does its window once the project is open. (An answer stays out, as
+/// the test above has it: `cf` takes a queued answer it printed for received.)
+#[tokio::test]
+async fn while_the_project_is_closed_a_note_no_window_was_handed_is_in_the_thread_as_a_line_that_says_it_waits(
+) {
+    let scene = scene();
+    let number = working_task(&scene);
+    let note = note_for_zeus(&scene, number, "Use the new lexer");
+    project_is(&scene, "suspended");
+
+    let route = number.to_string();
+    let (status, said) = get(&scene, &scene.zeus, &route).await;
+    assert_eq!(status, 200);
+    let held = said["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["id"] == note.id)
+        .unwrap_or_else(|| panic!("m-{} is not in the thread, which says nothing: {said}", note.id));
+    assert_eq!(
+        held["body"],
+        format!(
+            "(m-{} waits until the human resumes the project: it comes to you then)",
+            note.id
+        ),
+        "{said}"
+    );
+    assert!(!said.to_string().contains("Use the new lexer"), "{said}");
+    let (_, said) = get(&scene, &scene.chief, &route).await;
+    let own = said["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["id"] == note.id)
+        .unwrap();
+    assert_eq!(own["body"], "Use the new lexer", "{said}");
+
+    project_is(&scene, "open");
+    let (_, said) = get(&scene, &scene.zeus, &route).await;
+    let held = said["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["id"] == note.id)
+        .unwrap();
+    assert_eq!(held["body"], "Use the new lexer");
 }
 
 /// And the brief of a task its window was never handed, read while the project

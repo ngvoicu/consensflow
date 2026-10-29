@@ -107,6 +107,29 @@ fn a_meeting_started_on_the_page_holds_the_chiefs_messages_and_its_stop_lets_the
     assert!(inbox.contains(HELD), "{inbox}");
     assert!(!inbox.contains("ONE_DONE"), "{inbox}");
     assert!(!inbox.contains("Which format?"), "{inbox}");
+    // `cf task get`, the read that left a held result out and said nothing (T-942), puts a
+    // line in its place: under its message's own line, and nothing else of the message (the
+    // brief above it, which shares the words, is the brief's own).
+    for held in [&result, &asked] {
+        let thread = cf(
+            &rig,
+            &chief,
+            &["task", "get", &format!("T-{}", held["taskNumber"])],
+        )?;
+        let line = format!(
+            "(m-{} waits until your meeting with the human ends: it comes to you then)",
+            held["id"]
+        );
+        let at = thread
+            .find(&format!("m-{} [queued]", held["id"]))
+            .unwrap_or_else(|| panic!("m-{} is not in the thread: {thread}", held["id"]));
+        let under: Vec<&str> = thread[at..]
+            .lines()
+            .skip(1)
+            .take_while(|line| !line.is_empty())
+            .collect();
+        assert_eq!(under, [line.as_str()], "{thread}");
+    }
 
     meeting(&rig, id, false)?;
     rig.wait_for("both to be delivered", secs(120), || {

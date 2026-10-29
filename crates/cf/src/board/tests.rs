@@ -164,6 +164,38 @@ fn a_thread_with_no_answer_waiting_says_nothing() {
     assert_eq!(asked(&ran), [("GET", "/api/tasks/3")]);
 }
 
+/// T-942: a message whose text waits (for the chief's meeting, or for the Resume) is in the
+/// thread as a line that says so, in its body; it is printed under its message's line, and
+/// it is no answer written whole, so nothing is received by the print.
+#[test]
+fn a_thread_prints_the_line_that_stands_where_a_waiting_message_is_and_receives_nothing() {
+    let waits = "(m-16 waits until your meeting with the human ends: it comes to you then)";
+    let mut task = thread();
+    task["task"]["messages"] = json!([
+        { "id": 11, "kind": "task", "state": "delivered", "task": 3, "sender": "chief", "body": "Parser" },
+        { "id": 16, "kind": "result", "state": "queued", "task": 3, "sender": "zeus", "body": waits },
+    ]);
+    for json in [false, true] {
+        let ran = cf_with(
+            &["task", "get", "T-3"],
+            json,
+            vec![reply(200, task.clone())],
+            None,
+        );
+        assert_eq!(ran.code.unwrap(), 0);
+        assert!(ran.out.contains(waits), "{}", ran.out);
+        if !json {
+            assert!(
+                ran.out
+                    .contains(&format!("m-16 [queued] result T-3 from @zeus\n{waits}")),
+                "{}",
+                ran.out
+            );
+        }
+        assert_eq!(asked(&ran), [("GET", "/api/tasks/3")], "json: {json}");
+    }
+}
+
 #[test]
 fn a_transcript_says_nothing_of_any_answer_whether_it_prints_the_thread_or_not() {
     for json in [false, true] {
