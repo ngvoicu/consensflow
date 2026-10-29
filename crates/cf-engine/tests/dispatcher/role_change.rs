@@ -62,7 +62,7 @@ fn project_of(context: &Context, harness: &str) -> ProjectView {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": harness, "agent": "diana" },
+            "chief": { "harness": harness, "model": "gpt-5.6-luna" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "roles": ["worker"], "tier": "standard" }],
         }))
         .unwrap()

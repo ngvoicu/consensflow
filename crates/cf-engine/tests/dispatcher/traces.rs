@@ -223,7 +223,26 @@ const FINAL_ANSWER: &str = "the member wrote a report, ran a command and ended w
 /// hold note names the reset as the time the task goes on and never tells the
 /// requester it did. Node says nothing to the human of what waits for a window
 /// out of quota.
+/// A chief is a harness and a model, never a saved agent (CHF-04, T-729): asked for with
+/// no model, the words say what to pick now.
+const NO_CHIEF_MODEL: &str = "a chief asked for with no model is refused with `pick a harness for the chief, and one of its models`, where Node's said to pick one of the human's saved agents; and one named by no model's id is refused as no model (`not a model id`), where Node's refused an agent not among the human's";
+
+/// A chief runs on no saved agent (CHF-04, T-729): the roster is never read for it.
+const CHIEF_ON_NO_AGENT: &str = "the chief's saved agent is deleted after a Switch chief to it: the chief opens on its model when the project is resumed, and the human is told nothing, where Node kept the chief closed and told the human its agent was no longer among theirs";
+
 const DEPARTED: &[(&str, &str)] = &[
+    (
+        "switches no chief to a harness's own default model: it names a saved agent",
+        NO_CHIEF_MODEL,
+    ),
+    (
+        "opens a project whose chief runs on its saved agent, and none whose chief names no agent or one not among the agents",
+        NO_CHIEF_MODEL,
+    ),
+    (
+        "keeps a chief whose agent was deleted closed, tells the human, and holds what it was to receive",
+        CHIEF_ON_NO_AGENT,
+    ),
     (
         "reaches the chief again once the human says it is back before its reset",
         OUT_WITH_WORK_WAITING,

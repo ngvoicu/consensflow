@@ -120,7 +120,7 @@ async fn a_change_to_the_agents_moves_the_members_tiers_and_tells_the_page() {
                         name: "app".to_owned(),
                         chief: NewChief {
                             harness: "claude-code".to_owned(),
-                            agent: Some("mine".to_owned()),
+                            model: Some("mine".to_owned()),
                         },
                         staff: Vec::new(),
                         gate: false,

@@ -19,7 +19,7 @@
 //! it to a Codex agent, and the new chief works again.
 
 use cf_e2e::files;
-use cf_e2e::rig::{Project, Rig};
+use cf_e2e::rig::{chief_body, Project, Rig};
 use serde_json::{json, Value};
 
 use crate::idle_compaction_read_as_a_cut_turn::{
@@ -70,7 +70,7 @@ fn the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_swi
     // The human switches the chief to Codex, and the new chief works again.
     let switched = rig.page(
         "chief.switch",
-        json!({ "project": project.id(), "agent": "codex-chief" }),
+        chief_body(&rig, "codex-chief", json!({ "project": project.id() }))?,
     )?;
     assert_eq!(switched["ok"], true, "{switched}");
     rig.wait_for("the Codex chief's window", secs(60), || {

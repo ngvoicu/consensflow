@@ -158,5 +158,41 @@ pub(crate) async fn listed(
     })
 }
 
+/// Whether `words` are Pi's provider refusing a model it does not have: Pi sends an id it
+/// does not know ("Model … not found for provider …, using custom model id"), and the
+/// provider answers 400 `model_not_found` (1.4.0, CHF-02).
+pub(crate) fn gone(words: &str) -> bool {
+    words.contains("model_not_found") || words.contains("not found for provider")
+}
+
+/// The model Pi starts on where none is named: its settings' default
+/// (`defaultProvider`/`defaultModel` in its folder's `settings.json`), what its own launch
+/// with no `--model` runs; where that is a contributor model, or there is none, the first
+/// its list offers that is not (`ModelListing::default_model`). Never a contributor model
+/// (CHF-06, MUS-15): where none can be had, why.
+pub(crate) async fn default_model(
+    env: &Env,
+    processes: &dyn Processes,
+    time: &dyn Time,
+) -> Result<Option<String>, String> {
+    let settings = super::paths::agent_dir(env)
+        .ok()
+        .and_then(|dir| std::fs::read_to_string(cf_base::path::join(&[&dir, "settings.json"])).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let named = settings.as_ref().and_then(|settings| {
+        let provider = settings["defaultProvider"].as_str()?;
+        let model = settings["defaultModel"].as_str()?;
+        Some(format!("{provider}/{model}"))
+    });
+    if let Some(named) = named.filter(|named| !ModelChoice::new(named.clone(), "").contributor) {
+        return Ok(Some(named));
+    }
+    let listing = listed(env, processes, time, false).await?;
+    listing
+        .default_model()
+        .map(|model| Some(model.model()))
+        .ok_or_else(|| "Pi offers no model that is not a contributor model".to_owned())
+}
+
 #[cfg(test)]
 mod tests;

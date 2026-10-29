@@ -313,7 +313,7 @@ fn work_on_its_way_in_another_project_holds_nothing_back() {
             name: "other".to_owned(),
             chief: NewChief {
                 harness: "claude-code".to_owned(),
-                agent: Some("apollo".to_owned()),
+                model: Some("apollo".to_owned()),
             },
             staff: vec![NewMember {
                 agent: "zeus".to_owned(),

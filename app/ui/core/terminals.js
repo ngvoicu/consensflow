@@ -465,7 +465,7 @@ export class TerminalsView {
               'Switch chief',
               'quiet-button',
               () => this.#onSwitchChief(entry.participant),
-              'Switch the chief to another agent',
+              'Switch the chief to another harness or model',
             ),
             about(lane, board, agent, now, this.#onTryAgain),
           ]

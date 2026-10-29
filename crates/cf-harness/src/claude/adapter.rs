@@ -82,7 +82,8 @@ use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
     Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Over, Pane, PaneHost,
-    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
+    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Used, Waiting, Window,
+    Work,
 };
 use crate::detect::executable;
 use crate::records::{Boundary, Options, Reading, Settlement};
@@ -126,6 +127,29 @@ impl ClaudeAdapter {
 impl Adapter for ClaudeAdapter {
     fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
         Box::pin(super::models::listed(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+        ))
+    }
+
+    /// What its record says the conversation ran on last (CHF-05): read from its end,
+    /// within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(&'a self, session: &'a str, asked: Option<&'a str>) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, asked, &self.env) })
+    }
+
+    /// T-445's probe of each harness's own switch (brain `operations/work-in-flight/results/3.0.7/`).
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window and press s to keep it to that conversation: Enter there makes it your Claude Code default.")
+    }
+
+    fn model_gone(&self, words: &str) -> bool {
+        super::models::gone(words)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        Box::pin(super::models::default_model(
             &self.env,
             &*self.processes,
             &*self.time,

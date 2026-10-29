@@ -1,6 +1,5 @@
 import { button, element } from '../dom.js'
-import { itemLabel, laneName } from './board.js'
-import { HARNESS_NAMES } from './dialogs.js'
+import { HARNESS_NAMES, itemLabel, laneName } from './board.js'
 
 /** The most characters a search holds: the daemon refuses more. */
 const FIND_MOST = 1_000

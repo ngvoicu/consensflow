@@ -56,7 +56,7 @@ use crate::{checkout, files, wire, Error, Result};
 pub use homes::HarnessHome;
 pub use jobs::Job;
 pub use names::project_name;
-pub use project::{write_staff, Project};
+pub use project::{chief_body, chief_of, write_staff, Project};
 pub use route::{Held, Pasted};
 
 pub(crate) use observe::events_of;

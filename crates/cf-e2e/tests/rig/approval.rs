@@ -16,7 +16,7 @@
 
 use std::time::Duration;
 
-use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
+use cf_e2e::rig::{chief_body, write_staff, Project, Rig, OPEN};
 use regex::Regex;
 use serde_json::{json, Value};
 
@@ -1038,7 +1038,10 @@ fn the_handoff_a_switched_chief_is_given_is_not_held_for_the_human() -> Outcome 
             .transcript(&session_of(&first))
             .contains("\"text\":\"BEFORE_THE_SWITCH\""))
     })?;
-    let switched = rig.page("chief.switch", json!({ "project": id, "agent": "worker" }))?;
+    let switched = rig.page(
+        "chief.switch",
+        chief_body(&rig, "worker", json!({ "project": id }))?,
+    )?;
     assert_eq!(switched["ok"], true, "{switched}");
     let chiefs = || -> Vec<Value> {
         rig.open_frames()

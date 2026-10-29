@@ -16,6 +16,7 @@
 
 mod arrival;
 mod background;
+mod chief_model;
 mod chief_switch;
 pub mod computer_use;
 mod deliveries;
@@ -46,7 +47,7 @@ mod wake_ups;
 mod windows;
 
 pub use chief_switch::SwitchTo;
-pub use dispatcher::{require_chief_agent, require_open, Dispatcher, SwitchWhen};
+pub use dispatcher::{require_chief_model, require_open, Dispatcher, SwitchWhen};
 pub use stops::Unstopped;
 pub use turn_end::{Finished, Hold};
 pub use windows::{Activity, ActivityState};

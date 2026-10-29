@@ -26,7 +26,7 @@ use crate::windows::Activity;
 
 /// What a Switch chief is asked, as `switchChief` is given it.
 fn switch_asked(project: i64, to: &SwitchTo, when: SwitchWhen, note: bool) -> Value {
-    let mut asked = json!({ "harness": to.harness, "agent": to.agent });
+    let mut asked = json!({ "harness": to.harness, "model": to.model });
     if when == SwitchWhen::Turn {
         asked["when"] = json!("turn");
     }

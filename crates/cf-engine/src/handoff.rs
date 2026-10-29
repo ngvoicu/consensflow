@@ -31,7 +31,8 @@ use serde::Serialize;
 
 use entries::entries_of;
 use pages::paginate;
-use text::{defuse, delivered, first_line, name_of, typed_before, Shown};
+pub(crate) use text::name_of;
+use text::{defuse, delivered, first_line, typed_before, Shown};
 pub use viewer::{
     whole_history_page, Delivery, Openings, ShownConversation, ShownItem, WholeHistoryPage,
     HISTORY_ROOM, SHOWN_FIELD,
@@ -116,14 +117,16 @@ pub struct Handoff<'a> {
 
 /// The new chief's first message.
 pub fn handoff_text(handoff: &Handoff<'_>) -> String {
-    let who = |harness: Option<&str>, agent: Option<&str>| {
-        let agent = agent
-            .filter(|agent| !agent.is_empty())
-            .map_or_else(String::new, |agent| format!(" ({agent})"));
-        format!("{}{agent}", name_of(harness.unwrap_or("null")))
+    // Each side is its harness and the model picked for it (CHF-08): a chief from before
+    // a chief had a model is its harness alone.
+    let who = |harness: Option<&str>, model: Option<&str>| {
+        let model = model
+            .filter(|model| !model.is_empty())
+            .map_or_else(String::new, |model| format!(" ({model})"));
+        format!("{}{model}", name_of(harness.unwrap_or("null")))
     };
-    let from = who(Some(&handoff.from.harness), handoff.from.agent.as_deref());
-    let to = who(handoff.to.harness.as_deref(), handoff.to.agent.as_deref());
+    let from = who(Some(&handoff.from.harness), handoff.from.model.as_deref());
+    let to = who(handoff.to.harness.as_deref(), handoff.to.model.as_deref());
     let pages = handoff.pages;
     let noun = if pages == 1 { "page" } else { "pages" };
     let mut out = vec![

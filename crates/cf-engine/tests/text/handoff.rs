@@ -334,9 +334,9 @@ fn is_a_note_from_consensflow_under_its_title_or_under_the_lead_s_a_ledger_from_
 fn names_the_switch_the_history_what_waits_and_the_last_word() {
     let from = SwitchedFrom {
         harness: "claude-code".to_owned(),
-        agent: None,
+        model: None,
     };
-    let to = seat(Some("codex"), Some("astraeus"));
+    let to = seat(Some("codex"), Some("gpt-6-luna"));
     let open = ChiefOpenWork {
         questions: vec![message(
             6,
@@ -366,7 +366,7 @@ fn names_the_switch_the_history_what_waits_and_the_last_word() {
         pages: 3,
     });
     assert!(text.starts_with(
-        "You are the chief now. The human switched this project's chief from Claude Code to you, Codex (astraeus)."
+        "You are the chief now. The human switched this project's chief from Claude Code to you, Codex (gpt-6-luna)."
     ));
     assert!(text.contains("cf history (3 pages, newest first"));
     assert!(text.contains("cut off in the middle of a turn"));
@@ -384,7 +384,7 @@ fn names_the_switch_the_history_what_waits_and_the_last_word() {
     let calm = handoff_text(&Handoff {
         from: &SwitchedFrom {
             harness: "pi".to_owned(),
-            agent: Some("selene".to_owned()),
+            model: Some("openrouter/anthropic/claude-fable-5".to_owned()),
         },
         to: &seat(Some("claude-code"), None),
         open: &ChiefOpenWork {
@@ -396,7 +396,7 @@ fn names_the_switch_the_history_what_waits_and_the_last_word() {
         cut: false,
         pages: 1,
     });
-    assert!(calm.contains("from Pi (selene) to you, Claude Code."));
+    assert!(calm.contains("from Pi (openrouter/anthropic/claude-fable-5) to you, Claude Code."));
     assert!(calm.contains("cf history (1 page,"));
     assert!(calm.contains("Nothing on the board waits on you."));
     assert!(!calm.contains("cut off") && !calm.contains("human's last message"));

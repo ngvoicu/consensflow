@@ -8,8 +8,9 @@ use cf_ledger::{
 };
 use serde_json::{json, Map, Value};
 
-use super::agents::{chief_on, last_staff_now, membership, saved};
+use super::agents::{last_staff_now, membership, saved};
 use super::body::{one, Body, Fields, Said};
+use super::chief::chief_asked;
 use super::Page;
 
 /// `projects.list`.
@@ -18,7 +19,7 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
     one("projects", projects)
 }
 
-/// `project.open`: the chief on the saved agent given; the staff given, as the
+/// `project.open`: the chief on the harness and model given (`chief_asked`); the staff given, as the
 /// roster has those agents now, else the last staff. The gate, the wake-up calls
 /// (`wakeUp`, as `wakeup.set` takes them) and the specs (`specs`, as
 /// `project.specs` takes them) are the human's word for the project, kept in
@@ -31,9 +32,9 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         None | Some(Value::Null) => json!(basename(directory)?),
         Some(name) => name.clone(),
     };
+    let chief = chief_asked(page, body, false)?;
     let agents = saved(&page.env)?;
     let roster = agents.roster();
-    let chief = chief_on(&roster, body.get("agent"))?;
     let staff = match body.get("staff") {
         None => last_staff_now(&page.ledger.borrow(), &roster)?,
         Some(Value::Array(members)) => members
@@ -58,7 +59,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     request.insert("name".to_owned(), name);
     request.insert(
         "chief".to_owned(),
-        json!({ "harness": chief.harness, "agent": chief.agent }),
+        json!({ "harness": chief.harness, "model": chief.model }),
     );
     for key in ["gate", "wakeUp", "specs"] {
         if let Some(said) = body.get(key) {
@@ -147,7 +148,7 @@ fn typed(request: &Map<String, Value>) -> Option<NewProject> {
         name: request.get("name")?.as_str()?.to_owned(),
         chief: NewChief {
             harness: chief.get("harness")?.as_str()?.to_owned(),
-            agent: Some(chief.get("agent")?.as_str()?.to_owned()),
+            model: Some(chief.get("model")?.as_str()?.to_owned()),
         },
         staff: staff.iter().map(member).collect::<Option<Vec<_>>>()?,
         gate: match request.get("gate") {

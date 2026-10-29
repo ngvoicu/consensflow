@@ -162,7 +162,7 @@ fn a_project_opened_with_the_calls_on_is_woken_when_their_interval_has_passed_wi
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "roles": ["worker"], "tier": "standard" }],
             "wakeUp": { "on": true, "every": 5, "unit": "minutes" },
         }))

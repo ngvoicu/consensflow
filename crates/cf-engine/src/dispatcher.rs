@@ -30,7 +30,6 @@ use std::task::{Context, Poll, Waker};
 
 use cf_base::time::iso;
 use cf_harness::contract::{Observed, Pane};
-use cf_ledger::model::fits_role;
 use cf_ledger::{
     DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
 };
@@ -71,13 +70,13 @@ pub fn require_open(project: &ProjectView) -> Result<(), EngineError> {
     }
 }
 
-/// A chief runs on one of the human's saved agents, never on a harness's
-/// own default model: asked for without one, the daemon says what to pick.
-pub fn require_chief_agent(agent: Option<&str>) -> Result<&str, EngineError> {
-    agent.filter(|agent| !agent.is_empty()).ok_or_else(|| {
+/// A chief runs on a harness and a model of it the human picked (CHF-04): asked for
+/// without a model, the daemon says what to pick.
+pub fn require_chief_model(model: Option<&str>) -> Result<&str, EngineError> {
+    model.filter(|model| !model.is_empty()).ok_or_else(|| {
         EngineError::said(
-            "no-chief-agent",
-            "pick one of your saved agents for the chief: its harness, model and effort come with it",
+            "no-chief-model",
+            "pick a harness for the chief, and one of its models",
         )
     })
 }
@@ -205,25 +204,18 @@ impl Dispatcher {
         self.require_adapter(harness)
     }
 
-    /// The chief asked for: one of the human's saved agents, on its harness,
-    /// whose windows ConsensFlow opens, and no image agent: it only designs.
-    fn require_chief(&self, harness: &str, agent: Option<&str>) -> Result<(), EngineError> {
-        let agent = require_chief_agent(agent)?;
+    /// The chief asked for: a harness whose windows ConsensFlow opens, and a model of
+    /// it. Whether the harness lists that model is the daemon's to ask, which reads the
+    /// lists ([`cf_proto::models`]).
+    fn require_chief(&self, harness: &str, model: Option<&str>) -> Result<(), EngineError> {
+        let model = require_chief_model(model)?;
         self.require_adapter(harness)?;
-        let saved = self.seams.roster.agent(agent)?.ok_or_else(|| {
-            EngineError::said("unknown-agent", format!("{agent} is not among your agents"))
-        })?;
-        if !fits_role(saved.designer, "chief") {
-            return Err(EngineError::said(
-                "image-agent-chief",
-                format!("{agent} is an image agent, which can only be an image designer"),
-            ));
-        }
+        cf_ledger::model::require_model_id(model)?;
         Ok(())
     }
 
-    /// A new project: the ledger records it with its chief, on the saved
-    /// agent it names, and its staff, and with the wake-up calls and the specs
+    /// A new project: the ledger records it with its chief, on the harness and the
+    /// model it names, and its staff, and with the wake-up calls and the specs
     /// the request says, all in one write; its chief window opens after the
     /// answer, on the project as that write left it, so its first launch has
     /// the specs.
@@ -231,7 +223,7 @@ impl Dispatcher {
         self: &Rc<Self>,
         request: NewProject,
     ) -> Result<Option<ProjectView>, EngineError> {
-        self.require_chief(&request.chief.harness, request.chief.agent.as_deref())?;
+        self.require_chief(&request.chief.harness, request.chief.model.as_deref())?;
         for member in &request.staff {
             self.require_adapter(&member.harness)?;
         }
@@ -803,7 +795,7 @@ impl Dispatcher {
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)
         } else {
-            closed
+            closed.clone()
         };
         let first = delivering
             .as_ref()
@@ -872,6 +864,15 @@ impl Dispatcher {
             // window of a launch that was to say the role: it did not come up, and
             // is tried again (`settle_exited_launch`).
             let own = record.window.borrow().own_exit_of(pane).is_some();
+            // A window that went with its harness saying it no longer has the model the
+            // launch asked for closes nothing: the chief opens again at once on the
+            // harness's default (CHF-06).
+            if project.state == "open" && !own {
+                if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))? {
+                    self.reopen_without(&record, gone);
+                    return Ok(());
+                }
+            }
             if project.state == "open" && !own && !launch_owed {
                 self.seams
                     .ledger
@@ -1065,8 +1066,9 @@ impl Dispatcher {
         if project.state != "open" {
             return Ok(());
         }
-        // A chief whose agent is gone stays closed: its launch told the human, who switches it.
-        if participant.role == "chief" && self.agent_gone(participant) {
+        // A chief whose model is gone with no other to start it on stays closed: its launch
+        // told the human, who switches it (CHF-06).
+        if participant.role == "chief" && record.window.borrow().no_default {
             return Ok(());
         }
         // A chief whose window keeps failing to start is tried again ever more slowly.
@@ -1406,8 +1408,8 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// The human's Switch chief: the chief goes on in a fresh window on the
-    /// saved `agent` on `harness`, its first message the handoff.
+    /// The human's Switch chief: the chief goes on in a fresh window on `harness` and
+    /// `model`, its first message the handoff.
     pub async fn switch_chief(
         self: &Rc<Self>,
         project: i64,
@@ -1415,7 +1417,7 @@ impl Dispatcher {
         when: SwitchWhen,
         note: bool,
     ) -> Result<Option<ProjectView>, EngineError> {
-        self.require_chief(&to.harness, Some(&to.agent))?;
+        self.require_chief(&to.harness, Some(&to.model))?;
         let found = self.known_project(project)?;
         let chief = found
             .participants

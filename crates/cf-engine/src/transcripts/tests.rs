@@ -21,7 +21,7 @@ fn chief_talking() -> (Context, ParticipantView, Rc<Cell<u32>>) {
     let request = NewProject::from_json(&json!({
         "directory": "/work/app",
         "name": "app",
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
         "staff": [],
     }))
     .expect("a project");

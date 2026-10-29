@@ -120,7 +120,7 @@ async fn a_message_of_another_project_is_none_of_this_one_s_even_for_a_handle_th
             name: "other".to_owned(),
             chief: cf_ledger::NewChief {
                 harness: "claude-code".to_owned(),
-                agent: Some("mybuilder".to_owned()),
+                model: Some("mybuilder".to_owned()),
             },
             staff: Vec::new(),
             gate: false,

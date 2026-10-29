@@ -174,5 +174,28 @@ pub(crate) async fn listed(
     parse(&pages, fetched, at)
 }
 
+/// Whether `words` are Codex refusing a model it does not have: a launch on one exits with
+/// "The 'X' model is not supported when using Codex with a ChatGPT account" (0.165.0,
+/// CHF-02), and an API's account is told `model_not_found`.
+pub(crate) fn gone(words: &str) -> bool {
+    words.contains("model is not supported") || words.contains("model_not_found")
+}
+
+/// The model Codex starts on where none is named: the one its list marks, never a
+/// contributor model (`ModelListing::default_model`); left to it where the list cannot be
+/// read, as Codex's own default is no contributor model (CHF-06).
+pub(crate) async fn default_model(
+    env: &Env,
+    processes: &dyn Processes,
+    time: &dyn Time,
+) -> Result<Option<String>, String> {
+    Ok(listed(env, processes, time)
+        .await
+        .ok()
+        .as_ref()
+        .and_then(ModelListing::default_model)
+        .map(ModelChoice::model))
+}
+
 #[cfg(test)]
 mod tests;

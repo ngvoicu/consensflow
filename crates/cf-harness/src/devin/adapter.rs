@@ -69,7 +69,7 @@ use super::wire::selected_session;
 use super::wire_log::{Said, WireLog};
 use crate::contract::{
     Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, Observed, Over, Pane,
-    PaneHost, Prepared, Readiness, Records, Skill, Window, Work,
+    PaneHost, Prepared, Readiness, Records, Skill, Used, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -267,6 +267,30 @@ impl Adapter for DevinAdapter {
             &*self.services.processes,
             &*self.services.time,
         ))
+    }
+
+    /// What its record says the conversation ran on last (CHF-05): read from its end,
+    /// within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(
+        &'a self,
+        session: &'a str,
+        _asked: Option<&'a str>,
+    ) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, &self.services.env) })
+    }
+
+    /// T-445's probe of each harness's own switch (brain `operations/work-in-flight/results/3.0.7/`).
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window and press opt+↵ to keep it to that conversation: ↵ alone makes it your Devin default.")
+    }
+
+    fn model_gone(&self, words: &str) -> bool {
+        super::models::gone(words)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        let env = &self.services.env;
+        Box::pin(async move { super::models::default_model(env) })
     }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {

@@ -20,7 +20,7 @@
 
 use std::thread;
 
-use cf_e2e::rig::{Project, Rig, OPEN};
+use cf_e2e::rig::{chief_body, Project, Rig, OPEN};
 use serde_json::{json, Value};
 
 use crate::{config, secs, session_of, Outcome};
@@ -179,7 +179,7 @@ fn a_switch_after_the_chiefs_turn_waits_for_its_agents_which_would_end_with_its_
     // and the agent would end with it: it waits, though the window is at rest.
     let switched = rig.page(
         "chief.switch",
-        json!({ "project": id, "agent": "worker", "when": "turn" }),
+        chief_body(&rig, "worker", json!({ "project": id, "when": "turn" }))?,
     )?;
     assert_eq!(switched["ok"], true, "{switched}");
     thread::sleep(secs(6));

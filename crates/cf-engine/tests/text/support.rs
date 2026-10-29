@@ -162,15 +162,20 @@ pub fn task_of(row: &Value) -> TaskView {
     )
 }
 
-/// A participant, the way a test says it: a chief on a harness, or none.
-pub fn seat(harness: Option<&str>, agent: Option<&str>) -> ParticipantView {
+/// A participant, the way a test says it: a chief on a harness, or none, and the model
+/// picked for it, or none.
+pub fn seat(harness: Option<&str>, model: Option<&str>) -> ParticipantView {
     ParticipantView {
         id: 2,
         project_id: 1,
         handle: "chief".to_owned(),
         role: "chief".to_owned(),
-        agent: agent.map(str::to_owned),
+        agent: None,
         harness: harness.map(str::to_owned),
+        model: model.map(str::to_owned),
+        launched_model: None,
+        gone_model: None,
+        ran_on: None,
         designer: false,
         created_at: "2026-09-19T10:00:01.000Z".to_owned(),
         left_at: None,
@@ -193,6 +198,10 @@ pub fn participant_of(row: &Value) -> ParticipantView {
         role: row["role"].as_str().unwrap().to_owned(),
         agent: text(row, "agent"),
         harness: text(row, "harness"),
+        model: text(row, "model"),
+        launched_model: text(row, "launchedModel"),
+        gone_model: None,
+        ran_on: None,
         designer: row["designer"].as_bool().unwrap(),
         created_at: row["createdAt"].as_str().unwrap().to_owned(),
         left_at: text(row, "leftAt"),

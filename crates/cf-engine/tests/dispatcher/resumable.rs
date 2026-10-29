@@ -36,7 +36,7 @@ fn chief_on(harness: &'static str) -> (Context, i64) {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": harness, "agent": "apollo" },
+            "chief": { "harness": harness, "model": "claude-opus-5" },
             "staff": [],
         }))
         .unwrap()

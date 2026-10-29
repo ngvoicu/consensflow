@@ -702,7 +702,7 @@ fn every_event_a_heading_reads_is_logged_within_its_ceiling_however_long_what_it
             project.id,
             &ChiefSwitch {
                 harness: "claude-code".into(),
-                agent: "b".repeat(64),
+                model: "b".repeat(64),
                 cut: true,
             },
         )
@@ -762,7 +762,7 @@ fn every_field_and_part_a_read_goes_through_is_charged_as_what_it_is() {
             project.id,
             &ChiefSwitch {
                 harness: "codex".into(),
-                agent: "maia".into(),
+                model: "maia".into(),
                 cut: false,
             },
         )

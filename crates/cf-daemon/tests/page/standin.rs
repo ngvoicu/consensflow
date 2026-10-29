@@ -240,7 +240,7 @@ fn project_json(request: &NewProject) -> Value {
     json!({
         "directory": request.directory,
         "name": request.name,
-        "chief": { "harness": request.chief.harness, "agent": request.chief.agent },
+        "chief": { "harness": request.chief.harness, "model": request.chief.model },
         "gate": request.gate,
         "staff": staff,
     })
@@ -305,11 +305,11 @@ impl Engine for Standin {
             SwitchWhen::Turn => "turn",
         };
         let request =
-            json!({ "harness": to.harness, "agent": to.agent, "when": when, "note": note });
+            json!({ "harness": to.harness, "model": to.model, "when": when, "note": note });
         let mut seam = self.seam("switchChief", vec![json!(project), request]);
         let switch = ChiefSwitch {
             harness: to.harness,
-            agent: to.agent,
+            model: to.model,
             cut: false,
         };
         let answered = seam

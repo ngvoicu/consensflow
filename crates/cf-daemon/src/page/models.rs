@@ -2,7 +2,8 @@
 //! editor (CHF-03), as the home keeps them ([`crate::models::ModelLists`]): the listing
 //! (its models, when and how it was read, and why it is stale where it is), the model a harness is started
 //! on where nothing names one (never a contributor model, never from a stale list), and
-//! the words a picker shows beside a contributor model.
+//! the words a picker shows beside a contributor model, and how the harness switches its
+//! model in its own window (CHF-07).
 
 use cf_proto::agents::Harness;
 use cf_proto::models::{ModelChoice, CONTRIBUTOR_WARNING};
@@ -23,5 +24,6 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         "listing": listing,
         "default": default,
         "contributorWarning": CONTRIBUTOR_WARNING,
+        "switchHelp": page.models.switch_help(harness),
     }))
 }

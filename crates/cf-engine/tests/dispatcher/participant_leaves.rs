@@ -172,7 +172,7 @@ fn keeps_the_chief_of_a_project_created_while_a_deleted_one_still_closes_its_win
     let opening = context.begin_open_project(json!({
         "directory": "/work/api",
         "name": "api",
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
     }));
     let fresh = context.finish(opening).unwrap().unwrap();
     let chief = fresh

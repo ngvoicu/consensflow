@@ -93,7 +93,7 @@ impl Root {
                 name: "app".to_owned(),
                 chief: NewChief {
                     harness: "claude-code".to_owned(),
-                    agent: Some("mybuilder".to_owned()),
+                    model: Some("mybuilder".to_owned()),
                 },
                 staff: vec![NewMember {
                     agent: "zeus".to_owned(),

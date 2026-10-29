@@ -96,8 +96,48 @@ const message = (id, kind, sender, recipient, body, minutesAgo = 1, extra = {}) 
   ...extra,
 })
 
+/** A fresh listing of `models`, as a harness gives one. */
+const listed = (models) => ({
+  models,
+  readAt: 1_793_000_000_000,
+  freshness: { state: 'fresh' },
+  how: 'the harness itself',
+})
+
 function model() {
   return {
+    // What each harness lists of its models, by its program's name, and how its own
+    // window switches its model.
+    models: {
+      claude: {
+        listing: listed([
+          { id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: [] },
+          { id: 'claude-sonnet-5', label: 'Sonnet 5', efforts: [] },
+        ]),
+        switchHelp: 'Claude switches with /model and s.',
+      },
+      codex: {
+        listing: listed([
+          { id: 'gpt-6-astra', label: 'GPT-6 Astra', efforts: [] },
+          { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', efforts: [] },
+        ]),
+        switchHelp: 'Codex switches with /model and s.',
+      },
+      pi: {
+        listing: listed([
+          { id: 'muse-spark', provider: 'meta', label: 'Muse Spark', efforts: [] },
+          {
+            id: 'muse-spark-1.3-contributor',
+            provider: 'meta',
+            label: 'Muse Spark 1.3',
+            efforts: [],
+            contributor: true,
+          },
+        ]),
+        switchHelp: 'Pi switches with /model and Enter.',
+      },
+      devin: { listing: listed([{ id: 'swe-2', label: 'SWE-2', efforts: [] }]) },
+    },
     projects: [
       { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open' },
       {
@@ -193,7 +233,7 @@ function model() {
             pane: null,
           },
           {
-            participant: participant(2, 'chief', 'chief'),
+            participant: participant(2, 'chief', 'chief', { model: 'claude-opus-5-5' }),
             tasks: [task(1, 'Ship the release notes', 'working', 'human', 'chief', 12)],
             activity: { state: 'working' },
             pane: { id: 'p1-chief', generation: 5 },
@@ -353,6 +393,21 @@ async function open(page, data = model()) {
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: data.agents, missing: data.missing ?? [] }),
+      // What a harness lists of its models, by its program's name (CHF-07): the fixture's,
+      // or a refusal a test names for it (`modelsRefusal`).
+      'models.get': ({ harness }) => {
+        const refused = data.modelsRefusal?.[harness]
+        if (refused !== undefined) return { ok: false, error: refused }
+        const { listing, switchHelp = null } = data.models[harness]
+        return answer({
+          harness,
+          listing,
+          default: null,
+          contributorWarning:
+            'Contributor model: Meta may train on what it sees, including your code.',
+          switchHelp,
+        })
+      },
       'staff.last': () => answer({ staff: data.lastStaff ?? [] }),
       'member.roles': ({ project, agent, roles }) => {
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
@@ -663,19 +718,19 @@ const calls = (page, operation) =>
     operation,
   )
 
-/** What a chief pick list offers: each tier group's agents, and whether each is disabled. */
-const chiefGroups = (select) =>
+/** Picks a chief's harness, then one of its models, by what each says, as the human does (CHF-07). */
+async function pickChief(dialog, harness, model) {
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: harness })
+  const models = dialog.locator('[name="chiefModel"]')
+  await expect(models).toBeEnabled()
+  await models.selectOption({ label: model })
+}
+
+/** What a select offers: each option's words, and whether it is disabled. */
+const offered = (select) =>
   select
-    .locator('optgroup')
-    .evaluateAll((all) =>
-      all.map((group) => [
-        group.label,
-        [...group.querySelectorAll('option')].map((option) => [
-          option.textContent.split(' · ')[0],
-          option.disabled,
-        ]),
-      ]),
-    )
+    .locator('option')
+    .evaluateAll((all) => all.map((option) => [option.textContent, option.disabled]))
 
 test('draws the kanban: a row per participant, a column per state, and cards that stay when done', async ({
   page,
@@ -1124,14 +1179,14 @@ test("keeps a removed member's tasks on the board, on the row of whoever asked: 
   await expect(chief.locator('td[data-state="queued"] button.card')).toHaveCount(0)
 })
 
-test("says the effort an agent runs at, after its model: on a member's row, a session's, and the chief's card", async ({
+test("says the effort an agent runs at, after its model: on a member's row and a session's; the chief's card its harness and model", async ({
   page,
 }) => {
   const data = model()
   const { lanes } = data.boards[1]
   Object.assign(lanes.find((lane) => lane.participant.handle === 'chief').participant, {
-    agent: 'hera',
     harness: 'codex',
+    model: 'gpt-6-astra',
   })
   const zeus = lanes.find((lane) => lane.participant.handle === 'zeus').participant
   lanes.push(
@@ -1151,9 +1206,10 @@ test("says the effort an agent runs at, after its model: on a member's row, a se
   await open(page, data)
   await unfold(page)
   const meta = (handle) => page.locator(`tr[data-handle="${handle}"] .row-meta`)
+  // The chief's card: its harness and model, and no effort, which a chief is not picked at.
   await expect(
     page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta'),
-  ).toHaveText('codex · gpt-6-astra · max')
+  ).toHaveText('Codex · gpt-6-astra')
   await expect(meta('zeus')).toHaveText('worker · standard · claude-code · claude-sonnet-5 · high')
   await expect(meta('zeus-amber-pine')).toHaveText(
     'worker session of @zeus · claude-code · claude-sonnet-5 · high',
@@ -2552,17 +2608,9 @@ test('a project staffed with Khnum after the release that dropped it says it lef
   page,
 }) => {
   // Khnum, Devin's SWE-1.6 Slow, left the catalog on 2026-10-25: Devin no longer offers it.
-  // The staff saved before still names it, and so does the chief.
+  // The staff saved before still names it. A chief runs on no saved agent (CHF-08).
   const why = 'Devin no longer offers SWE-1.6 Slow'
   const data = model()
-  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  Object.assign(chief.participant, { agent: 'khnum', harness: 'devin' })
-  Object.assign(chief, {
-    agentMissing: true,
-    agentRetired: why,
-    activity: { state: 'closed' },
-    pane: null,
-  })
   data.boards[1].lanes.push({
     participant: participant(9, 'khnum', 'worker', { harness: 'devin', tier: 'light' }),
     tasks: [],
@@ -2577,10 +2625,6 @@ test('a project staffed with Khnum after the release that dropped it says it lef
     'khnum left the catalog: Devin no longer offers SWE-1.6 Slow. Remove @khnum from the staff and add another agent',
   )
   await expect(row.locator('.row-status')).toHaveAttribute('data-state', 'missing')
-  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
-  await expect(card.locator('.terminal-status')).toHaveText(
-    'khnum left the catalog: Devin no longer offers SWE-1.6 Slow. Switch the chief to another agent',
-  )
   // The staff row says so, with Remove at hand, and the pick list beside it offers the others.
   await page.getByRole('button', { name: 'Project settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Project settings' })
@@ -2593,31 +2637,6 @@ test('a project staffed with Khnum after the release that dropped it says it lef
     0,
   )
   await expect(settings.getByLabel('Agent').locator('option')).not.toHaveCount(0)
-  await settings.getByRole('button', { name: 'Close' }).click()
-  // Switch chief says it too, above the agents the chief may go on with.
-  await card.getByRole('button', { name: 'Switch the chief to another agent' }).click()
-  const switching = page.getByRole('dialog', { name: 'Switch the chief' })
-  await expect(switching.getByRole('status')).toHaveText(
-    'The chief runs on khnum, which left the catalog: Devin no longer offers SWE-1.6 Slow. Pick another agent.',
-  )
-  await expect(
-    switching.getByLabel('The chief runs on').locator('option', { hasText: /^khnum / }),
-  ).toHaveCount(0)
-  await switching.getByLabel('The chief runs on').selectOption('hera')
-  await switching.getByRole('button', { name: 'Switch', exact: true }).click()
-  await expect
-    .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 1, agent: 'hera', when: 'turn', note: false }])
-})
-
-test('Switch chief says nothing of a gone agent while the chief runs on one it has', async ({
-  page,
-}) => {
-  await open(page)
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
-  await expect(dialog).toBeVisible()
-  await expect(dialog.locator('.chief-gone')).toBeHidden()
 })
 
 test("says on the chief's card in the dock what the chief is doing and runs on, and switches it from there", async ({
@@ -2625,13 +2644,14 @@ test("says on the chief's card in the dock what the chief is doing and runs on, 
 }) => {
   const data = model()
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  Object.assign(chief.participant, { agent: 'hera', harness: 'codex' })
+  Object.assign(chief.participant, { harness: 'codex', model: 'gpt-6-astra' })
   chief.activity = { state: 'waiting', reason: 'permission to run a command' }
   await open(page, data)
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
   await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
   await expect(card.locator('.terminal-status')).toHaveText('Waiting: permission to run a command')
-  await expect(card.locator('.terminal-meta')).toHaveText('codex · gpt-6-astra · max')
+  // Its harness and the model it runs on: a chief runs on no saved agent.
+  await expect(card.locator('.terminal-meta')).toHaveText('Codex · gpt-6-astra')
   // Out of quota, it says until when, whatever its window does.
   await changed(page, () => {
     const chief = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
@@ -2643,40 +2663,55 @@ test("says on the chief's card in the dock what the chief is doing and runs on, 
   // Switch chief is on the card: none on the board, though the chief's row is there for its tasks.
   await expect(page.locator('tr[data-handle="chief"]')).toHaveCount(1)
   const board = page.getByRole('region', { name: 'Board' })
-  const switchChief = { name: 'Switch the chief to another agent' }
+  const switchChief = { name: 'Switch the chief to another harness or model' }
   await expect(board.getByRole('button', switchChief)).toHaveCount(0)
   await card.getByRole('button', switchChief).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await expect(dialog).toBeVisible()
-  // What the chief runs on now is no switch.
-  expect(await chiefGroups(dialog.getByLabel('The chief runs on'))).toContainEqual([
-    'T1 · Critical work',
-    [['hera', true]],
+  // The harness and model the chief runs on now is no switch.
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Codex' })
+  await expect(dialog.locator('[name="chiefModel"]')).toBeEnabled()
+  expect(await offered(dialog.locator('[name="chiefModel"]'))).toEqual([
+    ['Pick a model', true],
+    ['GPT-6 Astra', true],
+    ['GPT-5.6 Luna', false],
   ])
 })
 
-test("keeps the chief's card in the dock while its window is down: its agent gone, it says so, and Switch chief is the way on", async ({
+test("says on the chief's card the model its window ran on, where the human switched it there", async ({
   page,
 }) => {
   const data = model()
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  Object.assign(chief.participant, { agent: 'astraeus', harness: 'codex' })
-  // A chief whose agent is gone has no window: it does not open without one.
-  Object.assign(chief, { agentMissing: true, activity: { state: 'closed' }, pane: null })
+  Object.assign(chief.participant, { ranOn: 'claude-sonnet-5' })
+  await open(page, data)
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta'),
+  ).toHaveText('Claude Code · claude-sonnet-5')
+  // And Switch chief takes that one for the chief's: the pick it was is a switch now.
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Claude Code' })
+  await expect(dialog.locator('[name="chiefModel"]')).toBeEnabled()
+  expect(await offered(dialog.locator('[name="chiefModel"]'))).toEqual([
+    ['Pick a model', true],
+    ['Opus 5.5', false],
+    ['Sonnet 5', true],
+  ])
+})
+
+test("keeps the chief's card in the dock while its window is down, and Switch chief is the way on", async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief, { activity: { state: 'closed' }, pane: null })
   await open(page, data)
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
-  const status = card.locator('.terminal-status')
-  await expect(status).toHaveText(
-    'No agent named astraeus any more: define one under Agents, or switch the chief',
-  )
-  await expect(status).toHaveAttribute('data-state', 'missing')
   await expect(card.locator('.terminal-host')).toHaveCount(0)
-  await card.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await card.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByRole('status')).toHaveText(
-    'The chief runs on astraeus, which is no longer among your agents: pick another agent.',
-  )
 })
 
 test('a terminal and a board too narrow for its columns keep a visible scrollbar', async ({
@@ -3160,28 +3195,87 @@ test("the staff's pick list orders a tier's agents by harness, then by effort fr
   )
 })
 
-test("the chief's pick list groups as the staff's does, by tier, then harness and effort, in New project and Switch chief", async ({
+test('the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief', async ({
+  page,
+}) => {
+  await open(page)
+  for (const [button, name] of [
+    ['New project', 'New project'],
+    ['Switch the chief to another harness or model', 'Switch the chief'],
+  ]) {
+    await page.getByRole('button', { name: button }).click()
+    const dialog = page.getByRole('dialog', { name })
+    const harness = dialog.locator('[name="chiefHarness"]')
+    const models = dialog.locator('[name="chiefModel"]')
+    // Every harness installed here, in their order, none picked; the model waits for one.
+    expect(await offered(harness)).toEqual([
+      ['Pick a harness', true],
+      ['Claude Code', false],
+      ['Codex', false],
+      ['Pi', false],
+      ['Devin', false],
+    ])
+    await expect(harness).toHaveValue('')
+    await expect(models).toBeDisabled()
+    await expect(dialog.getByLabel(/effort/i)).toHaveCount(0)
+    // Its models, as the harness lists them; none picked; the harness's own switch said.
+    await harness.selectOption({ label: 'Pi' })
+    await expect(models).toBeEnabled()
+    await expect(models).toHaveValue('')
+    expect(await offered(models)).toEqual([
+      ['Pick a model', true],
+      ['Muse Spark', false],
+      ['Muse Spark 1.3 · Contributor', false],
+    ])
+    const help = dialog.locator('.chief-help')
+    await expect(help).toHaveText('Pi switches with /model and Enter.')
+    // A contributor model says what it is beside it.
+    await models.selectOption({ label: 'Muse Spark 1.3 · Contributor' })
+    await expect(help).toHaveText(
+      'Contributor model: Meta may train on what it sees, including your code. Pi switches with /model and Enter.',
+    )
+    // Another harness: its own models, nothing picked again.
+    await harness.selectOption({ label: 'Devin' })
+    await expect(models).toBeEnabled()
+    await expect(models).toHaveValue('')
+    expect(await offered(models)).toEqual([
+      ['Pick a model', true],
+      ['SWE-2', false],
+    ])
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toBeHidden()
+  }
+})
+
+test("a harness whose models cannot be read leaves the chief's model unpicked, and says why", async ({
   page,
 }) => {
   const data = model()
-  const { agents, order } = ladder()
-  data.agents.push(...agents)
+  data.modelsRefusal = { codex: 'codex answered nothing' }
+  data.models.devin.listing = {
+    models: [],
+    readAt: null,
+    freshness: { state: 'stale', why: 'devin is not logged in' },
+    how: '',
+  }
   await open(page, data)
-  // Every harness is installed here; Pi's kronos is hidden and pygmalion draws, so neither is on offer.
-  const expected = [
-    ['T1 · Critical work', ['hera']],
-    ['T2 · Complex work', order],
-    ['T3 · Standard work', ['zeus']],
-    ['T4 · Light work', ['diana', 'athena']],
-  ]
   await page.getByRole('button', { name: 'New project' }).click()
-  const fresh = page.getByRole('dialog', { name: 'New project' })
-  expect(await pickGroups(fresh.getByLabel('The chief runs on'))).toEqual(expected)
-  await fresh.getByRole('button', { name: 'Cancel' }).click()
-  await expect(fresh).toBeHidden()
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
-  const switching = page.getByRole('dialog', { name: 'Switch the chief' })
-  expect(await pickGroups(switching.getByLabel('The chief runs on'))).toEqual(expected)
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const harness = dialog.locator('[name="chiefHarness"]')
+  const models = dialog.locator('[name="chiefModel"]')
+  await harness.selectOption({ label: 'Codex' })
+  await expect(dialog.locator('.chief-help')).toHaveText(
+    "Codex's models could not be read: codex answered nothing",
+  )
+  await expect(models).toBeDisabled()
+  await harness.selectOption({ label: 'Devin' })
+  await expect(dialog.locator('.chief-help')).toHaveText(
+    'Devin lists no model: devin is not logged in.',
+  )
+  await expect(models).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect(dialog).toBeVisible()
+  expect(await calls(page, 'project.open')).toEqual([])
 })
 
 test('shows the staff as one row per member and role, and adds a saved agent in a role it fits', async ({
@@ -3493,30 +3587,44 @@ test('starts a project with human approval required, and posts the checkbox with
   const gate = dialog.getByLabel('Human approval required', { exact: false })
   await expect(gate).not.toBeChecked()
   await gate.check()
-  await dialog.getByLabel('The chief runs on').selectOption('zeus')
+  await pickChief(dialog, 'Claude Code', 'Sonnet 5')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', agent: 'zeus', gate: true, staff: [] }])
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: true,
+        staff: [],
+      },
+    ])
 })
 
-test('starts no project until its chief is picked: a chief runs on a saved agent, never on a default', async ({
+test('starts no project until its chief is picked, a harness and one of its models: never a default', async ({
   page,
 }) => {
   await open(page)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  const chief = dialog.getByLabel('The chief runs on')
-  await expect(chief).toHaveValue('')
-  await expect(chief.locator('option').first()).toHaveText('Pick an agent')
+  const harness = dialog.locator('[name="chiefHarness"]')
+  await expect(harness).toHaveValue('')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect(dialog).toBeVisible()
+  // A harness alone is no chief: its model is required too.
+  await harness.selectOption({ label: 'Pi' })
+  await expect(dialog.locator('[name="chiefModel"]')).toBeEnabled()
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect(dialog).toBeVisible()
   expect(await calls(page, 'project.open')).toEqual([])
-  await chief.selectOption('hera')
+  await pickChief(dialog, 'Pi', 'Muse Spark')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', agent: 'hera', gate: false, staff: [] }])
+    .toEqual([
+      { directory: '/work/fresh', harness: 'pi', model: 'meta/muse-spark', gate: false, staff: [] },
+    ])
   await expect(dialog).toBeHidden()
 })
 
@@ -3527,7 +3635,10 @@ async function newProject(page) {
   const section = (name) => dialog.getByRole('group', { name, exact: true })
   return {
     dialog,
-    chief: dialog.getByLabel('The chief runs on'),
+    chief: {
+      harness: dialog.locator('[name="chiefHarness"]'),
+      model: dialog.locator('[name="chiefModel"]'),
+    },
     start: dialog.getByRole('button', { name: 'Start project' }),
     refusal: dialog.getByRole('alert'),
     staff: section('Staff'),
@@ -3569,7 +3680,7 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
             : node.querySelector('[name]').name,
         ),
       ),
-  ).toEqual(['directory', 'chief', 'Staff', 'Human approval', 'Wake-up calls', 'Specs'])
+  ).toEqual(['directory', 'The chief', 'Staff', 'Human approval', 'Wake-up calls', 'Specs'])
   // The defaults: the last project's staff, approval off, wake-ups off and specs following the app's setting.
   await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/, /zeus.*Reviewer/])
   await expect(made.approval).not.toBeChecked()
@@ -3622,14 +3733,15 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   expect(here).toHaveLength(3)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
   await made.start.click()
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([
       {
         directory: '/work/fresh',
-        agent: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
         gate: false,
         staff: [{ agent: 'zeus', roles: ['worker', 'reviewer'] }],
       },
@@ -3641,7 +3753,7 @@ test('New project: starts a project with its approval, wake-up calls and specs s
 }) => {
   await open(page)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
   await made.approval.check()
   await made.calls.on.check()
   await made.calls.every.fill('2')
@@ -3656,7 +3768,8 @@ test('New project: starts a project with its approval, wake-up calls and specs s
     .toEqual([
       {
         directory: '/work/fresh',
-        agent: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
         gate: true,
         staff: [],
         wakeUp: { on: true, every: 2, unit: 'days', text: 'Anything left on the board?' },
@@ -3675,7 +3788,7 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
 }) => {
   await open(page)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
   // A variant alone is a word of the project's: it follows the app's setting, with that variant.
   await made.specs.variant.selectOption('core-html')
   // The calls left off, an hour apart no more, are the human's word too.
@@ -3687,7 +3800,8 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
     .toEqual([
       {
         directory: '/work/fresh',
-        agent: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
         gate: false,
         staff: [],
         wakeUp: { on: false, every: 45, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS },
@@ -3697,7 +3811,7 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
   await expect(made.dialog).toBeHidden()
   // Off needs no folder or variant, as in Project settings.
   await page.getByRole('button', { name: 'New project' }).click()
-  await made.chief.selectOption('hera')
+  await pickChief(made.dialog, 'Codex', 'GPT-6 Astra')
   await made.specs.mode.selectOption('off')
   await expect(made.specs.folder).toBeDisabled()
   await expect(made.specs.variant).toBeDisabled()
@@ -3719,14 +3833,15 @@ test('New project: a start the daemon refuses is said in the dialog in the daemo
     'the specs folder is a folder inside the project: it stays inside it, with no `..`'
   await open(page, data)
   const made = await newProject(page)
-  await made.chief.selectOption('hera')
+  await pickChief(made.dialog, 'Codex', 'GPT-6 Astra')
   await made.specs.mode.selectOption('on')
   await made.specs.folder.fill('../elsewhere')
   await made.start.click()
   await expect(made.refusal).toHaveText(data.openRefusal)
   // The dialog is as the human left it, to mend and try again.
   await expect(made.dialog).toBeVisible()
-  await expect(made.chief).toHaveValue('hera')
+  await expect(made.chief.harness).toHaveValue('codex')
+  await expect(made.chief.model).toHaveValue('gpt-6-astra')
   await expect(made.specs.mode).toHaveValue('on')
   await expect(made.specs.folder).toHaveValue('../elsewhere')
   await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/])
@@ -3755,7 +3870,7 @@ test('New project: a number that is no whole number of at least one holds the st
 }) => {
   await open(page)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
   // The browser holds a number under one, or none, or no whole number: nothing is asked of the daemon.
   for (const bad of ['0', '-3', '1.5', '']) {
     await made.calls.every.fill(bad)
@@ -3795,7 +3910,7 @@ test("New project: the new chief's terminal has the keyboard once its project is
   }
   await open(page, data)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
   await made.start.click()
   await expect(page.locator('#project-title')).toHaveText('new')
   await expect(made.dialog).toBeHidden()
@@ -3810,7 +3925,7 @@ test('New project: a start asked twice while the daemon answers is asked of it o
   data.openRefusal = 'the wake-up text must be text, not empty, at most 1000000 characters'
   await open(page, data)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
   await made.calls.on.check()
   await made.calls.words.fill('   ')
   await hold(page, 'project.open')
@@ -3830,7 +3945,7 @@ test('Enter in the number of the wake-up calls or in the specs folder of New pro
 }) => {
   await open(page)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
   await made.calls.every.press('Enter')
   await made.specs.folder.fill('docs')
   await made.specs.folder.press('Enter')
@@ -3867,7 +3982,7 @@ test('New project opens on the defaults every time: what was set in it before is
   await expect(made.specs.folder).toBeEnabled()
 })
 
-test("offers a new project's chief only the agents on a harness installed here, by tier", async ({
+test("offers a new project's chief only the harnesses installed here, and its staff only their agents", async ({
   page,
 }) => {
   const data = model()
@@ -3884,17 +3999,11 @@ test("offers a new project's chief only the agents on a harness installed here, 
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  // Claude Code and Devin are not installed here, and Pi's one agent is hidden; pygmalion
-  // is a Codex agent, but an image agent is never the chief.
-  expect(await chiefGroups(dialog.getByLabel('The chief runs on'))).toEqual([
-    ['T1 · Critical work', [['hera', false]]],
-    [
-      'T4 · Light work',
-      [
-        ['diana', false],
-        ['athena', false],
-      ],
-    ],
+  // Claude Code and Devin are not installed here.
+  expect(await offered(dialog.locator('[name="chiefHarness"]'))).toEqual([
+    ['Pick a harness', true],
+    ['Codex', false],
+    ['Pi', false],
   ])
   await expect(dialog.locator('tr[data-agent="ares"]')).toHaveCount(0)
   await expect(dialog.locator('option', { hasText: 'ares' })).toHaveCount(0)
@@ -4280,11 +4389,19 @@ test('New project says what following the app means as Project settings does, an
   await expect(made.specs.version).toHaveText('Specmint 3.1.0')
   // Chosen and taken back, the section is as it opened and the project starts with no word of specs.
   await made.specs.variant.selectOption('')
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
   await made.start.click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', agent: 'zeus', gate: false, staff: [] }])
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+      },
+    ])
 })
 
 test('New project opened again shows the version of the variant it opens with, not of the one chosen before it was cancelled', async ({
@@ -5394,7 +5511,9 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
     await expect(board.getByRole('button', { name })).toHaveCount(0)
   }
   // Nor is the chief switched from anywhere: its card in the dock went with its window.
-  const switchChief = page.getByRole('button', { name: 'Switch the chief to another agent' })
+  const switchChief = page.getByRole('button', {
+    name: 'Switch the chief to another harness or model',
+  })
   await expect(switchChief).toHaveCount(0)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
@@ -7272,7 +7391,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     /zeus.*Reviewer/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
-  await dialog.getByLabel('The chief runs on').selectOption('athena')
+  await pickChief(dialog, 'Pi', 'Muse Spark')
   await dialog.locator('[name="pickRole"]').selectOption('advisor')
   await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
     'hera · gpt-6-astra · codex · max',
@@ -7296,7 +7415,8 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     .toEqual([
       {
         directory: '/work/fresh',
-        agent: 'athena',
+        harness: 'pi',
+        model: 'meta/muse-spark',
         gate: false,
         staff: [
           { agent: 'zeus', roles: ['worker', 'reviewer'] },
@@ -7534,7 +7654,7 @@ test('starts a project while the board shown is on its way, and its windows go o
   })
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  await dialog.getByLabel('The chief runs on').selectOption('zeus')
+  await pickChief(dialog, 'Claude Code', 'Sonnet 5')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect(page.locator('#project-title')).toHaveText('new')
   await page.evaluate(() => {
@@ -8086,7 +8206,7 @@ test("keeps the chief's card first in the dock while its window is down and a se
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
   await expect(card.locator('.terminal-status')).toHaveText('Starting')
   await expect(
-    card.getByRole('button', { name: 'Switch the chief to another agent' }),
+    card.getByRole('button', { name: 'Switch the chief to another harness or model' }),
   ).toBeVisible()
   await expect(page.locator('#stage .stage-empty')).toHaveCount(0)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
@@ -8908,41 +9028,41 @@ test("gives a member's heading row no buttons, and a closed session's row no Tra
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
 })
 
-test('switches the chief from its card to a saved agent on a harness installed here, after its turn or now', async ({
+test('switches the chief from its card to a harness installed here and a model of it, after its turn or now', async ({
   page,
 }) => {
   const data = model()
   data.missing = ['devin']
-  // The chief runs on zeus: what it runs on now is no switch.
-  data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.agent =
-    'zeus'
   await open(page, data)
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await expect(dialog).toBeVisible()
-  const select = dialog.getByLabel('The chief runs on')
-  // An agent is picked, never a default: nothing is chosen yet.
-  await expect(select).toHaveValue('')
-  await expect(select.locator('option').first()).toHaveText('Pick an agent')
-  // Devin is not installed here, and a hidden agent (Pi's one) is never on offer.
-  expect(await chiefGroups(select)).toEqual([
-    ['T1 · Critical work', [['hera', false]]],
-    ['T3 · Standard work', [['zeus', true]]],
-    [
-      'T4 · Light work',
-      [
-        ['diana', false],
-        ['athena', false],
-      ],
-    ],
+  const harness = dialog.locator('[name="chiefHarness"]')
+  const models = dialog.locator('[name="chiefModel"]')
+  // A harness is picked, never a default: nothing is chosen yet; Devin is not installed here.
+  await expect(harness).toHaveValue('')
+  expect(await offered(harness)).toEqual([
+    ['Pick a harness', true],
+    ['Claude Code', false],
+    ['Codex', false],
+    ['Pi', false],
   ])
-  await select.selectOption('hera')
+  // Only the harness and model the chief is on are no switch: another model of its
+  // harness is a fresh conversation with the handoff.
+  await harness.selectOption({ label: 'Claude Code' })
+  await expect(models).toBeEnabled()
+  expect(await offered(models)).toEqual([
+    ['Pick a model', true],
+    ['Opus 5.5', true],
+    ['Sonnet 5', false],
+  ])
+  await pickChief(dialog, 'Codex', 'GPT-6 Astra')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
   await dialog.getByLabel('First ask the chief to write down where things stand').check()
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 1, agent: 'hera', when: 'now', note: true }])
+    .toEqual([{ project: 1, harness: 'codex', model: 'gpt-6-astra', when: 'now', note: true }])
   await expect(dialog).toBeHidden()
 })
 
@@ -8951,17 +9071,18 @@ test('opens Switch chief letting the chief finish its turn, whatever was picked 
 }) => {
   await open(page)
   const switchChief = page.getByRole('button', {
-    name: 'Switch the chief to another agent',
+    name: 'Switch the chief to another harness or model',
   })
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await switchChief.click()
-  await dialog.getByLabel('The chief runs on').selectOption('diana')
+  await pickChief(dialog, 'Codex', 'GPT-5.6 Luna')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
   await dialog.getByLabel('First ask the chief to write down where things stand').check()
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect(dialog).toBeHidden()
   await switchChief.click()
-  await expect(dialog.getByLabel('The chief runs on')).toHaveValue('')
+  await expect(dialog.locator('[name="chiefHarness"]')).toHaveValue('')
+  await expect(dialog.locator('[name="chiefModel"]')).toBeDisabled()
   await expect(dialog.getByLabel('Let it finish its turn, then switch')).toBeChecked()
   await expect(
     dialog.getByLabel('First ask the chief to write down where things stand'),
@@ -8972,12 +9093,12 @@ test("the chief's card says when a switch waits for its turn", async ({ page }) 
   const data = model()
   data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').switching = {
     harness: 'codex',
-    agent: 'hera',
+    model: 'gpt-6-astra',
   }
   await open(page, data)
   await expect(
     page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
-  ).toHaveText('Switching the chief to hera after this turn')
+  ).toHaveText('Switching the chief to Codex (gpt-6-astra) after this turn')
   await expect(page.locator('.row-status[data-state="switching"]')).toHaveCount(0)
 })
 
@@ -9010,23 +9131,29 @@ test('says a message waits for what the human typed in a window out of quota too
   )
 })
 
-test("offers a chief still on its harness's own default every saved agent, and moves it to one", async ({
+test('offers a chief from before it had a model every model, and moves it to one', async ({
   page,
 }) => {
-  // A project opened before chiefs were agents: its chief names none.
-  await open(page)
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  // A project opened before a chief was a harness and a model: its chief names none.
+  const data = model()
+  delete data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.model
+  await open(page, data)
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
-  const select = dialog.getByLabel('The chief runs on')
-  const disabled = (await chiefGroups(select)).flatMap(([, options]) =>
-    options.filter(([, off]) => off),
-  )
-  expect(disabled).toEqual([])
-  await select.selectOption('zeus')
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Claude Code' })
+  await expect(dialog.locator('[name="chiefModel"]')).toBeEnabled()
+  expect(await offered(dialog.locator('[name="chiefModel"]'))).toEqual([
+    ['Pick a model', true],
+    ['Opus 5.5', false],
+    ['Sonnet 5', false],
+  ])
+  await pickChief(dialog, 'Claude Code', 'Sonnet 5')
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 1, agent: 'zeus', when: 'turn', note: false }])
+    .toEqual([
+      { project: 1, harness: 'claude-code', model: 'claude-sonnet-5', when: 'turn', note: false },
+    ])
 })
 
 test('refuses Switch chief when no harness is installed here, and says where to get one', async ({
@@ -9035,7 +9162,7 @@ test('refuses Switch chief when no harness is installed here, and says where to 
   const data = model()
   data.missing = ['claude', 'codex', 'pi', 'devin']
   await open(page, data)
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   await expect(page.locator('#status')).toHaveText(
     'No harness is installed here: install one from Agents, Harnesses.',
   )
@@ -9125,7 +9252,7 @@ test('switches the chief only of the project it was asked for', async ({ page })
   await page.evaluate(() => {
     window.__delay['agents.list'] = 300
   })
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   await chooseProject(page, 'foundry')
   await expect(page.locator('#project-title')).toHaveText('foundry')
   await page.waitForTimeout(500)
@@ -9134,13 +9261,13 @@ test('switches the chief only of the project it was asked for', async ({ page })
   await page.evaluate(() => {
     window.__delay = {}
   })
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
-  await dialog.getByLabel('The chief runs on').selectOption('diana')
+  await pickChief(dialog, 'Codex', 'GPT-5.6 Luna')
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 2, agent: 'diana', when: 'turn', note: false }])
+    .toEqual([{ project: 2, harness: 'codex', model: 'gpt-5.6-luna', when: 'turn', note: false }])
 })
 
 test('says the daemon is down while it is, why, and what comes next, and reads everything again once it is back', async ({

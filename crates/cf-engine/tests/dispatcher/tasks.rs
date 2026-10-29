@@ -261,7 +261,7 @@ fn carries_an_advisors_and_a_reviewers_question_to_the_chief_and_the_answer_back
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [member("athena", "advisor"), member("calliope", "reviewer")],
         }))
         .unwrap()

@@ -157,5 +157,28 @@ pub(crate) async fn listed(
     .await
 }
 
+/// Whether `words` are Claude Code refusing a model it does not have: a launch on one
+/// exits with `[claude-code:unrecognized_model]` (2.1.312, CHF-02), and its window says
+/// there is an issue with the selected model.
+pub(crate) fn gone(words: &str) -> bool {
+    words.contains("unrecognized_model") || words.contains("issue with the selected model")
+}
+
+/// The model Claude Code starts on where none is named: the one its list marks, never a
+/// contributor model (`ModelListing::default_model`); left to it where the list cannot be
+/// read, as Claude Code's own default is no contributor model (CHF-06).
+pub(crate) async fn default_model(
+    env: &Env,
+    processes: &dyn Processes,
+    time: &dyn Time,
+) -> Result<Option<String>, String> {
+    Ok(listed(env, processes, time)
+        .await
+        .ok()
+        .as_ref()
+        .and_then(ModelListing::default_model)
+        .map(ModelChoice::model))
+}
+
 #[cfg(test)]
 mod tests;

@@ -32,10 +32,12 @@ fn told(
         })
         .collect();
     let text = |value: &Value| value.as_str().map(str::to_owned);
+    // Each side of a switch is a harness and a model (CHF-04).
+    let named = |side: &Value| text(&side["model"]);
     let switched_from: Vec<Option<String>> = events
         .iter()
         .filter(|event| event.kind == "chief.switched")
-        .map(|event| text(&event.data["from"]["agent"]))
+        .map(|event| named(&event.data["from"]))
         .collect();
     let mut agents = HashMap::new();
     let mut ends = HashMap::new();
@@ -47,7 +49,7 @@ fn told(
                 let to = &event.data["to"];
                 let end = ConversationEnd::Switch {
                     harness: text(&to["harness"]).unwrap_or_default(),
-                    agent: text(&to["agent"]),
+                    agent: named(to),
                 };
                 ends.insert(ended, end);
             }
@@ -157,7 +159,7 @@ fn step(ledger: &mut Ledger, project: i64, who: &mut Who, die: &mut Die, session
                     project,
                     &ChiefSwitch {
                         harness: who.harness.into(),
-                        agent: who.agent.into(),
+                        model: who.agent.into(),
                         cut: false,
                     },
                 )
@@ -216,13 +218,16 @@ fn every_heading_says_what_the_whole_log_says_of_its_conversation() {
                 .iter()
                 .map(|(conversation, _)| conversation.conversation.id)
                 .collect();
-            let (agents, ends) = told(&events, &own, who.handle == "chief", Some(who.agent));
+            // A chief names no saved agent (CHF-04): a conversation of its no switch came
+            // after is headed by none.
+            let now = (who.handle != "chief").then_some(who.agent);
+            let (agents, ends) = told(&events, &own, who.handle == "chief", now);
             for (heading, _) in &history {
                 let id = heading.conversation.id;
                 let agent = agents
                     .get(&id)
                     .cloned()
-                    .unwrap_or_else(|| Some(who.agent.to_owned()));
+                    .unwrap_or_else(|| now.map(str::to_owned));
                 let ended_by = heading
                     .conversation
                     .ended_at

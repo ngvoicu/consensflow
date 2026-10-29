@@ -27,9 +27,28 @@ pub(super) fn home_with(rows: &str) -> (tempfile::TempDir, Env) {
     (home, env)
 }
 
-/// The page over a home with these saved agents, on a bridge, asked `body` for `operation`.
+/// A home with these saved agents, where every harness ConsensFlow opens windows of is
+/// installed: a stand-in of each on its `PATH`, as a chief's harness must be (CHF-08).
+pub(super) fn home_installed(rows: &str) -> (tempfile::TempDir, Env) {
+    let (home, _) = home_with(rows);
+    let bin = home.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for name in ["claude", "codex", "pi", "devin"] {
+        cf_harness::testing::fake_executable(&bin.join(name));
+    }
+    let folder = home.path().to_str().unwrap().to_owned();
+    let env = Env::from_vars([
+        ("CONSENSFLOW_HOME", folder.as_str()),
+        ("HOME", folder.as_str()),
+        ("PATH", bin.to_str().unwrap()),
+    ]);
+    (home, env)
+}
+
+/// The page over a home with these saved agents and every harness, on a bridge, asked
+/// `body` for `operation`.
 async fn asked(rows: &str, operation: &str, body: Value) -> (Value, Rig) {
-    let (_home, env) = home_with(rows);
+    let (_home, env) = home_installed(rows);
     let rig = rig_over(env, None);
     let (daemon, app) = bridge_pair_over(&rig.spawn);
     register(&daemon, &rig.page, &rig.spawn);
@@ -48,7 +67,7 @@ async fn a_staff_member_on_a_harness_no_window_opens_is_refused_in_the_engines_w
             let (answer, rig) = asked(
                 rows,
                 "project.open",
-                json!({ "directory": "/work/app", "agent": "zeus", "staff": staff }),
+                json!({ "directory": "/work/app", "harness": "claude-code", "model": "claude-sonnet-5", "staff": staff }),
             )
             .await;
             // The dispatcher asks its adapters before the ledger checks the
@@ -70,7 +89,7 @@ async fn staff_that_is_no_list_is_refused_and_so_is_a_member_whose_roles_are_no_
             let (answer, _) = asked(
                 "[]",
                 "project.open",
-                json!({ "directory": "/work/app", "agent": "zeus", "staff": "zeus" }),
+                json!({ "directory": "/work/app", "harness": "claude-code", "model": "claude-sonnet-5", "staff": "zeus" }),
             )
             .await;
             assert_eq!(
@@ -82,7 +101,7 @@ async fn staff_that_is_no_list_is_refused_and_so_is_a_member_whose_roles_are_no_
             let (answer, rig) = asked(
                 "[]",
                 "project.open",
-                json!({ "directory": "/work/app", "agent": "zeus", "staff": staff }),
+                json!({ "directory": "/work/app", "harness": "claude-code", "model": "claude-sonnet-5", "staff": staff }),
             )
             .await;
             assert_eq!(
@@ -220,7 +239,7 @@ async fn the_board_marks_the_agent_of_a_member_gone_and_not_that_of_the_session_
                         name: "app".to_owned(),
                         chief: NewChief {
                             harness: "claude-code".to_owned(),
-                            agent: Some("zeus".to_owned()),
+                            model: Some("zeus".to_owned()),
                         },
                         // An agent the file does not have: the human removed it.
                         staff: vec![NewMember {
@@ -324,9 +343,10 @@ async fn a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why
                 .create_project(&NewProject {
                     directory: "/work/app".to_owned(),
                     name: "app".to_owned(),
+                    // A chief runs on a model, never a saved agent (CHF-08): nothing is missing of it.
                     chief: NewChief {
                         harness: "devin".to_owned(),
-                        agent: Some("khnum".to_owned()),
+                        model: Some("swe-1-6-slow".to_owned()),
                     },
                     staff: vec![
                         NewMember {
@@ -370,7 +390,7 @@ async fn a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why
                 lanes,
                 [
                     ("human", &json!(false), &Value::Null),
-                    ("chief", &json!(true), &why),
+                    ("chief", &json!(false), &Value::Null),
                     ("khnum", &json!(true), &why),
                     ("mine", &json!(true), &Value::Null),
                 ]
@@ -428,7 +448,7 @@ async fn the_agents_file_is_read_at_each_lane_and_not_once_for_the_board() {
                     name: "app".to_owned(),
                     chief: NewChief {
                         harness: "claude-code".to_owned(),
-                        agent: Some("zeus".to_owned()),
+                        model: Some("zeus".to_owned()),
                     },
                     staff: vec![member("a1"), member("a2")],
                     gate: false,
@@ -480,7 +500,7 @@ async fn an_inbox_is_the_humans_unless_the_page_names_a_handle_in_text() {
                     name: "app".to_owned(),
                     chief: NewChief {
                         harness: "claude-code".to_owned(),
-                        agent: Some("zeus".to_owned()),
+                        model: Some("zeus".to_owned()),
                     },
                     // A member whose handle is a number's digits.
                     staff: vec![NewMember {

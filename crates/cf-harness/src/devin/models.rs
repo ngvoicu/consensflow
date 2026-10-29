@@ -180,5 +180,26 @@ pub(crate) async fn listed(
     read(processes, program(PathBuf::from(executable), env), at).await
 }
 
+/// Whether `words` are Devin refusing a model it does not have: a launch on one is refused
+/// before any turn with "Error: Unknown model: 'X'" (3000.11.228, CHF-02).
+pub(crate) fn gone(words: &str) -> bool {
+    words.contains("Unknown model:")
+}
+
+/// The model Devin starts on where none is named: its config's `agent.model`, what its own
+/// launch with no `--model` runs; where it names none, Devin's own choice is left to it, as
+/// it differs by machine (`swe-2-high` on the Mac, `swe-2-max` on zeewin2, CHF-02), and
+/// Devin lists no contributor model (CHF-06).
+pub(crate) fn default_model(env: &Env) -> Result<Option<String>, String> {
+    let config = super::paths::config(env)?;
+    Ok(
+        std::fs::read_to_string(cf_base::path::join(&[&config, "config.json"]))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|config| config["agent"]["model"].as_str().map(str::to_owned))
+            .filter(|model| !model.is_empty()),
+    )
+}
+
 #[cfg(test)]
 mod tests;

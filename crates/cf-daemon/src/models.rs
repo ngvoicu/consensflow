@@ -77,6 +77,18 @@ impl ModelLists {
     }
 }
 
+impl ModelLists {
+    /// How the human switches `harness`'s model in its own window ([`Adapter::model_switch`]):
+    /// none where it has no adapter, or ConsensFlow has not probed it.
+    ///
+    /// [`Adapter::model_switch`]: cf_harness::contract::Adapter::model_switch
+    pub fn switch_help(&self, harness: Harness) -> Option<&'static str> {
+        self.adapters
+            .adapter(harness.kind())
+            .and_then(|adapter| adapter.model_switch())
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests_support {
     use std::rc::Rc;

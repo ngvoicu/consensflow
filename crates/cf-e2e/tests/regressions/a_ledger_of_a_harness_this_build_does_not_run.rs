@@ -20,7 +20,7 @@
 use std::path::Path;
 
 use cf_e2e::files;
-use cf_e2e::rig::{Project, Rig};
+use cf_e2e::rig::{chief_body, Project, Rig};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
@@ -191,7 +191,10 @@ fn an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_mo
     }
 
     // Switch chief takes the project off the harness, and the new chief works.
-    let switched = rig.page("chief.switch", json!({ "project": id, "agent": "next" }))?;
+    let switched = rig.page(
+        "chief.switch",
+        chief_body(&rig, "next", json!({ "project": id }))?,
+    )?;
     assert_eq!(switched["ok"], true, "{switched}");
     rig.wait_for("the new chief's window", secs(60), || {
         Ok(!windows_of(&rig, &project).is_empty())

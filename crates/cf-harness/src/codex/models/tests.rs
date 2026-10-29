@@ -160,3 +160,24 @@ fn a_refusal_is_a_failure_with_codex_s_words() {
         Err("codex app-server refused model/list: not now".to_owned())
     );
 }
+
+#[test]
+fn a_model_codex_does_not_have_is_said_in_its_words() {
+    // As Codex 0.165.0 said it on CHF-02's probe.
+    assert!(gone(
+        "The 'gpt-gone-9' model is not supported when using Codex with a ChatGPT account."
+    ));
+    assert!(gone(r#"{"error":{"code":"model_not_found"}}"#));
+    assert!(!gone("stream disconnected before completion"));
+}
+
+#[test]
+fn a_codex_whose_list_cannot_be_read_is_left_to_its_own_default() {
+    let processes = crate::testing::ScriptedProcesses::default();
+    let time = crate::testing::ManualTime::new(0);
+    let env = Env::from_vars([("PATH", "/nowhere")]);
+    assert_eq!(
+        crate::testing::finished(Box::pin(default_model(&env, &processes, &time))),
+        Ok(None)
+    );
+}

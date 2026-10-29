@@ -17,7 +17,7 @@ fn request_at(directory: &str, said: &Value) -> Value {
     let mut request = json!({
         "directory": directory,
         "name": directory.trim_start_matches('/'),
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
         "staff": [{ "agent": "zeus", "harness": "claude-code", "roles": ["worker"], "tier": "standard" }],
     });
     if let (Some(request), Some(said)) = (request.as_object_mut(), said.as_object()) {

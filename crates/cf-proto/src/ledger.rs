@@ -17,6 +17,24 @@ pub struct ParticipantView {
     pub role: String,
     pub agent: Option<String>,
     pub harness: Option<String>,
+    /// A chief's: the model picked for it, which it runs on where its record names none
+    /// (CHF-04). Said only where there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// A chief's: the model its last launch asked its harness for, read from its record
+    /// or picked; none where it left it to the harness's default. Not said: the board
+    /// says it of the chief's lane.
+    #[serde(skip_serializing)]
+    pub launched_model: Option<String>,
+    /// A chief's: the model a launch found its harness no longer has, which a reopen never
+    /// asks for again though its record names it (CHF-06). Not said.
+    #[serde(skip_serializing)]
+    pub gone_model: Option<String>,
+    /// A chief's: the model its last launch ran on, where it is not the one picked for it
+    /// (the human switched it in the window, and the reopen kept it): what its card says
+    /// it runs on (O7). Said only then.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ran_on: Option<String>,
     pub designer: bool,
     pub created_at: String,
     pub left_at: Option<String>,
@@ -365,11 +383,12 @@ fn did(happened: &bool) -> bool {
     *happened
 }
 
-/// What the chief ran on before the latest Switch chief.
+/// What the chief ran on before the latest Switch chief: its harness, and the model
+/// picked for it where one was (none for a chief from before a chief had one).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SwitchedFrom {
     pub harness: String,
-    pub agent: Option<String>,
+    pub model: Option<String>,
 }
 
 /// The project's latest Switch chief: what the chief was switched from, and
@@ -687,6 +706,10 @@ mod tests {
             role: "worker".into(),
             agent: Some("zeus".into()),
             harness: Some("pi".into()),
+            model: None,
+            launched_model: None,
+            gone_model: None,
+            ran_on: None,
             designer: false,
             created_at: "2026-09-19T10:00:01.000Z".into(),
             left_at: None,
@@ -701,6 +724,39 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&view).unwrap(),
             r#"{"id":2,"projectId":1,"handle":"zeus-amber-pine","role":"worker","agent":"zeus","harness":"pi","designer":false,"createdAt":"2026-09-19T10:00:01.000Z","leftAt":null,"tier":"standard","roles":["worker"],"outUntil":null,"outSince":null,"memberId":1,"member":"zeus","session":"amber-pine"}"#
+        );
+    }
+
+    /// A chief's model is said after its harness, and only by a chief that has one; the
+    /// model its last launch asked for is not said: a member's view reads as Node's did
+    /// (CHF-04).
+    #[test]
+    fn writes_a_chiefs_model_after_its_harness() {
+        let chief = ParticipantView {
+            id: 2,
+            project_id: 1,
+            handle: "chief".into(),
+            role: "chief".into(),
+            agent: None,
+            harness: Some("pi".into()),
+            model: Some("openrouter/anthropic/claude-fable-5".into()),
+            launched_model: Some("openai/gpt-6-luna".into()),
+            gone_model: None,
+            ran_on: None,
+            designer: false,
+            created_at: "2026-09-19T10:00:01.000Z".into(),
+            left_at: None,
+            tier: None,
+            roles: Vec::new(),
+            out_until: None,
+            out_since: None,
+            member_id: None,
+            member: None,
+            session: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&chief).unwrap(),
+            r#"{"id":2,"projectId":1,"handle":"chief","role":"chief","agent":null,"harness":"pi","model":"openrouter/anthropic/claude-fable-5","designer":false,"createdAt":"2026-09-19T10:00:01.000Z","leftAt":null,"tier":null,"roles":[],"outUntil":null,"outSince":null,"memberId":null,"member":null,"session":null}"#
         );
     }
 

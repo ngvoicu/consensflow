@@ -41,6 +41,7 @@ mod assigning;
 mod background;
 mod cancelled_task;
 mod carriers;
+mod chief_models;
 mod chief_not_up;
 mod chiefs;
 mod closed_given_nothing;

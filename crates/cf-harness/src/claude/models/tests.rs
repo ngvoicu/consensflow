@@ -141,3 +141,24 @@ fn a_refused_initialize_is_a_failure_with_claude_s_words() {
     let (read, _) = read_of(&[answer.to_string()]);
     assert_eq!(read, Err("claude -p refused initialize: no".to_owned()));
 }
+
+#[test]
+fn a_model_claude_code_does_not_have_is_said_in_its_words() {
+    // As Claude Code 2.1.312 said it on CHF-02's probe, and as its window says it.
+    assert!(gone(
+        r#"[claude-code:unrecognized_model] {"model":"claude-gone-9-9"}"#
+    ));
+    assert!(gone("There's an issue with the selected model (claude-gone-9-9). It may not exist or you may not have access to it."));
+    assert!(!gone("API Error: 529 overloaded"));
+}
+
+#[test]
+fn a_claude_code_whose_list_cannot_be_read_is_left_to_its_own_default() {
+    let processes = crate::testing::ScriptedProcesses::default();
+    let time = crate::testing::ManualTime::new(0);
+    let env = Env::from_vars([("PATH", "/nowhere")]);
+    assert_eq!(
+        crate::testing::finished(Box::pin(default_model(&env, &processes, &time))),
+        Ok(None)
+    );
+}

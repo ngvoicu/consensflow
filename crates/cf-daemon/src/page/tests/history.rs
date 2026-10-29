@@ -23,7 +23,7 @@ fn project(rig: &Rig, name: &str) -> i64 {
             name: name.into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("ares".into()),
+                model: Some("ares".into()),
             },
             staff: Vec::new(),
             gate: false,
@@ -135,7 +135,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                     harbour,
                     &ChiefSwitch {
                         harness: "codex".into(),
-                        agent: "maia".into(),
+                        model: "maia".into(),
                         cut: false,
                     },
                 )
@@ -215,7 +215,9 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                                 ],
                             },
                             {
-                                "id": second.id, "harness": "codex", "agent": "maia",
+                                // Headed by the model a switch names on its side: none
+                                // after the last (CHF-04; the headings go with CHF-11).
+                                "id": second.id, "harness": "codex", "agent": null,
                                 "startedAt": heading(second.id).started_at,
                                 "endedAt": null, "endedBy": null,
                                 "toolsLeftOut": 0,

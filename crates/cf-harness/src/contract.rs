@@ -58,6 +58,48 @@ pub trait Adapter {
         Box::pin(async { Err("ConsensFlow cannot read this harness's models".to_owned()) })
     }
 
+    /// The model, and the effort or thinking, conversation `session` ran on last, as the
+    /// harness's own record says (CHF-05): what a chief's reopen launches on, so that a
+    /// model the human switched to in the window is kept. `asked` is the model the
+    /// conversation's last launch asked for, which a harness whose record cannot tell its
+    /// own move from the human's compares with ([`Used::by_harness`]). Read from the end
+    /// of the record within a bound, never the whole of it (a Claude transcript can be
+    /// 300 MB): none where the bound holds nothing of it, where the record cannot be read,
+    /// or where the harness's record names no model. None too for a harness ConsensFlow
+    /// cannot read so.
+    fn last_used<'a>(
+        &'a self,
+        _session: &'a str,
+        _asked: Option<&'a str>,
+    ) -> Work<'a, Option<Used>> {
+        Box::pin(async { None })
+    }
+
+    /// How the human switches this harness's model in its own window, keeping the
+    /// conversation, and which key keeps it to that session rather than saving it as their
+    /// default (CHF-07): the words the chief's dialogs say it in. None where ConsensFlow has
+    /// not probed it.
+    fn model_switch(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Whether `words`, what a window showed as it went or what its harness's record said
+    /// of a failed turn, are the harness refusing the model it was launched on as one it no
+    /// longer has (CHF-06): each harness says so in its own words (CHF-02's probes). No for a
+    /// harness ConsensFlow has not heard say it.
+    fn model_gone(&self, _words: &str) -> bool {
+        false
+    }
+
+    /// The model this harness starts a conversation on where none is named, as the harness
+    /// itself has it, and never a contributor model (CHF-06, MUS-15): a chief whose model
+    /// is gone starts on it. `Ok(Some(model))` names it on the launch; `Ok(None)` leaves it
+    /// to the harness, whose own default is no contributor model; `Err(why)` where no such
+    /// model can be had. A harness ConsensFlow cannot say more of is left to choose.
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// The keys that interrupt a turn in this harness's window
     /// (`adapter.interrupt`): Escape once, unless the harness says more.
     fn interrupt(&self) -> Interrupt {
@@ -247,6 +289,23 @@ pub struct Launch<'a> {
     /// one for not coming up in the time they had: a harness whose window takes
     /// as long as it takes (a Codex resuming a long thread) gives this one longer.
     pub starts_given_up: u32,
+}
+
+/// What a harness's record says a conversation ran on last ([`Adapter::last_used`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Used {
+    /// The model, as its harness's `--model` takes it (Pi's `provider/id`, Devin's id with
+    /// its effort in it).
+    pub model: String,
+    /// The effort it ran at, where the harness keeps one apart from the model and its
+    /// record says it (Claude Code's, Codex's).
+    pub effort: Option<String>,
+    /// The thinking level it ran at, where the harness calls it so (Pi's).
+    pub thinking: Option<String>,
+    /// The harness moved to `model` by itself, as its own record of the move says (Claude
+    /// Code's `fallback` block): never the human's choice, and never what a reopen takes
+    /// (MUS-24).
+    pub by_harness: bool,
 }
 
 /// The model a window runs on and the levels its harness reads, as the

@@ -26,7 +26,7 @@
 
 use std::error::Error;
 
-use cf_e2e::rig::{Project, Rig};
+use cf_e2e::rig::{chief_body, Project, Rig};
 use serde_json::{json, Value};
 
 use crate::resume_of_a_chief_with_no_turn::{after, wait_for_the_chief, windows_of};
@@ -76,7 +76,7 @@ fn handoff_after_a_switch(rig: &Rig, project: &Project) -> Result<String, Box<dy
     wait_for_the_chief(rig, project)?;
     let switched = rig.page(
         "chief.switch",
-        json!({ "project": project.id(), "agent": "worker" }),
+        chief_body(rig, "worker", json!({ "project": project.id() }))?,
     )?;
     assert_eq!(switched["ok"], true, "{switched}");
     rig.wait_for("a second chief window to be opened", secs(60), || {

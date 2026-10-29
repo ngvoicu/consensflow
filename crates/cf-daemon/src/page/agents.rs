@@ -6,7 +6,6 @@
 use cf_base::env::Env;
 use cf_base::js;
 use cf_catalog::{roster_path, AgentView, Catalog, Roster};
-use cf_engine::{require_chief_agent, SwitchTo};
 use cf_ledger::model::fits_role;
 use cf_ledger::{Ledger, StaffMember};
 use serde_json::{json, Map, Value};
@@ -94,17 +93,6 @@ fn membership_among(
         harness: row.kind().unwrap_or("undefined").to_owned(),
         designer: row.get("designer") == Some(&Value::Bool(true)),
         tier: saved.profile.work_tier.as_str(),
-    })
-}
-
-/// A chief as the dispatcher takes it: the saved agent named, and the
-/// harness it runs on (`chiefOn`).
-pub(super) fn chief_on(roster: &Roster<'_>, agent: Option<&Value>) -> Result<SwitchTo, Said> {
-    let named = require_chief_agent(agent.and_then(Value::as_str))?;
-    let member = membership(roster, Some(&json!(named)))?;
-    Ok(SwitchTo {
-        harness: member.harness,
-        agent: named.to_owned(),
     })
 }
 

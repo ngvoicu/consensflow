@@ -418,7 +418,7 @@ fn app(staff: Vec<Value>) -> Value {
     json!({
         "directory": "/work/app",
         "name": "app",
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
         "staff": staff,
     })
 }

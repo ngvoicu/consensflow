@@ -1582,7 +1582,7 @@ fn a_chief_opened_again_at_rest_whose_window_never_comes_up_is_closed_the_human_
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "codex", "agent": "apollo" },
+            "chief": { "harness": "codex", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()
@@ -1666,7 +1666,7 @@ fn codex_chief_at_rest_after_a_restart(context: &Context) -> (i64, Restarted<'_>
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "codex", "agent": "apollo" },
+            "chief": { "harness": "codex", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()
@@ -1862,7 +1862,7 @@ fn a_chief_window_with_a_first_message_that_exits_while_it_is_waited_for_is_give
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "codex", "agent": "apollo" },
+            "chief": { "harness": "codex", "model": "claude-opus-5" },
             "staff": [],
         }))
         .unwrap()
@@ -2022,7 +2022,7 @@ fn a_chief_window_given_up_after_it_began_a_turn_on_its_result_opens_again_told_
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "codex", "agent": "apollo" },
+            "chief": { "harness": "codex", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()

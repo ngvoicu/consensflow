@@ -9,7 +9,7 @@
 
 use cf_ledger::DEFAULT_WAKE_UP_TEXT;
 
-use super::reading::home_with;
+use super::reading::home_installed;
 use super::*;
 
 /// The saved agents of the home: apollo, whom a chief may run on.
@@ -26,7 +26,7 @@ struct Asked {
 }
 
 fn asked() -> Asked {
-    let (home, env) = home_with(APOLLO);
+    let (home, env) = home_installed(APOLLO);
     let rig = rig_over(env, None);
     let (daemon, app) = bridge_pair_over(&rig.spawn);
     register(&daemon, &rig.page, &rig.spawn);
@@ -42,7 +42,7 @@ fn asked() -> Asked {
 
 /// What New project sends: the folder, the chief, no staff, and `said` besides.
 fn opening(said: Value) -> Value {
-    let mut body = json!({ "directory": "/work/fresh", "agent": "apollo", "staff": [] });
+    let mut body = json!({ "directory": "/work/fresh", "harness": "claude-code", "model": "claude-opus-5-5", "staff": [] });
     if let (Some(body), Some(said)) = (body.as_object_mut(), said.as_object()) {
         body.extend(said.clone());
     }

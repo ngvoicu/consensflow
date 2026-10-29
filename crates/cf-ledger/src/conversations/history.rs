@@ -780,7 +780,7 @@ impl Reading<'_> {
             None => None,
         };
         let agent = match switched {
-            Some((_, data)) => text(&data["from"]["agent"]),
+            Some((_, data)) => named(&data["from"]),
             None => participant.agent.clone(),
         };
         let ended_by = match conversation.ended_at {
@@ -882,7 +882,7 @@ impl Reading<'_> {
             let to = &data["to"];
             return Ok(Some(ConversationEnd::Switch {
                 harness: text(&to["harness"]).unwrap_or_default(),
-                agent: text(&to["agent"]),
+                agent: named(to),
             }));
         }
         let Some((at, kind, to)) = went else {
@@ -932,6 +932,12 @@ fn number(count: usize) -> i64 {
 
 fn json_len(value: &impl serde::Serialize) -> usize {
     serde_json::to_vec(value).map_or(0, |json| json.len())
+}
+
+/// What one side of a Switch chief ran on: the model picked for the chief (CHF-04), or
+/// the saved agent a switch logged before a chief had a model.
+fn named(side: &Value) -> Option<String> {
+    text(&side["model"]).or_else(|| text(&side["agent"]))
 }
 
 fn text(value: &Value) -> Option<String> {

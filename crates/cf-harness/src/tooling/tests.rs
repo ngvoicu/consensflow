@@ -696,9 +696,10 @@ fn the_models_question_reads_as_the_daemon_and_says_why_a_harness_has_none() {
         answer(&json!({ "op": "models", "kind": "claude-code", "env": env })),
         Err("claude is not installed on this machine".to_owned())
     );
+    // OpenCode is no harness of ConsensFlow's now (T-566): asked of, it is none.
     assert_eq!(
         answer(&json!({ "op": "models", "kind": "opencode", "env": env })),
-        Err("ConsensFlow cannot read this harness's models".to_owned())
+        Err("no harness runs as opencode".to_owned())
     );
     assert!(answer(&json!({ "op": "models", "kind": "kimi", "env": env })).is_err());
 }

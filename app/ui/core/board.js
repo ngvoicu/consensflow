@@ -315,10 +315,25 @@ function route(task) {
 const resting = (participant, activity) =>
   isMember(participant) && (activity?.state ?? 'closed') === 'closed'
 
+/** The harnesses a chief runs in, as the human knows them, in the order they are offered. */
+export const HARNESS_NAMES = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  pi: 'Pi',
+  devin: 'Devin',
+}
+
+/**
+ * The model the chief runs on, as its card says it (O7): the one its window last ran on
+ * where the human switched it there, else the one picked for it.
+ */
+const chiefModel = (participant) => participant.ranOn ?? participant.model
+
 /**
  * A session's row says whose window it is; the member's row says what it
  * is. Each says what its agent runs: its model, and its effort when it has
- * one, as Project settings does; so does the chief's card in the dock.
+ * one, as Project settings does. The chief's card in the dock says its
+ * harness and the model it runs on: a chief runs on no saved agent.
  */
 export const identity = (participant, agent) =>
   (participant.member
@@ -328,13 +343,15 @@ export const identity = (participant, agent) =>
         agent?.model,
         agent?.effort,
       ]
-    : [
-        participant.role === 'chief' ? null : participant.roles.join('+'),
-        participant.tier,
-        participant.harness,
-        agent?.model,
-        agent?.effort,
-      ]
+    : participant.role === 'chief'
+      ? [HARNESS_NAMES[participant.harness] ?? participant.harness, chiefModel(participant)]
+      : [
+          participant.roles.join('+'),
+          participant.tier,
+          participant.harness,
+          agent?.model,
+          agent?.effort,
+        ]
   )
     .filter(Boolean)
     .join(' · ')
@@ -348,26 +365,26 @@ export const identity = (participant, agent) =>
  */
 export function laneStatus(lane, board, now) {
   const { participant, activity } = lane
+  // A member's: a chief runs on no saved agent, and never misses one.
   if (lane.agentMissing) {
     // One a release took out of the catalog cannot be defined again: its harness no longer has its model.
     if (lane.agentRetired) {
-      const pick =
-        participant.role === 'chief'
-          ? 'Switch the chief to another agent'
-          : `Remove @${participant.handle} from the staff and add another agent`
-      return ['missing', `${participant.agent} left the catalog: ${lane.agentRetired}. ${pick}`]
+      return [
+        'missing',
+        `${participant.agent} left the catalog: ${lane.agentRetired}. Remove @${participant.handle} from the staff and add another agent`,
+      ]
     }
-    const remedy =
-      participant.role === 'chief'
-        ? 'switch the chief'
-        : `remove @${participant.handle} from the staff`
     return [
       'missing',
-      `No agent named ${participant.agent} any more: define one under Agents, or ${remedy}`,
+      `No agent named ${participant.agent} any more: define one under Agents, or remove @${participant.handle} from the staff`,
     ]
   }
   if (lane.switching) {
-    return ['switching', `Switching the chief to ${lane.switching.agent} after this turn`]
+    const { harness, model } = lane.switching
+    return [
+      'switching',
+      `Switching the chief to ${HARNESS_NAMES[harness] ?? harness} (${model}) after this turn`,
+    ]
   }
   // A stop its window ignored in every round: the human can cancel the task to end it.
   if (lane.unstopped) {

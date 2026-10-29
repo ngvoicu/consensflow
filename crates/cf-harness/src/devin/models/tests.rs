@@ -131,3 +131,24 @@ fn a_read_runs_the_list_and_a_signed_out_devin_s_words_are_the_reason() {
     assert!(devin_run(Ok("{".to_owned())).is_err());
     assert!(devin_run(Ok(json!({ "families": [] }).to_string())).is_err());
 }
+
+#[test]
+fn a_model_devin_does_not_have_is_said_in_its_words() {
+    // As Devin 3000.11.228 said it on CHF-02's probe.
+    assert!(gone("Error: Unknown model: 'swe-gone-9-medium'"));
+    assert!(!gone("Error: not logged in"));
+}
+
+#[test]
+fn devin_starts_on_its_configs_model_and_else_on_its_own_choice() {
+    let folder = tempfile::tempdir().unwrap();
+    let env = Env::from_vars([("XDG_CONFIG_HOME", folder.path().as_os_str())]);
+    assert_eq!(default_model(&env), Ok(None), "no config: Devin's own");
+    std::fs::create_dir_all(folder.path().join("devin")).unwrap();
+    std::fs::write(
+        folder.path().join("devin").join("config.json"),
+        r#"{"agent":{"model":"swe-1-6-slow"}}"#,
+    )
+    .unwrap();
+    assert_eq!(default_model(&env), Ok(Some("swe-1-6-slow".to_owned())));
+}

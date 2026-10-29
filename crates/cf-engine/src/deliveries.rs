@@ -1138,9 +1138,11 @@ impl Dispatcher {
     }
 
     /// The chief's turn that failed: the human is told why, once, on the board.
-    /// Nothing else of the chief's changes.
+    /// Nothing else of the chief's changes, but where the failure is its harness saying it
+    /// no longer has the model the chief's launch asked for: the window closes and the chief
+    /// opens again at once on the harness's default (CHF-06), which its note says.
     pub(crate) async fn tell_chief_failed(
-        &self,
+        self: &Rc<Self>,
         project: &ProjectView,
         participant: &ParticipantView,
         record: &Rc<Record>,
@@ -1151,6 +1153,17 @@ impl Dispatcher {
         };
         let why = self.why_it_failed(participant, record, observed).await?;
         if self.forgotten(record) {
+            return Ok(());
+        }
+        if let Some(gone) = self.gone_model(participant, &why.said)? {
+            let pane = record.window.borrow().pane.clone();
+            if let Some(pane) = pane {
+                if !self.close_own(record, &pane).await? {
+                    return Ok(());
+                }
+            }
+            self.settle_told(record, given, "human", &why.key);
+            self.reopen_without(record, gone);
             return Ok(());
         }
         if self.same_outage(record, &why.key) {

@@ -286,7 +286,7 @@ fn an_uncertain_hand_over_to_codex_is_never_given_back_by_an_enter_and_arrives_o
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "codex", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()

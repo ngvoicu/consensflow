@@ -101,7 +101,7 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             name: "harbour".into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("ares".into()),
+                model: Some("ares".into()),
             },
             staff: Vec::new(),
             gate: false,
@@ -192,7 +192,7 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
             project.id,
             &ChiefSwitch {
                 harness: "codex".into(),
-                agent: "maia".into(),
+                model: "maia".into(),
                 cut: false,
             },
         )
@@ -209,13 +209,16 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
 
     let logged = ledger.events(project.id, 0, 500).expect("the log").len();
     let history = everything(&ledger, project.id, "chief").expect("the history");
+    // A conversation is headed by the model a switch names on its side: the chief's own
+    // row is not read (CHF-04), so one with no switch after it names none until the
+    // headings go (CHF-11).
     assert_eq!(
         lines(&history),
         [
             r#"claude-code ares Some(Switch { harness: "codex", agent: Some("maia") }) ["user: Ship the parser", "assistant: On it", "tool: ok 12 passed", "user: This session is being continued. (compaction)", "user: Where were we?"]"#,
             r#"claude-code ares Some(Window { resumed: true }) ["user: A fresh start"]"#,
-            r#"codex maia Some(Fresh) ["assistant: Taken over"]"#,
-            "codex maia None []",
+            r#"codex - Some(Fresh) ["assistant: Taken over"]"#,
+            "codex - None []",
         ]
     );
     let ids: Vec<i64> = history.iter().map(|(c, _)| c.conversation.id).collect();
@@ -265,7 +268,7 @@ fn a_clear_to_a_conversation_the_ledger_never_saw_and_a_member_s_agent_and_an_un
             project.id,
             &ChiefSwitch {
                 harness: "codex".into(),
-                agent: "maia".into(),
+                model: "maia".into(),
                 cut: false,
             },
         )

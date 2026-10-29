@@ -14,7 +14,7 @@ fn request() -> NewProject {
         name: "app".to_owned(),
         chief: NewChief {
             harness: "claude-code".to_owned(),
-            agent: Some("apollo".to_owned()),
+            model: Some("apollo".to_owned()),
         },
         staff: vec![NewMember {
             agent: "zeus".to_owned(),
@@ -97,11 +97,11 @@ fn a_pane_and_a_waiting_switch_are_written_as_the_dispatcher_writes_them() {
     );
     let to = SwitchTo {
         harness: "codex".to_owned(),
-        agent: "diana".to_owned(),
+        model: "diana".to_owned(),
     };
     assert_eq!(
         switch_value(&to).to_string(),
-        r#"{"harness":"codex","agent":"diana"}"#
+        r#"{"harness":"codex","model":"diana"}"#
     );
 }
 

@@ -34,6 +34,7 @@ mod agents;
 mod app_specs;
 mod board;
 mod body;
+mod chief;
 mod computer_use;
 mod engine;
 mod history;

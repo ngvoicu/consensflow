@@ -43,8 +43,8 @@ fn hands_over_to_the_new_chief() {
     assert_eq!(killed, [format!("p{}-chief", project.id)]);
     let now = chief_of(&context, project.id);
     assert_eq!(
-        (now.harness.as_deref(), now.agent.as_deref()),
-        (Some("codex"), Some("astraeus"))
+        (now.harness.as_deref(), now.model.as_deref()),
+        (Some("codex"), Some("gpt-6-astra"))
     );
     let prepared = context.codex.prepared().last().cloned().unwrap();
     assert_eq!(
@@ -63,7 +63,7 @@ fn hands_over_to_the_new_chief() {
     let message = prepared["message"].as_str().unwrap();
     assert_match(
         message,
-        r"^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nYou are the chief now\. The human switched this project's chief from Claude Code \(apollo\) to you, Codex \(astraeus\)\.",
+        r"^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nYou are the chief now\. The human switched this project's chief from Claude Code \(claude-opus-5\) to you, Codex \(gpt-6-astra\)\.",
     );
     assert_match(message, "cut off in the middle of a turn");
     assert_match(
@@ -181,8 +181,8 @@ fn keeps_the_chief_whose_window_would_not_close_for_a_switch_and_switches_after_
     context.pass().unwrap();
     let now = chief_of(&context, project.id);
     assert_eq!(
-        (now.harness.as_deref(), now.agent.as_deref()),
-        (Some("codex"), Some("astraeus"))
+        (now.harness.as_deref(), now.model.as_deref()),
+        (Some("codex"), Some("gpt-6-astra"))
     );
     held_to(
         context.close(),
@@ -252,7 +252,7 @@ fn first_asks_the_chief_where_things_stand_when_the_human_wants_that_and_switche
         .unwrap();
     assert_match(
         &asked.text,
-        r"moving this project's chief to codex \(astraeus\) once you answer\. Write down where things stand",
+        r"moving this project's chief to codex \(gpt-6-astra\) once you answer\. Write down where things stand",
     );
     context.pass().unwrap();
     assert_eq!(
@@ -412,7 +412,7 @@ fn writes_the_note_that_asks_where_things_stand_only_when_it_pastes_it_with_the_
     assert_eq!(written[0].state, "delivered");
     assert_match(
         &context.adapter.agent("chief").items.last().unwrap().text,
-        r"moving this project's chief to codex \(astraeus\) once you answer\. Write down where things stand",
+        r"moving this project's chief to codex \(gpt-6-astra\) once you answer\. Write down where things stand",
     );
 
     // At rest with no answer after the paste, the switch waits.

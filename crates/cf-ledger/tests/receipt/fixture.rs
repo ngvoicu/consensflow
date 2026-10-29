@@ -98,7 +98,7 @@ impl World {
                 name: "app".into(),
                 chief: NewChief {
                     harness: "claude-code".into(),
-                    agent: Some("apollo".into()),
+                    model: Some("apollo".into()),
                 },
                 staff: vec![member("zeus"), member("diana")],
                 gate,

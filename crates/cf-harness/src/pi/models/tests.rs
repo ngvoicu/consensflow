@@ -160,3 +160,81 @@ fn only_the_human_s_refresh_fetches_pi_s_catalogs_and_a_failed_fetch_leaves_a_st
     );
     assert_eq!(listed.models.len(), 1, "the list Pi keeps");
 }
+
+/// Pi's default model, from a folder of its own whose `settings.json` says `settings`, a
+/// `pi` on the PATH whose list offers `listed`.
+fn default_with(
+    settings: Option<Value>,
+    listed: &[(&str, &str)],
+) -> Result<Option<String>, String> {
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(folder.path().join("bin")).unwrap();
+    let pi = crate::testing::fake_executable(&folder.path().join("bin").join("pi"));
+    let agent = folder.path().join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    if let Some(settings) = settings {
+        std::fs::write(agent.join("settings.json"), settings.to_string()).unwrap();
+    }
+    let env = Env::from_vars([
+        ("PATH", pi.parent().unwrap().as_os_str()),
+        ("PI_CODING_AGENT_DIR", agent.as_os_str()),
+    ]);
+    let processes = Rc::new(ScriptedProcesses::default());
+    let models: Vec<Value> = listed
+        .iter()
+        .map(|(provider, id)| json!({ "provider": provider, "id": id, "name": id }))
+        .collect();
+    let answer = json!({ "type": "response", "id": "models", "success": true,
+        "data": { "models": models } });
+    processes.child(
+        "pi",
+        ChildScript {
+            lines: vec![answer.to_string()],
+            ends: Ends::Asked,
+        },
+    );
+    let time = ManualTime::new(0);
+    finished(Box::pin(default_model(&env, &*processes, &time)))
+}
+
+#[test]
+fn pi_starts_on_its_settings_default_and_never_on_a_contributor_model() {
+    let settings = |provider: &str, model: &str| {
+        Some(json!({ "defaultProvider": provider, "defaultModel": model }))
+    };
+    let listed = [
+        ("meta", "muse-spark-1.3-contributor"),
+        ("openai", "gpt-6-luna"),
+    ];
+    assert_eq!(
+        default_with(settings("openrouter", "anthropic/claude-fable-5"), &listed),
+        Ok(Some("openrouter/anthropic/claude-fable-5".to_owned()))
+    );
+    // A contributor default is never the one: the first its list offers that is not.
+    assert_eq!(
+        default_with(settings("meta", "muse-spark-1.3-contributor"), &listed),
+        Ok(Some("openai/gpt-6-luna".to_owned()))
+    );
+    // No default said: the same.
+    assert_eq!(
+        default_with(None, &listed),
+        Ok(Some("openai/gpt-6-luna".to_owned()))
+    );
+    // Nothing but contributor models: none, and why.
+    assert_eq!(
+        default_with(None, &[("meta", "muse-spark-1.3-contributor")]),
+        Err("Pi offers no model that is not a contributor model".to_owned())
+    );
+}
+
+#[test]
+fn a_model_pi_does_not_have_is_said_in_its_words_and_its_providers() {
+    // As Pi 1.4.0 and OpenAI said it on CHF-02's probe.
+    assert!(gone(
+        "Model 'gpt-gone-9' not found for provider 'openai'. Using custom model id."
+    ));
+    assert!(gone(
+        r#"400 {"error":{"code":"model_not_found","message":"The model `gpt-gone-9` does not exist"}}"#
+    ));
+    assert!(!gone("429 rate limited: try again later"));
+}
