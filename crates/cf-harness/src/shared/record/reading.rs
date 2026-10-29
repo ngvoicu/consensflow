@@ -303,7 +303,9 @@ pub struct Item {
     /// An assistant's item with nothing of the model's in it: Claude Code's close
     /// of a turn it found cut, the step Pi writes of a run that failed or was aborted
     /// before the model's first token, a message OpenCode made before the reply. No
-    /// turn got through it. Never said: a reading is the one Node wrote.
+    /// turn got through it. And a user's item with no human's words in it, the
+    /// harness's own: Claude Code's `<task-notification>`. Never said: a reading is
+    /// the one Node wrote.
     pub synthetic: bool,
     /// The summary a compaction writes in the user's place (Claude Code's
     /// `isCompactSummary`): the harness's own, and no message of the user's. Never

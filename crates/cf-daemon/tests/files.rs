@@ -125,6 +125,7 @@ fn write(trace: &Trace, entry: &Value) {
         "delivery.held" => window(WindowEvent::DeliveryHeld {
             message: entry["message"].as_i64().unwrap(),
             reason: text(&entry["reason"]).to_owned(),
+            input: None,
         }),
         "delivery.enter_again" => window(WindowEvent::EnterAgain {
             message: entry["message"].as_i64().unwrap(),

@@ -136,8 +136,8 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                return self.held_once(record, first.message, &reason);\n            }\n            Readiness::Unfit"
-replace = "                self.held_once(record, first.message, &reason)?;\n            }\n            Readiness::Unfit"
+find = "                return self.hold(record, first.message, &reason, unsent).await;\n            }\n            Readiness::Unfit"
+replace = "                self.hold(record, first.message, &reason, unsent).await?;\n            }\n            Readiness::Unfit"
 
 [[plant]]
 name = "first message: one its window refused is taken for handed over"
@@ -146,7 +146,7 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            let reason = format!(\"its window refused its first message: {reason}\");\n            return self.held_once(record, first.message, &reason);"
+find = "            let reason = format!(\"its window refused its first message: {reason}\");\n            return self.held_once(record, first.message, &reason).await;"
 replace = "            let _ = reason;"
 
 [[plant]]

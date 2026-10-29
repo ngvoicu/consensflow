@@ -170,6 +170,43 @@ fn a_message_is_pasted_into_a_window_busy_with_its_agents_as_into_any_at_rest() 
     );
 }
 
+/// What the pane host said of the human's input at a look `ready()` took is the window's
+/// to say, for the trace of a delivery that look held (T-883); a look that read no
+/// snapshot says nothing.
+#[test]
+fn a_window_says_what_its_last_look_read_of_the_humans_input() {
+    let (_home, window) = window_on(&turn(Some(2)), Some("busy"));
+    assert_eq!(window.human_input(), None, "no look yet");
+    let host = AnsweringHost::new(|op| {
+        Ok(match op {
+            "pane.snapshot" => json!({
+                "ok": true, "pasteInFlight": false, "unsent": false, "typed": 3,
+                "typedQuietMs": 900,
+                "humanWrites": [{ "agoMs": 900, "length": 25, "classes": ["string"] }],
+            }),
+            _ => json!({ "ok": true }),
+        })
+    });
+    let pane = Pane {
+        id: "s1-chief".to_owned(),
+        generation: 1,
+    };
+    assert_eq!(finished(window.ready(&host, &pane)), Ok(Readiness::Ready));
+    assert_eq!(
+        window.human_input(),
+        Some(cf_proto::panes::HumanInput {
+            typed: Some(3),
+            typed_quiet_ms: Some(900),
+            unsent: Some(false),
+            writes: vec![cf_proto::panes::HumanWrite {
+                ago_ms: 900,
+                length: 25,
+                classes: vec!["string"],
+            }],
+        })
+    );
+}
+
 /// The records of a turn that began with the brief, started its agents, and was
 /// interrupted before it answered (T-604, 2026-10-25): the interrupt's record ends
 /// the turn, and no `turn_duration` counts the agents that still run.

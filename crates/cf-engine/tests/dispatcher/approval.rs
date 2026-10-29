@@ -802,7 +802,7 @@ fn the_handoff_a_switched_chief_is_given_is_consensflows_own_word_and_the_gate_d
 }
 
 #[test]
-fn a_note_and_a_question_the_human_passes_on_while_the_chief_is_in_a_turn_reach_it_oldest_first_once(
+fn a_note_and_a_question_the_human_passes_on_while_the_chief_is_in_a_turn_reach_it_question_first_once(
 ) {
     let context = Context::new();
     let project = working(&context);
@@ -831,16 +831,17 @@ fn a_note_and_a_question_the_human_passes_on_while_the_chief_is_in_a_turn_reach_
         "a busy chief is given nothing"
     );
 
-    // Its turn ends: one message at a time, the oldest first.
+    // Its turn ends: one message at a time, the member's question first, as its
+    // member is blocked on it (3.0.7 chief-meeting, CMT-07).
     the_chiefs_turn_ends(&context);
     assert_eq!(
         [
             headed(&context, "chief", note.id),
             headed(&context, "chief", question.id)
         ],
-        [1, 0]
+        [0, 1]
     );
-    context.adapter.answer("chief", "Read the note.");
+    context.adapter.answer("chief", "Answered the question.");
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(

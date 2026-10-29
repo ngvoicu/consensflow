@@ -339,7 +339,7 @@ pub(crate) struct WindowsState {
 }
 
 /// A pane as the pane host's requests name it.
-fn pane_body(pane: &Pane) -> Value {
+pub(crate) fn pane_body(pane: &Pane) -> Value {
     json!({ "id": pane.id, "generation": pane.generation })
 }
 

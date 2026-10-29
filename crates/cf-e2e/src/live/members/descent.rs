@@ -89,6 +89,17 @@ pub(crate) trait Held {
     fn started(&self) -> io::Result<Option<u64>>;
     /// Ends the process held.
     fn end(&self) -> io::Result<()>;
+    /// Stops the process held where it is, or lets it go on ([`Pause`]).
+    fn pause(&self, pause: Pause) -> io::Result<()>;
+}
+
+/// What a check does to a process it chose that it does not end: stops it where it is, as
+/// a machine too loaded to run it does, or lets it go on (Unix only: Windows has no stop of
+/// a process).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pause {
+    Stop,
+    Continue,
 }
 
 /// How a check takes hold of the process that has a number now.
@@ -155,18 +166,55 @@ pub(crate) fn end_chosen_by(holds: &dyn Holds, chosen: &[Running]) -> Ended {
     said
 }
 
+/// Stops each of `chosen` (chosen from a window's own tree) where it is, or lets it go on,
+/// only while it is still the process chosen, as [`end_chosen`] ends one: the one way a live
+/// check stops a process (3.0.7 chief-meeting: a window stopped for longer than a paste's
+/// wait, as a loaded machine stops one). `Ended::ended` holds the ones it reached.
+pub fn pause_chosen(chosen: &[Running], pause: Pause) -> Ended {
+    pause_chosen_by(&native::Native, chosen, pause)
+}
+
+/// [`pause_chosen`], each process held by `holds`.
+pub(crate) fn pause_chosen_by(holds: &dyn Holds, chosen: &[Running], pause: Pause) -> Ended {
+    let mut said = Ended::default();
+    for process in chosen {
+        match act_on_one(
+            holds,
+            process.identity,
+            &|held| held.pause(pause),
+            "its pause",
+        ) {
+            Outcome::Ended => said.ended.push(process.clone()),
+            Outcome::Gone => said.gone.push(process.clone()),
+            Outcome::Failed(why) => said.failed.push((process.clone(), why)),
+        }
+    }
+    said
+}
+
 /// Ends the process `identity` names, only while what `holds` holds of its number began
 /// when it did: one that has ended, or whose number another process has now, is gone.
 fn end_one(holds: &dyn Holds, identity: Identity) -> Outcome {
+    act_on_one(holds, identity, &|held| held.end(), "its end")
+}
+
+/// Does `act` to the process `identity` names, only while what `holds` holds of its number
+/// began when it did; `what` names the act where it failed.
+fn act_on_one(
+    holds: &dyn Holds,
+    identity: Identity,
+    act: &dyn Fn(&dyn Held) -> io::Result<()>,
+    what: &str,
+) -> Outcome {
     let held = match holds.hold(identity.pid) {
         Ok(Some(held)) => held,
         Ok(None) => return Outcome::Gone,
         Err(failed) => return Outcome::Failed(format!("it could not be reached: {failed}")),
     };
     match held.started() {
-        Ok(Some(started)) if started == identity.started => match held.end() {
+        Ok(Some(started)) if started == identity.started => match act(&*held) {
             Ok(()) => Outcome::Ended,
-            Err(failed) => Outcome::Failed(format!("its end failed: {failed}")),
+            Err(failed) => Outcome::Failed(format!("{what} failed: {failed}")),
         },
         Ok(_) => Outcome::Gone,
         Err(failed) => Outcome::Failed(format!("when it began could not be read again: {failed}")),

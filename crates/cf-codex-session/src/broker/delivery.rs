@@ -93,6 +93,37 @@ impl Shared {
     }
 }
 
+impl Shared {
+    /// Asks Codex the shown thread's status where the broker last heard it busy, and
+    /// learns the answer: a `turn/completed` it never heard leaves it busy in its word
+    /// for good, and the daemon asks this only once the thread's own record has read
+    /// the turn over for its settle (T-842's P2). A thread heard idle, or none shown,
+    /// asks nothing; a read that is not answered in time leaves the word as it was.
+    pub(super) async fn refresh_idle(&self) {
+        let busy = {
+            let state = self.state.borrow();
+            state
+                .session_id()
+                .filter(|_| state.idle() == Some(false))
+                .map(str::to_owned)
+        };
+        let Some(thread) = busy else {
+            return;
+        };
+        let asked = self
+            .request(
+                "thread/read",
+                json!({ "threadId": thread, "includeTurns": false }),
+                now_ms() + ADMISSION_MS,
+            )
+            .await;
+        if let Asked::Answered(answer) = asked {
+            let read = answer.get("result").and_then(|result| result.get("thread"));
+            self.state.borrow_mut().learn(&thread, read);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

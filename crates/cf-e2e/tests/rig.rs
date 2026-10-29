@@ -99,15 +99,15 @@ mod devin_bypass_first;
 mod devin_compaction;
 #[path = "rig/devin_stamped.rs"]
 mod devin_stamped;
-#[cfg(unix)]
 #[path = "rig/harness_homes.rs"]
+#[cfg(unix)]
 mod harness_homes;
 #[path = "rig/help.rs"]
 mod help;
 #[path = "rig/homes.rs"]
 mod homes;
-#[cfg(unix)]
 #[path = "rig/kept_config.rs"]
+#[cfg(unix)]
 mod kept_config;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
@@ -119,6 +119,8 @@ mod live_member;
 mod live_members;
 #[path = "rig/live_support.rs"]
 mod live_support;
+#[path = "rig/pacing.rs"]
+mod pacing;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
 #[path = "rig/printed_output.rs"]
@@ -128,11 +130,11 @@ mod reports;
 #[path = "rig/specs.rs"]
 mod specs;
 // The packaged smoke's stand-in is a shell script.
-#[cfg(unix)]
 #[path = "rig/smoke_stand_in.rs"]
-mod smoke_stand_in;
 #[cfg(unix)]
+mod smoke_stand_in;
 #[path = "rig/specs_codex.rs"]
+#[cfg(unix)]
 mod specs_codex;
 #[path = "rig/stand_in_codex.rs"]
 mod stand_in_codex;

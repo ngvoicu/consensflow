@@ -51,6 +51,9 @@ pub struct Target<'a> {
     pub host: &'a dyn PaneHost,
 }
 
+/// The extension's reason for a message it refused while Pi was at work.
+const BUSY: &str = "chief busy";
+
 /// What a send answered (the object `send` returned): what Pi's window did
 /// with the message, as far as the channel can tell.
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +152,19 @@ impl Answer {
             },
             _ => Self::uncertain(Some("invalid-admission".to_owned()), Some(ack)),
         }
+    }
+
+    /// Whether the extension refused the message, before it sent it, because Pi was
+    /// at work: its own word for that (`nativeTuiState`'s `chief busy`, in
+    /// `hosts/pi-extension/consensflow-delivery.mjs`). Nothing reached Pi.
+    pub(crate) fn busy(&self) -> bool {
+        self.admitted == Some(false)
+            && self
+                .ack
+                .as_ref()
+                .and_then(|ack| ack.get("reason"))
+                .and_then(Value::as_str)
+                == Some(BUSY)
     }
 
     /// The answer as an adapter reads a send's (`admission`).
