@@ -76,9 +76,11 @@ fn a_panic_is_written_to_the_error_log_with_its_thread_place_and_backtrace() {
         "panics::tests::a_panic_is_written_to_the_error_log_with_its_thread_place_and_backtrace",
     );
     assert!(ran.status.success(), "{}", said(&ran));
+    // The place as the platform spells a path: `app\src-tauri\src\panics\tests.rs` on Windows.
+    let place = ["src", "panics", "tests.rs:"].join(std::path::MAIN_SEPARATOR_STR);
     assert!(
         written.contains("consensflow: thread 'deliberate' panicked at ")
-            && written.contains("src/panics/tests.rs:"),
+            && written.contains(&place),
         "{written}"
     );
     assert!(
