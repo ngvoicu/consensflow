@@ -89,6 +89,9 @@ pub struct Made {
     /// Codex has a fake of its own ([`Context::codex`]), so a test sees which
     /// harness a window opened on (`withCodex`).
     pub codex: bool,
+    /// The settle of the pacing ([`Limits::settle_ms`]): none, unless the case is
+    /// the pacing's.
+    pub settle_ms: i64,
 }
 
 impl Default for Made {
@@ -97,8 +100,22 @@ impl Default for Made {
             // The fake answers for any harness; OpenCode is here for a mixed staff.
             harnesses: vec!["claude-code", "opencode"],
             codex: false,
+            settle_ms: 0,
         }
     }
+}
+
+/// The variable that runs the kit in its paced mode: every case that asks for no settle
+/// of its own runs with the daemon's, counted as passed at the first look at rest, so the
+/// gate's other rules meet every path the kit drives (`npm run test:kit-paced`). Cases
+/// held to Node's traces are not held to them then: the gate's looks are none of Node's.
+pub const PACED_VARIABLE: &str = "CF_KIT_PACED";
+
+/// Whether the kit runs in its paced mode ([`PACED_VARIABLE`]).
+pub fn paced_mode() -> bool {
+    cf_base::env::Env::from_process()
+        .text(PACED_VARIABLE)
+        .is_some()
 }
 
 /// A test's engine and everything it is made with.
@@ -140,6 +157,7 @@ impl Context {
     }
 
     pub fn made(made: Made) -> Self {
+        let paced = paced_mode();
         let dir = tempfile::Builder::new()
             .prefix("cf-dispatch-")
             .tempdir()
@@ -217,6 +235,16 @@ impl Context {
                 launch_ms: 120_000,
                 open_ms: 60_000,
                 max_attempts: 3,
+                // No pacing, so every case keeps the timing it was written with; a
+                // case of the pacing's own asks for a settle (`Made::settle_ms`). In the
+                // kit's paced mode, a case that asks for none has the daemon's settle,
+                // counted as passed at the first look at rest.
+                settle_ms: if paced && made.settle_ms == 0 {
+                    Limits::default().settle_ms
+                } else {
+                    made.settle_ms
+                },
+                settle_from_first_look: paced && made.settle_ms == 0,
             },
         };
         let dispatcher = Dispatcher::new(seams.clone());

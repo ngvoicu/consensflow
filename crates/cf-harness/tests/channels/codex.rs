@@ -239,6 +239,7 @@ fn uses_the_owned_bridge_for_exact_identity_and_rejects_a_session_switch_after_t
             Some(Shown {
                 session: Session::Thread(SESSION.to_owned()),
                 available: true,
+                idle: None,
             })
         );
         let switched = "01a09094-a559-7db0-bf50-e2309856c3c0";

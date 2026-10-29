@@ -272,8 +272,33 @@ fn sha256_hex(text: &str) -> String {
 /// that never had a turn has none, and is answered with Codex's refusal, which
 /// names it), and a message handed over (as the start of a turn, or queued behind
 /// one) with what Codex answers, which the agent then takes.
-fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &Arc<Agent>) {
-    while let Ok(message) = socket.read() {
+fn serve<S: Read + Write + Timed>(
+    mut socket: WebSocket<S>,
+    behavior: Behavior,
+    agent: &Arc<Agent>,
+) {
+    // What Codex says unasked of the thread goes to its client between two of its
+    // requests: the read waits a moment at a time for one.
+    let notices = agent.listen();
+    let _ = socket.get_ref().time_out(Some(NOTICE_WAIT));
+    loop {
+        while let Ok(notice) = notices.try_recv() {
+            if socket.send(Message::text(notice.to_string())).is_err() {
+                return;
+            }
+        }
+        let message = match socket.read() {
+            Ok(message) => message,
+            Err(tungstenite::Error::Io(failed))
+                if matches!(
+                    failed.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue
+            }
+            Err(_) => return,
+        };
         let Message::Text(text) = message else {
             continue;
         };
@@ -312,6 +337,7 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
                 hand_over(agent, &request);
                 result(id, json!({ "turn": { "id": "turn-1" } }))
             }
+            Some("thread/read") => result(id, json!({ "thread": agent.read() })),
             Some("thread/queue/add") => {
                 hand_over(agent, &request);
                 result(id, json!({ "queuedMessage": { "id": "queue-1" } }))
@@ -343,6 +369,27 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
                 return;
             }
         }
+    }
+}
+
+/// How long a connection's read waits before what the agent says unasked is sent.
+const NOTICE_WAIT: Duration = Duration::from_millis(100);
+
+/// A connection whose reads can wait no longer than a while.
+trait Timed {
+    fn time_out(&self, after: Option<Duration>) -> std::io::Result<()>;
+}
+
+impl Timed for std::net::TcpStream {
+    fn time_out(&self, after: Option<Duration>) -> std::io::Result<()> {
+        self.set_read_timeout(after)
+    }
+}
+
+#[cfg(unix)]
+impl Timed for std::os::unix::net::UnixStream {
+    fn time_out(&self, after: Option<Duration>) -> std::io::Result<()> {
+        self.set_read_timeout(after)
     }
 }
 

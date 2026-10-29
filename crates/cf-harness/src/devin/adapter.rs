@@ -55,6 +55,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
+use cf_proto::panes::HumanInput;
 use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
@@ -422,6 +423,9 @@ struct DevinWindow {
     /// latest readiness read the input box empty on the screen, at this count of
     /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
     read_empty: Cell<Option<u64>>,
+    /// What the pane host said of the human's input at the latest readiness, where it
+    /// read a snapshot of the pane ([`Window::human_input`]).
+    input: RefCell<Option<HumanInput>>,
     /// What its record held when the window was opened again with no message to begin
     /// a turn. Devin resumed waits at its prompt and works on nothing, so no process is
     /// in the turn the record leaves, whatever it says: a final answer its store marks
@@ -454,6 +458,7 @@ impl DevinWindow {
             history: History::default(),
             looked: Cell::default(),
             read_empty: Cell::default(),
+            input: RefCell::default(),
             left_open: RefCell::new(left_open),
         }
     }
@@ -604,12 +609,17 @@ impl Window for DevinWindow {
         Box::pin(input_box::words_on_screen(host, pane, Harness::Devin))
     }
 
+    fn human_input(&self) -> Option<HumanInput> {
+        self.input.borrow().clone()
+    }
+
     fn ready<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
+            self.input.replace(None);
             let said = self.wire.read(self.time.wall_ms())?;
             if let Some(held) = self.shows_another(&said) {
                 return Ok(Readiness::Held(held));
@@ -617,6 +627,7 @@ impl Window for DevinWindow {
             let snapshot = pane::snapshot(host, pane)
                 .await
                 .map_err(|failed| failed.message)?;
+            self.input.replace(HumanInput::of(&snapshot));
             if snapshot.get("ok") != Some(&Value::Bool(true))
                 || js::truthy(snapshot.get("pasteInFlight"))
             {
@@ -700,6 +711,14 @@ impl Window for DevinWindow {
     /// contract's own false: `took` reaches the engine first, and holds the paste for good.
     fn took(&self) -> bool {
         self.history().is_some_and(|seen| seen.took)
+    }
+
+    fn input_box<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<input_box::InputBox>> {
+        Box::pin(input_box::on_screen(host, pane, Harness::Devin))
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

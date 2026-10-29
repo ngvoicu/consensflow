@@ -380,6 +380,84 @@ fn settled_record(thread: &str) -> Arc<Reading> {
     reading(vec![item], Settlement::Settled, None)
 }
 
+/// The broker's word that the thread is at work, which Codex says live, before its
+/// rollout says a turn began (3.0.7 chief-meeting, CMT-06): the window is at work by
+/// it, for the pacing, whatever the record says; idle, or no word, and it is not. A
+/// look whose broker did not answer keeps no word of it.
+#[test]
+fn a_window_is_at_work_while_the_broker_says_codex_last_called_its_thread_busy() {
+    let home = Home::new();
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: settled_record("any"),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let says = |idle: Value| {
+        let word =
+            json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
+        fakes
+            .loopback
+            .serve("GET /session", [replies(&word.to_string())]);
+    };
+    assert!(!window.at_work(), "nothing said yet");
+    for (idle, at_work) in [
+        (json!(false), true),
+        (json!(true), false),
+        (json!(false), true),
+        (json!(null), false),
+    ] {
+        says(idle.clone());
+        let observed = finished(window.observe()).unwrap();
+        assert!(observed.settled, "the record's word stands for its lane");
+        assert_eq!(window.at_work(), at_work, "{idle}");
+    }
+}
+
+/// A window the broker last heard at work is asked again when the engine says so
+/// (`Window::recheck`, T-842's P2: a lost `turn/completed`): the broker's refreshed word
+/// is the window's from then on.
+#[test]
+fn a_recheck_takes_the_brokers_refreshed_word_on_whether_codex_is_at_work() {
+    let home = Home::new();
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: settled_record("any"),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let says = |route: &str, idle: bool| {
+        let word =
+            json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
+        fakes
+            .loopback
+            .serve(&format!("GET {route}"), [replies(&word.to_string())]);
+    };
+    says("/session", false);
+    finished(window.observe()).unwrap();
+    assert!(window.at_work());
+    fakes.loopback.take_asked();
+    says("/session", true);
+    finished(window.recheck());
+    let asked: Vec<String> = fakes
+        .loopback
+        .take_asked()
+        .into_iter()
+        .map(|request| request.url)
+        .collect();
+    assert!(
+        asked.len() == 1 && asked[0].ends_with("/session?refresh"),
+        "{asked:?}"
+    );
+    assert!(!window.at_work(), "Codex said idle when asked again");
+}
+
 #[test]
 fn follows_the_window_to_the_thread_a_new_or_resume_left_it_on_holding_while_it_shows_none() {
     let home = Home::new();

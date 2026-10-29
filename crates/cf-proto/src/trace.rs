@@ -8,6 +8,7 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
 
 use crate::ledger::DeletedProject;
+use crate::panes::HumanInput;
 
 /// A line of the trace: when it happened, and what.
 #[derive(Debug, Clone, PartialEq)]
@@ -54,8 +55,15 @@ pub enum WindowEvent {
     },
     /// `window.kill_failed`: the pane host would not end it, in its words.
     KillFailed { error: Option<String> },
-    /// `delivery.held`: a message waits for the window, and why.
-    DeliveryHeld { message: i64, reason: String },
+    /// `delivery.held`: a message waits for the window, and why; and what the pane host
+    /// said of the human's input at that look, where the look read it (`typed`,
+    /// `typedQuietMs`, `unsent`, `humanWrites`: the trace a hold for words nobody typed
+    /// is read from, T-839).
+    DeliveryHeld {
+        message: i64,
+        reason: String,
+        input: Option<HumanInput>,
+    },
     /// `delivery.enter_again`: Enter pressed once more for a paste.
     EnterAgain { message: i64 },
 }
@@ -113,9 +121,30 @@ impl Serialize for TraceLine {
                         line.serialize_entry("reason", reason)?;
                     }
                     WindowEvent::KillFailed { error } => line.serialize_entry("error", error)?,
-                    WindowEvent::DeliveryHeld { message, reason } => {
+                    WindowEvent::DeliveryHeld {
+                        message,
+                        reason,
+                        input,
+                    } => {
                         line.serialize_entry("message", message)?;
                         line.serialize_entry("reason", reason)?;
+                        if let Some(input) = input {
+                            let writes: Vec<Value> = input
+                                .writes
+                                .iter()
+                                .map(|write| {
+                                    serde_json::json!({
+                                        "agoMs": write.ago_ms,
+                                        "length": write.length,
+                                        "classes": write.classes,
+                                    })
+                                })
+                                .collect();
+                            line.serialize_entry("typed", &input.typed)?;
+                            line.serialize_entry("typedQuietMs", &input.typed_quiet_ms)?;
+                            line.serialize_entry("unsent", &input.unsent)?;
+                            line.serialize_entry("humanWrites", &writes)?;
+                        }
                     }
                     WindowEvent::EnterAgain { message } => {
                         line.serialize_entry("message", message)?;
@@ -164,6 +193,7 @@ mod tests {
         let held = WindowEvent::DeliveryHeld {
             message: 7,
             reason: "the window is not ready for a paste: a paste is on its way".to_owned(),
+            input: None,
         };
         assert_eq!(
             written(&at(Some(2), Some("zeus"), held)),
@@ -177,6 +207,37 @@ mod tests {
             )),
             r#"{"at":"2026-09-19T12:00:00.000Z","kind":"delivery.enter_again","project":2,"participant":"zeus","message":7}"#
         );
+    }
+    /// A held delivery's line carries what the pane host said of the human's input at that
+    /// look, read field by field from its snapshot (T-883): a kind by its known name alone,
+    /// and nothing else the snapshot held.
+    #[test]
+    fn a_held_deliverys_line_says_what_the_pane_host_said_of_the_humans_input() {
+        let snapshot = serde_json::json!({
+            "ok": true,
+            "typed": 3,
+            "typedQuietMs": 1200,
+            "unsent": true,
+            "outputQuietMs": 9,
+            "bottom": ["> QZXJ"],
+            "humanWrites": [
+                { "agoMs": 1500, "length": 25, "classes": ["string"] },
+                { "agoMs": 1200, "length": 4, "classes": ["text", "QZXJ"], "bytes": "QZXJ" },
+            ],
+        });
+        let input = HumanInput::of(&snapshot);
+        let held = WindowEvent::DeliveryHeld {
+            message: 7,
+            reason:
+                "the window is not ready for a paste: you have typed in this window and not sent it"
+                    .to_owned(),
+            input,
+        };
+        assert_eq!(
+            written(&at(Some(2), Some("chief"), held)),
+            r#"{"at":"2026-09-19T12:00:00.000Z","kind":"delivery.held","project":2,"participant":"chief","message":7,"reason":"the window is not ready for a paste: you have typed in this window and not sent it","typed":3,"typedQuietMs":1200,"unsent":true,"humanWrites":[{"agoMs":1500,"length":25,"classes":["string"]},{"agoMs":1200,"length":4,"classes":["text"]}]}"#
+        );
+        assert_eq!(HumanInput::of(&serde_json::json!({ "ok": false })), None);
     }
 
     #[test]

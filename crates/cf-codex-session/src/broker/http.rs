@@ -87,6 +87,11 @@ async fn route(
     if request.method() == Method::GET && target == "/session" {
         return Ok(json(StatusCode::OK, &shared.session()));
     }
+    // The same, Codex asked again first where the broker last heard the thread busy.
+    if request.method() == Method::GET && target == "/session?refresh" {
+        shared.refresh_idle().await;
+        return Ok(json(StatusCode::OK, &shared.session()));
+    }
     if request.method() != Method::POST || target != "/deliver" {
         return Ok(refuse(StatusCode::NOT_FOUND, Refusal::InvalidRecord));
     }

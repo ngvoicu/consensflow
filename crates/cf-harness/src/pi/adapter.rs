@@ -254,6 +254,13 @@ impl Window for PiWindow {
             let session = self.session.borrow().clone();
             let target = self.channel.target(&session, pane, host);
             let sent = send(&*self.time, &*self.entropy, &target, &window_text(text)).await?;
+            // Refused for being at work: no attempt is spent on it (`pacing`, D9).
+            if sent.busy() {
+                return Ok(Admission::Busy {
+                    reason: "Pi is at work: its extension sends nothing until it is idle"
+                        .to_owned(),
+                });
+            }
             Ok(admission(&sent.reading(), "Pi refused it", true))
         })
     }

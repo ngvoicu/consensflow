@@ -429,6 +429,11 @@ const RERECORD: &str = "CF_RERECORD_DEPARTED";
 /// Holds a closed test to the Node trace of the test named `name` in `suites`,
 /// or, if the engine departs from Node's in it, to the trace of its own.
 pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
+    // The paced mode's gate looks and asks the pane host where Node's never did: what such
+    // a case holds is its own assertions (`cf_engine::testing::PACED_VARIABLE`).
+    if cf_engine::testing::paced_mode() {
+        return;
+    }
     let key = (
         suites.iter().map(|suite| (*suite).to_owned()).collect(),
         name.to_owned(),

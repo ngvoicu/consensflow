@@ -281,6 +281,7 @@ fn an_uncertain_hand_over_to_codex_is_never_given_back_by_an_enter_and_arrives_o
     let context = Context::made(Made {
         harnesses: vec!["claude-code", "opencode", "codex"],
         codex: false,
+        ..Made::default()
     });
     let project = context
         .open_project(json!({

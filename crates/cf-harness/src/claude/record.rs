@@ -4,8 +4,8 @@
 //! The transcript says what the session did in records of several types: the
 //! user's turns, the assistant's messages (each written as one record or
 //! several, its fragments), the operations on Claude Code's queue of
-//! messages, the attachments a hook added, and the system's own records of a
-//! turn's end.
+//! messages, the attachments a hook added or that bring a message into a turn
+//! under way, and the system's own records of a turn's end.
 //!
 //! A turn is settled once the transcript says it ended, with no tool call or
 //! queued message open: natively (an API error, an interrupt, the output of a

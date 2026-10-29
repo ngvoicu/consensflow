@@ -225,6 +225,7 @@ impl Shared {
             // Whether a delivery would be taken now: the dispatcher holds a
             // message while this is false, instead of spending its attempts.
             available: state.available(open),
+            idle: state.idle(),
         }
     }
 }

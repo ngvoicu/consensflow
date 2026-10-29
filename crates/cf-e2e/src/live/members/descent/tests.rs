@@ -163,6 +163,30 @@ fn a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_b
 }
 
 #[test]
+fn a_process_is_stopped_or_let_go_on_only_while_it_is_still_the_one_chosen() {
+    use super::testing::{Listed, Now};
+
+    // As its end: 102 has gone, 103's number is another process's, 104 refuses.
+    let chosen: Vec<Running> = (101..=104)
+        .map(|pid| running(pid, u64::from(pid), 1, "claude"))
+        .collect();
+    let machine = Listed::new(chosen.clone())
+        .with(102, Now::Nobody)
+        .with(103, Now::Began(999))
+        .with(104, Now::Unending);
+    let said = pause_chosen_by(&machine, &chosen, Pause::Stop);
+    let pids =
+        |found: &[Running]| -> Vec<u32> { found.iter().map(|one| one.identity.pid).collect() };
+    assert_eq!(pids(&said.ended), [101]);
+    assert_eq!(pids(&said.gone), [102, 103]);
+    assert_eq!(
+        said.problems(),
+        ["process 104 (claude) may still run: its pause failed: refused"]
+    );
+    assert_eq!(machine.ended(), [101], "what was reached");
+}
+
+#[test]
 fn a_mac_lists_a_process_with_when_it_began_to_the_microsecond_and_not_one_whose_number_changed_hands(
 ) {
     // `ps` lists 10, 11 and 12; since, 11 has ended and its number is a process that 99

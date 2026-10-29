@@ -23,8 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, Opening, Over, Prepared, Readiness,
-    Skill, Trusts, TurnLeft, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
+    Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -101,6 +101,14 @@ pub struct FakeAgent {
     /// Its harness says its window waits at its prompt, whatever its record says of the
     /// turn ([`Observed::at_prompt`]): set by [`FakeAdapter::answer_never_over`].
     pub at_prompt: bool,
+    /// Its harness's live word says its window is at work, whatever its record says
+    /// (`Window::at_work`: Codex's broker).
+    pub at_work: bool,
+    /// What its harness says of `at_work` when asked again (`Window::recheck`): none
+    /// leaves the word as it was.
+    pub at_work_after_recheck: Option<bool>,
+    /// How many times its harness was asked again.
+    pub rechecked: u32,
     /// Another program than the window's has shown its conversation since it opened
     /// ([`Observed::shared`]): a Claude Code the human started outside ConsensFlow.
     pub shared: bool,
@@ -181,6 +189,9 @@ pub struct FakeAdapter {
     /// What its windows' input boxes show (`unsent_words`): none, as an adapter
     /// with no reader of its harness's box.
     pub box_words: RefCell<Option<String>>,
+    /// What its windows' last `ready` read of the human's input (`human_input`): none, as
+    /// an adapter that reads no snapshot of the pane.
+    pub human_input: RefCell<Option<cf_proto::panes::HumanInput>>,
     /// A `started` of the test's own, that fails some windows.
     pub started: RefCell<Option<Started>>,
     /// A `came_up` of the test's own, that says a window came up after all.
@@ -283,6 +294,13 @@ pub struct FakeAdapter {
     /// The readings of the windows opened from now on say the record each item
     /// is of: every harness's but Devin's, whose items are its store's.
     pub says_places: Cell<bool>,
+    /// Its windows' harness has a word of its own that the window is at rest
+    /// (`Window::idle_word`): every harness's but one with no such word, whose
+    /// windows are read at rest by the pacing's fallback.
+    pub idle_word: Cell<bool>,
+    /// What its windows' input box holds on their screen (`Window::input_box`): none,
+    /// as a window whose box no reader reads, unless a test says.
+    pub input_box: Cell<Option<InputBox>>,
 }
 
 impl FakeAdapter {
@@ -323,6 +341,7 @@ impl FakeAdapter {
             items,
             ready: RefCell::new(None),
             box_words: RefCell::new(None),
+            human_input: RefCell::new(None),
             started: RefCell::new(None),
             came_up: RefCell::new(None),
             prepare: RefCell::new(None),
@@ -355,6 +374,8 @@ impl FakeAdapter {
             resumes_records: Cell::new(false),
             trusts: RefCell::new(None),
             says_places: Cell::new(true),
+            idle_word: Cell::new(true),
+            input_box: Cell::new(None),
         })
     }
 
@@ -980,6 +1001,9 @@ impl Asked {
             takes_back: false,
             took_back: false,
             at_prompt: false,
+            at_work: false,
+            at_work_after_recheck: None,
+            rechecked: 0,
             shared: false,
             over: Over::No,
             busy_when_interrupted: false,

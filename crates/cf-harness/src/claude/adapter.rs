@@ -72,7 +72,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{HumanInput, Servers};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -212,6 +212,7 @@ impl Adapter for ClaudeAdapter {
                     put_back: Cell::new(false),
                     clear_first: Cell::new(false),
                     read_empty: Cell::new(None),
+                    input: RefCell::new(None),
                     left_open: RefCell::new(left_open),
                     over_since: RefCell::new(None),
                     relaunched,
@@ -309,6 +310,9 @@ struct ClaudeWindow {
     /// latest readiness read the input box empty on the screen, at this count of
     /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
     read_empty: Cell<Option<u64>>,
+    /// What the pane host said of the human's input at the latest readiness, where it
+    /// read a snapshot of the pane ([`Window::human_input`]).
+    input: RefCell<Option<HumanInput>>,
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
@@ -504,6 +508,10 @@ impl Window for ClaudeWindow {
         Box::pin(input_box::words_on_screen(host, pane, Harness::Claude))
     }
 
+    fn human_input(&self) -> Option<HumanInput> {
+        self.input.borrow().clone()
+    }
+
     /// A paste waits for the window to be readable, on its conversation,
     /// with no paste going in, and for what the human typed and did not send,
     /// unless the input box reads empty on the screen ([`input_box::unsent`]).
@@ -517,12 +525,14 @@ impl Window for ClaudeWindow {
         pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
+            self.input.replace(None);
             if self.status().is_some_and(|live| self.elsewhere(&live)) {
                 return Ok(Readiness::Held(Held::ShowsAnother));
             }
             let snapshot = pane::snapshot(host, pane)
                 .await
                 .map_err(|failed| failed.message)?;
+            self.input.replace(HumanInput::of(&snapshot));
             if snapshot.get("ok") != Some(&Value::Bool(true)) {
                 // The host's own word for why, as a template writes it.
                 let said = snapshot
@@ -585,6 +595,20 @@ impl Window for ClaudeWindow {
             }
             Ok(admitted)
         })
+    }
+
+    /// The box as the next paste meets it: one its own hand-over empties first (the
+    /// message an interrupt of ours put back, a `/compact` the human's cancel left, which
+    /// [`ClaudeWindow::ready`] found there) holds nothing the paste would go in behind.
+    fn input_box<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        if self.restored.get() || self.clear_first.get() {
+            return Box::pin(async { Some(InputBox::Empty) });
+        }
+        Box::pin(input_box::on_screen(host, pane, Harness::Claude))
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

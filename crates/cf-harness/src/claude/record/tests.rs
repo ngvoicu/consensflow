@@ -10,7 +10,8 @@
 //! Node's reading) and the jobs (`jobs`, which Node's never counted), the tool
 //! calls and how the items are ordered (`items`),
 //! the messages queued (`queues`) and a relaunch, which empties the queue
-//! (`restart`), the API's refusals (`refusals`), the output of a `/clear`
+//! (`restart`), a message taken into a turn under way (`absorbed`), the API's
+//! refusals (`refusals`), the output of a `/clear`
 //! (`clear`) and of the other commands typed at the prompt (`commands`), a
 //! compaction while idle (`compaction`), the record beside a message that says where
 //! its images came from (`companions`), an interrupt (`interrupts`), and the
@@ -21,6 +22,7 @@
 //! reading (`fields`). A long transcript, made like a big one (`synthetic`),
 //! is read (`scale`) and measured (`memory`).
 
+mod absorbed;
 mod agents;
 mod ancestry;
 mod boundaries;

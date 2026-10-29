@@ -87,13 +87,15 @@
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::{Input, Observed, Pane};
+use cf_harness::contract::{Input, InputBox, Observed, Pane};
 use cf_harness::records::{Reading, Role, Settlement};
+use cf_ledger::NewNote;
+use cf_proto::ledger::MessageView;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
 use crate::deliveries::{Delivering, Enter, Uncleared, Unread};
-use crate::delivery_text::is_paste_of;
+use crate::delivery_text::{header_shape, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
@@ -133,6 +135,21 @@ struct Rest {
     /// Since when the paste has been free (`Delivering::free_since`): none while the
     /// harness holds it.
     free: Option<i64>,
+}
+
+/// What the looks at a window read while a message was on its way, for its retry or
+/// failure to say (`look`, 3.0.7 chief-meeting CMT-08, T-760's F5): every retry
+/// classifies itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Watched {
+    message: i64,
+    /// When the last look at it came, on the engine's clock.
+    last: i64,
+    /// The longest time between two looks at it: a loaded machine's.
+    longest_pass: i64,
+    /// How long the window's screen had printed nothing, as the pane host said before
+    /// it was to go again.
+    output_quiet_ms: Option<i64>,
 }
 
 impl Dispatcher {
@@ -205,6 +222,7 @@ impl Dispatcher {
         let Some(delivering) = record.delivery.borrow().delivering.clone() else {
             return Ok(());
         };
+        self.watched(record, &delivering);
         if delivering.launch {
             // A first message waits as long as its window asks one of the questions its
             // harness asks as it starts (its folder's trust, its folder's grants, the
@@ -308,6 +326,16 @@ impl Dispatcher {
         if !self.read_once_more(record, delivering.message).await? {
             return Ok(());
         }
+        // A record that holds the message's header in an item the proof cannot match
+        // has it, unproven: it is never pasted again (CMT-23).
+        if self.arrived_unproven(record, observed, delivering.message)? {
+            return Ok(());
+        }
+        // Nor does a paste go again that is still there for the window: on its way to
+        // its record, in its input box, or on its screen (CMT-24).
+        if self.paste_still_there(record, delivering.message).await? {
+            return Ok(());
+        }
         record.delivery.borrow_mut().delivering = None;
         // A paste the harness record never showed after the whole window, the
         // window at rest all of it, did not land: sending it again is how it
@@ -336,7 +364,267 @@ impl Dispatcher {
         } else {
             "the harness record never showed it".to_owned()
         };
-        self.settle_failure(delivering, &because, true)
+        let look = self.arrival_look(record, observed, delivering.message, rested);
+        self.settle_failure_looked(delivering, &because, true, Some(&look))
+    }
+
+    /// Whether the paste of `message`, which the record never showed in its whole wait,
+    /// is still there for the window (3.0.7 chief-meeting, CMT-24, T-760's F4: on a loaded
+    /// Mac, m-3093 and m-4273 had no record of their paste for 177 s and 196 s, and were
+    /// pasted again). It is where the window's screen printed within the last
+    /// [`ENTER_AGAIN_QUIET_MS`] (a window that draws is at work, or taking the paste in), and
+    /// where its input box holds it: then an Enter is pressed once more, as the hand-over's
+    /// is ([`Dispatcher::enter_again`], whose guards keep the human's own words from going
+    /// with it). Either way its rest begins again, and nothing is pasted: a paste goes
+    /// again only where it is gone from the screen as from the record. Only a paste is
+    /// asked of: what a harness took through a channel of its own is its record's. Limit: a
+    /// screen that drew nothing since the paste is no proof either way (a stopped program
+    /// that has not read it, a TUI that dropped it: `devin_notes_twice`'s stand-in), so a
+    /// paste whose window drew it in no box it reads goes again, as before.
+    async fn paste_still_there(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        message: i64,
+    ) -> Result<bool, EngineError> {
+        if !self.pasted(record) {
+            return Ok(false);
+        }
+        let (window, pane) = {
+            let part = record.window.borrow();
+            (part.window.clone(), part.pane.clone())
+        };
+        let (Some(window), Some(pane)) = (window, pane) else {
+            return Ok(false);
+        };
+        let watched = record
+            .delivery
+            .borrow()
+            .watched
+            .filter(|watched| watched.message == message);
+        let printing = watched
+            .and_then(|watched| watched.output_quiet_ms)
+            .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);
+        let boxed = if printing {
+            None
+        } else {
+            returning(window.input_box(&*self.seams.host, &pane)).await
+        };
+        let on_its_way = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.message == message);
+        if self.forgotten(record) || !on_its_way {
+            return Ok(true);
+        }
+        let held = boxed == Some(InputBox::Holds);
+        if !(printing || held) {
+            return Ok(false);
+        }
+        if held {
+            self.enter_again(record, message).await?;
+        }
+        let now = self.now();
+        if let Some(delivering) = record
+            .delivery
+            .borrow_mut()
+            .delivering
+            .as_mut()
+            .filter(|delivering| delivering.message == message)
+        {
+            // A whole wait from now, the half hour's too: the next ask comes no sooner.
+            delivering.rested_since = Some(now);
+            delivering.free_since = Some(now);
+        }
+        self.seams.log.warn(&format!(
+            "m-{message} was to go again, its record never having shown it: its window {}; it waits once more, and is not pasted again",
+            if held {
+                "holds it in its input box, and Enter was pressed once more"
+            } else {
+                "printed on its screen within the last seconds"
+            }
+        ));
+        Ok(true)
+    }
+
+    /// A look at the window while `delivering` is on its way: the time since the last
+    /// one, or since its hand-over, is a pass, the longest of which its retry says.
+    fn watched(&self, record: &Record, delivering: &Delivering) {
+        let (now, message) = (self.now(), delivering.message);
+        let mut part = record.delivery.borrow_mut();
+        let watched = part
+            .watched
+            .filter(|watched| watched.message == message)
+            .map_or(
+                Watched {
+                    message,
+                    last: now,
+                    longest_pass: now - delivering.since,
+                    output_quiet_ms: None,
+                },
+                |watched| Watched {
+                    last: now,
+                    longest_pass: watched.longest_pass.max(now - watched.last),
+                    ..watched
+                },
+            );
+        part.watched = Some(watched);
+    }
+
+    /// What the looks read of the window as `message` is to go again, which its retry
+    /// or failure says (CMT-08): how many of the record's items hold its header and
+    /// where the first of them has it, the record's last item, how long the window
+    /// rested, the longest pass and how long its screen printed nothing.
+    fn arrival_look(
+        &self,
+        record: &Record,
+        observed: &Observed,
+        message: i64,
+        rested: i64,
+    ) -> Value {
+        let marker = marker_of(message);
+        let items = observed.items();
+        let holding: Vec<_> = items
+            .iter()
+            .filter(|item| item.text.contains(&marker))
+            .collect();
+        let watched = record
+            .delivery
+            .borrow()
+            .watched
+            .filter(|watched| watched.message == message);
+        json!({
+            "markers": holding.len(),
+            "first": holding.first().map(|item| json!({
+                "role": item.role,
+                "shape": header_shape(&item.text, message),
+            })),
+            "lastItem": items.last().map(|item| &*item.id),
+            "restMs": rested,
+            "longestPassMs": watched.map(|watched| watched.longest_pass),
+            "outputQuietMs": watched.and_then(|watched| watched.output_quiet_ms),
+        })
+    }
+
+    /// Whether `message`, on its way, arrived unproven (3.0.7 chief-meeting, CMT-23): a
+    /// user item its window's record was given since its delivery began holds its header, and
+    /// the proof (`is_paste_of`) does not take it for its paste. It is then taken for
+    /// arrived, never pasted again and never said not to have reached its window: its
+    /// shape is logged for filing (`delivery.unproven`), and whoever can act on it is
+    /// told once. A human who quoted the header there meanwhile is covered by that note.
+    fn arrived_unproven(
+        &self,
+        record: &Record,
+        observed: &Observed,
+        message: i64,
+    ) -> Result<bool, EngineError> {
+        // The harness's own words (a notification, a compaction's summary) are no item
+        // the window was given: one that quotes the header proves nothing (T-842's P3).
+        let own = |item: &str| {
+            observed
+                .items()
+                .iter()
+                .any(|seen| &*seen.id == item && (seen.synthetic || seen.compaction))
+        };
+        if !self.take_unproven(record.id, message, &own)? {
+            return Ok(false);
+        }
+        record.delivery.borrow_mut().delivering = None;
+        Ok(true)
+    }
+
+    /// Takes `message`, on its way to `participant`'s window, for arrived, unproven, where
+    /// ConsensFlow's copy of the window's conversation holds, since the message's delivery
+    /// began, a user's item with its header that is none of the harness's own (`own`, and
+    /// no compaction's summary): the look's rule past the arrival window, and the window's
+    /// end's (T-842's P3). The shape goes to `delivery.unproven`, and whoever can act is
+    /// told once. False where no such item is, or the message is on its way no more.
+    pub(crate) fn take_unproven(
+        &self,
+        participant: i64,
+        message: i64,
+        own: &dyn Fn(&str) -> bool,
+    ) -> Result<bool, EngineError> {
+        let found = {
+            // Since its delivery began: the hand-over's own time moves with an Enter
+            // pressed once more, which admits the paste again (Devin, 2026-10-27). The
+            // record keeps it; a start asks the ledger's events.
+            let kept = self
+                .record(participant)
+                .and_then(|record| record.delivery.borrow().begun_at.clone())
+                .filter(|(of, _)| *of == message)
+                .map(|(_, at)| at);
+            let ledger = self.seams.ledger.borrow();
+            let begun = match kept {
+                Some(at) => Some(at),
+                None => ledger.delivery_begun_at(message)?,
+            };
+            let Some(begun) = begun else {
+                return Ok(false);
+            };
+            ledger
+                .copied_items_since(participant, &marker_of(message), &begun)?
+                .into_iter()
+                .find(|(item, _)| !own(item))
+        };
+        let Some((item, text)) = found else {
+            return Ok(false);
+        };
+        let on_its_way = self.seams.ledger.borrow().message(message)?;
+        let Some(on_its_way) = on_its_way.filter(|found| found.state == "delivering") else {
+            return Ok(false);
+        };
+        let tell = self.unproven_notes(&on_its_way)?;
+        self.seams.ledger.borrow_mut().confirm_unproven(
+            message,
+            &item,
+            &header_shape(&text, message),
+            &tell,
+        )?;
+        self.changed();
+        Ok(true)
+    }
+
+    /// The notes that say `message` arrived unproven: to its task's requester where that
+    /// is another than its recipient, else to the chief, who for its own window is the
+    /// recipient, and reads it there; and to a member recipient's own window, which may
+    /// not have it (T-842's P3).
+    fn unproven_notes(&self, message: &MessageView) -> Result<Vec<NewNote>, EngineError> {
+        let requester = match message.task_number {
+            Some(number) => self
+                .seams
+                .ledger
+                .borrow()
+                .task(message.project_id, number)?
+                .map(|thread| thread.task.requester),
+            None => None,
+        };
+        let to = requester
+            .filter(|requester| *requester != message.recipient)
+            .unwrap_or_else(|| "chief".to_owned());
+        let mut notes = vec![NewNote {
+            from: None,
+            to: to.clone(),
+            task: message.task_number,
+            body: format!(
+                "m-{id}'s arrival couldn't be proven from the record; it was not pasted again. @{who} can read it with `cf inbox read m-{id}`.",
+                id = message.id,
+                who = message.recipient,
+            ),
+        }];
+        if message.recipient_role != "chief" && message.recipient != to {
+            notes.push(NewNote {
+                from: None,
+                to: message.recipient.clone(),
+                task: message.task_number,
+                body: format!(
+                    "m-{id}'s arrival couldn't be proven from your window's record; it was not pasted again. Read it with `cf inbox read m-{id}`.",
+                    id = message.id,
+                ),
+            });
+        }
+        Ok(notes)
     }
 
     /// The conversation the message on its way was pasted into, where the window is on
@@ -652,7 +940,7 @@ impl Dispatcher {
 
     /// The pane host's word on the window now: none where it failed, or came too late
     /// ([`SLOW_READ_MS`]) to say what the window does now.
-    async fn snapshot_now(&self, pane: &Pane) -> Option<Value> {
+    pub(crate) async fn snapshot_now(&self, pane: &Pane) -> Option<Value> {
         let asked = self.now();
         let body = json!({ "id": pane.id, "generation": pane.generation });
         // `.catch(() => null)` made a promise of its own to wait on, a turn
@@ -686,6 +974,18 @@ impl Dispatcher {
             self.unknown(record, NO_ANSWER);
             return Ok(false);
         };
+        if let Some(watched) = record
+            .delivery
+            .borrow_mut()
+            .watched
+            .as_mut()
+            .filter(|watched| watched.message == message)
+        {
+            watched.output_quiet_ms = snapshot
+                .get("outputQuietMs")
+                .and_then(Value::as_f64)
+                .map(|quiet| quiet as i64);
+        }
         if js::truthy(snapshot.get("pasteInFlight")) {
             self.unknown(record, "its pane host is writing a paste into it still");
             return Ok(false);

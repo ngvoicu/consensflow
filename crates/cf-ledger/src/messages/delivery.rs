@@ -15,7 +15,7 @@ use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
 use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
-use super::{known_message, message_task, messages, require_message, settle_answered};
+use super::{known_message, message_task, messages, require_message, settle_answered, NewNote};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
@@ -75,7 +75,10 @@ pub(crate) fn next_delivery_of(
 }
 
 /// The head of the participant's queue that may go now, of the one row `only`
-/// when it names one.
+/// when it names one. A member's question goes ahead of the rest, as its member
+/// is blocked on it, and the rest go oldest first; an urgent question is the
+/// chief's `cf tell`, no member's question, and keeps its place by age (3.0.7
+/// chief-meeting, CMT-07).
 fn next_delivery_among(
     store: &Store,
     participant_id: i64,
@@ -112,7 +115,7 @@ fn next_delivery_among(
          ))
          AND NOT {}
          AND (?3 IS NULL OR m.id = ?3)
-       ORDER BY m.id LIMIT 1",
+       ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id LIMIT 1",
             sql_list(&HELD_TASK_STATES),
             behind_held_words("m")
         ))?
@@ -250,8 +253,14 @@ pub(crate) fn first_received(
 }
 
 /// A message's delivery begins: it is what the paste is told by, with the
-/// rows it carries, which are the ones still waiting now and no others.
-pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun, LedgerError> {
+/// rows it carries, which are the ones still waiting now and no others. `look`
+/// is what the look that let it go read of the window (the pacing's evidence:
+/// 3.0.7 chief-meeting, CMT-08), which its `delivery.begun` says.
+pub(crate) fn begin_delivery(
+    store: &mut Store,
+    message_id: i64,
+    look: Option<&Value>,
+) -> Result<Begun, LedgerError> {
     store.write(|store| {
         let message = require_message(store, message_id, "queued")?;
         if message.recipient_role == "human" {
@@ -307,15 +316,71 @@ pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun
          WHERE id = ?",
             [message_id],
         )?;
-        store.log(
-            message.project_id,
-            "delivery.begun",
-            json!({ "message": message_id, "attempt": message.attempts + 1 }),
-        )?;
+        let begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
+        store.log(message.project_id, "delivery.begun", looked(begun, look))?;
         Ok(Begun {
             message: known_message(store, message_id)?,
             carried: carried(store, message_id)?,
         })
+    })
+}
+
+/// An event's `data` with what the engine's look read of the window, where it says
+/// (`look`: the evidence a delivery's begin, retry or failure is classified by, 3.0.7
+/// chief-meeting CMT-08).
+fn looked(mut data: Value, look: Option<&Value>) -> Value {
+    if let Some(look) = look {
+        data["look"] = look.clone();
+    }
+    data
+}
+
+/// When the delivery of message `message_id` on its way began (its last
+/// `delivery.begun`), as the ledger writes a time: none while it is not on its way.
+/// Its hand-over time is no such mark: an Enter pressed once more admits the paste
+/// again, and moves it.
+pub(crate) fn delivery_begun_at(
+    store: &Store,
+    message_id: i64,
+) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT e.at FROM message m
+               JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.begun'
+                AND json_extract(e.data, '$.message') = m.id
+              WHERE m.state = 'delivering' AND m.id = ?
+              ORDER BY e.id DESC LIMIT 1",
+            [message_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
+/// A message on its way whose window's record holds, after its hand-over, a user
+/// item that carries its header but is no paste of it the proof can match (3.0.7
+/// chief-meeting, CMT-23): it is taken for arrived, unproven (`unproven` in its
+/// receipt), never pasted again; `delivery.unproven` keeps the item's shape for
+/// filing, and `tell` says so, once, to whoever can act on it.
+pub(crate) fn confirm_unproven(
+    store: &mut Store,
+    message_id: i64,
+    item: &str,
+    shape: &Value,
+    tell: &[NewNote],
+) -> Result<MessageView, LedgerError> {
+    store.write(|store| {
+        let receipt = json!({ "item": item, "unproven": true });
+        let confirmed = confirm_delivery(store, message_id, Some(&receipt))?;
+        store.log(
+            confirmed.project_id,
+            "delivery.unproven",
+            json!({ "message": message_id, "item": item, "shape": shape }),
+        )?;
+        for note in tell {
+            super::note(store, confirmed.project_id, note)?;
+        }
+        Ok(confirmed)
     })
 }
 
@@ -682,6 +747,8 @@ pub(crate) fn retry_delivery(
     message_id: i64,
     reason: &str,
     refund: bool,
+    look: Option<&Value>,
+    log: bool,
 ) -> Result<MessageView, LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
@@ -723,11 +790,13 @@ pub(crate) fn retry_delivery(
             "UPDATE message SET handed_at = NULL WHERE carried_by = ? AND state = 'queued'",
             [message_id],
         )?;
-        store.log(
-            message.project_id,
-            "delivery.retried",
-            json!({ "message": message_id, "reason": reason }),
-        )?;
+        if log {
+            store.log(
+                message.project_id,
+                "delivery.retried",
+                looked(json!({ "message": message_id, "reason": reason }), look),
+            )?;
+        }
         store.db.execute(
             "UPDATE message SET carried_by = NULL
              WHERE id = ?1
@@ -756,7 +825,7 @@ pub(crate) fn fail_delivery(
     message_id: i64,
     reason: &str,
 ) -> Result<MessageView, LedgerError> {
-    give_up_delivery(store, message_id, reason).map(|(message, _)| message)
+    give_up_delivery(store, message_id, reason, None).map(|(message, _)| message)
 }
 
 /// What a delivery given up came to ([`give_up_delivery`]), which only the ledger
@@ -785,6 +854,7 @@ pub(crate) fn give_up_delivery(
     store: &mut Store,
     message_id: i64,
     reason: &str,
+    look: Option<&Value>,
 ) -> Result<(MessageView, GivenUp), LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
@@ -810,7 +880,7 @@ pub(crate) fn give_up_delivery(
         store.log(
             message.project_id,
             "delivery.failed",
-            json!({ "message": message_id, "reason": reason }),
+            looked(json!({ "message": message_id, "reason": reason }), look),
         )?;
         if let Some(task) = message_task(store, message_id)? {
             release_carried(store, task.id)?;

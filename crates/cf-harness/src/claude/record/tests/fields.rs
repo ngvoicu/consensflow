@@ -3,6 +3,7 @@
 //! changed, so the projection holds it, and so does the line it is built from
 //! (`keep`). A row is a scenario, the record of it that changes, and how.
 
+use super::absorbed::{field_case as taken_in, AT};
 use super::commands::{printed, typed_command};
 use super::jobs::monitor_wait;
 use super::projection::{interrupt, projected};
@@ -604,6 +605,36 @@ fn read() -> Vec<Row> {
             job_ended_mid_turn,
             6,
             in_the_attachment("type", json!("hook_success")),
+        ),
+        (
+            "attachment.origin.kind, of a message taken into a turn",
+            taken_in,
+            AT,
+            in_the_attachment("origin", json!({ "kind": "peer" })),
+        ),
+        (
+            "attachment.prompt, of a message taken into a turn",
+            taken_in,
+            AT,
+            in_the_attachment("prompt", json!("Other words")),
+        ),
+        (
+            "attachment.commandMode, of a message taken into a turn",
+            taken_in,
+            AT,
+            in_the_attachment("commandMode", json!("bash")),
+        ),
+        (
+            "uuid, of a message taken into a turn",
+            taken_in,
+            AT,
+            is("uuid", json!("q2")),
+        ),
+        (
+            "timestamp, of a message taken into a turn",
+            taken_in,
+            AT,
+            is("timestamp", json!(LATER)),
         ),
         (
             "toolUseResult.taskId, of a monitor armed",

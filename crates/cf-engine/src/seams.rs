@@ -212,6 +212,16 @@ pub struct Limits {
     pub open_ms: i64,
     /// Attempts at a delivery before it fails.
     pub max_attempts: u32,
+    /// How long a window's looks must read it at rest on the same last item of its
+    /// record, with no key of the human's, before a message is typed into it
+    /// (`pacing`). None at all (0) is no pacing: a message goes at the first look
+    /// that reads the window at rest, as before 3.0.7.
+    pub settle_ms: i64,
+    /// The kit's paced mode alone (`CF_KIT_PACED`, `npm run test:kit-paced`): the settle
+    /// counts as passed at the first look at rest, so a case that never moves the clock
+    /// still meets every other rule of the gate (the human's keys, the fallback, the fresh
+    /// look and its box). False in every daemon.
+    pub settle_from_first_look: bool,
 }
 
 impl Default for Limits {
@@ -222,6 +232,8 @@ impl Default for Limits {
             launch_ms: 180_000,
             open_ms: 60_000,
             max_attempts: 3,
+            settle_ms: 3_000,
+            settle_from_first_look: false,
         }
     }
 }
@@ -236,6 +248,12 @@ pub const LAUNCH_MS_VARIABLE: &str = "CONSENSFLOW_LAUNCH_TIMEOUT_MS";
 /// record that comes late has to outlast it, so with the minute the daemon gives
 /// it, each such case takes minutes; nothing in a person's environment sets it.
 pub const ARRIVAL_MS_VARIABLE: &str = "CONSENSFLOW_ARRIVAL_TIMEOUT_MS";
+
+/// The variable that sets how long a window must read at rest before a message is
+/// typed into it, in milliseconds (`Limits::settle_ms`); 0 turns the pacing off. A
+/// test that runs many deliveries back to back would otherwise wait the settle at
+/// each; nothing in a person's environment sets it.
+pub const SETTLE_MS_VARIABLE: &str = "CONSENSFLOW_SETTLE_MS";
 
 /// The variable that sets how long the pane host has to answer a window's open, in
 /// milliseconds. A test of an open the host answers late would otherwise hold it a
@@ -257,6 +275,12 @@ impl Limits {
             arrival_ms: named(ARRIVAL_MS_VARIABLE).unwrap_or(default.arrival_ms),
             launch_ms: named(LAUNCH_MS_VARIABLE).unwrap_or(default.launch_ms),
             open_ms: named(OPEN_MS_VARIABLE).unwrap_or(default.open_ms),
+            // No settle is one a rig may ask for, so 0 is a value here.
+            settle_ms: env
+                .text(SETTLE_MS_VARIABLE)
+                .and_then(|text| text.parse::<i64>().ok())
+                .filter(|ms| *ms >= 0)
+                .unwrap_or(default.settle_ms),
             ..default
         }
     }
@@ -280,6 +304,12 @@ impl Limits {
                 LAUNCH_MS_VARIABLE,
             ),
             ("open wait", self.open_ms, default.open_ms, OPEN_MS_VARIABLE),
+            (
+                "settle",
+                self.settle_ms,
+                default.settle_ms,
+                SETTLE_MS_VARIABLE,
+            ),
         ]
         .into_iter()
         .filter(|(_, now, was, _)| now != was)
@@ -374,6 +404,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_settle_is_three_seconds_unless_the_environment_names_a_number_of_milliseconds_zero_among_them(
+    ) {
+        // The variable's name is written out, so that a rename shows here.
+        let settle =
+            |value: &str| Limits::of(&Env::from_vars([("CONSENSFLOW_SETTLE_MS", value)])).settle_ms;
+        assert_eq!(SETTLE_MS_VARIABLE, "CONSENSFLOW_SETTLE_MS");
+        assert_eq!(Limits::default().settle_ms, 3_000);
+        assert_eq!(settle("1500"), 1_500);
+        // No settle at all is a settle a rig may ask for: the pacing is off.
+        assert_eq!(settle("0"), 0);
+        for refused in ["", "-5", "soon", "1.5", "2s"] {
+            assert_eq!(settle(refused), 3_000, "{refused:?}");
+        }
+        let named = Limits::of(&Env::from_vars([(SETTLE_MS_VARIABLE, "0")]));
+        assert_eq!(
+            named,
+            Limits {
+                settle_ms: 0,
+                ..Limits::default()
+            },
+            "the rest is as it was"
+        );
+        assert_eq!(
+            named.cut_by_the_environment().as_deref(),
+            Some("limits set by the environment: settle 0 ms, not 3000 (CONSENSFLOW_SETTLE_MS)")
+        );
+    }
+
+    #[test]
     fn the_open_wait_is_a_minute_unless_the_environment_names_a_number_of_milliseconds() {
         // The variable's name is written out, so that a rename shows here.
         let wait = |value: &str| {
@@ -438,6 +497,8 @@ mod tests {
                 launch_ms: 1_500,
                 open_ms: 60_000,
                 max_attempts: 3,
+                settle_ms: 3_000,
+                settle_from_first_look: false,
             },
             "each variable sets its own wait and nothing else"
         );
