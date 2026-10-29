@@ -81,11 +81,16 @@ fn a_monitor_whose_shell_claude_code_ended_lets_its_task_go_though_what_the_shel
             .all(|(_, body)| !body.contains("cannot see on this machine")),
         "the host told the window's commands: {thread:?}"
     );
-    assert!(
-        is_alive(watched.pid()),
-        "what the ended shell ran runs on, as Claude Code leaves it"
-    );
-    signal(watched.pid(), Signal::Kill)?;
+    // What the ended shell ran was left running, as Claude Code leaves it. On Windows the
+    // free window's close after the result ends its job object whole, that with it; on Unix
+    // nothing ends it, and the case does.
+    if cfg!(unix) {
+        assert!(
+            is_alive(watched.pid()),
+            "what the ended shell ran runs on, as Claude Code leaves it"
+        );
+        signal(watched.pid(), Signal::Kill)?;
+    }
     rig.close()?;
     Ok(())
 }
