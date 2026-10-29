@@ -213,7 +213,8 @@ pub(crate) fn ask(
 
 /// The answer goes back to whoever asked; the one asked answers. A plain
 /// question's answer is delivered into the asker's window. A question with
-/// options is answered by choice (or by text, one line per question): that
+/// options is answered by choice (or by text: one line per question of an ask
+/// of several, any text for an ask of one, `require_choices`): that
 /// answer is read at once and never delivered, because the harness door
 /// that asked collects it and the tool call completes with it; the asker's
 /// task resumes here. A question on a task that is over (accepted, cancelled

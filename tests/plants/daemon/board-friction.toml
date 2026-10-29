@@ -7,6 +7,9 @@
 
 [run]
 friction-tell = ["cargo", "test", "--offline", "-p", "cf", "--test", "tell"]
+friction-answer-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "questions::"]
+friction-answer-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "questions::"]
+friction-answer-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers"]
 
 # --- T-689: the last line of a reply names its task ---
 
@@ -49,3 +52,45 @@ runs = ["cf-lib-board"]
 file = "crates/cf/src/board/task.rs"
 find = "        format!(\"\\n{}\", brief::sent(number, &text))"
 replace = "        format!(\"\\n{}\", brief::sent(0, &text))"
+
+# --- T-637: a text of several lines answers an ask of one question whole ---
+
+[[plant]]
+name = "board friction: answer: the lines of an answer to one question are one answer each"
+meant = "a_text_of_several_lines_is_the_one_answer_to_an_ask_of_one_question"
+runs = ["friction-answer-ledger", "friction-answer-receipt", "friction-answer-route"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = "            if questions.len() == 1 && lines.len() > 1 {"
+replace = "            if false {"
+
+[[plant]]
+name = "board friction: answer: an ask of several questions takes its whole text as one answer"
+meant = "reads_choices_from_lines_matching_labels_whatever_their_case"
+runs = ["friction-answer-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = "            if questions.len() == 1 && lines.len() > 1 {"
+replace = "            if lines.len() > 1 {"
+
+[[plant]]
+name = "board friction: answer: only the first line of a text of several lines is kept"
+meant = "a_text_of_several_lines_is_the_one_answer_to_an_ask_of_one_question"
+runs = ["friction-answer-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = "                vec![Value::from(vec![js::trim(&text)])]"
+replace = "                vec![Value::from(vec![lines[0]])]"
+
+[[plant]]
+name = "board friction: answer: the refusal of an ask of several questions does not say how many"
+meant = "a_text_of_several_lines_to_an_ask_of_several_questions_is_still_one_line_each"
+runs = ["friction-answer-ledger", "friction-answer-route"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = this ask has {count} questions; give one answer to each, one line each in the order asked (a label or your own words)
+replace = one answer per question ({count})
