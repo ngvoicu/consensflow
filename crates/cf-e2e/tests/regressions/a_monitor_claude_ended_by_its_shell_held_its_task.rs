@@ -13,7 +13,8 @@
 //!
 //! What the chief should see, on every platform: the task goes on once the monitor's
 //! notice came and its shell is gone, its last answer the result, though what the shell ran
-//! runs on; never a word that ConsensFlow cannot see the window's commands.
+//! runs on (until the window's close ends it); never a word that ConsensFlow cannot see the
+//! window's commands.
 //!
 //! The stand-in (`CLAUDE-MONITOR-ENDS` of the fake agent) ends the monitor as Claude Code
 //! 2.1.312 does on Windows: the shell alone, then the notice, with no status.
@@ -33,8 +34,7 @@ const WATCHING: &str = "Watching the command with Monitor";
 const EXPIRES: u64 = 6;
 
 #[test]
-fn a_monitor_whose_shell_claude_code_ended_lets_its_task_go_though_what_the_shell_ran_runs_on(
-) -> Outcome {
+fn a_monitor_whose_shell_claude_code_ended_lets_its_task_go_with_its_last_answer() -> Outcome {
     let rig = Rig::start(config())?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
@@ -81,14 +81,11 @@ fn a_monitor_whose_shell_claude_code_ended_lets_its_task_go_though_what_the_shel
             .all(|(_, body)| !body.contains("cannot see on this machine")),
         "the host told the window's commands: {thread:?}"
     );
-    // What the ended shell ran was left running, as Claude Code leaves it. On Windows the
-    // free window's close after the result ends its job object whole, that with it; on Unix
-    // nothing ends it, and the case does.
-    if cfg!(unix) {
-        assert!(
-            is_alive(watched.pid()),
-            "what the ended shell ran runs on, as Claude Code leaves it"
-        );
+    // What the ended shell ran was left running, as Claude Code leaves it, until the free
+    // window's close after the result ends it with what the window holds (the job object on
+    // Windows, the session on the Mac): whether it is still there when the case looks races
+    // that close (the gate's run on a loaded Mac, f1c04eed2), so the case only ends it.
+    if is_alive(watched.pid()) {
         signal(watched.pid(), Signal::Kill)?;
     }
     rig.close()?;

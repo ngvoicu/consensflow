@@ -2034,7 +2034,7 @@ replace = """        if self.env.on_windows() {
 
 [[plant]]
 name = "turn-end-min rig (Windows): Claude says nothing of its servers on Windows"
-meant = "a_monitor_whose_shell_claude_code_ended_lets_its_task_go_though_what_the_shell_ran_runs_on"
+meant = "a_monitor_whose_shell_claude_code_ended_lets_its_task_go_with_its_last_answer"
 platforms = ["windows"]
 runs = ["tem-rig-shell-ended"]
 builds = true
