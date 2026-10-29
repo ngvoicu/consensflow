@@ -343,8 +343,12 @@ fn a_chief_that_came_up_and_ended_with_a_gone_models_words_on_its_screen_keeps_i
         let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
         let project = context.with_staff(&["zeus"]);
         context.pass().unwrap();
-        context.adapter.answer("chief", "Hello");
-        context.pass().unwrap();
+        // It works: it is handed words and takes them, its record shows.
+        let note = context.note_from_consensflow(project.id, "chief", "Look at T-1");
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        assert_eq!(context.message(note.id).state, "delivered");
         context.host.exits_showing(
             Some(code),
             None,
@@ -524,4 +528,37 @@ fn a_launch_that_ended_with_code_0_before_it_came_up_keeps_its_model() {
     assert!(to_human(&context, project.id)
         .iter()
         .all(|body| !body.contains("no longer available")));
+}
+
+/// A chief that worked, was closed and resumed, and whose relaunch its harness refuses
+/// (Devin's resume on a model it no longer has ends at once): the window before took work,
+/// this one none, and its refusal is heard (CHF-06), whatever the conversation's history.
+#[test]
+fn a_resumed_chief_whose_relaunch_is_refused_starts_on_the_default() {
+    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    let note = context.note_from_consensflow(project.id, "chief", "Look at T-1");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).state, "delivered");
+    // Its turn over, the Close cuts nothing: the relaunch is handed nothing first.
+    context.adapter.answer("chief", "On it");
+    context.pass().unwrap();
+    context.close_project(project.id).unwrap();
+    context.host.exits_showing(
+        Some(1),
+        None,
+        Some(&["Error: Unknown model: 'claude-opus-5'"]),
+    );
+    *context.host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+    context.resume_project(project.id).unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-haiku-5-5"), Some("claude-opus-5"))
+    );
 }

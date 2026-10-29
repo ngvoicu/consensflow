@@ -986,3 +986,23 @@ file = "app/ui/core/board.js"
 find = '''  muse: 'Muse Code',
 '''
 replace = ''
+
+[[plant]]
+name = "chief: a window that took work is never marked so"
+meant = "a_chief_that_came_up_and_ended_with_a_gone_models_words_on_its_screen_keeps_its_model"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '            record.window.borrow_mut().took = true;'
+replace = '            record.window.borrow_mut().took = false;'
+
+[[plant]]
+name = "chief: a relaunch keeps the work the window before it took"
+meant = "a_resumed_chief_whose_relaunch_is_refused_starts_on_the_default"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '            part.took = false;'
+replace = '            part.took = part.took;'

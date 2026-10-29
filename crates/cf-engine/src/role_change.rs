@@ -481,6 +481,10 @@ impl Dispatcher {
         if tells == Some(false) {
             self.told_in_part(message)?;
         }
+        // Its window took work: it came up, whatever its record showed before (CHF-06).
+        if let Some(record) = self.record(message.recipient_id) {
+            record.window.borrow_mut().took = true;
+        }
         Ok(())
     }
 

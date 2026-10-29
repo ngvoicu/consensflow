@@ -232,6 +232,10 @@ pub(crate) struct WindowPart {
     /// they had: the next is given longer (`Launch::starts_given_up`). One that comes
     /// up starts the count again.
     pub(crate) starts_given_up: u32,
+    /// Its record showed a message it was handed ([`Dispatcher::confirm_delivered`]): the
+    /// window came up and took work. A chief's window that ends before is a launch its
+    /// harness may have refused (CHF-06); the history a resumed record shows is no sign.
+    pub(crate) took: bool,
     /// It printed, then held still: its screen is drawn.
     pub(crate) drawn: bool,
     /// It named its first conversation.
@@ -322,6 +326,7 @@ impl Default for WindowPart {
             relaunch: None,
             gone: None,
             starts_given_up: 0,
+            took: false,
             drawn: false,
             named: false,
             trust: Trusting::Past,
@@ -852,6 +857,7 @@ impl Dispatcher {
             part.activity = Activity::of(ActivityState::Starting);
             part.drawn = false;
             part.named = false;
+            part.took = false;
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
             part.owner = planned.owner;
             part.conversation = conversation_id;
