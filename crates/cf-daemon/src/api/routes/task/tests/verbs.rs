@@ -812,3 +812,39 @@ async fn a_release_with_no_task_named_lets_go_of_all_and_a_from_that_is_no_numbe
     assert_eq!(said.0, 200, "{:?}", said.1);
     assert_eq!(said.1["from"], json!([stage]));
 }
+
+#[tokio::test]
+async fn an_accept_says_how_many_jobs_and_agents_the_finish_counted_running() {
+    // T-691: the close of the window after the accept ended a parity run the worker had left
+    // running, and nothing said so.
+    let scene = scene();
+    let number = working_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_finished(scene.project.id, number, "Parser done", (1, 2))
+        .unwrap();
+    let said = post(&scene, &scene.chief, &format!("{number}/accept"), "{}").await;
+    assert_eq!(said.0, 200, "{:?}", said.1);
+    assert_eq!(said.1["running"], json!({ "jobs": 1, "agents": 2 }));
+    assert_eq!(said.1["task"]["state"], "accepted");
+}
+
+#[tokio::test]
+async fn an_accept_of_a_result_that_left_nothing_running_says_nothing_of_it() {
+    let scene = scene();
+    // The worker's own result waits for its work to end, so there is nothing to say.
+    let given = working_task(&scene);
+    let done = post(
+        &scene,
+        &scene.zeus,
+        &format!("{given}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    assert_eq!(done.0, 200, "{:?}", done.1);
+    let said = post(&scene, &scene.chief, &format!("{given}/accept"), "{}").await;
+    assert_eq!(said.0, 200, "{:?}", said.1);
+    assert!(said.1.get("running").is_none(), "{:?}", said.1);
+}
