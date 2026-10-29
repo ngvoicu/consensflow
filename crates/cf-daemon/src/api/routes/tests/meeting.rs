@@ -96,7 +96,10 @@ async fn what_a_meeting_holds_is_not_the_chiefs_to_read_until_it_ends() {
     )
     .await;
     assert_eq!(status, 200, "{said}");
-    assert!(!said.to_string().contains("The parser is written"), "{said}");
+    assert!(
+        !said.to_string().contains("The parser is written"),
+        "{said}"
+    );
     // zeus wrote both: its own words are its own to read.
     let (status, said) = api(
         &scene,

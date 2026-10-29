@@ -1904,8 +1904,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "            .retain(|message| message.state != \"gated\" && !waits.holds(message));"
-replace = "            .retain(|message| message.state != \"gated\");"
+find = "            .filter_map(|message| waits.in_thread(message))"
+replace = "            .filter_map(Some)"
 
 [[plant]]
 name = "resume tasks: a brief no window was handed is read while the project is closed"

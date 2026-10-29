@@ -315,8 +315,9 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '            .retain(|message| message.state != "gated" && !waits.holds(message));'
-replace = "            .retain(|message| !waits.holds(message));"
+find = '''            .filter(|message| message.state != "gated")
+            .filter_map(|message| waits.in_thread(message))'''
+replace = '''            .filter_map(|message| waits.in_thread(message))'''
 
 [[plant]]
 name = "pause: a lane says nothing of a stop its window ignores"

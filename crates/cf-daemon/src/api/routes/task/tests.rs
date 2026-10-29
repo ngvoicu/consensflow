@@ -476,7 +476,12 @@ async fn while_the_project_is_closed_a_note_no_window_was_handed_is_in_the_threa
         .unwrap()
         .iter()
         .find(|message| message["id"] == note.id)
-        .unwrap_or_else(|| panic!("m-{} is not in the thread, which says nothing: {said}", note.id));
+        .unwrap_or_else(|| {
+            panic!(
+                "m-{} is not in the thread, which says nothing: {said}",
+                note.id
+            )
+        });
     assert_eq!(
         held["body"],
         format!(
