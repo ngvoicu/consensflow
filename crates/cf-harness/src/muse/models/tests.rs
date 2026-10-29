@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use super::*;
 use crate::seams::processes::{Program, Streams};
 use crate::testing::{finished, ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
+use cf_proto::models::{warning, CONTRIBUTOR_WARNING};
 
 /// What `muse serve` answered `model/list` with: the account's (`providerCatalog`, recorded
 /// 2026-10-27 over the real login), and the bundled one a host answers with no login.
@@ -22,8 +23,8 @@ fn recorded(name: &str) -> Value {
 
 #[test]
 fn the_accounts_models_come_with_the_efforts_each_takes_and_the_contributor_ones_are_marked() {
-    let models = parse(&recorded("account")["result"]).unwrap();
-    assert!(!models.stale);
+    let models = parse(&recorded("account")["result"], 0).unwrap();
+    assert!(!models.is_stale());
     let ids: Vec<&str> = models
         .models
         .iter()
@@ -68,7 +69,7 @@ fn the_accounts_models_come_with_the_efforts_each_takes_and_the_contributor_ones
 #[test]
 fn a_contributor_model_is_never_the_default_though_muse_marks_one() {
     // On the account Muse marks `muse-spark-1.3-contributor` its default, and runs it at `max`.
-    let models = parse(&recorded("account")["result"]).unwrap();
+    let models = parse(&recorded("account")["result"], 0).unwrap();
     let marked = models
         .models
         .iter()
@@ -85,7 +86,7 @@ fn a_contributor_model_is_never_the_default_though_muse_marks_one() {
     alone.models.retain(|model| model.contributor);
     assert_eq!(alone.default_model(), None);
     // One Muse marks that is no contributor model stays the default.
-    let mut plain = parse(&recorded("account")["result"]).unwrap();
+    let mut plain = parse(&recorded("account")["result"], 0).unwrap();
     for model in &mut plain.models {
         model.marked_default = model.id == "muse-wonder-1.0";
     }
@@ -94,8 +95,8 @@ fn a_contributor_model_is_never_the_default_though_muse_marks_one() {
 
 #[test]
 fn a_list_a_host_with_no_login_gives_is_muses_bundled_one_and_is_stale() {
-    let models = parse(&recorded("bundled")["result"]).unwrap();
-    assert!(models.stale);
+    let models = parse(&recorded("bundled")["result"], 0).unwrap();
+    assert!(models.is_stale());
     assert_eq!(models.models.len(), 1);
     assert_eq!(models.models[0].id, "muse-spark-1.2");
     // A model of a list that is not the account's is no default for it: the account may not
@@ -112,7 +113,7 @@ fn a_hidden_model_a_contributor_by_description_and_a_list_with_no_model_are_read
           "description": "Your content may be used for product improvement." },
         { "modelId": "" },
     ] });
-    let models = parse(&result).unwrap();
+    let models = parse(&result, 0).unwrap();
     assert_eq!(models.models.len(), 1);
     let model = &models.models[0];
     assert_eq!(
@@ -121,8 +122,8 @@ fn a_hidden_model_a_contributor_by_description_and_a_list_with_no_model_are_read
     );
     assert_eq!(model.efforts, ["low", "high"]);
     assert!(model.contributor, "said so by its description, not its id");
-    assert!(parse(&json!({ "models": [] })).is_err());
-    assert!(parse(&json!({})).is_err());
+    assert!(parse(&json!({ "models": [] }), 0).is_err());
+    assert!(parse(&json!({}), 0).is_err());
 }
 
 fn program() -> Program {
@@ -262,5 +263,35 @@ fn a_host_that_says_nothing_is_given_up_on_at_the_bound_and_ended() {
     assert_eq!(
         settled[0].1,
         Err("muse serve did not answer within 30 s".to_owned())
+    );
+}
+
+#[test]
+fn a_model_muse_does_not_have_is_said_in_its_providers_404() {
+    // As Muse 1.4.14's first turn on `muse-gone-9` failed on T-727's probe.
+    assert!(gone(
+        "API error 404: model `muse-gone-9` does not exist or you lack access"
+    ));
+    assert!(!gone("API error 429: rate limited"));
+    assert!(!gone("Billing verification failed"));
+}
+
+/// The model a chief whose model is gone starts on: the account's default, never a
+/// contributor model, and never Muse's own choice, which is one on a fresh config (T-955).
+#[test]
+fn a_chief_starts_on_the_accounts_default_and_on_none_where_the_list_is_bundled_or_unread() {
+    let account = parse(&recorded("account")["result"], 0);
+    assert_eq!(default_of(account), Ok(Some("muse-spark-1.3".to_owned())));
+    let bundled = parse(&recorded("bundled")["result"], 0);
+    assert_eq!(default_of(bundled), Err(BUNDLED.to_owned()));
+    assert_eq!(
+        default_of(Err("muse serve did not answer within 30 s".to_owned())),
+        Err("muse serve did not answer within 30 s".to_owned())
+    );
+    let mut contributors = parse(&recorded("account")["result"], 0).unwrap();
+    contributors.models.retain(|model| model.contributor);
+    assert_eq!(
+        default_of(Ok(contributors)),
+        Err("Muse Code offers no model that is not a contributor model".to_owned())
     );
 }

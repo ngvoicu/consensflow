@@ -159,10 +159,11 @@ pub(crate) async fn listed(
 }
 
 /// Whether `words` are Pi's provider refusing a model it does not have: Pi sends an id it
-/// does not know ("Model … not found for provider …, using custom model id"), and the
-/// provider answers 400 `model_not_found` (1.4.0, CHF-02).
+/// does not know, and the provider answers 400 `model_not_found` (1.4.0, CHF-02). Pi's own
+/// "Model … not found for provider …, using custom model id" is a warning of its offline
+/// catalog, which runs the id all the same: never a refusal (Calliope's P1, T-955).
 pub(crate) fn gone(words: &str) -> bool {
-    words.contains("model_not_found") || words.contains("not found for provider")
+    words.contains("model_not_found")
 }
 
 /// The model Pi starts on where none is named: its settings' default

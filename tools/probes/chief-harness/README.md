@@ -12,7 +12,7 @@ real home>` (Devin stalls in a workspace under the Mac's `/var` symlink).
 | `resume_matrix.py <harness> [--a M] [--b M]` | T-445's resume rows, headless: start on A, resume with no flag, with `--model B`, with a model that does not exist, with no flag again; Devin also `--model <family>` | 5 or 6 one-line turns on the cheap models |
 | `claude_alias_tail.py [alias\|tail]` | Claude's alias pinning in the record; the cost of a tail read of a 120 MB transcript | 3 one-line turns (alias) |
 | `muse_model.py` (a Python with `pyte`; Mac) | Muse's `/model` in its window, and what its record says before and after a resume | 4 one-line turns on Muse Spark at minimal |
-| `native_switch.py <harness> --ask <harness-ask>` (a Python with `pyte`; Mac) | CHF-10: the human's `/model` in the window with the key that keeps it to the conversation (Claude `s`, Codex `s`, Pi Enter, Devin `opt+↵`), then what ConsensFlow's own reader (`harness-ask` `last_used`) says, a headless reopen on it, and whether the switch wrote a model to the throwaway's settings | 4 one-line turns on the cheap models (the fourth is the reopen's) |
+| `native_switch.py <harness> --ask <harness-ask>` (a Python with `pyte`; Mac; Muse with `--muse-after-d1`, once the live kit's Muse row is on the base) | CHF-10: the human's `/model` in the window with the key that keeps it to the conversation (Claude `s`, Codex `s`, Pi Enter, Devin `opt+↵`), then what ConsensFlow's own reader (`harness-ask` `last_used`) says, a headless reopen on it, and whether the switch wrote a model to the throwaway's settings | 4 one-line turns on the cheap models (the fourth is the reopen's) |
 | `tuidrive.py` | T-445's pty driver (pyte), which `muse_model.py` and `native_switch.py` drive the windows with | |
 | `moved_lines.py <repo> <file.md> <old> <new>` | CHF-01: each `file:line` a research or spec names, at the base it was read against and on another; which moved, by how much, and which changed | none |
 
@@ -77,3 +77,9 @@ nothing had switched), and the probe now waits for that line.
 | Codex | gpt-5.6-luna low → gpt-6-luna | `/model` (opens on the current model, the last row), GPT-6-Luna, Enter, then the reasoning list (on the model's default, medium) and `s` | `gpt-6-luna`, effort `medium` | `[tui]` flags only (`screen_reader_detection_done`, `model_availability_nux`) |
 | Pi | openai-codex/gpt-5.6-luna minimal → openai-codex/gpt-6-luna | `/model`, typed `gpt-6-luna` (filters; another provider's model of the name can come first), Enter | `openai-codex/gpt-6-luna`, thinking `minimal` (an `openai/` pick reset it to `low`) | `lastChangelogVersion` only |
 | Devin | swe-2-medium → swe-2-high | `/model` (opens on the family), `→`, `opt+↵` ("Model set to SWE-2 for this session") | `swe-2-high` | account and shell setup only, no `agent.model` |
+
+Muse's row (the Muse round, after Calliope's T-955) is written and has not run: its live
+check waits for integration D1's Muse row of the live kit, after a run wrote into the
+owner's `~/.config/muse`. Muse has no key that keeps a switch to one conversation (Enter
+saves the default, here the throwaway's `settings.json`) and no headless resume that takes
+a prompt, so its reopen is a window.

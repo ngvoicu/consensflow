@@ -228,13 +228,13 @@ pub(crate) struct WindowPart {
     /// The model a chief's launch asked for, which its harness said it no longer has: the
     /// next launch starts on the harness's default (CHF-06).
     pub(crate) gone: Option<String>,
-    /// A chief whose model is gone and whose harness has no default to start it on: it
-    /// stays closed until the human switches it (CHF-06).
-    pub(crate) no_default: bool,
     /// How many of its windows in a row were given up for not coming up in the time
     /// they had: the next is given longer (`Launch::starts_given_up`). One that comes
     /// up starts the count again.
     pub(crate) starts_given_up: u32,
+    /// Its window came up: its harness said it is ready, the launch over. A chief's window
+    /// that ends before is a launch its harness may have refused (CHF-06).
+    pub(crate) up: bool,
     /// It printed, then held still: its screen is drawn.
     pub(crate) drawn: bool,
     /// It named its first conversation.
@@ -324,8 +324,8 @@ impl Default for WindowPart {
             settled: false,
             relaunch: None,
             gone: None,
-            no_default: false,
             starts_given_up: 0,
+            up: false,
             drawn: false,
             named: false,
             trust: Trusting::Past,
@@ -856,6 +856,7 @@ impl Dispatcher {
             part.activity = Activity::of(ActivityState::Starting);
             part.drawn = false;
             part.named = false;
+            part.up = false;
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
             part.owner = planned.owner;
             part.conversation = conversation_id;
@@ -932,7 +933,11 @@ impl Dispatcher {
             }
             started => started,
         };
-        record.window.borrow_mut().starts_given_up = 0;
+        {
+            let mut part = record.window.borrow_mut();
+            part.starts_given_up = 0;
+            part.up = true;
+        }
         if self.forgotten(record) {
             return Ok(());
         }
@@ -1409,12 +1414,6 @@ impl Dispatcher {
         }
         if let Some(delivering) = delivering {
             self.give_back(delivering.message, because)?;
-        }
-        // Its harness no longer has the model the launch asked for: the chief opens again
-        // at once on the harness's default, which its note says (CHF-06).
-        if let Some(gone) = self.gone_model(participant, because)? {
-            self.reopen_without(record, gone);
-            return Ok(());
         }
         let before = record.window.borrow().relaunch;
         let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;

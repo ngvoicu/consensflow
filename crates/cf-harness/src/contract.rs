@@ -305,8 +305,10 @@ pub struct Used {
     /// The thinking level it ran at, where the harness calls it so (Pi's).
     pub thinking: Option<String>,
     /// The harness moved to `model` by itself, as its own record of the move says (Claude
-    /// Code's `fallback` block): never the human's choice, and never what a reopen takes
-    /// (MUS-24).
+    /// Code's `fallback` block, Muse's reconfigure that no `/model` asked for): never the
+    /// human's choice, and never what a reopen takes (MUS-24). Read for Claude Code and Muse
+    /// alone: CHF-02's probes showed no move of its own in Codex, Pi or Devin, whose readers
+    /// answer false (Codex's `model_reroute` has no recorded example; Calliope's P3, T-955).
     pub by_harness: bool,
 }
 

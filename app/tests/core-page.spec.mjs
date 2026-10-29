@@ -137,6 +137,18 @@ function model() {
         switchHelp: 'Pi switches with /model and Enter.',
       },
       devin: { listing: listed([{ id: 'swe-2', label: 'SWE-2', efforts: [] }]) },
+      muse: {
+        listing: listed([
+          { id: 'muse-spark-1.3', label: 'Muse Spark 1.3', efforts: [] },
+          {
+            id: 'muse-spark-1.3-contributor',
+            label: 'Muse Spark 1.3',
+            efforts: [],
+            contributor: true,
+          },
+        ]),
+        switchHelp: 'Muse switches with /model, and Enter makes it the default.',
+      },
     },
     projects: [
       { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open' },
@@ -3292,6 +3304,7 @@ test('the chief is picked as a harness, then a model it lists, nothing picked an
       ['Codex', false],
       ['Pi', false],
       ['Devin', false],
+      ['Muse Code', false],
     ])
     await expect(harness).toHaveValue('')
     await expect(models).toBeDisabled()
@@ -3320,6 +3333,17 @@ test('the chief is picked as a harness, then a model it lists, nothing picked an
       ['Pick a model', true],
       ['SWE-2', false],
     ])
+    // Muse Code: no switch for one conversation, which its help says.
+    await harness.selectOption({ label: 'Muse Code' })
+    await expect(models).toBeEnabled()
+    expect(await offered(models)).toEqual([
+      ['Pick a model', true],
+      ['Muse Spark 1.3', false],
+      ['Muse Spark 1.3 · Contributor', false],
+    ])
+    await expect(dialog.locator('.chief-help')).toHaveText(
+      'Muse switches with /model, and Enter makes it the default.',
+    )
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden()
   }

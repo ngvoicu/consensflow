@@ -54,6 +54,9 @@ pub(crate) struct ParticipantRow {
     pub(crate) left_at: Option<String>,
     pub(crate) switched_from_harness: Option<String>,
     pub(crate) switched_from_model: Option<String>,
+    /// The saved agent an old chief ran on when it was switched (a chief from before a
+    /// chief was a model): what the handoff names where no model was picked.
+    pub(crate) switched_from_agent: Option<String>,
     pub(crate) switched_from_cut: i64,
     pub(crate) model: Option<String>,
     pub(crate) launched_model: Option<String>,
@@ -80,6 +83,7 @@ impl ParticipantRow {
             left_at: row.get("left_at")?,
             switched_from_harness: row.get("switched_from_harness")?,
             switched_from_model: row.get("switched_from_model")?,
+            switched_from_agent: row.get("switched_from_agent")?,
             switched_from_cut: row.get("switched_from_cut")?,
             model: row.get("model")?,
             launched_model: row.get("launched_model")?,

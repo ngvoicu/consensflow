@@ -33,7 +33,7 @@ pub(super) fn home_installed(rows: &str) -> (tempfile::TempDir, Env) {
     let (home, _) = home_with(rows);
     let bin = home.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    for name in ["claude", "codex", "pi", "devin"] {
+    for name in ["claude", "codex", "pi", "devin", "muse"] {
         cf_harness::testing::fake_executable(&bin.join(name));
     }
     let folder = home.path().to_str().unwrap().to_owned();

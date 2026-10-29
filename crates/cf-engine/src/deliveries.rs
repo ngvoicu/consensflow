@@ -1312,7 +1312,9 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
-        if let Some(gone) = self.gone_model(participant, &why.said)? {
+        // Its record's own words, never the screen `why` falls back on (Calliope's P1, T-955).
+        let refused = observed.failure().unwrap_or_default();
+        if let Some(gone) = self.gone_model(participant, refused)? {
             let pane = record.window.borrow().pane.clone();
             if let Some(pane) = pane {
                 if !self.close_own(record, &pane).await? {

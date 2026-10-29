@@ -228,11 +228,13 @@ fn pi_starts_on_its_settings_default_and_never_on_a_contributor_model() {
 }
 
 #[test]
-fn a_model_pi_does_not_have_is_said_in_its_words_and_its_providers() {
-    // As Pi 1.4.0 and OpenAI said it on CHF-02's probe.
-    assert!(gone(
+fn a_model_pi_does_not_have_is_said_in_its_providers_words_and_its_catalogs_warning_is_none() {
+    // Pi's own warning of an id its offline catalog does not know: it runs it all the same,
+    // and a model the catalog has not caught up with yet works (Calliope's P1, T-955).
+    assert!(!gone(
         "Model 'gpt-gone-9' not found for provider 'openai'. Using custom model id."
     ));
+    // The provider's refusal, as OpenAI said it on CHF-02's probe.
     assert!(gone(
         r#"400 {"error":{"code":"model_not_found","message":"The model `gpt-gone-9` does not exist"}}"#
     ));

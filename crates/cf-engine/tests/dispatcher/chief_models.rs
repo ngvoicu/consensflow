@@ -301,40 +301,6 @@ fn a_chief_opened_again_on_its_harnesss_default_is_told_no_turn_was_cut() {
     );
 }
 
-#[test]
-fn a_window_that_never_came_up_on_a_gone_model_starts_the_chief_on_the_default_at_once() {
-    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
-    // The window does not come up: its harness refuses the model it no longer has, in its
-    // own words; the next window does.
-    let first = Rc::new(std::cell::Cell::new(true));
-    *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
-        if first.replace(false) {
-            Err("Error: Unknown model: 'claude-opus-5'".to_owned())
-        } else {
-            Ok(())
-        }
-    }));
-    let project = context.with_staff(&["zeus"]);
-    context.pass().unwrap();
-    let launched = context.adapter.prepared();
-    assert_eq!(
-        launched.last().unwrap()["agent"],
-        agent("claude-haiku-5-5", None),
-        "at once, not a backoff later: {launched:?}"
-    );
-    let told = to_human(&context, project.id);
-    assert!(
-        told.iter().all(|body| !body.contains("could not start")),
-        "{told:?}"
-    );
-    assert_eq!(
-        told.iter()
-            .filter(|body| body.contains("no longer available"))
-            .count(),
-        1
-    );
-}
-
 /// A chief from before a chief was a harness and a model names a saved agent and no model
 /// (CHF-04): the roster is never read for it, so one the human deleted holds it nowhere.
 #[test]
@@ -365,4 +331,153 @@ fn a_chief_that_still_names_a_deleted_agent_opens_on_its_record_and_the_roster_i
     assert!(to_human(&context, project.id)
         .iter()
         .all(|body| !body.contains("among your agents")));
+}
+
+/// What the chief's screen shows is never its harness's word that its model is gone, once
+/// the window came up (Calliope's P1, T-955): the chief grepped this repository for the
+/// words, the human quit its window, and the project goes as a human's quit takes it.
+#[test]
+fn a_chief_that_came_up_and_ended_with_a_gone_models_words_on_its_screen_keeps_its_model() {
+    // Ended by the human's quit (0) or by a crash (1): a window that came up either way.
+    for code in [0, 1] {
+        let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+        let project = context.with_staff(&["zeus"]);
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Hello");
+        context.pass().unwrap();
+        context.host.exits_showing(
+            Some(code),
+            None,
+            Some(&["tests/models.rs:12: Error: Unknown model: 'claude-opus-5'"]),
+        );
+        context.exit("chief");
+        context.pass().unwrap();
+        let chief = chief_of(&context, project.id);
+        assert_eq!(
+            (chief.model.as_deref(), chief.gone_model.as_deref()),
+            (Some("claude-opus-5"), None),
+            "exit code {code}"
+        );
+        assert_eq!(
+            context.project(project.id).state,
+            "suspended",
+            "exit code {code}"
+        );
+        assert!(to_human(&context, project.id)
+            .iter()
+            .all(|body| !body.contains("no longer available")));
+    }
+}
+
+/// A window that never came up and was given up on, its harness's words on its screen,
+/// ended with no code of its own: it is tried again as any launch that did not come up
+/// (Pi warns "not found for provider" of a model its offline catalog does not know yet,
+/// and runs it all the same).
+#[test]
+fn a_window_given_up_on_with_a_gone_models_words_is_tried_again_and_keeps_its_model() {
+    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+    let first = Rc::new(std::cell::Cell::new(true));
+    *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
+        if first.replace(false) {
+            Err("Error: Unknown model: 'claude-opus-5'".to_owned())
+        } else {
+            Ok(())
+        }
+    }));
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), None)
+    );
+    assert!(to_human(&context, project.id)
+        .iter()
+        .all(|body| !body.contains("no longer available")));
+    assert!(context
+        .adapter
+        .prepared()
+        .iter()
+        .all(|launch| launch["agent"] == agent("claude-opus-5", None)));
+}
+
+/// A failed turn is read in its record's own words, never its screen's.
+#[test]
+fn a_failed_turn_whose_record_says_nothing_of_the_model_keeps_it_whatever_the_screen_shows() {
+    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.host.set_snapshot(json!({
+        "tail": ["$ rg model_not_found", "Error: Unknown model: 'claude-opus-5'"]
+    }));
+    context.adapter.with("chief", |chief| {
+        chief.failed = true;
+        chief.failure = None;
+    });
+    context.adapter.answer("chief", "…");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), None)
+    );
+}
+
+/// Every harness's refusal names the model it refused: words of a gone model that name
+/// another are no word of the chief's.
+#[test]
+fn a_failed_turn_whose_record_names_another_gone_model_keeps_the_chiefs() {
+    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.with("chief", |chief| {
+        chief.failed = true;
+        chief.failure = Some("400 model_not_found: Unknown model 'claude-instant-1'".to_owned());
+    });
+    context.adapter.answer("chief", "…");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), None)
+    );
+}
+
+/// The hold of a chief whose model is gone and whose harness has no other to start it on
+/// is the ledger's, not the engine's memory (Calliope's P2, T-955): after a restart and a
+/// Resume it still opens no window on the gone model and tells the human nothing more. Its
+/// model stays the human's pick: never none, which would be the harness's own default.
+#[test]
+fn a_chief_held_for_no_default_stays_held_across_a_restart_and_is_told_once() {
+    let context = harness_without_the_model(Err("no model to start on".to_owned()));
+    let project = opened_on_a_gone_model(&context);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let launched = context.adapter.prepared().len();
+    let chief = chief_of(&context, project);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), Some("claude-opus-5")),
+        "held in the ledger"
+    );
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launched,
+        "no launch on it"
+    );
+    let told = to_human(&context, project)
+        .into_iter()
+        .filter(|body| body.contains("no longer available"))
+        .count();
+    assert_eq!(told, 1);
 }

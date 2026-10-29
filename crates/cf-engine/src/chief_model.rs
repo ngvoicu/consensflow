@@ -108,9 +108,13 @@ impl Dispatcher {
 }
 
 impl Dispatcher {
-    /// The model the chief's last launch asked for, where `words` (what its window showed as
-    /// it went, or its record said of a failed turn) are its harness saying it no longer
-    /// has it: none where the launch asked for none, or the words say something else.
+    /// The model the chief's last launch asked for, where `words` are its harness saying it
+    /// no longer has it, by name: every harness's refusal names the model it refused, so
+    /// words of a gone model that name another, or none, are no word of the chief's. None
+    /// where the launch asked for none. `words` are the record's own of a failed turn, or the
+    /// screen of a launch that ended with a code of failure before it came up, never a
+    /// screen else: a chief's screen may show anything (it grepped for the words), and only
+    /// a refusal at launch has no record to say it in (Calliope's P1, T-955).
     pub(crate) fn gone_model(
         &self,
         chief: &ParticipantView,
@@ -129,7 +133,7 @@ impl Dispatcher {
         let Some(adapter) = self.seams.adapters.adapter(harness) else {
             return Ok(None);
         };
-        Ok(adapter.model_gone(words).then_some(asked))
+        Ok((words.contains(asked.as_str()) && adapter.model_gone(words)).then_some(asked))
     }
 
     /// The chief opens again at once, its model `gone`: its next launch starts on its
@@ -149,8 +153,8 @@ impl Dispatcher {
 
     /// The chief as its launch runs it: where its last launch found its model gone, on its
     /// harness's default model from now on, which the ledger keeps as the chief's, and the
-    /// human told once; none where the harness has no such model, the chief then staying
-    /// closed, what it was to receive given back.
+    /// human told once; none where the harness has no such model, the chief then held
+    /// ([`held_for_no_default`]), what it was to receive given back.
     pub(crate) async fn start_on_default(
         &self,
         record: &Rc<Record>,
@@ -160,6 +164,17 @@ impl Dispatcher {
         delivering: Option<&Delivering>,
     ) -> Result<Option<ParticipantView>, EngineError> {
         let Some(gone) = record.window.borrow_mut().gone.take() else {
+            // Held since a launch before this one, a restart's or a Resume's included: no
+            // window, and the human was told then.
+            if held_for_no_default(chief) {
+                if let Some(delivering) = delivering {
+                    self.give_back(
+                        delivering.message,
+                        "the chief's model is gone and its harness has no other",
+                    )?;
+                }
+                return Ok(None);
+            }
             return Ok(Some(chief.clone()));
         };
         let harness = name_of(chief.harness.as_deref().unwrap_or_default());
@@ -185,7 +200,13 @@ impl Dispatcher {
             },
         )?;
         let Ok(model) = started else {
-            record.window.borrow_mut().no_default = true;
+            // Held in the ledger, so that a restart or a Resume holds it still and tells the
+            // human nothing more: the model picked stays the human's (never none, which is
+            // the harness's own default), found gone (Calliope's P2, T-955).
+            self.seams
+                .ledger
+                .borrow_mut()
+                .chief_gone(chief.id, &gone, Some(&gone))?;
             if let Some(delivering) = delivering {
                 self.give_back(
                     delivering.message,
@@ -207,6 +228,13 @@ impl Dispatcher {
             ..chief.clone()
         }))
     }
+}
+
+/// Whether `chief` is held for want of a model to start it on: its model found gone, and
+/// its harness with no other ([`Dispatcher::start_on_default`]), as the ledger keeps it, its
+/// model and the gone one the same. It stays closed until the human switches it (CHF-06).
+pub(crate) fn held_for_no_default(chief: &ParticipantView) -> bool {
+    chief.gone_model.is_some() && chief.gone_model == chief.model
 }
 
 #[cfg(test)]

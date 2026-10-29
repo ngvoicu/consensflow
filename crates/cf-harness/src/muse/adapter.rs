@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
+use cf_proto::models::ModelListing;
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 
@@ -23,7 +24,7 @@ use super::index;
 use super::launch;
 use super::paths;
 use super::window::{MuseWindow, CLEAR_INPUT};
-use crate::contract::{Adapter, FirstMessage, Input, Launch, Prepared, Records, Skill, Work};
+use crate::contract::{Adapter, FirstMessage, Input, Launch, Prepared, Records, Skill, Used, Work};
 use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::Services;
@@ -54,6 +55,38 @@ impl MuseAdapter {
 }
 
 impl Adapter for MuseAdapter {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
+        Box::pin(super::models::listed(
+            self.env(),
+            &*self.services.processes,
+            &*self.services.time,
+        ))
+    }
+
+    /// What its log says the conversation ran on last (CHF-05): its newest turn's model,
+    /// read from its end, within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(&'a self, session: &'a str, asked: Option<&'a str>) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, asked, self.env()) })
+    }
+
+    /// T-727's probe of Muse's own switch (`tools/probes/chief-harness/muse_model.py`): it
+    /// has no key that keeps a switch to one conversation.
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window: Muse Code has no switch for one conversation, and Enter there makes it your Muse Code default.")
+    }
+
+    fn model_gone(&self, words: &str) -> bool {
+        super::models::gone(words)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        Box::pin(super::models::default_model(
+            self.env(),
+            &*self.services.processes,
+            &*self.services.time,
+        ))
+    }
+
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let env = self.env();

@@ -10,8 +10,8 @@ keeps the switch to the conversation, answers one turn on model B, and is quit. 
   6. the throwaway's own settings are unchanged by the switch (the key kept it to the
      conversation), and the owner's config and login files are unchanged.
 
-    python3 -I tools/probes/chief-harness/native_switch.py <claude|codex|pi|devin>
-        --ask <harness-ask> [--keep] [--explore]
+    python3 -I tools/probes/chief-harness/native_switch.py <claude|codex|pi|devin|muse>
+        --ask <harness-ask> [--keep] [--explore] [--muse-after-d1]
 
 One harness at a time, in a throwaway config (as resume_matrix.py's), its workspace under
 the real home (Devin stalls under the Mac's /var symlink), every CONSENSFLOW_* variable
@@ -39,6 +39,7 @@ MODELS = {
     "codex": ("gpt-5.6-luna", "gpt-6-luna"),
     "pi": ("openai-codex/gpt-5.6-luna", "openai-codex/gpt-6-luna"),
     "devin": ("swe-2-medium", "swe-2-high"),
+    "muse": ("muse-spark-1.3", "muse-spark-1.2"),
 }
 # The owner's files a switch could write: their hashes before and after. Not ~/.claude.json:
 # the owner's own Claude Code windows write it all day.
@@ -47,6 +48,7 @@ OWNER = [
     "~/.codex/config.toml", "~/.codex/auth.json",
     "~/.pi/agent/settings.json", "~/.pi/agent/auth.json",
     "~/.config/devin/config.json", "~/.local/share/devin/credentials.toml",
+    "~/.config/muse/settings.json", "~/.config/muse/auth.json",
 ]
 ACCOUNT_WORDS = ("Logged in as", "Organization", "@")
 DROPPED = ("CONSENSFLOW_", "CLAUDE_CODE_", "ANTHROPIC_", "OPENAI_", "CODEX_", "PI_")
@@ -321,6 +323,80 @@ def devin(scratch, work):
     }
 
 
+def muse(scratch, work):
+    """Muse's row (the Muse round of T-729): its window on throwaway XDG folders, its login
+    the Keychain's (`auth.json` names the storage, never holds a secret), as muse_model.py.
+    Its `/model` has no key that keeps a switch to one conversation: Enter saves the model
+    as the default, here the throwaway's `settings.json`, which step 6 says. No headless
+    resume takes a prompt, so its reopen is a window too. Run it only once the live kit's
+    Muse row is on this base (integration D1: a run wrote into the owner's ~/.config/muse)."""
+    if "--muse-after-d1" not in sys.argv:
+        sys.exit("refusing: Muse's live check waits for the kit's Muse isolation row (D1); "
+                 "pass --muse-after-d1 once it is on this base")
+    auth = json.load(open(os.path.join(HOME, ".config", "muse", "auth.json")))
+    storages = [provider.get("storage") for provider in (auth.get("providers") or {}).values()]
+    if not storages or any(storage != "keychain" for storage in storages):
+        sys.exit("refusing: a Muse login is kept in its file, which a copy would carry")
+    del auth
+    config, data = os.path.join(scratch, "config"), os.path.join(scratch, "data")
+    os.makedirs(os.path.join(config, "muse"))
+    shutil.copy2(os.path.join(HOME, ".config", "muse", "auth.json"), os.path.join(config, "muse", "auth.json"))
+    print("  login copied: auth.json (the Keychain's) set")
+    os.makedirs(os.path.join(data, "muse"))
+    env = clean_env(XDG_CONFIG_HOME=config, XDG_DATA_HOME=data,
+                    XDG_CACHE_HOME=os.path.join(scratch, "cache"),
+                    XDG_STATE_HOME=os.path.join(scratch, "state"), MUSE_NO_AUTO_UPDATE="1")
+    a, b = MODELS["muse"]
+    base = [exe("muse"), "--contributor-mode", "off"]
+
+    def switch(drive):
+        drive.type("/model", enter=True, settle=2)
+        settle(drive, "the /model picker")
+        if not cursor_to(drive, b, r"[›❯>] "):
+            return False
+        # Enter: Muse's only key, which saves the default.
+        drive.key("enter", settle=2)
+        settle(drive, "after Enter")
+        # The effort picker that follows: left as it stands.
+        drive.key("esc", settle=1.5)
+        settle(drive, "after Esc")
+        return True
+
+    def session():
+        import sqlite3
+        index = os.path.join(data, "muse", "session-index.db")
+        if not os.path.exists(index):
+            return None
+        db = sqlite3.connect("file:%s?mode=ro" % index, uri=True)
+        try:
+            row = db.execute("SELECT session_id FROM sessions ORDER BY rowid DESC LIMIT 1").fetchone()
+        finally:
+            db.close()
+        return row[0] if row else None
+
+    return {
+        "env": env,
+        "window": base + ["--model", a, "--reasoning-effort", "minimal"],
+        "switch": switch,
+        "session": session,
+        "reopen_window": lambda used: base + ["--model", used["model"], "resume", session()],
+        "settings": [os.path.join(config, "muse", "settings.json")],
+    }
+
+
+def reopened(argv, env, cwd):
+    """A window opened on `argv` answers one turn (THREE): the reopen of a harness that
+    takes no prompt headless."""
+    drive = tuidrive.Session(argv, env, cwd, limit=600)
+    try:
+        settle(drive, "the reopened window", quiet=4, maxwait=90)
+        return 0, turn(drive, "THREE")
+    finally:
+        drive.key("ctrl-c", settle=0.5)
+        drive.key("ctrl-c", settle=2)
+        drive.kill()
+
+
 def ask(binary, kind, session, env):
     asked = subprocess.run([binary], input=json.dumps({"op": "last_used", "kind": kind,
                                                       "session": session, "env": env}),
@@ -362,7 +438,10 @@ def main():
         used = ask(binary, kind, session or "none", it["env"])
         print("4. ConsensFlow's reader says:", json.dumps(used), "| B:", isinstance(used, dict) and used.get("model") == b)
         if isinstance(used, dict) and used.get("model"):
-            code, answered = headless(it["reopen"](used), it["env"], work)
+            if "reopen_window" in it:
+                code, answered = reopened(it["reopen_window"](used), it["env"], work)
+            else:
+                code, answered = headless(it["reopen"](used), it["env"], work)
             again = ask(binary, kind, session, it["env"])
             print("5. the reopen with it exited %s and answered THREE: %s; the reader then says: %s"
                   % (code, answered, json.dumps(again)))

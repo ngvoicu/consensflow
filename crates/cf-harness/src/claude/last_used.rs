@@ -34,6 +34,11 @@ pub(super) fn used_in(
 ) -> std::io::Result<Option<Used>> {
     let mut newest: Option<Used> = None;
     lines_back(file, bound, |line| {
+        // The human's own `/model` began the newest model: nothing before it says how it
+        // came, and the walk back stops there rather than parse a 16 MB tail (T-955).
+        if newest.is_some() && line.contains(MODEL_COMMAND) {
+            return ControlFlow::Break(());
+        }
         if !line.contains("\"assistant\"") {
             return ControlFlow::Continue(());
         }
@@ -75,6 +80,9 @@ pub(super) fn used_in(
     })?;
     Ok(newest)
 }
+
+/// The echo of the human's own `/model` in Claude Code's record (2.1.312, CHF-02).
+const MODEL_COMMAND: &str = "<command-name>/model</command-name>";
 
 /// The model an assistant entry of the main conversation ran on, where Claude Code ran it
 /// on one: none for a sidechain's, a `<synthetic>` one, or an API error's.

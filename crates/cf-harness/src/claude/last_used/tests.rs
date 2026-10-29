@@ -158,3 +158,30 @@ fn a_record_with_no_assistant_entry_or_none_within_the_bound_says_nothing() {
     std::fs::write(&file, text).unwrap();
     assert_eq!(used_in(&file, None, 2048).unwrap(), None);
 }
+
+/// The walk back from a model the launch did not ask for ends at the human's own `/model`:
+/// what came before it is no word of how the newest model came (Calliope's P3, T-955), and
+/// a 16 MB tail is not parsed line by line past it.
+#[test]
+fn the_walk_back_ends_at_the_humans_own_switch_whatever_came_before_it() {
+    let mut fell_back = assistant("claude-sonnet-5-5", None);
+    fell_back["message"]["content"] = json!([{
+        "type": "fallback",
+        "from": { "model": "claude-opus-5-5" },
+        "to": { "model": "claude-sonnet-5-5" },
+    }]);
+    let entries = [
+        user("Hi"),
+        assistant("claude-opus-5-5", None),
+        fell_back,
+        user("<command-name>/model</command-name>"),
+        user("<local-command-stdout>Set model to Sonnet 5.5</local-command-stdout>"),
+        user("More"),
+        assistant("claude-sonnet-5-5", Some("low")),
+    ];
+    assert_eq!(
+        read(&entries, Some("claude-opus-5-5")),
+        used("claude-sonnet-5-5", Some("low"), false),
+        "the human chose it, after Claude Code's own move"
+    );
+}

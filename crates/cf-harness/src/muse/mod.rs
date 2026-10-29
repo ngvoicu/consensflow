@@ -5,6 +5,7 @@
 
 mod adapter;
 pub(crate) mod index;
+pub(crate) mod last_used;
 mod launch;
 pub mod models;
 mod msp;

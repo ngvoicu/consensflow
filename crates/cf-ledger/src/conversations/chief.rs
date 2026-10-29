@@ -120,8 +120,8 @@ pub(crate) fn chief_open_work(
 /// reads the history, whose first launch has asked for no model yet. What it was out of
 /// quota for was the old harness's account, so that clears. The window is the caller's to
 /// close before and open after. The chief keeps what it was switched from (the harness and
-/// the model picked for it), and whether the old chief was stopped mid-turn, for the
-/// handoff to say.
+/// the model picked for it, or the saved agent an old chief ran on), and whether the old
+/// chief was stopped mid-turn, for the handoff to say.
 pub(crate) fn switch_chief(
     store: &mut Store,
     project_id: i64,
@@ -134,13 +134,14 @@ pub(crate) fn switch_chief(
         store.db.execute(
             "UPDATE participant SET harness = ?, model = ?, agent = NULL, launched_model = NULL,
            gone_model = NULL, out_until = NULL, switched_from_harness = ?, switched_from_model = ?,
-           switched_from_agent = NULL, switched_from_cut = ?
+           switched_from_agent = ?, switched_from_cut = ?
          WHERE id = ?",
             params![
                 switch.harness,
                 switch.model,
                 chief.harness,
                 chief.model,
+                chief.agent,
                 i64::from(switch.cut),
                 chief.id
             ],
@@ -150,11 +151,17 @@ pub(crate) fn switch_chief(
             "UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL",
             params![at, chief.id],
         )?;
+        // A chief from before a chief was a model ran on a saved agent: its switch keeps it,
+        // as Node's event and handoff named it (Calliope's P3, T-955).
+        let mut from = json!({ "harness": chief.harness, "model": chief.model });
+        if let Some(agent) = &chief.agent {
+            from["agent"] = json!(agent);
+        }
         store.log(
             project_id,
             "chief.switched",
             json!({
-                "from": { "harness": chief.harness, "model": chief.model },
+                "from": from,
                 "to": { "harness": switch.harness, "model": switch.model },
                 "cut": switch.cut,
             }),
@@ -182,8 +189,8 @@ pub(crate) fn history_read(
 }
 
 /// The project's latest Switch chief: what the chief was switched from (its
-/// harness, and the model picked for it where one was) and whether its turn was cut;
-/// none before any.
+/// harness, and the model picked for it where one was, else the saved agent an old chief
+/// ran on) and whether its turn was cut; none before any.
 pub(crate) fn last_switch(
     store: &Store,
     project_id: i64,
@@ -192,7 +199,7 @@ pub(crate) fn last_switch(
     Ok(chief.switched_from_harness.map(|harness| LastSwitch {
         from: SwitchedFrom {
             harness,
-            model: chief.switched_from_model,
+            model: chief.switched_from_model.or(chief.switched_from_agent),
         },
         cut: chief.switched_from_cut == 1,
     }))

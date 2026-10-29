@@ -337,6 +337,7 @@ export const HARNESS_NAMES = {
   codex: 'Codex',
   pi: 'Pi',
   devin: 'Devin',
+  muse: 'Muse Code',
 }
 
 /**

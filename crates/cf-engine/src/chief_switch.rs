@@ -356,7 +356,6 @@ impl Dispatcher {
             window.interrupted = None;
             window.relaunch = None;
             window.gone = None;
-            window.no_default = false;
         }
         record.delivery.borrow_mut().held = None;
         self.changed();

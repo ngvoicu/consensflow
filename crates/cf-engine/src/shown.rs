@@ -191,6 +191,12 @@ impl Shown {
         self.is_known().then_some(self.survivor.is_none())
     }
 
+    /// Whether the host said the program ended with a code of failure: not 0, and no signal
+    /// (a close's, or the human's Ctrl-C).
+    pub(crate) fn ended_failing(&self) -> bool {
+        self.signal.is_none() && self.code.is_some_and(|code| code != 0)
+    }
+
     pub fn is_known(&self) -> bool {
         self.code.is_some()
             || self.signal.is_some()

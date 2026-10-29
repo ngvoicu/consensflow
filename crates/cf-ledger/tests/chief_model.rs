@@ -324,8 +324,10 @@ fn a_ledger_whose_chief_names_a_saved_agent_and_no_model_opens_as_it_was() {
                 "to": { "harness": "codex", "agent": "eval-codex-worker" },
                 "cut": false,
             }),
+            // An old chief's switch keeps the saved agent it ran on, as the event and the
+            // handoff named it before (Calliope's P3, T-955).
             json!({
-                "from": { "harness": "codex", "model": null },
+                "from": { "harness": "codex", "model": null, "agent": "eval-codex-worker" },
                 "to": { "harness": "claude-code", "model": "claude-opus-5-5" },
                 "cut": false,
             }),
@@ -335,5 +337,16 @@ fn a_ledger_whose_chief_names_a_saved_agent_and_no_model_opens_as_it_was() {
     assert_eq!(
         (after.agent, after.model.as_deref()),
         (None, Some("claude-opus-5-5"))
+    );
+    // The handoff says "from Codex (eval-codex-worker)", as it did.
+    assert_eq!(
+        ledger.last_switch(1).unwrap(),
+        Some(LastSwitch {
+            from: SwitchedFrom {
+                harness: "codex".to_owned(),
+                model: Some("eval-codex-worker".to_owned()),
+            },
+            cut: false,
+        })
     );
 }

@@ -880,10 +880,14 @@ impl Dispatcher {
             // window of a launch that was to say the role: it did not come up, and
             // is tried again (`settle_exited_launch`).
             let own = record.window.borrow().own_exit_of(pane).is_some();
-            // A window that went with its harness saying it no longer has the model the
-            // launch asked for closes nothing: the chief opens again at once on the
-            // harness's default (CHF-06).
-            if project.state == "open" && !own {
+            // A launch whose harness ended it with a code of failure before it came up,
+            // its screen saying it no longer has the model the launch asked for, closes
+            // nothing: the chief opens again at once on the harness's default (CHF-06).
+            // A refusal at launch has no record to say it in, so its screen is read; a
+            // window that came up, or ended with no failure, is read in no screen's words
+            // (Calliope's P1, T-955).
+            let up = record.window.borrow().up;
+            if project.state == "open" && !own && !up && shown.ended_failing() {
                 if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))? {
                     self.reopen_without(&record, gone);
                     return Ok(());
@@ -1084,7 +1088,7 @@ impl Dispatcher {
         }
         // A chief whose model is gone with no other to start it on stays closed: its launch
         // told the human, who switches it (CHF-06).
-        if participant.role == "chief" && record.window.borrow().no_default {
+        if participant.role == "chief" && crate::chief_model::held_for_no_default(participant) {
             return Ok(());
         }
         // A chief whose window keeps failing to start is tried again ever more slowly.
