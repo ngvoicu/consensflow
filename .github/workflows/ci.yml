@@ -90,7 +90,7 @@ jobs:
       # the workspace's tests turn on for it.
       - run: cargo clippy -p cf-harness --lib -- -D warnings
       # That crate's `pub` items its crate does not export may not be more than the ceiling
-      # holds (tools/xtask/src/unreachable_pub.rs): the count differs by system.
+      # holds (tools/xtask/src/unreachable_pub.rs): 32 on macOS and on Windows alike.
       - run: cargo xtask unreachable-pub
       # The daemon's end of the bridge, behind a feature nothing in the
       # workspace turns on yet: tested and linted here until the daemon does.
