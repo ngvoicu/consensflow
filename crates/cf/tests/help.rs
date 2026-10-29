@@ -138,6 +138,10 @@ const BOARD: [(&[&str], &str); 19] = [
         "  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n",
     ),
     (
+        &["task", "release"],
+        "  cf task release T-3 [--from T-1]  let a waiting task go on early: without T-1, or without any task it waits for\n",
+    ),
+    (
         &["task", "finish"],
         concat!(
             "  cf task finish T-3                take what a working or paused task's worker said last as its\n",

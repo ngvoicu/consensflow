@@ -99,6 +99,7 @@ fn a_task_route_is_the_task_and_the_word_after_it_whatever_the_method() {
         ("pause", TaskAction::Pause),
         ("resume", TaskAction::Resume),
         ("finish", TaskAction::Finish),
+        ("release", TaskAction::Release),
         ("tell", TaskAction::Tell),
         ("transcript", TaskAction::Transcript),
     ] {

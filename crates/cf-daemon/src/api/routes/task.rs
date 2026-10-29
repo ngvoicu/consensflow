@@ -1,5 +1,5 @@
 //! One task: `GET /api/tasks/<n>`, its `/transcript`, and the `POST`s that move
-//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `finish`, `tell`). It
+//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `finish`, `release`, `tell`). It
 //! reads the task first, so an unknown one is 404 before anything else is
 //! asked; and it takes the task as it was then, awaiting the body after: who
 //! may do what is decided on the task as it was read, and the ledger decides on
@@ -119,6 +119,7 @@ pub(super) async fn handle(
             ),
         )),
         TaskAction::Tell => tell(context, caller, &task, words),
+        TaskAction::Release => release(context, caller, &task, &body),
         TaskAction::Finish => finish(context, caller, &task).await,
         _ => moved(context, caller, &task, action, words.unwrap_or_default()),
     }
@@ -350,6 +351,43 @@ async fn finish(context: &Context, caller: &Caller, task: &TaskThread) -> Result
     })))
 }
 
+/// `POST /api/tasks/<n>/release`: a task that waits for others is let go of what it waits for
+/// (T-798): of the task `from` names, or of every task it waits for that is not accepted. Only
+/// the named task goes, and nothing the task it waited for does is changed. The answer is the
+/// task as it is now and the numbers it no longer waits for (`from`); the ledger refuses a
+/// task that waits for nothing, one that does not wait for `from`, and a follow-up, which
+/// goes into the window that has the task it follows.
+fn release(
+    context: &Context,
+    caller: &Caller,
+    task: &TaskThread,
+    body: &Value,
+) -> Result<Answer, Failure> {
+    let from = match body.get("from") {
+        None | Some(Value::Null) => None,
+        Some(given) => Some(
+            given
+                .as_f64()
+                .and_then(whole)
+                .filter(|number| *number > 0)
+                .ok_or_else(|| {
+                    Failure::refuse(400, "invalid-from", "from is the number of a task (T-3)")
+                })?,
+        ),
+    };
+    let letting = context.ledger.borrow_mut().let_go(
+        caller.project.id,
+        task.task.number,
+        &caller.participant.handle,
+        from,
+    )?;
+    (context.kick)();
+    Ok(Answer::ok(json!({
+        "task": value(&TaskSummary::from(&letting.task))?,
+        "from": letting.from,
+    })))
+}
+
 /// Whether a tell reaches the task's window: one that has it, which it stops,
 /// or one coming up, which it keeps the words for.
 fn reaches(task: &TaskView) -> bool {
@@ -424,6 +462,7 @@ fn word(action: TaskAction) -> &'static str {
         TaskAction::Pause => "pause",
         TaskAction::Resume => "resume",
         TaskAction::Finish => "finish",
+        TaskAction::Release => "release",
         TaskAction::Tell => "tell",
         TaskAction::Transcript => "transcript",
     }

@@ -50,6 +50,8 @@ pub enum TaskAction {
     /// Which Node's API had no twin of: the chief takes what the worker of a working
     /// task said last as its result.
     Finish,
+    /// A task that waits for others is let go of what it waits for, by name (T-798).
+    Release,
     Tell,
     Transcript,
 }
@@ -65,6 +67,7 @@ impl TaskAction {
             "pause" => Self::Pause,
             "resume" => Self::Resume,
             "finish" => Self::Finish,
+            "release" => Self::Release,
             "tell" => Self::Tell,
             "transcript" => Self::Transcript,
             _ => return None,

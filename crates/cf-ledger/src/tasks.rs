@@ -4,13 +4,15 @@
 //! and resumed (`pausing`); finished with a result and accepted, sent back,
 //! cancelled, failed, and deleted from the board by the human (`finishing`),
 //! the chief's own step by its word (`own_steps`); their briefs replaced before
-//! a window has them (`editing`); and read with their threads.
+//! a window has them (`editing`); let go of what they wait for before it is
+//! accepted (`releasing`); and read with their threads.
 
 mod editing;
 mod finishing;
 mod giving;
 mod own_steps;
 mod pausing;
+mod releasing;
 
 use cf_proto::ledger::{TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
@@ -27,6 +29,7 @@ pub(crate) use finishing::{
 pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};
 pub(crate) use own_steps::withdrawn_late;
+pub(crate) use releasing::let_go;
 pub use pausing::resumed_in_vain;
 pub(crate) use pausing::{
     clear_hold, go_on_in_window, held_tasks_due, hold_task, pause_again, pause_task,

@@ -481,6 +481,14 @@ pub struct TaskReleased {
     pub task: TaskView,
 }
 
+/// A task let go of what it waited for (`cf task release`): the task as it is now, and the
+/// numbers of the tasks it no longer waits for.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskLetGo {
+    pub task: TaskView,
+    pub from: Vec<i64>,
+}
+
 /// A held task whose time has come.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

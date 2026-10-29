@@ -44,8 +44,8 @@ pub use cf_proto::ledger::{
     HistoryItem, HistoryKey, HistoryRead, HistoryRow, Lane, LastSwitch, LatestMessages,
     LatestTranscript, MemberView, MessageOpening, MessageView, ParticipantConversation,
     ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume, Scanned,
-    StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread,
-    TaskTranscript, TaskView, TextCut, TextPart, TierChange,
+    StaffMember, Stop, TaskCard, TaskCreated, TaskLetGo, TaskMoved, TaskReleased, TaskThatFits,
+    TaskThread, TaskTranscript, TaskView, TextCut, TextPart, TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{

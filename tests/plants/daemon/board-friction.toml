@@ -11,6 +11,9 @@ friction-answer-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--li
 friction-answer-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "questions::"]
 friction-answer-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers"]
 friction-cancel = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "cancel_failed"]
+friction-release-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "let_go"]
+friction-release-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task"]
+friction-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
 
 # --- T-689: the last line of a reply names its task ---
 
@@ -157,3 +160,125 @@ runs = ["friction-cancel"]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '        "paused" => format!('
 replace = '        "paused" if false => format!('
+
+# --- T-798: a task that waits for others is let go of them early, by name ---
+
+[[plant]]
+name = "board friction: release: the task named is not the only one let go of"
+meant = "a_task_that_waits_for_nothing_or_not_for_the_task_named_is_refused_with_the_way_it_stands"
+runs = ["friction-release-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/releasing.rs"
+find = "            Some(from) => waits.iter().filter(|need| need.number == from).collect(),"
+replace = "            Some(_) => waits.iter().collect(),"
+
+[[plant]]
+name = "board friction: release: a task is let go of a task it does not wait for"
+meant = "a_task_that_waits_for_nothing_or_not_for_the_task_named_is_refused_with_the_way_it_stands"
+runs = ["friction-release-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/releasing.rs"
+find = "        if letting.is_empty() {"
+replace = "        if false {"
+
+[[plant]]
+name = "board friction: release: a follow-up is let go of the task whose window it goes into"
+meant = "only_an_open_or_paused_task_is_let_go_and_a_follow_up_is_never_let_go_of_the_task_it_follows"
+runs = ["friction-release-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/releasing.rs"
+find = "            if store.participant_row(assignee)?.member_id.is_some() {"
+replace = "            if false {"
+
+[[plant]]
+name = "board friction: release: a task in its window is let go of what it waits for"
+meant = "only_an_open_or_paused_task_is_let_go_and_a_follow_up_is_never_let_go_of_the_task_it_follows"
+runs = ["friction-release-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/releasing.rs"
+find = '        if !matches!(task.state.as_str(), "open" | "paused") {'
+replace = "        if false {"
+
+[[plant]]
+name = "board friction: release: a task given to a window is not sent in once let go"
+meant = "a_stage_holding_several_tasks_lets_go_of_only_the_ones_named"
+runs = ["friction-release-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/releasing.rs"
+find = '        if task.state == "open" && task.assignee_id.is_some() && !waits_still {'
+replace = "        if false {"
+
+[[plant]]
+name = "board friction: release: the need stays on the task"
+meant = "a_stage_holding_several_tasks_lets_go_of_only_the_ones_named"
+runs = ["friction-release-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/releasing.rs"
+find = '                "DELETE FROM task_need WHERE task_id = ? AND needs_id = ?",'
+replace = '                "DELETE FROM task_need WHERE task_id = ? AND needs_id = ? AND 0",'
+
+[[plant]]
+name = "board friction: release: the dispatcher is not woken once a task is let go"
+meant = "the_chief_lets_a_task_go_of_the_one_it_waits_for_and_a_member_may_not"
+runs = ["friction-release-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    (context.kick)();\n    Ok(Answer::ok(json!({\n        \"task\": value(&TaskSummary::from(&letting.task))?,"
+replace = "    Ok(Answer::ok(json!({\n        \"task\": value(&TaskSummary::from(&letting.task))?,"
+
+[[plant]]
+name = "board friction: release: a from of 0 is a task number"
+meant = "a_release_with_no_task_named_lets_go_of_all_and_a_from_that_is_no_number_is_refused"
+runs = ["friction-release-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "                .filter(|number| *number > 0)\n                .ok_or_else(|| {\n                    Failure::refuse(400, \"invalid-from\""
+replace = "                .filter(|number| *number >= 0)\n                .ok_or_else(|| {\n                    Failure::refuse(400, \"invalid-from\""
+
+[[plant]]
+name = "board friction: release: cf does not send the task it names"
+meant = "a_waiting_task_is_let_go_of_the_task_named_and_the_reply_says_where_it_goes"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '        body.insert("from".into(), from.into());'
+replace = '        let _ = from;'
+
+[[plant]]
+name = "board friction: release: cf does not say a paused task stays paused"
+meant = "a_waiting_task_is_let_go_of_the_task_named_and_the_reply_says_where_it_goes"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "        Some(\"paused\") => {\n            format!(\"It stays paused"
+replace = "        Some(\"paused\") if false => {\n            format!(\"It stays paused"
+
+[[plant]]
+name = "board friction: release: cf takes a --from with no task"
+meant = "a_release_whose_from_names_no_task_is_a_command_written_wrong_and_asks_the_board_nothing"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    if words.given("--from") && from.is_none() {'
+replace = '    if false {'
+
+[[plant]]
+name = "board friction: release: the usage does not list cf task release"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["friction-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = "  cf task release T-3 [--from T-1]  let a waiting task go on early: without T-1, or without any task it waits for\n"
+replace = ""

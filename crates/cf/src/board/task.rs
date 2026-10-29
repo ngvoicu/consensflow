@@ -7,7 +7,9 @@ use cf_base::js;
 use cf_board::Board;
 use serde_json::{json, Map, Value};
 
-use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks, waiting_answers};
+use super::lines::{
+    a_pool, list, message_line, numbers, task_head, task_line, tasks, waiting_answers,
+};
 use super::usage::{task_usage, ADD_USAGE};
 use super::words::{quoted, require_text, split, task_number, task_numbers, Shape};
 use super::{brief, transcript};
@@ -41,9 +43,16 @@ const GET: Shape = Shape {
     leading: 0,
 };
 
+/// The flags of `cf task release`, which stand after its task.
+const RELEASE: Shape = Shape {
+    switches: &[],
+    valued: &["--from"],
+    leading: 0,
+};
+
 /// The commands that move a task, which stands first among their words.
-const MOVES: [&str; 8] = [
-    "done", "accept", "cancel", "reopen", "edit", "pause", "resume", "finish",
+const MOVES: [&str; 9] = [
+    "done", "accept", "cancel", "reopen", "edit", "pause", "resume", "finish", "release",
 ];
 
 /// `cf task` with `words`, the last of those `given` spells as the system gave them.
@@ -80,6 +89,7 @@ pub fn command(
     let number = task_number(rest.first().map(String::as_str))?;
     match action {
         Some("get") => get(number, rest.get(1..).unwrap_or_default(), board),
+        Some("release") => release(number, rest.get(1..).unwrap_or_default(), board),
         Some(action) if MOVES.contains(&action) => moved(
             action,
             number,
@@ -89,7 +99,7 @@ pub fn command(
             input,
         ),
         other => Err(Failure::Usage(format!(
-            "unknown task command {}: use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish",
+            "unknown task command {}: use add, list, get, done, accept, reopen, edit, cancel, pause, resume, finish or release",
             quoted(other.unwrap_or_default())
         ))),
     }
@@ -100,6 +110,7 @@ fn shape_of(verb: &str) -> Shape {
     match verb {
         "get" => GET,
         "reopen" | "resume" | "edit" => BRIEFED,
+        "release" => RELEASE,
         _ => Shape::TEXT,
     }
 }
@@ -470,6 +481,59 @@ fn moved(
     Ok(Said::new(task, format!("{said}{sent}")))
 }
 
+/// `cf task release T-3 [--from T-1]`: a task that waits for others goes on without waiting for
+/// `T-1`, or for any task not yet accepted. Only T-3 goes; what it waited for is as it was.
+fn release(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
+    let words = split(rest, RELEASE);
+    let from = words
+        .value("--from")
+        .map(|from| task_number(Some(from)))
+        .transpose()?;
+    if words.given("--from") && from.is_none() {
+        return Err(Failure::Usage(
+            "--from takes the task to let go of: cf task release T-3 --from T-1".into(),
+        ));
+    }
+    let mut body = Map::new();
+    if let Some(from) = from {
+        body.insert("from".into(), from.into());
+    }
+    let mut answer = board.post(
+        &format!("/api/tasks/{number}/release"),
+        &Value::Object(body),
+    )?;
+    let letting = answer.list(answer.value().get("from"), "from")?.to_vec();
+    let task = answer.take("task")?;
+    let blocked = list(task.get("blockedBy"));
+    let now = match task.get("state").and_then(Value::as_str) {
+        Some("paused") => {
+            format!("It stays paused: resume it with: cf task resume T-{number} \"what to do now\"")
+        }
+        _ if !blocked.is_empty() => format!(
+            "It still waits until {} {} accepted.",
+            tasks(numbers(blocked)),
+            if blocked.len() == 1 { "is" } else { "are" }
+        ),
+        Some("queued") => format!(
+            "It goes to @{}'s window now.",
+            js::text(task.get("assignee"))
+        ),
+        _ if matches!(task.get("assignee"), Some(Value::Null) | None) => format!(
+            "It is on the board for {}; the first free one gets it.",
+            a_pool(task.get("pool"), task.get("tier"))
+        ),
+        _ => format!(
+            "It goes to @{}'s window as soon as that is free.",
+            js::text(task.get("assignee"))
+        ),
+    };
+    let text = format!(
+        "T-{number} no longer waits for {}. {now}",
+        tasks(numbers(&letting))
+    );
+    Ok(Said::new(task, text))
+}
+
 /// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
 /// `agents` the worker's harness still counted are said to run on until its window closes,
 /// or past it where the host cannot tell what is the window's (on Windows a program runs
@@ -836,6 +900,106 @@ and 2 idle sessions (`cf task list --all`)";
         );
         let (posted, _) = added(&["--tier", "light", "Write it"], &answer);
         assert_eq!(posted, Some(json!({ "tier": "light", "body": "Write it" })));
+    }
+
+    /// What `cf task release words…` did, the board answering with `answer`: what it posted and
+    /// what it printed.
+    fn released(
+        words: &[&str],
+        answer: &Value,
+    ) -> (Vec<(String, Option<Value>)>, Result<String, String>) {
+        let api = scripted(vec![reply(200, answer.clone())]);
+        let words: Vec<String> = [&["release"], words]
+            .concat()
+            .iter()
+            .map(|word| (*word).to_owned())
+            .collect();
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut "".as_bytes(),
+        );
+        let posted = api
+            .received()
+            .into_iter()
+            .map(|got| (got.path.clone(), got.json()))
+            .collect();
+        let said = match said {
+            Ok(said) => Ok(said.text),
+            Err(Failure::Usage(why) | Failure::Failed(why)) => Err(why),
+        };
+        (posted, said)
+    }
+
+    #[test]
+    fn a_waiting_task_is_let_go_of_the_task_named_and_the_reply_says_where_it_goes() {
+        let task = |state: &str, assignee: Value, blocked: Value| {
+            json!({
+                "number": 12, "state": state, "assignee": assignee, "requester": "chief",
+                "title": "Docs", "blockedBy": blocked, "pool": "worker", "tier": "standard",
+            })
+        };
+        let route = || "/api/tasks/12/release".to_owned();
+        // A task for a tier is on the board for a member.
+        let (posted, said) = released(
+            &["T-12", "--from", "T-768"],
+            &json!({ "task": task("open", Value::Null, json!([])), "from": [768] }),
+        );
+        assert_eq!(posted, [(route(), Some(json!({ "from": 768 })))]);
+        assert_eq!(
+            said.unwrap(),
+            "T-12 no longer waits for T-768. It is on the board for a standard worker; the first free one gets it."
+        );
+        // One given to a window goes into it; the flag may stand before the task's words too.
+        let (_, said) = released(
+            &["T-12", "--from", "T-768"],
+            &json!({ "task": task("queued", json!("zeus-pale"), json!([])), "from": [768] }),
+        );
+        assert_eq!(
+            said.unwrap(),
+            "T-12 no longer waits for T-768. It goes to @zeus-pale's window now."
+        );
+        // None named: all it waited for, and the request names none.
+        let (posted, said) = released(
+            &["T-12"],
+            &json!({ "task": task("open", Value::Null, json!([])), "from": [767, 768] }),
+        );
+        assert_eq!(posted, [(route(), Some(json!({})))]);
+        assert!(said
+            .unwrap()
+            .starts_with("T-12 no longer waits for T-767, T-768. "));
+        // Still held by another, or paused: it says so.
+        let (_, said) = released(
+            &["T-12", "--from", "T-768"],
+            &json!({ "task": task("open", Value::Null, json!([9])), "from": [768] }),
+        );
+        assert_eq!(
+            said.unwrap(),
+            "T-12 no longer waits for T-768. It still waits until T-9 is accepted."
+        );
+        let (_, said) = released(
+            &["T-12"],
+            &json!({ "task": task("paused", Value::Null, json!([])), "from": [768] }),
+        );
+        assert_eq!(
+            said.unwrap(),
+            "T-12 no longer waits for T-768. It stays paused: resume it with: cf task resume T-12 \"what to do now\""
+        );
+    }
+
+    #[test]
+    fn a_release_whose_from_names_no_task_is_a_command_written_wrong_and_asks_the_board_nothing() {
+        for words in [
+            &["T-12", "--from"][..],
+            &["T-12", "--from", "soon"][..],
+            &["--from", "T-3"][..],
+        ] {
+            let (posted, said) = released(words, &json!({}));
+            assert!(posted.is_empty(), "{words:?}");
+            assert!(said.is_err(), "{words:?}");
+        }
     }
 
     /// What `cf task edit words…` posted and printed, the board answering with `answer`.

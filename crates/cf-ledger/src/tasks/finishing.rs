@@ -223,38 +223,51 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
         .query_map([project_id], TaskRow::read)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for task in waiting {
-        let mut assignee = store.participant_of(task.assignee_id)?;
-        // Never queued for a member's window that has left, which nothing opens: the
-        // session the human deleted comes back for it, as for any follow-up, and a
-        // session whose member left, or a lane that did, cannot, so the task ends
-        // here (a removal cancels such tasks itself; this is for a ledger an older
-        // build left).
-        if a_members_window(&assignee) && assignee.left_at.is_some() {
-            if can_continue(store, &assignee)? {
-                assignee = bring_back(store, assignee)?;
-            } else {
-                cancel_unreachable(store, project_id, &task, &assignee)?;
-                continue;
-            }
-        }
-        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {
-            continue;
-        }
-        let body = delivery_body(&task);
-        let message_id = queue(
-            store,
-            project_id,
-            &Queued {
-                to: assignee.id,
-                from: Some(task.requester_id),
-                kind: "task",
-                task_id: Some(task.id),
-                body: &body,
-                ..Queued::default()
-            },
-        )?;
-        store.move_task(&task, "queued", json!({ "message": message_id }))?;
+        release_waiting(store, project_id, &task)?;
     }
+    Ok(())
+}
+
+/// One task that waited on the board for what it needs, now free to go: to its window, unless
+/// the window left (the task then ends, or the session comes back for it) or has a task in hand
+/// (the task waits for the session to be free). Called for each task [`release_ready`] finds, and
+/// for a task let go of its last need by hand (`releasing`), which has no need left to be found
+/// by.
+pub(super) fn release_waiting(
+    store: &mut Store,
+    project_id: i64,
+    task: &TaskRow,
+) -> Result<(), LedgerError> {
+    let mut assignee = store.participant_of(task.assignee_id)?;
+    // Never queued for a member's window that has left, which nothing opens: the
+    // session the human deleted comes back for it, as for any follow-up, and a
+    // session whose member left, or a lane that did, cannot, so the task ends
+    // here (a removal cancels such tasks itself; this is for a ledger an older
+    // build left).
+    if a_members_window(&assignee) && assignee.left_at.is_some() {
+        if can_continue(store, &assignee)? {
+            assignee = bring_back(store, assignee)?;
+        } else {
+            return cancel_unreachable(store, project_id, task, &assignee);
+        }
+    }
+    if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {
+        return Ok(());
+    }
+    let body = delivery_body(task);
+    let message_id = queue(
+        store,
+        project_id,
+        &Queued {
+            to: assignee.id,
+            from: Some(task.requester_id),
+            kind: "task",
+            task_id: Some(task.id),
+            body: &body,
+            ..Queued::default()
+        },
+    )?;
+    store.move_task(task, "queued", json!({ "message": message_id }))?;
     Ok(())
 }
 
