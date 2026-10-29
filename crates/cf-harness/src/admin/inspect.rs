@@ -45,14 +45,13 @@ pub(super) async fn inspect(
     row.update = match inner.latest.latest(harness, &source).await {
         Ok(value) => {
             let comparison = newer(row.version.value(), &value);
-            let offered = offers(row.setup.as_ref());
             let release = Release {
                 value,
                 source: source.url,
                 command,
             };
             match comparison {
-                Some(true) if offered => Update::Available(release),
+                Some(true) => Update::Available(release),
                 Some(false) => Update::Current(release),
                 _ => Update::Unknown(release),
             }
@@ -100,12 +99,6 @@ fn setup(harness: Harness, version: Option<&str>) -> Option<Setup> {
         Harness::Devin => Some(devin_setup(version)),
         _ => None,
     }
-}
-
-/// Whether a release is offered as an update to a CLI whose setup is `setup`:
-/// none is to a CLI no window is opened on.
-fn offers(setup: Option<&Setup>) -> bool {
-    !matches!(setup, Some(Setup::NotSupportedYet { .. }))
 }
 
 /// Whether the Devin that said `version` is new enough to open a window on.

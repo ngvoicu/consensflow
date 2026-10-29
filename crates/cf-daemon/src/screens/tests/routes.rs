@@ -77,7 +77,6 @@ fn view(name: &str, harness: Option<&str>) -> AgentView {
             model_key: "m".to_owned(),
             model_label: "M".to_owned(),
             route_label: "R".to_owned(),
-            route_note: None,
             work_tier: WorkTier::Light,
         },
         unsupported: false,

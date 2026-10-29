@@ -225,6 +225,10 @@ const FINAL_ANSWER: &str = "the member wrote a report, ran a command and ended w
 /// out of quota.
 const DEPARTED: &[(&str, &str)] = &[
     (
+        "gives a member on it no work, says why, and every pass goes on",
+        "the note that T-1 waits for a free worker names the way out for a member on a harness ConsensFlow cannot open (`remove @hera from the staff and add a member on another harness`), where Node's named none (T-569, from Calliope's review of T-566)",
+    ),
+    (
         "reaches the chief again once the human says it is back before its reset",
         OUT_WITH_WORK_WAITING,
     ),

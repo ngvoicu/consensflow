@@ -578,7 +578,7 @@ impl Window for DevinWindow {
         *self.left_open.borrow_mut() = None;
     }
 
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async move {
             if self.session.borrow().is_some() {
                 return Ok(None);

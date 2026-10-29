@@ -27,10 +27,7 @@ fn learns_the_session_this_window_opened_from_its_own_wire_log() {
     let window = window(&adapter, &Request::default());
     let mut driver = Driver::default();
     let asking = Rc::clone(&window);
-    driver.begin(
-        0,
-        async move { asking.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { asking.started().await });
     assert!(driver.run().is_empty());
     // Devin's wire log says it some polls later.
     assert!(home.fakes.time.fire_next(EPOCH_MS + 250));
@@ -57,7 +54,7 @@ fn a_torn_line_of_its_wire_log_before_the_session_s_line_neither_stops_the_launc
     home.appends(&shows("another-one"));
     home.appends(&shows("mild-coin"));
     assert_eq!(
-        finished(window.started(&ScriptedHost::default())),
+        finished(window.started()),
         Ok(Some("mild-coin".to_owned())),
         "the launch learns its session past the torn line"
     );
@@ -80,10 +77,7 @@ fn waits_for_the_session(request: &Request) -> i64 {
     let adapter = home.adapter();
     let window = window(&adapter, request);
     let mut driver = Driver::default();
-    driver.begin(
-        0,
-        async move { window.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { window.started().await });
     let began = home.fakes.time.wall_ms();
     let mut settled = driver.run();
     while settled.is_empty() {
@@ -378,10 +372,7 @@ fn reads_its_own_question_dialog_still_open_as_waiting() {
     let mut driver = Driver::default();
     let asking = Rc::clone(&window);
     home.fakes.time.settle_at(EPOCH_MS);
-    driver.begin(
-        0,
-        async move { asking.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { asking.started().await });
     assert!(driver.run().is_empty());
     home.selects("dev-1");
     assert!(home.fakes.time.fire_next(EPOCH_MS + 250));

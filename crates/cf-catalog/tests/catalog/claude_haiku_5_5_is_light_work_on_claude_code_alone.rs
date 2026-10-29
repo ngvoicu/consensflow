@@ -62,14 +62,12 @@ fn is_the_one_haiku_of_the_catalog_with_its_label_its_route_and_its_effort() {
             profile.model_key.as_str(),
             profile.model_label.as_str(),
             profile.route_label.as_str(),
-            profile.route_note.as_deref(),
             profile.work_tier,
         ),
         (
             "claude-haiku-5.5",
             "Claude Haiku 5.5",
             "Claude Code account",
-            None,
             WorkTier::Light
         )
     );

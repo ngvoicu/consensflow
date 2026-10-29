@@ -8,8 +8,9 @@
 //! it reads any kind it does not run.
 //!
 //! What should be: the app starts and the board opens; History reads the transcripts;
-//! the member's task goes back to the board or fails, with the reason, and the member is
-//! said not to be free: it runs on a harness whose windows ConsensFlow cannot open;
+//! the member's task is paused, with the reason and the way out (cancel and add it again,
+//! or finish it: no resume opens its window), and the member is said not to be free: it
+//! runs on a harness whose windows ConsensFlow cannot open, and is to leave the staff;
 //! Switch chief moves the project off the chief's harness and the new chief works; the
 //! agents of the human's own on that harness are unsupported and hidden.
 //!
@@ -32,6 +33,9 @@ use crate::{config, secs, Outcome};
 
 /// The harness an older build ran, which this one does not.
 const GONE: &str = "opencode";
+
+/// The way out a pause note gives for T-1, whose member's harness has no adapter.
+const WAY_OUT: &str = "Its member runs on a harness whose windows ConsensFlow cannot open: cancel it with cf task cancel T-1 and add it again with cf task add once a member on another harness is on the staff, or finish it with cf task finish T-1";
 
 /// What the chief was told before the upgrade, and after it.
 const BEFORE: &str = "Reply with exactly: BEFORE_THE_UPGRADE";
@@ -153,14 +157,17 @@ fn an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_mo
         "{read}"
     );
     // T-1's window cannot come back: the task is paused, not left working, and the
-    // chief is told why.
+    // chief is told why and the way out, which no resume is.
     rig.wait_for("T-1 to be paused", secs(60), || {
         Ok(project.task(1)?["state"] == "paused")
     })?;
     let told_why = |messages: &Value| {
-        notes(messages)
-            .iter()
-            .any(|note| note.starts_with("T-1 is paused") && note.contains("window is gone"))
+        notes(messages).iter().any(|note| {
+            note.starts_with("T-1 is paused")
+                && note.contains("window is gone")
+                && note.contains(WAY_OUT)
+                && !note.contains("cf task resume")
+        })
     };
     let task = project.task(1)?;
     assert!(told_why(&task["messages"]), "{task}");
@@ -210,7 +217,9 @@ fn an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_mo
     // A task for the worker's tier waits: the member is not free, and the chief is told
     // it runs on a harness whose windows ConsensFlow cannot open.
     rig.tell(id, "DISPATCH --tier light Reply with exactly: NEVER_RUN")?;
-    let not_free = format!("@worker runs on {GONE}, whose windows ConsensFlow cannot open");
+    let not_free = format!(
+        "@worker runs on {GONE}, whose windows ConsensFlow cannot open (remove @worker from the staff and add a member on another harness)"
+    );
     rig.wait_for("T-2 to wait for a free worker", secs(60), || {
         Ok(notes(&json!(project.inbox("chief")?))
             .iter()

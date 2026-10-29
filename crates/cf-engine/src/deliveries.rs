@@ -177,13 +177,12 @@ pub(crate) enum Enter {
     Arrived,
 }
 
-/// The pane host as a window is handed it for a hand-over (a delivery, or the
-/// first message a window posts once it is up): the host's own requests, and the
-/// engine's word whether the window may be handed the text now
+/// The pane host as a window is handed it for a delivery: the host's own requests,
+/// and the engine's word whether the window may be handed the text now
 /// ([`PaneHost::admits`]). Every adapter asks it at the moment of its hand-over,
 /// after every wait of its own (Claude's keys that clear its input box, the pane's
-/// claim Pi's rename waits for, OpenCode's wait for its server, the connection a
-/// send over loopback waits for): a Close that comes during any of them hands the
+/// claim Pi's rename waits for, the connection a send over loopback waits for): a
+/// Close that comes during any of them hands the
 /// window nothing (both reviews of 2026-10-16, rounds 4 and 5). Of a message
 /// begun, the ledger answers, in the write that marks it handed if it goes
 /// ([`cf_ledger::Ledger::admit`]): it goes while its project is open and nothing
@@ -194,11 +193,10 @@ pub(crate) enum Enter {
 /// ([`Admitting::again`]).
 pub(crate) struct Admitting<'a> {
     dispatcher: &'a Dispatcher,
-    /// The window's project.
-    project: i64,
-    /// The message it hands over, and the rows its paste carries, where it hands
-    /// over one begun.
-    handing: Option<(i64, Vec<i64>)>,
+    /// The message it hands over, begun.
+    message: i64,
+    /// The rows its paste carries.
+    carried: Vec<i64>,
     /// What it hands over is a paste handed over already, which an Enter sends.
     again: bool,
     /// The engine emptied the window's input box just before the hand-over.
@@ -214,12 +212,12 @@ pub(crate) struct Admitting<'a> {
 }
 
 impl<'a> Admitting<'a> {
-    /// The host for a window of `project`.
-    pub(crate) fn new(dispatcher: &'a Dispatcher, project: i64) -> Self {
+    /// The host for the hand-over of `message`, begun with the rows `carried`.
+    pub(crate) fn handing(dispatcher: &'a Dispatcher, message: i64, carried: Vec<i64>) -> Self {
         Self {
             dispatcher,
-            project,
-            handing: None,
+            message,
+            carried,
             again: false,
             cleared: false,
             received: Cell::new(None),
@@ -227,12 +225,6 @@ impl<'a> Admitting<'a> {
             withdrawn: Cell::new(false),
             failed: RefCell::new(None),
         }
-    }
-
-    /// The host for the hand-over of `message`, begun with the rows `carried`.
-    pub(crate) fn handing(mut self, message: i64, carried: Vec<i64>) -> Self {
-        self.handing = Some((message, carried));
-        self
     }
 
     /// The host for a paste handed over already, which an Enter sends: a row of it
@@ -265,16 +257,14 @@ impl<'a> Admitting<'a> {
 
     /// Whether the window may be handed the text now, as the ledger says.
     fn may(&self) -> Result<bool, EngineError> {
-        let Some((message, carried)) = &self.handing else {
-            return self.dispatcher.in_open_project(self.project);
-        };
+        let (message, carried) = (self.message, &self.carried);
         if self.again {
             let received = self
                 .dispatcher
                 .seams
                 .ledger
                 .borrow()
-                .received_of(*message, carried)?;
+                .received_of(message, carried)?;
             if received.is_some() {
                 self.received.set(received);
                 return Ok(false);
@@ -285,7 +275,7 @@ impl<'a> Admitting<'a> {
             .seams
             .ledger
             .borrow_mut()
-            .admit(*message, carried)?;
+            .admit(message, carried)?;
         self.withdrawn.set(handed == HandOver::Withdrawn);
         Ok(handed == HandOver::Admitted)
     }
@@ -583,9 +573,7 @@ impl Dispatcher {
         // The adapter asks the ledger at its hand-over whether the project is still
         // open and nothing of the paste was withdrawn since it was begun.
         let cleared = record.delivery.borrow().emptied.as_ref() == Some(&pane);
-        let admitting = Admitting::new(self, message.project_id)
-            .handing(message.id, carried.clone())
-            .cleared(cleared);
+        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(cleared);
         let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
@@ -751,8 +739,7 @@ impl Dispatcher {
                 .paste_into(first.message, conversation.id)?;
         }
         let session = conversation.and_then(|conversation| conversation.native_session);
-        let admitting =
-            Admitting::new(self, message.project_id).handing(first.message, first.carried.clone());
+        let admitting = Admitting::handing(self, first.message, first.carried.clone());
         let handed = returning(window.deliver(&admitting, &pane, &text)).await;
         let outcome = match handed {
             Ok(admission) => admission,
@@ -839,10 +826,7 @@ impl Dispatcher {
             .map(|delivering| delivering.carried.clone())
             .unwrap_or_default();
         let found = self.seams.ledger.borrow().message(message)?;
-        let project = found.as_ref().map_or(0, |found| found.project_id);
-        let admitting = Admitting::new(self, project)
-            .handing(message, carried)
-            .again();
+        let admitting = Admitting::handing(self, message, carried).again();
         if admitting.admits() {
             return Ok(Enter::Go);
         }

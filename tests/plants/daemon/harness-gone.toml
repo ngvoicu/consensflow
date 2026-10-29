@@ -3,13 +3,18 @@
 # run, with no code for it. `a_ledger_of_a_harness_this_build_does_not_run` makes that install on
 # the rig and starts on it: the board opens, History reads the copied transcripts, the task of a
 # member on it is paused with the reason, a task for its tier waits for a member that is free,
-# Switch chief takes the project off it, and the agents on it are unsupported and hidden. Each
-# plant takes one generic rule out.
+# Switch chief takes the project off it, and the agents on it are unsupported and hidden. A
+# paused task of a member on it, and the member that is not free, are told the way out: no
+# resume, which cannot open its window (T-569, from Calliope's review of T-566). Each plant
+# takes one generic rule out.
 #
 # Every name holds `harness gone`, so `npm run plants:daemon -- "harness gone"` runs them all.
 
 [run]
 rig-regression-harness-gone = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_ledger_of_a_harness_this_build_does_not_run::"]
+# The engine's cases of a harness it has no adapter for, and the words of a pause note.
+engine-no-adapter = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "no_adapter::"]
+ledger-pause-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses"]
 
 [[plant]]
 name = "harness gone: an agent of a kind the build does not run is listed as supported"
@@ -47,3 +52,53 @@ replace = '''
         let record = self.record_of(chief.id);
         let (this, held) = (Rc::clone(self), Rc::clone(&record));
 '''
+
+[[plant]]
+name = "harness gone: a task paused on a harness with no adapter is told to resume"
+meant = "an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_moves_off_it"
+runs = ["rig-regression-harness-gone", "engine-no-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stalls.rs"
+find = "        let harness_gone = self.harness_gone(project, task);\n"
+replace = "        let harness_gone = false;\n"
+
+[[plant]]
+name = "harness gone: the member on a harness with no adapter is said not free with no way out"
+meant = "gives_a_member_on_it_no_work_says_why_and_every_pass_goes_on"
+runs = ["engine-no-adapter", "rig-regression-harness-gone"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "whose windows ConsensFlow cannot open (remove @{} from the staff and add a member on another harness)\",\n                member.handle, member.handle\n"
+replace = "whose windows ConsensFlow cannot open\",\n                member.handle\n"
+
+[[plant]]
+name = "harness gone: a pause note says the resume whatever the member's harness"
+meant = "a_task_whose_member_s_harness_is_gone_is_told_the_way_on_and_no_resume"
+runs = ["ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    if harness_gone {\n"
+replace = "    if false {\n"
+
+[[plant]]
+name = "harness gone: a pause note of a gone harness is not read back"
+meant = "what_is_written_reads_back"
+runs = ["ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    [false, true].into_iter().find_map(|harness_gone| {\n"
+replace = "    [false].into_iter().find_map(|harness_gone| {\n"
+
+[[plant]]
+name = "harness gone: a note of tasks on gone harnesses alone says their windows come back"
+meant = "a_task_whose_member_s_harness_is_gone_is_told_the_way_on_and_no_resume"
+runs = ["ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "            if many.iter().any(|paused| !paused.harness_gone) {\n"
+replace = "            if true {\n"

@@ -73,8 +73,8 @@ tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
 
 # The mask the goldens' scenarios make their files under, which std cannot set,
 # the most memory a process held, which the memory measurement reports, and
-# whether a process is gone (`kill` with no signal), which a throwaway server's
-# end is checked by.
+# the kill of the program the processes seam's test of a child's end leaves in
+# the background (`seams::processes`).
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["fs", "resource", "signal"] }
 

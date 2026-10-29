@@ -195,13 +195,6 @@ impl Stage<'_> {
             let at = look.fresh.or(look.read).unwrap();
             self.hold(&reading, at, &format!("{name}, fresh"));
         }
-        // Node played these between OpenCode's two snapshot reads, which read
-        // the store as it was before them: so is it read here, before them.
-        // That the reads are one snapshot, a writer between them unseen, is
-        // OpenCode's reader's own test.
-        for step in look.between.iter().flatten() {
-            self.step(step, index);
-        }
         self.answered += 1;
     }
 

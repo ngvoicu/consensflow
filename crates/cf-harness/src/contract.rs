@@ -173,9 +173,6 @@ pub enum FirstMessage {
     /// window opens ([`Launch::message`]), and handed over as the window's pane is
     /// asked for: Devin's `--prompt-file`.
     Opened,
-    /// Posted through the harness's own server once the window is up, which asks
-    /// [`PaneHost::admits`] then ([`Window::started`]): OpenCode's.
-    Started,
     /// Handed over as any later message is, by the window's own
     /// [`Window::deliver`], once the window is past any question of trusting its
     /// folder and has drawn its screen: Claude Code's pasted (its record wraps it
@@ -187,9 +184,9 @@ pub enum FirstMessage {
 /// How a harness's windows take the words they are handed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Input {
-    /// Over a channel of the harness's own (Codex's broker, OpenCode's server,
-    /// Pi's inbox): nothing handed over waits in the window's input box, and no
-    /// key the engine presses sends it.
+    /// Over a channel of the harness's own (Codex's broker, Pi's inbox): nothing
+    /// handed over waits in the window's input box, and no key the engine presses
+    /// sends it.
     #[default]
     Channel,
     /// Pasted into the window's input box, and sent by an Enter (Claude Code,
@@ -218,9 +215,8 @@ pub struct Launch<'a> {
     /// be written to by a process ConsensFlow does not hold.
     pub previous_gone: bool,
     /// The window's first message, as the engine wrote it, where its harness takes
-    /// it as its window opens or once it is up ([`FirstMessage::Opened`],
-    /// [`FirstMessage::Started`]): none for a harness whose windows are delivered
-    /// their first message.
+    /// it as its window opens ([`FirstMessage::Opened`]): none for a harness whose
+    /// windows are delivered their first message.
     pub message: Option<&'a str>,
     /// The agent it runs on: none for a chief from before every chief had one.
     pub agent: Option<Agent<'a>>,
@@ -242,8 +238,7 @@ pub struct Launch<'a> {
 
 /// The model a window runs on and the levels its harness reads, as the
 /// launch gives them: `Some("")` is an empty one, which a window's
-/// arguments take for none (`if (model)`), and OpenCode's first message is
-/// refused for (`variant: ''`).
+/// arguments take for none (`if (model)`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Agent<'a> {
     pub model: Option<&'a str>,
@@ -359,10 +354,8 @@ pub trait Window {
     /// The conversation the window started on, where its harness says it
     /// itself; none where ConsensFlow named it. A window that waits for its
     /// harness to say it gives up by [`Launch::first_message_ms`], if not
-    /// before. A window whose first message goes in once it is up (OpenCode's,
-    /// through its server) hands it over only if `host` admits it then
-    /// ([`PaneHost::admits`]).
-    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>>;
+    /// before.
+    fn started(&self) -> Work<'_, Result<Option<String>, String>>;
     /// Once [`Window::started`] gave up, and right before the engine closes the
     /// window: whether its harness says it came up since, with the conversation it
     /// started on where it says that itself (`Some(None)` where ConsensFlow named
@@ -486,8 +479,8 @@ pub trait PaneHost {
     /// Whether text may be handed to the window now, asked at the moment of the
     /// hand-over, after every wait before it: a paste as it is asked for (after
     /// Claude's keys that clear its input box), Pi's inbox rename once the pane's
-    /// claim is answered, and a request to a peer on loopback (a Codex or OpenCode
-    /// send, OpenCode's first message) inside the send, once its connection is up
+    /// claim is answered, and a request to a peer on loopback (a Codex send) inside
+    /// the send, once its connection is up
     /// ([`Loopback::hand_over`](crate::seams::loopback::Loopback::hand_over)). The
     /// engine's host for a window says no once the window's project is closed (the
     /// human's Close, or the chief's window ending), and the text goes back to wait

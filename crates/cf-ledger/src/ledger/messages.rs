@@ -64,7 +64,7 @@ impl Ledger {
         number: i64,
         because: &str,
     ) -> Result<MessageView, LedgerError> {
-        messages::note_pause(&mut self.store, project_id, to, number, because)
+        messages::note_pause(&mut self.store, project_id, to, number, because, false)
     }
 
     /// ConsensFlow tells `to` that T-`number` is held with `handle`, out of
@@ -90,7 +90,7 @@ impl Ledger {
         number: i64,
         because: &str,
     ) -> Result<Option<MessageView>, LedgerError> {
-        messages::join_pause_note(&mut self.store, note, number, because)
+        messages::join_pause_note(&mut self.store, note, number, because, false)
     }
 
     /// A question for a coordinator; the asker's task waits for the answer.
@@ -430,14 +430,18 @@ impl Ledger {
     /// ConsensFlow paused T-`number` as its window went away (`because`): its
     /// requester is told in a note of the pause, `join`'s where that can take it, and
     /// the words told to the window that still wait for it are named in it as waiting
-    /// for the resume, `why` said once, but `except`, which the caller names itself. The
-    /// note, and the words named.
+    /// for the resume, `why` said once, but `except`, which the caller names itself. A
+    /// task whose member's harness this build opens no window on (`harness_gone`) is
+    /// told the way on that is left: no resume, but a cancel and a new task, or its
+    /// finish. The note, and the words named.
+    #[allow(clippy::too_many_arguments)]
     pub fn note_stall(
         &mut self,
         project_id: i64,
         number: i64,
         because: &str,
         why: &str,
+        harness_gone: bool,
         join: Option<i64>,
         except: Option<i64>,
     ) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
@@ -447,6 +451,7 @@ impl Ledger {
             number,
             because,
             why,
+            harness_gone,
             join,
             except,
         )

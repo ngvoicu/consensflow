@@ -5,8 +5,7 @@
     "windowText": { "rows": 270, "held": "tests/launch/tables.rs" },
     "consoleText": { "rows": 2011, "held": "tests/launch/tables.rs" },
     "admission": { "rows": 120, "held": "shared::admission" },
-    "recordState": { "rows": 16, "held": "shared::record_state" },
-    "fileUrl": { "rows": 295, "held": "tests/launch/tables.rs" }
+    "recordState": { "rows": 16, "held": "shared::record_state" }
   },
   "scenarios": {
     "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" },

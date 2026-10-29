@@ -240,8 +240,8 @@ impl Dispatcher {
         let harness = member.harness.as_deref().unwrap_or("null");
         if self.seams.adapters.adapter(harness).is_none() {
             return Some(format!(
-                "@{} runs on {harness}, whose windows ConsensFlow cannot open",
-                member.handle
+                "@{} runs on {harness}, whose windows ConsensFlow cannot open (remove @{} from the staff and add a member on another harness)",
+                member.handle, member.handle
             ));
         }
         let agent = member.agent.as_deref();

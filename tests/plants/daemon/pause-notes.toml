@@ -117,8 +117,8 @@ runs = ["pause-notes-words"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "    (render(&paused) == body).then_some(paused)"
-replace = "    Some(paused)"
+find = "    .find(|paused| render(paused) == body)"
+replace = "    .find(|_| true)"
 
 [[plant]]
 name = "pause notes: a note takes a task whatever state it is in"

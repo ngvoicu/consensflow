@@ -404,7 +404,6 @@ fn offers_devin_s_models_as_presets_each_on_its_twin_s_tier() {
             entry.name
         );
         assert_eq!(entry.profile.route_label, "Devin account", "{}", entry.name);
-        assert_eq!(entry.profile.route_note, None, "{}", entry.name);
         if entry.model == "swe-2" {
             assert_eq!(entry.profile.model_label, "SWE-2", "{}", entry.name);
             continue;

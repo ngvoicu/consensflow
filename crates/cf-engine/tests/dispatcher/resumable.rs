@@ -122,8 +122,12 @@ fn a_conversation_the_human_switched_the_window_to_is_resumed_on_what_its_harnes
 }
 
 #[test]
-fn a_chief_whose_harness_makes_its_sessions_before_any_turn_is_resumed_though_nothing_was_said_in_it(
+fn a_chief_whose_harness_holds_its_conversation_before_any_turn_is_resumed_though_nothing_was_said_in_it(
 ) {
+    // The harness's record holds the conversation from the window's start, before any
+    // turn: its yes resumes the window, as its no opens one afresh (the case of a chief
+    // that never had a turn, below). The fake holds every conversation unless told, and
+    // treats every harness alike: which one the chief is on is only a label here.
     let (context, project) = chief_on("pi");
     let chief = context.id(project, "chief");
     let before = native_of(&context, chief);
