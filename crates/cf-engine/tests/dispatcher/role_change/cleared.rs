@@ -236,3 +236,31 @@ fn a_greeting_whose_session_a_hook_greeted_meanwhile_is_withdrawn_unsent() {
         "never pasted"
     );
 }
+
+/// T-931: a second session no hook greeted, before the first one's greeting went in, writes
+/// no second note: the one that waits goes into the session the window shows then.
+#[test]
+fn two_switches_before_the_greeting_goes_in_write_one_note() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into());
+        agent.ungreeted.push("native-cleared-2".into());
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    context.adapter.with("chief", |agent| agent.settled = false);
+    context.pass().unwrap();
+    context.adapter.switch_to("chief", "native-cleared-2");
+    context.adapter.with("chief", |agent| agent.settled = false);
+    context.pass().unwrap();
+    assert_eq!(greetings(&context, chief).len(), 1);
+    context.adapter.with("chief", |agent| agent.settled = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let notes = greetings(&context, chief);
+    assert_eq!(notes.len(), 1);
+    assert_eq!(context.message(notes[0].id).state, "delivered");
+}
