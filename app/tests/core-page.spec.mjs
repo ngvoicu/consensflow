@@ -4106,6 +4106,7 @@ test("offers a new project's chief only the harnesses installed here, and its st
     ['Pick a harness', true],
     ['Codex', false],
     ['Pi', false],
+    ['Muse Code', false],
   ])
   await expect(dialog.locator('tr[data-agent="ares"]')).toHaveCount(0)
   await expect(dialog.locator('option', { hasText: 'ares' })).toHaveCount(0)
@@ -4115,7 +4116,7 @@ test('refuses a new project when no harness is installed here, and says where to
   page,
 }) => {
   const data = model()
-  data.missing = ['claude', 'codex', 'pi', 'devin']
+  data.missing = ['claude', 'codex', 'pi', 'devin', 'muse']
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   await expect(page.locator('#status')).toHaveText(
@@ -4898,7 +4899,7 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
     const harnesses = await openScreen(page, 'Harnesses')
     await expect(harnesses).toBeVisible()
     const screen = harnesses.frameLocator('iframe')
-    await expect(screen.locator('.host')).toHaveCount(4)
+    await expect(screen.locator('.host')).toHaveCount(5)
     await expect(
       screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^pi$/ }) }),
     ).toContainText('Version 1.2.3')
@@ -9148,6 +9149,7 @@ test('switches the chief from its card to a harness installed here and a model o
     ['Claude Code', false],
     ['Codex', false],
     ['Pi', false],
+    ['Muse Code', false],
   ])
   // Only the harness and model the chief is on are no switch: another model of its
   // harness is a fresh conversation with the handoff.
@@ -9262,7 +9264,7 @@ test('refuses Switch chief when no harness is installed here, and says where to 
   page,
 }) => {
   const data = model()
-  data.missing = ['claude', 'codex', 'pi', 'devin']
+  data.missing = ['claude', 'codex', 'pi', 'devin', 'muse']
   await open(page, data)
   await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   await expect(page.locator('#status')).toHaveText(
