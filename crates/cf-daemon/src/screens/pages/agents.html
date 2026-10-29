@@ -180,7 +180,7 @@ const el = (tag, className, text) => {
   return node;
 };
 
-const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', devin: 'Devin' };
+const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', pi: 'Pi', devin: 'Devin' };
 const WORK_TIERS = {"critical":{"label":"Critical work","description":"Important reviews, architecture, hard problems and important questions. No coding or routine advice."},"complex":{"label":"Complex work","description":"Demanding implementation, investigation, planning and substantial reviews."},"standard":{"label":"Standard work","description":"Feature work, tests, research, planning and ordinary reviews."},"light":{"label":"Light work","description":"Bounded fixes, lookups and routine tasks; verify the model is suitable."}};
 const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'not-applicable'];
 const effortValue = p => p.designer ? 'not-applicable' : (p.effort || 'default');

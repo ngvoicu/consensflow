@@ -210,5 +210,5 @@ fn each_kind_names_the_harness_node_names_and_none_where_node_names_none() {
             &format!("the harness of {kind:?}"),
         );
     }
-    assert_eq!(kinds.len(), 8);
+    assert_eq!(kinds.len(), 7);
 }

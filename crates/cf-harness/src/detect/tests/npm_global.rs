@@ -143,12 +143,7 @@ fn a_cli_is_found_in_npm_s_folder_when_path_lacks_it_as_the_cmd_windows_starts()
     );
     assert_eq!(
         missing_harnesses(&env),
-        [
-            Harness::Devin,
-            Harness::Claude,
-            Harness::Codex,
-            Harness::Opencode
-        ]
+        [Harness::Devin, Harness::Claude, Harness::Codex]
     );
     // Another harness's shim is not this one's.
     startable(&folder.join("codex.cmd"));

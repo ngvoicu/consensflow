@@ -2,8 +2,8 @@
 //! which the pane host tells a turn's work from them by). Claude Code and Pi keep
 //! them in the group of their window's program and run what their agents start in
 //! groups of their own; Codex opens them with its window, each in a group of its
-//! own. All three say so where there are process groups. OpenCode and Devin have
-//! not been probed, and say nothing on every platform.
+//! own. All three say so where there are process groups. Devin has not been
+//! probed, and says nothing on every platform.
 
 use cf_base::env::Env;
 use cf_harness::launch;
@@ -50,12 +50,5 @@ fn on_windows_no_harness_says_so_whose_job_object_has_no_groups() {
 #[test]
 fn a_harness_that_was_not_probed_says_nothing_and_is_told_by_when_its_processes_began() {
     let unix = Env::from_vars([("OS", "Darwin")]);
-    for harness in [Harness::Opencode, Harness::Devin] {
-        assert_eq!(
-            says(harness, &unix),
-            Servers::Unknown,
-            "{}",
-            harness.as_str()
-        );
-    }
+    assert_eq!(says(Harness::Devin, &unix), Servers::Unknown);
 }

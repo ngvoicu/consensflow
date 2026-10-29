@@ -134,17 +134,7 @@ fn an_extension_is_its_state_and_its_path_and_the_reason_when_it_failed() {
         json!({"state": "installed-unverified", "path": "/p"})
     );
     assert_eq!(
-        said(Extension::of_opencode(
-            opencode::Extension::InstalledUnverified {
-                path: "/p".to_owned(),
-                config: "/tui.json".to_owned()
-            }
-        )),
-        json!({"state": "installed-unverified", "path": "/p"}),
-        "OpenCode's settings file is the launch's, not the row's"
-    );
-    assert_eq!(
-        serde_json::to_string(&Extension::of_opencode(opencode::Extension::Error {
+        serde_json::to_string(&Extension::of_pi(pi::Extension::Error {
             reason: "EACCES".to_owned()
         }))
         .unwrap(),

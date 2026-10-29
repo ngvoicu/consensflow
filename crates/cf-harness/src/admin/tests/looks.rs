@@ -1,6 +1,5 @@
 //! What a look at one harness says of it: its version, its release, how it
-//! was installed, what Devin may be opened on, and the extension two
-//! harnesses load.
+//! was installed, what Devin may be opened on, and the extension Pi loads.
 
 use cf_proto::agents::Harness;
 use serde_json::json;
@@ -150,76 +149,6 @@ fn devin_is_ready_only_from_its_minimum_and_codex_has_no_setup() {
 }
 
 #[test]
-fn an_opencode_of_2_or_more_is_said_not_to_be_supported_yet_and_is_offered_no_update_further() {
-    let reason = "OpenCode 2 or newer is not supported yet. Install the last OpenCode 1.x release.";
-    for said in ["opencode v2.0.29", "2.0.29", "opencode v5.0.0"] {
-        let fixture = look("opencode", "bin", says(said), Ok("5.0.1".to_owned()));
-        let row = fixture.row("opencode", false);
-        assert_eq!(
-            row.setup,
-            Some(Setup::NotSupportedYet {
-                reason: reason.to_owned()
-            }),
-            "{said}"
-        );
-        // The release is said, and no update to it: the page draws its Update
-        // button for an update that is available alone.
-        let Update::Unknown(release) = &row.update else {
-            panic!("{said}: {:?}", row.update);
-        };
-        assert_eq!(release.value, "5.0.1", "{said}");
-        let json = json_of(&row);
-        assert_eq!(json["setup"]["state"], "not-supported-yet", "{said}");
-        assert_eq!(json["update"]["state"], "unknown", "{said}");
-    }
-    // One that is as new as the release says so, as any CLI does.
-    let fixture = look(
-        "opencode",
-        "bin",
-        says("opencode v2.0.29"),
-        Ok("2.0.29".to_owned()),
-    );
-    let row = fixture.row("opencode", false);
-    assert!(matches!(row.update, Update::Current(_)), "{:?}", row.update);
-    assert!(matches!(row.setup, Some(Setup::NotSupportedYet { .. })));
-}
-
-#[test]
-fn an_opencode_of_1_x_has_no_setup_and_is_offered_the_update_to_a_1_x_and_none_to_a_2() {
-    for said in ["1.19.0", "opencode 1.4.0", "0.9.9"] {
-        let fixture = look("opencode", "bin", says(said), Ok("1.19.1".to_owned()));
-        let row = fixture.row("opencode", false);
-        assert_eq!(row.setup, None, "{said}");
-        assert!(matches!(row.update, Update::Available(_)), "{said}");
-    }
-    // The feed says the latest is a 2, as npm's has since 2.0: the OpenCode
-    // that is installed is supported, so its row has no setup, and the way to
-    // the one that is not is no update on offer. It says the release all the same.
-    for release in ["2.0.29", "5.0.1"] {
-        let fixture = look("opencode", "bin", says("1.19.0"), Ok(release.to_owned()));
-        let row = fixture.row("opencode", false);
-        assert_eq!(row.setup, None, "{release}");
-        let Update::Unknown(found) = &row.update else {
-            panic!("{release}: {:?}", row.update);
-        };
-        assert_eq!(found.value, release);
-        assert_eq!(json_of(&row)["update"]["state"], "unknown", "{release}");
-    }
-    // Only OpenCode's releases are held back for their version: a 2 is a
-    // release like any of another CLI's.
-    let fixture = look("codex", "bin", says("1.0.0"), Ok("2.0.0".to_owned()));
-    assert!(matches!(
-        fixture.row("codex", false).update,
-        Update::Available(_)
-    ));
-    // One that says no version has none to be unsupported, and no setup.
-    let fixture = look("opencode", "bin", says("opencode"), Ok("1.19.1".to_owned()));
-    assert_eq!(fixture.row("opencode", false).setup, None);
-    let fixture = look("opencode", "bin", fails(false), Ok("1.19.1".to_owned()));
-    assert_eq!(fixture.row("opencode", false).setup, None);
-}
-
-#[test]
 fn a_row_says_its_fields_in_the_order_node_builds_them() {
     let fixture = look(
         "devin",
@@ -245,9 +174,9 @@ fn a_row_says_its_fields_in_the_order_node_builds_them() {
 }
 
 #[test]
-fn pi_and_opencode_are_given_the_extension_made_for_them_and_the_others_none() {
+fn pi_is_given_the_extension_made_for_it_and_the_others_none() {
     let fixture = Fixture::new();
-    for (command, version) in [("pi", "0.1.0"), ("opencode", "0.2.0"), ("codex", "0.3.0")] {
+    for (command, version) in [("pi", "0.1.0"), ("codex", "0.3.0")] {
         fixture.install("bin", command);
         fixture
             .capture
@@ -256,26 +185,17 @@ fn pi_and_opencode_are_given_the_extension_made_for_them_and_the_others_none() {
             .latest
             .says(Harness::from_name(command).unwrap(), version);
     }
-    for (command, folder) in [("pi", "pi"), ("opencode", "opencode")] {
-        let json = json_of(&fixture.row(command, false));
-        let extension = &json["extension"];
-        assert_eq!(extension["state"], "installed-unverified", "{command}");
-        let path = extension["path"].as_str().unwrap().replace('\\', "/");
-        assert!(
-            path.contains(&format!("/consensflow/extensions/{folder}/")),
-            "{path}"
-        );
-        let keys: Vec<&String> = extension.as_object().unwrap().keys().collect();
-        assert_eq!(
-            keys,
-            ["state", "path"],
-            "{command}: OpenCode's config is no part of it"
-        );
-        assert_eq!(
-            json.as_object().unwrap().keys().next_back().unwrap(),
-            "extension"
-        );
-    }
+    let json = json_of(&fixture.row("pi", false));
+    let extension = &json["extension"];
+    assert_eq!(extension["state"], "installed-unverified");
+    let path = extension["path"].as_str().unwrap().replace('\\', "/");
+    assert!(path.contains("/consensflow/extensions/pi/"), "{path}");
+    let keys: Vec<&String> = extension.as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["state", "path"]);
+    assert_eq!(
+        json.as_object().unwrap().keys().next_back().unwrap(),
+        "extension"
+    );
     assert!(json_of(&fixture.row("codex", false))
         .get("extension")
         .is_none());
@@ -284,25 +204,18 @@ fn pi_and_opencode_are_given_the_extension_made_for_them_and_the_others_none() {
 #[test]
 fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
     let fixture = Fixture::new();
-    for command in ["devin", "claude", "codex", "opencode", "pi"] {
+    for command in ["devin", "claude", "codex", "pi"] {
         fixture.install("bin", command);
-        // An OpenCode of 2 or more is offered no update, and none is offered to
-        // a release of 2 or more.
-        let (version, release) = if command == "opencode" {
-            ("1.5.0", "1.5.1")
-        } else {
-            ("5.0.0", "5.0.1")
-        };
         fixture
             .capture
-            .says(&format!("{command} --version"), version);
+            .says(&format!("{command} --version"), "5.0.0");
         fixture
             .latest
-            .says(Harness::from_name(command).unwrap(), release);
+            .says(Harness::from_name(command).unwrap(), "5.0.1");
     }
     let rows = fixture.check(None, false);
     let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
-    assert_eq!(ids, ["devin", "claude", "codex", "opencode", "pi"]);
+    assert_eq!(ids, ["devin", "claude", "codex", "pi"]);
     assert!(rows
         .iter()
         .all(|row| matches!(row.update, Update::Available(_))));
@@ -319,7 +232,6 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
             "claude --version",
             "codex --version",
             "devin --version",
-            "opencode --version",
             "pi --version"
         ]
     );
@@ -330,6 +242,6 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
         .map(|(id, _)| id.as_str())
         .collect();
     asked.sort_unstable();
-    assert_eq!(asked, ["claude", "codex", "devin", "opencode", "pi"]);
+    assert_eq!(asked, ["claude", "codex", "devin", "pi"]);
     assert!(fixture.capture.unused().is_empty() && fixture.latest.unused().is_empty());
 }

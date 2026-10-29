@@ -10,10 +10,7 @@ const member = (page, name) =>
     .locator('#agents .member')
     .filter({ has: page.locator('.callsign', { hasText: new RegExp(`^${name}$`) }) })
 
-for (const [harness, label] of [
-  ['pi', 'Pi'],
-  ['opencode', 'OpenCode'],
-]) {
+for (const [harness, label] of [['pi', 'Pi']]) {
   test(`real administration page checks ${label} setup and retries without global configuration`, async ({
     page,
   }) => {
@@ -50,7 +47,7 @@ for (const [harness, label] of [
         page.getByText('Role skills included in ConsensFlow', { exact: false }),
       ).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Update skills', exact: true })).toHaveCount(0)
-      await expect(page.locator('.host')).toHaveCount(5)
+      await expect(page.locator('.host')).toHaveCount(4)
       await expect(page.locator('.host').filter({ hasText: 'claude' })).toContainText(
         'Not installed',
       )
@@ -236,7 +233,7 @@ test('Harnesses reports a failed initial check and allows retry', async ({ page 
     await page.getByRole('button', { name: 'Check all harnesses' }).click()
     // The retry runs the real check, which probes every harness on this
     // machine: on a busy CI runner that took longer than the 5 s default.
-    await expect(page.locator('.host')).toHaveCount(5, { timeout: 30_000 })
+    await expect(page.locator('.host')).toHaveCount(4, { timeout: 30_000 })
     await expect(page.getByRole('status')).toBeEmpty()
   } finally {
     await server.close()
@@ -256,7 +253,7 @@ test('Harnesses says how each one was installed and updates it from a button', a
     distribution: 'Homebrew',
     update,
   })
-  const others = ['claude', 'opencode', 'pi', 'devin'].map((id) => ({
+  const others = ['claude', 'pi', 'devin'].map((id) => ({
     id,
     path: null,
     installed: false,
@@ -300,7 +297,7 @@ test('Harnesses says how each one was installed and updates it from a button', a
     await expect(codex).toContainText('Version 0.2.0, up to date')
     await expect(codex.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
     expect(asked).toEqual({ id: 'codex' })
-    await expect(page.locator('.host').nth(4)).not.toContainText('next prompt')
+    await expect(page.locator('.host').nth(3)).not.toContainText('next prompt')
   } finally {
     await server.close()
     t.cleanup()
@@ -322,7 +319,7 @@ test('Harnesses tells the human to update a harness the way it was installed whe
     distribution: null,
     update: { state: 'available', value: '1.2.4', command: null },
   }
-  const others = ['claude', 'codex', 'opencode', 'devin'].map((id) => ({
+  const others = ['claude', 'codex', 'devin'].map((id) => ({
     id,
     path: null,
     installed: false,
@@ -477,7 +474,6 @@ test('grouped by work tier, a tier lists its agents as the pickers offer them: b
     ['dune', 'claude', undefined],
     ['echo', 'codex', 'minimal'],
     ['flint', 'codex', 'ultra'],
-    ['gale', 'opencode', 'high'],
     ['heath', 'pi', 'off'],
     ['iris', 'pi', 'xhigh'],
   ]
@@ -494,14 +490,13 @@ test('grouped by work tier, a tier lists its agents as the pickers offer them: b
   try {
     for (const screen of [page, fixture.second]) {
       await fixture.saved(screen)
-      await expect(screen.locator('.agent-group > h3')).toHaveText(['Light work · 9'])
+      await expect(screen.locator('.agent-group > h3')).toHaveText(['Light work · 8'])
       await expect(screen.locator('.callsign')).toHaveText([
         'cedar',
         'birch',
         'dune',
         'flint',
         'echo',
-        'gale',
         'iris',
         'heath',
         'amber',
@@ -513,7 +508,6 @@ test('grouped by work tier, a tier lists its agents as the pickers offer them: b
       'flint',
       'cedar',
       'iris',
-      'gale',
       'amber',
       'birch',
       'echo',
@@ -1064,7 +1058,6 @@ test('image agents keep the Codex route and offer only their tier for editing', 
       'claude',
       'codex',
       'pi',
-      'opencode',
       'devin',
     ])
     await expect(image).toBeHidden()

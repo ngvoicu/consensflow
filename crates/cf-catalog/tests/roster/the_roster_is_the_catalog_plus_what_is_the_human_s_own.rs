@@ -68,7 +68,6 @@ fn reads_v1_rows_as_agents_kind_to_harness_thinking_or_effort_to_effort() {
     assert_eq!(agents["endymion"].harness.as_deref(), Some("pi"));
     // The fixture's copy says xhigh; a catalog agent reads as the catalog has it.
     assert_eq!(agents["endymion"].effort.as_deref(), Some("max"));
-    assert_eq!(agents["mani"].harness.as_deref(), Some("opencode"));
 }
 
 #[test]

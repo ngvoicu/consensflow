@@ -144,7 +144,6 @@ fn a_pi_presets_effort_is_kept_under_thinking_and_every_other_kinds_under_effort
         ("pi", "thinking"),
         ("claude-code", "effort"),
         ("codex", "effort"),
-        ("opencode", "effort"),
         ("devin", "effort"),
     ] {
         let mut with_effort = preset("a", kind, "m");

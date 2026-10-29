@@ -148,12 +148,6 @@ impl OwnCopy {
     pub(crate) fn file(&self) -> String {
         path::join(&[&self.folder, "SKILL.md"])
     }
-
-    /// The folder of skills the copy is in, which a harness that is told which
-    /// folders to read skills from (OpenCode) is given.
-    pub(crate) fn skills(&self) -> String {
-        path::join(&[&self.root, SKILLS[1], SKILLS[2]])
-    }
 }
 
 /// Where the window of `harness` finds the skill of `variant`: the copy the

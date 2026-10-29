@@ -12,11 +12,8 @@ fn covers_every_harness_each_with_a_real_list_the_image_agent_among_codex_s() {
         .map(|group| group.harness.as_str())
         .collect();
     offered.sort_unstable();
-    // OpenCode leaves ConsensFlow: the catalog offers nothing on it (T-564),
-    // and its variant goes with its adapter.
     let mut harnesses: Vec<&str> = Harness::ALL
         .iter()
-        .filter(|harness| **harness != Harness::Opencode)
         .map(|harness| harness.as_str())
         .collect();
     harnesses.sort_unstable();

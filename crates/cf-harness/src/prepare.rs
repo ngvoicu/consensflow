@@ -1,5 +1,5 @@
 //! What opening the standalone app prepares: its private launcher, the terminal
-//! command, and its Pi and OpenCode integrations. It is what `cf setup` does,
+//! command, and its Pi integration. It is what `cf setup` does,
 //! and the one place that puts the launcher beside the extensions; the
 //! harnesses' own modules stay apart.
 //!
@@ -11,7 +11,7 @@ use std::path::Path;
 use cf_base::env::Env;
 use cf_launcher::Places;
 
-use crate::{opencode, pi};
+use crate::pi;
 
 /// What preparing the app came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +21,6 @@ pub struct Prepared {
     /// else's was there to leave alone.
     pub report: Vec<String>,
     pub pi_extension: pi::Extension,
-    pub opencode_extension: opencode::Extension,
 }
 
 /// Prepares the launcher for `cf`, the native one of this bundle, and the
@@ -36,6 +35,5 @@ pub fn prepare_app(env: &Env, cf: &Path) -> Prepared {
     Prepared {
         report,
         pi_extension: pi::prepare_extension(env),
-        opencode_extension: opencode::prepare_extension(env),
     }
 }

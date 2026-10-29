@@ -21,7 +21,7 @@ pub struct Preset {
     pub label: String,
     /// The paragraph the catalog card shows.
     pub description: String,
-    /// The harness, in the payload's vocabulary (`claude-code`, `codex`, `pi`, `opencode`, `devin`).
+    /// The harness, in the payload's vocabulary (`claude-code`, `codex`, `pi`, `devin`).
     pub kind: String,
     pub model: String,
     pub effort: Option<String>,

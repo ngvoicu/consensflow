@@ -62,6 +62,8 @@ mod a_follow_up_after_a_restart_lost_its_windows_conversation;
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 #[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
 mod a_job_that_still_ran_was_taken_for_ended;
+#[path = "regressions/a_ledger_of_a_harness_this_build_does_not_run.rs"]
+mod a_ledger_of_a_harness_this_build_does_not_run;
 #[path = "regressions/a_message_the_chief_took_was_typed_in_again_under_load.rs"]
 mod a_message_the_chief_took_was_typed_in_again_under_load;
 #[path = "regressions/a_paste_devin_held_pasted_again_after_a_switch_and_a_restart.rs"]

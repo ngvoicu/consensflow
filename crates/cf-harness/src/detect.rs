@@ -26,13 +26,8 @@ use crate::shared::paths::{home, set};
 /// Every harness, in the order Node's harness list had them: the order
 /// detection answers in and the Harnesses page lists its rows in. It is not
 /// [`Harness::ALL`]'s, the roster's.
-const DETECTION_ORDER: [Harness; 5] = [
-    Harness::Devin,
-    Harness::Claude,
-    Harness::Codex,
-    Harness::Opencode,
-    Harness::Pi,
-];
+const DETECTION_ORDER: [Harness; 4] =
+    [Harness::Devin, Harness::Claude, Harness::Codex, Harness::Pi];
 
 /// A harness whose CLI is installed here, as `detectHarnesses` lists it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -51,7 +46,6 @@ fn locations(harness: Harness) -> &'static [&'static [&'static str]] {
         // there, but nothing installs there fresh (it installs to `.local/bin`).
         Harness::Claude => &[&[".local", "bin"], &[".claude", "local"]],
         Harness::Codex => &[&[".codex", "bin"], &[".local", "bin"]],
-        Harness::Opencode => &[&[".opencode", "bin"], &[".local", "bin"]],
         Harness::Pi => &[&[".pi", "bin"], &[".local", "bin"]],
     }
 }
@@ -151,7 +145,7 @@ pub fn harness_path(harness: Harness, env: &Env) -> Option<PathBuf> {
 }
 
 /// All supported harnesses, whether installed or not (`knownHarnesses`).
-pub fn known_harnesses() -> [Harness; 5] {
+pub fn known_harnesses() -> [Harness; 4] {
     DETECTION_ORDER
 }
 

@@ -249,7 +249,7 @@ pub fn check(step: &Step, scenario: &str) {
             for inner in between.as_deref().unwrap_or_default() {
                 check(inner, scenario);
             }
-            ["codex", "claude-code", "pi", "opencode", "devin"].contains(&kind.as_str())
+            ["codex", "claude-code", "pi", "devin"].contains(&kind.as_str())
                 && (session.is_empty() || !session.contains('/'))
                 && options.values().all(|value| !value.is_null())
                 && env

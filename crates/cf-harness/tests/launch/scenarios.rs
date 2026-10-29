@@ -11,7 +11,6 @@
 //! step holds waits until a step releases it, and the work begun is run by
 //! hand until nothing moves.
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
@@ -34,7 +33,6 @@ use cf_harness::testing::{
     ScriptedHost, Sent, Served, FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
-use regex::Regex;
 use rusqlite::types::Value as Bound;
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
@@ -61,9 +59,6 @@ struct Names {
     root: String,
     other: Option<u32>,
     forms: RootForms,
-    bundle: Regex,
-    /// OpenCode's bundle hashes, in the order each first appeared.
-    hashes: RefCell<Vec<String>>,
 }
 
 /// The ways the root reads in the text a step records, each written as a name
@@ -117,33 +112,9 @@ impl Names {
     fn new(root: String, other: Option<u32>) -> Self {
         Self {
             forms: RootForms::of(&root),
-            // OpenCode's bundle is named by a hash of the folder it is
-            // published in, which the root is among the parents of: the hash
-            // is not the same in two runs, and is written `$HASH`.
-            bundle: Regex::new(r"(extensions[\\/]opencode[\\/])([0-9a-f]{64})").unwrap(),
-            hashes: RefCell::new(Vec::new()),
             root,
             other,
         }
-    }
-
-    /// `text` with each OpenCode bundle hash named by the order it first
-    /// appeared in among the scenario's (`$HASH1`, `$HASH2`, …).
-    fn hashed(&self, text: &str) -> String {
-        let mut hashes = self.hashes.borrow_mut();
-        self.bundle
-            .replace_all(text, |found: &regex::Captures| {
-                let hash = &found[2];
-                let at = hashes
-                    .iter()
-                    .position(|seen| seen == hash)
-                    .unwrap_or_else(|| {
-                        hashes.push(hash.to_owned());
-                        hashes.len() - 1
-                    });
-                format!("{}$HASH{}", &found[1], at + 1)
-            })
-            .into_owned()
     }
 
     /// The process ids a scenario names, by their names.
@@ -236,7 +207,7 @@ impl Names {
                 if text.starts_with("$ROOT") {
                     text = posix(text);
                 }
-                json!(self.hashed(&text))
+                json!(text)
             }
             other => other.clone(),
         }
@@ -753,7 +724,7 @@ fn a_number_is_named_a_live_process_only_under_pid() {
 
 #[cfg(unix)]
 #[test]
-fn the_root_is_named_by_how_a_record_spells_it_and_each_bundle_hash_by_its_order() {
+fn the_root_is_named_by_how_a_record_spells_it_and_a_bundle_hash_as_it_is() {
     let names = Names::new("/tmp/cf-launch-golden-X y's".to_owned(), None);
     let written = |text: &str| names.written(&json!(text), None);
     assert_eq!(
@@ -779,22 +750,8 @@ fn the_root_is_named_by_how_a_record_spells_it_and_each_bundle_hash_by_its_order
         written("?directory=%2Ftmp%2Fcf-launch-golden-X+y%27s%2Fwork"),
         json!("?directory=$FORM_ROOT%2Fwork")
     );
-    let (hash, other) = ("0123456789abcdef".repeat(4), "fedcba9876543210".repeat(4));
-    let bundle = |hash: &str| format!("/x/extensions/opencode/{hash}/hosts");
-    assert_eq!(
-        written(&bundle(&hash)),
-        json!("/x/extensions/opencode/$HASH1/hosts")
-    );
-    assert_eq!(
-        written(&bundle(&other)),
-        json!("/x/extensions/opencode/$HASH2/hosts"),
-        "another bundle is another name"
-    );
-    assert_eq!(
-        written(&bundle(&hash)),
-        json!("/x/extensions/opencode/$HASH1/hosts")
-    );
-    // Pi's bundle is named by the same kind of hash, which does not change.
+    // A bundle's hash is written as it is: it does not change from run to run.
+    let hash = "0123456789abcdef".repeat(4);
     let pi = format!("/x/extensions/pi/{hash}/hosts");
     assert_eq!(written(&pi), json!(pi));
 }

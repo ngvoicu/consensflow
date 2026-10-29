@@ -99,7 +99,7 @@ fn the_contributor_routes_of_muse_spark_become_its_key_and_nothing_else_does() {
         "muse-spark-1.2-contributor",
         "Muse-spark-1.3-contributor",
         "muse-spark-1.3-contributor\n",
-        "opencode/muse-spark-1.3-contributor-free",
+        "openrouter/meta/muse-spark-1.3-contributor-free",
     ] {
         assert_eq!(muse_spark_plain(key), None, "{key:?}");
     }
@@ -117,7 +117,7 @@ fn a_key_is_the_last_segment_with_its_version_in_the_catalog_s_spelling() {
         "claude-fable-5.1"
     );
     assert_eq!(
-        curated_key("opencode/muse-spark-1.3-contributor-free"),
+        curated_key("openrouter/meta/muse-spark-1.3-contributor-free"),
         "muse-spark-1.3"
     );
     assert_eq!(curated_key("a/b/"), "");

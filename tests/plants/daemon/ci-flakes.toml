@@ -1,8 +1,9 @@
 # The tests that failed now and then on the CI runners (T-178, 3.0.6), each held by the test
 # written for its cause; one plant takes one rule out and a test fails.
 #
-# - a throwaway OpenCode server is stopped when its process has ended, whatever still holds its
-#   error stream open (`crates/cf-harness/src/shared/child.rs`, `cf_process::Child::ended`);
+# - a child is stopped when its process has ended, whatever still holds its error stream open
+#   (`crates/cf-harness/src/shared/child.rs`, `cf_process::Child::ended`; a real child in
+#   `seams::processes`'s unit tests since OpenCode's throwaway server went, T-566);
 # - a stop waits for the pass it found running and for no longer than that, counted in the
 #   timers' own time (`crates/cf-daemon/src/stop.rs`), and so is the stop of everything open (T-376):
 #   one deadline for a pass that never ends, a door, an idle connection and a body half sent,
@@ -29,7 +30,7 @@
 # Every name holds `ci flakes`, so `npm run plants:daemon -- "ci flakes"` runs them all.
 
 [run]
-harness-channels-create = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--test", "channels", "a_server_that_has_exited"]
+harness-processes-ended = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "seams::processes::tests::a_child_that_has_exited"]
 harness-shared-child = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "shared::child::"]
 process-child-ended = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "child::tests::a_program_is_ended"]
 daemon-lib-stop-pass = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::a_pass_that_ends"]
@@ -43,8 +44,8 @@ panes-keys = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::key
 
 [[plant]]
 name = "ci flakes: a server's stop waits for its error stream to close"
-meant = "a_server_that_has_exited_is_stopped_though_a_program_holds_its_error_stream"
-runs = ["harness-channels-create"]
+meant = "a_child_that_has_exited_is_not_asked_to_end_and_is_stopped_at_once_though_its_error_stream_is_open"
+runs = ["harness-shared-child"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/child.rs"
@@ -82,8 +83,8 @@ replace = '''
 
 [[plant]]
 name = "ci flakes: a real child is ended when its streams have closed"
-meant = "a_server_that_has_exited_is_stopped_though_a_program_holds_its_error_stream"
-runs = ["harness-channels-create"]
+meant = "a_child_that_has_exited_has_ended_though_a_program_it_left_holds_its_error_stream"
+runs = ["harness-processes-ended"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/seams/processes.rs"
