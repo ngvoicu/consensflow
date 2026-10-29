@@ -1,0 +1,76 @@
+# An answer in the human's own words ("Something else") to a question with options is an answer
+# like any other, up to the body limit, and one past it says `pick too long` (issue
+# `long-own-words-answer-refused`, `911656f`): a 6,000-character one was refused as `answer: empty
+# pick` when a pick was capped at `MAX_TITLE * 10`. `crates/cf-ledger/src/questions.rs` holds the
+# picks' rule (its unit tests), and `crates/cf-ledger/tests/receipt/own_words.rs` takes one through
+# `answer`, which prints it under the question's header and holds that text to the body limit.
+# Every name begins `own words:`, so `npm run plants:daemon -- "own words"` runs them.
+
+[run]
+ledger-questions = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "questions::"]
+ledger-own-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "own_words::"]
+
+[[plant]]
+name = "own words: a pick is capped at 1,200 characters again"
+meant = "a_pick_in_the_humans_own_words_is_taken_up_to_the_body_limit"
+runs = ["ledger-questions"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = "                    if utf16_len(&wanted) > MAX_BODY {"
+replace = "                    if utf16_len(&wanted) > MAX_TITLE * 10 {"
+
+[[plant]]
+name = "own words: an answer of 6,000 characters is refused by the picks' cap"
+meant = "a_6000_character_answer_in_the_humans_own_words_is_an_answer_like_any_other"
+runs = ["ledger-own-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = "                    if utf16_len(&wanted) > MAX_BODY {"
+replace = "                    if utf16_len(&wanted) > MAX_TITLE * 10 {"
+
+[[plant]]
+name = "own words: a pick is as long as its bytes, not its characters"
+meant = "a_pick_in_the_humans_own_words_is_taken_up_to_the_body_limit"
+runs = ["ledger-questions"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = "                    if utf16_len(&wanted) > MAX_BODY {"
+replace = "                    if wanted.len() > MAX_BODY {"
+
+[[plant]]
+name = "own words: a pick of any length is taken"
+meant = "a_pick_past_the_body_limit_is_too_long_and_not_empty"
+runs = ["ledger-questions"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = "                    if utf16_len(&wanted) > MAX_BODY {"
+replace = "                    if false && utf16_len(&wanted) > MAX_BODY {"
+
+[[plant]]
+name = "own words: a pick too long is refused as an empty one"
+meant = "a_pick_past_the_body_limit_is_too_long_and_not_empty"
+runs = ["ledger-questions"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/questions.rs"
+find = '"pick too long (at most {MAX_BODY} characters)"'
+replace = '"empty pick"'
+
+[[plant]]
+name = "own words: the printed answer is not held to the body limit"
+meant = "the_longest_pick_a_question_takes_is_the_body_limit_less_the_header_it_is_printed_under"
+runs = ["ledger-own-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''
+        model::require_text(&text, "body", MAX_BODY)?;
+        require_active(&answerer)?;
+'''
+replace = '''
+        require_active(&answerer)?;
+'''

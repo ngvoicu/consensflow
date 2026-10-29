@@ -273,4 +273,64 @@ mod tests {
         );
         assert_eq!(refused(json!([["Left"], [" "]])), "answer: empty pick");
     }
+
+    /// A question with one pick to give, and what `choices` or the text of an answer make of
+    /// `pick` for it: the pick as taken, or the refusal.
+    fn picked(pick: &str, by_text: bool) -> Result<Vec<Vec<String>>, String> {
+        let questions = require_questions(&json!([
+            { "question": "Which way?", "header": "Way", "options": [{ "label": "Left" }] },
+        ]))
+        .unwrap();
+        let (choices, body) = (json!([[pick]]), json!(pick));
+        let taken = if by_text {
+            require_choices(&questions, None, Some(&body))
+        } else {
+            require_choices(&questions, Some(&choices), None)
+        };
+        taken.map_err(|refused| refused.to_string())
+    }
+
+    #[test]
+    fn a_pick_in_the_humans_own_words_is_taken_up_to_the_body_limit() {
+        // 6,000 characters was refused as an empty pick when a pick was capped at
+        // `MAX_TITLE * 10` (the long-message evals, 2026-09-27). The limit counts UTF-16 units,
+        // as the body's does: two bytes of text are one unit, and an emoji is two.
+        let own_words = [
+            "x".repeat(6_000),
+            "x".repeat(MAX_TITLE * 10 + 1),
+            "x".repeat(MAX_BODY),
+            "\u{e9}".repeat(MAX_BODY),
+            "\u{1f642}".repeat(MAX_BODY / 2),
+        ];
+        for pick in own_words {
+            for by_text in [false, true] {
+                assert_eq!(
+                    picked(&pick, by_text),
+                    Ok(vec![vec![pick.clone()]]),
+                    "{} units, by text: {by_text}",
+                    utf16_len(&pick)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_pick_past_the_body_limit_is_too_long_and_not_empty() {
+        let too_long = format!("answer: pick too long (at most {MAX_BODY} characters)");
+        for pick in [
+            "x".repeat(MAX_BODY + 1),
+            "\u{1f642}".repeat(MAX_BODY / 2 + 1),
+        ] {
+            for by_text in [false, true] {
+                assert_eq!(
+                    picked(&pick, by_text),
+                    Err(too_long.clone()),
+                    "{} units",
+                    utf16_len(&pick)
+                );
+            }
+        }
+        // And an empty one is still empty.
+        assert_eq!(picked(" ", false), Err("answer: empty pick".to_owned()));
+    }
 }

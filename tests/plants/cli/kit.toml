@@ -4,7 +4,9 @@
 # command) and the bundle without Node (nothing reads the file the flip read, an npm shim with
 # no Node is refused, the daemon the app starts, the update's check, the page's console text), the
 # PATH the app gives its daemon (the login shell's, else the app's, and the system's folders after
-# it), and the check that holds Node's sources gone from the scripts that stay.
+# it), the check that holds Node's sources gone from the scripts that stay, and the text a board
+# command is given (standard input at `-`, a file, an argument whole: `text.toml`; from each shell of
+# Windows: `shells.toml`).
 # A run here is any command, a script’s test among them.
 #
 # What a plant is, and what this file and the tables beside it hold, is told in
@@ -12,7 +14,7 @@
 
 run_limit_minutes = 10
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["parser", "verbs", "admin", "dispatch", "help", "flip", "deletion", "login-path", "rig", "tester", "off-node", "task-get"]
+tables = ["parser", "verbs", "admin", "dispatch", "help", "flip", "deletion", "login-path", "rig", "tester", "off-node", "task-get", "text", "shells"]
 
 [run]
 # The parser held to Node's `parseArgs` on three thousand lists of words.
