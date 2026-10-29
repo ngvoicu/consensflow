@@ -195,9 +195,6 @@ fn early_case(live: &Live) -> Result<String> {
     rig.wait_for("the stopped turn's end", secs(60), || {
         Ok(!terminals(&the_session(&rig).1).is_empty())
     })?;
-    let (_, log) = the_session(&rig);
-    let retracted = has(&log, "run/run_retracted");
-    let first = terminals(&log);
     // The daemon reads the window at rest, taken back by its own stop, and puts the brief
     // back in its queue for the resume.
     let worker = worker(&project)?;
@@ -206,6 +203,11 @@ fn early_case(live: &Live) -> Result<String> {
         brief = message_with(&project, &worker, "T1_DONE")?.unwrap_or_default();
         Ok(brief["state"] == "queued")
     })?;
+    // Read once the daemon took the brief back: Muse writes the run's end a moment before
+    // its `run_retracted` (T-931's live run read the log between the two).
+    let (_, log) = the_session(&rig);
+    let retracted = has(&log, "run/run_retracted");
+    let first = terminals(&log);
     let resumed = rig.page("task.resume", json!({ "project": project.id(), "task": 1 }))?;
     held(resumed["ok"] == true, format!("{resumed}"))?;
     done(&rig, &project, 1, secs(240))?;
