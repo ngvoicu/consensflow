@@ -347,6 +347,7 @@ fn the_rule_reads_the_shell_scripts_of_the_tools_folder_and_the_package_scripts(
     write("elsewhere/x.sh", "ssh host\n");
     let found = unbounded_in(root.path());
     let said = found.join("\n");
+    // The rule names a script by its path as the system spells it: `\` on Windows.
     for (file, at) in [
         ("tools/other/by-path.sh", "2"),
         ("tools/other/by-name.sh", "3"),
@@ -357,7 +358,8 @@ fn the_rule_reads_the_shell_scripts_of_the_tools_folder_and_the_package_scripts(
         assert!(
             found
                 .iter()
-                .any(|line| line.contains(file) && line.contains(&format!(":{at}:"))),
+                .any(|line| line.replace('\\', "/").contains(file)
+                    && line.contains(&format!(":{at}:"))),
             "{file}:{at} was not found in\n{said}"
         );
     }
