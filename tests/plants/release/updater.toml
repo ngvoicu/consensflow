@@ -522,14 +522,14 @@ runs = ["smoke-app"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/app.rs"
 find = '''
-            for process in &seen {
-                kill_group(process, first.pid());
+        // The group of the child still held: its number is its own, ended or not.
+        if let Some(child) = locked(&self.0.child).as_ref() {
 '''
 replace = '''
-            self.close_input();
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            for process in &seen {
-                kill_group(process, first.pid());
+        self.close_input();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // The group of the child still held: its number is its own, ended or not.
+        if let Some(child) = locked(&self.0.child).as_ref() {
 '''
 
 [[plant]]
