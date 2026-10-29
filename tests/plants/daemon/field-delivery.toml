@@ -66,8 +66,10 @@ runs = ["fd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        } else if items.get(from..).is_some_and(answered) {'''
-replace = '''        } else if false && items.get(from..).is_some_and(answered) {'''
+find = '''            .is_some_and(answered)
+        {'''
+replace = '''            .is_some_and(|_| false)
+        {'''
 
 [[plant]]
 name = "field delivery: what the record held when the head came is read again at every look"
@@ -76,8 +78,8 @@ runs = ["fd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''                Some((message, from)) if message == next.id => from,'''
-replace = '''                Some((message, _)) if message == next.id => items.len(),'''
+find = '''                Some((message, from)) if message == next.id => Some(from),'''
+replace = '''                Some((message, _)) if message == next.id => Some(items.len()),'''
 
 [[plant]]
 name = "field delivery: an answer needs no user's words before it"
@@ -194,3 +196,85 @@ runs = ["fd-answers"]
 file = "crates/cf-engine/src/delivery_text.rs"
 find = '''            let beside = told_in.map_or_else(String::new, |note| {'''
 replace = '''            let beside = Some(told_in.unwrap_or(0)).map_or_else(String::new, |note| {'''
+
+# --- Calliope's review of T-958 (T-987, fixed in T-988) ---
+
+[[plant]]
+name = "field delivery: a head first looked at with no record read is counted from nothing"
+meant = "a_head_first_looked_at_with_no_record_read_says_nothing_of_answers_since"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                _ if read => {'''
+replace = '''                _ => {'''
+
+[[plant]]
+name = "field delivery: a record that says its turn is over is not said"
+meant = "a_chief_whose_record_says_its_turn_is_over_tells_the_human_it_may_be_misread"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        } else if observed.over == Over::Held {'''
+replace = '''        } else if false && observed.over == Over::Held {'''
+
+[[plant]]
+name = "field delivery: the human is sent to a command for what waits"
+meant = "the_note_of_a_misread_window_sends_the_human_to_the_board"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''ConsensFlow may be misreading it, and the chief's inbox on the board shows what waits")'''
+replace = '''ConsensFlow may be misreading it, and `cf inbox` shows what waits")'''
+
+[[plant]]
+name = "field delivery: a hold at the bound is told in the words of a settle that passes"
+meant = "a_hold_at_the_bound_is_not_told_in_the_words_of_a_settle_that_passes"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if crate::pacing::passing(&held.reason) && waited < 2 * HELD_TOLD_MS {'''
+replace = '''        if false && crate::pacing::passing(&held.reason) && waited < 2 * HELD_TOLD_MS {'''
+
+[[plant]]
+name = "field delivery: a settle that never passes is never told"
+meant = "a_settle_that_never_passes_is_told_past_twice_the_bound"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if crate::pacing::passing(&held.reason) && waited < 2 * HELD_TOLD_MS {'''
+replace = '''        if crate::pacing::passing(&held.reason) {'''
+
+[[plant]]
+name = "field delivery: no reason passes by itself"
+meant = "a_hold_at_the_bound_is_not_told_in_the_words_of_a_settle_that_passes"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = '''    reason.starts_with(NOT_RESTED)'''
+replace = '''    reason.starts_with(NOT_RESTED) && false'''
+
+[[plant]]
+name = "field delivery: a result names a note an earlier result already named"
+meant = "a_result_after_a_reopen_names_no_note_of_an_earlier_round"
+runs = ["fd-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = '''            if id < result && earlier.is_none_or(|earlier| id > earlier) {'''
+replace = '''            if id < result {'''
+
+[[plant]]
+name = "field delivery: the note of a task taken back to the board says only its resume"
+meant = "a_task_taken_back_to_the_board_keeps_the_note_the_chief_has_not_read_in_the_words_of_a_task_that_moved_on"
+runs = ["fd-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = '''const MOVED_ON: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins,'''
+replace = '''const MOVED_ON: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume begins,'''

@@ -184,7 +184,7 @@ fn finish_takes_the_final_answer_of_a_paused_task_as_its_result() {
 /// The note T-1's paused turn left, as the words of a task that has moved on say it.
 fn moved_on_words(handle: &str, told: &MessageView) -> String {
     format!(
-        "T-1, paused when @{handle}'s turn on the words put to its window (m-{}) began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume begins, and it is the one to decide. What the turn on those words ended with:\n\n{FINAL}",
+        "T-1, paused when @{handle}'s turn on the words put to its window (m-{}) began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. What the turn on those words ended with:\n\n{FINAL}",
         told.id
     )
 }
@@ -241,7 +241,7 @@ fn the_result_after_a_note_of_the_turn_on_a_tell_says_it_is_the_one_to_decide() 
     context.resume_task(project, 1, "Carry on with the brief");
     assert!(
         context.message(note.id).body.contains(
-            "This is not its result: that comes as a message of its own, the answer of the turn its resume begins, and it is the one to decide."
+            "This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide."
         ),
         "{}",
         context.message(note.id).body
@@ -268,6 +268,61 @@ fn the_result_after_a_note_of_the_turn_on_a_tell_says_it_is_the_one_to_decide() 
             note.id
         )),
         "{result}"
+    );
+}
+
+/// Calliope's T-987: a note names the result that came after it, and no result after
+/// that. The note of T-1's turn on the tell, its result naming it, and the chief's reopen
+/// of the done task (`cf task reopen`, as the footer says; an accepted task is reopened by
+/// no one): the reopen's result says only how to decide.
+#[test]
+fn a_result_after_a_reopen_names_no_note_of_an_earlier_round() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.adapter.busy("chief");
+    answers_then_goes_on_to_the_end(&context, &told);
+    context.pass().unwrap();
+    let note = kept_note(&context, project);
+    context.resume_task(project, 1, "Carry on with the brief");
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "The parser is done.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    for _ in 0..4 {
+        chief_ends_its_turn(&context);
+    }
+    let first = given(&context, "chief");
+    assert!(
+        first
+            .iter()
+            .any(|text| text.contains(&format!("given in m-{}", note.id))),
+        "the first result names the note: {first:?}"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the typo in its name")
+        .unwrap();
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    context.adapter.answer("zeus", "The typo is fixed.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    for _ in 0..4 {
+        chief_ends_its_turn(&context);
+    }
+    let pasted = given(&context, "chief");
+    let last = pasted
+        .iter()
+        .rfind(|text| text.contains(" · result from "))
+        .unwrap_or_else(|| panic!("the results are given: {pasted:?}"));
+    assert!(last.contains("The typo is fixed."), "{last}");
+    assert!(
+        last.ends_with("\n\nDecide with: cf task accept T-1 · cf task reopen T-1 \"…\""),
+        "{last}"
     );
 }
 

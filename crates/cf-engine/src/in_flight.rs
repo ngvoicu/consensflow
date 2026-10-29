@@ -65,11 +65,11 @@ impl Dispatcher {
             .given_back_because(message.id, TOOK_BEFORE_A_RESTART)?;
         // A result whose task's turn on a tell was told in a note says which to decide.
         let told_in = match (message.kind.as_str(), message.task_number) {
-            ("result", Some(number)) => self
-                .seams
-                .ledger
-                .borrow()
-                .paused_answer_given(message.project_id, number)?,
+            ("result", Some(number)) => self.seams.ledger.borrow().paused_answer_given(
+                message.project_id,
+                number,
+                message.id,
+            )?,
             _ => None,
         };
         Ok(delivery_text_beside(message, carried, again, told_in))
