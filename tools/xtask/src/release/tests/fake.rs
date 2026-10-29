@@ -248,6 +248,9 @@ pub struct FakeRun {
     pub unlisted_for: u32,
 }
 
+/// What happens once GitHub has started the run a hand run asked for.
+pub type AfterDispatch = Box<dyn FnOnce(&mut Fake)>;
+
 /// The machine a release test runs on: real `git`, and the rest a script.
 pub struct Fake {
     upstream: PathBuf,
@@ -299,7 +302,7 @@ pub struct Fake {
     /// (main moves on, say), and once its run is started (someone else's hand run
     /// of another commit follows it, say).
     pub before_dispatch: Option<Box<dyn FnOnce()>>,
-    pub after_dispatch: Option<Box<dyn FnOnce(&mut Fake)>>,
+    pub after_dispatch: Option<AfterDispatch>,
     /// The runs, by id, that `gh run view` cannot answer for (a 502, say).
     pub view_fails: Vec<u64>,
     /// Whether `gh run list` takes no notice of `--commit`, as it would if GitHub's
