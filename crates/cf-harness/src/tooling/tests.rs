@@ -703,3 +703,39 @@ fn the_models_question_reads_as_the_daemon_and_says_why_a_harness_has_none() {
     );
     assert!(answer(&json!({ "op": "models", "kind": "kimi", "env": env })).is_err());
 }
+
+#[test]
+fn the_last_used_question_reads_a_conversation_as_a_chiefs_reopen_does() {
+    let config = tempfile::tempdir().unwrap();
+    let folder = config.path().join("projects").join("-work");
+    fs::create_dir_all(&folder).unwrap();
+    let entry = |model: &str| {
+        json!({
+            "type": "assistant",
+            "isSidechain": false,
+            "effort": "low",
+            "message": { "model": model, "content": [{ "type": "text", "text": "OK" }] },
+        })
+        .to_string()
+    };
+    fs::write(
+        folder.join("s-1.jsonl"),
+        format!(
+            "{}\n{}\n",
+            entry("claude-sonnet-5-5"),
+            entry("claude-haiku-5-5")
+        ),
+    )
+    .unwrap();
+    let env = json!({ "CLAUDE_CONFIG_DIR": config.path().to_str().unwrap(), "HOME": "/nowhere" });
+    let ask = |session: &str| {
+        answer(&json!({ "op": "last_used", "kind": "claude-code", "session": session, "env": env }))
+    };
+    assert_eq!(
+        ask("s-1"),
+        Ok(
+            json!({ "model": "claude-haiku-5-5", "effort": "low", "thinking": null, "byHarness": false })
+        )
+    );
+    assert_eq!(ask("s-2"), Ok(Value::Null), "no such conversation");
+}

@@ -81,8 +81,9 @@ fn a_switch_shows_only_at_the_next_assistant_entry() {
 fn a_sidechain_a_synthetic_entry_and_an_api_error_are_never_the_model_used() {
     let mut sidechain = assistant("claude-haiku-5-5", Some("low"));
     sidechain["isSidechain"] = json!(true);
-    let mut synthetic = assistant("<synthetic>", None);
-    synthetic["isApiErrorMessage"] = json!(true);
+    // What Claude Code writes itself to close a turn that was cut: no model ran it, and no
+    // error says so.
+    let synthetic = assistant("<synthetic>", None);
     let mut refused = assistant("claude-gone-9-9", None);
     refused["isApiErrorMessage"] = json!(true);
     let entries = [

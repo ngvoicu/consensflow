@@ -1,4 +1,4 @@
-# Probes of the chief-harness spec (CHF-02, CHF-03)
+# Probes of the chief-harness spec (CHF-02, CHF-03, CHF-10)
 
 Replayable scripts that ask the real harnesses what the spec builds on. Each runs one
 session at a time, in a throwaway config (never the owner's), strips every
@@ -12,7 +12,8 @@ real home>` (Devin stalls in a workspace under the Mac's `/var` symlink).
 | `resume_matrix.py <harness> [--a M] [--b M]` | T-445's resume rows, headless: start on A, resume with no flag, with `--model B`, with a model that does not exist, with no flag again; Devin also `--model <family>` | 5 or 6 one-line turns on the cheap models |
 | `claude_alias_tail.py [alias\|tail]` | Claude's alias pinning in the record; the cost of a tail read of a 120 MB transcript | 3 one-line turns (alias) |
 | `muse_model.py` (a Python with `pyte`; Mac) | Muse's `/model` in its window, and what its record says before and after a resume | 4 one-line turns on Muse Spark at minimal |
-| `tuidrive.py` | T-445's pty driver (pyte), which `muse_model.py` drives Muse's window with | |
+| `native_switch.py <harness> --ask <harness-ask>` (a Python with `pyte`; Mac) | CHF-10: the human's `/model` in the window with the key that keeps it to the conversation (Claude `s`, Codex `s`, Pi Enter, Devin `opt+↵`), then what ConsensFlow's own reader (`harness-ask` `last_used`) says, a headless reopen on it, and whether the switch wrote a model to the throwaway's settings | 3 one-line turns on the cheap models |
+| `tuidrive.py` | T-445's pty driver (pyte), which `muse_model.py` and `native_switch.py` drive the windows with | |
 | `moved_lines.py <repo> <file.md> <old> <new>` | CHF-01: each `file:line` a research or spec names, at the base it was read against and on another; which moved, by how much, and which changed | none |
 
 ## What they found (2026-10-28, the Mac)
@@ -59,3 +60,17 @@ Parsing every line in the tail (a tool's output can be megabytes of JSON) cost 5
 - **Pi** (`--a openai/gpt-5.6-luna --b openai/gpt-6-luna`: its `openai` provider there is a ChatGPT login, which serves only Codex's models, so `gpt-5-nano` and `gpt-5-mini` were refused 400 `model_not_found`): every row as on the Mac, the trap included: after the gone model, a no-flag resume came up on the settings' default (`openai/gpt-5.5`, which that login cannot run either).
 - **Claude:** not run: the login there had 0.7 h left, and the probe refuses a login that expires within 2 h (a refresh in the copy could rotate the owner's token).
 - **Devin:** not isolated, so the probe now refuses Devin on Windows. Devin finds its folders through Windows' known folders, not `APPDATA`: the run went on the owner's own login and store. The login file hashed the same before and after, but two of the probe's sessions are in the owner's `%APPDATA%\devin\cli\sessions.db` there (`wirehaired-hotel` on swe-2-medium, `phase-scourge` on swe-2-max, workspaces under `%TEMP%\cf-resume-matrix-*`), left for the owner to remove (`devin rm <id>`). What it showed: the gone model refused at launch with the Mac's words, and `--model swe-2` with no effort came up on **`swe-2-max`** there (`swe-2-high` in the Mac's empty config): the owner's own config there very probably picks the family's variant (`agent.preferred_family_models`; inferred, not read).
+
+### The human's own switch, read by ConsensFlow (CHF-10, 2026-10-29, the Mac)
+
+`native_switch.py`, the same versions. Each window opened on A, answered, was switched in
+the window, answered on B; `harness-ask` `last_used` (the adapter's `last_used`) then said
+B every time, and a headless reopen with what it said answered, the reader saying B again.
+No switch wrote a model to the throwaway's settings; the owner's files were unchanged.
+
+| Harness | A → B | The switch | `last_used` after | Written to the throwaway's settings |
+|---|---|---|---|---|
+| Claude Code | claude-sonnet-5-5 low → claude-haiku-5-5 | `/model`, Haiku, `s`; a conversation with a turn then asks "Switch model? … the full history gets re-read" (Yes) | `claude-haiku-5-5`, effort `low` | nothing |
+| Codex | gpt-5.6-luna low → gpt-6-luna | `/model` (opens on the current model, the last row), GPT-6-Luna, Enter, then the reasoning list (on the model's default, medium) and `s` | `gpt-6-luna`, effort `medium` | `[tui]` flags only (`screen_reader_detection_done`, `model_availability_nux`) |
+| Pi | openai-codex/gpt-5.6-luna minimal → openai-codex/gpt-6-luna | `/model`, typed `gpt-6-luna` (filters; another provider's model of the name can come first), Enter | `openai-codex/gpt-6-luna`, thinking `minimal` (an `openai/` pick reset it to `low`) | `lastChangelogVersion` only |
+| Devin | swe-2-medium → swe-2-high | `/model` (opens on the family), `→`, `opt+↵` ("Model set to SWE-2 for this session") | `swe-2-high` | account and shell setup only, no `agent.model` |

@@ -371,6 +371,15 @@ async fn a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why
                 })
                 .unwrap()
                 .id;
+            // A chief from before a chief had a model names a saved agent, here the one the
+            // release dropped: no saved agent is the chief's (CHF-08), and nothing is missing.
+            rig.kit.edit_ledger(|file| {
+                let db = rusqlite::Connection::open(file).unwrap();
+                db.execute_batch(
+                    "UPDATE participant SET agent = 'khnum', model = NULL WHERE role = 'chief'",
+                )
+                .unwrap();
+            });
             let board =
                 ask(&app, "board.get", json!({ "project": project })).await["board"].clone();
             let lanes: Vec<(&str, &Value, &Value)> = board["lanes"]

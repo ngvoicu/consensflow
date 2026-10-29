@@ -22,6 +22,7 @@ chm-tail = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::
 chm-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "chief_model::"]
 chm-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_models::"]
 chm-switching = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "switching_refused::"]
+chm-role = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::"]
 chm-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "handoff::"]
 chm-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening::"]
 chm-daemon-reading = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::reading::"]
@@ -394,7 +395,8 @@ runs = ["chm-ledger-testing"]
 file = "crates/cf-ledger/src/testing/chief_model.rs"
 find = '''    ("participant", "gone_model"),
 '''
-replace = ''
+replace = '''    ("participant", "launched_model"),
+'''
 
 [[plant]]
 name = "chief: Claude's synthetic entry is the model used"
@@ -615,7 +617,7 @@ replace = '                if let Some(gone) = self.gone_model(&participant, &sh
 
 [[plant]]
 name = 'chief: a launch that failed on a gone model is tried again slowly'
-meant = "a_gone_model_starts_the_chief_on_its_harnesss_default_and_the_human_is_told_once"
+meant = "a_window_that_never_came_up_on_a_gone_model_starts_the_chief_on_the_default_at_once"
 runs = ["chm-dispatcher"]
 
 [[plant.edit]]
@@ -651,8 +653,8 @@ replace = ''
 
 [[plant]]
 name = 'chief: a chief is held for a deleted agent'
-meant = "opens_a_chief_whatever_became_of_the_saved_agents_and_tells_the_human_nothing"
-runs = ["chm-switching"]
+meant = "a_chief_that_still_names_a_deleted_agent_is_told_its_changed_role_all_the_same"
+runs = ["chm-role"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
@@ -687,8 +689,8 @@ runs = ["chm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/chief.rs"
-find = '        None => Err(Said(format!('
-replace = '        None if false => Err(Said(format!('
+find = '    let Some(listing) = kept.filter(|listing| !listing.models.is_empty()) else {'
+replace = '    let Some(listing) = kept.filter(|_| false) else {'
 
 [[plant]]
 name = "chief: a chief's agent is missing on the board"

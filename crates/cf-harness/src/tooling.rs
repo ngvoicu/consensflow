@@ -93,8 +93,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "input_box" => input_box(question),
         "unsent" => unsent(question),
         "models" => models::models(question),
+        "last_used" => models::last_used(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, input_box, unsent and models"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, input_box, unsent, models and last_used"
         )),
     }
 }

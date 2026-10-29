@@ -6,6 +6,8 @@
 //! none, the chief stays closed until the human switches it. Node's chief ran on a saved
 //! agent, so none of these is held to a trace of Node's.
 
+use std::rc::Rc;
+
 use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
 use cf_harness::contract::Used;
@@ -297,4 +299,70 @@ fn a_chief_opened_again_on_its_harnesss_default_is_told_no_turn_was_cut() {
         1,
         "{notes:?}"
     );
+}
+
+#[test]
+fn a_window_that_never_came_up_on_a_gone_model_starts_the_chief_on_the_default_at_once() {
+    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+    // The window does not come up: its harness refuses the model it no longer has, in its
+    // own words; the next window does.
+    let first = Rc::new(std::cell::Cell::new(true));
+    *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
+        if first.replace(false) {
+            Err("Error: Unknown model: 'claude-opus-5'".to_owned())
+        } else {
+            Ok(())
+        }
+    }));
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    let launched = context.adapter.prepared();
+    assert_eq!(
+        launched.last().unwrap()["agent"],
+        agent("claude-haiku-5-5", None),
+        "at once, not a backoff later: {launched:?}"
+    );
+    let told = to_human(&context, project.id);
+    assert!(
+        told.iter().all(|body| !body.contains("could not start")),
+        "{told:?}"
+    );
+    assert_eq!(
+        told.iter()
+            .filter(|body| body.contains("no longer available"))
+            .count(),
+        1
+    );
+}
+
+/// A chief from before a chief was a harness and a model names a saved agent and no model
+/// (CHF-04): the roster is never read for it, so one the human deleted holds it nowhere.
+#[test]
+fn a_chief_that_still_names_a_deleted_agent_opens_on_its_record_and_the_roster_is_never_asked() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Hello");
+    context.pass().unwrap();
+    context.close_project(project.id).unwrap();
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        db.execute_batch(
+            "UPDATE participant SET agent = 'apollo', model = NULL, launched_model = NULL
+             WHERE role = 'chief'",
+        )
+        .unwrap();
+    });
+    context.roster.gone.borrow_mut().insert("apollo".to_owned());
+    context.adapter.with("chief", |chief| {
+        chief.used = Some(used("claude-sonnet-5-5", Some("low"), false))
+    });
+    let opened = context.host.opened().len();
+    context.resume_project(project.id).unwrap();
+    assert_eq!(context.host.opened().len(), opened + 1, "it opens");
+    let reopened = context.adapter.prepared().last().cloned().unwrap();
+    assert_eq!(reopened["agent"], agent("claude-sonnet-5-5", Some("low")));
+    assert!(to_human(&context, project.id)
+        .iter()
+        .all(|body| !body.contains("among your agents")));
 }

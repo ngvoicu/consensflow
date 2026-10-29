@@ -455,3 +455,28 @@ fn a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_cut_an
     assert!(texts[2].contains("Any news?"), "{}", texts[2]);
     context.close();
 }
+
+/// A chief from before a chief had a model still names a saved agent, which the human has
+/// deleted since. No saved agent is the chief's (CHF-04): its changed role is told it all
+/// the same, as any chief's.
+#[test]
+fn a_chief_that_still_names_a_deleted_agent_is_told_its_changed_role_all_the_same() {
+    let context = codex();
+    let project = project_of(&context, "codex");
+    let chief = context.id(project.id, "chief");
+    context.close_project(project.id).unwrap();
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        db.execute_batch(
+            "UPDATE participant SET agent = 'diana', model = NULL, launched_model = NULL
+             WHERE role = 'chief'",
+        )
+        .unwrap();
+    });
+    context.roster.gone.borrow_mut().insert("diana".to_owned());
+    specs(&context, project.id, true);
+    context.resume_project(project.id).unwrap();
+    let notes = replacements(&context, chief);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].body.ends_with(&format!("\n\n{WITH_SPECS}")));
+}
