@@ -3039,8 +3039,8 @@ runs = ["muse-base-file"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/file.rs"
-find = '''            Some(name) => rest.push(name.to_owned()),'''
-replace = '''            Some(_) => break,'''
+find = '''            return rest.iter().rev().fold(real, |real, part| real.join(part));'''
+replace = '''            return real;'''
 
 [[plant]]
 name = "muse: a window's Muse is given its data folder through the link"
