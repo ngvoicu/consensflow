@@ -350,3 +350,31 @@ fn a_claude_window_shuts_out_every_mcp_server_but_its_files_and_where_asked_its_
         ["--no-chrome", "--mcp-config", "/run/servers.json"]
     );
 }
+
+/// A window is marked as the daemon marks it, with the way its harness keeps its servers that
+/// the product's adapter says: on Windows Claude Code's are by the shell it starts for each
+/// command (T-906), which a live run on zeewin2 marked `inGroup` and read untold (T-946).
+#[test]
+fn a_window_is_marked_with_the_servers_its_adapter_says_on_each_platform() {
+    let on = |windows: bool| {
+        Harness::ALL
+            .iter()
+            .map(|harness| (harness.name(), servers_of(*harness, windows)))
+            .collect::<Vec<_>>()
+    };
+    let said = |name: &str, windows: bool| {
+        on(windows)
+            .into_iter()
+            .find(|(harness, _)| *harness == name)
+            .and_then(|(_, servers)| servers)
+    };
+    assert_eq!(said("claude", true), Some("byShell"));
+    assert_eq!(said("claude", false), Some("inGroup"));
+    assert_eq!(said("codex", false), Some("atLaunch"));
+    assert_eq!(said("pi", false), Some("inGroup"));
+    assert_eq!(said("muse", false), Some("atLaunch"));
+    for name in ["codex", "pi", "muse", "devin", "opencode"] {
+        assert_eq!(said(name, true), None, "{name} on Windows");
+    }
+    assert_eq!(said("devin", false), None);
+}

@@ -19,6 +19,7 @@ live-rig-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::
 live-claude-table = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::claude"]
 live-members-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command"]
 live-monitor-wait-host = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "--", "a_platform_with_no_groups"]
+live-window-mark = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::window::tests::a_window_is_marked"]
 
 [[plant]]
 name = "windows live: a window of a fake model is started on the real Claude all the same"
@@ -285,6 +286,33 @@ runs = ["live-monitor-wait-host"]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
 find = '''const GROUPS_ONLY: [&str; 2] = ["first-turn-call", "call-margin"];'''
 replace = '''const GROUPS_ONLY: [&str; 5] = ["first-turn-call", "mcp-not-a-command", "commands-armed", "expiries-end", "call-margin"];'''
+
+# T-946: the kit marked every window's servers `inGroup`, which T-906's host takes for no answer where
+# there are no groups: the zeewin2 live monitor-wait read every look untold. A window is marked as its
+# harness's adapter marks it, Claude Code `byShell` on Windows.
+[[plant]]
+name = "windows live: the kit marks a Claude window on Windows as keeping its servers in a group"
+meant = "a_window_is_marked_with_the_servers_its_adapter_says_on_each_platform"
+runs = ["live-window-mark"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window.rs"
+find = '''        (Harness::Claude, true) => Some("byShell"),'''
+replace = '''        (Harness::Claude, true) => Some("inGroup"),'''
+
+[[plant]]
+name = "windows live: the kit says a way of keeping servers for a harness whose adapter says none"
+meant = "a_window_is_marked_with_the_servers_its_adapter_says_on_each_platform"
+runs = ["live-window-mark"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window.rs"
+find = '''        _ => None,
+    }
+}'''
+replace = '''        _ => Some("inGroup"),
+    }
+}'''
 
 # T-858: `live resume-cut` on Windows: a resumed Claude window's screen read blank for 120 s though it had
 # printed its whole prompt (zeewin2): Claude titles its window with a string ended by ST, and the rig's
