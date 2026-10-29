@@ -142,7 +142,11 @@ fn a_model_devin_does_not_have_is_said_in_its_words() {
 #[test]
 fn devin_starts_on_its_configs_model_and_else_on_its_own_choice() {
     let folder = tempfile::tempdir().unwrap();
-    let env = Env::from_vars([("XDG_CONFIG_HOME", folder.path().as_os_str())]);
+    // Its config folder is `devin` in XDG_CONFIG_HOME, and in APPDATA on Windows.
+    let env = Env::from_vars([
+        ("XDG_CONFIG_HOME", folder.path().as_os_str()),
+        ("APPDATA", folder.path().as_os_str()),
+    ]);
     assert_eq!(default_model(&env), Ok(None), "no config: Devin's own");
     std::fs::create_dir_all(folder.path().join("devin")).unwrap();
     std::fs::write(

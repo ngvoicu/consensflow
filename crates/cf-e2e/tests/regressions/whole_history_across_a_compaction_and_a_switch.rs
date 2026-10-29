@@ -97,13 +97,14 @@ fn the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_swi
     assert_eq!(conversations.len(), 2, "{read}");
     let (before, now) = (&conversations[0], &conversations[1]);
     // The Claude conversation, whole: what the human typed, the answer, and the summary named.
+    // A chief is a harness and a model (CHF-04): each conversation is named by its model.
     assert_eq!(
         (&before["harness"], &before["agent"]),
-        (&json!("claude-code"), &json!("chief"))
+        (&json!("claude-code"), &json!("fake-chief"))
     );
     assert_eq!(
         before["endedBy"],
-        json!({ "by": "switch", "harness": "codex", "agent": "codex-chief" })
+        json!({ "by": "switch", "harness": "codex", "agent": "fake" })
     );
     assert!(
         holds(before, "user", "Reply with exactly: BEFORE_THE_SWITCH"),
@@ -125,10 +126,10 @@ fn the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_swi
         (&json!("user"), &json!(true))
     );
     // The Codex conversation going on now: the handoff that brought it in, as one
-    // line, and its work.
+    // line, and its work. Its heading names no model until CHF-11 heads it.
     assert_eq!(
         (&now["harness"], &now["agent"]),
-        (&json!("codex"), &json!("codex-chief"))
+        (&json!("codex"), &Value::Null)
     );
     assert!(
         now["endedAt"].is_null() && now["endedBy"].is_null(),

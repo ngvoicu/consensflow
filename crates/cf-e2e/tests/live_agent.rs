@@ -474,13 +474,15 @@ mod tests {
                 "{flag:?} is not in {argv:?}"
             );
         }
-        // The stand-in answers, and writes no model in its record: which the check says.
+        // The stand-in answers, and records the model it was opened on, as Claude Code's
+        // assistant entries do (CHF-10): the check reads it there.
         let check = check_of(&window, &opening, &stand_in_ask())?;
         assert_eq!(check.who, "huginn low");
-        assert!(!check.ok, "{check:?}");
-        assert_eq!(
-            check.detail,
-            "answered, but its record names no model, not claude-haiku-5-5"
+        assert!(check.ok, "{check:?}");
+        assert!(
+            check.detail.ends_with(", as claude-haiku-5-5"),
+            "{}",
+            check.detail
         );
         drop(window);
         rig.close()
