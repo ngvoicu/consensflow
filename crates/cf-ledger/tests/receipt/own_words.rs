@@ -40,6 +40,13 @@ fn a_6000_character_answer_in_the_humans_own_words_is_an_answer_like_any_other()
     assert_eq!(w.state(task), "working");
 }
 
+/// The refusal of a pick that does not fit, with how long the longest could be.
+fn too_long(room: usize) -> String {
+    format!(
+        "answer: pick too long (at most {room} characters here; the headers of the questions and the other picks count too)"
+    )
+}
+
 #[test]
 fn the_longest_pick_a_question_takes_is_the_body_limit_less_the_header_it_is_printed_under() {
     let longest = MAX_BODY - PRINTED_UNDER.len();
@@ -55,10 +62,7 @@ fn the_longest_pick_a_question_takes_is_the_body_limit_less_the_header_it_is_pri
             Some(&json!([["x".repeat(longest + 1)]])),
         )
         .expect_err("one unit over the answer's limit");
-    assert!(
-        refused.to_string().contains("at most 1000000 characters"),
-        "{refused}"
-    );
+    assert_eq!(refused.to_string(), too_long(longest));
     // The refusal left the question as it was: the same answer, one unit shorter, is taken.
     let answer = w
         .ledger
@@ -67,12 +71,11 @@ fn the_longest_pick_a_question_takes_is_the_body_limit_less_the_header_it_is_pri
     assert_eq!(answer.body.chars().count(), MAX_BODY);
 }
 
-/// The picks' limit is the body limit (`questions.rs`), and the answer prints the header before
-/// the pick: a pick of the limit's own length passes the first and fails the second, under another
-/// name (`body must be text, not empty, at most 1000000 characters`), where the page says one past
-/// the limit is `pick too long`. Written 2026-10-29 (T-969), kept as a known failure.
+/// The picks' limit is the answer's: the answer prints the header before the pick, so a pick of the
+/// body limit's own length passed the picks' check and was refused by the body's, under another name
+/// (`body must be text, not empty, at most 1000000 characters`), where the page says a pick too long
+/// is `pick too long`. Found 2026-10-29 (T-969), mended the same day.
 #[test]
-#[ignore = "known failure (T-969, issues/long-own-words-answer-refused.md): a pick of exactly MAX_BODY units passes the picks' check and is refused under the body's name, not as a pick too long"]
 fn a_pick_of_the_body_limit_is_refused_as_a_pick_too_long_and_not_as_a_body() {
     let mut w = world();
     let (_, question) = with_a_question(&mut w);
@@ -86,5 +89,17 @@ fn a_pick_of_the_body_limit_is_refused_as_a_pick_too_long_and_not_as_a_body() {
             Some(&json!([["x".repeat(MAX_BODY)]])),
         )
         .expect_err("a pick as long as the body limit");
-    assert!(refused.to_string().contains("pick too long"), "{refused}");
+    assert_eq!(
+        refused.to_string(),
+        too_long(MAX_BODY - PRINTED_UNDER.len())
+    );
+    // In the text of an answer, which is read as picks line by line, the same.
+    let refused = w
+        .ledger
+        .answer(question, chief, Some(&json!("x".repeat(MAX_BODY))), None)
+        .expect_err("the same, by text");
+    assert_eq!(
+        refused.to_string(),
+        too_long(MAX_BODY - PRINTED_UNDER.len())
+    );
 }
