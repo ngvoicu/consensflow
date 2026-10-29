@@ -990,6 +990,53 @@ file = "crates/cf-harness/src/muse/screen.rs"
 find = '''    Some(said.join(" "))'''
 replace = '''    None::<String>.filter(|_| !said.is_empty())'''
 
+# The screen: the box is found by the labelled rule above it, so a mark in its words, or a
+# screen drawn halfway, does not hold the window for good (Calliope's P3-2 of T-945).
+[[plant]]
+name = "muse: the box's first line is the last mark in view"
+meant = "a_box_whose_words_begin_a_line_with_the_mark_is_read_whole_by_the_rule_above_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/screen.rs"
+find = '''    let first = voice_rule(screen)? + 1;
+    if !screen.get(first)?.trim_start().starts_with(MARK) {
+        return None;
+    }'''
+replace = '''    let first = screen
+        .iter()
+        .rposition(|line| line.trim_start().starts_with(MARK))?;
+    if first == 0 || !is_rule(&screen[first - 1]) {
+        return None;
+    }'''
+
+[[plant]]
+name = "muse: a mark anywhere in a cut box's words reads it whole"
+meant = "a_cut_box_is_read_cut_with_a_mark_in_its_words_and_a_screen_drawn_halfway_is_not"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/screen.rs"
+find = '''    inside.iter().any(|line| !line.trim().is_empty()) && !inside[0].trim_start().starts_with(MARK)'''
+replace = '''    inside.iter().any(|line| !line.trim().is_empty())
+        && !inside.iter().any(|line| line.trim_start().starts_with(MARK))'''
+
+[[plant]]
+name = "muse: a screen drawn halfway, the voice rule and nothing under it, is a cut box"
+meant = "a_cut_box_is_read_cut_with_a_mark_in_its_words_and_a_screen_drawn_halfway_is_not"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/screen.rs"
+find = '''    let Some(end) = under.iter().position(|line| is_rule(line)) else {
+        return false;
+    };
+    let inside = &under[..end];
+    inside.iter().any(|line| !line.trim().is_empty())'''
+replace = '''    let end = under.iter().position(|line| is_rule(line)).unwrap_or(under.len());
+    let inside = &screen[..top + 1 + end];
+    inside.iter().any(|line| !line.trim().is_empty() && !is_labelled(line))'''
+
 # The window: Muse's box is read for words the human left.
 [[plant]]
 name = "muse: a Muse window's box is never read"
