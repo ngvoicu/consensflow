@@ -5,8 +5,8 @@ keeps the switch to the conversation, answers one turn on model B, and is quit. 
 
   4. ConsensFlow's own reader of that conversation (`harness-ask` `last_used`, the
      adapter's `last_used`, CHF-05) must say B;
-  5. a reopen with what it says (the flags a chief's reopen passes, headless) answers, and
-     the reader still says B;
+  5. a reopen with what it says (the flags a chief's reopen passes, headless) answers its
+     own turn (its output holds the word asked for), and the reader still says B;
   6. the throwaway's own settings are unchanged by the switch (the key kept it to the
      conversation), and the owner's config and login files are unchanged.
 
@@ -127,9 +127,11 @@ def cursor_to(drive, words, marker, way="down", limit=40):
 
 
 def headless(argv, env, cwd):
+    """The exit code of a headless run, and whether its output holds the word it was asked
+    to reply with (THREE): the reopen answered, not only ended."""
     done = subprocess.run(argv, env=env, cwd=cwd, input="", capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=300)
-    return done.returncode
+    return done.returncode, "THREE" in (done.stdout or "")
 
 
 # --- each harness: its throwaway, window, switch, session and reopen --------------------
@@ -309,6 +311,8 @@ def devin(scratch, work):
         "env": clean_env(HOME=own, XDG_CONFIG_HOME=os.path.join(own, ".config"),
                          XDG_DATA_HOME=os.path.join(own, ".local", "share")),
         "window": [exe("devin"), "--respect-workspace-trust", "false", "--model", a],
+        # Its input line: what is typed before it is up can be lost (one run in three).
+        "ready": r"Ask Devin to",
         "switch": switch,
         "session": session,
         "reopen": lambda used: [exe("devin"), "--respect-workspace-trust", "false", "-r", session(),
@@ -344,6 +348,8 @@ def main():
         drive = tuidrive.Session(it["window"], it["env"], work, limit=1200,
                                  rawlog=os.path.join(scratch, "window.raw"))
         try:
+            if it.get("ready"):
+                drive.wait_for(it["ready"], maxwait=120, history=False)
             settle(drive, "the window", quiet=4, maxwait=90)
             print("1. a turn on A answered:", turn(drive, "ONE"))
             print("2. the native switch made:", it["switch"](drive))
@@ -356,9 +362,10 @@ def main():
         used = ask(binary, kind, session or "none", it["env"])
         print("4. ConsensFlow's reader says:", json.dumps(used), "| B:", isinstance(used, dict) and used.get("model") == b)
         if isinstance(used, dict) and used.get("model"):
-            code = headless(it["reopen"](used), it["env"], work)
+            code, answered = headless(it["reopen"](used), it["env"], work)
             again = ask(binary, kind, session, it["env"])
-            print("5. the reopen with it exited %s; the reader then says: %s" % (code, json.dumps(again)))
+            print("5. the reopen with it exited %s and answered THREE: %s; the reader then says: %s"
+                  % (code, answered, json.dumps(again)))
         for path, was in settings.items():
             now = read(path)
             print("6. the throwaway's %s unchanged: %s" % (os.path.basename(path), now == was))

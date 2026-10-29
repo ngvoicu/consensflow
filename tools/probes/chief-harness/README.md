@@ -12,7 +12,7 @@ real home>` (Devin stalls in a workspace under the Mac's `/var` symlink).
 | `resume_matrix.py <harness> [--a M] [--b M]` | T-445's resume rows, headless: start on A, resume with no flag, with `--model B`, with a model that does not exist, with no flag again; Devin also `--model <family>` | 5 or 6 one-line turns on the cheap models |
 | `claude_alias_tail.py [alias\|tail]` | Claude's alias pinning in the record; the cost of a tail read of a 120 MB transcript | 3 one-line turns (alias) |
 | `muse_model.py` (a Python with `pyte`; Mac) | Muse's `/model` in its window, and what its record says before and after a resume | 4 one-line turns on Muse Spark at minimal |
-| `native_switch.py <harness> --ask <harness-ask>` (a Python with `pyte`; Mac) | CHF-10: the human's `/model` in the window with the key that keeps it to the conversation (Claude `s`, Codex `s`, Pi Enter, Devin `opt+↵`), then what ConsensFlow's own reader (`harness-ask` `last_used`) says, a headless reopen on it, and whether the switch wrote a model to the throwaway's settings | 3 one-line turns on the cheap models |
+| `native_switch.py <harness> --ask <harness-ask>` (a Python with `pyte`; Mac) | CHF-10: the human's `/model` in the window with the key that keeps it to the conversation (Claude `s`, Codex `s`, Pi Enter, Devin `opt+↵`), then what ConsensFlow's own reader (`harness-ask` `last_used`) says, a headless reopen on it, and whether the switch wrote a model to the throwaway's settings | 4 one-line turns on the cheap models (the fourth is the reopen's) |
 | `tuidrive.py` | T-445's pty driver (pyte), which `muse_model.py` and `native_switch.py` drive the windows with | |
 | `moved_lines.py <repo> <file.md> <old> <new>` | CHF-01: each `file:line` a research or spec names, at the base it was read against and on another; which moved, by how much, and which changed | none |
 
@@ -65,8 +65,11 @@ Parsing every line in the tail (a tool's output can be megabytes of JSON) cost 5
 
 `native_switch.py`, the same versions. Each window opened on A, answered, was switched in
 the window, answered on B; `harness-ask` `last_used` (the adapter's `last_used`) then said
-B every time, and a headless reopen with what it said answered, the reader saying B again.
-No switch wrote a model to the throwaway's settings; the owner's files were unchanged.
+B every time, and a headless reopen with what it said answered its own turn (its output held
+the word it was asked for), the reader saying B again. No switch wrote a model to the
+throwaway's settings; the owner's files were unchanged. One Devin run in three answered
+neither turn: the first was typed before its input line was up (the reader then said A, as
+nothing had switched), and the probe now waits for that line.
 
 | Harness | A → B | The switch | `last_used` after | Written to the throwaway's settings |
 |---|---|---|---|---|

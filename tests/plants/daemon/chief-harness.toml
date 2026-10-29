@@ -26,6 +26,9 @@ chm-role = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatch
 chm-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "handoff::"]
 chm-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening::"]
 chm-daemon-reading = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::reading::"]
+chm-page-pick = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the chief is picked as a harness"]
+chm-page-unread = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "models cannot be read"]
+chm-page-card = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "card in the dock what the chief is doing|card the model its window ran on"]
 chm-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "chief_model::"]
 
 [[plant]]
@@ -701,3 +704,75 @@ runs = ["chm-daemon-reading"]
 file = "crates/cf-daemon/src/page/board.rs"
 find = '            Some(agent) if participant.member.is_none() && participant.role != "chief" => {'
 replace = '            Some(agent) if participant.member.is_none() => {'
+
+[[plant]]
+name = "chief: the page marks no contributor model in the chief's list"
+meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+runs = ["chm-page-pick"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '        model.contributor ? `${model.label} · Contributor` : model.label,'
+replace = '        model.label,'
+
+[[plant]]
+name = "chief: the page says no contributor warning for the chief's model"
+meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+runs = ["chm-page-pick"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '        picked?.contributor ? this.#words.contributorWarning : null,'
+replace = '        null,'
+
+[[plant]]
+name = "chief: the page offers a switch to the model the chief is on"
+meant = "says on the chief's card in the dock what the chief is doing and runs on, and switches it from there"
+runs = ["chm-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '      option.disabled = model.disabled || (current?.harness === kind && current?.model === id)'
+replace = '      option.disabled = model.disabled'
+
+[[plant]]
+name = "chief: the page lets a model be picked where none could be read"
+meant = "a harness whose models cannot be read leaves the chief's model unpicked, and says why"
+runs = ["chm-page-unread"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#model.disabled = true
+    this.#listing = null'''
+replace = '''    this.#model.disabled = false
+    this.#listing = null'''
+
+[[plant]]
+name = "chief: the page starts a project whose chief's harness has no model to pick"
+meant = "a harness whose models cannot be read leaves the chief's model unpicked, and says why"
+runs = ["chm-page-unread"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    if (this.#harness.value !== '' && this.#model.value !== '') return true'''
+replace = '''    if (this.#harness.value !== '') return true'''
+
+[[plant]]
+name = "chief: the card says the model picked, not the one the window ran on"
+meant = "says on the chief's card the model its window ran on, where the human switched it there"
+runs = ["chm-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = 'const chiefModel = (participant) => participant.ranOn ?? participant.model'
+replace = 'const chiefModel = (participant) => participant.model'
+
+[[plant]]
+name = "chief: Switch chief takes the pick for the model the chief is on"
+meant = "says on the chief's card the model its window ran on, where the human switched it there"
+runs = ["chm-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '    this.#chief.fill(missing, { harness: chief.harness, model: chief.ranOn ?? chief.model })'
+replace = '    this.#chief.fill(missing, { harness: chief.harness, model: chief.model })'
