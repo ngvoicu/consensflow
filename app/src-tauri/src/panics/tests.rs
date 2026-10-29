@@ -100,14 +100,34 @@ fn a_panic_is_written_to_the_error_log_with_its_thread_place_and_backtrace() {
 /// `extern "C"` functions end a panic under them: it is written down before the abort.
 #[test]
 fn a_panic_that_ends_in_an_abort_is_written_before_it() {
-    extern "C" fn cannot_unwind() {
+    /// What is dropped on the way takes its time, as on a loaded runner, where the unwind to the
+    /// function that cannot unwind took longer than 20 ms (CI's Windows, run 40950847078, T-946).
+    struct Slow;
+    impl Drop for Slow {
+        fn drop(&mut self) {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+    fn slowly() {
+        let _slow = Slow;
         panic!("the panic of T-908 that aborts");
     }
+    extern "C" fn cannot_unwind() {
+        slowly();
+    }
     if the_childs_log().is_some() {
-        record_in(the_childs_log);
-        // Narrower than the backtrace takes to read: the window is counted from the end of the
-        // panic's writing, not its start (T-929).
-        UNWOUND_WITHIN_MS.store(20, Ordering::Relaxed);
+        // The panic's writing takes twice the window an abort is a panic's within, so a stamp
+        // taken as the panic began would be that old when its abort is described: the window is
+        // counted from the end of the writing (T-929). What it then holds is the unwind alone,
+        // which the slow drop above stretches as a loaded runner did, and no window narrower
+        // than the product's is assumed (T-946).
+        static WRITTEN: AtomicBool = AtomicBool::new(false);
+        record_in(|| {
+            if !WRITTEN.swap(true, Ordering::Relaxed) {
+                std::thread::sleep(UNWOUND_WITHIN * 2);
+            }
+            the_childs_log()
+        });
         cannot_unwind();
         return;
     }
