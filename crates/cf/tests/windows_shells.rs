@@ -75,6 +75,8 @@ impl Case {
                 ("CONSENSFLOW_HOME", &home.to_string_lossy()),
                 ("HOME", &case.at("home").to_string_lossy()),
                 ("CLAUDE_CONFIG_DIR", &case.at("claude").to_string_lossy()),
+                // No harness on the PATH: `setup` prepares none of the machine's.
+                ("PATH", &case.at("bin").to_string_lossy()),
             ],
             "",
         );

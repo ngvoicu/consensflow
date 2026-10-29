@@ -135,8 +135,8 @@ fn commands() -> Vec<Command> {
                 if word == "\"…\"" && depth == 0 {
                     let name = words
                         .iter()
-                        .take_while(|word| {
-                            word.chars()
+                        .take_while(|part| {
+                            part.chars()
                                 .all(|each| each.is_ascii_lowercase() || each == '|')
                         })
                         .cloned()
@@ -285,6 +285,7 @@ fn every_command_that_the_table_says_takes_a_file_reads_its_text_from_one() {
 #[test]
 fn every_command_that_takes_a_text_gets_it_whole_through_a_shells_quoted_heredoc() {
     let quote = |word: &str| format!("'{}'", word.replace('\'', "'\\''"));
+    let bin = common::own_cf().to_string_lossy().into_owned();
     for command in commands() {
         for text in TEXTS {
             let words: Vec<String> = with(&command, &["-"])
@@ -302,7 +303,7 @@ fn every_command_that_takes_a_text_gets_it_whole_through_a_shells_quoted_heredoc
                 &[
                     ("CONSENSFLOW_URL", &api.url),
                     ("CONSENSFLOW_TOKEN", "tok"),
-                    ("BIN_UNDER_TEST", &common::own_cf().to_string_lossy()),
+                    ("BIN_UNDER_TEST", &bin),
                 ],
                 "",
             );
