@@ -129,7 +129,7 @@ impl Adapter for CodexAdapter {
             let executable = executable(Harness::Codex, &services.env)?;
             let launched =
                 launch::configuration(services, launch.id, launch.directory, &executable).await?;
-            let role = role::arguments(
+            let role = role::text(
                 services,
                 launch.role,
                 &executable,
@@ -169,7 +169,9 @@ impl Adapter for CodexAdapter {
                 }
                 None => None,
             };
-            let mut args = role;
+            // The role goes by a file the window's broker reads, never its command line.
+            let role = role::write(&services.env, launch.id, &role)?;
+            let mut args = Vec::new();
             if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
             }
@@ -177,7 +179,7 @@ impl Adapter for CodexAdapter {
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),
-                env: launched.env,
+                env: launched.env.into_iter().chain([role]).collect(),
                 drop_env: invocation
                     .drop_env
                     .iter()
@@ -222,8 +224,8 @@ impl Adapter for CodexAdapter {
     }
 
     /// A resumed thread keeps the developer message its first turn began with:
-    /// the role text a launch gives it (`developer_instructions`, see the
-    /// module `role`) is read at a resume and not used. Found live on Codex 0.162.1,
+    /// the role text a launch gives it (the developer instructions of a main
+    /// start, see the module `role`) is not given to a resume, and would not be used. Found live on Codex 0.162.1,
     /// 2026-10-13: a chief's rollout held the one developer message of its start,
     /// with no section of the specs turned on before its Resume. And probed through
     /// `codex app-server` the same day: a thread started with the developer

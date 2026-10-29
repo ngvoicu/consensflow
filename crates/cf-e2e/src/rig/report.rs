@@ -57,7 +57,7 @@ pub(super) fn plain(bytes: &[u8]) -> String {
         });
     let text = pattern::once(&JUMP, r"\x1b\[[0-9;]*[Hf]").replace_all(&text, "\n");
     let text = pattern::once(&SEQUENCE, r"\x1b\[[0-9;?]*[ -/]*[@-~]").replace_all(&text, "");
-    let text = pattern::once(&TITLE, r"\x1b\][^\x07]*\x07").replace_all(&text, "");
+    let text = pattern::once(&TITLE, r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)").replace_all(&text, "");
     text.replace('\r', "")
 }
 
@@ -699,6 +699,20 @@ mod tests {
     fn control_sequences_are_stripped_and_the_text_between_them_is_left() {
         let bytes = b"\x1b[1;32mgreen\x1b[0m and \x1b[?25lplain\x1b]0;a title\x07!\r\n";
         assert_eq!(plain(bytes), "green and plain!\n");
+    }
+
+    // Claude Code 2.1.312 on Windows titles its window with a string ended by ST (`ESC \`), not by
+    // BEL: the title took everything up to the next BEL for itself, and a resumed window's whole
+    // screen (2,024 bytes) read as 153 blanks (zeewin2, 2026-10-28: `live resume-cut`).
+    #[test]
+    fn a_title_ended_by_the_string_terminator_ends_there_and_takes_none_of_what_follows() {
+        let bytes = b"\x1b]0;claude\x1b\\hello\x1b[?25l world\x1b]7501;?\x07!";
+        assert_eq!(plain(bytes), "hello world!");
+        // Either ends a title, and a title with nothing in it is none.
+        assert_eq!(
+            plain(b"a\x1b]0;one\x07b\x1b]2;two\x1b\\c\x1b]0;\x07d"),
+            "abcd"
+        );
     }
 
     #[test]

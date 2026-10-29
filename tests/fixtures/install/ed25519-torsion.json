@@ -1,0 +1,61 @@
+{
+  "source": "make-fixtures.mjs: RFC 8032 5.1.7's equation without the cofactor, by a BigInt reference",
+  "cases": [
+    {
+      "name": "A and R the identity, S = 0",
+      "public": "0100000000000000000000000000000000000000000000000000000000000000",
+      "message": "616e79206d657373616765",
+      "signature": "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expect": true
+    },
+    {
+      "name": "A and R the identity, S = 1",
+      "public": "0100000000000000000000000000000000000000000000000000000000000000",
+      "message": "616e79206d657373616765",
+      "signature": "01000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000",
+      "expect": false
+    },
+    {
+      "name": "A of order 4, R the identity, S = 0, k a multiple of 4",
+      "public": "0000000000000000000000000000000000000000000000000000000000000000",
+      "message": "4d2034",
+      "signature": "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expect": true
+    },
+    {
+      "name": "A of order 4, R the identity, S = 0, k no multiple of 4",
+      "public": "0000000000000000000000000000000000000000000000000000000000000000",
+      "message": "4d2030",
+      "signature": "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expect": false
+    },
+    {
+      "name": "A of mixed order, k a multiple of 4",
+      "public": "ac3db77d906355f058ac6c3f678b36d1fbbee5a1801970dd88b326b42498aebe",
+      "message": "4d2030",
+      "signature": "271d8c92f169f807f35feb73ac7418f86d7b14e3992023efde04f8bd723357529f52ba8903ddb91b8a693c5e96c4338e3eedbe1cdedf9a59c1f1bcd605281802",
+      "expect": true
+    },
+    {
+      "name": "A of mixed order, k no multiple of 4",
+      "public": "ac3db77d906355f058ac6c3f678b36d1fbbee5a1801970dd88b326b42498aebe",
+      "message": "4d2031",
+      "signature": "271d8c92f169f807f35feb73ac7418f86d7b14e3992023efde04f8bd723357522e4380d4af30bba9f183df27474e4050c9dfd27e104548eea503176a6a700b05",
+      "expect": false
+    },
+    {
+      "name": "R of mixed order, A honest",
+      "public": "15c96cfc5bfc17667457e56f2e5a1d3a8f4b0aa8799e8a63def773773d2708c8",
+      "message": "6d697865642052",
+      "signature": "e2d447a65a02015c80c0bd89b425a3792d74a8c07c49dc9c9c4d6dcb7ba0f939d0a7f37dd8025c649b7e25b2074b56460ce00bffff1a67e75678cfe5a1bea008",
+      "expect": false
+    },
+    {
+      "name": "R and A honest",
+      "public": "15c96cfc5bfc17667457e56f2e5a1d3a8f4b0aa8799e8a63def773773d2708c8",
+      "message": "6d697865642052",
+      "signature": "271d8c92f169f807f35feb73ac7418f86d7b14e3992023efde04f8bd72335752602e01327de41d7af1a13758dfc114a584ff5430774b55ae8478d57a7b87620c",
+      "expect": true
+    }
+  ]
+}

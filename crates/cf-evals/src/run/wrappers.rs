@@ -29,7 +29,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cf_e2e::files;
-use cf_e2e::live::{self, ask, codex, ISOLATION};
+use cf_e2e::live::{self, codex, ISOLATION};
 use serde_json::{json, Value};
 
 use super::machine::Machine;
@@ -128,35 +128,6 @@ fn pi_script(real: &str, model: &str, thinking: &str) -> String {
     .join("\n")
 }
 
-/// The Node script a Windows wrapper runs: it starts the program and the arguments
-/// of `argv` (what the window of the real program opens on, flags and all) with the
-/// arguments it was given after them.
-fn relay(argv: &[String]) -> String {
-    [
-        format!("// {WHY}"),
-        "import { spawn } from 'node:child_process'".to_owned(),
-        format!("const [file, ...args] = {}", json!(argv)),
-        "for (const signal of ['SIGINT', 'SIGBREAK']) process.on(signal, () => {})".to_owned(),
-        "const child = spawn(file, [...args, ...process.argv.slice(2)], { stdio: 'inherit' })"
-            .to_owned(),
-        "child.on('error', (error) => { console.error(error.message); process.exit(1) })"
-            .to_owned(),
-        "child.on('exit', (code) => process.exit(code ?? 1))".to_owned(),
-        String::new(),
-    ]
-    .join("\n")
-}
-
-/// The `.cmd` of a Windows wrapper: npm's shape, `"<program>" "<script>" %*`, with
-/// the batch file's own line ends.
-fn cmd(node: &Path, script: &Path) -> String {
-    format!(
-        "@echo off\r\nREM {WHY}\r\n\"{}\" \"{}\" %*\r\n",
-        node.display(),
-        script.display()
-    )
-}
-
 /// The wrapper `name` that starts `real` with `flags`, in `bin`: where a window
 /// finds it.
 fn emit(machine: &Machine, name: &str, real: &Path, flags: &[String]) -> Result<PathBuf> {
@@ -169,16 +140,16 @@ fn emit(machine: &Machine, name: &str, real: &Path, flags: &[String]) -> Result<
     let words: Vec<String> = std::iter::once(real.to_string_lossy().into_owned())
         .chain(flags.iter().cloned())
         .collect();
-    // What a window of the real program opens on: its program and script, which a
-    // `.cmd` shim of npm's is read for.
-    let env = [("PATH".to_owned(), machine.path())];
-    let argv = ask::program(&words, &env)?;
-    let node = live::command("node")?;
-    let relay_file = bin.join(format!("{name}.mjs"));
-    files::write(&relay_file, relay(&argv))?;
-    let program = bin.join(format!("{name}.cmd"));
-    files::write_executable(&program, cmd(&node, &relay_file))?;
-    Ok(program)
+    // The kit's Windows wrapper: what a window of the real program opens on, which a `.cmd`
+    // shim of npm's is read for, run by a Node script beside a `.cmd` of npm's shape.
+    Ok(live::windows_wrapper(
+        &bin,
+        name,
+        WHY,
+        &words,
+        &machine.path(),
+        None,
+    )?)
 }
 
 /// Writes the wrappers a run needs, in a folder of its own, fresh: a wrapper

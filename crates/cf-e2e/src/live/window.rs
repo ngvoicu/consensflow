@@ -161,6 +161,12 @@ impl Window<'_> {
         after(&screen, mark.saturating_sub(dropped))
     }
 
+    /// What it printed so far, as it came, bytes and all: the end of it ([`raw_end`]) tells
+    /// a blank screen from a window that printed nothing.
+    pub fn printed(&self) -> Vec<u8> {
+        self.rig.printed(&self.id)
+    }
+
     /// The end of its screen, as a line ([`last_lines`]): what a report says of a
     /// window to say why it did not open or did not answer.
     pub fn tail(&self) -> String {

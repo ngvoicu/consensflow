@@ -7,23 +7,19 @@
 //! with `ps eww` (macOS shows its owner a process's environment), compared by value and
 //! said by name only.
 //!
-//! The run's Claude config is a folder of its own (`--claude-config <folder>`), into which
-//! the case copies the machine's login and nothing else, and from which it takes the copy
-//! away at the end, so nothing of the machine's `~/.claude` is used.
+//! The run's Claude config is a folder of the kit's own (`CLAUDE_CONFIG_DIR`, given every
+//! real Claude window of a rig: a copy of the machine's login and nothing else, removed with
+//! the run), so nothing of the machine's `~/.claude` is used.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::agents;
-use cf_e2e::live::machine::home;
 use cf_e2e::live::members::{self, find, is_over, Members, Plan};
-use cf_e2e::live::{self, text, Harness, Log};
+use cf_e2e::live::{text, Harness, Log};
 use cf_e2e::process::Run;
-use cf_e2e::{files, Error, Result};
+use cf_e2e::{Error, Result};
 use serde_json::json;
-
-use crate::claude::{login, now_ms, LOGIN_LEFT_MS};
 
 /// The stand-in for the chief's window, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -42,42 +38,6 @@ const TASK: &str = "Reply with only the word ok.";
 const OPENS: Duration = Duration::from_secs(180);
 const WORK: Duration = Duration::from_secs(300);
 const LOOK: Duration = Duration::from_secs(1);
-
-/// The run's own Claude config, `--claude-config`, given the machine's login.
-fn claude_config() -> Result<PathBuf> {
-    let folder = live::option("claude-config").map(PathBuf::from).ok_or_else(|| {
-        Error::Daemon(
-            "give the run a Claude config folder of its own: cargo xtask live parity --claude-config <empty folder> -- a_real_claude_member".to_owned(),
-        )
-    })?;
-    files::make_dir(&folder)?;
-    let login = login(&home()?.join(".claude"))?;
-    let left = login["expiresAt"].as_i64().unwrap_or(0) - now_ms();
-    if left < LOGIN_LEFT_MS {
-        return Err(Error::Daemon(format!(
-            "the machine's Claude login has {} min left: wait for Claude to refresh it",
-            left / 60_000
-        )));
-    }
-    files::write(
-        &folder.join(".credentials.json"),
-        json!({ "claudeAiOauth": login }).to_string(),
-    )?;
-    files::write(
-        &folder.join(".claude.json"),
-        json!({ "hasCompletedOnboarding": true }).to_string(),
-    )?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&folder, fs::Permissions::from_mode(0o700));
-        let _ = fs::set_permissions(
-            folder.join(".credentials.json"),
-            fs::Permissions::from_mode(0o600),
-        );
-    }
-    Ok(folder)
-}
 
 /// The value the process `pid` has of `name`, by `ps eww`: none where it has none.
 fn of_process(pid: u32, name: &str) -> Result<Option<String>> {
@@ -102,11 +62,7 @@ pub fn run(log: &Log) -> Result {
             "this case reads a process's environment as macOS shows it".to_owned(),
         ));
     }
-    let config = claude_config()?;
-    let outcome = checked(log);
-    // The copy of the login goes with the run, whatever came of it.
-    let _ = fs::remove_file(config.join(".credentials.json"));
-    outcome
+    checked(log)
 }
 
 fn checked(log: &Log) -> Result {

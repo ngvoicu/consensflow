@@ -2,13 +2,21 @@
 //! that every Claude window of the run starts through one of them: the wrapper
 //! that shuts the human's MCP servers, connectors and browser out of it, and the
 //! shim that does that and also has the stand-in agent play the windows whose
-//! agent's model is `fake` or `fake-chief`. Both are shell scripts, for macOS
-//! and Linux: Windows opens a window only on the shape of an npm shim.
+//! agent's model is `fake` or `fake-chief`. On macOS and Linux both are shell
+//! scripts. Windows opens a window only on the shape of an npm shim
+//! (`"<program>" "<script>" %*`), so there each is a `.cmd` of that shape that names
+//! Node and a script written beside it, which starts the real program (or the stand-in)
+//! and ends as it ends ([`windows_wrapper`]).
 
-use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::{files, Error, Result};
+use serde_json::json;
+
+use super::path;
+use crate::live::agents::{STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL};
+use crate::live::ask;
+use crate::process::own_var;
+use crate::{files, Result};
 
 /// The flags that keep a scripted Claude window from reaching the human's MCP
 /// servers, connectors and browser, which it would in full-permission mode on
@@ -16,12 +24,18 @@ use crate::{files, Error, Result};
 /// test runs are the only place they are shut out.
 pub const ISOLATION: [&str; 2] = ["--strict-mcp-config", "--no-chrome"];
 
+/// What a live test's wrapper says of itself: why it is there.
+const WHY: &str = "Written by a live test: its Claude windows reach no MCP server and no browser.";
+
 /// A program called `claude-isolated` that runs the real Claude Code at `claude`
 /// with [`ISOLATION`] before whatever words it is given, made in `folder`: the
 /// stand-in a rig puts first on the `PATH` of its windows is then this one,
 /// and every Claude window of the run starts through it. Where it is.
 pub fn isolated_claude(folder: &Path, claude: &Path) -> Result<PathBuf> {
-    written(folder, "claude-isolated", claude, isolating_script(claude))
+    if cfg!(windows) {
+        return on_windows(folder, "claude-isolated", claude, None, None);
+    }
+    written(folder, "claude-isolated", isolating_script(claude))
 }
 
 /// A program called `claude-shimmed` that runs the stand-in agent at `stand_in`,
@@ -32,10 +46,12 @@ pub fn isolated_claude(folder: &Path, claude: &Path) -> Result<PathBuf> {
 /// members are stand-ins and whose other members are real. Made in `folder`.
 /// Where it is.
 pub fn shimmed_claude(folder: &Path, claude: &Path, stand_in: &Path) -> Result<PathBuf> {
+    if cfg!(windows) {
+        return on_windows(folder, "claude-shimmed", claude, Some(stand_in), None);
+    }
     written(
         folder,
         "claude-shimmed",
-        claude,
         shimming_script(claude, stand_in, None),
     )
 }
@@ -50,36 +66,154 @@ pub fn shimmed_claude_with_servers(
     stand_in: &Path,
     servers: &Path,
 ) -> Result<PathBuf> {
+    if cfg!(windows) {
+        return on_windows(
+            folder,
+            "claude-shimmed",
+            claude,
+            Some(stand_in),
+            Some(servers),
+        );
+    }
     written(
         folder,
         "claude-shimmed",
-        claude,
         shimming_script(claude, stand_in, Some(servers)),
     )
 }
 
-/// The program `name` in `folder`, with `script` for its words; a platform that
-/// cannot run a script as a window's program is an error that says so.
-fn written(folder: &Path, name: &str, claude: &Path, script: String) -> Result<PathBuf> {
-    if cfg!(windows) {
-        return Err(Error::Program {
-            action: "isolate",
-            program: claude.to_string_lossy().into_owned(),
-            source: io::Error::new(
-                io::ErrorKind::Unsupported,
-                "a live run that starts Claude Code through a wrapper is for macOS and Linux",
-            ),
-        });
-    }
+/// The program `name` in `folder`, with `script` for its words.
+fn written(folder: &Path, name: &str, script: String) -> Result<PathBuf> {
     let program = folder.join(name);
     files::write_executable(&program, script)?;
     Ok(program)
 }
 
+/// The words that start the real Claude Code at `claude` the way a live run does: the
+/// servers file `servers` names, if it is given one, and [`ISOLATION`], before whatever
+/// words a window is given.
+fn real_words(claude: &Path, servers: Option<&Path>) -> Vec<String> {
+    let mut words = vec![claude.to_string_lossy().into_owned()];
+    if let Some(file) = servers {
+        words.push("--mcp-config".to_owned());
+        words.push(file.to_string_lossy().into_owned());
+    }
+    words.extend(ISOLATION.map(str::to_owned));
+    words
+}
+
+/// The wrapper (`stand_in` given: the shim) `name` of the real Claude Code at `claude`, in
+/// `folder`, for a Windows machine: the real program is what its window would open on
+/// (an npm-installed Claude Code is a `.cmd`, which is read for its Node and script), and
+/// the Node that runs the wrapper's script is the one on the `PATH` of this run, as the
+/// rig's windows find it.
+fn on_windows(
+    folder: &Path,
+    name: &str,
+    claude: &Path,
+    stand_in: Option<&Path>,
+    servers: Option<&Path>,
+) -> Result<PathBuf> {
+    windows_wrapper(
+        folder,
+        name,
+        WHY,
+        &real_words(claude, servers),
+        &own_var("PATH").unwrap_or_default(),
+        stand_in,
+    )
+}
+
+/// A program called `name` for a Windows machine, in `folder`: the `.cmd` in npm's shape
+/// that a window opens on (the pane host starts a file with each argument quoted the way
+/// programs read them, which `cmd.exe` does not, so the daemon opens a window on a `.cmd`
+/// only as the shim npm writes, and reads it for its program and script). It names Node
+/// and a script written beside it that starts `words` (the real program, as a window of
+/// it opens, then its flags) with the arguments the window is given after them, in the
+/// same console, and ends as it ends; Ctrl+C is the program's to answer, not the script's.
+/// Where `stand_in` is given, a window whose arguments name a stand-in's model
+/// (`fake`, `fake-chief`) starts the stand-in with them instead. `why` is what both
+/// files say of themselves, and `search` the `PATH` a shim among `words` is read on.
+/// Where the `.cmd` is.
+pub fn windows_wrapper(
+    folder: &Path,
+    name: &str,
+    why: &str,
+    words: &[String],
+    search: &str,
+    stand_in: Option<&Path>,
+) -> Result<PathBuf> {
+    let env = [("PATH".to_owned(), search.to_owned())];
+    let argv = ask::program(words, &env)?;
+    let node = path::command("node")?;
+    write_windows_wrapper(folder, name, why, &node, &argv, stand_in)
+}
+
+/// [`windows_wrapper`], once the program the real one's window opens on (`argv`) and the
+/// Node (`node`) that runs the script are known.
+fn write_windows_wrapper(
+    folder: &Path,
+    name: &str,
+    why: &str,
+    node: &Path,
+    argv: &[String],
+    stand_in: Option<&Path>,
+) -> Result<PathBuf> {
+    let script = folder.join(format!("{name}.mjs"));
+    files::write(&script, relay(why, argv, stand_in))?;
+    let program = folder.join(format!("{name}.cmd"));
+    files::write_executable(&program, cmd(why, node, &script))?;
+    Ok(program)
+}
+
+/// The Node script a Windows wrapper runs: it starts the program and the arguments of
+/// `argv` with the arguments it was given after them, or, where a `stand_in` is given and
+/// one of the arguments it was given is the model of a stand-in agent, the stand-in.
+fn relay(why: &str, argv: &[String], stand_in: Option<&Path>) -> String {
+    let route = match stand_in {
+        None => format!("const [file, ...args] = {}", json!(argv)),
+        Some(agent) => [
+            format!("const real = {}", json!(argv)),
+            format!("const stand_in = {}", json!([agent.to_string_lossy()])),
+            format!(
+                "const fake = process.argv.slice(2).some((word) => {})",
+                [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL]
+                    .map(|model| format!("word === '{model}'"))
+                    .join(" || ")
+            ),
+            "const [file, ...args] = fake ? stand_in : real".to_owned(),
+        ]
+        .join("\n"),
+    };
+    [
+        format!("// {why}"),
+        "import { spawn } from 'node:child_process'".to_owned(),
+        route,
+        "for (const signal of ['SIGINT', 'SIGBREAK']) process.on(signal, () => {})".to_owned(),
+        "const child = spawn(file, [...args, ...process.argv.slice(2)], { stdio: 'inherit' })"
+            .to_owned(),
+        "child.on('error', (error) => { console.error(error.message); process.exit(1) })"
+            .to_owned(),
+        "child.on('exit', (code) => process.exit(code ?? 1))".to_owned(),
+        String::new(),
+    ]
+    .join("\n")
+}
+
+/// The `.cmd` of a Windows wrapper: npm's shape, `"<program>" "<script>" %*`, with the
+/// batch file's own line ends.
+fn cmd(why: &str, node: &Path, script: &Path) -> String {
+    format!(
+        "@echo off\r\nREM {why}\r\n\"{}\" \"{}\" %*\r\n",
+        node.display(),
+        script.display()
+    )
+}
+
 /// The shell script that is [`isolated_claude`].
 fn isolating_script(claude: &Path) -> String {
     format!(
-        "#!/bin/sh\n# Written by a live test: its Claude windows reach no MCP server and no browser.\nexec {} {} \"$@\"\n",
+        "#!/bin/sh\n# {WHY}\nexec {} {} \"$@\"\n",
         shell_word(&claude.to_string_lossy()),
         ISOLATION.join(" ")
     )
@@ -118,6 +252,8 @@ fn shell_word(word: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
@@ -318,18 +454,201 @@ mod tests {
         assert_eq!(own, "/run/own\n");
     }
 
-    #[cfg(windows)]
+    fn strings(words: &[&str]) -> Vec<String> {
+        words.iter().map(|word| (*word).to_owned()).collect()
+    }
+
     #[test]
-    fn on_windows_a_wrapper_is_refused_and_says_why() {
+    fn the_real_claude_is_started_with_its_servers_file_first_and_the_flags_that_shut_the_rest_out()
+    {
+        assert_eq!(
+            real_words(Path::new("C:/bin/claude.exe"), None),
+            strings(&["C:/bin/claude.exe", "--strict-mcp-config", "--no-chrome"])
+        );
+        // The order the shell scripts have: a flag that takes several files ends its list at the
+        // flag after it.
+        assert_eq!(
+            real_words(Path::new("claude"), Some(Path::new("/run/mcp.json"))),
+            strings(&[
+                "claude",
+                "--mcp-config",
+                "/run/mcp.json",
+                "--strict-mcp-config",
+                "--no-chrome"
+            ])
+        );
+    }
+
+    #[test]
+    fn a_windows_wrapper_is_a_cmd_in_the_shape_of_an_npm_shim_that_names_node_and_the_script_it_runs(
+    ) {
+        let shim = cmd(
+            "Written by a test.",
+            Path::new(r"C:\Program Files\nodejs\node.exe"),
+            Path::new(r"C:\Users\u\bin\claude-shimmed.mjs"),
+        );
+        assert_eq!(
+            shim,
+            "@echo off\r\nREM Written by a test.\r\n\
+             \"C:\\Program Files\\nodejs\\node.exe\" \"C:\\Users\\u\\bin\\claude-shimmed.mjs\" %*\r\n"
+        );
+        // The daemon reads the last line that passes the arguments on, and takes the last
+        // two words it quotes there for the program and the script: the comment is no such line.
+        let line = shim.lines().rev().find(|line| line.contains("%*")).unwrap();
+        assert_eq!(line.matches('"').count(), 4);
+        assert!(!shim.lines().next().unwrap_or_default().contains("%*"));
+    }
+
+    #[test]
+    fn the_script_a_windows_wrapper_runs_starts_the_real_program_and_ends_as_it_ends() {
+        let text = relay(
+            "Why.",
+            &strings(&[
+                "C:\\node.exe",
+                "C:\\cli.js",
+                "--no-chrome",
+                "-c",
+                "model=\"m\"",
+            ]),
+            None,
+        );
+        assert!(
+            text.contains(
+                "const [file, ...args] = [\"C:\\\\node.exe\",\"C:\\\\cli.js\",\"--no-chrome\",\"-c\",\"model=\\\"m\\\"\"]"
+            ),
+            "{text}"
+        );
+        assert!(text.starts_with("// Why.\n"), "{text}");
+        for part in [
+            "import { spawn } from 'node:child_process'",
+            "for (const signal of ['SIGINT', 'SIGBREAK']) process.on(signal, () => {})",
+            "spawn(file, [...args, ...process.argv.slice(2)], { stdio: 'inherit' })",
+            "child.on('exit', (code) => process.exit(code ?? 1))",
+        ] {
+            assert!(text.contains(part), "{part}");
+        }
+        assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn the_script_of_a_shim_starts_the_stand_in_for_the_model_of_one_and_the_real_program_for_every_other(
+    ) {
+        let text = relay(
+            "Why.",
+            &strings(&["C:\\real.exe", "--no-chrome"]),
+            Some(Path::new(r"C:\bin\fake-agent.exe")),
+        );
+        assert!(
+            text.contains("const real = [\"C:\\\\real.exe\",\"--no-chrome\"]"),
+            "{text}"
+        );
+        assert!(
+            text.contains("const stand_in = [\"C:\\\\bin\\\\fake-agent.exe\"]"),
+            "{text}"
+        );
+        // A word that is the model of a stand-in, as the shell script reads it.
+        assert!(
+            text.contains(
+                "const fake = process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-chief')"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("const [file, ...args] = fake ? stand_in : real"),
+            "{text}"
+        );
+        // The stand-in is started with the window's arguments as they are given: it takes
+        // its own file for none of them, whether it is given it first or not.
+        assert!(
+            text.contains("spawn(file, [...args, ...process.argv.slice(2)]"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_windows_wrapper_is_the_cmd_of_a_script_written_beside_it_under_the_name_it_was_given() {
         let folder = tempfile::tempdir().unwrap();
-        let failed = isolated_claude(folder.path(), Path::new("claude.cmd")).unwrap_err();
-        assert!(failed.to_string().contains("macOS and Linux"), "{failed}");
-        let failed = shimmed_claude(
+        let program = write_windows_wrapper(
             folder.path(),
-            Path::new("claude.cmd"),
-            Path::new("fake-agent.exe"),
+            "claude-shimmed",
+            "Why.",
+            Path::new(r"C:\nodejs\node.exe"),
+            &strings(&[r"C:\real.exe"]),
+            Some(Path::new(r"C:\fake-agent.exe")),
         )
-        .unwrap_err();
-        assert!(failed.to_string().contains("macOS and Linux"), "{failed}");
+        .unwrap();
+        assert_eq!(program, folder.path().join("claude-shimmed.cmd"));
+        let shim = fs::read_to_string(&program).unwrap();
+        let script = folder.path().join("claude-shimmed.mjs");
+        assert!(
+            shim.ends_with(&format!(
+                "\"C:\\nodejs\\node.exe\" \"{}\" %*\r\n",
+                script.display()
+            )),
+            "{shim}"
+        );
+        assert!(fs::read_to_string(&script).unwrap().contains("real.exe"));
+    }
+
+    /// What the script of a Windows wrapper does, run by the Node of this machine (the one a
+    /// window would run it on), with `real` as the program the real Claude's window opens on and
+    /// the Node as the stand-in: the words a window was given, `given`, and what comes of them.
+    fn relayed(real: &[&str], given: &[&str]) -> crate::process::Ran {
+        let node = path::command("node").expect("a test of the wrapper's script needs Node");
+        let folder = tempfile::tempdir().unwrap();
+        let mut argv = vec![node.to_string_lossy().into_owned()];
+        argv.extend(real.iter().map(|word| (*word).to_owned()));
+        let program =
+            write_windows_wrapper(folder.path(), "w", "Why.", &node, &argv, Some(&node)).unwrap();
+        crate::process::Run::new(&node)
+            .arg(program.with_extension("mjs"))
+            .args(given)
+            .run()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_script_starts_the_real_program_with_its_flags_first_and_every_word_the_window_gave_it() {
+        let say = "console.log(JSON.stringify(process.argv.slice(1)))";
+        let ran = relayed(
+            &["-e", say, "--", "--strict-mcp-config", "--no-chrome"],
+            &["--model", "claude-sonnet-5-5", "a b", "it's"],
+        );
+        assert_eq!(
+            ran.stdout.trim(),
+            r#"["--strict-mcp-config","--no-chrome","--model","claude-sonnet-5-5","a b","it's"]"#
+        );
+        assert_eq!(ran.code, Some(0));
+    }
+
+    #[test]
+    fn the_script_starts_the_stand_in_for_a_window_of_a_fake_model_and_ends_as_the_program_does() {
+        // After the `--` Node takes the words for the script's, so the window's own `-e` is
+        // the stand-in's alone: which program ran is what it printed.
+        let real = [
+            "-e",
+            "console.log('real', JSON.stringify(process.argv.slice(1)))",
+            "--",
+        ];
+        // The Node is the stand-in here: it is given the window's words, and runs them.
+        for model in ["fake", "fake-chief"] {
+            let ran = relayed(
+                &real,
+                &[
+                    "-e",
+                    "console.log('stand-in', process.argv.slice(1))",
+                    model,
+                ],
+            );
+            assert_eq!(ran.stdout.trim(), format!("stand-in [ '{model}' ]"));
+        }
+        // A word that only holds the name of a fake model is not the model.
+        assert_eq!(
+            relayed(&real, &["fakes"]).stdout.trim(),
+            r#"real ["fakes"]"#
+        );
+        // The program's exit code is the wrapper's.
+        let ran = relayed(&["-e", "process.exit(7)"], &[]);
+        assert_eq!(ran.code, Some(7));
     }
 }

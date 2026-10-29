@@ -54,6 +54,12 @@ pub(crate) struct Config {
     pub(crate) upstream: Upstream,
     /// Whether the window's first start opens in full-permission mode.
     pub(crate) fresh_bypass: bool,
+    /// The developer instructions every main start of the window is given (its
+    /// role), read from the file ConsensFlow wrote; none for a window given none.
+    pub(crate) role: Option<String>,
+    /// ConsensFlow's own variables, each name with its value, which every thread
+    /// the TUI starts, resumes or forks is given for its commands.
+    pub(crate) shell_env: Vec<(String, String)>,
     /// The board Codex's questions go to; none outside a window.
     pub(crate) board: Option<Arc<Board>>,
     /// How long a question waits for the board before the TUI's dialog takes over.
@@ -103,6 +109,8 @@ impl Broker {
             bridge,
             upstream,
             fresh_bypass,
+            role,
+            shell_env,
             board,
             question_wait,
         } = config;
@@ -112,7 +120,7 @@ impl Broker {
             upstream,
             board,
             question_wait,
-            state: RefCell::new(Selection::new(fresh_bypass)),
+            state: RefCell::new(Selection::new(fresh_bypass, role, shell_env)),
             control: RefCell::new(None),
             pairs: RefCell::new(HashMap::new()),
             tasks: RefCell::new(Vec::new()),
@@ -218,6 +226,30 @@ impl Shared {
             // message while this is false, instead of spending its attempts.
             available: state.available(open),
         }
+    }
+}
+
+/// What the window says of a start of its TUI's that the broker could not tell
+/// for the window's own thread or a side one (`why`): it went without the role.
+pub(crate) fn unclassified_note(why: &str) -> String {
+    format!(
+        "ConsensFlow: Codex's TUI in this window started a thread the broker could not tell for the window's own or a side one ({why}), so that thread was not given this window's role. Codex may have changed how its TUI starts a thread: tell the human, who can check it with `cargo xtask live codex-role`."
+    )
+}
+
+impl Shared {
+    /// Tells whoever reads the window's notes (its chief; for the chief's own
+    /// window, the human) that a start of its TUI's went without its role
+    /// ([`unclassified_note`]): asked of the board off this thread, as a question
+    /// is. A window with no board, or a board that refuses, says nothing more.
+    fn say_unclassified(&self, why: &'static str) {
+        let Some(board) = self.board.clone() else {
+            return;
+        };
+        self.spawn(async move {
+            let body = json!({ "body": unclassified_note(why) });
+            let _ = tokio::task::spawn_blocking(move || board.post("/api/notes", &body)).await;
+        });
     }
 }
 

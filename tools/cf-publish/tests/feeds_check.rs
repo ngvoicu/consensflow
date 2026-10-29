@@ -85,6 +85,8 @@ mod after_a_release_is_published_the_files_and_the_feeds_serve_what_the_rule_say
             installer(LATER),
             portable(LATER),
             format!("ConsensFlow_{LATER}_aarch64.dmg"),
+            "SHA256SUMS".to_string(),
+            "SHA256SUMS.sig".to_string(),
         ] {
             let problems = found(LATER, |github, _| {
                 github.serve(&download(LATER, &name), "another file");

@@ -12,8 +12,11 @@
 //! app-server resumed that thread (`thread/resume`) with the developer
 //! instructions "Your code word is now ROLETWO; this replaces any earlier code
 //! word.", and the same turn was answered ROLEONE again. Neither the
-//! `developer_instructions` setting of a resumed window's command line nor that
-//! field of the resume request replaces what the thread began with, so a chief's
+//! `developer_instructions` setting of a resumed window's server nor that field of
+//! the resume request replaces what the thread began with (and since T-698 a
+//! resumed window is given neither: its broker gives the role to a thread that
+//! starts, and to nothing else; a thread resumed by an app-server given no
+//! instructions answered ROLEONE on Codex 0.164.0, 2026-10-26), so a chief's
 //! specs turned on, a member added to the staff or a release that rewrote a text
 //! would never reach a conversation that is resumed. The engine says it itself.
 //!
@@ -24,8 +27,8 @@
 //! message, and once it is up the note is the first delivery of its queue, by the
 //! way every message goes in (`next_in_line`): then the message the launch would
 //! have given first (a handoff, a brief, the note that its turn was cut), then
-//! the rest of the queue in its order. The command line carries the role once, as
-//! the developer instructions a window always had. What the launch owes the note
+//! the rest of the queue in its order. The role goes in once, as the developer
+//! instructions a window always had (which a resumed thread does not use). What the launch owes the note
 //! until it is told, and what comes of a launch that cannot tell it, is in
 //! [`prelude`].
 //!
@@ -63,7 +66,7 @@
 //! role is compared (`conversation_to_go_on_with`): a conversation its harness
 //! holds nothing of (a Codex thread that never had a turn has no record for a
 //! resume to find) is not resumed, its window opens afresh with the role as it is
-//! on its command line, as the window of any conversation that begins, and there
+//! now, as the window of any conversation that begins, and there
 //! is nothing to tell it: no note is written for it, and the text it begins with
 //! is what is recorded of it. A chief's launch asks its harness first, its handoff
 //! depending on the answer. A member's first message is begun, and the stop its
@@ -95,25 +98,9 @@
 //! A harness that takes its role at every launch is never asked, and its launch
 //! is what it always was.
 //!
-//! What it asks of a Windows launch is nothing it did not ask before. The command
-//! line carries the role once, as the developer instructions of the window
-//! (`-c developer_instructions=<JSON>`, which a resumed thread reads and does not
-//! use), and the note goes in by paste once the window is up, which has no such
-//! limit. Windows' `CreateProcess` takes 32,767 UTF-16 units of command line, the
-//! last for its end. Measured on the real text of a chief with specs on (tdd-html,
-//! a staff whose rows hold two roles each, Windows paths for the skill and for
-//! `cf`, 190 units before the role for what the harness says of it), the word as
-//! Windows quotes it (each of the role's 50 quotes is two more than JSON has it)
-//! comes to 14,463 units for 1 staff row, 15,654 for 25 and 16,654 for 45, about
-//! 50 a row. With some 400 units for the rest of the line (the two programs'
-//! paths, the flags, the thread's id, the model) a staff of 354 rows is the most
-//! it holds. What Codex's own instructions hold (the human's own, which begin the
-//! developer instructions) is in none of that: 2,500 units of them are some 2,700
-//! on the line, and the most is then 301 rows. Without specs the role is 1,422
-//! units shorter at 25 rows, and the most is 382. (When the note was the
-//! launch's first message the role was on the line twice, and a staff of 25 with
-//! 2,500 units of Codex's own instructions was over the limit.) A test holds
-//! these numbers to the real text.
+//! It asks nothing of a Windows launch's command line: a Codex window's role is in
+//! a file its supervisor reads (the harness's `codex/role.rs`), and the note goes in
+//! by paste once the window is up, which has no such limit.
 //!
 //! What is written down and not done (the limits of this):
 //!

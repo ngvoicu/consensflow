@@ -1,0 +1,88 @@
+{
+  "source": "make-fixtures.mjs: points by rule and by Euler's criterion; signatures by Node's crypto",
+  "points": [
+    {
+      "name": "the identity (y = 1)",
+      "point": "0100000000000000000000000000000000000000000000000000000000000000",
+      "decodes": true
+    },
+    {
+      "name": "y = 0, a point of order 4",
+      "point": "0000000000000000000000000000000000000000000000000000000000000000",
+      "decodes": true
+    },
+    {
+      "name": "y = p",
+      "point": "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "decodes": false
+    },
+    {
+      "name": "y = p + 1, the identity not reduced",
+      "point": "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "decodes": false
+    },
+    {
+      "name": "y = 2^255 - 1",
+      "point": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "decodes": false
+    },
+    {
+      "name": "x = 0 with the sign bit (y = 1)",
+      "point": "0100000000000000000000000000000000000000000000000000000000000080",
+      "decodes": false
+    },
+    {
+      "name": "x = 0 with the sign bit (y = p - 1)",
+      "point": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "decodes": false
+    },
+    {
+      "name": "y = 2, off the curve",
+      "point": "0200000000000000000000000000000000000000000000000000000000000000",
+      "decodes": false
+    },
+    {
+      "name": "y = 7, off the curve",
+      "point": "0700000000000000000000000000000000000000000000000000000000000000",
+      "decodes": false
+    }
+  ],
+  "boundaries": [
+    {
+      "name": "R || A || M of 111 bytes",
+      "public": "c4013e9e5ed1db18a75f65a8fcdcfa72164f4d1796053a3486b2a7737415f2b8",
+      "message": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734414e5b",
+      "signature": "db10b80052d5c99ae5aec08c44aacc3fe16b0a2ee14ab582c350282af8e9313fa683da2a2a5113f81ddb8d7a4284dac43091bc3b89ef03b85465a8b5057f3d0f"
+    },
+    {
+      "name": "R || A || M of 112 bytes",
+      "public": "c4013e9e5ed1db18a75f65a8fcdcfa72164f4d1796053a3486b2a7737415f2b8",
+      "message": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734414e5b68",
+      "signature": "dcfc5f44bc4cf70a286668c600118a98aa0a767fdb411c7cf3ff0cb06dd1c2ce81fa5f0c23a02076f5615d1f399d07783deb5d4f0951bf0e263afaedce3f7705"
+    },
+    {
+      "name": "R || A || M of 127 bytes",
+      "public": "c4013e9e5ed1db18a75f65a8fcdcfa72164f4d1796053a3486b2a7737415f2b8",
+      "message": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b",
+      "signature": "aaee7d4b53730bc2adc7428d843057cec835edcf4c08bd91554d978757cbd99f330bcf39b08ece73c75f8aad50b9d3e34cf4cf11bbf783d6febc571c0a1ce706"
+    },
+    {
+      "name": "R || A || M of 128 bytes",
+      "public": "c4013e9e5ed1db18a75f65a8fcdcfa72164f4d1796053a3486b2a7737415f2b8",
+      "message": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b38",
+      "signature": "6059a3e85ae4aa9b931bdbb4bbace47dedcf1c1a9bf68d717c0d855bf97718a7e9c3c77e27c27b7af5352e431faef1066ba8b596c650a406a154a65f8fda7b0c"
+    },
+    {
+      "name": "R || A || M of 239 bytes",
+      "public": "c4013e9e5ed1db18a75f65a8fcdcfa72164f4d1796053a3486b2a7737415f2b8",
+      "message": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b3845525f6c798693a0adbac7d4e1eefb0815222f3c495663707d8a97a4b1becbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0edfa0714212e3b4855626f7c8996a3b0bdcad7e4f1fe0b1825323f4c596673808d9aa7b4c1cedb",
+      "signature": "c7482fe4a1051a2ae347529f1b00cc2a12c71bcd0b5dcec775aad2332bae242ac8e475c87ac3218be2716d1539732461c5504cac54c4b09cd3f154bc338b5505"
+    },
+    {
+      "name": "R || A || M of 240 bytes",
+      "public": "c4013e9e5ed1db18a75f65a8fcdcfa72164f4d1796053a3486b2a7737415f2b8",
+      "message": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b3845525f6c798693a0adbac7d4e1eefb0815222f3c495663707d8a97a4b1becbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0edfa0714212e3b4855626f7c8996a3b0bdcad7e4f1fe0b1825323f4c596673808d9aa7b4c1cedbe8",
+      "signature": "0a1c2b19da49bd12aaa5c7a4c842c74c6a032fa0b6bd4d247c5aa32ded73d232f7e7e76213e9f3740dd79077cfdefcc5f6046b7c33f7b73707e923e5033c3f01"
+    }
+  ]
+}

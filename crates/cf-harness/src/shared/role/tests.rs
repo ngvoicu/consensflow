@@ -108,7 +108,7 @@ fn a_role_text_is_private_to_its_launch_and_a_launch_id_names_nothing_outside_it
 }
 
 #[test]
-fn codex_keeps_no_role_file_its_window_is_given_the_text_itself() {
+fn codex_has_no_role_skill_its_role_is_a_file_its_own_module_writes() {
     let (_dir, env) = fixture();
     assert_eq!(
         write_role(Harness::Codex, "worker", &env, &launch(ONE), "worker text"),

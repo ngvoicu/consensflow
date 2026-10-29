@@ -468,6 +468,6 @@ find = '''
                 .seams
                 .ledger
                 .borrow()
-                .told_waiting(participant.id, thread.task.id)?;'''
+                .notes_waiting(participant.id, thread.task.id)?;'''
 replace = ";"
 
