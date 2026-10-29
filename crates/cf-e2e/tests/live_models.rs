@@ -5,13 +5,11 @@
 //! no quota: Claude's `initialize`, Codex's `model/list`, Pi's `get_available_models` and
 //! `devin models list` run no turn.
 //!
-//! Each read runs on a throwaway home of the run's own, never the owner's config: Claude in
-//! ConsensFlow's own config folder of that home, signed out (its list is the same signed
-//! in); Codex in a `CODEX_HOME` holding a copy of `auth.json`; Pi in a
-//! `PI_CODING_AGENT_DIR` holding copies of its login, catalog and settings; Devin in a
-//! `HOME` holding a copy of its `credentials.toml`. Each copy is made with the mode 600,
-//! and the run removes the throwaway when it ends or fails. The owner's login files are
-//! hashed before and after: a read that rotated one is a failure.
+//! Each read runs on the home the kit gives every live window of the harness
+//! ([`machine::installed`]: Claude Code on a config folder of the run's own, Codex, Pi and
+//! Devin on a home of the run's own, each with a copy of the login), never the owner's, and
+//! the owner's setup and login are looked at after it as a rig's end looks: a read that
+//! changed one, or rotated a login, is a failure.
 //!
 //! It checks, for each harness, that the list is the account's (not stale), names models
 //! with a label, a contributor model only with its warning and never as the default, and
@@ -23,10 +21,9 @@
 //! cargo xtask live models claude devin    some
 //! ```
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use cf_e2e::live::machine::Installed;
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, ask, machine, Harness, Log};
 use cf_e2e::process::own_var;
@@ -54,87 +51,21 @@ fn named() -> Result<Vec<Harness>> {
         .collect()
 }
 
-/// The owner's login file of `harness`, under `home`.
-fn login(home: &Path, harness: Harness) -> Option<PathBuf> {
-    match harness {
-        Harness::Codex => Some(home.join(".codex/auth.json")),
-        Harness::Pi => Some(home.join(".pi/agent/auth.json")),
-        Harness::Devin => Some(home.join(".local/share/devin/credentials.toml")),
-        _ => None,
-    }
-}
-
-/// A digest of the file at `path`, none where there is none: what a run compares,
-/// never what the file holds.
-fn digest(path: &Path) -> Option<u64> {
-    let bytes = std::fs::read(path).ok()?;
-    let mut hasher = DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Some(hasher.finish())
-}
-
-/// Copies the owner's `from` to `to`, readable by its owner alone.
-fn copy_secret(from: &Path, to: &Path) -> Result {
-    let fail = |source| Error::File {
-        action: "copy a login to",
-        path: to.to_owned(),
-        source,
-    };
-    std::fs::create_dir_all(to.parent().unwrap_or(to)).map_err(fail)?;
-    std::fs::copy(from, to).map_err(fail)?;
-    #[cfg(unix)]
-    std::fs::set_permissions(to, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-        .map_err(fail)?;
-    Ok(())
-}
-
-/// What `harness` is read with: the run's search path and shell, a home of `scratch`'s,
-/// ConsensFlow's home in it, and the copies the harness reads its login from.
-fn env(harness: Harness, home: &Path, scratch: &Path) -> Result<Value> {
+/// What `harness` is read with: the run's search path and shell, ConsensFlow's home in
+/// `scratch`, and the variables of the home the kit gives the harness's windows.
+fn env(installed: &Installed, scratch: &Path) -> Result<Value> {
     let mut vars = serde_json::Map::new();
-    for name in ["PATH", "USER", "LANG", "TMPDIR", "SHELL"] {
+    for name in ["PATH", "USER", "LANG", "TMPDIR", "SHELL", "HOME"] {
         if let Some(value) = own_var(name) {
             vars.insert(name.to_owned(), Value::String(value));
         }
     }
-    let own = scratch.join("home");
-    vars.insert("HOME".to_owned(), json!(own));
     vars.insert(
         "CONSENSFLOW_HOME".to_owned(),
         json!(scratch.join("consensflow")),
     );
-    match harness {
-        Harness::Codex => {
-            copy_secret(
-                &home.join(".codex/auth.json"),
-                &scratch.join("codex/auth.json"),
-            )?;
-            vars.insert("CODEX_HOME".to_owned(), json!(scratch.join("codex")));
-        }
-        Harness::Pi => {
-            for name in [
-                "auth.json",
-                "models-store.json",
-                "models.json",
-                "settings.json",
-            ] {
-                let from = home.join(".pi/agent").join(name);
-                if from.exists() {
-                    copy_secret(&from, &scratch.join("pi-agent").join(name))?;
-                }
-            }
-            vars.insert(
-                "PI_CODING_AGENT_DIR".to_owned(),
-                json!(scratch.join("pi-agent")),
-            );
-        }
-        Harness::Devin => {
-            let credentials = ".local/share/devin/credentials.toml";
-            copy_secret(&home.join(credentials), &own.join(credentials))?;
-            vars.insert("XDG_CONFIG_HOME".to_owned(), json!(own.join(".config")));
-            vars.insert("XDG_DATA_HOME".to_owned(), json!(own.join(".local/share")));
-        }
-        _ => {}
+    for (name, value) in installed.home_vars()? {
+        vars.insert(name, Value::String(value));
     }
     Ok(Value::Object(vars))
 }
@@ -217,7 +148,6 @@ fn each_harness_lists_its_models_with_no_model_turn_and_no_login_of_the_owner_s_
     // No window runs here, and no model: a `--models` would be read by nothing.
     let log = Log::own_agents("live models", "it reads what each harness lists")?;
     ask::prepare()?;
-    let home = machine::home()?;
     let harnesses = named()?;
     let mut checks = Vec::new();
     for harness in harnesses {
@@ -226,12 +156,12 @@ fn each_harness_lists_its_models_with_no_model_turn_and_no_login_of_the_owner_s_
             harness.name(),
             std::process::id()
         ));
-        let before = login(&home, harness).map(|file| digest(&file));
-        let env = env(harness, &home, &scratch);
-        let listed = env.and_then(|env| {
+        let installed = machine::installed(harness)?;
+        let listed = env(&installed, &scratch).and_then(|env| {
             ask::question(&json!({ "op": "models", "kind": harness.kind(), "env": env }))
         });
-        let after = login(&home, harness).map(|file| digest(&file));
+        let kept = installed.finish_homes();
+        drop(installed);
         let removed = std::fs::remove_dir_all(&scratch);
         log.say(format!(
             "{}: its throwaway {} removed: {}",
@@ -241,9 +171,9 @@ fn each_harness_lists_its_models_with_no_model_turn_and_no_login_of_the_owner_s_
         ));
         checks.push(Check::new(
             harness.name(),
-            "the owner's login is the same after the read",
-            before == after,
-            String::new(),
+            "the owner's setup and login are as they were after the read",
+            kept.is_ok(),
+            kept.err().map(|said| said.to_string()).unwrap_or_default(),
         ));
         match listed {
             Ok(listed) => checks.extend(checks_of(harness, &listed, &log)),
