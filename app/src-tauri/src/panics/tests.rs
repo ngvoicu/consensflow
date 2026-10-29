@@ -4,6 +4,7 @@
 
 use super::*;
 use std::process::Output;
+use std::time::Duration;
 
 /// Set in the child: the log it writes in.
 const LOG: &str = "CONSENSFLOW_TEST_PANIC_LOG";
@@ -26,6 +27,30 @@ fn in_a_child(name: &str) -> (Output, String) {
         .expect("run the test in a child");
     let written = std::fs::read_to_string(&log).unwrap_or_default();
     (ran, written)
+}
+
+/// How many times the child's person was told.
+static TOLD_TIMES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The child's teller: it says it told, and on which thread.
+fn tell_by_printing() {
+    tell_with(|| {
+        let thread = std::thread::current();
+        println!(
+            "told the person on {}",
+            thread.name().unwrap_or("an unnamed thread")
+        );
+        TOLD_TIMES.fetch_add(1, Ordering::AcqRel);
+    });
+}
+
+/// Waits for the child's person to be told, and a little more for a second telling to show.
+fn wait_for_the_telling() {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while TOLD_TIMES.load(Ordering::Acquire) == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(300));
 }
 
 fn said(ran: &Output) -> String {
@@ -78,6 +103,9 @@ fn a_panic_that_ends_in_an_abort_is_written_before_it() {
     }
     if the_childs_log().is_some() {
         record_in(the_childs_log);
+        // Narrower than the backtrace takes to read: the window is counted from the end of the
+        // panic's writing, not its start (T-929).
+        UNWOUND_WITHIN_MS.store(20, Ordering::Relaxed);
         cannot_unwind();
         return;
     }
@@ -137,7 +165,7 @@ fn an_objective_c_exception_into_a_function_that_cannot_unwind_is_said_to_be_one
 fn a_panic_in_a_callback_is_stopped_at_its_edge_and_told_once() {
     if the_childs_log().is_some() {
         record_in(the_childs_log);
-        tell_with(|| println!("told the person"));
+        tell_by_printing();
         assert_eq!(
             contained("a test's callback", || -> u8 {
                 panic!("the first of T-908")
@@ -152,6 +180,7 @@ fn a_panic_in_a_callback_is_stopped_at_its_edge_and_told_once() {
         );
         assert_eq!(contained("a test's callback", || 7), Some(7));
         println!("the app runs on");
+        wait_for_the_telling();
         return;
     }
     let (ran, written) =
@@ -163,6 +192,11 @@ fn a_panic_in_a_callback_is_stopped_at_its_edge_and_told_once() {
         said.matches("told the person").count(),
         1,
         "told once: {said}"
+    );
+    // On a thread of its own, after the callback's edge: never in the frame that stopped it.
+    assert!(
+        said.contains("told the person on consensflow-tell"),
+        "{said}"
     );
     for panic in ["the first of T-908", "the second of T-908"] {
         assert!(written.contains(&format!("\n{panic}\n")), "{written}");
@@ -205,6 +239,7 @@ fn what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame() {
 
     const RAISE: u8 = 1;
     const PANIC: u8 = 2;
+    const RAISE_BADLY: u8 = 3;
     static DOES: AtomicU8 = AtomicU8::new(0);
     static GUARDED: Guarded = Guarded::new("the test's dispatch");
 
@@ -212,6 +247,7 @@ fn what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame() {
         match DOES.load(Ordering::Acquire) {
             RAISE => objc2::exception::throw(objc_test::exception()),
             PANIC => panic!("the panic of T-908 under a dispatch"),
+            RAISE_BADLY => objc2::exception::throw(objc_test::exception_whose_stack_raises()),
             _ => println!("dispatched"),
         }
     }
@@ -226,7 +262,7 @@ fn what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame() {
 
     if the_childs_log().is_some() {
         record_in(the_childs_log);
-        tell_with(|| println!("told the person"));
+        tell_by_printing();
         let mut application =
             ClassBuilder::new(c"CfT908Application", NSObject::class()).expect("a new class");
         // SAFETY: the function has the method's signature.
@@ -247,11 +283,12 @@ fn what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame() {
             "a second install keeps the first"
         );
         let app: Retained<AnyObject> = unsafe { msg_send![tao, new] };
-        for does in [RAISE, PANIC, 0] {
+        for does in [RAISE_BADLY, RAISE, PANIC, 0] {
             DOES.store(does, Ordering::Release);
             let _: () = unsafe { msg_send![&*app, sendEvent: std::ptr::null_mut::<AnyObject>()] };
         }
         println!("the app runs on");
+        wait_for_the_telling();
         return;
     }
     let (ran, written) = in_a_child(
@@ -278,6 +315,14 @@ fn what_unwinds_out_of_a_guarded_dispatch_stops_there_below_taos_frame() {
         written.contains("\nthe panic of T-908 under a dispatch\n")
             && written
                 .contains("consensflow: the test's dispatch panicked; the app stopped it there"),
+        "{written}"
+    );
+    // What raised as it was being said is stopped as well, still below tao's frame (T-929).
+    assert!(
+        written.contains(
+            "consensflow: the test's dispatch raised or panicked, and saying which raised or \
+             panicked in turn; the app stopped it there"
+        ),
         "{written}"
     );
     assert!(!written.contains(CANNOT_UNWIND), "{written}");
@@ -354,6 +399,38 @@ mod objc_test {
 
     fn string(text: &std::ffi::CStr) -> *mut AnyObject {
         unsafe { msg_send![class!(NSString), stringWithUTF8String: text.as_ptr()] }
+    }
+
+    /// An NSException whose `callStackSymbols` raises in turn, as one of a class of its own may.
+    pub(super) fn exception_whose_stack_raises() -> Retained<Exception> {
+        use objc2::runtime::{AnyClass, ClassBuilder, Sel};
+        use objc2::sel;
+
+        unsafe extern "C-unwind" fn raises(_: &AnyObject, _: Sel) -> *mut AnyObject {
+            objc2::exception::throw(exception())
+        }
+        let class = AnyClass::get(c"CfT929BadException").unwrap_or_else(|| {
+            let mut class =
+                ClassBuilder::new(c"CfT929BadException", class!(NSException)).expect("a new class");
+            // SAFETY: the function has the method's signature.
+            unsafe {
+                class.add_method(
+                    sel!(callStackSymbols),
+                    raises as unsafe extern "C-unwind" fn(_, _) -> _,
+                )
+            };
+            class.register()
+        });
+        let name = string(c"CfT929BadException");
+        let reason = string(c"its stack raises");
+        unsafe {
+            msg_send![
+                class,
+                exceptionWithName: name,
+                reason: reason,
+                userInfo: std::ptr::null_mut::<AnyObject>()
+            ]
+        }
     }
 
     /// An NSException, named and with its reason, as AppKit raises one.

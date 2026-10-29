@@ -473,7 +473,8 @@ pub fn run() {
         let teller = app.handle().clone();
         panics::tell_with(move || {
             let shown = teller.clone();
-            // Shown from the event loop, after the dispatch that stopped the error has ended.
+            // Told on a thread of its own (panics::stopped), so this posts the dialog to the event
+            // loop, which shows it after the dispatch that stopped the error has ended.
             let _ = teller.run_on_main_thread(move || {
                 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
                 shown
@@ -535,8 +536,10 @@ pub fn run() {
 /// `Command`. A descriptor of this app's that is not close-on-exec then (a socket or a pipe another
 /// thread made in std's two steps, a file a framework opened so) would be the new app's for as
 /// long as it runs. A quit that is no restart loses nothing by it: the process ends.
+/// A shutdown that panics is written down by the hook and the marking still comes: the event
+/// loop's handler is contained, so a restart may follow it (T-929).
 fn at_exit(shutdown: impl FnOnce()) {
-    shutdown();
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(shutdown));
     #[cfg(target_os = "macos")]
     if let Err(failed) = cf_process::close_all_on_exec() {
         eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
@@ -715,6 +718,45 @@ mod tests {
             .args([
                 "--exact",
                 "tests::the_apps_end_leaves_every_descriptor_close_on_exec_for_the_restart_after_it",
+                "--nocapture",
+            ])
+            .env(ENDED, "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run the test in a child");
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ran.stdout),
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert!(ran.status.success(), "{said}");
+        assert!(said.contains("1 passed"), "the test did not run: {said}");
+    }
+
+    /// A shutdown that panics still leaves every descriptor close-on-exec: the event loop's
+    /// handler is contained, so a panic there no longer ends the app before a restart starts the
+    /// app an update installed, and the marking must come all the same (T-929).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec() {
+        const ENDED: &str = "CONSENSFLOW_TEST_AT_EXIT_PANICS";
+        if std::env::var_os(ENDED).is_some() {
+            use std::os::fd::AsRawFd;
+
+            let stray = std::fs::File::open("/dev/null").expect("a file");
+            let fd = stray.as_raw_fd();
+            // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+            at_exit(|| panic!("the shutdown of T-929 panics"));
+            // SAFETY: `fcntl` is asked the flags of a descriptor this test holds.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            assert_ne!(flags & libc::FD_CLOEXEC, 0, "left inheritable");
+            return;
+        }
+        let ran = crate::testing::command(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "tests::a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec",
                 "--nocapture",
             ])
             .env(ENDED, "1")
