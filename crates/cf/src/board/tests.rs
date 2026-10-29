@@ -176,10 +176,11 @@ fn a_thread_prints_the_line_that_stands_where_a_waiting_message_is_and_receives_
         { "id": 16, "kind": "result", "state": "queued", "task": 3, "sender": "zeus", "body": waits },
     ]);
     for json in [false, true] {
+        // A reply for the acknowledgement too, so that one that was wrongly sent is seen.
         let ran = cf_with(
             &["task", "get", "T-3"],
             json,
-            vec![reply(200, task.clone())],
+            vec![reply(200, task.clone()), reply(200, json!({}))],
             None,
         );
         assert_eq!(ran.code.unwrap(), 0);
