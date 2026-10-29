@@ -106,6 +106,12 @@ impl Dispatcher {
 
     /// The head of `record`'s queue, the prelude a launch put ahead of it first, and the
     /// greeting of a session no hook greeted before the rest (`greet_switched`).
+    ///
+    /// The greeting is read by its id from its slot (`DeliveryPart::greeting`), never
+    /// through the ledger's choice of a queue's next (`next_delivery_among`): a hold
+    /// written only into that choice does not reach it. It is exempt from the meeting by
+    /// this slot, not by the SQL, and so is from any such hold to come (Calliope's
+    /// landing note of T-945).
     fn head_of_line(&self, record: &Record) -> Result<Option<MessageView>, EngineError> {
         if let Some(greeting) = self.greeting(record)? {
             let busy = self

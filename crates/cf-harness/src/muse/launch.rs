@@ -73,7 +73,9 @@ pub(super) fn pinned(executable: &str, env: &Env) -> Result<String, String> {
 
 /// Where `launcher` really is: the file a link names (Homebrew's and the human's own
 /// links), and the path as found where it is no link, as Windows' canonical form is
-/// one of its own (`\\?\C:\…`) that no window was opened on before.
+/// one of its own (`\\?\C:\…`) that no window was opened on before. A launcher that is
+/// a link on Windows still comes back in that form, and is the program the window is
+/// spawned as: no Windows install of Muse links it today (Calliope's P3-4 of T-945).
 fn really(launcher: &Path) -> PathBuf {
     let linked = fs::symlink_metadata(launcher).is_ok_and(|meta| meta.file_type().is_symlink());
     if linked {

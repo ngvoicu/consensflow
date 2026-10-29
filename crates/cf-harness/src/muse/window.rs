@@ -35,6 +35,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
+use cf_proto::panes::HumanInput;
 use serde_json::Value;
 
 use super::paths::{begun_ms, cleared_into, opened_by, Heads};
@@ -91,6 +92,9 @@ pub(super) struct MuseWindow {
     /// The human's keys left something unsent by the pane host's count, and the latest
     /// readiness read the input box empty on the screen, at this count of their keys.
     read_empty: Cell<Option<u64>>,
+    /// What the pane host said of the human's input at the latest readiness, where it read
+    /// a snapshot of the pane ([`Window::human_input`]).
+    input: RefCell<Option<HumanInput>>,
 }
 
 impl MuseWindow {
@@ -112,6 +116,7 @@ impl MuseWindow {
             heads: Heads::default(),
             restored: Cell::new(false),
             read_empty: Cell::default(),
+            input: RefCell::new(None),
         }
     }
 
@@ -182,7 +187,13 @@ impl Window for MuseWindow {
     }
 
     /// Its hook greeted the session where it wrote it down; one a `/clear` started it
-    /// never does.
+    /// never does. The engine reads this again right before the greeting goes in, and
+    /// withdraws it where a hook greeted the session since: that read is best-effort and
+    /// no guard. A Muse whose hook greeted a cleared session at its first prompt would
+    /// speak after it, on the paste's own Enter, and the session would have its role
+    /// twice in one turn (the same words, context and not a task). Such a Muse is to be
+    /// answered here, by this saying yes for a cleared session on its version, so that
+    /// no greeting is written (Calliope's P3-3 of T-945).
     fn greeted(&self, session: &str) -> bool {
         greeted(&self.said, session)
     }
@@ -232,6 +243,7 @@ impl Window for MuseWindow {
         pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
+            self.input.replace(None);
             let Some(known) = self.session.borrow().clone() else {
                 return Ok(Readiness::Held(Held::Because(HOLD.to_owned())));
             };
@@ -241,6 +253,7 @@ impl Window for MuseWindow {
             let snapshot = pane::snapshot_drawn(host, pane)
                 .await
                 .map_err(|failed| failed.message)?;
+            self.input.replace(HumanInput::of(&snapshot));
             if snapshot.get("ok") != Some(&Value::Bool(true))
                 || js::truthy(snapshot.get("pasteInFlight"))
             {
@@ -283,6 +296,32 @@ impl Window for MuseWindow {
             }
             Ok(Readiness::Ready)
         })
+    }
+
+    fn human_input(&self) -> Option<HumanInput> {
+        self.input.borrow().clone()
+    }
+
+    /// Muse says nothing of a window at rest apart from its record (MUS-07's `Pending`
+    /// reads are not taken as its word until a live pacing run proves them): its windows
+    /// are read at rest by the pacing's fallback, which the board says is in use.
+    fn idle_word(&self) -> bool {
+        false
+    }
+
+    /// The box as the next paste meets it, through Muse's own reader ([`screen::read`]): a
+    /// turn taken back left its message there, which the hand-over empties first
+    /// ([`MuseWindow::deliver`]), so it holds nothing the paste would go in behind; a box
+    /// the screen does not show whole holds the window before this is asked ([`Held::ForHuman`]).
+    fn input_box<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        if self.restored.get() {
+            return Box::pin(async { Some(InputBox::Empty) });
+        }
+        Box::pin(input_box::on_screen(host, pane, Harness::Muse))
     }
 
     fn deliver<'a>(

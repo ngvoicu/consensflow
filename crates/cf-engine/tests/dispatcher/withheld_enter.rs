@@ -598,3 +598,107 @@ fn a_window_held_for_the_human_waits_in_its_words_on_the_board_and_goes_on_once_
     assert_eq!(context.message(note.id).state, "delivered");
     assert_ne!(context.dispatcher.activity(chief).state.as_str(), "waiting");
 }
+
+/// Calliope's P2-1 of T-945: a window held for what only the human can do in it goes
+/// through the one clock of a held head message (chief-meeting's `hold`, T-839): at ten
+/// minutes the human is told, and the requester of its task, in the window's own words.
+/// On Muse's branch only a hold for words typed and not sent had that clock, and a
+/// worker's resume could sit in the queue with its lane the only sign.
+#[test]
+fn a_window_held_for_the_human_is_told_at_ten_minutes_to_the_human_and_the_requester_in_its_words()
+{
+    use cf_harness::contract::{Held, Readiness};
+    const WORDS: &str = "the box is out of view: empty it in the window";
+    let context = Context::new();
+    let tiers = crate::fixtures::Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.ready.replace(Some(Rc::new(|| {
+        Ok::<_, String>(Readiness::Held(Held::ForHuman(WORDS.to_owned())))
+    })));
+    let worker = tiers.assignee(1);
+    let told = context.tell(tiers.project.id, &worker, 1, "One more case.");
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let said = |handle: &str| -> Vec<String> {
+        tiers
+            .notes(handle)
+            .into_iter()
+            .filter(|note| note.contains("has waited") && note.contains(WORDS))
+            .collect()
+    };
+    context.advance(9 * 60_000);
+    context.pass().unwrap();
+    assert_eq!(
+        said("human"),
+        Vec::<String>::new(),
+        "not before ten minutes"
+    );
+    context.advance(2 * 60_000);
+    context.pass().unwrap();
+    let human = said("human");
+    assert_eq!(human.len(), 1, "{:?}", tiers.notes("human"));
+    assert!(
+        human[0].starts_with(&format!("m-{},", told.id)),
+        "{}",
+        human[0]
+    );
+    let chief = said("chief");
+    assert_eq!(
+        chief.len(),
+        1,
+        "the requester of T-1: {:?}",
+        tiers.notes("chief")
+    );
+    assert_eq!(context.message(told.id).attempts, 0, "no attempt is spent");
+    context.advance(30 * 60_000);
+    context.pass().unwrap();
+    assert_eq!(said("human").len(), 1, "told once");
+}
+
+/// Calliope's P3-1 of T-945: the words a window was held in for the human are its head
+/// message's. Once that message leaves the head of the queue (its task cancelled), the
+/// lane says them no more, though nothing else is pasted to ask the window again.
+#[test]
+fn a_window_held_for_the_human_whose_message_leaves_the_head_says_its_words_no_more() {
+    use cf_harness::contract::{Held, Readiness};
+    const WORDS: &str = "the box is out of view: empty it in the window";
+    let context = Context::new();
+    let tiers = crate::fixtures::Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.ready.replace(Some(Rc::new(|| {
+        Ok::<_, String>(Readiness::Held(Held::ForHuman(WORDS.to_owned())))
+    })));
+    let project = tiers.project.id;
+    let worker = tiers.assignee(1);
+    let asked = context.ask(project, &worker, "chief", 1, "Which format?");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = tiers.id("chief");
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.message),
+        Some(asked.id)
+    );
+    let activity = context.dispatcher.activity(chief);
+    assert_eq!(
+        (activity.state.as_str(), activity.reason.as_deref()),
+        ("waiting", Some(WORDS))
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(asked.id).state, "cancelled");
+    assert_eq!(context.dispatcher.held_back(chief), None);
+    let activity = context.dispatcher.activity(chief);
+    assert_ne!(activity.reason.as_deref(), Some(WORDS), "{activity:?}");
+    assert_ne!(activity.state.as_str(), "waiting", "{activity:?}");
+}

@@ -3061,3 +3061,86 @@ runs = ["muse-lib"]
 file = "crates/cf-harness/src/muse/paths.rs"
 find = '''    Ok(real_path(&data_home(env)?).join("muse"))'''
 replace = '''    Ok(data_home(env)?.join("muse"))'''
+
+# Muse meets chief-meeting Phase 1 (integration D1, T-946; Calliope's T-945): a hold for the human
+# goes through the one clock of a held head message and its ten-minute note (P2-1), and leaves the
+# lane with its message (P3-1).
+[[plant]]
+name = "muse: a window held for the human holds its message outside the one clock, and nobody is told"
+meant = "a_window_held_for_the_human_is_told_at_ten_minutes_to_the_human_and_the_requester_in_its_words"
+runs = ["muse-withheld"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if let Some(held) = held {
+            // Said once a reason, so a wait is in the trace, not a mystery.'''
+replace = '''        if matches!(held, Some(Held::ForHuman(_))) {
+            return Ok(());
+        }
+        if let Some(held) = held {
+            // Said once a reason, so a wait is in the trace, not a mystery.'''
+
+[[plant]]
+name = "muse: a window's words for the human stay on its lane once its message left the head"
+meant = "a_window_held_for_the_human_whose_message_leaves_the_head_says_its_words_no_more"
+runs = ["muse-withheld"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                    part.held = None;
+                    part.for_human = None;
+'''
+replace = '''                    part.held = None;
+'''
+
+# Muse meets chief-meeting's gate (integration D1, T-946): the fallback reads its windows at rest,
+# its box is read by its own reader for the gate's fresh look, and a hold's trace says the human's
+# input as the readiness read it.
+[[plant]]
+name = "muse: Muse says it has a word of its own that a window is at rest"
+meant = "muse_is_read_at_rest_by_the_fallback_its_box_by_its_own_reader_and_its_input_by_its_readiness"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''    fn idle_word(&self) -> bool {
+        false
+    }'''
+replace = '''    fn idle_word(&self) -> bool {
+        true
+    }'''
+
+[[plant]]
+name = "muse: the gate's fresh look reads no box in a Muse window"
+meant = "muse_is_read_at_rest_by_the_fallback_its_box_by_its_own_reader_and_its_input_by_its_readiness"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''        Box::pin(input_box::on_screen(host, pane, Harness::Muse))'''
+replace = '''        Box::pin(input_box::on_screen(host, pane, Harness::Codex))'''
+
+[[plant]]
+name = "muse: a box a turn taken back left its message in holds the gate's paste back"
+meant = "muse_is_read_at_rest_by_the_fallback_its_box_by_its_own_reader_and_its_input_by_its_readiness"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''        if self.restored.get() {
+            return Box::pin(async { Some(InputBox::Empty) });
+        }'''
+replace = '''        if self.restored.get() && false {
+            return Box::pin(async { Some(InputBox::Empty) });
+        }'''
+
+[[plant]]
+name = "muse: the readiness keeps nothing of the human's input for a hold's trace"
+meant = "muse_is_read_at_rest_by_the_fallback_its_box_by_its_own_reader_and_its_input_by_its_readiness"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''            self.input.replace(HumanInput::of(&snapshot));'''
+replace = '''            let _ = HumanInput::of(&snapshot);'''
+
