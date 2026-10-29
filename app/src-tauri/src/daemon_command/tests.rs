@@ -817,6 +817,24 @@ fn of_a_printed_environment_consensflows_own_the_loaders_and_a_claude_sessions_a
     assert_eq!(names, ["PATH", "CLAUDE_CONFIG_DIR"]);
 }
 
+/// Of what a shell asked inside any harness's session printed, that session's variables are
+/// not taken (T-971), every harness's: what configures a harness is.
+#[test]
+fn of_a_printed_environment_no_harness_sessions_variable_is_taken() {
+    let mut printed = b"PATH=/rc/bin\0CODEX_HOME=/rc/codex\0PI_CODING_AGENT_DIR=/rc/pi\0".to_vec();
+    for harness in cf_proto::agents::Harness::ALL {
+        for name in harness.session_variables() {
+            printed.extend_from_slice(format!("{name}=the-parent's\0").as_bytes());
+        }
+    }
+    let names: Vec<String> = taken(&printed)
+        .expect("taken")
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["PATH", "CODEX_HOME", "PI_CODING_AGENT_DIR"]);
+}
+
 /// The real Windows PowerShell answers what this process has, as a terminal's gives it:
 /// its Path and SystemRoot come back as they are, within the time.
 #[cfg(windows)]

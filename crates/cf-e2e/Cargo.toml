@@ -114,6 +114,10 @@ url.workspace = true
 # Windows), plainly and as a member, with no daemon (`tests/live_parity/claude.rs`).
 cf-panes = { workspace = true, features = ["test-support"] }
 portable-pty.workspace = true
+# The variables each harness marks its own session with, as the product lists them, which
+# no window of a rig started inside such a session may be given (T-971): a case enumerates
+# the product's own list, so a harness added to it is held at once.
+cf-proto.workspace = true
 
 # Signals by process id, whether a process is there, the group it is in, and the
 # terminal's raw mode, which std does not give (this crate allows unsafe code only in

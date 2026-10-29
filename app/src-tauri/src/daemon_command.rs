@@ -239,7 +239,7 @@ fn kept_from_the_app(env: &Env, name: &OsStr) -> bool {
 /// no pane's (a pane says its own, `cf-panes`' `advertise_terminal`); ConsensFlow's own
 /// (`CONSENSFLOW_*`, `CF_*`), which the app and the daemon set for themselves, so that an
 /// rc's `CONSENSFLOW_HOME` never replaces the Candidate's own home; the identity of a
-/// Claude Code session the app removes from itself ([`crate::CLAUDE_SESSION_IDENTITY`]);
+/// harness's session the app removes from itself ([`cf_proto::agents::is_session_variable`]);
 /// and the dynamic loader's (`DYLD_*`, `LD_*`), on purpose: a library an rc injects into
 /// its terminal's programs is not given to every agent ConsensFlow starts.
 fn not_taken(name: &OsStr) -> bool {
@@ -248,7 +248,7 @@ fn not_taken(name: &OsStr) -> bool {
         || ["TERM", "CONSENSFLOW_", "CF_", "DYLD_", "LD_"]
             .iter()
             .any(|prefix| name.starts_with(prefix))
-        || crate::CLAUDE_SESSION_IDENTITY.contains(&&*name)
+        || cf_proto::agents::is_session_variable(&name)
 }
 
 /// The environment of the human's interactive login shell, as a terminal's shell

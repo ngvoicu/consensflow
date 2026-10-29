@@ -21,16 +21,22 @@
 //! wait is said in the daemon's log, once. A line of JSON this build cannot
 //! hold is no torn line: it fails the look.
 //!
-//! The file read so far is known by four things: its identity, the bytes
+//! The file read so far is known by five things: its identity, the bytes
 //! just before where the last look stopped (the edge), the unterminated
-//! record it remembered (the tail), and its size and time of writing. A
-//! file of another identity, or one that no longer holds the edge or the
-//! tail, is not the one read so far: it shrank, or was written over. Its
-//! size and time alone say it is unchanged only where that time was
-//! [`settled`] when the look that found it began; one within a file time's
-//! step of it is checked for its edge and tail.
+//! record it remembered (the tail), a hash of every byte read, and its size
+//! and time of writing. A file of another identity, or one that no longer
+//! holds the edge or the tail, is not the one read so far: it shrank, or was
+//! written over. Its size and time alone say it is unchanged only where that
+//! time was [`settled`] when the look that checked it began. One whose time is
+//! not is checked for its edge and tail and, at its size, for every byte read
+//! (T-971): a record rewritten at its length more than an edge before the end
+//! is not the one read, and a last line finished at its size (`{"b":2  ` that
+//! became `{"b":2}` and its newline) is read on. That costs one read of the
+//! whole file at each look of the step after its last write, and none while it
+//! grows, and none once its time is settled.
 
 use std::fs::File;
+use std::hash::{DefaultHasher, Hasher};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
@@ -61,10 +67,18 @@ pub(crate) struct Seen {
     mtime_ms: f64,
     /// When the look began, in the clock's milliseconds.
     looked_ms: i64,
+    /// When the look began that first found the file last written at `mtime_ms`.
+    since_ms: i64,
     /// The byte after the last whole line.
     offset: u64,
     /// The bytes before `offset`, up to `EDGE_BYTES` of them.
     edge: Vec<u8>,
+    /// A hash of every byte before `offset`, as the looks read them.
+    read: ReadHash,
+    /// A hash of the bytes from `offset` to `size`: the tail, and what follows the
+    /// last whole line that is no record yet (a line still being written, torn lines
+    /// waiting).
+    rest: u64,
     /// An unterminated last record already visited: its bytes, after `offset`.
     tail: Vec<u8>,
     /// How many records were visited.
@@ -77,6 +91,17 @@ pub(crate) struct Seen {
     torn_since: Option<i64>,
     /// The unfinished last line, at the file's `size`, that is no record.
     unfinished: Option<Unfinished>,
+}
+
+/// A hash of the bytes a look read, which the next look goes on from. Two are equal
+/// where they hash the same bytes.
+#[derive(Debug, Clone, Default)]
+struct ReadHash(DefaultHasher);
+
+impl PartialEq for ReadHash {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.finish() == other.0.finish()
+    }
 }
 
 /// An unfinished last line that is no record, as long as when it was first found.
@@ -207,7 +232,7 @@ pub(crate) fn read_on_with(
             && written == seen.mtime_ms
             && done_waiting.is_none()
             && !unfinished_due;
-        if same && settled(written, seen.looked_ms) {
+        if same && settled(written, seen.since_ms, seen.looked_ms, looked_ms) {
             return Ok(Looked::Unchanged);
         }
         let edge_start = seen.offset - seen.edge.len() as u64;
@@ -216,12 +241,22 @@ pub(crate) fn read_on_with(
         {
             return Ok(Looked::NotTheFile);
         }
-        // As long and as old as it was, and holding what was read: nothing follows it.
+        // As long and as old as it was, its time too near the look to tell: its bytes
+        // do. Not holding what was read, it was written over; holding it, and the rest
+        // as it was, nothing follows it; the rest otherwise (a line finished at its
+        // size) is read on.
         if same {
-            return Ok(Looked::Held(Seen {
-                looked_ms,
-                ..seen.clone()
-            }));
+            if hash_of(&mut handle, ReadHash::default(), 0, seen.offset)? != seen.read {
+                return Ok(Looked::NotTheFile);
+            }
+            if hash_of(&mut handle, ReadHash::default(), seen.offset, size)?.0.finish()
+                == seen.rest
+            {
+                return Ok(Looked::Held(Seen {
+                    looked_ms,
+                    ..seen.clone()
+                }));
+            }
         }
     }
     let mut offset = seen.map_or(0, |seen| seen.offset);
@@ -342,13 +377,28 @@ pub(crate) fn read_on_with(
         Some(seen) if seen.offset == offset => seen.edge.clone(),
         _ => bytes_at(&mut handle, offset.saturating_sub(EDGE_BYTES), offset)?,
     };
+    // What was read is hashed as it is now: the bytes up to the line the look stopped
+    // at, read again from where the last look's hash ends, and the rest.
+    let read = hash_of(
+        &mut handle,
+        seen.map(|seen| seen.read.clone()).unwrap_or_default(),
+        seen.map_or(0, |seen| seen.offset),
+        offset,
+    )?;
+    let rest = hash_of(&mut handle, ReadHash::default(), offset, at)?.0.finish();
     Ok(Looked::Read(Seen {
         identity: file_identity,
         size: at,
         mtime_ms: written,
         looked_ms,
+        since_ms: match seen {
+            Some(seen) if seen.mtime_ms == written => seen.since_ms,
+            _ => looked_ms,
+        },
         offset,
         edge,
+        read,
+        rest,
         tail,
         records,
         passed_over: passed.places,
@@ -449,6 +499,24 @@ fn bytes_at(handle: &mut File, from: u64, to: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     handle.take(to - from).read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+/// `hash` gone on with the bytes of `handle` from `from` to `to`, read a [`CHUNK`] at a
+/// time; fewer where the file ends first.
+fn hash_of(handle: &mut File, mut hash: ReadHash, from: u64, to: u64) -> io::Result<ReadHash> {
+    if from >= to {
+        return Ok(hash);
+    }
+    handle.seek(SeekFrom::Start(from))?;
+    let mut rest = handle.take(to - from);
+    let mut chunk = vec![0; CHUNK];
+    loop {
+        let read = rest.read(&mut chunk)?;
+        if read == 0 {
+            return Ok(hash);
+        }
+        hash.0.write(&chunk[..read]);
+    }
 }
 
 /// Whether the file still holds `bytes` at `at`.

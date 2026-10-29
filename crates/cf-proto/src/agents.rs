@@ -63,6 +63,73 @@ impl Harness {
             other => other.as_str(),
         }
     }
+
+    /// The variables the harness's CLI sets to mark a session of its own, which every
+    /// program it starts inherits: who the session is, how to reach it, what it runs on.
+    /// A ConsensFlow started from inside such a session (`tauri dev`, a test run, the app
+    /// opened from an agent's shell) would hand them to every window: a Claude window
+    /// given `CLAUDE_CODE_CHILD_SESSION` saves no transcript, one given the parent's
+    /// `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` is taken for it, and the messaging
+    /// socket and token reach into the parent. Configuration is no part of it
+    /// (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`),
+    /// nor is OpenCode's `AGENT=1`, true of every window, and too common a name.
+    ///
+    /// Read from the binaries (2026-10-29, T-971): Claude Code 2.1.312's own list of what
+    /// it gives a child session; Codex 0.165's sandbox (`codex sandbox -- env`) and the
+    /// names its shell's environment is made of; Pi 1.4's `process.env` and its bash
+    /// tool's; OpenCode 1.19's `process.env` and its terminal's; Devin 3000.11's terminal,
+    /// whose shell script names and unsets both.
+    pub fn session_variables(self) -> &'static [&'static str] {
+        match self {
+            Harness::Claude => &[
+                "CLAUDECODE",
+                "CLAUDE_CODE_ENTRYPOINT",
+                "CLAUDE_CODE_SESSION_ID",
+                "CLAUDE_CODE_CHILD_SESSION",
+                "CLAUDE_CODE_SESSION_ATTENDED",
+                "CLAUDE_CODE_MESSAGING_SOCKET",
+                "CLAUDE_CODE_MESSAGING_TOKEN",
+                "CLAUDE_CODE_BRIDGE_SESSION_ID",
+                "CLAUDE_CODE_EXECPATH",
+                "CLAUDE_PID",
+                "CLAUDE_EFFORT",
+                "AI_AGENT",
+                "TRACEPARENT",
+            ],
+            Harness::Codex => &[
+                "CODEX_SANDBOX",
+                "CODEX_SANDBOX_NETWORK_DISABLED",
+                "CODEX_THREAD_ID",
+                "CODEX_SESSION_ID",
+                "CODEX_TOOL_CALL_ID",
+            ],
+            Harness::Pi => &[
+                "PI_CODING_AGENT",
+                "PI_SESSION_ID",
+                "PI_SESSION_FILE",
+                "PI_PROVIDER",
+                "PI_MODEL",
+                "PI_REASONING_LEVEL",
+                "AI_AGENT",
+            ],
+            Harness::Opencode => &["OPENCODE", "OPENCODE_PID", "OPENCODE_TERMINAL"],
+            Harness::Devin => &["WINDSURF_CASCADE_TERMINAL", "DEVIN_DISABLE_HISTEXPAND"],
+        }
+    }
+}
+
+/// Whether `name` marks a session of some harness's own ([`Harness::session_variables`]),
+/// as the system compares names: on Windows in any case.
+pub fn is_session_variable(name: &str) -> bool {
+    Harness::ALL.into_iter().any(|harness| {
+        harness.session_variables().iter().any(|marked| {
+            if cfg!(windows) {
+                marked.eq_ignore_ascii_case(name)
+            } else {
+                *marked == name
+            }
+        })
+    })
 }
 
 /// The work an agent suits, from the most serious to the lightest: what a
@@ -247,6 +314,52 @@ mod tests {
                 format!("\"{name}\"")
             );
         }
+    }
+
+    /// Every harness the build runs names what marks a session of its own (T-971): a
+    /// harness added with none fails here until its CLI is read for them.
+    #[test]
+    fn every_harness_names_the_variables_that_mark_its_own_session() {
+        for harness in Harness::ALL {
+            let names = harness.session_variables();
+            assert!(!names.is_empty(), "{} names none", harness.as_str());
+            for name in names {
+                assert!(
+                    !name.is_empty()
+                        && name
+                            .bytes()
+                            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'),
+                    "{}: {name:?} is no variable's name",
+                    harness.as_str()
+                );
+                assert!(is_session_variable(name), "{name}");
+            }
+        }
+    }
+
+    /// What a harness is configured by is the human's, and reaches every window: only
+    /// what marks a session is a session's.
+    #[test]
+    fn a_harness_configuration_marks_no_session() {
+        for name in [
+            "CLAUDE_CONFIG_DIR",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+            "ANTHROPIC_API_KEY",
+            "CODEX_HOME",
+            "OPENAI_API_KEY",
+            "PI_CODING_AGENT_DIR",
+            "OPENCODE_CONFIG",
+            "AGENT",
+            "CONSENSFLOW_HOME",
+            "PATH",
+            "HOME",
+            "TERM",
+            "",
+        ] {
+            assert!(!is_session_variable(name), "{name}");
+        }
+        assert_eq!(is_session_variable("claudecode"), cfg!(windows));
     }
 
     #[test]

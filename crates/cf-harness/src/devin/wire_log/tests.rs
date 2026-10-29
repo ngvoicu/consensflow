@@ -206,6 +206,35 @@ fn a_log_that_holds_other_bytes_than_were_read_was_replaced_whether_it_grew_or_n
     );
 }
 
+/// T-971 (`record-readers-trust-what-a-file-time-cannot-prove`, limit 4): a log dated
+/// ahead of the clock was read whole again at every look until the clock passed its
+/// time. Its bytes are checked for a step after the look that first found it so, which
+/// sees a rewrite then; after that its time is taken, as a log long quiet's is, while it
+/// stays more than a step ahead of the look.
+#[test]
+fn a_log_dated_ahead_of_the_clock_is_read_again_only_for_a_step_after_it_is_found() {
+    let log = Log::new();
+    let ahead = EPOCH_MS + 86_400_000;
+    log.write_at(&shows("native-a"), ahead);
+    assert_eq!(log.wire.read(EPOCH_MS).unwrap().shown.as_deref(), Some("native-a"));
+    // Within the step: rewritten at its size and its time, it is told by its bytes.
+    log.write_at(&shows("native-b"), ahead);
+    assert_eq!(
+        log.wire.read(EPOCH_MS + 1_000).unwrap().shown.as_deref(),
+        Some("native-b")
+    );
+    assert_eq!(
+        log.wire.read(EPOCH_MS + 2_500).unwrap().shown.as_deref(),
+        Some("native-b")
+    );
+    // A step on, its time is taken: it is not read again.
+    log.write_at(&shows("native-c"), ahead);
+    assert_eq!(
+        log.wire.read(EPOCH_MS + 3_000).unwrap().shown.as_deref(),
+        Some("native-b")
+    );
+}
+
 #[test]
 fn a_log_that_cannot_be_opened_says_what_it_said_before() {
     let log = Log::new();

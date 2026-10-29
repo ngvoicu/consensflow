@@ -483,6 +483,7 @@ dependencies = [
  "cf-e2e",
  "cf-panes",
  "cf-process",
+ "cf-proto",
  "jiff",
  "nix",
  "portable-pty",

@@ -256,31 +256,18 @@ fn isolated_home(
         .ok_or_else(|| "this build needs HOME to find ~/.consensflow-candidate".to_string())
 }
 
-/// The variables a Claude Code session exports to its own children. A
-/// ConsensFlow started from inside one (`tauri dev`, a test or bench run) would
-/// hand them to every pane: `CLAUDE_CODE_CHILD_SESSION` switches off transcript
-/// saving, `CLAUDE_CODE_SESSION_ID` impersonates the parent, and the messaging
-/// socket and token reach into the parent session. Only this identity is
-/// removed; configuration such as `CLAUDE_CONFIG_DIR` or
-/// `CLAUDE_CODE_USE_BEDROCK` stays.
-pub(crate) const CLAUDE_SESSION_IDENTITY: [&str; 11] = [
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_CODE_SESSION_ID",
-    "CLAUDE_CODE_CHILD_SESSION",
-    "CLAUDE_CODE_SESSION_ATTENDED",
-    "CLAUDE_CODE_MESSAGING_SOCKET",
-    "CLAUDE_CODE_MESSAGING_TOKEN",
-    "CLAUDE_CODE_BRIDGE_SESSION_ID",
-    "CLAUDE_CODE_EXECPATH",
-    "CLAUDE_PID",
-    "CLAUDE_EFFORT",
-];
-
+/// Which of the variables `names` the app was started with it does not keep: those that
+/// mark a harness's own session ([`cf_proto::agents::is_session_variable`]). A ConsensFlow
+/// started from inside one (`tauri dev`, a test or bench run, the app opened from an
+/// agent's shell) would hand them to every pane: Claude's `CLAUDE_CODE_CHILD_SESSION`
+/// switches off transcript saving, its `CLAUDE_CODE_SESSION_ID` or Codex's
+/// `CODEX_THREAD_ID` impersonates the parent, and the messaging socket and token reach
+/// into it. Only a session's identity is removed; configuration such as
+/// `CLAUDE_CONFIG_DIR` or `CLAUDE_CODE_USE_BEDROCK` stays.
 fn inherited_session_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
     names
         .into_iter()
-        .filter(|name| CLAUDE_SESSION_IDENTITY.contains(name))
+        .filter(|name| cf_proto::agents::is_session_variable(name))
         .collect()
 }
 
@@ -605,6 +592,25 @@ mod tests {
                 "CLAUDE_EFFORT",
             ],
             "configuration (CLAUDE_CONFIG_DIR, CLAUDE_CODE_USE_BEDROCK) stays"
+        );
+    }
+
+    /// Every harness's session is taken out of what the app was started with (T-971), as
+    /// Claude Code's was: enumerated from the harnesses the build runs.
+    #[test]
+    fn no_harness_sessions_variable_is_ever_inherited() {
+        for harness in cf_proto::agents::Harness::ALL {
+            let names = harness.session_variables();
+            assert_eq!(
+                inherited_session_variables(names.iter().copied()),
+                names,
+                "{}",
+                harness.as_str()
+            );
+        }
+        assert_eq!(
+            inherited_session_variables(["CODEX_HOME", "PI_CODING_AGENT_DIR", "AGENT", "PATH"]),
+            Vec::<&str>::new()
         );
     }
 

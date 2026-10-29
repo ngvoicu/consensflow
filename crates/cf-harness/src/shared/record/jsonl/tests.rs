@@ -436,6 +436,141 @@ fn a_file_last_written_well_before_the_look_that_read_it_is_not_read_again_while
     ));
 }
 
+// The four limits of `record-readers-trust-what-a-file-time-cannot-prove` (T-971), each
+// a file rewritten so that its size and its time say nothing: only its bytes tell.
+
+/// Limit 1: a record rewritten at its length more than an edge before the end, the file's
+/// size and time kept and the look within a step of its time, was taken for the one read:
+/// only the last kilobyte and the tail were checked.
+#[test]
+fn a_record_rewritten_at_its_length_before_the_edge_within_a_step_is_not_the_one_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    // Twice the edge: its first byte is a kilobyte and more before the end.
+    let long = "a".repeat(2_048);
+    assert_eq!(EDGE_BYTES, 1_024);
+    fs::write(&file, format!("{{\"x\":\"{long}\"}}\n{{\"y\":1}}\n")).unwrap();
+    stamp(&file, written as u64);
+    let seen = read(collect_at(&file, None, written + 500, None).0);
+    let rewritten = format!("b{}", &long[1..]);
+    fs::write(&file, format!("{{\"x\":\"{rewritten}\"}}\n{{\"y\":1}}\n")).unwrap();
+    stamp(&file, written as u64);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), written + 1_000, None).0,
+        Ok(Looked::NotTheFile)
+    ));
+}
+
+/// What limit 1's fix must not lose: a file read in two looks, and as they left it since,
+/// is held by its bytes within a step of its time, not taken for another.
+#[test]
+fn a_file_read_in_two_looks_and_unchanged_since_is_held_within_a_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n").unwrap();
+    stamp(&file, written as u64);
+    let seen = read(collect_at(&file, None, written + 100, None).0);
+    append(&file, "{\"a\":2}\n{\"a\":", (written + 200) as u64);
+    let seen = read(collect_at(&file, Some(&seen), written + 300, None).0);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), written + 400, None).0,
+        Ok(Looked::Held(_))
+    ));
+}
+
+/// Limit 2: a last line finished at its size (its spaces a brace and a newline) within a
+/// step of the look was never read: the unfinished rest was kept nowhere.
+#[test]
+fn a_last_line_finished_at_its_size_within_a_step_is_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n{\"b\":2  ").unwrap();
+    stamp(&file, written as u64);
+    let (looked, visited) = collect_at(&file, None, written + 500, None);
+    assert_eq!(visited.len(), 1);
+    let seen = read(looked);
+    fs::write(&file, "{\"a\":1}\n{\"b\":2}\n").unwrap();
+    stamp(&file, written as u64);
+    let (looked, visited) = collect_at(&file, Some(&seen), written + 1_000, None);
+    assert_eq!(visited, [(serde_json::json!({ "b": 2 }), 1)]);
+    assert_eq!(read(looked).records, 2);
+}
+
+/// Limit 3, a known failure: a writer whose clock is behind this one's (a network file
+/// system) dates its fresh write in the past, so it reads as settled at once, and a
+/// rewrite at its size in the same tick is taken for the file read. It cannot be told
+/// from a file long quiet, which `a_file_last_written_well_before_the_look_…` takes so as
+/// git takes a clean entry; only checking every file's bytes for a step after it is first
+/// found tells them apart, at the cost of reading every file found again for that step.
+#[test]
+#[ignore = "known failure, record-readers-trust-what-a-file-time-cannot-prove limit 3: a writer's clock behind this one's"]
+fn a_fresh_write_by_a_clock_behind_this_one_rewritten_in_its_tick_is_not_the_one_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let looked = EPOCH_MS;
+    // Written now, by a clock ten seconds behind.
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, (looked - 10_000) as u64);
+    let seen = read(collect_at(&file, None, looked, None).0);
+    fs::write(&file, "{\"b\":1}\n{\"b\":2}\n").unwrap();
+    stamp(&file, (looked - 10_000) as u64);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), looked + 100, None).0,
+        Ok(Looked::NotTheFile)
+    ));
+}
+
+/// Limit 4: a file dated ahead of the clock was read again at every look until the clock
+/// passed its time. Its bytes are checked for a step after the look that first found it
+/// so; after that it is not read again while its time stays a step ahead of the look.
+#[test]
+fn a_file_dated_ahead_of_the_clock_is_read_again_only_for_a_step_after_it_is_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let found = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, (found + 86_400_000) as u64);
+    let seen = read(collect_at(&file, None, found, None).0);
+    let held = |looked: Result<Looked, Stop>| match looked {
+        Ok(Looked::Held(held)) => held,
+        other => panic!("not held: {other:?}"),
+    };
+    let seen = held(collect_at(&file, Some(&seen), found + 1_000, None).0);
+    let seen = held(collect_at(&file, Some(&seen), found + 2_500, None).0);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), found + 3_000, None).0,
+        Ok(Looked::Unchanged)
+    ));
+    assert!(matches!(
+        collect_at(&file, Some(&seen), found + 3_600_000, None).0,
+        Ok(Looked::Unchanged)
+    ));
+}
+
+/// What limit 4's fix must not lose: a file dated ahead of the clock (a writer's clock
+/// ahead of this one's), rewritten at its size in its tick within a step of the look that
+/// first found it so, is told by its bytes.
+#[test]
+fn a_file_dated_ahead_of_the_clock_rewritten_within_a_step_of_being_found_is_not_the_one_read()
+{
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let found = EPOCH_MS;
+    let ahead = (found + 10_000) as u64;
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, ahead);
+    let seen = read(collect_at(&file, None, found, None).0);
+    fs::write(&file, "{\"b\":1}\n{\"b\":2}\n").unwrap();
+    stamp(&file, ahead);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), found + 100, None).0,
+        Ok(Looked::NotTheFile)
+    ));
+}
+
 #[test]
 fn a_file_that_is_not_there_is_an_io_failure() {
     let dir = tempfile::tempdir().unwrap();
