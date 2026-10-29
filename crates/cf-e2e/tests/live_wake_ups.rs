@@ -29,7 +29,7 @@
 //! ```text
 //! cargo xtask live wake-ups                          Claude, the default
 //! cargo xtask live wake-ups codex                    one harness
-//! cargo xtask live wake-ups claude codex opencode pi devin   each, one after the other
+//! cargo xtask live wake-ups claude codex pi devin   each, one after the other
 //! cargo xtask live wake-ups fake                     the rig's stand-in as the chief: no model, no quota
 //! cargo xtask live wake-ups pi --keep                leaves the run's home and project where they are
 //! cargo xtask live wake-ups -- --list                lists this test
@@ -126,7 +126,7 @@ mod tests {
         );
         assert_eq!(
             chiefs(&["nobody".to_owned()]).unwrap_err().to_string(),
-            "no chief is called nobody: fake, claude, opencode, pi, devin, codex"
+            "no chief is called nobody: fake, claude, pi, devin, codex"
         );
     }
 

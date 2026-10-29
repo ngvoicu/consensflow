@@ -75,23 +75,13 @@ impl Planned {
     pub fn name(&self) -> String {
         format!("p{} {}", self.number, self.seats.chief.name())
     }
-
-    /// The harnesses the project needs on the machine: its staff's, and Codex
-    /// where the image designer is.
-    pub fn needs(&self) -> Vec<Harness> {
-        let mut needs = self.seats.harnesses().to_vec();
-        if self.designer && !needs.contains(&Harness::Codex) {
-            needs.push(Harness::Codex);
-        }
-        needs
-    }
 }
 
 /// The seats of the project of the rotation `at` (from 0): the chief is the
 /// `at`th harness, and the worker, the advisor and the reviewer the next ones
 /// after it, round the list.
 fn seats(at: usize) -> Seats {
-    let harness = |offset: usize| Harness::DEFAULT[(at + offset) % Harness::DEFAULT.len()];
+    let harness = |offset: usize| Harness::ALL[(at + offset) % Harness::ALL.len()];
     Seats {
         chief: harness(0),
         worker: harness(1),
@@ -108,7 +98,7 @@ fn seats(at: usize) -> Seats {
 /// first whose chief is not Codex.
 pub fn projects(chiefs: &[Harness], steps: &[Step]) -> Vec<Planned> {
     let wanted = |step: Step| steps.is_empty() || steps.contains(&step);
-    let mut projects: Vec<Planned> = (0..Harness::DEFAULT.len())
+    let mut projects: Vec<Planned> = (0..Harness::ALL.len())
         .map(seats)
         .enumerate()
         .filter(|(_, seats)| chiefs.is_empty() || chiefs.contains(&seats.chief))
@@ -138,7 +128,7 @@ pub fn projects(chiefs: &[Harness], steps: &[Step]) -> Vec<Planned> {
 pub fn harnesses_named(list: &str) -> Result<Vec<Harness>, String> {
     words(list)
         .map(|word| {
-            Harness::DEFAULT
+            Harness::ALL
                 .into_iter()
                 .find(|harness| harness.name() == word)
                 .ok_or_else(|| format!("no harness is called {word}"))
@@ -171,7 +161,7 @@ mod tests {
     fn every_harness_is_the_chief_of_one_project_and_holds_every_other_seat_once() {
         let all = projects(&[], &[]);
         assert_eq!(all.len(), 4);
-        for harness in Harness::DEFAULT {
+        for harness in Harness::ALL {
             let seat = |of: fn(&Seats) -> Harness| {
                 all.iter()
                     .filter(|project| of(&project.seats) == harness)
@@ -220,11 +210,9 @@ mod tests {
         // The claude project, whose staff is pi, devin and codex.
         assert_eq!(with[0].seats.chief, Harness::Claude);
         assert_eq!(with[0].steps.last(), Some(&Step::Designer));
-        assert_eq!(with[0].needs().len(), 4);
         // The others do not have it as a step.
         for project in all.iter().filter(|project| !project.designer) {
             assert!(!project.steps.contains(&Step::Designer));
-            assert_eq!(project.needs().len(), 4);
         }
         // The first chosen one whose chief is not Codex.
         let devin = projects(&[Harness::Codex, Harness::Devin], &[]);

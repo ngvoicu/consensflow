@@ -121,10 +121,10 @@ fn entries(patch: Option<&Value>) -> Vec<(String, Value)> {
 
 /// The harnesses that reach other makers' models: Devin's Claude and GPT
 /// agents too (the owner, 2026-10-25).
-const RELAYED: [&str; 3] = ["pi", "opencode", "devin"];
+const RELAYED: [&str; 2] = ["pi", "devin"];
 
 /// Whether the list the human sees leaves `view` out: Claude and OpenAI
-/// models reached through Pi, OpenCode or Devin are hidden when the human
+/// models reached through Pi or Devin are hidden when the human
 /// keeps them to their own harnesses. A member already on one still runs.
 pub(crate) fn hides(preferences: Preferences, view: &AgentView) -> bool {
     preferences.own_harness_only

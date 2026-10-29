@@ -313,7 +313,7 @@ fn a_workers_window_opened_again_with_no_task_reads_at_rest_and_at_work_on_a_tur
         &Harness::ALL,
         Harness::name,
         "harness",
-        &Harness::DEFAULT,
+        &Harness::ALL,
     )?;
     let mut checks = Vec::new();
     for harness in harnesses {

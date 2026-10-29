@@ -1,5 +1,5 @@
-//! This machine, as a live run meets it: the harnesses it has (Claude Code,
-//! OpenCode, Pi, Devin and Codex), found as a shell finds them with the home
+//! This machine, as a live run meets it: the harnesses it has (Claude Code, Pi,
+//! Devin and Codex), found as a shell finds them with the home
 //! each reads its login from, and the rig whose windows run them.
 //!
 //! A window reads its login where it is, as it does for the person it belongs to
@@ -43,38 +43,26 @@ pub use wrapper::{isolated_claude, shimmed_claude, shimmed_claude_with_servers, 
 /// as both.
 pub use crate::stand_in::window_shim;
 
-/// A harness the live tests run: the five of ConsensFlow's.
+/// A harness the live tests run: the four of ConsensFlow's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Harness {
     Claude,
-    OpenCode,
     Pi,
     Devin,
     Codex,
 }
 
 impl Harness {
-    /// Every harness a run can name.
-    pub const ALL: [Harness; 5] = [
-        Harness::Claude,
-        Harness::OpenCode,
-        Harness::Pi,
-        Harness::Devin,
-        Harness::Codex,
-    ];
-
-    /// The harnesses a suite runs where its run names none: all but OpenCode,
-    /// which leaves ConsensFlow (`.specs/remove-opencode`). In the order the live
-    /// approval test rotates them through its positions: each is the chief of one
-    /// project and the one after it is that project's worker.
-    pub const DEFAULT: [Harness; 4] =
-        [Harness::Claude, Harness::Pi, Harness::Devin, Harness::Codex];
+    /// Every harness a run can name, and the ones a suite runs where its run
+    /// names none. In the order the live approval test rotates them through its
+    /// positions: each is the chief of one project and the one after it is that
+    /// project's worker.
+    pub const ALL: [Harness; 4] = [Harness::Claude, Harness::Pi, Harness::Devin, Harness::Codex];
 
     /// What it is called on a command line, and what its command is called.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
-            Self::OpenCode => "opencode",
             Self::Pi => "pi",
             Self::Devin => "devin",
             Self::Codex => "codex",
@@ -101,7 +89,6 @@ impl Harness {
     const fn login_marks(self) -> &'static [&'static str] {
         match self {
             Self::Claude => &[".claude.json", ".claude"],
-            Self::OpenCode => &[".local/share/opencode", ".config/opencode"],
             Self::Pi => &[".pi"],
             Self::Devin => &[".config/devin", ".local/share/devin"],
             Self::Codex => &[""],
@@ -112,7 +99,6 @@ impl Harness {
     const fn log_in(self) -> &'static str {
         match self {
             Self::Claude => "log in by running `claude` once",
-            Self::OpenCode => "log in by running `opencode` once",
             Self::Pi => "log in by running `pi` once",
             Self::Devin => "log in with `devin auth login`",
             Self::Codex => "log in with `codex login`, or name its home in CODEX_HOME",

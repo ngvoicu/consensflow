@@ -43,7 +43,7 @@ mod tests {
             &Harness::ALL,
             Harness::name,
             "harness",
-            &[Harness::OpenCode],
+            &[Harness::Devin],
         )
         .unwrap();
         assert_eq!(named, [Harness::Pi, Harness::Claude, Harness::Pi]);
@@ -56,10 +56,10 @@ mod tests {
             &Harness::ALL,
             Harness::name,
             "harness",
-            &[Harness::OpenCode],
+            &[Harness::Devin],
         )
         .unwrap();
-        assert_eq!(named, [Harness::OpenCode]);
+        assert_eq!(named, [Harness::Devin]);
     }
 
     #[test]

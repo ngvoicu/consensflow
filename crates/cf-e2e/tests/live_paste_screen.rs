@@ -42,7 +42,7 @@
 //! own login stale, and the home goes with the run.
 //!
 //! ```text
-//! cargo xtask live paste-screen                         all but OpenCode, one after another
+//! cargo xtask live paste-screen                         every harness, one after another
 //! cargo xtask live paste-screen claude devin            those named
 //! cargo xtask live paste-screen pi --keep               leaves the run's home and project
 //! ```
@@ -193,11 +193,11 @@ fn tail(members: &Members, pane: &Value, lines: usize) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The harnesses the words of the command line name, or every one but OpenCode where
-/// they name none.
+/// The harnesses the words of the command line name, or every one where they name
+/// none.
 fn harnesses(named: &[String]) -> Result<Vec<Harness>> {
     if named.is_empty() {
-        return Ok(Harness::DEFAULT.to_vec());
+        return Ok(Harness::ALL.to_vec());
     }
     named
         .iter()
@@ -512,8 +512,8 @@ mod tests {
     }
 
     #[test]
-    fn with_no_harness_named_all_but_opencode_run_and_those_named_run_in_their_order() {
-        assert_eq!(harnesses(&[]).unwrap(), Harness::DEFAULT.to_vec());
+    fn with_no_harness_named_all_run_and_those_named_run_in_their_order() {
+        assert_eq!(harnesses(&[]).unwrap(), Harness::ALL.to_vec());
         assert_eq!(
             harnesses(&["pi".to_owned(), "claude".to_owned()]).unwrap(),
             [Harness::Pi, Harness::Claude]

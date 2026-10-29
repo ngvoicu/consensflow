@@ -299,7 +299,7 @@ mod tests {
             listed(10, 1, 10, "cargo test"),
             listed(20, 10, 10, "cf ui --json"),
             listed(21, 10, 10, "consensflow-bridge"),
-            listed(30, 21, 30, "opencode"),
+            listed(30, 21, 30, "devin"),
             listed(31, 30, 30, "sh ./script"),
             listed(32, 31, 30, "sleep 200"),
             // Another's, which no parent of this rig started.

@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn every_member_of_the_run_is_of_one_tier_which_asks_for_no_purpose() {
-        for harness in Harness::DEFAULT {
+        for harness in Harness::ALL {
             assert_eq!(shared::row(harness, TIER)["workTier"], TIER);
         }
         assert_ne!(TIER, "critical");

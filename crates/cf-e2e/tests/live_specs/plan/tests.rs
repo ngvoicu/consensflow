@@ -6,7 +6,7 @@ use super::*;
 fn every_harness_is_the_chief_of_one_project_which_runs_every_step_in_order() {
     let all = projects(&[], &[]);
     let chiefs: Vec<Harness> = all.iter().map(|project| project.chief).collect();
-    assert_eq!(chiefs, Harness::DEFAULT);
+    assert_eq!(chiefs, Harness::ALL);
     assert_eq!(
         all.iter().map(|project| project.number).collect::<Vec<_>>(),
         [1, 2, 3, 4]

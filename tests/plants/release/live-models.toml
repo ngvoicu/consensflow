@@ -130,16 +130,6 @@ file = "crates/cf-e2e/src/live/agents.rs"
 find = '        Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],'
 replace = '        Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max"],'
 
-[[plant]]
-name = "live models: OpenCode takes no xhigh, so Buri cannot be named"
-meant = "every_agent_of_the_catalog_can_be_named_by_its_model_and_effort"
-runs = ["e2e-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/agents.rs"
-find = '        Harness::OpenCode => &["minimal", "low", "medium", "high", "xhigh", "max"],'
-replace = '        Harness::OpenCode => &["minimal", "low", "medium", "high", "max"],'
-
 # --claude-model beside it.
 
 [[plant]]
@@ -415,38 +405,6 @@ runs = ["e2e-live-resume-cut"]
 file = "crates/cf-e2e/tests/live_resume_cut.rs"
 find = "    match model.filter(|_| harness == Harness::Claude) {"
 replace = "    match model.filter(|_| false) {"
-
-# An OpenCode effort a window opened without the daemon would not get.
-
-[[plant]]
-name = "live models: a window opened without the daemon is opened on an OpenCode effort"
-meant = "a_window_opened_without_the_daemon_is_never_opened_on_an_opencode_effort_it_would_not_get"
-runs = ["e2e-rig-launches"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/window/open.rs"
-find = "        without_the_daemon(&agent)?;"
-replace = ""
-
-[[plant]]
-name = "live models: an OpenCode effort is refused only where it is a thinking"
-meant = "an_opencode_effort_is_refused_before_anything_is_spent_for_its_plain_window_takes_none"
-runs = ["e2e-live-resume-cut"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/window/open.rs"
-find = '        text("effort").or(text("thinking")),'
-replace = '        text("thinking"),'
-
-[[plant]]
-name = "live models: resume-cut opens its windows before it refuses an OpenCode effort"
-meant = "an_opencode_effort_is_refused_before_anything_is_spent_for_its_plain_window_takes_none"
-runs = ["e2e-live-resume-cut"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_resume_cut.rs"
-find = "        window::without_the_daemon(&agent_of(*harness, model.as_deref(), models))?;"
-replace = ""
 
 # The runs of agents of their own.
 

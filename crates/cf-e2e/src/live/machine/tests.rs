@@ -91,11 +91,8 @@ fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds
 
 #[test]
 fn the_harnesses_are_named_as_a_command_line_and_the_roster_name_them() {
-    let names: Vec<_> = Harness::ALL.iter().map(|harness| harness.name()).collect();
-    assert_eq!(names, ["claude", "opencode", "pi", "devin", "codex"]);
-    // A suite that is named none runs every one but OpenCode.
     assert_eq!(
-        Harness::DEFAULT.map(Harness::name),
+        Harness::ALL.map(Harness::name),
         ["claude", "pi", "devin", "codex"]
     );
     for harness in Harness::ALL {
@@ -125,8 +122,8 @@ fn a_home_holds_a_login_when_it_holds_the_place_the_harness_keeps_it() {
     fs::write(home.path().join(".claude.json"), "{}").unwrap();
     assert!(held(Harness::Claude, home.path()));
     assert!(!held(Harness::Pi, home.path()));
-    fs::create_dir_all(home.path().join(".config").join("opencode")).unwrap();
-    assert!(held(Harness::OpenCode, home.path()));
+    fs::create_dir_all(home.path().join(".config").join("devin")).unwrap();
+    assert!(held(Harness::Devin, home.path()));
     // Codex's home is the folder itself: any folder that is there.
     assert!(held(Harness::Codex, home.path()));
     assert!(!held(Harness::Codex, &home.path().join("missing")));

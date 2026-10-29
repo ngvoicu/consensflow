@@ -247,10 +247,6 @@ mod tests {
             Some("unsupported bench chief: pi")
         );
         assert_eq!(
-            refused(options(Some("opencode"), None, None, &[])).as_deref(),
-            Some("unsupported bench chief: opencode")
-        );
-        assert_eq!(
             refused(options(Some("kimi"), None, None, &[])).as_deref(),
             Some("unsupported bench chief: kimi")
         );

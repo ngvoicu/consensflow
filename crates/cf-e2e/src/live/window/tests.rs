@@ -32,7 +32,7 @@ fn the_app_pastes_into_claude_and_devin_and_no_other_harness() {
         [Harness::Claude, Harness::Devin]
     );
     assert!(pasted_into(&[]).unwrap().is_empty());
-    for other in ["codex", "pi", "opencode"] {
+    for other in ["codex", "pi"] {
         let failed = pasted_into(&names(&[other])).unwrap_err().to_string();
         assert_eq!(
             failed,
@@ -44,7 +44,7 @@ fn the_app_pastes_into_claude_and_devin_and_no_other_harness() {
     let failed = pasted_into(&names(&["claud"])).unwrap_err().to_string();
     assert_eq!(
         failed,
-        "no harness is called claud: claude, opencode, pi, devin, codex"
+        "no harness is called claud: claude, pi, devin, codex"
     );
 }
 
@@ -88,7 +88,7 @@ fn claude_code_and_pi_are_opened_on_an_id_they_are_given_and_the_others_name_the
     for kind in ["claude-code", "pi"] {
         assert_eq!(session_for(kind).map(|id| id.len()), Some(36), "{kind}");
     }
-    for kind in ["devin", "codex", "opencode", "claude", ""] {
+    for kind in ["devin", "codex", "claude", ""] {
         assert_eq!(session_for(kind), None, "{kind}");
     }
 }

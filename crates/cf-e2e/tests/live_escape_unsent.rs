@@ -12,8 +12,8 @@
 //! shape suspected of results queued for two days on the owner's other Mac). The
 //! adapters that paste (Claude Code's and Devin's) now read the box on the screen
 //! (`harness-ask input_box`), and a paste whose adapter read it empty, with no key
-//! of the human's since, goes in over the count (`readEmpty`). Codex, Pi and
-//! OpenCode take their messages through their own channels, which no count holds:
+//! of the human's since, goes in over the count (`readEmpty`). Codex and Pi take
+//! their messages through their own channels, which no count holds:
 //! their windows are looked at for what Escape does, and nothing is sent.
 //!
 //! Each window, in a folder of its own, on its harness's cheap model, has keys typed
@@ -27,8 +27,8 @@
 //! - `escape`        Escape once
 //! - `escape-twice`  Escape twice, 150 ms apart (the daemon's gap)
 //! - `ctrl-u`        Ctrl+U, to leave the box as empty as keys can
-//! - `dialog`        the harness's model picker (`/models` in OpenCode, `/model`
-//!   elsewhere), opened with Enter, and a filter typed into it
+//! - `dialog`        the harness's model picker (`/model`), opened with Enter, and
+//!   a filter typed into it
 //! - `dialog-escape` Escape out of it, and once more where the filter is still on
 //!   the screen
 //!
@@ -174,13 +174,8 @@ impl Step {
     }
 }
 
-/// The command that opens `harness`'s model picker.
-const fn picker(harness: Harness) -> &'static str {
-    match harness {
-        Harness::OpenCode => "/models",
-        Harness::Claude | Harness::Codex | Harness::Pi | Harness::Devin => "/model",
-    }
-}
+/// The command that opens a harness's model picker.
+const PICKER: &str = "/model";
 
 /// Whether ConsensFlow pastes into `harness`'s window, so that the count holds its
 /// deliveries: Claude Code and Devin. The others take theirs through their own
@@ -372,7 +367,7 @@ fn step(pane: &Pane, harness: Harness, step: Step, before: Option<&Read>) -> Res
             pane.drawn()?
         }
         Step::Dialog => {
-            let command = pane.types_text(picker(harness))?;
+            let command = pane.types_text(PICKER)?;
             sleep(KEYED);
             pane.types(ENTER)?;
             let opened = pane.drawn()?;

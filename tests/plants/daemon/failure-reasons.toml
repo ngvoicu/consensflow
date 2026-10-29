@@ -1046,7 +1046,7 @@ replace = "            this.perform_switch(&found, &chief, &held, to).await?;"
 
 # A window that cannot be launched: the human hears that the chief could not start, and a task
 # given to a worker whose window cannot be launched fails and its requester hears why. Held by the
-# rig's OpenCode 2 cases until they left with OpenCode (`.specs/remove-opencode`, RMOC-05); the
+# rig's OpenCode 2 cases until they left with OpenCode (T-563); the
 # engine's cases of a launch that fails hold them now.
 
 [[plant]]

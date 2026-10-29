@@ -17,7 +17,7 @@
 //!
 //! Four projects, a harness the chief of each ([`plan`]): the worker, the
 //! advisor and the reviewer are the next three after it in the order of
-//! [`cf_e2e::live::Harness::DEFAULT`], so that every harness holds every seat once.
+//! [`cf_e2e::live::Harness::ALL`], so that every harness holds every seat once.
 //! Each project is a folder in the run's home (`git init`, a README, the bench's
 //! brief in `AGENTS.md` and `CLAUDE.md`), opened with its staff and with the
 //! gate on by the call the Project settings' checkbox makes ([`project`]).
@@ -105,7 +105,7 @@ fn limits() -> Result<(Vec<Harness>, Vec<plan::Step>)> {
 /// is the error, before anything is spent.
 fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
     let mut needed: Vec<Harness> = Vec::new();
-    for harness in plan.iter().flat_map(plan::Planned::needs) {
+    for harness in plan.iter().flat_map(|planned| planned.seats.harnesses()) {
         if !needed.contains(&harness) {
             needed.push(harness);
         }

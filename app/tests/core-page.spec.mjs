@@ -4655,7 +4655,7 @@ test('opens Agents from Settings in a dialog over the board, the daemon’s agen
     await expect(agents.getByRole('button', { name: 'Close' })).toBeFocused()
     const screen = agents.frameLocator('iframe')
     await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
-    await expect(screen.locator('#agents .member .callsign', { hasText: /^gefjon$/ })).toBeVisible()
+    await expect(screen.locator('#agents .member .callsign', { hasText: /^eos$/ })).toBeVisible()
     const read = await agentsRead(page)
     await agents.getByRole('button', { name: 'Close' }).click()
     await expect(agents).toBeHidden()
@@ -4703,7 +4703,7 @@ test('Escape pressed inside a screen closes its dialog, as it closes every other
   try {
     await open(page, { ...model(), screens: daemon.screens })
     const agents = await openScreen(page, 'Agents')
-    await agents.frameLocator('iframe').getByRole('searchbox').fill('gefjon')
+    await agents.frameLocator('iframe').getByRole('searchbox').fill('eos')
     await page.keyboard.press('Escape')
     await expect(agents).toBeHidden()
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()

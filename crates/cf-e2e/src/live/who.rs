@@ -67,17 +67,17 @@ mod tests {
     fn a_word_names_a_harness_or_the_stand_in_and_any_other_is_refused_with_the_checks_noun() {
         assert_eq!(Who::named("fake", "door").unwrap(), Who::StandIn);
         assert_eq!(
-            Who::named("opencode", "door").unwrap(),
-            Who::Harness(Harness::OpenCode)
+            Who::named("devin", "door").unwrap(),
+            Who::Harness(Harness::Devin)
         );
         let failed = Who::named("kimi", "worker").unwrap_err().to_string();
         assert_eq!(
             failed,
-            "no worker is called kimi: fake, claude, opencode, pi, devin, codex"
+            "no worker is called kimi: fake, claude, pi, devin, codex"
         );
         assert_eq!(
             Who::named("kimi", "door").unwrap_err().to_string(),
-            "no door is called kimi: fake, claude, opencode, pi, devin, codex"
+            "no door is called kimi: fake, claude, pi, devin, codex"
         );
     }
 

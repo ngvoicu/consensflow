@@ -592,34 +592,6 @@ fn the_harness_code_of_the_product_opens_each_harness_on_a_kept_conversation_by_
     Ok(())
 }
 
-#[test]
-fn a_window_opened_without_the_daemon_is_never_opened_on_an_opencode_effort_it_would_not_get(
-) -> Outcome {
-    let rig = rig()?;
-    let home = rig.var("HOME").unwrap_or_default().to_owned();
-    let install = Installed::at(Harness::OpenCode, FAKE_AGENT, &home);
-    let log = Log::begin("live members")?;
-    let refused = Open::new(&rig, &install, "effort", "effort-opencode")
-        .agent(json!({ "kind": "opencode", "model": "opencode/x", "effort": "high" }))
-        .without_trust()
-        .open(&log)
-        .err()
-        .map(|failed| failed.to_string());
-    assert_eq!(
-        refused.as_deref(),
-        Some(
-            "an OpenCode window opened without the daemon is given no effort: OpenCode takes \
-             it as the variant of the first message the daemon sends to the window's server, \
-             which this window has not; run opencode=opencode/x with no :high"
-        )
-    );
-    // Nothing was opened, and the run says so.
-    assert!(rig.open_frames().is_empty(), "{:?}", rig.open_frames());
-    assert_eq!(log.ran_on().as_deref(), Some("no window was launched"));
-    rig.close()?;
-    Ok(())
-}
-
 /// A model of Claude's that the catalog has no row of, which `--models` names at
 /// an effort: the case holds that it is in no row of the catalog.
 const MODEL: &str = "claude-stand-in-no-catalog-row";
