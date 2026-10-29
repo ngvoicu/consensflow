@@ -34,6 +34,7 @@ fn every_command_of_the_plan_is_there_once() {
             "portable inspect",
             "app test",
             "app clippy",
+            "app fresh",
             "clippy-windows",
             "--as-archiver",
             "test daemons",

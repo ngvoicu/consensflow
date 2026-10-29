@@ -20,6 +20,10 @@ app-builds = ["cargo", "xtask", "app", "test", "tests::a_"]
 windows-gate = ["node", "--test", "tests/built-identity.test.mjs"]
 app-identity = ["cargo", "xtask", "app", "test", "identity"]
 app-daemon-wait = ["cargo", "xtask", "app", "test", "the_first_start_runs_apart_and_what_a_page_asks_waits_for_it"]
+app-fresh = ["cargo", "xtask", "app", "fresh"]
+app-daemon-stop = ["cargo", "xtask", "app", "test", "stopping_ends_a_wait_for_the_first_start"]
+app-daemon-panic = ["cargo", "xtask", "app", "test", "a_start_that_panics_answers_what_waits_for_it_with_its_cause"]
+page-screens = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Agents asked for while the daemon starts"]
 packaged-copy = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--test", "smoke", "--", "bundle::"]
 
 [[plant]]
@@ -469,3 +473,131 @@ find = '''
 replace = '''
     pub(crate) fn roster(&self) -> Option<RosterHandle> {
         let state = self.lock();'''
+
+# The review of T-951 (T-978, T-981): a build that watches a file that is not there, a roster
+# wait reached on Windows, a start that panics, a refusal whose answer is dropped, the rule's
+# held files, and a click on a screen while the daemon starts.
+[[plant]]
+name = "live app: a build watches the target's file where it has none"
+meant = "a_build_reads_its_identity_from_its_files_and_from_what_tauri_was_given"
+runs = ["app-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/build/identity.rs"
+find = """
+        patches.push(parse(&text)?);
+        files.push(platform);
+    }"""
+replace = """
+        patches.push(parse(&text)?);
+    }
+    files.push(platform);"""
+
+[[plant]]
+name = "live app: a second build of the app with nothing changed makes it again"
+meant = "xtask app fresh: a second build, with nothing changed, made these again"
+runs = ["app-fresh"]
+
+[[plant.edit]]
+file = "app/src-tauri/build/identity.rs"
+find = """
+        patches.push(parse(&text)?);
+        files.push(platform);
+    }"""
+replace = """
+        patches.push(parse(&text)?);
+    }
+    files.push(platform);"""
+
+[[plant]]
+name = "live app: an agents screen asked while the app stops mid-start is answered at once (any system)"
+meant = "stopping_ends_a_wait_for_the_first_start"
+runs = ["app-daemon-stop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''
+    pub(crate) fn roster(&self) -> Option<RosterHandle> {
+        let state = self
+            .settled
+            .wait_while(self.lock(), |state| !state.settled && !state.stopping)
+            .unwrap_or_else(|error| error.into_inner());'''
+replace = '''
+    pub(crate) fn roster(&self) -> Option<RosterHandle> {
+        let state = self.lock();'''
+
+[[plant]]
+name = "live app: a start that panics leaves what waits for it waiting until the app quits"
+meant = "a_start_that_panics_answers_what_waits_for_it_with_its_cause"
+runs = ["app-daemon-panic"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "                if let Err(panic) = panic::catch_unwind(AssertUnwindSafe(run)) {"
+replace = "                if let Err(panic) = Ok::<(), Box<dyn std::any::Any + Send>>(run()) {"
+
+[[plant]]
+name = "live app: the Windows smoke reads the identity and drops the answer"
+meant = "every_windows_start_of_a_built_app_reads_its_identity_first"
+runs = ["live-app-rules"]
+
+[[plant.edit]]
+file = "app/scripts/windows-smoke.mjs"
+find = "const refused = refusalOf(exe)"
+replace = "refusalOf(exe)\nconst refused = null"
+
+[[plant]]
+name = "live app: a file held to its starts takes one more"
+meant = "the_windows_rule_reads_every_start_and_a_refusal_that_is_tested"
+runs = ["live-app-rules"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/live_app.rs"
+find = "            Some((_, _, held)) if start_lines(text) != *held => unheld.push(format!("
+replace = "            Some((_, _, held)) if false && start_lines(text) != *held => unheld.push(format!("
+
+[[plant]]
+name = "live app: the Windows rule reads a built app's name in one case alone"
+meant = "the_windows_rule_reads_every_start_and_a_refusal_that_is_tested"
+runs = ["live-app-rules"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/live_app.rs"
+find = """
+    let text = text.to_lowercase();
+    ["consensflow.exe", "app.exe", "-portable.exe", "-setup.exe"]"""
+replace = """
+    let text = text.to_owned();
+    ["consensflow.exe", "app.exe", "-portable.exe", "-setup.exe"]"""
+
+[[plant]]
+name = "live app: the Windows rule reads no PowerShell call of a program"
+meant = "the_windows_rule_reads_every_start_and_a_refusal_that_is_tested"
+runs = ["live-app-rules"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/live_app.rs"
+find = "    called || operator || cmd"
+replace = "    called || cmd"
+
+[[plant]]
+name = "live app: a click on a screen while the daemon starts says nothing"
+meant = "Agents asked for while the daemon starts says it waits, a click meanwhile asks nothing more, and it opens once the daemon is up"
+runs = ["page-screens"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "    const saying = setTimeout(() => note(waiting), SCREEN_WAIT_SAID_MS)"
+replace = "    const saying = setTimeout(() => {}, SCREEN_WAIT_SAID_MS)"
+
+[[plant]]
+name = "live app: clicks on a screen while the daemon starts queue a wait each"
+meant = "Agents asked for while the daemon starts says it waits, a click meanwhile asks nothing more, and it opens once the daemon is up"
+runs = ["page-screens"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "    if (screenAsked) return"
+replace = "    if (screenAsked && false) return"

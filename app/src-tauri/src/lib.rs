@@ -907,17 +907,28 @@ mod tests {
     }
 
     /// The app's file says the identity its build was made with, as Tauri's configuration says
-    /// it: a test build is the release's, given no `--config`.
+    /// it: its file, the target's own file and what the build was given in `TAURI_CONFIG`, read
+    /// as the build script reads them (T-978: not the file alone, which a `--config` or a
+    /// target's file naming an identifier would make wrong).
     #[test]
     fn the_app_says_the_identity_its_build_was_made_with() {
-        let config: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.conf.json")).expect("the configuration");
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let read = |name: &str| -> Result<Option<String>, String> {
+            match std::fs::read_to_string(folder.join(name)) {
+                Ok(text) => Ok(Some(text)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(format!("{name}: {error}")),
+            }
+        };
+        let (identity, _) = built_identity::built_identity(
+            &read,
+            std::env::consts::OS,
+            option_env!("TAURI_CONFIG"),
+        )
+        .expect("the identity of the build");
         assert_eq!(
             BUILT_IDENTITY,
-            format!(
-                "consensflow-built-identity:{};",
-                config["identifier"].as_str().expect("an identifier")
-            )
+            format!("consensflow-built-identity:{identity};")
         );
     }
 

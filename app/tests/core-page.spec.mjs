@@ -548,6 +548,13 @@ async function open(page, data = model()) {
       // An agents screen's address, as Rust hands it: the daemon's page with
       // the UI token, or why there is none.
       if (command === 'agents_screen') {
+        // Held by a test (`hold(page, 'agents_screen')`), as the app holds it while the
+        // daemon starts.
+        const held = window.__hold.agents_screen
+        if (held !== undefined) {
+          delete window.__hold.agents_screen
+          await held
+        }
         return data.screens
           ? { ok: true, url: `${data.screens.url}/${args.page}?token=${data.screens.token}` }
           : { ok: false, error: 'the agents screens are not available: the daemon is not up' }
@@ -4663,6 +4670,33 @@ test('opens Agents from Settings in a dialog over the board, the daemon’s agen
     // What the screen changed (a model, a tier) is on the board's agents too.
     await expect.poll(() => agentsRead(page)).toBe(read + 1)
     expect(await page.getByRole('dialog').count()).toBe(0)
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('Agents asked for while the daemon starts says it waits, a click meanwhile asks nothing more, and it opens once the daemon is up', async ({
+  page,
+}) => {
+  const daemon = await agentsScreens()
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    const status = page.locator('#status')
+    const asked = () =>
+      page.evaluate(() => window.__calls.filter(([c]) => c === 'agents_screen').length)
+    await hold(page, 'agents_screen')
+    const agents = await openScreen(page, 'Agents')
+    await expect(status).toHaveText("Agents opens once ConsensFlow's daemon is up.")
+    await expect(agents).toBeHidden()
+    // Clicked again, and Harnesses too: nothing more is asked while the first waits.
+    await openScreen(page, 'Agents')
+    await openScreen(page, 'Harnesses')
+    await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeHidden()
+    expect(await asked()).toBe(1)
+    await letGo(page, 'agents_screen')
+    await expect(agents).toBeVisible()
+    await expect(status).toHaveText('')
+    expect(await page.getByRole('dialog').count()).toBe(1)
   } finally {
     await daemon.close()
   }

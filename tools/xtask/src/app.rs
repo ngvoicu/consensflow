@@ -12,11 +12,21 @@
 //!   tests included and the warnings denied, as the gate lints the rest of the
 //!   workspace. What follows the command goes to clippy after `-D warnings`.
 //!
-//! Both answer cargo's exit status and say nothing of their own. `check` runs
-//! them too, by [`test`] and [`clippy`], and `clippy-windows` leaves the
-//! resources out of its lint of the app the same way, by [`without_resources`].
+//! - `app fresh` builds the app's tests twice, the second time saying why cargo
+//!   makes each part: with nothing changed between, every part is fresh, and one
+//!   cargo calls dirty fails it, by its name and cargo's reason. A build script that
+//!   tells cargo to watch a file that is not there makes every build of the app
+//!   again (`tauri.macos.conf.json` on the Mac, T-978); the app's is the only build
+//!   script of the checkout, so this holds them all.
+//!
+//! `test` and `clippy` answer cargo's exit status and say nothing of their own.
+//! `check` runs all three, by [`test`], [`clippy`] and `cargo xtask app fresh`, and
+//! `clippy-windows` leaves the resources out of its lint of the app the same way,
+//! by [`without_resources`].
 
 use std::ffi::OsString;
+
+use std::io::Write;
 
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
@@ -42,6 +52,12 @@ pub const COMMANDS: &[Command] = &[
         usage: "[more clippy arguments]",
         run: Run::Native(run_clippy),
     },
+    Command {
+        words: &["app", "fresh"],
+        about: "Build the app crate's tests twice: the second build must find every part fresh",
+        usage: "",
+        run: Run::Native(run_fresh),
+    },
 ];
 
 fn run_test(context: &Context, args: &[OsString], _console: &mut Console) -> Result<i32, Failure> {
@@ -54,6 +70,52 @@ fn run_clippy(
     _console: &mut Console,
 ) -> Result<i32, Failure> {
     Ok(process::run(&clippy(context, args), &context.env)?)
+}
+
+fn run_fresh(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+    if !args.is_empty() {
+        return Err(Failure::Usage("app fresh takes no arguments".into()));
+    }
+    let first = process::run(&test_build(context), &context.env)?;
+    if first != 0 {
+        return Ok(first);
+    }
+    let again = process::capture(&test_build(context).arg("--verbose"), &context.env)?;
+    if again.code != 0 {
+        console.err.write_all(again.stderr.as_bytes())?;
+        return Ok(again.code);
+    }
+    let dirty = dirty_parts(&again.stderr);
+    if dirty.is_empty() {
+        writeln!(
+            console.err,
+            "xtask app fresh: a second build found every part fresh"
+        )?;
+        return Ok(0);
+    }
+    writeln!(
+        console.err,
+        "xtask app fresh: a second build, with nothing changed, made these again:"
+    )?;
+    for line in &dirty {
+        writeln!(console.err, "  {line}")?;
+    }
+    Ok(1)
+}
+
+/// The app's tests built and not run: `cargo test --offline --no-run`, in the app's folder.
+fn test_build(context: &Context) -> Invocation {
+    in_the_app(context).args(["test", "--offline", "--no-run"])
+}
+
+/// The lines of a verbose cargo build that say a part is made again, and why
+/// (`Dirty app v3.0.6 (…): the file `tauri.macos.conf.json` is missing`).
+fn dirty_parts(stderr: &str) -> Vec<&str> {
+    stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("Dirty "))
+        .collect()
 }
 
 /// The app's tests: `cargo test --offline -- <args>`, in the app's folder.
@@ -178,13 +240,43 @@ mod tests {
         );
     }
 
+    /// A second build is read for the parts cargo makes again, each with its reason, and
+    /// for nothing else it says.
     #[test]
-    fn the_two_commands_run_in_rust_and_are_no_scripts() {
+    fn the_parts_a_second_build_makes_again_are_its_dirty_lines() {
+        let verbose = concat!(
+            "       Fresh serde v1.0.228\n",
+            "       Dirty app v3.0.6-alpha.3 (/x/app/src-tauri): the file `tauri.macos.conf.json` is missing\n",
+            "   Compiling app v3.0.6-alpha.3 (/x/app/src-tauri)\n",
+            "     Running `/x/target/debug/build/app-1/build-script-build`\n",
+            "warning: Dirty is a word a warning may hold\n",
+        );
+        assert_eq!(
+            dirty_parts(verbose),
+            ["Dirty app v3.0.6-alpha.3 (/x/app/src-tauri): the file `tauri.macos.conf.json` is missing"]
+        );
+        assert!(
+            dirty_parts("       Fresh app v3.0.6-alpha.3 (/x)\n    Finished `test` profile\n")
+                .is_empty()
+        );
+    }
+
+    /// The build `app fresh` makes twice is the app's tests' own, resources left out.
+    #[test]
+    fn the_fresh_build_is_the_apps_test_build_not_run() {
+        let build = test_build(&context());
+        assert_eq!(build.display(), "cargo test --offline --no-run");
+        assert_eq!(build.cwd, app_folder());
+        assert_eq!(build.vars, resources_left_out());
+    }
+
+    #[test]
+    fn the_three_commands_run_in_rust_and_are_no_scripts() {
         let lines: Vec<_> = COMMANDS
             .iter()
             .map(|command| command.words.join(" "))
             .collect();
-        assert_eq!(lines, ["app test", "app clippy"]);
+        assert_eq!(lines, ["app test", "app clippy", "app fresh"]);
         assert!(COMMANDS
             .iter()
             .all(|command| matches!(command.run, Run::Native(_))));

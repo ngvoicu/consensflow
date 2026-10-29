@@ -123,50 +123,172 @@ fn spells_an_installed_app(code: &str) -> bool {
         })
 }
 
-/// Whether a file names a built ConsensFlow of Windows: the exe a build leaves, or a release's
-/// portable one.
+/// Whether a file names a built ConsensFlow of Windows, whatever its case: the exe a build
+/// leaves (`app.exe` until Tauri names it), a release's portable one, or its installer.
 fn names_a_built_windows_app(text: &str) -> bool {
-    text.contains("ConsensFlow.exe") || text.contains("-portable.exe")
+    let text = text.to_lowercase();
+    ["consensflow.exe", "app.exe", "-portable.exe", "-setup.exe"]
+        .iter()
+        .any(|name| text.contains(name))
 }
 
-/// Whether a file starts a program, any way the tests and the tools do.
-fn starts_a_program(text: &str) -> bool {
-    [
+/// The lines of a file that start a program, any way the tests and the tools do, trimmed:
+/// Node's and Rust's starts, PowerShell's (its call operator `&` where a command begins, and
+/// `Invoke-Expression`, `Invoke-Command`, `Start-Process`) and cmd's `start`.
+fn start_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| starts_a_program(line))
+        .collect()
+}
+
+/// Whether a line starts a program.
+fn starts_a_program(line: &str) -> bool {
+    let line = line.to_lowercase();
+    let called = [
         "spawn(",
-        "spawnSync(",
-        "execFile(",
-        "execFileSync(",
-        "Start-Process",
-        "Command::new(",
-        "Run::new(",
-        "Invocation::new(",
+        "spawnsync(",
+        "exec(",
+        "execsync(",
+        "execfile(",
+        "execfilesync(",
+        "fork(",
+        "start-process",
+        "invoke-expression",
+        "invoke-command",
+        "command::new(",
+        "run::new(",
+        "invocation::new(",
     ]
     .iter()
-    .any(|start| text.contains(start))
+    .any(|start| line.contains(start));
+    // PowerShell's call operator: `& ` then a program, where a command begins (not `&&`, nor
+    // an `&` between two numbers).
+    let operator = line.match_indices("& ").any(|(at, _)| {
+        let before = line[..at].trim_end();
+        line[at + 2..].starts_with(['$', '"', '\'', '('])
+            && !before.ends_with('&')
+            && before
+                .chars()
+                .next_back()
+                .is_none_or(|it| "=(;|{".contains(it))
+    });
+    // cmd's `start "title" program` or `start /wait program`, as a word of its own.
+    let cmd = line.match_indices("start ").any(|(at, _)| {
+        line[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|it| !(it.is_alphanumeric() || matches!(it, '-' | '_' | '.')))
+            && line[at + 6..].starts_with(['"', '/'])
+    });
+    called || operator || cmd
 }
 
-/// What a Windows start of a built app calls first: it refuses one that is not of the smoke
-/// identity, read off its file (app/scripts/built-identity.mjs).
-const WINDOWS_GATE: &str = "refusalOf(";
+/// What a Windows start of a built app does first: it reads its identity off its file and
+/// refuses one that is not of the smoke identity (app/scripts/built-identity.mjs), the
+/// refusal kept in a name the file then tests (`const refused = refusalOf(exe)`, then
+/// `if (refused)`). A call whose answer is dropped holds nothing.
+fn reads_its_identity_first(text: &str) -> bool {
+    text.match_indices(" = refusalOf(").any(|(at, _)| {
+        let name: String = text[..at]
+            .chars()
+            .rev()
+            .take_while(|it| it.is_alphanumeric() || *it == '_')
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        !name.is_empty() && text.contains(&format!("if ({name})"))
+    })
+}
 
-/// The files that name a built Windows app and start programs, and why that starts no app of
-/// the release's on a machine someone uses.
-const STARTING_NO_BUILT_APP: [(&str, &str); 4] = [
+/// The files that name a built Windows app and start programs, why that starts no app of the
+/// release's on a machine someone uses, and the lines that start what they start: held to
+/// those, so a start added to such a file is read again.
+#[allow(clippy::type_complexity)]
+const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 7] = [
     (
         ".github/workflows/windows-build.yml",
-        "the shipped exe's first start, on GitHub's runner, which holds no one's ConsensFlow",
+        "the shipped exe's first start, and its runtime's cf, on GitHub's runner, which holds no one's ConsensFlow",
+        &[
+            r#"$app = Start-Process -FilePath $exe -PassThru `"#,
+            r#"$said = & (Join-Path $runtime 'cli\bin\cf.exe') --version"#,
+        ],
     ),
     (
         "app/src-tauri/src/portable/tests.rs",
         "fake exes of a few bytes, which it packs and starts none of",
+        &[
+            r#"thread::spawn(move || unpacked_runtime(&exe, &local, "9.9.9"))"#,
+            r#"thread::spawn(move || {"#,
+            r#".spawn()"#,
+        ],
     ),
     (
         "tests/install-ps1.test.mjs",
-        "a stand-in named ConsensFlow.exe, a copy of ping",
+        "a stand-in named ConsensFlow.exe, a copy of ping, and the installer the test builds",
+        &[
+            r#"return spawnSync(windows ? 'where' : 'which', [program], { encoding: 'utf8' }).status === 0"#,
+            r#"const read = spawnSync("#,
+            r#"const ran = spawnSync("#,
+            r#"const made = spawnSync('reg', ['add', key, '/v', name, '/d', value, '/f'], {"#,
+            r#"const child = spawn(program, all, {"#,
+            r#"if (windows) spawnSync('reg', ['delete', TEST_KEYS, '/f'])"#,
+            r#""$run = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru","#,
+            r#"const running = spawn(program(at, 'ConsensFlow.exe'), ['-n', '60', '127.0.0.1'], {"#,
+            r#"`Close-CfOpen $dir; $null = Start-Process -FilePath '${ping}' -ArgumentList '-n', '30', '127.0.0.1' -WindowStyle Hidden; Start-Sleep -Milliseconds 500\n`,"#,
+            r#"spawnSync('powershell', ["#,
+            r#"const child = spawn(process.execPath, ['-e', ''])"#,
+            r#"const child = spawn(program, args, { stdio: 'ignore' })"#,
+        ],
     ),
     (
         "tools/cf-publish/src/testing/built.rs",
-        "the names of a release's files, which it starts none of",
+        "the names of a release's files, which it starts none of: it runs tar",
+        &[
+            r#"let made = Command::new("tar")"#,
+        ],
+    ),
+    (
+        "tests/fixtures/install/make-fixtures.mjs",
+        "an installer's name in a fixture's checksums; it runs Tauri's signer",
+        &[
+            r#"const ran = spawnSync(tauri, words, { cwd: work, env, encoding: 'utf8' })"#,
+            r#"const version = spawnSync(tauri, ['--version'], { encoding: 'utf8' }).stdout.trim()"#,
+        ],
+    ),
+    (
+        "tests/install-sh.test.mjs",
+        "the Windows installer's name in a release's checksums, which the Mac's installer reads; it starts sh and the Mac's tools",
+        &[
+            r#"if (argc < 2 || posix_spawn(&pid, argv[1], 0, 0, argv + 1, environ) != 0) return 127;"#,
+            r#"const ran = spawnSync(program, args, { encoding: 'utf8' })"#,
+            r#"const child = spawn(program, words, {"#,
+            r#"return spawnSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', plist], {"#,
+            r#"return spawnSync('ps', ['-axo', 'pid=,comm='], { encoding: 'utf8' })"#,
+            r#"return spawnSync('mount', { encoding: 'utf8' })"#,
+            r#"return () => spawnSync('hdiutil', ['detach', '-quiet', '-force', mountpoint])"#,
+            r#"const ran = spawnSync('/bin/sh', ['-c', `${order}\nnewer_than "$1" "$2"`, 'sh', a, b])"#,
+            r#"const ran = spawnSync('sh', [INSTALL_SH], {"#,
+            r#"const child = spawn('/bin/sh', ['-s', '--', '--version', '3.0.7'], {"#,
+            r#"const child = spawn('/bin/sh', ['-c', 'exit 0'])"#,
+            r#"const child = spawn(program, args, {"#,
+            r#"spawnSync('hdiutil', ['detach', '-quiet', '-force', mounted])"#,
+            r#"const child = spawn('/bin/sh', ['-c', 'exit 0'])"#,
+            r#"spawnSync("#,
+            r#"const child = spawn('/bin/sh', ['-c', 'exit 0'])"#,
+            r#"const child = spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' })"#,
+        ],
+    ),
+    (
+        "tests/install-verifiers.test.mjs",
+        "the Windows installer's name in the checksums a verifier reads; it starts the verifiers",
+        &[
+            r#"const ran = spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], {"#,
+            r#"return spawnSync('osascript', ['-l', 'JavaScript', script, JSON.stringify(input)], {"#,
+            r#"return spawnSync("#,
+            r#"const ran = spawnSync("#,
+        ],
     ),
 ];
 
@@ -535,6 +657,35 @@ fn no_test_or_tool_spells_an_installed_apps_path() {
     );
 }
 
+/// The files of `files` that start a built Windows app and do not read its identity first,
+/// each with what is wrong: one that is not held to its starts ([`STARTING_NO_BUILT_APP`]),
+/// or whose starts are no longer the ones it is held to.
+fn unheld_windows_starts(files: &[(String, String)]) -> Vec<String> {
+    let mut unheld = Vec::new();
+    for (path, text) in files {
+        if RULES.contains(&path.as_str())
+            || !names_a_built_windows_app(text)
+            || start_lines(text).is_empty()
+            || reads_its_identity_first(text)
+        {
+            continue;
+        }
+        match STARTING_NO_BUILT_APP
+            .iter()
+            .find(|(listed, _, _)| listed == path)
+        {
+            None => unheld.push(path.clone()),
+            Some((_, _, held)) if start_lines(text) != *held => unheld.push(format!(
+                "{path}, whose starts are no longer the ones held to (say why each starts no \
+                 app of the release's, and list it):\n  {}",
+                start_lines(text).join("\n  ")
+            )),
+            Some(_) => {}
+        }
+    }
+    unheld
+}
+
 /// No test starts a built ConsensFlow on Windows but one of the smoke identity: an app of the
 /// release's keeps its runtime in the release's folder of the machine's user, whatever the test
 /// sets `LOCALAPPDATA` to, and T-930's start of the CI exe on zeewin2 wrote into Gabriel's
@@ -553,27 +704,93 @@ fn every_windows_start_of_a_built_app_reads_its_identity_first() {
             .find(|(path, _)| path == read)
             .unwrap_or_else(|| panic!("{read} is not read"));
         assert!(
-            names_a_built_windows_app(text) && starts_a_program(text),
+            names_a_built_windows_app(text) && !start_lines(text).is_empty(),
             "{read} is not read as a start of a built Windows app"
         );
     }
-    let unheld: Vec<&str> = files
-        .iter()
-        .filter(|(path, text)| {
-            !RULES.contains(&path.as_str())
-                && names_a_built_windows_app(text)
-                && starts_a_program(text)
-                && !text.contains(WINDOWS_GATE)
-                && !STARTING_NO_BUILT_APP
-                    .iter()
-                    .any(|(listed, _)| listed == path)
-        })
-        .map(|(path, _)| path.as_str())
-        .collect();
+    let unheld = unheld_windows_starts(&files);
     assert!(
         unheld.is_empty(),
-        "these start a built Windows app and do not read its identity first: call {WINDOWS_GATE}exe) \
-         of app/scripts/built-identity.mjs before it starts, as the Windows smoke does:\n{}",
+        "these start a built Windows app and do not read its identity first: keep \
+         `const refused = refusalOf(exe)` of app/scripts/built-identity.mjs and test it \
+         (`if (refused)`) before it starts, as the Windows smoke does:\n{}",
         unheld.join("\n")
     );
+}
+
+/// What the Windows rule reads as a start and as a built app, and what it takes for a read of
+/// the identity: every way of starting a program, in any case, and a refusal tested, never
+/// one dropped (T-978).
+#[test]
+fn the_windows_rule_reads_every_start_and_a_refusal_that_is_tested() {
+    for start in [
+        "const app = spawn(exe, [])",
+        "execSync(`${exe} --version`)",
+        "exec(exe)",
+        "fork(script)",
+        "$app = Start-Process -FilePath $exe",
+        "$said = & $exe --version",
+        "& \"$dir\\ConsensFlow.exe\"",
+        "Invoke-Expression $line",
+        "invoke-command -ScriptBlock { & $exe }",
+        "cmd /c start \"\" \"%EXE%\"",
+        "start /wait app.exe",
+        "Command::new(&exe)",
+    ] {
+        assert!(starts_a_program(start), "{start}");
+    }
+    for no_start in [
+        "if (a && (b || c)) {}",
+        "const A = point(x & ((1n << 255n) - 1n))",
+        "the app's start time",
+        "restart /now",
+        "skip: windows && 'this is Windows',",
+    ] {
+        assert!(!starts_a_program(no_start), "{no_start}");
+    }
+    for name in [
+        "ConsensFlow.exe",
+        "consensflow.EXE",
+        "target/release/app.exe",
+        "ConsensFlow_3.0.7_x64-setup.exe",
+    ] {
+        assert!(names_a_built_windows_app(name), "{name}");
+    }
+    assert!(reads_its_identity_first(
+        "const refused = refusalOf(exe)\nif (refused) {\n  process.exit(2)\n}"
+    ));
+    for dropped in [
+        "refusalOf(exe)\nspawn(exe)",
+        "const refused = refusalOf(exe)\nspawn(exe)",
+        "import { refusalOf } from './built-identity.mjs'",
+    ] {
+        assert!(!reads_its_identity_first(dropped), "{dropped}");
+    }
+
+    // A file held to its starts is read again when one is added, and one that names a built
+    // app and starts a program with its refusal dropped is not taken for one that reads it.
+    let files = files();
+    let held = |path: &str| {
+        files
+            .iter()
+            .find(|(listed, _)| listed == path)
+            .cloned()
+            .unwrap_or_else(|| panic!("{path} is not read"))
+    };
+    let (path, text) = held("tests/install-ps1.test.mjs");
+    assert!(unheld_windows_starts(&[(path.clone(), text.clone())]).is_empty());
+    let one_more = format!("{text}\nspawn(join(dir, 'ConsensFlow.exe'), [])\n");
+    assert_eq!(unheld_windows_starts(&[(path.clone(), one_more)]).len(), 1);
+    let (smoke, script) = held("app/scripts/windows-smoke.mjs");
+    let dropped = script.replace(
+        "const refused = refusalOf(exe)",
+        "refusalOf(exe)\nconst refused = null",
+    );
+    assert_ne!(dropped, script);
+    assert_eq!(unheld_windows_starts(&[(smoke.clone(), dropped)]), [smoke]);
+    let elsewhere = (
+        "tests/new.test.mjs".to_owned(),
+        "spawn('ConsensFlow.exe')".to_owned(),
+    );
+    assert_eq!(unheld_windows_starts(&[elsewhere]), ["tests/new.test.mjs"]);
 }

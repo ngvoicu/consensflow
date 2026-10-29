@@ -2,6 +2,7 @@
 //! and again after a start that failed, stops with the app, and every change
 //! is told to the page as `daemon-status`.
 
+use std::panic::{self, AssertUnwindSafe};
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -169,6 +170,9 @@ impl Daemon {
     /// Starts the daemon from a thread of its own, so the app's window opens
     /// meanwhile: a daemon may take a while to start (a migration on a big
     /// ledger), and the first start used to run before the window existed.
+    /// A start that panics ends as one that failed, saying the panic's words:
+    /// unsettled, whatever the page asked meanwhile, a request or an agents
+    /// screen, would wait until the app quits (T-978).
     pub(crate) fn start(
         self: &Arc<Self>,
         starter: DaemonStarter,
@@ -178,7 +182,22 @@ impl Daemon {
         let daemon = Arc::clone(self);
         if let Err(error) = thread::Builder::new()
             .name("consensflow-daemon-start".to_string())
-            .spawn(move || daemon.run(&starter, &panes, backoff))
+            .spawn(move || {
+                let run = || daemon.run(&starter, &panes, backoff);
+                if let Err(panic) = panic::catch_unwind(AssertUnwindSafe(run)) {
+                    let said = panic
+                        .downcast_ref::<&str>()
+                        .map(|said| (*said).to_owned())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "a panic that says nothing".to_owned());
+                    daemon.fail(&DaemonFailure {
+                        cause: format!(
+                            "ConsensFlow's daemon could not be started: its start stopped on an error ({said})"
+                        ),
+                        retry: false,
+                    });
+                }
+            })
         {
             self.fail(&DaemonFailure {
                 cause: format!("ConsensFlow's daemon could not be started: {error}"),
@@ -777,7 +796,17 @@ mod tests {
         thread::spawn(move || {
             let _ = answered.send(asking.connection().err());
         });
+        // An agents screen asked meanwhile waits too, and is answered none (T-951, T-978).
+        let screen = Arc::clone(&daemon);
+        let (screened, screen_answer) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = screened.send(screen.roster().is_some());
+        });
         assert!(answer.recv_timeout(Duration::from_millis(200)).is_err());
+        assert!(
+            screen_answer.try_recv().is_err(),
+            "an agents screen did not wait"
+        );
 
         assert!(daemon.stop().is_some());
         assert_eq!(
@@ -786,7 +815,48 @@ mod tests {
                 .expect("answered"),
             Some("ConsensFlow's daemon has not started".to_string())
         );
+        assert!(!screen_answer
+            .recv_timeout(Duration::from_secs(1))
+            .expect("an agents screen answered"));
         drop(release);
+    }
+
+    /// A start that panics settles as one that failed, with the panic's words: what the page
+    /// asked meanwhile, a request or an agents screen, is answered, not left waiting until the
+    /// app quits (T-978).
+    #[test]
+    fn a_start_that_panics_answers_what_waits_for_it_with_its_cause() {
+        let (release, released) = mpsc::channel::<()>();
+        let released = Mutex::new(released);
+        let starter: DaemonStarter = Arc::new(
+            move |_closed: Box<dyn Fn() + Send + Sync>| -> Result<StartedDaemon, DaemonFailure> {
+                let _ = released.lock().expect("the release").recv();
+                panic!("the start broke");
+            },
+        );
+        let (report, _heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
+        let asking = Arc::clone(&daemon);
+        let (answered, answer) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = answered.send((asking.connection().err(), asking.roster().is_some()));
+        });
+        assert!(answer.recv_timeout(Duration::from_millis(200)).is_err());
+
+        drop(release);
+        let (cause, screen) = answer
+            .recv_timeout(Duration::from_secs(2))
+            .expect("answered once the start panicked");
+        assert_eq!(
+            cause.as_deref(),
+            Some(
+                "ConsensFlow's daemon could not be started: its start stopped on an error \
+                 (the start broke)"
+            )
+        );
+        assert!(!screen);
+        daemon.stop();
     }
 
     /// A daemon that stops while the app runs is not started again (its

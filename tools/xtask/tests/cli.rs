@@ -133,6 +133,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "portable inspect",
         "app test",
         "app clippy",
+        "app fresh",
         "clippy-windows",
         "--as-archiver",
         "departures",
@@ -198,6 +199,7 @@ fn check_steps() -> Vec<String> {
         "cargo test --package cf-engine --test dispatcher".to_string(),
         own_tests,
         "cargo test --offline --".to_string(),
+        "cargo xtask app fresh".to_string(),
     ]);
     steps.extend(
         families

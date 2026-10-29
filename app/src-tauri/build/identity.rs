@@ -43,7 +43,9 @@ pub fn identity_of(base: &Value, patches: &[&Value]) -> Option<String> {
 /// The identity a build for `target_os` is made with: `tauri.conf.json`, then the target's own
 /// file, then `given` (`TAURI_CONFIG`), as `read` (the build's folder) and the build's
 /// environment have them. The files it read are said, for the build to be run again when they
-/// change.
+/// change: only those that are there, as tauri-build says its own. Cargo takes a file it is
+/// told to watch that is not there for one that changed, and every build would make the app
+/// again (`tauri.macos.conf.json`, which the Mac has not; T-978).
 pub fn built_identity(
     read: &dyn Fn(&str) -> Result<Option<String>, String>,
     target_os: &str,
@@ -54,8 +56,10 @@ pub fn built_identity(
     let base = parse(&base)?;
     let platform = format!("tauri.{target_os}.conf.json");
     let mut patches = Vec::new();
+    let mut files = vec!["tauri.conf.json".to_owned()];
     if let Some(text) = read(&platform)? {
         patches.push(parse(&text)?);
+        files.push(platform);
     }
     if let Some(text) = given {
         patches.push(parse(text)?);
@@ -63,7 +67,7 @@ pub fn built_identity(
     let patches: Vec<&Value> = patches.iter().collect();
     let identity =
         identity_of(&base, &patches).ok_or("Tauri's configuration names no identifier")?;
-    Ok((identity, vec!["tauri.conf.json".to_owned(), platform]))
+    Ok((identity, files))
 }
 
 #[cfg(test)]
@@ -108,7 +112,7 @@ mod tests {
 
     /// A build reads its identity from the files of its folder and from what Tauri's command
     /// line was given: a smoke's `tauri build --config` makes the smoke's, on every target, and
-    /// a target's own file that names one makes that.
+    /// a target's own file that names one makes that. The files said are the ones there.
     #[test]
     fn a_build_reads_its_identity_from_its_files_and_from_what_tauri_was_given() {
         let files = |windows: Option<&'static str>| {
@@ -134,6 +138,14 @@ mod tests {
                 "{target}"
             );
         }
+        // No file of the target: the configuration's alone, and only it to watch.
+        assert_eq!(
+            built_identity(&files(None), "windows", smoke),
+            Ok((
+                "dev.ngvoicu.consensflow.smoke".to_owned(),
+                vec!["tauri.conf.json".to_owned()]
+            ))
+        );
         let own = files(Some(r#"{"identifier":"dev.example.windows"}"#));
         assert_eq!(
             built_identity(&own, "windows", None),
