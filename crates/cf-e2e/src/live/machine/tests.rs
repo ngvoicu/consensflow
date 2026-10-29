@@ -602,3 +602,17 @@ fn a_harness_the_machine_lacks_is_left_out_of_every_seat_with_why_unless_it_was_
         "muse was asked for, and this machine cannot run it: muse is in no folder of the PATH"
     );
 }
+
+/// T-931 P2-2: a run with no home to look for a login in cannot run a harness, as
+/// `installed` refuses it; it is not taken for one that can.
+#[test]
+fn a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks() {
+    let why = login_lacks(Harness::Muse, None, None, false).expect("lacking");
+    assert!(why.contains("home"), "{why}");
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".config").join("muse")).unwrap();
+    assert_eq!(
+        login_lacks(Harness::Muse, Some(home.path().to_path_buf()), None, false),
+        None
+    );
+}

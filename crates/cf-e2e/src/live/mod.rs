@@ -202,6 +202,9 @@ pub struct Log {
     /// What each window of the run was launched on, in the order they first were,
     /// once each: the run and every scope of it share them ([`Log::launched`]).
     launches: Arc<Mutex<Vec<agents::Model>>>,
+    /// What the run left out, each harness with why ([`seated`]): its report says it,
+    /// where a green run is read.
+    left_out: Arc<Mutex<Vec<String>>>,
 }
 
 impl Log {
@@ -212,6 +215,7 @@ impl Log {
             started: Instant::now(),
             begun: false,
             launches: Arc::default(),
+            left_out: Arc::default(),
         }
     }
 
@@ -260,6 +264,7 @@ impl Log {
             started: self.started,
             begun: self.begun,
             launches: Arc::clone(&self.launches),
+            left_out: Arc::clone(&self.left_out),
         }
     }
 
@@ -311,15 +316,51 @@ impl Log {
     /// The run's report under `title`: `table`, what each check or step came to,
     /// then what its windows were launched on where the run [`Log::begin`]s.
     pub fn report(&self, title: &str, table: &str) {
-        self.block(title, &self.reported(table));
+        self.block(&self.titled(title), &self.reported(table));
+    }
+
+    /// Says each of the harnesses `lines` leave out of the run ([`seated`]), and keeps
+    /// them for its report.
+    pub fn leave_out(&self, lines: Vec<String>) {
+        for line in &lines {
+            self.say(line);
+        }
+        self.left_out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(lines);
+    }
+
+    /// The title of the run's report, with the harnesses it left out after it.
+    fn titled(&self, title: &str) -> String {
+        let left_out = self.left_out.lock().unwrap_or_else(PoisonError::into_inner);
+        let names: Vec<&str> = left_out
+            .iter()
+            .filter_map(|line| line.split_whitespace().next())
+            .collect();
+        if names.is_empty() {
+            title.to_owned()
+        } else {
+            format!("{title} ({} left out)", names.join(", "))
+        }
     }
 
     /// What [`Log::report`] says under its title.
     fn reported(&self, table: &str) -> String {
-        match self.ran_on() {
+        let mut said = match self.ran_on() {
             Some(ran_on) => format!("{table}\n{ran_on}"),
             None => table.to_owned(),
+        };
+        for line in self
+            .left_out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+        {
+            said.push('\n');
+            said.push_str(line);
         }
+        said
     }
 
     /// Finds `harness` on the machine as a person's shell does ([`installed`]: one

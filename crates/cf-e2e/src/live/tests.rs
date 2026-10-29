@@ -391,3 +391,28 @@ fn a_claude_whose_windows_run_on_a_copy_of_the_login_says_where_it_is_copied_fro
          into a config folder of the run's own"
     );
 }
+
+/// T-931 P2-2: a harness the run left out is said in its report's title and body, where a
+/// green run is read, not once at its start.
+#[test]
+fn a_run_that_left_a_harness_out_says_so_in_its_report() {
+    let log = Log::new("live approval");
+    log.leave_out(vec![
+        "muse is left out of every seat: this machine cannot run it (no muse)".to_owned(),
+    ]);
+    assert_eq!(
+        log.titled("what each step came to"),
+        "what each step came to (muse left out)"
+    );
+    assert!(
+        log.reported("ok  a step")
+            .ends_with("muse is left out of every seat: this machine cannot run it (no muse)"),
+        "{}",
+        log.reported("ok  a step")
+    );
+    let whole = Log::new("live approval");
+    assert_eq!(
+        whole.titled("what each step came to"),
+        "what each step came to"
+    );
+}

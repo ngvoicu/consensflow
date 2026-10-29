@@ -145,19 +145,28 @@ impl fmt::Display for Model {
 
 /// The model of every harness in a run, in the order of [`Harness::ALL`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Models([Model; 6]);
+pub struct Models {
+    models: [Model; 6],
+    /// The harnesses the flags named, in the order they did.
+    named: Vec<Harness>,
+}
 
 impl Models {
     /// The model `harness` runs on.
     pub fn of(&self, harness: Harness) -> &Model {
-        &self.0[slot(harness)]
+        &self.models[slot(harness)]
+    }
+
+    /// The harnesses `--models` and `--claude-model` named, in the order they were.
+    pub fn named(&self) -> &[Harness] {
+        &self.named
     }
 
     /// What a run says of them in its first lines: what the flags give each
     /// harness, which a suite's own flag may override for its windows (the report
     /// says what each window was launched on: [`super::Log::launched`]).
     pub fn line(&self) -> String {
-        let each: Vec<String> = self.0.iter().map(Model::to_string).collect();
+        let each: Vec<String> = self.models.iter().map(Model::to_string).collect();
         format!(
             "the models --models and the cheap ones give: {}",
             each.join("; ")
@@ -214,8 +223,12 @@ pub fn parse(
     }
     if let Some(model) = claude_model.filter(|_| !named.contains(&Harness::Claude)) {
         chosen[slot(Harness::Claude)] = model_of(Harness::Claude, model, "--claude-model")?;
+        named.push(Harness::Claude);
     }
-    Ok(Models(chosen))
+    Ok(Models {
+        models: chosen,
+        named,
+    })
 }
 
 /// Where `harness` is in [`Harness::ALL`].
@@ -352,6 +365,21 @@ pub fn question_tool(harness: Harness) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    /// T-931 P2-2: the harnesses `--models` and `--claude-model` name are asked for: a
+    /// machine that lacks one is the run's error, not a harness left out.
+    #[test]
+    fn the_harnesses_the_model_flags_name_are_the_ones_asked_for() {
+        let models = parse(
+            Some("muse=muse-spark-1.3:minimal, pi=openai/gpt-6-luna"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(models.named(), [Harness::Muse, Harness::Pi]);
+        let claude = parse(None, Some("claude-sonnet-5-5")).unwrap();
+        assert_eq!(claude.named(), [Harness::Claude]);
+        assert!(parse(None, None).unwrap().named().is_empty());
+    }
+
     #[test]
     fn every_harness_has_one_agent_of_its_own_kind_on_its_cheap_model() {
         let rows: Vec<Value> = Harness::ALL
@@ -410,7 +438,7 @@ mod tests {
     fn given(models: Option<&str>, claude: Option<&str>) -> Vec<(String, Option<String>)> {
         parse(models, claude)
             .unwrap()
-            .0
+            .models
             .into_iter()
             .map(|model| (model.name, model.effort))
             .collect()

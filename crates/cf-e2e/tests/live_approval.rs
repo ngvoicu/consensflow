@@ -133,10 +133,12 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
 fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat() -> Result {
     let log = Log::begin("live approval")?;
     let (chiefs, steps) = limits()?;
-    let (seated, left_out) = live::seated(&chiefs, live::lacks).map_err(Error::Daemon)?;
-    for line in left_out {
-        log.say(line);
-    }
+    // A harness the run was limited to, or named a model for, is asked for: a machine
+    // that lacks it is the error. Any other it lacks is left out, and the report says so.
+    let mut named = chiefs.clone();
+    named.extend_from_slice(live::agents::asked()?.named());
+    let (seated, left_out) = live::seated(&named, live::lacks).map_err(Error::Daemon)?;
+    log.leave_out(left_out);
     if seated.len() < 4 {
         return Err(Error::Daemon(format!(
             "a project's four seats need four harnesses, and this machine runs {}",

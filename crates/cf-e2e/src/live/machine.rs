@@ -518,8 +518,24 @@ pub fn lacks(harness: Harness) -> Option<String> {
         harness,
         own_var("CODEX_HOME"),
         own_var("HOME").or_else(|| own_var("USERPROFILE")),
-    )?;
-    let places = login_places(harness, &home, own_var("APPDATA").as_deref(), cfg!(windows));
+    );
+    login_lacks(harness, home, own_var("APPDATA").as_deref(), cfg!(windows))
+}
+
+/// Why `harness` cannot run for want of a login, its home `home` (none where the run has
+/// none to look in), as [`installed`] would refuse it.
+fn login_lacks(
+    harness: Harness,
+    home: Option<PathBuf>,
+    appdata: Option<&str>,
+    windows: bool,
+) -> Option<String> {
+    let Some(home) = home else {
+        return Some(
+            "this run has neither a home nor CODEX_HOME to look for its login in".to_owned(),
+        );
+    };
+    let places = login_places(harness, &home, appdata, windows);
     (!has_login(&places)).then(|| no_login(harness, &places).to_string())
 }
 
