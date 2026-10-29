@@ -1,6 +1,6 @@
 //! The quota tables Node computed (`tables.json`, `quota`): `resets`,
 //! `refused` and `statuses`, each answer compared as text. The others
-//! (`codex`, `opencode`, `devin`) are other harnesses' own.
+//! (`codex`, `devin`) are other harnesses' own.
 
 use cf_base::js;
 use serde_json::{json, Value};

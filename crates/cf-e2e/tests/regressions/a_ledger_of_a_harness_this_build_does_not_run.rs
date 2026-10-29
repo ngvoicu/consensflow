@@ -1,6 +1,6 @@
 //! An install whose ledger and agents name a harness this build does not run.
 //!
-//! ConsensFlow 3.0.7 took a harness out (OpenCode, T-566, the removal's RMOC-19) with no
+//! ConsensFlow 3.0.7 took a harness out (T-566, the removal's RMOC-19) with no
 //! code for the state an older build left of it (the owner's rule: none for old state).
 //! What such an install holds is the harness's word: in the ledger, on its chief, on a
 //! member with a task, and on the conversations whose transcripts were copied; in
@@ -31,7 +31,7 @@ use crate::idle_compaction_read_as_a_cut_turn::{
 use crate::resume_of_a_chief_with_no_turn::{after, wait_for_the_chief, windows_of};
 use crate::{config, secs, Outcome};
 
-/// The harness an older build ran, which this one does not.
+/// The harness an older build ran, which this one does not: the field's own word, as a 3.0.6 ledger writes it.
 const GONE: &str = "opencode";
 
 /// The way out a pause note gives for T-1, whose member's harness has no adapter.

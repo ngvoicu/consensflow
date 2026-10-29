@@ -413,7 +413,7 @@ fn a_job_the_agent_leaves_beside_the_harnesss_server_runs_on_and_the_close_names
     Ok(())
 }
 
-/// What the agents of four harnesses did on the Mac (Codex, OpenCode, Pi and Devin, in
+/// What the agents of three harnesses did on the Mac (Codex, Pi and Devin, in
 /// the live run of 2026-10-13): they detached the job from a shell that then ended
 /// (`nohup … &`), which left it to the system's init, with no parent in the window's
 /// tree. Nothing proves whose it is, and the host ends only what a chain of processes

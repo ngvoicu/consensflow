@@ -1,6 +1,6 @@
 //! A secret a launch hands a window: 24 drawn bytes, as
 //! `randomBytes(24).toString('base64url')` writes them (Codex's broker
-//! token, OpenCode's password and its plugin's token).
+//! token).
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;

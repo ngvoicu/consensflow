@@ -250,7 +250,7 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            GivenUp::Kept => return self.tell_kept(message, because),"
+find = "            GivenUp::Kept => return self.tell_kept(message, because, false),"
 replace = "            GivenUp::Kept => {}"
 
 [[plant]]
@@ -335,7 +335,7 @@ runs = ["engine-dispatcher-unfit", "engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            GivenUp::Kept => return self.tell_kept(message, because),"
+find = "            GivenUp::Kept => return self.tell_kept(message, because, false),"
 replace = "            GivenUp::Kept => return Ok(()),"
 
 [[plant]]

@@ -302,8 +302,8 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
 
 #[test]
 fn carries_gpt_6_1_sol_wherever_sol_was_sonnet_5_5_and_mimo_v2_6_pro_through_openrouter_on_pi() {
-    // 2026-09-30: every Sol preset moved to 6.1 (probed on Codex 0.159.2, Pi 0.99.1,
-    // OpenCode 1.18.33), Sonnet to 5.5, and MiMo V2.6 Pro joined.
+    // 2026-09-30: every Sol preset moved to 6.1 (probed on Codex 0.159.2 and Pi
+    // 0.99.1), Sonnet to 5.5, and MiMo V2.6 Pro joined.
     let catalog = catalog();
     // `/gpt-[\d.]+-sol$/`: "gpt-", digits and dots, and "-sol" to the end.
     let is_sol = |model: &str| {

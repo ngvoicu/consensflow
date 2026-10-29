@@ -12,7 +12,7 @@
 //! stays in the transcript (`cf task get --transcript`), and so does all it wrote of a
 //! turn that ended before the one that answers. Each harness's own record says which turn
 //! that is: a harness marks the step that ends its turn complete (Claude Code's
-//! `end_turn` and its boundary record, Pi's `stop`, OpenCode's `finish: stop`, Devin's
+//! `end_turn` and its boundary record, Pi's `stop`, Devin's
 //! last reply of a request, Codex's `final_answer`), and the progress it writes on the way
 //! is no complete answer. What the harness wrote itself is no answer and cuts none: the
 //! summary of a compaction, a notification it keeps in its record alone, Claude Code's

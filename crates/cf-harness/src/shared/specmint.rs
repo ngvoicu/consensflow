@@ -28,8 +28,7 @@
 //! a folder of its own and leaves the old one to the windows that still read it.
 //!
 //! Each harness loads it as it loads any skill: Claude is given its root as one
-//! more folder to read (`--add-dir`), OpenCode its skills folder as one more of
-//! its `skills.paths`, Pi the file as a second skill, and Codex and Devin read
+//! more folder to read (`--add-dir`), Pi the file as a second skill, and Codex and Devin read
 //! it by its path, which the chief's role text names.
 
 mod bundled;

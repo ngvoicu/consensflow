@@ -119,7 +119,7 @@ impl Dispatcher {
             self.stalls.told.borrow_mut().insert(key, note.id);
         }
         for message in &kept {
-            self.tell_kept(message, why)?;
+            self.tell_kept(message, why, harness_gone)?;
         }
         Ok(())
     }

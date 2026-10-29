@@ -228,7 +228,7 @@ find = "self.admin.check(id.map(Harness::as_str), refresh)"
 replace = "self.admin.check(None, refresh)"
 
 [[plant]]
-name = "screens: a harness that is none of the five is Claude"
+name = "screens: a harness that is none of the four is Claude"
 meant = "corners_screens_009"
 runs = ["daemon-screens"]
 

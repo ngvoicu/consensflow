@@ -18,8 +18,8 @@
 //! cargo xtask live interrupt claude devin         both
 //! ```
 //!
-//! Harnesses: the two the app pastes into, claude and devin (Codex, Pi and
-//! OpenCode take their messages through their own queues). They run one after
+//! Harnesses: the two the app pastes into, claude and devin (Codex and Pi
+//! take their messages through their own queues). They run one after
 //! another; the run fails when a window lost its conversation or the message
 //! after the interrupt.
 //!

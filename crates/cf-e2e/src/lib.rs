@@ -29,7 +29,7 @@
 //!   agents screens to what they must do; [`http`] asks a daemon's API. (The
 //!   packaged smoke uses all three, on the daemon the built app chose.)
 //! - [`live`] is what the opt-in live tests share (its own doc lists its parts):
-//!   the machine's own harnesses (Claude Code, OpenCode, Pi, Devin and Codex),
+//!   the machine's own harnesses (Claude Code, Pi, Devin and Codex),
 //!   the rig whose windows run them, a real harness's window opened as the app
 //!   opens one, a project of real members whose chief a check plays, what the
 //!   harnesses keep and say and what the daemon wrote as it went, what the
@@ -68,7 +68,7 @@
 //! turn was closed on at once, `live_reopened` a worker's window opened again
 //! with no task, which reads at rest until it has a turn of its own, `live_bench` the
 //! board between a real chief and real workers, `live_designer` a real Codex
-//! drawing an image, `live_approval` real harnesses in every seat of five
+//! drawing an image, `live_approval` real harnesses in every seat of four
 //! projects sending what the human approves, behind the approval gate, and
 //! `live_mcp` a real Claude Code worker that has an MCP server finishing its
 //! task, `live_finish` a real worker of any harness running a shell

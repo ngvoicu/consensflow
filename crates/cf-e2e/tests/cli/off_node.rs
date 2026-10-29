@@ -1,7 +1,7 @@
 //! `Node's sources are gone for good`: nothing imports what the deletion took
 //! away, step 4 of the Rust rewrite: Node's daemon, CLI and ledger (`src/`,
-//! `bin/cf.mjs`) and the host libraries they shared (`hosts/lib/`, the last of
-//! which, OpenCode's question door, went with OpenCode). What stays runs the native daemon and
+//! `bin/cf.mjs`) and the host libraries they shared (`hosts/lib/`, whose last
+//! file, a removed harness's question door, is gone too). What stays runs the native daemon and
 //! `cf`, or fixtures of its own.
 //!
 //! The dangling-import check is the guard of the imports: a script that imports a
@@ -27,7 +27,7 @@ use regex::Regex;
 use crate::Outcome;
 
 /// What a check finds, or why it could not look.
-type Found<T> = Result<T, Box<dyn std::error::Error>>;
+pub(super) type Found<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// The folders whose scripts are held: tests, the page's specs and its build, and
 /// the host extensions.
@@ -88,7 +88,7 @@ const UNSOURCED: [&str; 6] = [
 const SYNCED: &str = ".synced-files";
 
 /// `relative`, a path written with `/`, under `root`.
-fn under(root: &Path, relative: &str) -> PathBuf {
+pub(super) fn under(root: &Path, relative: &str) -> PathBuf {
     relative
         .split('/')
         .fold(root.to_path_buf(), |path, part| path.join(part))
@@ -242,7 +242,7 @@ fn walked(root: &Path) -> Found<Vec<String>> {
 /// there, which is none of the repository's), or else (the commit gate tests an
 /// exported copy) every file under the root but what is built, installed or
 /// fetched ([`walked`]).
-fn tree(root: &Path) -> Found<Vec<String>> {
+pub(super) fn tree(root: &Path) -> Found<Vec<String>> {
     let listed = Run::new("git")
         .args([
             "ls-files",

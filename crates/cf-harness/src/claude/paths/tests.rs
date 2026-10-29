@@ -65,7 +65,7 @@ fn the_specmint_variant_the_human_installed_is_found_in_the_skills_folder_of_the
         &[
             ".codex/skills",
             ".agents/skills",
-            ".config/opencode/skills",
+            ".config/devin/skills",
             ".pi/agent/skills",
             ".claude/skill",
             ".claude/plugins/skills",

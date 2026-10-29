@@ -28,9 +28,6 @@
 //! - **Pi 1.0.4**: 2,000 lines or 51,200 bytes, whichever comes first, and the
 //!   tail is what is kept (`dist/core/tools/truncate.js`, `DEFAULT_MAX_LINES`
 //!   and `DEFAULT_MAX_BYTES`, and the bash tool's own description).
-//! - **OpenCode 1.18.35**: 2,000 lines or 51,200 bytes, saved to a file past
-//!   that (`tool_output.max_lines` and `max_bytes`, "default: 2000" and
-//!   "default: 51200" in its configuration schema).
 //! - **Devin 3000.6.14**: cuts too (its binary holds "[output truncated]" and
 //!   "Output truncated at line "), and no number was found, in the binary or
 //!   in the docs it ships. It is not known to be above these.
@@ -39,7 +36,7 @@
 //! are fewer than its 10,000 tokens. A byte count under 10,000 is a count of
 //! UTF-16 units and of characters under it too (a character is one byte or
 //! more, and a unit never fewer than a character), so under Claude Code's
-//! 30,000 characters, and under Pi's and OpenCode's bytes: so bytes are what
+//! 30,000 characters, and under Pi's bytes: so bytes are what
 //! is counted, and one number serves them all. No harness with a number cuts
 //! below 2,000 lines. A thread longer than this says nothing of its answers,
 //! which then come as text as well: a duplicate, never a loss. So does a
@@ -53,7 +50,7 @@
 const SEEN_WHOLE_BYTES: usize = 10_000;
 
 /// An output of fewer lines than this is shown whole by every harness whose
-/// cut was found as a number: Pi's and OpenCode's 2,000 are the smallest.
+/// cut was found as a number: Pi's 2,000 is the smallest.
 const SEEN_WHOLE_LINES: usize = 2_000;
 
 /// Whether what a command printed, `printed`, is shorter than the smallest cut

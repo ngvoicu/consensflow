@@ -8,6 +8,8 @@
 # The check, as the CLI's suite runs it: the repository's own files, read as they are.
 off-node = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "off_node"]
 e2e-lib-checkout = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "checkout::"]
+# The check that no file names the removed harness, as the CLI's suite runs it.
+removed-harness = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "a_removed_harness_is_named_nowhere"]
 
 [[plant]]
 name = "off node: a page spec imports a helper that is gone"
@@ -61,3 +63,60 @@ runs = ["e2e-lib-checkout"]
 file = "crates/cf-e2e/src/checkout.rs"
 find = "    fs::symlink_metadata(path).is_ok_and(|kind| kind.is_file())"
 replace = "    path.is_file()"
+
+# The check that no file of the repository names a harness the app removed
+# (`crates/cf-e2e/tests/cli/a_removed_harness_is_named_nowhere.rs`, T-570): it reads the names
+# and the text of every file, and the unzipped text of every recording, in any case, but in the
+# two files that keep the word on purpose. A plant takes one of those looks out, or puts the
+# word into a file, and a test of the check fails. The word is written as an escape below, as
+# the check would find it in these very files otherwise.
+
+[[plant]]
+name = "a removed harness: a recording is not read unzipped"
+meant = "finds_it_in_a_text_in_any_case_in_a_recording_and_in_a_name"
+runs = ["removed-harness"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/a_removed_harness_is_named_nowhere.rs"
+find = "        if file.ends_with(\".gz\") {\n"
+replace = "        if false && file.ends_with(\".gz\") {\n"
+
+[[plant]]
+name = "a removed harness: a file's name is not looked at"
+meant = "finds_it_in_a_text_in_any_case_in_a_recording_and_in_a_name"
+runs = ["removed-harness"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/a_removed_harness_is_named_nowhere.rs"
+find = "        if names_it(file.as_bytes()) {\n"
+replace = "        if false && names_it(file.as_bytes()) {\n"
+
+[[plant]]
+name = "a removed harness: the word in capitals is not found"
+meant = "finds_it_in_a_text_in_any_case_in_a_recording_and_in_a_name"
+runs = ["removed-harness"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/a_removed_harness_is_named_nowhere.rs"
+find = "        .to_ascii_lowercase()\n"
+replace = "        .to_vec()\n"
+
+[[plant]]
+name = "a removed harness: the two files that keep it are not told from the others"
+meant = "leaves_the_two_files_that_keep_it_alone"
+runs = ["removed-harness"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/a_removed_harness_is_named_nowhere.rs"
+find = "        if KEPT.contains(&file.as_str()) {\n"
+replace = "        if false && KEPT.contains(&file.as_str()) {\n"
+
+[[plant]]
+name = "a removed harness: a keyword of package.json names it"
+meant = "names_it_nowhere_in_the_repository_but_in_the_two_places_that_keep_it"
+runs = ["removed-harness"]
+
+[[plant.edit]]
+file = "package.json"
+find = "    \"codex\",\n    \"pi\",\n"
+replace = "    \"codex\",\n    \"\u006fpencode\",\n    \"pi\",\n"

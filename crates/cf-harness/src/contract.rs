@@ -78,14 +78,14 @@ pub trait Adapter {
     /// own ([`Servers::InGroup`]). Codex's supervisor opens its servers with the
     /// window, each in a group of its own, under the harness's own process, which
     /// starts the agent's commands ([`Servers::AtLaunch`]). Windows has no process
-    /// groups to tell by, and OpenCode and Devin have not been probed.
+    /// groups to tell by, and Devin has not been probed.
     fn servers(&self) -> Servers {
         Servers::Unknown
     }
 
     /// Whether a resumed conversation keeps the instructions it began with. Every
     /// launch gives a window its role text ([`Launch::instructions`]), and a
-    /// harness that takes it again at each launch (Claude Code, OpenCode, Pi,
+    /// harness that takes it again at each launch (Claude Code, Pi,
     /// Devin) needs nothing more to read a role that changed since its conversation
     /// began. One that keeps the first instructions of the conversation it resumes
     /// reads the new text and does not use it: a change never reaches it, and
@@ -98,8 +98,8 @@ pub trait Adapter {
     /// that a window whose turn gets through after a refusal for quota says the
     /// quota is back for every other window of it: a login in one is a login in
     /// all, and a spent quota is spent for all. Not, where nobody has looked: Pi
-    /// and OpenCode log into a provider for each model, so two of their windows
-    /// may be on two accounts, and Codex and Devin have not been probed for a
+    /// logs into a provider for each model, so two of its windows may be on two
+    /// accounts, and Codex and Devin have not been probed for a
     /// login changed under a window that is open.
     fn one_account(&self) -> bool {
         false
@@ -471,7 +471,7 @@ pub trait Window {
     fn interrupted(&self) {}
     /// Whether the harness has a word of its own that its window is at rest, apart
     /// from its record (Claude Code's status, Codex's broker, Pi's extension, Devin's
-    /// store and wire log, OpenCode's TUI status). One that has none is read at rest
+    /// store and wire log). One that has none is read at rest
     /// for a delivery only by the fallback: its record's turn ended, its screen quiet
     /// and no key of the human's, each for the settle (`pacing`), and the board says
     /// the fallback is in use.

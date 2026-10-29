@@ -109,9 +109,9 @@ fn codexs_notes_are_commentary_and_its_final_answer_is_the_result() {
 }
 
 #[test]
-fn pis_steps_opencodes_replies_and_devins_messages_before_the_one_that_stopped_are_progress() {
-    // Pi's extension adds messages of its own to the conversation, OpenCode's tool output
-    // comes after the reply that called it, and Devin's system messages sit among the steps.
+fn pis_steps_and_devins_messages_before_the_one_that_stopped_are_progress() {
+    // Pi's extension adds messages of its own to the conversation, a tool's output comes
+    // after the reply that called it, and Devin's system messages sit among the steps.
     assert_eq!(result_of(&REVIEWING, REPORT), REPORT);
     let with_its_own = [
         Wrote::Progress("Still reviewing the diff"),

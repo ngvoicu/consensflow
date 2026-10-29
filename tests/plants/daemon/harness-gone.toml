@@ -1,4 +1,4 @@
-# An install of a harness this build no longer runs (the OpenCode removal's RMOC-19, T-566): its
+# An install of a harness this build no longer runs (the harness removal's RMOC-19, T-566): its
 # ledger and agents.json keep the harness's word, and the build reads it as any kind it does not
 # run, with no code for it. `a_ledger_of_a_harness_this_build_does_not_run` makes that install on
 # the rig and starts on it: the board opens, History reads the copied transcripts, the task of a
@@ -102,3 +102,36 @@ runs = ["ledger-pause-words"]
 file = "crates/cf-ledger/src/messages/pauses.rs"
 find = "            if many.iter().any(|paused| !paused.harness_gone) {\n"
 replace = "            if true {\n"
+
+# The words told to the window of a task paused on a harness with no adapter reach nothing,
+# and a note that says they wait for a resume is wrong (T-570, the pause note's clause).
+
+[[plant]]
+name = "harness gone: the words kept for a paused task on it are said to wait for its resume"
+meant = "the_words_kept_where_the_harness_is_gone_name_no_resume_and_read_back"
+runs = ["ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    let (kept_words, held_words) = if harness_gone {\n"
+replace = "    let (kept_words, held_words) = if false {\n"
+
+[[plant]]
+name = "harness gone: the human is told the words wait for the resume of a task on it"
+meant = "words_told_to_the_window_of_a_task_paused_on_a_harness_with_no_adapter_are_said_to_reach_nothing_not_to_wait_for_a_resume"
+runs = ["engine-no-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                body: match (message.state == \"gated\", harness_gone) {\n"
+replace = "                body: match (message.state == \"gated\", false) {\n"
+
+[[plant]]
+name = "harness gone: the pause note names the words of a gone harness's task as the stall found them"
+meant = "words_told_to_the_window_of_a_task_paused_on_a_harness_with_no_adapter_are_said_to_reach_nothing_not_to_wait_for_a_resume"
+runs = ["engine-no-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "        named.because = with_kept(&named.because, message.id, why, held, named.harness_gone);\n"
+replace = "        named.because = with_kept(&named.because, message.id, why, held, false);\n"

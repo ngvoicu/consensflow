@@ -2,7 +2,7 @@
 //! alone')` of Node's catalog suite.
 //!
 //! 2026-10-08: Claude Code 2.1.294 answers claude-haiku-5-5 as itself at every level it lists.
-//! Pi and OpenCode (OpenRouter) carry Haiku 4.5 and a `~anthropic/claude-haiku-latest` alias,
+//! Pi (OpenRouter) carries Haiku 4.5 and a `~anthropic/claude-haiku-latest` alias,
 //! no 5.5. Devin lists it since (3000.11.205, 2026-10-25), at every level, and the catalog
 //! carries every model Devin lists: light work there too.
 //!

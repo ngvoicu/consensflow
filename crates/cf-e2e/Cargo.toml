@@ -89,6 +89,9 @@ uuid.workspace = true
 
 [dev-dependencies]
 cf-e2e = { path = ".", features = ["test-support"] }
+# The recordings (`*.json.gz`) the repository holds, read unzipped by the rule that names no
+# removed harness (`tests/cli/a_removed_harness_is_named_nowhere.rs`).
+flate2.workspace = true
 # Node's `--import` takes a module as a file URL, on Windows as anywhere.
 url.workspace = true
 # The live parity case opens Claude Code in a terminal of ConsensFlow's own (a ConPTY on

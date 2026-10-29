@@ -32,7 +32,7 @@ const SHELL_SPECIAL = /[ !"#$&'()*;<>?[\\\]^`{|}~]/g
  * line (a paste's line breaks reach the program as Enter), a tab completes, an
  * escape begins a key, a delete rubs out; and the windows are no shells, so no
  * quoting a shell reads (`$'…'`, a backslash before a line break) is read back
- * as the name by Pi, OpenCode, Codex or Claude Code.
+ * as the name by Pi, Codex or Claude Code.
  */
 const control = (character) => character < ' ' || character === '\x7f'
 

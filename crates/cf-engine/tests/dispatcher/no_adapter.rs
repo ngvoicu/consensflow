@@ -6,7 +6,7 @@
 
 use cf_engine::testing::{Context, Made};
 use cf_engine::{SwitchTo, SwitchWhen};
-use cf_ledger::{NewMember, NewTask, ProjectView};
+use cf_ledger::{NewMember, NewNote, NewTask, ProjectView};
 use serde_json::json;
 
 use crate::fixtures::{assert_match, notes};
@@ -18,7 +18,7 @@ const SUITES: &[&str] = &["a harness ConsensFlow has no adapter for"];
 fn without_pi() -> Context {
     Context::made(Made {
         harnesses: vec!["claude-code"],
-        codex: false,
+        ..Made::default()
     })
 }
 
@@ -184,6 +184,66 @@ fn a_task_whose_window_closes_on_a_harness_with_no_adapter_is_paused_with_the_wa
         [format!(
             "T-1 is paused: @zeus's window closed (exit code 3). {}.",
             way_out(1)
+        )]
+    );
+}
+
+#[test]
+fn words_told_to_the_window_of_a_task_paused_on_a_harness_with_no_adapter_are_said_to_reach_nothing_not_to_wait_for_a_resume(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.busy("zeus");
+    let told = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project.id,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: "zeus".to_owned(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(told.id).state,
+        "queued",
+        "its window is busy"
+    );
+    now_on(&context, "zeus", "kimi");
+
+    context.host.exits_showing(Some(3), None, None);
+    context.exit("zeus");
+    context.pass().unwrap();
+
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+    let paused: Vec<String> = notes(&context, context.id(project.id, "chief"))
+        .into_iter()
+        .filter(|said| said.starts_with("T-1 is paused: "))
+        .collect();
+    assert_eq!(
+        paused,
+        [format!(
+            "T-1 is paused: @zeus's window closed (exit code 3); the words told its window cannot reach it, and go with the task if it is cancelled: m-{}. {}.",
+            told.id,
+            way_out(1)
+        )]
+    );
+    assert_eq!(
+        notes(&context, context.id(project.id, "human"))
+            .into_iter()
+            .filter(|said| said.contains(&format!("m-{}", told.id)))
+            .collect::<Vec<_>>(),
+        [format!(
+            "m-{}, a note from @chief on T-1, cannot reach @zeus, and goes with T-1 if it is cancelled: @zeus's window closed (exit code 3).",
+            told.id
         )]
     );
 }

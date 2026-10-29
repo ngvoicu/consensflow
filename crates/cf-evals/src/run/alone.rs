@@ -32,7 +32,7 @@ const LOOK: Duration = Duration::from_secs(5);
 
 /// How long a bare window's screen and record both hold still before it counts as
 /// idle whatever its record says: a working harness keeps drawing (a spinner, a timer)
-/// or adding to its record, and without ConsensFlow Devin's and OpenCode's records
+/// or adding to its record, and without ConsensFlow Devin's records
 /// never say a turn is over.
 const SCREEN_IDLE: Duration = Duration::from_secs(30);
 

@@ -1,7 +1,7 @@
 //! The harness diagnostics' routes: what is known of each harness's CLI here,
 //! and its update. Both are the harness admin's
 //! ([`HarnessAdmin`](cf_harness::admin::HarnessAdmin)): the screen only checks
-//! that the harness asked about is one of the five, before the machine is asked
+//! that the harness asked about is one of the four, before the machine is asked
 //! anything, and says what the admin answered, or why it would not (a harness
 //! that is not installed is asked to update: `Claude is not installed`).
 

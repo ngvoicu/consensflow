@@ -238,6 +238,15 @@ const KEPT: &str = "; the words told its window wait for the resume: ";
 /// (`gated`): they wait for the human's word, and then for the resume.
 const HELD: &str = "; the words told its window wait for the human, then the resume: ";
 
+/// What a note says of the same words where the task's member runs on a harness whose
+/// windows ConsensFlow cannot open (`harness_gone`): no resume brings the window, so
+/// they reach nothing, and are dropped with the task if it is cancelled.
+const KEPT_GONE: &str =
+    "; the words told its window cannot reach it, and go with the task if it is cancelled: ";
+
+/// And of those held for the human, where the harness is gone.
+const HELD_GONE: &str = "; the words told its window wait for the human, then cannot reach it, and go with the task if it is cancelled: ";
+
 /// The ids `clause` names in `rest`, the clauses after why a task stopped: none
 /// where it is not there.
 fn named_in(rest: &str, clause: &str) -> Vec<i64> {
@@ -258,15 +267,21 @@ fn named_in(rest: &str, clause: &str) -> Vec<i64> {
 /// and the words, the why said once (a `because` that says it already, or that
 /// names words already, is not told it again), and the words in the order they
 /// were told. Words `held` for the human are named apart, as waiting for the
-/// human first.
-fn with_kept(because: &str, id: i64, why: &str, held: bool) -> String {
+/// human first. Where the task's harness is gone (`harness_gone`) no resume is
+/// named: the words reach nothing.
+fn with_kept(because: &str, id: i64, why: &str, held: bool, harness_gone: bool) -> String {
+    let (kept_words, held_words) = if harness_gone {
+        (KEPT_GONE, HELD_GONE)
+    } else {
+        (KEPT, HELD)
+    };
     let why = why.lines().collect::<Vec<_>>().join(" ");
-    let at = [because.find(KEPT), because.find(HELD)]
+    let at = [because.find(kept_words), because.find(held_words)]
         .into_iter()
         .flatten()
         .min();
     let (head, rest) = at.map_or((because, ""), |at| because.split_at(at));
-    let (mut kept, mut waiting) = (named_in(rest, KEPT), named_in(rest, HELD));
+    let (mut kept, mut waiting) = (named_in(rest, kept_words), named_in(rest, held_words));
     let mut head = head.to_owned();
     if kept.is_empty() && waiting.is_empty() && !head.contains(&why) {
         head = format!("{head}: {why}");
@@ -282,7 +297,7 @@ fn with_kept(because: &str, id: i64, why: &str, held: bool) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    for (clause, named) in [(KEPT, &kept), (HELD, &waiting)] {
+    for (clause, named) in [(kept_words, &kept), (held_words, &waiting)] {
         if !named.is_empty() {
             head = format!("{head}{clause}{}", ids(named));
         }
@@ -297,7 +312,9 @@ fn with_kept(because: &str, id: i64, why: &str, held: bool) -> String {
 /// about the task (that note given already, or a pause of the human's, which
 /// writes none). Main told the human only, that the words "did not reach" the
 /// window; they reach it at the resume. Words held for the human (`gated`) wait
-/// for the human's word first, and are said to.
+/// for the human's word first, and are said to. Where the pause note says the task's
+/// member runs on a harness whose windows ConsensFlow cannot open (`harness_gone`) they
+/// wait for no resume: they reach nothing, and go with the task if it is cancelled.
 pub(crate) fn tell_kept(
     store: &mut Store,
     task: &TaskRow,
@@ -324,7 +341,7 @@ pub(crate) fn tell_kept(
         let Some(named) = paused.iter_mut().find(|named| named.number == task.number) else {
             continue;
         };
-        named.because = with_kept(&named.because, message.id, why, held);
+        named.because = with_kept(&named.because, message.id, why, held, named.harness_gone);
         return set(store, id, task.project_id, &paused);
     }
     let requester = store.participant_row(task.requester_id)?.handle;
@@ -790,12 +807,12 @@ mod tests {
 
     #[test]
     fn the_words_kept_for_a_resume_are_named_after_the_why_said_once_and_read_back() {
-        let first = with_kept("@zeus's window closed", 2, "unfit\nfor work", false);
+        let first = with_kept("@zeus's window closed", 2, "unfit\nfor work", false, false);
         assert_eq!(
             first,
             "@zeus's window closed: unfit for work; the words told its window wait for the resume: m-2"
         );
-        let second = with_kept(&first, 3, "unfit for work", false);
+        let second = with_kept(&first, 3, "unfit for work", false, false);
         assert_eq!(
             second,
             "@zeus's window closed: unfit for work; the words told its window wait for the resume: m-2, m-3"
@@ -805,6 +822,34 @@ mod tests {
             vec![paused(1, &first), paused(4, "@diana's window closed")],
         ] {
             assert_eq!(read(&render(&tasks)), Some(tasks));
+        }
+    }
+
+    #[test]
+    fn the_words_kept_where_the_harness_is_gone_name_no_resume_and_read_back() {
+        let first = with_kept("@zeus's window closed", 2, "unfit\nfor work", false, true);
+        assert_eq!(
+            first,
+            "@zeus's window closed: unfit for work; the words told its window cannot reach it, and go with the task if it is cancelled: m-2"
+        );
+        let second = with_kept(&first, 3, "unfit for work", false, true);
+        assert_eq!(
+            second,
+            "@zeus's window closed: unfit for work; the words told its window cannot reach it, and go with the task if it is cancelled: m-2, m-3"
+        );
+        let held = with_kept(&second, 4, "unfit for work", true, true);
+        assert_eq!(
+            held,
+            "@zeus's window closed: unfit for work; the words told its window cannot reach it, and go with the task if it is cancelled: m-2, m-3; the words told its window wait for the human, then cannot reach it, and go with the task if it is cancelled: m-4"
+        );
+        assert!(!held.contains("resume"), "{held}");
+        for tasks in [
+            vec![gone(1, &second)],
+            vec![gone(1, &held), paused(4, "@diana's window closed")],
+        ] {
+            let said = render(&tasks);
+            assert!(!said.lines().next().unwrap().contains("cf task resume"));
+            assert_eq!(read(&said), Some(tasks));
         }
     }
 

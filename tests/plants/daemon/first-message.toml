@@ -6,7 +6,7 @@
 # (`/bin/ps` is set-uid root) and every kill or wait by pattern matches.
 #
 # - The adapters say how a window takes its first message (`FirstMessage`,
-#   `crates/cf-harness/src/contract.rs`): Devin reads it from its prompt file, OpenCode is posted it,
+#   `crates/cf-harness/src/contract.rs`): Devin reads it from its prompt file,
 #   and Claude Code, Pi and Codex are given none as they open (`claude/adapter.rs`, `pi/adapter.rs`,
 #   `codex/adapter.rs`, `shared/window_args.rs`). Pi's role text goes by its file. A resumed window
 #   reads a turn the quit left open whatever its launch carries.

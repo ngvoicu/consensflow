@@ -351,8 +351,8 @@ pub fn program(argv: &[String], env: &[(String, String)]) -> Result<Vec<String>>
         .unwrap_or_default())
 }
 
-/// The newest top-level conversation a harness of the kind `kind` (`opencode`,
-/// `devin`, `codex`: the ones that name theirs only in their own store) opened in
+/// The newest top-level conversation a harness of the kind `kind` (`devin`,
+/// `codex`: the ones that name theirs only in their own store) opened in
 /// `workspace` at or after `since_ms` (milliseconds since the epoch), from its
 /// store in the places `env` names. None while there is none: the folder is the
 /// run's own, and a window of a run with no staff is its chief's, so the newest

@@ -1474,7 +1474,7 @@ impl Dispatcher {
         };
         match given_up {
             GivenUp::Failed => {}
-            GivenUp::Kept => return self.tell_kept(message, because),
+            GivenUp::Kept => return self.tell_kept(message, because, false),
             GivenUp::Withdrawn => return Ok(()),
             GivenUp::Paused => {
                 let project = self.known_project(message.project_id)?;
@@ -1584,12 +1584,15 @@ impl Dispatcher {
     /// Words told to a window, kept for their task's resume as their paste failed or
     /// as its window went (`because`): the human hears it once, as main told it of
     /// words that did not reach the window, which these do at the resume; words held
-    /// for the human wait for their word first. A task the human gave was told of it
+    /// for the human wait for their word first; where the task's member runs on a harness
+    /// whose windows ConsensFlow cannot open (`harness_gone`) no resume brings the window,
+    /// and the words are said to reach nothing. A task the human gave was told of it
     /// already: that note was theirs.
     pub(crate) fn tell_kept(
         &self,
         message: &MessageView,
         because: &str,
+        harness_gone: bool,
     ) -> Result<(), EngineError> {
         let Some(number) = message.task_number else {
             return Ok(());
@@ -1604,20 +1607,31 @@ impl Dispatcher {
                 from: None,
                 to: "human".to_owned(),
                 task: Some(number),
-                body: if message.state == "gated" {
-                    format!(
+                body: match (message.state == "gated", harness_gone) {
+                    (true, true) => format!(
+                        "m-{}, {}, waits for your approval, then cannot reach @{}, and goes with T-{number} if it is cancelled: {because}.",
+                        message.id,
+                        described(message),
+                        message.recipient
+                    ),
+                    (false, true) => format!(
+                        "m-{}, {}, cannot reach @{}, and goes with T-{number} if it is cancelled: {because}.",
+                        message.id,
+                        described(message),
+                        message.recipient
+                    ),
+                    (true, false) => format!(
                         "m-{}, {}, waits for your approval, then T-{number}'s resume, to reach @{}: {because}.",
                         message.id,
                         described(message),
                         message.recipient
-                    )
-                } else {
-                    format!(
+                    ),
+                    (false, false) => format!(
                         "m-{}, {}, waits for T-{number}'s resume to reach @{}: {because}.",
                         message.id,
                         described(message),
                         message.recipient
-                    )
+                    ),
                 },
             },
         )?;
