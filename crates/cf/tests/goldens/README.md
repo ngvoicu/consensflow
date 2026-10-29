@@ -157,3 +157,7 @@ and `cf task help`; the fifth is the usage inside the JSON of `--json`) have it,
 (`unknown task command "frobnicate": use add, list, get, done, accept, reopen, edit, cancel,
 pause, resume, finish or release`) names it too. Changed by hand, in those words alone. The
 daemon's traces hold no `cf task release` line, and `cf-board-028` and `-029` depart already.
+
+The line of a task given to a window says what it waits for (`T-7 [open] blocked by T-1, T-2 ·
+@chief ← @chief: …`), as the line of a task for a tier did (T-957, from T-798). No case of
+`board.json` prints such a line, so none changed; the daemon's trace `cf-board-021` did.

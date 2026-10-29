@@ -32,22 +32,22 @@ pub fn a_pool(pool: Option<&Value>, tier: Option<&Value>) -> String {
 }
 
 /// One task: its number and state, whose it is or who it waits for, who
-/// asked, and its title.
+/// asked, and its title. What it waits for is said whoever has it: a task given
+/// to a window or to the chief itself waits on the board as one for a tier does,
+/// and `cf task release` lets it go (T-798).
 pub fn task_line(task: &Value) -> String {
+    let blocked_by = list(task.get("blockedBy"));
+    let blocked = if blocked_by.is_empty() {
+        String::new()
+    } else {
+        format!("blocked by {} · ", tasks(numbers(blocked_by)))
+    };
     let whose = match task.get("assignee") {
-        Some(Value::Null) => {
-            let blocked_by = list(task.get("blockedBy"));
-            let blocked = if blocked_by.is_empty() {
-                String::new()
-            } else {
-                format!("blocked by {} · ", tasks(numbers(blocked_by)))
-            };
-            format!(
-                "{blocked}for {}",
-                a_pool(task.get("pool"), task.get("tier"))
-            )
-        }
-        assignee => format!("@{}", js::text(assignee)),
+        Some(Value::Null) => format!(
+            "{blocked}for {}",
+            a_pool(task.get("pool"), task.get("tier"))
+        ),
+        assignee => format!("{blocked}@{}", js::text(assignee)),
     };
     format!(
         "T-{} [{}] {whose} ← @{}: {}",
@@ -159,6 +159,13 @@ mod tests {
         assert_eq!(
             task_line(&testing),
             "T-6 [open] blocked by T-3 · for a standard tester ← @chief: Run T-3"
+        );
+        // A task given to a window, or the chief's own step, says what it waits for too.
+        let held = json!({ "number": 7, "state": "open", "assignee": "chief", "requester": "chief",
+            "title": "Release notes", "blockedBy": [1, 2], "pool": "worker", "tier": "standard" });
+        assert_eq!(
+            task_line(&held),
+            "T-7 [open] blocked by T-1, T-2 · @chief ← @chief: Release notes"
         );
     }
 

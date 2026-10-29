@@ -282,3 +282,13 @@ runs = ["friction-help"]
 file = "crates/cf/src/board/usage.txt"
 find = "  cf task release T-3 [--from T-1]  let a waiting task go on early: without T-1, or without any task it waits for\n"
 replace = ""
+
+[[plant]]
+name = "board friction: release: a task given to a window says nothing of what it waits for"
+meant = "a_task_reads_as_whose_it_is_or_who_it_waits_for"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/lines.rs"
+find = '        assignee => format!("{blocked}@{}", js::text(assignee)),'
+replace = '        assignee => format!("@{}", js::text(assignee)),'

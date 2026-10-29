@@ -97,3 +97,8 @@ one; a task in a window is not pulled back. Add the new task without --before, p
 (cf task pause T-3), and send it on with cf task resume T-3 "…" once the new task is accepted;
 or cancel it and add it again with --needs on the new task`. Changed by hand, in those words
 alone, as the ledger's `ledger-tasks-012` was.
+
+`cf task list` says what a task given to a window waits for, as it says it of one for a tier
+(board task T-957, 3.0.7, from T-798): in `cf-board-021`, the chief's own step in the run of `cf task list`
+reads `T-2 [open] blocked by T-1 · @chief ← @chief: Plan the release` where it read `T-2 [open]
+@chief ← @chief: Plan the release`. Changed by hand, in those words alone.
