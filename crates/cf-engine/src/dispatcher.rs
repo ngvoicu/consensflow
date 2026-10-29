@@ -1182,8 +1182,11 @@ impl Dispatcher {
         // still: nothing goes into it, as a paste's Enter would answer the question
         // (`trust`).
         let asking = record.window.borrow().trust != Trusting::Past;
+        // A window read at rest by the fallback is asked whether it is drawn whatever its
+        // record holds: its harness's prompt is its only sign that it is up (`drawn`).
         let drawing = asking
-            || ((observed.items().is_empty() || unnamed) && !returning(self.drawn(record)).await);
+            || ((observed.items().is_empty() || unnamed || !self.idle_word(record))
+                && !returning(self.drawn(record)).await);
         if self.forgotten(record) {
             return Ok(());
         }

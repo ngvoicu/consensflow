@@ -131,8 +131,11 @@ impl Window for FakeWindow {
         })
     }
 
+    /// Its prompt is a line of the screen that holds [`TRUST_PROMPT`], the screen the engine
+    /// read: past the trust question, where its windows ask one.
     fn shows_prompt(&self, screen: &[String]) -> bool {
-        self.trusts.is_some() && holds(screen, TRUST_PROMPT) && self.toward_trust(screen).is_none()
+        holds(screen, TRUST_PROMPT)
+            && (self.trusts.is_none() || self.toward_trust(screen).is_none())
     }
 
     fn names_trust_choices(&self, screen: &[String]) -> bool {

@@ -32,6 +32,7 @@ use crate::role_change::Prelude;
 use crate::runtime::returning;
 use crate::seams::EngineError;
 use crate::shown::{after_words, words_key, Paste, Shown};
+use crate::windows::pane_body_drawn;
 
 /// What ends the words of a failed message sent back to whoever sent them where they
 /// fill a note's whole room.
@@ -1257,12 +1258,18 @@ impl Dispatcher {
         let Some(window) = record.window.borrow().window.clone() else {
             return false;
         };
-        let body = json!({ "id": pane.id, "generation": pane.generation });
-        returning(self.seams.host.request("pane.snapshot", body))
-            .await
-            .is_ok_and(|snapshot| {
-                snapshot.get("ok") == Some(&Value::Bool(true)) && window.box_read_empty(&snapshot)
-            })
+        // The box is read from the screen's lines as drawn, which the host sends only when
+        // asked (`pane_body_drawn`): asked without them, every box read not empty, and the
+        // key went into empty ones too (T-946).
+        returning(
+            self.seams
+                .host
+                .request("pane.snapshot", pane_body_drawn(pane)),
+        )
+        .await
+        .is_ok_and(|snapshot| {
+            snapshot.get("ok") == Some(&Value::Bool(true)) && window.box_read_empty(&snapshot)
+        })
     }
 
     /// A member's turn that failed while its task was not working (waiting on an

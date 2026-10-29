@@ -515,7 +515,10 @@ pub trait Window {
     /// store and wire log, OpenCode's TUI status). One that has none is read at rest
     /// for a delivery only by the fallback: its record's turn ended, its screen quiet
     /// and no key of the human's, each for the settle (`pacing`), and the board says
-    /// the fallback is in use.
+    /// the fallback is in use. Such a harness gives its own sign that its window is up,
+    /// its prompt ([`Window::shows_prompt`]): a quiet screen before it is a harness still
+    /// starting, which takes no keys (Muse 1.4.14, T-946), and its window is not read at
+    /// rest until the prompt shows.
     fn idle_word(&self) -> bool {
         true
     }
