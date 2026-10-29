@@ -15,6 +15,12 @@ use serde::{Deserialize, Serialize};
 pub const CONTRIBUTOR_WARNING: &str =
     "Contributor model: Meta may train on what it sees, including your code.";
 
+/// Whether the model `id` names is a contributor model, by its name (`-contributor` ends
+/// it): its provider may train on what it sees.
+pub fn is_contributor(id: &str) -> bool {
+    id.ends_with("-contributor")
+}
+
 /// A model a harness offers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,7 +68,7 @@ impl ModelChoice {
     pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
         let id = id.into();
         Self {
-            contributor: id.ends_with("-contributor"),
+            contributor: is_contributor(&id),
             id,
             provider: None,
             label: label.into(),

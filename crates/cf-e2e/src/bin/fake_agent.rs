@@ -8,6 +8,13 @@
 //! attachments, as Claude's input box makes them: a `[Image #N]` for each at the head of
 //! the message, the lines gone, and a record of the paths after it (`images`).
 //!
+//! A window launched on the model `CF_TEST_GONE_MODEL` names says its account has no such
+//! model, in Claude Code's words, and ends with the code 1, as a launch on a model that is
+//! gone does. Its answers say the model and effort it was launched on (`--model`,
+//! `--effort`), and `/model <model> [<effort>]` typed alone switches them, as the human's
+//! own switch in Claude Code's window does, with the key that keeps it to the
+//! conversation: the records of the command name no model, and the next answer does.
+//!
 //! The window of the participant `CF_TEST_NO_LOGIN` names has no login: it
 //! prints that and stays, doing nothing else (`CF_TEST_NO_LOGIN_EXITS`: and
 //! ends with the code 3). A key pressed in a turn (the Escape that stops it) is
@@ -242,6 +249,7 @@ fn run(
     let pid = std::process::id();
     let mut records = Records::new(Path::new(&config), &launch.session, pid)
         .map_err(|failed| failed.to_string())?;
+    records.runs_on(launch.model.clone(), launch.effort.clone());
     let status_file: PathBuf = records.status_file().to_path_buf();
     // The ids of the processes started, for the test beside the daemon's home.
     let beside = Path::new(&home).parent().unwrap_or(Path::new("."));
@@ -258,6 +266,17 @@ fn run(
         own_var(variable)
             .is_some_and(|wanted| !wanted.is_empty() && is_session_of(&participant, &wanted))
     };
+    // A model its account no longer has: the window says so in Claude Code's words and
+    // ends, as a launch on one does (CHF-02).
+    if launch.model.is_some() && launch.model == own_var("CF_TEST_GONE_MODEL") {
+        let model = launch.model.as_deref().unwrap_or_default();
+        let mut out = io::stdout().lock();
+        out.write_all(gone_model(model).as_bytes())
+            .and_then(|()| out.flush())
+            .map_err(|failed| failed.to_string())?;
+        thread::sleep(Duration::from_millis(300));
+        leave(&status_file, 1);
+    }
     if named("CF_TEST_NO_LOGIN") || named("CF_TEST_NO_LOGIN_EXITS") {
         let mut out = io::stdout().lock();
         out.write_all(NO_LOGIN.as_bytes())
@@ -529,6 +548,9 @@ const CAVEAT: &str = "<local-command-caveat>The messages below were made by a co
 /// while idle (`compact`), and runs no turn (the long run's compaction, which its
 /// watch finds in the record).
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
+    if let Some((model, effort)) = model_switch(text) {
+        return switch_model(records, pid, model, effort);
+    }
     if is_compact(text) {
         // Its time, which an Escape cuts short.
         let compacting = || {
@@ -562,6 +584,49 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
     let done = turn(records, pid, window, text);
     window.stop.end();
     done
+}
+
+/// What Claude Code says of a launch on a model the account does not have.
+fn gone_model(model: &str) -> String {
+    format!(
+        "There's an issue with the selected model ({model}). It may not exist or you may not have access to it. Run /model to pick a different model.\r\n"
+    )
+}
+
+/// What the human types to switch the model, its words the model and, after it, the
+/// effort: `/model <model> [<effort>]`, as Claude Code's picker leaves it.
+const MODEL: &str = "/model ";
+
+/// The model and the effort `text` switches to, where it is `/model` with a model.
+fn model_switch(text: &str) -> Option<(String, Option<String>)> {
+    let mut words = text.trim().strip_prefix(MODEL)?.split_whitespace();
+    let model = words.next()?.to_owned();
+    Some((model, words.next().map(str::to_owned)))
+}
+
+/// The human switched the model in the window, with the key that keeps it to the
+/// conversation (CHF-05): no turn, and the records Claude Code writes of the command,
+/// which name no model; its next answer says the one switched to.
+fn switch_model(
+    records: &mut Records,
+    pid: u32,
+    model: String,
+    effort: Option<String>,
+) -> Result<(), String> {
+    let said = format!("Set model to {model}");
+    for content in [
+        "<command-name>/model</command-name>".to_owned(),
+        format!("<local-command-stdout>{said}</local-command-stdout>"),
+    ] {
+        records
+            .append(
+                pid,
+                json!({ "type": "user", "message": { "role": "user", "content": content } }),
+            )
+            .map_err(|cause| cause.to_string())?;
+    }
+    records.runs_on(Some(model), effort);
+    Ok(())
 }
 
 /// Whether `text`, sent, is `/compact`: alone, or with words after it, whatever
@@ -1233,5 +1298,49 @@ mod tests {
         for text in [None, Some(""), Some("soon"), Some("-5"), Some("1.5")] {
             assert_eq!(wait_of(text), Duration::ZERO, "{text:?}");
         }
+    }
+
+    #[test]
+    fn an_answer_says_its_model_and_effort_and_a_typed_model_switches_them_naming_none_itself() {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        records.runs_on(Some("fake-chief".to_owned()), Some("high".to_owned()));
+        let answer =
+            || json!({ "type": "assistant", "message": { "role": "assistant", "content": [] } });
+        records.append(7, answer()).unwrap();
+        let (model, effort) = model_switch("/model fake-switched low").unwrap();
+        switch_model(&mut records, 7, model, effort).unwrap();
+        records.append(7, answer()).unwrap();
+        let written = written_from(config.path(), 0);
+        let said: Vec<(String, &serde_json::Value, &serde_json::Value)> = written
+            .iter()
+            .map(|record| {
+                (
+                    shape(record),
+                    &record["message"]["model"],
+                    &record["effort"],
+                )
+            })
+            .collect();
+        let none = serde_json::Value::Null;
+        assert_eq!(
+            said,
+            [
+                ("assistant".to_owned(), &json!("fake-chief"), &json!("high")),
+                ("user <command-name".to_owned(), &none, &none),
+                ("user <local-command-stdout".to_owned(), &none, &none),
+                (
+                    "assistant".to_owned(),
+                    &json!("fake-switched"),
+                    &json!("low")
+                ),
+            ]
+        );
+        assert_eq!(
+            model_switch("/model fake-x"),
+            Some(("fake-x".to_owned(), None))
+        );
+        assert_eq!(model_switch("/models"), None);
+        assert_eq!(model_switch("Use /model x"), None);
     }
 }

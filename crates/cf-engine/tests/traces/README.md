@@ -26,3 +26,13 @@ engine's behaviour. Where the engine departs from Node's trace on purpose, the
 test is named in its `DEPARTED` list, and held to a trace of its own in
 `../departures/`: those are recorded from the engine itself, in the shape of
 Node's (`npm run departures` records them again).
+
+A chief is a harness and a model (T-729): Node's chief ran on a saved agent.
+`tools/move_chief_model_goldens.py engine` moved what that changes, and nothing else, in
+every trace and departure: a request names the model the kit's roster saves the agent
+with (`MODELS` in `cf_engine::testing`) in the agent's place, the chief names no agent and
+says its model after its harness, the switches name a model on each side, a handoff and the
+note that asks where things stand name the model, and a chief's launch is given its model
+alone (9 launches, where the kit's roster had another model). 235 of 235 moved; run again,
+it moves nothing. Three tests depart where a chief no longer runs on a saved agent (no
+model named; a chief that opens whatever became of the saved agents), recorded again.

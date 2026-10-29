@@ -153,7 +153,7 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = '''            Some((_, data)) => text(&data["from"]["agent"]),'''
+find = '''            Some((_, data)) => named(&data["from"]),'''
 replace = "            Some(_) => participant.agent.clone(),"
 
 [[plant]]

@@ -75,6 +75,8 @@ mod background_close;
 mod background_work;
 #[path = "rig/cf_native.rs"]
 mod cf_native;
+#[path = "rig/chief_model.rs"]
+mod chief_model;
 #[path = "rig/codex_session.rs"]
 mod codex_session;
 #[path = "rig/core_board.rs"]

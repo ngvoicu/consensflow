@@ -184,7 +184,7 @@ pub(crate) async fn default_model(
         let model = settings["defaultModel"].as_str()?;
         Some(format!("{provider}/{model}"))
     });
-    if let Some(named) = named.filter(|named| !ModelChoice::new(named.clone(), "").contributor) {
+    if let Some(named) = named.filter(|named| !cf_proto::models::is_contributor(named)) {
         return Ok(Some(named));
     }
     let listing = listed(env, processes, time, false).await?;

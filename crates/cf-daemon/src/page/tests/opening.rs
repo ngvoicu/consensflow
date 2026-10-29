@@ -8,6 +8,7 @@
 //! the page.
 
 use cf_ledger::DEFAULT_WAKE_UP_TEXT;
+use cf_proto::models::{ModelChoice, ModelListing};
 
 use super::reading::home_installed;
 use super::*;
@@ -231,6 +232,45 @@ async fn a_setting_the_daemon_refuses_refuses_the_whole_start_in_the_dialogs_wor
             assert_eq!(projects.len(), 1, "only the project that was open");
             assert_eq!(projects[0].id, project);
             assert_eq!(chief_launches(&held).len(), launched, "no window was asked for");
+        })
+        .await;
+}
+
+/// A chief's model is one its harness lists and runs, where the home keeps its list
+/// (CHF-08): the picker read it to offer it.
+#[tokio::test]
+async fn a_chief_on_a_model_its_harness_does_not_list_or_will_not_run_is_refused() {
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let mut gated = ModelChoice::new("claude-opus-9", "Opus 9");
+            gated.disabled = true;
+            let listing = ModelListing::read(
+                vec![ModelChoice::new("claude-opus-5-5", "Opus 5.5"), gated],
+                1_793_000_000_000,
+                "the test's",
+            );
+            held.rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .keep_model_listing("claude", &listing)
+                .unwrap();
+            for (model, said) in [
+                (
+                    "claude-gone-9",
+                    "claude-code does not list claude-gone-9: pick one of its models",
+                ),
+                (
+                    "claude-opus-9",
+                    "claude-code lists claude-opus-9 but will not run it: pick another of its models",
+                ),
+            ] {
+                let answer = ask(&held.app, "project.open", opening(json!({ "model": model }))).await;
+                assert_eq!(answer, json!({ "ok": false, "error": said }), "{model}");
+            }
+            let answer = ask(&held.app, "project.open", opening(json!({}))).await;
+            assert_eq!(answer["ok"], true, "a model it lists: {answer}");
         })
         .await;
 }

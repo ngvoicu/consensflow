@@ -63,7 +63,7 @@ impl ChiefRuns {
     /// The agent a launch is given, never an image agent's: none where it names nothing,
     /// which leaves the model to the harness's own default.
     pub(crate) fn agent(&self) -> Option<Agent<'_>> {
-        (*self != Self::default()).then(|| Agent {
+        (*self != Self::default()).then_some(Agent {
             model: self.model.as_deref(),
             effort: self.effort.as_deref(),
             thinking: self.thinking.as_deref(),

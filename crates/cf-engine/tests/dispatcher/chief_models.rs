@@ -241,3 +241,60 @@ fn a_turn_that_fails_on_a_gone_model_closes_the_window_and_starts_the_chief_on_t
         .iter()
         .all(|body| !body.contains("The chief's turn failed")));
 }
+
+#[test]
+fn what_waits_for_a_chief_held_on_a_gone_model_waits_for_the_chief_switched_in() {
+    let context = harness_without_the_model(Err("no model to start on".to_owned()));
+    let project = opened_on_a_gone_model(&context);
+    // The human's word to the chief, queued before its window opens again.
+    let note = context.note_from_consensflow(project, "chief", "Look at T-1");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).state, "queued", "held, not lost");
+    context
+        .switch_chief(project, to("claude-code", "diana"), SwitchWhen::Now, false)
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_ne!(
+        context.message(note.id).state,
+        "queued",
+        "given to the chief switched in"
+    );
+}
+
+#[test]
+fn a_chief_opened_again_on_its_harnesss_default_is_told_no_turn_was_cut() {
+    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.with("chief", |chief| {
+        chief.failed = true;
+        chief.failure = Some("400 model_not_found: Unknown model 'claude-opus-5'".to_owned());
+    });
+    context.adapter.answer("chief", "…");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let told: Vec<String> = context
+        .adapter
+        .prepared()
+        .iter()
+        .filter_map(|launch| launch["message"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        told.iter()
+            .all(|message| !message.contains("ConsensFlow stopped in the middle of your turn")),
+        "{told:?}"
+    );
+    let notes = to_human(&context, project.id);
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|body| body.contains("no longer available"))
+            .count(),
+        1,
+        "{notes:?}"
+    );
+}

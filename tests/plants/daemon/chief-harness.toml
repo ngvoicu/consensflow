@@ -4,7 +4,7 @@
 # never a contributor model, a disabled one or one of a stale listing, kept in the home ledger
 # (migration 0025, crates/cf-ledger/src/model_lists.rs), and read by the daemon at the first ask of
 # its life and at the human's Refresh, one harness at a time (crates/cf-daemon/src/models.rs).
-# Phases 1 to 3 of the spec add their own plants here.
+# Phase 1's plants follow T-727's, their names holding `chief:`; phases 2 and 3 add their own.
 #
 # Every name holds `listing:`, so `npm run plants:daemon -- "listing:"` runs them all.
 
@@ -15,6 +15,17 @@ ch-one-shot = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "share
 ch-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "model_lists"]
 ch-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::model_list"]
 ch-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "models::"]
+chm-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "chief_model"]
+chm-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::chief_model"]
+chm-last-used = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "last_used::"]
+chm-tail = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::tail::"]
+chm-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "chief_model::"]
+chm-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_models::"]
+chm-switching = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "switching_refused::"]
+chm-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "handoff::"]
+chm-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening::"]
+chm-daemon-reading = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::reading::"]
+chm-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "chief_model::"]
 
 [[plant]]
 name = 'listing: a stale listing gives a default'
@@ -53,8 +64,8 @@ runs = ["ch-proto"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/models.rs"
-find = '            contributor: id.ends_with("-contributor"),'
-replace = '            contributor: false,'
+find = '    id.ends_with("-contributor")'
+replace = '    false'
 
 [[plant]]
 name = "listing: Pi's provider is not joined to its id for --model"
@@ -305,3 +316,386 @@ runs = ["ch-daemon"]
 file = "crates/cf-daemon/src/models.rs"
 find = '        let listing = ModelListing::after(kept, adapter.models(refresh).await);'
 replace = '        let listing = ModelListing::after(kept.filter(|_| false), adapter.models(refresh).await);'
+
+# A chief is a harness and a model (Phase 1, CHF-04 to CHF-10, T-729): the ledger's chief
+# model and its switch (crates/cf-ledger), each harness's last_used reader and its words for a
+# gone model (crates/cf-harness/src/*/last_used.rs, */models.rs, shared/tail.rs), the engine's
+# launch of a chief (crates/cf-engine/src/chief_model.rs and its hooks) and the daemon's chief
+# request (crates/cf-daemon/src/page/chief.rs). Every name holds `chief:`.
+
+[[plant]]
+name = "chief: a model id may begin with a flag's dash"
+meant = "a_model_id_is_what_a_harness_names_its_models_and_never_a_flag_or_words"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = '''        && (bytes[0].is_ascii_alphanumeric() || bytes[0] == b'~')'''
+replace = '''        && (bytes[0].is_ascii_alphanumeric() || bytes[0] == b'~' || bytes[0] == b'-')'''
+
+[[plant]]
+name = 'chief: a switch forgets the model it was from'
+meant = "a_switch_names_the_harness_and_the_model_it_leaves_and_the_ones_it_takes"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''                chief.model,
+'''
+replace = '''                None::<String>,
+'''
+
+[[plant]]
+name = "chief: a switch logs the agent's key"
+meant = "a_switch_names_the_harness_and_the_model_it_leaves_and_the_ones_it_takes"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '                "from": { "harness": chief.harness, "model": chief.model },'
+replace = '                "from": { "harness": chief.harness, "agent": chief.model },'
+
+[[plant]]
+name = 'chief: a switch keeps what the last launch asked for'
+meant = "the_model_a_chiefs_launch_asked_for_is_kept_apart_from_the_one_picked_for_it"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = 'model = ?, agent = NULL, launched_model = NULL,'
+replace = 'model = ?, agent = NULL,'
+
+[[plant]]
+name = 'chief: a switch keeps the model found gone'
+meant = "a_gone_model_is_kept_apart_and_the_harnesss_default_becomes_the_chiefs_model"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '           gone_model = NULL, out_until = NULL,'
+replace = '           out_until = NULL,'
+
+[[plant]]
+name = "chief: the card's model is said where it is the pick"
+meant = "the_model_a_chiefs_launch_asked_for_is_kept_apart_from_the_one_picked_for_it"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = '            .filter(|launched| Some(launched) != row.model.as_ref()),'
+replace = '            .filter(|_| true),'
+
+[[plant]]
+name = "chief: the gone model's column is not held apart"
+meant = "takes_the_chiefs_model_columns_and_their_values_out_of_the_participant_table_and_nothing_else"
+runs = ["chm-ledger-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing/chief_model.rs"
+find = '''    ("participant", "gone_model"),
+'''
+replace = ''
+
+[[plant]]
+name = "chief: Claude's synthetic entry is the model used"
+meant = "a_sidechain_a_synthetic_entry_and_an_api_error_are_never_the_model_used"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '        .filter(|model| !model.is_empty() && *model != "<synthetic>")'
+replace = '        .filter(|model| !model.is_empty())'
+
+[[plant]]
+name = "chief: Claude's sidechain is the model used"
+meant = "a_sidechain_a_synthetic_entry_and_an_api_error_are_never_the_model_used"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '''        || entry["isSidechain"] == true
+'''
+replace = ''
+
+[[plant]]
+name = "chief: Claude's fallback is taken for the human's"
+meant = "a_fallback_claude_code_made_by_itself_is_the_harnesss_and_one_the_human_made_after_is_theirs"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '        let fell_back = fallback_to(&entry) == Some(model);'
+replace = '        let fell_back = false;'
+
+[[plant]]
+name = "chief: Claude's effort is not read"
+meant = "the_last_assistant_entry_says_the_model_and_the_effort_a_flagless_resume_would_lose"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '                    effort: entry["effort"].as_str().map(str::to_owned),'
+replace = '                    effort: None,'
+
+[[plant]]
+name = "chief: Codex's applied switch is not read"
+meant = "a_switch_applied_before_any_turn_of_it_is_the_model_used_last"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/last_used.rs"
+find = '    } else if entry["type"] == "event_msg" && payload["type"] == "thread_settings_applied" {'
+replace = '    } else if entry["type"] == "event_msg" && payload["type"] == "thread_settings_applied" && false {'
+
+[[plant]]
+name = "chief: Pi's failed message is the model used"
+meant = "a_message_that_ended_in_an_error_is_never_the_model_used"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/last_used.rs"
+find = '''        || message["stopReason"] == "error"
+'''
+replace = ''
+
+[[plant]]
+name = "chief: Pi's thinking is not the message's"
+meant = "the_thinking_is_the_last_messages_never_the_settings_a_launchs_flags_left_unwritten"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/last_used.rs"
+find = '        thinking: message["thinkingLevel"].as_str().map(str::to_owned),'
+replace = '        thinking: None,'
+
+[[plant]]
+name = "chief: Devin's session row is not read"
+meant = "the_sessions_row_says_the_model_and_never_its_first_node"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/last_used.rs"
+find = '            Some(Cell::Text(model)) if !model.is_empty() => Some(Used {'
+replace = '            Some(Cell::Text(model)) if false => Some(Used {'
+
+[[plant]]
+name = 'chief: the tail gives the line the bound cuts'
+meant = "stops_at_the_bound_and_never_gives_the_line_it_cuts"
+runs = ["chm-tail"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/tail.rs"
+find = '''        if before[0] == b'\n' {'''
+replace = '        if true {'
+
+[[plant]]
+name = 'chief: the tail reads past its bound'
+meant = "reads_no_more_of_a_long_record_than_its_end_when_what_it_needs_is_there"
+runs = ["chm-tail"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/tail.rs"
+find = '    let floor = size.saturating_sub(bound);'
+replace = '    let floor = 0 * bound;'
+
+[[plant]]
+name = "chief: claude's words for a gone model are not heard"
+meant = "a_model_claude_code_does_not_have_is_said_in_its_words"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '    words.contains("unrecognized_model") || words.contains("issue with the selected model")'
+replace = '    words.is_empty()'
+
+[[plant]]
+name = "chief: codex's words for a gone model are not heard"
+meant = "a_model_codex_does_not_have_is_said_in_its_words"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = '    words.contains("model is not supported") || words.contains("model_not_found")'
+replace = '    words.is_empty()'
+
+[[plant]]
+name = "chief: pi's words for a gone model are not heard"
+meant = "a_model_pi_does_not_have_is_said_in_its_words_and_its_providers"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '    words.contains("model_not_found") || words.contains("not found for provider")'
+replace = '    words.is_empty()'
+
+[[plant]]
+name = "chief: devin's words for a gone model are not heard"
+meant = "a_model_devin_does_not_have_is_said_in_its_words"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = '    words.contains("Unknown model:")'
+replace = '    words.is_empty()'
+
+[[plant]]
+name = "chief: Pi's default may be a contributor model"
+meant = "pi_starts_on_its_settings_default_and_never_on_a_contributor_model"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '    if let Some(named) = named.filter(|named| !cf_proto::models::is_contributor(named)) {'
+replace = '    if let Some(named) = named {'
+
+[[plant]]
+name = 'chief: a model the harness moved to by itself is taken'
+meant = "a_model_the_harness_moved_to_by_itself_is_never_taken_and_the_last_launchs_is_asked_again"
+runs = ["chm-engine", "chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '            Some(used) if used.by_harness || Some(used.model.as_str()) == gone => Self {'
+replace = '            Some(used) if Some(used.model.as_str()) == gone => Self {'
+
+[[plant]]
+name = 'chief: a gone model is asked for again'
+meant = "a_reopen_never_asks_for_a_gone_model_again_though_the_record_still_names_it"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '            Some(used) if used.by_harness || Some(used.model.as_str()) == gone => Self {'
+replace = '            Some(used) if used.by_harness => Self {'
+
+[[plant]]
+name = 'chief: a reopen reads no record'
+meant = "a_reopen_goes_on_with_the_model_and_effort_the_human_switched_to_in_the_window"
+runs = ["chm-dispatcher", "chm-rig"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''            Some(session) => {
+                adapter
+                    .last_used(session, chief.launched_model.as_deref())
+                    .await
+            }'''
+replace = '            Some(_) => None,'
+
+[[plant]]
+name = 'chief: what the launch asked for is not kept'
+meant = "a_model_the_harness_moved_to_by_itself_is_never_taken_and_the_last_launchs_is_asked_again"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            self.chief_launched(participant, chief)?;
+'''
+replace = ''
+
+[[plant]]
+name = 'chief: a gone model at a turn is a failed turn'
+meant = "a_turn_that_fails_on_a_gone_model_closes_the_window_and_starts_the_chief_on_the_default"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '        if let Some(gone) = self.gone_model(participant, &why.said)? {'
+replace = '        if let Some(gone) = self.gone_model(participant, &why.said)?.filter(|_| false) {'
+
+[[plant]]
+name = 'chief: a window gone on a gone model closes the project'
+meant = "a_gone_model_starts_the_chief_on_its_harnesss_default_and_the_human_is_told_once"
+runs = ["chm-dispatcher", "chm-rig"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '                if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))? {'
+replace = '                if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))?.filter(|_| false) {'
+
+[[plant]]
+name = 'chief: a launch that failed on a gone model is tried again slowly'
+meant = "a_gone_model_starts_the_chief_on_its_harnesss_default_and_the_human_is_told_once"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '        if let Some(gone) = self.gone_model(participant, because)? {'
+replace = '        if let Some(gone) = self.gone_model(participant, because)?.filter(|_| false) {'
+
+[[plant]]
+name = 'chief: no default and the chief opens anyway'
+meant = "a_gone_model_the_harness_has_no_default_for_keeps_the_chief_closed_until_a_switch"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '        if participant.role == "chief" && record.window.borrow().no_default {'
+replace = '        if participant.role == "chief" && record.window.borrow().no_default && false {'
+
+[[plant]]
+name = 'chief: what waited for a held chief is not given back'
+meant = "what_waits_for_a_chief_held_on_a_gone_model_waits_for_the_chief_switched_in"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''            if let Some(delivering) = delivering {
+                self.give_back(
+                    delivering.message,
+                    "the chief's model is gone and its harness has no other",
+                )?;
+            }
+'''
+replace = ''
+
+[[plant]]
+name = 'chief: a chief is held for a deleted agent'
+meant = "opens_a_chief_whatever_became_of_the_saved_agents_and_tells_the_human_nothing"
+runs = ["chm-switching"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        participant.role != "chief"
+            && participant'''
+replace = '        participant'
+
+[[plant]]
+name = 'chief: a chief may name no model'
+meant = "switches_no_chief_to_a_harness_with_no_model_named"
+runs = ["chm-switching"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '    model.filter(|model| !model.is_empty()).ok_or_else(|| {'
+replace = '    model.or(Some("")).ok_or_else(|| {'
+
+[[plant]]
+name = "chief: the handoff names the new chief's agent"
+meant = "names_the_switch_the_history_what_waits_and_the_last_word"
+runs = ["chm-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff.rs"
+find = '    let to = who(handoff.to.harness.as_deref(), handoff.to.model.as_deref());'
+replace = '    let to = who(handoff.to.harness.as_deref(), handoff.to.agent.as_deref());'
+
+[[plant]]
+name = 'chief: a model the harness does not list is taken'
+meant = "a_chief_on_a_model_its_harness_does_not_list_or_will_not_run_is_refused"
+runs = ["chm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/chief.rs"
+find = '        None => Err(Said(format!('
+replace = '        None if false => Err(Said(format!('
+
+[[plant]]
+name = "chief: a chief's agent is missing on the board"
+meant = "a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why_on_its_lanes"
+runs = ["chm-daemon-reading"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/board.rs"
+find = '            Some(agent) if participant.member.is_none() && participant.role != "chief" => {'
+replace = '            Some(agent) if participant.member.is_none() => {'
