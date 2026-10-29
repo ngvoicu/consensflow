@@ -480,6 +480,25 @@ fn a_chief_held_for_no_default_stays_held_across_a_restart_and_is_told_once() {
         .filter(|body| body.contains("no longer available"))
         .count();
     assert_eq!(told, 1);
+    // Held, it costs a pass nothing: no event, no window asked for, pass after pass.
+    let events = |context: &Context| {
+        let mut count = 0;
+        context.edit_ledger(|file| {
+            let db = rusqlite::Connection::open(file).unwrap();
+            count = db
+                .query_row("SELECT COUNT(*) FROM event", [], |row| row.get::<_, i64>(0))
+                .unwrap();
+        });
+        count
+    };
+    let (before, opened) = (events(&context), context.host.opened().len());
+    for _ in 0..50 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        (events(&context), context.host.opened().len()),
+        (before, opened)
+    );
 }
 
 /// A launch that ended before its window came up with no code of failure is no refusal of
