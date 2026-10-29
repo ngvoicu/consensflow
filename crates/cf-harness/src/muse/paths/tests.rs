@@ -24,12 +24,80 @@ fn the_data_folder_is_xdg_s_and_an_empty_one_is_none_as_muse_reads_it() {
     );
 }
 
+/// Muse on Windows keeps its data in the user's profile (T-708:
+/// `C:\Users\AGV\.local\share\muse`) and reads no `HOME` there, which Git's tools and
+/// others set; and a folder given in Windows' verbatim form (`\\?\C:\…`, as Muse writes
+/// some of its paths) is read as the plain path it names.
+#[test]
+fn on_windows_the_data_folder_is_in_the_profile_and_a_verbatim_folder_is_read_plain() {
+    let windows = |vars: &[(&str, &str)]| {
+        let mut all = vec![("OS", "Windows_NT")];
+        all.extend_from_slice(vars);
+        env_of(&all)
+    };
+    let profile = r"C:\Users\Zoë";
+    let in_profile = PathBuf::from(path::join(&[profile, ".local", "share"])).join("muse");
+    let env = windows(&[("HOME", "/c/Users/git"), ("USERPROFILE", profile)]);
+    assert_eq!(data(&env).unwrap(), in_profile);
+    assert_eq!(
+        settings(&env).unwrap(),
+        PathBuf::from(path::join(&[profile, ".config"]))
+            .join("muse")
+            .join("settings.json")
+    );
+    // A Windows with no profile named: the home all the same.
+    let home_only = PathBuf::from(path::join(&["/h", ".local", "share"])).join("muse");
+    assert_eq!(data(&windows(&[("HOME", "/h")])).unwrap(), home_only);
+    // Elsewhere the home is HOME's, as Muse reads it.
+    if !cfg!(windows) {
+        assert_eq!(
+            data(&env_of(&[("HOME", "/h"), ("USERPROFILE", profile)])).unwrap(),
+            home_only
+        );
+    }
+    // XDG's folder, given verbatim, as its plain path.
+    let given = windows(&[("XDG_DATA_HOME", r"\\?\C:\Data"), ("USERPROFILE", profile)]);
+    assert_eq!(
+        data(&given).unwrap(),
+        PathBuf::from(r"C:\Data").join("muse")
+    );
+    let config = windows(&[
+        ("XDG_CONFIG_HOME", r"\\?\UNC\server\share\c"),
+        ("USERPROFILE", profile),
+    ]);
+    assert_eq!(
+        settings(&config).unwrap(),
+        PathBuf::from(r"\\server\share\c")
+            .join("muse")
+            .join("settings.json")
+    );
+}
+
+#[test]
+fn a_verbatim_path_is_the_drive_or_share_path_it_names_and_any_other_is_as_it_is() {
+    assert_eq!(plain(r"\\?\C:\Users\AGV\work"), r"C:\Users\AGV\work");
+    assert_eq!(plain(r"\\?\d:"), "d:");
+    assert_eq!(plain(r"\\?\UNC\nas\share\x"), r"\\nas\share\x");
+    for kept in [
+        r"C:\Users\AGV",
+        r"\\nas\share",
+        r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\x",
+        r"\\?\1:\x",
+        "/home/a",
+        "",
+    ] {
+        assert_eq!(plain(kept), kept);
+    }
+}
+
 #[test]
 fn a_session_s_log_is_in_the_folder_named_for_it_under_a_date_and_never_a_child_s() {
     let dir = tempfile::tempdir().unwrap();
     // By its real path, as Muse's data folder is read (the temp folder may be reached
-    // through a link).
-    let home = fs::canonicalize(dir.path()).unwrap();
+    // through a link), in its plain form (Windows' is verbatim).
+    let home = PathBuf::from(plain(
+        &fs::canonicalize(dir.path()).unwrap().to_string_lossy(),
+    ));
     let env = env_of(&[("XDG_DATA_HOME", home.to_str().unwrap())]);
     let sessions = home.join("muse").join("sessions");
     let write = |relative: &str| {
@@ -138,6 +206,164 @@ fn a_window_s_session_is_the_newest_its_process_opened_since_its_launch() {
         opened_by(40_085, launched, &env, &Heads::default()).as_deref(),
         Some(cleared)
     );
+}
+
+/// A session under `day` whose log names no process (Muse on Windows writes no route
+/// facts) and whose lock says `lock`, as Muse writes it.
+fn locked(sessions: &Path, day: &str, id: &str, lock: &str) {
+    let folder = sessions.join(day).join(id);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join("session.jsonl"),
+        "{\"retained_frame\":true}\n{\"payload\":{\"kind\":\"metadata\",\"record\":{\"workspace_root\":\"C:\\\\w\"}}}\n",
+    )
+    .unwrap();
+    fs::write(folder.join(".session.lock"), lock).unwrap();
+}
+
+/// Muse on Windows names no process in a session's log (T-708: no `route_facts`), and a
+/// session's folder holds a lock its process keeps while the session is open, naming it
+/// (`pid=50544`; a Mac's adds `host=`): a fresh window learns its session by the lock.
+/// One closed (an empty lock), another process's, or one begun before the launch, is not
+/// the window's; and a log that names its process is believed over its lock.
+#[test]
+fn where_the_log_names_no_process_the_session_s_lock_names_it() {
+    let home = tempfile::tempdir().unwrap();
+    let env = env_of(&[("XDG_DATA_HOME", home.path().to_str().unwrap())]);
+    let sessions = home.path().join("muse").join("sessions");
+    let launched = 0x01a1_7bc7_6aab_i64;
+    let look = || opened_by(50_544, launched, &env, &Heads::default());
+    locked(
+        &sessions,
+        "2026/10/26",
+        "01a17000-0000-7000-8000-000000000001",
+        "pid=50544\n",
+    );
+    locked(
+        &sessions,
+        "2026/10/27",
+        "01a17bc7-6ab0-7000-8000-000000000002",
+        "pid=50545\n",
+    );
+    locked(
+        &sessions,
+        "2026/10/27",
+        "01a17bc7-6ab1-7000-8000-000000000003",
+        "",
+    );
+    assert_eq!(look(), None);
+    let windows = "01a17bc7-6ab2-7000-8000-000000000004";
+    locked(&sessions, "2026/10/27", windows, "pid=50544\r\n");
+    assert_eq!(look().as_deref(), Some(windows));
+    let mac = "01a17bc7-6ab3-7000-8000-000000000005";
+    locked(
+        &sessions,
+        "2026/10/27",
+        mac,
+        "pid=50544\nhost=a-mac.local\n",
+    );
+    assert_eq!(look().as_deref(), Some(mac));
+    // The log's word first: a session whose route facts name another process is that one's.
+    let named = "01a17bc7-6ab4-7000-8000-000000000006";
+    opened(&sessions, "2026/10/27", named, 40_085);
+    fs::write(
+        sessions
+            .join("2026/10/27")
+            .join(named)
+            .join(".session.lock"),
+        "pid=50544\n",
+    )
+    .unwrap();
+    assert_eq!(look().as_deref(), Some(mac));
+    assert_eq!(
+        opened_by(40_085, launched, &env, &Heads::default()).as_deref(),
+        Some(named)
+    );
+}
+
+/// Windows has no `exec`: a launcher runs Muse as its child, and the window's process is
+/// the launcher's. Where no session names the window's process, the one whose lock names a
+/// process it started is its own; one that names the window's process is believed first.
+#[test]
+#[allow(clippy::disallowed_methods)] // The test's own program, ended by it.
+fn a_session_of_a_process_the_window_s_process_started_is_its_own_where_none_names_it() {
+    let home = tempfile::tempdir().unwrap();
+    let env = env_of(&[("XDG_DATA_HOME", home.path().to_str().unwrap())]);
+    let sessions = home.path().join("muse").join("sessions");
+    let launched = 0x01a1_7bc7_6aab_i64;
+    let mut child = if cfg!(windows) {
+        let mut command = std::process::Command::new("cmd.exe");
+        command.args(["/d", "/c", "ping -n 30 127.0.0.1 >nul"]);
+        command.spawn().unwrap()
+    } else {
+        std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap()
+    };
+    let me = std::process::id();
+    let look = || opened_by(me, launched, &env, &Heads::default());
+    assert_eq!(look(), None);
+    let launched_muse = "01a17bc7-6ab2-7000-8000-000000000004";
+    locked(
+        &sessions,
+        "2026/10/27",
+        launched_muse,
+        &format!("pid={}\n", child.id()),
+    );
+    // Another's child, and the process's own child, are told apart by whose it is.
+    assert_eq!(
+        opened_by(me + 1, launched, &env, &Heads::default()),
+        None,
+        "a process {} did not start",
+        me + 1
+    );
+    assert_eq!(look().as_deref(), Some(launched_muse));
+    let own = "01a17bc7-6ab1-7000-8000-000000000003";
+    locked(&sessions, "2026/10/27", own, &format!("pid={me}\n"));
+    assert_eq!(look().as_deref(), Some(own), "its own first, though older");
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+/// Muse on Windows keeps its lock's words from every other reader while it holds it
+/// (T-792's probe: "another process has locked a portion of the file"): the process that
+/// holds the lock open is the session's. Here a child of the test's holds it, as Muse does
+/// as the child of a launcher; a lock nobody holds names nobody.
+#[cfg(windows)]
+#[test]
+#[allow(clippy::disallowed_methods)] // The test's own program, ended by it.
+fn on_windows_a_lock_whose_words_cannot_be_read_is_named_by_the_process_that_holds_it() {
+    let home = tempfile::tempdir().unwrap();
+    let env = env_of(&[("XDG_DATA_HOME", home.path().to_str().unwrap())]);
+    let sessions = home.path().join("muse").join("sessions");
+    let launched = 0x01a1_7bc7_6aab_i64;
+    let closed = "01a17bc7-6ab1-7000-8000-000000000003";
+    locked(&sessions, "2026/10/27", closed, "");
+    let held = "01a17bc7-6ab2-7000-8000-000000000004";
+    locked(&sessions, "2026/10/27", held, "");
+    let lock = sessions.join("2026/10/27").join(held).join(".session.lock");
+    // One process holds it, as Muse alone holds its lock: no shell with a child that
+    // would hold it too.
+    let file = fs::OpenOptions::new().append(true).open(&lock).unwrap();
+    let mut child = std::process::Command::new(r"C:\Windows\System32\PING.EXE")
+        .args(["-n", "30", "127.0.0.1"])
+        .stdout(file)
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let look = |pid: u32| opened_by(pid, launched, &env, &Heads::default());
+    while look(child.id()).is_none() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(look(child.id()).as_deref(), Some(held));
+    assert_eq!(
+        look(std::process::id()).as_deref(),
+        Some(held),
+        "its launcher's"
+    );
+    child.kill().unwrap();
+    child.wait().unwrap();
 }
 
 /// A session log under `day` started from `previous` by a `/clear`: no route facts.

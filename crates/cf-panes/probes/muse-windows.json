@@ -1,0 +1,440 @@
+{
+ "cases": [
+  {
+   "name": "muse",
+   "argv": [
+    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "5000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "mode": true,
+     "note": "up, at rest",
+     "locks": true
+    },
+    {
+     "paste": "probe one: a paste and a plain CR",
+     "enter_after_ms": 400,
+     "mode": true,
+     "note": "the pane host's paste",
+     "locks": true
+    },
+    {
+     "after_ms": 7000,
+     "note": "the echo turn is done"
+    },
+    {
+     "write": "typed words",
+     "note": "words typed into the box"
+    },
+    {
+     "after_ms": 500,
+     "write": "\u0003",
+     "note": "a plain Control-C byte into a box holding words"
+    },
+    {
+     "after_ms": 500,
+     "paste": "probe two: interrupted",
+     "enter_after_ms": 400,
+     "note": "a turn to interrupt"
+    },
+    {
+     "after_ms": 1000,
+     "write": "\u001b",
+     "note": "a plain Escape while the turn works"
+    },
+    {
+     "after_ms": 3000,
+     "note": "after the Escape: the brief taken back?"
+    },
+    {
+     "write": "\u0003",
+     "note": "a plain Control-C into the box holding the brief taken back"
+    },
+    {
+     "after_ms": 1000,
+     "write": "\u0003",
+     "mode": true,
+     "note": "a plain Control-C into an empty box at rest (arms the quit)"
+    },
+    {
+     "after_ms": 300,
+     "write": "\u0003",
+     "note": "a second within 1.5 s: quits?"
+    },
+    {
+     "after_ms": 3000,
+     "note": "after the quit"
+    }
+   ]
+  },
+  {
+   "name": "muse-resumed",
+   "argv": [
+    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "resume",
+    "${LAST_SESSION}",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "5000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "note": "resumed on the session the case before left: its words shown?",
+     "locks": true
+    },
+    {
+     "paste": "probe three: after the resume",
+     "enter_after_ms": 400,
+     "note": "a turn in the resumed session",
+     "locks": true
+    },
+    {
+     "after_ms": 7000,
+     "note": "done"
+    }
+   ],
+   "temp_of_previous": true
+  },
+  {
+   "name": "muse-taken-back",
+   "argv": [
+    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "5000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "note": "up"
+    },
+    {
+     "paste": "probe four: taken back before its first word",
+     "enter_after_ms": 400,
+     "note": "a first turn"
+    },
+    {
+     "after_ms": 300,
+     "write": "\u001b",
+     "note": "Escape at once"
+    },
+    {
+     "after_ms": 2000,
+     "note": "taken back?"
+    },
+    {
+     "write": "\u0003",
+     "note": "the box emptied"
+    },
+    {
+     "after_ms": 1000,
+     "write": "\u0003",
+     "note": "quit, 1"
+    },
+    {
+     "after_ms": 300,
+     "write": "\u0003",
+     "note": "quit, 2"
+    },
+    {
+     "after_ms": 3000,
+     "note": "gone"
+    }
+   ]
+  },
+  {
+   "name": "muse-taken-back-resumed",
+   "argv": [
+    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "resume",
+    "${LAST_SESSION}",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "5000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "note": "resumed on a session whose one turn was taken back",
+     "locks": true
+    },
+    {
+     "paste": "probe five: after resuming a taken-back session",
+     "enter_after_ms": 400,
+     "note": "a turn",
+     "locks": true
+    },
+    {
+     "after_ms": 7000,
+     "note": "done"
+    }
+   ],
+   "temp_of_previous": true
+  },
+  {
+   "name": "muse-zoë-日本",
+   "argv": [
+    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "5000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "note": "up in a folder whose name is not ASCII",
+     "locks": true
+    },
+    {
+     "paste": "probe six: a non-ASCII workspace é ț 日",
+     "enter_after_ms": 400,
+     "note": "a turn",
+     "locks": true
+    },
+    {
+     "after_ms": 7000,
+     "note": "done"
+    }
+   ]
+  },
+  {
+   "name": "muse-hooks",
+   "argv": [
+    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "-c",
+    "hooks={\"SessionStart\":[{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"'C:\\\\Windows\\\\System32\\\\cmd.exe' /c echo command-ran> \\\"${TEMP_JSON}\\\\command.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"& 'C:\\\\Windows\\\\System32\\\\cmd.exe' /c echo windows-ran> '${TEMP_JSON}\\\\windows.txt'\",\"timeout\":10},{\"type\":\"command\",\"command\":\"$PSVersionTable.PSVersion.ToString() | Out-File -LiteralPath '${TEMP_JSON}\\\\ps.txt'\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"$input | Out-File -LiteralPath '${TEMP_JSON}\\\\stdin.txt'; Get-ChildItem env: | Out-File -LiteralPath '${TEMP_JSON}\\\\env.txt'\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"& 'C:\\\\Windows\\\\System32\\\\cmd.exe' /c echo quotes-ran> '${TEMP_JSON}\\\\it’’s-‘‘q’’.txt'\",\"timeout\":10}]}]}",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "5000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "note": "up, with four SessionStart hooks"
+    },
+    {
+     "paste": "probe seven: hooks",
+     "enter_after_ms": 400,
+     "note": "the first prompt fires SessionStart"
+    },
+    {
+     "after_ms": 8000,
+     "note": "done"
+    }
+   ]
+  },
+  {
+   "name": "muse-win32",
+   "argv": [
+    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "5000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "note": "up, at rest"
+    },
+    {
+     "write": "\u001b[200~probe eight: win32 Enter\u001b[201~",
+     "note": "a bracketed paste, no Enter"
+    },
+    {
+     "after_ms": 400,
+     "keys": [
+      [
+       13,
+       28,
+       13,
+       0
+      ]
+     ],
+     "note": "Enter as a key event"
+    },
+    {
+     "after_ms": 7000,
+     "note": "the echo turn is done"
+    },
+    {
+     "write": "typed words",
+     "note": "words typed"
+    },
+    {
+     "after_ms": 500,
+     "keys": [
+      [
+       67,
+       46,
+       3,
+       8
+      ]
+     ],
+     "note": "Control-C as a key event"
+    },
+    {
+     "after_ms": 1000,
+     "note": "box cleared?"
+    }
+   ]
+  },
+  {
+   "name": "claude",
+   "argv": [
+    "${USERPROFILE}\\.local\\bin\\claude.exe"
+   ],
+   "env": {
+    "USERPROFILE": "${TEMP}\\home",
+    "HOME": "${TEMP}\\home",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9",
+    "APPDATA": "${TEMP}\\appdata",
+    "LOCALAPPDATA": "${TEMP}\\localappdata",
+    "CLAUDE_CONFIG_DIR": "${TEMP}\\claude",
+    "DISABLE_AUTOUPDATER": "1"
+   },
+   "steps": [
+    {
+     "after_ms": 10000,
+     "mode": true,
+     "note": "up"
+    }
+   ]
+  },
+  {
+   "name": "codex",
+   "argv": [
+    "${SystemRoot}\\System32\\cmd.exe",
+    "/d",
+    "/c",
+    "${APPDATA}\\npm\\codex.cmd"
+   ],
+   "env": {
+    "USERPROFILE": "${TEMP}\\home",
+    "HOME": "${TEMP}\\home",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9",
+    "CODEX_HOME": "${TEMP}\\codex"
+   },
+   "steps": [
+    {
+     "after_ms": 10000,
+     "mode": true,
+     "note": "up"
+    }
+   ]
+  },
+  {
+   "name": "pi",
+   "argv": [
+    "${SystemRoot}\\System32\\cmd.exe",
+    "/d",
+    "/c",
+    "${APPDATA}\\npm\\pi.cmd"
+   ],
+   "env": {
+    "USERPROFILE": "${TEMP}\\home",
+    "HOME": "${TEMP}\\home",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9",
+    "PI_CODING_AGENT_DIR": "${TEMP}\\pi"
+   },
+   "steps": [
+    {
+     "after_ms": 10000,
+     "mode": true,
+     "note": "up"
+    }
+   ]
+  }
+ ]
+}
