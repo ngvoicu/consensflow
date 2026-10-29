@@ -4,6 +4,7 @@
 
 [run]
 release-commands = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "release::"]
+dispatch-plan = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "dispatch::tests::every_command_of_the_plan_is_there_once"]
 
 [[plant]]
 name = "release: a pre-release that is not alpha.N is taken for an alpha"
@@ -149,7 +150,7 @@ replace = "if newest.is_some() {"
 
 [[plant]]
 name = "release: a run is taken as it is before it ends"
-meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -231,7 +232,7 @@ replace = "                    finish_by_hand(tag, branch)"
 
 [[plant]]
 name = "release: release alpha's dry run tags"
-meant = "a_dry_run_watches_ci_and_starts_and_tags_nothing"
+meant = "a_dry_run_watches_ci_says_it_would_trial_and_tag_and_starts_and_tags_nothing"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -261,7 +262,7 @@ replace = "if stable_after.as_str().is_empty() {"
 
 [[plant]]
 name = "release: the tag's message is not the notes"
-meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -273,7 +274,7 @@ replace = '''
 
 [[plant]]
 name = "release: the tag goes to upstream alone"
-meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -794,3 +795,610 @@ runs = ["release-commands"]
 file = "tools/xtask/src/release/github.rs"
 find = "Err(Refusal::NeverRan(_)) if looks < self.pace.appear_attempts => {"
 replace = "Err(Refusal::NeverRan(_)) if looks > self.pace.appear_attempts => {"
+
+# The trial: a hand run of the Release workflow on the release commit, watched green before the tag.
+
+[[plant]]
+name = "release: the trial is not started"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    release.trial(&commit)?;"
+replace = ""
+
+[[plant]]
+name = "release: a trial that did not end green is taken"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    release.trial(&commit)?;"
+replace = "    let _ = release.trial(&commit);"
+
+[[plant]]
+name = "release: the trial is run after the tag"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = '''
+    release.trial(&commit)?;
+'''
+replace = ""
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    release.tag_and_push(&tag, &notes, &commit)?;"
+replace = '''
+    release.tag_and_push(&tag, &notes, &commit)?;
+    release.trial(&commit)?;'''
+
+[[plant]]
+name = "release: the trial is asked for on a branch the signing keys' environment does not admit"
+meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+            "--ref",
+            "main",'''
+replace = '''
+            "--ref",
+            "HEAD",'''
+
+[[plant]]
+name = "release: a hand run gh refuses to start is let by"
+meant = "a_hand_run_that_gh_cannot_start_stops_it_with_what_gh_said_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+            "--ref",
+            "main",
+        ])?;'''
+replace = '''
+            "--ref",
+            "main",
+        ])
+        .unwrap_or_default();'''
+
+[[plant]]
+name = "release: the hand run of before is taken for the trial"
+meant = "an_older_hand_run_of_the_same_commit_is_not_taken_for_the_trial"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+        let before = self.newest_run("release.yml", Some(commit), Some("workflow_dispatch"))?;'''
+replace = "        let before = None;"
+
+[[plant]]
+name = "release: main is not asked again before the hand run"
+meant = "main_that_moved_while_ci_was_watched_is_not_trialled_for_a_hand_run_is_of_main_s_head"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    let head = release.main_as_upstream_has_it()?;"
+replace = "    let head = commit.clone();"
+
+[[plant]]
+name = "release: main that moved with the checkout is trialled"
+meant = "main_that_moved_while_ci_was_watched_is_not_trialled_for_a_hand_run_is_of_main_s_head"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    if head != commit {"
+replace = "    if head.is_empty() {"
+
+[[plant]]
+name = "release: a failed step is not named"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "                .filter(|(_, conclusion)| !passed(conclusion))"
+replace = "                .filter(|_| false)"
+
+[[plant]]
+name = "release: a job that ended cancelled or timed out is not named"
+meant = "a_trial_cancelled_with_no_step_to_name_is_refused_with_its_jobs"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "        for job in self.jobs.iter().filter(|job| !passed(&job.conclusion)) {"
+replace = '''
+        for job in self.jobs.iter().filter(|job| job.conclusion == "failure") {'''
+
+[[plant]]
+name = "release: a step that was skipped is named as failed"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+        let passed = |conclusion: &str| matches!(conclusion, "success" | "skipped" | "neutral");'''
+replace = '''
+        let passed = |conclusion: &str| matches!(conclusion, "success");'''
+
+[[plant]]
+name = "release: the address of a red run is not said"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                format!("{}; {address}", failed.join(", "))'''
+replace = '''
+                failed.join(", ")'''
+
+# The trial is bound to the commit that is tagged, and told from a main that moved (T-897).
+
+[[plant]]
+name = "release: the run asked for is looked for by no commit"
+meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = ".newest_run(workflow, Some(watched.commit), watched.event)"
+replace = ".newest_run(workflow, None, watched.event)"
+
+[[plant]]
+name = "release: the list of runs is not asked for the commit"
+meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+        if let Some(commit) = commit {
+            args.extend(["--commit", commit]);
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "release: a run of another commit is taken for the one asked for"
+meant = "a_run_of_another_commit_that_gh_lists_anyway_is_refused_for_what_it_says_of_itself"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "            if status.head_sha != watched.commit {"
+replace = "            if status.head_sha.is_empty() {"
+
+[[plant]]
+name = "release: a main that moved is not looked for while the run is waited for"
+meant = "main_that_moved_between_the_check_and_the_dispatch_is_refused_at_once_with_the_run_of_the_new_head"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "                self.main_moved(watched, head)?;"
+replace = "                let _ = head;"
+
+[[plant]]
+name = "release: a main that is still the commit is taken for moved"
+meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "        if now == watched.commit {"
+replace = "        if now.is_empty() {"
+
+[[plant]]
+name = "release: the run that is ours is taken for one of a main that moved"
+meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_commit_it_ran_on"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "        if Some(id) == head.newest_before || sha == watched.commit {"
+replace = "        if Some(id) == head.newest_before {"
+
+[[plant]]
+name = "release: the run that was there before is taken for one of a main that moved"
+meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_commit_it_ran_on"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "        if Some(id) == head.newest_before || sha == watched.commit {"
+replace = "        if sha == watched.commit {"
+
+[[plant]]
+name = "release: the newest run before the trial is not taken"
+meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_commit_it_ran_on"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+        let newest_before = self.newest_run("release.yml", None, Some("workflow_dispatch"))?;'''
+replace = "        let newest_before = None;"
+
+[[plant]]
+name = "release: a gh that fails while the run is looked at ends the command as gh's error"
+meant = "a_gh_that_fails_while_the_trial_is_watched_is_a_refusal_naming_the_run_and_that_nothing_was_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                .status(id)
+                .map_err(|error| watched.unasked(&error, Some(id)))?;'''
+replace = '''
+                .status(id)?;'''
+
+[[plant]]
+name = "release: a gh that fails while the run is looked for ends the command as gh's error"
+meant = "a_gh_that_fails_while_the_trial_is_watched_is_a_refusal_naming_the_run_and_that_nothing_was_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                .newest_run(workflow, Some(watched.commit), watched.event)
+                .map_err(|error| watched.unasked(&error, None))?;'''
+replace = '''
+                .newest_run(workflow, Some(watched.commit), watched.event)?;'''
+
+[[plant]]
+name = "release: a trial that fails is told as nothing after it was done"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+            left: Left::Trial,'''
+replace = '''
+            left: Left::Nothing,'''
+
+[[plant]]
+name = "release: a trial that fails says nothing of what to do next"
+meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                Some(_) => "nothing was tagged. Read the failed step at the address; for a flake run the command \
+                            again, which starts a new trial; for a real failure fix it on main so that CI runs \
+                            again, then run the command again"
+                    .to_owned(),'''
+replace = '''
+                Some(_) => "nothing was tagged".to_owned(),'''
+
+# `release verify`, and the step the releases end with (T-869): the files against SHA256SUMS,
+# the update archive's signature against the key the tag pins, the control, the feeds.
+
+[[plant]]
+name = "release: a file that hashes otherwise than SHA256SUMS lists is taken"
+meant = "a_file_with_a_byte_changed_since_sha256sums_was_written_fails_naming_both_hashes"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            if got != *hash {"
+replace = "            if got.is_empty() {"
+
+[[plant]]
+name = "release: a file SHA256SUMS lists that the release lacks is hashed anyway"
+meant = "a_file_sha256sums_lists_that_the_release_lacks_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            if !names.contains(name) {"
+replace = "            if names.is_empty() {"
+
+[[plant]]
+name = "release: a file the release holds that SHA256SUMS does not list is taken"
+meant = "a_file_the_release_holds_that_sha256sums_does_not_list_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''name != "SHA256SUMS" && !listed.contains_key(name)'''
+replace = "false"
+
+[[plant]]
+name = "release: a line of SHA256SUMS that is no hash and name is let by"
+meant = "the_lines_of_sha256sums_are_read_as_sha256sum_writes_them_and_any_other_is_told"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            None => odd.push(line.to_owned()),"
+replace = "            None => {}"
+
+[[plant]]
+name = "release: a name written in binary mode keeps its star"
+meant = "the_lines_of_sha256sums_are_read_as_sha256sum_writes_them_and_any_other_is_told"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "rest.strip_prefix([' ', '*'])"
+replace = "rest.strip_prefix(' ')"
+
+[[plant]]
+name = "release: the archive's signature is not checked"
+meant = "an_archive_with_a_byte_changed_fails_its_hash_and_its_signature"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if let Err(cause) = key.verify(&bytes, &parsed, false) {"
+replace = "        if let Err(cause) = Result::<(), minisign_verify::Error>::Ok(()) {"
+
+[[plant]]
+name = "release: the key is the checkout's, not the tag's"
+meant = "the_key_is_the_one_the_tag_pins_not_the_one_the_checkout_pins_now"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''let spec = format!("{tag}:{CONF}");'''
+replace = '''let spec = format!("HEAD:{CONF}");'''
+
+[[plant]]
+name = "release: the key is read from another file than the one that pins it"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''const CONF: &str = "app/src-tauri/tauri.conf.json";'''
+replace = '''const CONF: &str = "app/src-tauri/tauri.conf.json5";'''
+
+[[plant]]
+name = "release: a tag the checkout lacks is not fetched"
+meant = "a_tag_the_checkout_lacks_is_fetched_by_name_from_upstream"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''self.git(&["fetch", "-q", "--no-tags", "upstream", &fetch])'''
+replace = '''self.git(&["fetch", "-q", "--no-tags", "upstream", "HEAD"])'''
+
+[[plant]]
+name = "release: the control changes no byte"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            Some(first) => *first ^= 1,"
+replace = "            Some(first) => *first ^= 0,"
+
+[[plant]]
+name = "release: the control is taken as passed when the check refuses nothing"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if key.verify(&bytes, &parsed, false).is_ok() {"
+replace = "        if key.verify(&bytes, &parsed, false).is_err() {"
+
+[[plant]]
+name = "release: a feed that serves a later release is held to this one"
+meant = "a_feed_that_serves_a_later_release_is_told_and_not_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if served > ours {"
+replace = "        if served.as_str().is_empty() {"
+
+[[plant]]
+name = "release: a feed that serves an earlier release is held to this one"
+meant = "a_feed_that_serves_an_earlier_release_or_none_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if served < ours {"
+replace = "        if served.as_str().is_empty() {"
+
+[[plant]]
+name = "release: a feed's latest.json is not held to the release's"
+meant = "a_feed_whose_latest_json_is_not_the_releases_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''        if body != read("latest.json")? {'''
+replace = "        if body.is_empty() {"
+
+[[plant]]
+name = "release: a feed's signature is not held to the .sig"
+meant = "a_feed_whose_signature_is_not_the_sig_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if signed.trim() != read(signature)?.trim() {"
+replace = "        if signed.is_empty() {"
+
+[[plant]]
+name = "release: a feed's archive is not held to the release's"
+meant = "a_feed_whose_address_gives_another_archive_than_the_releases_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        } else if sha256_of(&fetched)? != sha256_of(&folder.join(archive))? {"
+replace = "        } else if false {"
+
+[[plant]]
+name = "release: a feed's archive that cannot be read is let by"
+meant = "a_feed_whose_address_gives_nothing_fails_with_what_curl_said"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''
+        if answered.code != 0 {
+            report.problems.push(format!(
+                "{feed}'s archive could not be read'''
+replace = '''
+        if false {
+            report.problems.push(format!(
+                "{feed}'s archive could not be read'''
+
+[[plant]]
+name = "release: an alpha's feed-stable is held to it too"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "    if version.contains('-') {"
+replace = "    if false {"
+
+[[plant]]
+name = "release: a plain version's feed-stable is not checked"
+meant = "a_plain_version_is_served_by_both_feeds_and_both_are_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        vec![ALPHA_FEED, STABLE_FEED]"
+replace = "        vec![ALPHA_FEED]"
+
+[[plant]]
+name = "release: an update archive or signature the release lacks is let by"
+meant = "an_update_archive_or_signature_the_release_lacks_fails_for_the_update_needs_both"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if lacking {"
+replace = "        if false {"
+
+[[plant]]
+name = "release: the folder the files were downloaded into is left"
+meant = "it_only_reads_whatever_the_checkout_holds_and_leaves_nothing_behind"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        let removed = fs::remove_dir_all(&folder);"
+replace = "        let removed: io::Result<()> = Ok(());"
+
+[[plant]]
+name = "release: the folder that held the download folder is left"
+meant = "it_only_reads_whatever_the_checkout_holds_and_leaves_nothing_behind"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        let _ = fs::remove_dir(&parent);"
+replace = "        let _ = &parent;"
+
+[[plant]]
+name = "release: a flag is taken for the version to verify"
+meant = "the_command_takes_the_version_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            Some(text) if version.is_none() && !text.starts_with('-') => {"
+replace = "            Some(text) if version.is_none() => {"
+
+[[plant]]
+name = "release: a second version is taken for the first"
+meant = "the_command_takes_the_version_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            Some(text) if version.is_none() && !text.starts_with('-') => {"
+replace = "            Some(text) if !text.starts_with('-') => {"
+
+[[plant]]
+name = "release: a release that does not verify is passed by the command"
+meant = "a_file_with_a_byte_changed_since_sha256sums_was_written_fails_naming_both_hashes"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''
+    if !report.problems.is_empty() {
+        return Err(refused(does_not_verify(version, &report.problems)));'''
+replace = '''
+    if report.held.is_empty() {
+        return Err(refused(does_not_verify(version, &report.problems)));'''
+
+[[plant]]
+name = "release: the release run's end is not followed by the check of the release"
+meant = "a_published_release_is_checked_once_the_feeds_serve_it_and_what_held_is_said"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    release.verify_published(&version, run)?;"
+replace = ""
+
+[[plant]]
+name = "release: a promotion is not followed by the check of its release"
+meant = "a_promoted_release_is_checked_once_both_feeds_serve_it_and_a_bad_one_is_told_as_published"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "    release.verify_published(&plain, run)?;"
+replace = ""
+
+[[plant]]
+name = "release: a published release that does not verify is let by"
+meant = "a_release_that_does_not_verify_once_published_says_it_is_published_and_never_to_run_again"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''
+        if !report.problems.is_empty() {
+            return Err(refused(format!(
+                "{published}, yet checking it found'''
+replace = '''
+        if false {
+            return Err(refused(format!(
+                "{published}, yet checking it found'''
+
+[[plant]]
+name = "release: why a published release could not be checked is not said"
+meant = "a_release_that_cannot_be_read_once_published_is_told_as_published_too"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '"{published}, yet it could not be checked ({cause}); {read_by_hand}"'
+replace = '"{published}, yet it could not be checked; {read_by_hand}"'
+
+[[plant]]
+name = "release: release verify is not a command"
+meant = "every_command_of_the_plan_is_there_once"
+runs = ["dispatch-plan"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''        words: &["release", "verify"],'''
+replace = '''        words: &["release", "verifx"],'''

@@ -60,6 +60,7 @@ fn every_command_of_the_plan_is_there_once() {
             "candidate",
             "release alpha",
             "release promote",
+            "release verify",
             "check",
             "ci-times",
         ]
