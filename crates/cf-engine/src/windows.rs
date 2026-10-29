@@ -27,6 +27,7 @@ use crate::deliveries::{Admitting, Delivering};
 use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
+use crate::ownership::Kept;
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
 use crate::runtime::{begin, caught, returning};
@@ -1002,7 +1003,21 @@ impl Dispatcher {
             )? {
                 return Ok(None);
             }
-            self.kept_apart(project, participant, found, before.as_ref(), first)?
+            match self.kept_apart(project, participant, found, before.as_ref(), first)? {
+                Kept::On(conversation) => conversation,
+                Kept::Held => {
+                    // The task is paused, a stop the launch did not capture: the message it
+                    // began goes back to wait for the chief's word, and the launch is over.
+                    self.launch_over(
+                        record,
+                        participant,
+                        delivering,
+                        stop,
+                        "its task waits for the chief's word: the conversation it follows cannot be gone on in",
+                    )?;
+                    return Ok(None);
+                }
+            }
         };
         // The task whose work the window holds: its first message's, or what its
         // conversation was last given where it goes on with one.

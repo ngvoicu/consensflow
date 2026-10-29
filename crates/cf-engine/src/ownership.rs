@@ -30,7 +30,13 @@
 //! saw it close: a window open when the app quit, which the window's quit ends after the
 //! daemon has gone and tells no one, `cf_panes::headless::reap_all`), the other task opens
 //! a new conversation, as a session's first task does, and whoever gave it is told once
-//! that it does not go on in the earlier task's ([`Dispatcher::kept_apart`]).
+//! that it does not go on in the earlier task's ([`Dispatcher::kept_apart`]). A task queued for
+//! the window that cannot go on in the earlier task's conversation is not given to a window of
+//! its own unasked, though: its brief may be written for a window that remembers the earlier
+//! task ("your T-65 snapshot", the field issue of 2026-10-29). It is held for the chief's word
+//! (paused, `Ledger::hold_for_context`), told once with how to go on: rewrite the brief with
+//! `cf task edit`, and send it on with `cf task resume`, which is the chief's knowing: the task
+//! then goes to a conversation of its own, and is not held a second time.
 //!
 //! The window knows its task by the launch that opened it (its first message's task, the
 //! message a role said first displaced among them, or the task its conversation was last
@@ -49,6 +55,14 @@ use crate::seams::EngineError;
 /// The states of a task that a session it is given to still has in hand, whose window
 /// stays for it.
 const IN_HAND: [&str; 4] = ["queued", "working", "waiting", "paused"];
+
+/// What a launch does with the conversation of the session's earlier task.
+pub(crate) enum Kept {
+    /// The window goes on with this conversation, or opens a new one (none).
+    On(Option<ConversationView>),
+    /// The task waits for the chief's word instead: it is paused, and the launch is over.
+    Held,
+}
 
 impl Dispatcher {
     /// The participant of a record, as the ledger has it now: none for one forgotten.
@@ -145,8 +159,10 @@ impl Dispatcher {
     /// The conversation a member's window that opens for `first` goes on with: `found`,
     /// the session's, unless `first` is a message of another task than the one that
     /// conversation was last given (`before`) and the host did not prove the program of
-    /// the last window on it gone, as the ledger keeps it, in which case a new one
-    /// (none), whoever gave `first`'s task told once.
+    /// the last window on it gone, as the ledger keeps it. Then a task still queued for the
+    /// window is held for the chief's word ([`Kept::Held`]), once: told to whoever gave it,
+    /// with how to go on. A task the chief sent on after that goes to a new conversation (none),
+    /// knowingly, and so does one that is not queued, whoever gave it told once.
     pub(crate) fn kept_apart(
         &self,
         project: &ProjectView,
@@ -154,38 +170,69 @@ impl Dispatcher {
         found: Option<ConversationView>,
         before: Option<&TaskThread>,
         first: Option<&MessageView>,
-    ) -> Result<Option<ConversationView>, EngineError> {
+    ) -> Result<Kept, EngineError> {
         let Some(before) = before else {
-            return Ok(found);
+            return Ok(Kept::On(found));
         };
         let Some(conversation) = found else {
-            return Ok(None);
+            return Ok(Kept::On(None));
         };
         let other = first
             .and_then(|first| first.task_number)
             .filter(|number| *number != before.task.number);
         let Some(number) = other else {
-            return Ok(Some(conversation));
+            return Ok(Kept::On(Some(conversation)));
         };
         let gone = self.seams.ledger.borrow().program_gone(conversation.id)?;
         if gone {
-            return Ok(Some(conversation));
+            return Ok(Kept::On(Some(conversation)));
         }
         let waiting = self.seams.ledger.borrow().task(project.id, number)?;
-        if let Some(waiting) = waiting {
-            self.seams.ledger.borrow_mut().note(
+        let Some(waiting) = waiting else {
+            return Ok(Kept::On(None));
+        };
+        let (earlier, handle) = (before.task.number, &participant.handle);
+        if self
+            .seams
+            .ledger
+            .borrow()
+            .held_for_context(project.id, number)?
+        {
+            return Ok(Kept::On(None));
+        }
+        if waiting.task.state == "queued" {
+            let mut ledger = self.seams.ledger.borrow_mut();
+            ledger.hold_for_context(
+                project.id,
+                number,
+                &format!(
+                    "@{handle}'s window that worked on T-{earlier} closed with no proof its program was gone"
+                ),
+            )?;
+            ledger.note(
                 project.id,
                 &NewNote {
                     from: None,
                     to: waiting.task.requester.clone(),
                     task: Some(number),
                     body: format!(
-                        "T-{number} goes to @{} in a new conversation: its window that worked on T-{} closed with no proof its program was gone, which may still write to that conversation, so T-{number} does not go on in it.",
-                        participant.handle, before.task.number
+                        "T-{number} is paused and waits for your word: @{handle}'s window that worked on T-{earlier} closed with no proof its program was gone, which may still write to that conversation, so T-{number} does not go on in it, and a window of its own would not remember T-{earlier}. If its brief counts on that, rewrite it with cf task edit T-{number} \"…\"; send it to a window of its own with cf task resume T-{number} \"…\", or cancel it."
                     ),
                 },
             )?;
+            return Ok(Kept::Held);
         }
-        Ok(None)
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: waiting.task.requester.clone(),
+                task: Some(number),
+                body: format!(
+                    "T-{number} goes to @{handle} in a new conversation: its window that worked on T-{earlier} closed with no proof its program was gone, which may still write to that conversation, so T-{number} does not go on in it."
+                ),
+            },
+        )?;
+        Ok(Kept::On(None))
     }
 }

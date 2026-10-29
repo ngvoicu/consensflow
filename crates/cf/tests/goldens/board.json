@@ -1022,7 +1022,7 @@
         "body": "{\"after\":3,\"needs\":[1,2],\"body\":\"more\"}"
       }
     ],
-    "stdout": "T-6 continues in @zeus, the window that did T-3; its result arrives in your inbox. The human approves each message before it moves. It waits until T-1, T-2 are accepted.\nT-6: sent 4 characters, ending \"more\".\n",
+    "stdout": "T-6 continues in @zeus, the window that did T-3; its result arrives in your inbox. The human approves each message before it moves. It waits until T-1, T-2 are accepted. If that window cannot go on in its conversation when T-6 starts, T-6 waits paused for your word (cf task edit T-6, then cf task resume T-6).\nT-6: sent 4 characters, ending \"more\".\n",
     "stderr": "",
     "code": 0
   },

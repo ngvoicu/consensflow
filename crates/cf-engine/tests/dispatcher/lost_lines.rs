@@ -573,6 +573,24 @@ fn devins_window_begun_afresh_counts_its_lost_lines_from_none_whatever_the_last_
     for _ in 0..3 {
         context.pass().unwrap();
     }
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word: its window cannot go on in T-1's conversation"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            tiers.project.id,
+            2,
+            Some("human"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
     assert_eq!(tiers.task(2).task.state, "working");
     assert_eq!(
         context.adapter.prepared().last().unwrap()["resume"],

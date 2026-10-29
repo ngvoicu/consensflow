@@ -161,3 +161,14 @@ daemon's traces hold no `cf task release` line, and `cf-board-028` and `-029` de
 The line of a task given to a window says what it waits for (`T-7 [open] blocked by T-1, T-2 ·
 @chief ← @chief: …`), as the line of a task for a tier did (T-957, from T-798). No case of
 `board.json` prints such a line, so none changed; the daemon's trace `cf-board-021` did.
+
+## `cf task add --after` says the task may wait for the chief's word (T-957, the field issue of 2026-10-29)
+
+The reply of `cf task add --after T-3` ends, before the `T-6: sent …` line, with ` If that window
+cannot go on in its conversation when T-6 starts, T-6 waits paused for your word (cf task edit T-6,
+then cf task resume T-6).`: a follow-up whose window closed with no proof its program was gone is
+held for the chief's word (`crates/cf-engine/src/ownership.rs`) instead of going to a window of its
+own, which would not remember the task it follows. The board cannot say at the add whether that
+window will be proven gone (the host's word on its exit comes to the engine, after the accept), so
+the sentence is the same for every follow-up. The one case of `board.json` that adds one was changed
+by hand, in those words alone; the daemon's traces hold no `--after` add.

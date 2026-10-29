@@ -48,6 +48,22 @@ impl Ledger {
         tasks::let_go(&mut self.store, project_id, number, by, from)
     }
 
+    /// The engine holds a queued follow-up that cannot go on in the conversation of the task it
+    /// follows: paused, with the mark that it was held for this.
+    pub fn hold_for_context(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::hold_for_context(&mut self.store, project_id, number, because)
+    }
+
+    /// Whether T-`number` was held once for the conversation it could not go on in.
+    pub fn held_for_context(&self, project_id: i64, number: i64) -> Result<bool, LedgerError> {
+        tasks::held_for_context(&self.store, project_id, number)
+    }
+
     /// Whether a task may go back to the board for its tier, without moving it; says why not.
     pub fn check_release(&self, project_id: i64, number: i64) -> Result<(), LedgerError> {
         tasks::check_release(&self.store, project_id, number)

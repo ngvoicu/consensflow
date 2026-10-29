@@ -14,6 +14,8 @@ friction-cancel = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "c
 friction-release-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "let_go"]
 friction-release-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task"]
 friction-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
+friction-hold-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "hold_for_context"]
+friction-hold-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "exit_proof::"]
 friction-running-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "left_running"]
 friction-running-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "turn_end::"]
 
@@ -356,3 +358,66 @@ runs = ["cf-lib-board"]
 file = "crates/cf/src/board/task.rs"
 find = '    let them = if jobs + agents == 1 { "it" } else { "them" };'
 replace = '    let them = "it";'
+
+# --- The sixth fix (the field issue of 2026-10-29): a follow-up whose window cannot go on in
+# --- its conversation is held for the chief's word, never given to a fresh window unasked ---
+
+[[plant]]
+name = "board friction: hold: a task held for its conversation carries no mark of it"
+meant = "a_queued_task_is_held_for_the_conversation_it_cannot_go_on_in_and_the_chiefs_word_sends_it_on"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '        detail.insert("context".into(), json!(true));'
+replace = '        detail.insert("by".into(), Value::Null);'
+
+[[plant]]
+name = "board friction: hold: a task that is not queued is held for a conversation"
+meant = "only_a_queued_task_is_held_and_an_ordinary_pause_is_no_such_hold"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '        require_task_state(&task, &["queued"], "hold")?;'
+replace = '        require_task_state(&task, &["queued", "paused"], "hold")?;'
+
+[[plant]]
+name = "board friction: hold: any pause counts as a hold for a conversation"
+meant = "only_a_queued_task_is_held_and_an_ordinary_pause_is_no_such_hold"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                AND json_extract(data, '$.context') = 1\","
+replace = "                AND 1\","
+
+[[plant]]
+name = "board friction: hold: a follow-up of an unproven window goes to a fresh window unasked"
+meant = "a_follow_up_goes_to_a_new_conversation_after_a_restart_where_the_window_before_closed_with_its_program_alive"
+runs = ["friction-hold-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '        if waiting.task.state == "queued" {'
+replace = '        if false {'
+
+[[plant]]
+name = "board friction: hold: a task the chief sent on is held a second time"
+meant = "a_follow_up_goes_to_a_new_conversation_after_a_restart_where_the_window_before_closed_with_its_program_alive"
+runs = ["friction-hold-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = "            .held_for_context(project.id, number)?\n"
+replace = "            .held_for_context(project.id, number)?\n            && false\n"
+
+[[plant]]
+name = "board friction: hold: cf task add --after does not say the task may wait for the chief's word"
+meant = "a_follow_up_behind_a_window_at_work_says_what_it_waits_for"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = " If that window cannot go on in its conversation when T-{number} starts, T-{number} waits paused for your word (cf task edit T-{number}, then cf task resume T-{number}).\","
+replace = "\","

@@ -68,7 +68,33 @@ fn resumed(context: &Context) -> serde_json::Value {
     context.adapter.prepared().last().unwrap()["resume"].clone()
 }
 
-/// What the human was told of T-2 going to `session` in a new conversation.
+/// What the human was told of T-2 held for the chief's word, in the one note (T-957, from
+/// the field issue of 2026-10-29: a follow-up whose window closed with no proof its program was
+/// gone went to a window of its own unasked, and its brief counted on the window before).
+fn told_held(tiers: &Tiers<'_>) -> Vec<String> {
+    tiers
+        .notes("human")
+        .into_iter()
+        .filter(|note| note.starts_with("T-2 is paused and waits for your word"))
+        .collect()
+}
+
+/// The chief's word on T-2, held: it goes to a window of its own, on a new conversation.
+fn send_on(context: &Context, tiers: &Tiers<'_>) {
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            tiers.project.id,
+            2,
+            Some("human"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
+}
+
+/// What the human was told of T-2 going to `session` in a new conversation, where it is no
+/// follow-up still queued to hold.
 fn told_new(tiers: &Tiers<'_>, session: &str) -> Vec<String> {
     let words = format!("T-2 goes to @{session} in a new conversation");
     tiers
@@ -121,18 +147,27 @@ fn a_follow_up_goes_to_a_new_conversation_after_a_restart_where_the_window_befor
     let after = restart(&context, &tiers);
     follow_up(&context, &tiers, 1, "Write the docs");
     again(&after, 3);
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word, not given to a window of its own"
+    );
+    assert_eq!(
+        told_held(&tiers).len(),
+        1,
+        "told once: {:?}",
+        told_held(&tiers)
+    );
+    assert_eq!(told_new(&tiers, &session), Vec::<String>::new());
+    send_on(&context, &tiers);
+    again(&after, 3);
     assert_eq!(tiers.task(2).task.state, "working");
     assert_eq!(
         resumed(&context),
         serde_json::Value::Null,
-        "a new conversation"
+        "a new conversation, at the chief's word"
     );
-    assert_eq!(
-        told_new(&tiers, &session).len(),
-        1,
-        "told once: {:?}",
-        told_new(&tiers, &session)
-    );
+    assert_eq!(told_held(&tiers).len(), 1, "no second hold");
 }
 
 /// A window open when the daemon stopped: the app's window quits after the daemon has gone
@@ -159,19 +194,27 @@ fn a_window_open_when_the_daemon_stopped_is_no_proof_though_the_window_before_it
         "the human keeps the window"
     );
 
-    restart(&context, &tiers);
+    let after = restart(&context, &tiers);
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word, not given to a window of its own"
+    );
+    assert_eq!(
+        told_held(&tiers).len(),
+        1,
+        "told once: {:?}",
+        told_held(&tiers)
+    );
+    send_on(&context, &tiers);
+    again(&after, 3);
     assert_eq!(tiers.task(2).task.state, "working");
     assert_eq!(
         resumed(&context),
         serde_json::Value::Null,
-        "a new conversation"
+        "a new conversation, at the chief's word"
     );
-    assert_eq!(
-        told_new(&tiers, &session).len(),
-        1,
-        "told once: {:?}",
-        told_new(&tiers, &session)
-    );
+    assert_eq!(told_held(&tiers).len(), 1, "no second hold");
 }
 
 /// The host's word on a window the engine's own close settled (a Close's, which does not
@@ -225,19 +268,27 @@ fn a_late_word_that_a_closed_windows_program_is_gone_proves_nothing_of_the_windo
         "the human keeps the window"
     );
 
-    restart(&context, &tiers);
+    let after = restart(&context, &tiers);
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word, not given to a window of its own"
+    );
+    assert_eq!(
+        told_held(&tiers).len(),
+        1,
+        "told once: {:?}",
+        told_held(&tiers)
+    );
+    send_on(&context, &tiers);
+    again(&after, 3);
     assert_eq!(tiers.task(2).task.state, "working");
     assert_eq!(
         resumed(&context),
         serde_json::Value::Null,
-        "a new conversation"
+        "a new conversation, at the chief's word"
     );
-    assert_eq!(
-        told_new(&tiers, &session).len(),
-        1,
-        "told once: {:?}",
-        told_new(&tiers, &session)
-    );
+    assert_eq!(told_held(&tiers).len(), 1, "no second hold");
 }
 
 /// The host's word on a window the engine's own close settled (a Close's) can come after
@@ -367,6 +418,13 @@ fn the_exit_of_a_deleted_sessions_window_proves_nothing_of_the_window_that_broug
     // A follow-up of another task brings it back, in a new window on a new conversation.
     follow_up(&context, &tiers, 1, "Write the docs");
     passes(&context, 3);
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word: no window yet"
+    );
+    send_on(&context, &tiers);
+    passes(&context, 3);
     let second = context.host.last(&session).unwrap().pane;
     assert_ne!(second, first, "a window of its own");
     assert_eq!(
@@ -434,6 +492,13 @@ fn a_brought_back_windows_end_on_its_new_conversation_is_kept_while_the_deleted_
     let context = Context::new();
     let (tiers, session, first, old, kill, ending) = deleted_with_its_window_held(&context, true);
     follow_up(&context, &tiers, 1, "Write the docs");
+    passes(&context, 3);
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word: no window yet"
+    );
+    send_on(&context, &tiers);
     passes(&context, 3);
     let second = context.host.last(&session).unwrap().pane;
     assert_ne!(second, first, "a window of its own");

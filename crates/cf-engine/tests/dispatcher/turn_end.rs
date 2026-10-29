@@ -766,6 +766,25 @@ fn the_next_task_goes_on_in_a_new_conversation_where_the_window_before_closed_wi
     context.host.exits_with_a_survivor(4242);
     release(&context, &tiers, Release::Cancel);
     passes(&context, 4);
+    // Not given to a window of its own unasked: T-2 is held for the chief's word, told once.
+    assert_eq!(tiers.task(2).task.state, "paused");
+    let held: Vec<String> = tiers
+        .notes("human")
+        .into_iter()
+        .filter(|note| note.starts_with("T-2 is paused and waits for your word"))
+        .collect();
+    assert_eq!(held.len(), 1, "{held:?}");
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            tiers.project.id,
+            2,
+            Some("human"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
+    passes(&context, 4);
     assert_eq!(tiers.task(2).task.state, "working");
     let launch = context.adapter.prepared().last().unwrap().clone();
     assert_eq!(
@@ -774,12 +793,6 @@ fn the_next_task_goes_on_in_a_new_conversation_where_the_window_before_closed_wi
         "a new conversation"
     );
     let _ = conversation;
-    let told: Vec<String> = tiers
-        .notes("human")
-        .into_iter()
-        .filter(|note| note.starts_with("T-2 goes to @zeus in a new conversation"))
-        .collect();
-    assert_eq!(told.len(), 1, "{told:?}");
 }
 
 #[test]
@@ -800,6 +813,24 @@ fn after_a_restart_another_task_goes_on_in_a_new_conversation_and_the_same_task_
     let after = context.make();
     after.settle_after_restart().unwrap();
     after.resume_project(tiers.project.id).unwrap();
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word, not given to a window of its own"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            tiers.project.id,
+            2,
+            Some("human"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
     for _ in 0..4 {
         after.pass().unwrap();
     }

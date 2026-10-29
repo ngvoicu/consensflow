@@ -208,7 +208,7 @@ fn add(
         )
     } else if let Some(after) = after {
         format!(
-            "T-{number} continues in @{}, the window that did T-{after}; its result arrives in your inbox.{gated}{waits}",
+            "T-{number} continues in @{}, the window that did T-{after}; its result arrives in your inbox.{gated}{waits} If that window cannot go on in its conversation when T-{number} starts, T-{number} waits paused for your word (cf task edit T-{number}, then cf task resume T-{number}).",
             js::text(task.get("assignee"))
         )
     } else {
@@ -1200,7 +1200,7 @@ and 2 idle sessions (`cf task list --all`)";
         assert_eq!(posted, Some(json!({ "after": 3, "body": "Tests" })));
         assert_eq!(
             said,
-            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted.\nT-5: sent 5 characters, ending \"Tests\"."
+            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted. If that window cannot go on in its conversation when T-5 starts, T-5 waits paused for your word (cf task edit T-5, then cf task resume T-5).\nT-5: sent 5 characters, ending \"Tests\"."
         );
     }
 
