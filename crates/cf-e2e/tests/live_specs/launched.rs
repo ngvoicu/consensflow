@@ -119,7 +119,7 @@ pub fn skill_called(file_text: &str) -> Option<String> {
 }
 
 /// Where a window was given its role text, by what its `pane.open` says: a file
-/// (Claude's, OpenCode's, Devin's and Codex's), or the text itself (Pi's).
+/// (Claude's, Devin's and Codex's), or the text itself (Pi's).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoleText {
     File(String),
@@ -127,9 +127,8 @@ pub enum RoleText {
 }
 
 /// How the window of `frame` (a `pane.open` request) was given its role: Claude
-/// appends a file to its system prompt, Pi appends the text, Codex's broker and
-/// Devin read the file their environment names, and OpenCode has it as the last of
-/// the instructions its configuration lists.
+/// appends a file to its system prompt, Pi appends the text, and Codex's broker
+/// and Devin read the file their environment names.
 pub fn role_of(frame: &Value) -> Option<RoleText> {
     let argv: Vec<&str> = frame["argv"]
         .as_array()
@@ -154,10 +153,7 @@ pub fn role_of(frame: &Value) -> Option<RoleText> {
             return Some(RoleText::File(file.to_owned()));
         }
     }
-    let configuration: Value =
-        serde_json::from_str(frame["env"]["OPENCODE_CONFIG_CONTENT"].as_str()?).ok()?;
-    let file = configuration["instructions"].as_array()?.last()?.as_str()?;
-    Some(RoleText::File(file.to_owned()))
+    None
 }
 
 /// That no word of the window's launch (its command line and its environment)

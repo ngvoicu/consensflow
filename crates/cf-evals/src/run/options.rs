@@ -7,10 +7,9 @@
 //!                  [--effort high] [--staff-effort medium]
 //! ```
 //!
-//! `--model` is the chief's: Opus for Claude Code and the cheap model for OpenCode
-//! unless given; Codex, Pi and Devin run their own default and ignore it. `--effort`
-//! is the chief's reasoning level (Claude, Codex, Pi; OpenCode's window and Devin
-//! have no switch for it), `--staff-effort` every member's.
+//! `--model` is the chief's: Opus for Claude Code unless given; Codex, Pi and Devin
+//! run their own default and ignore it. `--effort` is the chief's reasoning level
+//! (Claude, Codex, Pi; Devin has no switch for it), `--staff-effort` every member's.
 
 use std::path::PathBuf;
 use std::time::Duration;

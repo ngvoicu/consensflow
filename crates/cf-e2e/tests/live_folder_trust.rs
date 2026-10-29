@@ -1436,12 +1436,7 @@ mod tests {
             ]
         );
         for case in Case::ALL {
-            for harness in [
-                Harness::Codex,
-                Harness::Pi,
-                Harness::OpenCode,
-                Harness::Devin,
-            ] {
+            for harness in [Harness::Codex, Harness::Pi, Harness::Devin] {
                 assert!(!must_ask(harness, case), "{harness:?} {case:?}");
             }
         }

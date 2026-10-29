@@ -250,7 +250,6 @@ impl Catalog {
             known.filter(|model| key == "muse-spark-1.3" && model.contains("-contributor"));
         let route = match model {
             Some(model) if model.starts_with("openrouter/") => "OpenRouter · API",
-            Some(model) if model.starts_with("opencode/") => "OpenCode Zen",
             Some(model) if model.starts_with("openai-codex/") => "Codex subscription",
             Some(model) if model.starts_with("anthropic/") => "Anthropic · API",
             _ => match harness {

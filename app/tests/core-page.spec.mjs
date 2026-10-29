@@ -125,7 +125,7 @@ function model() {
       },
       {
         name: 'athena',
-        harness: 'opencode',
+        harness: 'pi',
         model: 'muse-spark',
         profile: { workTier: 'light' },
       },
@@ -1142,7 +1142,7 @@ test("says the effort an agent runs at, after its model: on a member's row, a se
       pane: { id: 'p1-zeus-amber-pine', generation: 1 },
     },
     {
-      participant: participant(7, 'athena', 'advisor', { harness: 'opencode', tier: 'light' }),
+      participant: participant(7, 'athena', 'advisor', { harness: 'pi', tier: 'light' }),
       tasks: [],
       activity: { state: 'closed' },
       pane: null,
@@ -1159,7 +1159,7 @@ test("says the effort an agent runs at, after its model: on a member's row, a se
     'worker session of @zeus · claude-code · claude-sonnet-5 · high',
   )
   // An agent with no effort shows none.
-  await expect(meta('athena')).toHaveText('advisor · light · opencode · muse-spark')
+  await expect(meta('athena')).toHaveText('advisor · light · pi · muse-spark')
 })
 
 test('shows what a task on the board waits for, on its card and in its drawer', async ({
@@ -3227,7 +3227,7 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
   // A worker: every agent that does not hold the role yet, grouped by work tier, the most critical first.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
     'hera · gpt-6-astra · codex · max',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   await expect(dialog.getByLabel('Agent').locator('optgroup')).toHaveCount(2)
   // An advisor: every agent but the image agent, which only draws.
@@ -3236,7 +3236,7 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
     'hera · gpt-6-astra · codex · max',
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   expect(
     await dialog
@@ -3256,7 +3256,7 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   await dialog.getByLabel('Agent').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
@@ -3303,7 +3303,7 @@ test('adds a saved agent to the staff as a tester, or as one more role of a memb
     'hera · gpt-6-astra · codex · max',
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   await dialog.getByLabel('Agent').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
@@ -3904,7 +3904,7 @@ test('refuses a new project when no harness is installed here, and says where to
   page,
 }) => {
   const data = model()
-  data.missing = ['claude', 'codex', 'opencode', 'pi', 'devin']
+  data.missing = ['claude', 'codex', 'pi', 'devin']
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   await expect(page.locator('#status')).toHaveText(
@@ -4571,7 +4571,7 @@ test('lists what waits for approval in For you, and approves or declines it, wri
 function withAdvisor() {
   const data = model()
   data.boards[1].lanes.push({
-    participant: participant(5, 'athena', 'advisor', { harness: 'opencode' }),
+    participant: participant(5, 'athena', 'advisor', { harness: 'pi' }),
     tasks: [task(7, 'Research the market', 'working', 'chief', 'athena', 4)],
     activity: { state: 'working' },
     pane: { id: 'p1-athena', generation: 4 },
@@ -4655,7 +4655,7 @@ test('opens Agents from Settings in a dialog over the board, the daemon’s agen
     await expect(agents.getByRole('button', { name: 'Close' })).toBeFocused()
     const screen = agents.frameLocator('iframe')
     await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
-    await expect(screen.locator('#agents .member .callsign', { hasText: /^gefjon$/ })).toBeVisible()
+    await expect(screen.locator('#agents .member .callsign', { hasText: /^eos$/ })).toBeVisible()
     const read = await agentsRead(page)
     await agents.getByRole('button', { name: 'Close' }).click()
     await expect(agents).toBeHidden()
@@ -4679,7 +4679,7 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
     const harnesses = await openScreen(page, 'Harnesses')
     await expect(harnesses).toBeVisible()
     const screen = harnesses.frameLocator('iframe')
-    await expect(screen.locator('.host')).toHaveCount(5)
+    await expect(screen.locator('.host')).toHaveCount(4)
     await expect(
       screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^pi$/ }) }),
     ).toContainText('Version 1.2.3')
@@ -4703,7 +4703,7 @@ test('Escape pressed inside a screen closes its dialog, as it closes every other
   try {
     await open(page, { ...model(), screens: daemon.screens })
     const agents = await openScreen(page, 'Agents')
-    await agents.frameLocator('iframe').getByRole('searchbox').fill('gefjon')
+    await agents.frameLocator('iframe').getByRole('searchbox').fill('eos')
     await page.keyboard.press('Escape')
     await expect(agents).toBeHidden()
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
@@ -6070,7 +6070,7 @@ function twoWithStaffs() {
   const data = twoOpen()
   data.boards[2].lanes.push({
     participant: {
-      ...participant(11, 'athena', 'worker', { harness: 'opencode', tier: 'light' }),
+      ...participant(11, 'athena', 'worker', { harness: 'pi', tier: 'light' }),
       projectId: 2,
     },
     tasks: [],
@@ -6397,7 +6397,7 @@ function twoWithOwnSettings() {
   ]
   data.boards[2].lanes.push(
     member(11, 'zeus'),
-    member(12, 'athena', { harness: 'opencode', tier: 'light' }),
+    member(12, 'athena', { harness: 'pi', tier: 'light' }),
   )
   data.boards[2].project.gate = true
   data.boards[1].project.specs = { on: true, folder: 'plans', variant: 'tdd' }
@@ -7278,7 +7278,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     'hera · gpt-6-astra · codex · max',
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   await dialog.locator('[name="pickAgent"]').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
@@ -9033,7 +9033,7 @@ test('refuses Switch chief when no harness is installed here, and says where to 
   page,
 }) => {
   const data = model()
-  data.missing = ['claude', 'codex', 'opencode', 'pi', 'devin']
+  data.missing = ['claude', 'codex', 'pi', 'devin']
   await open(page, data)
   await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
   await expect(page.locator('#status')).toHaveText(

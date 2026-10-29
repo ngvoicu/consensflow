@@ -279,7 +279,7 @@ fn a_continuation_withdrawn_while_the_screen_was_looked_at_is_cleared_before_the
 #[test]
 fn an_uncertain_hand_over_to_codex_is_never_given_back_by_an_enter_and_arrives_once() {
     let context = Context::made(Made {
-        harnesses: vec!["claude-code", "opencode", "codex"],
+        harnesses: vec!["claude-code", "pi", "codex"],
         codex: false,
     });
     let project = context

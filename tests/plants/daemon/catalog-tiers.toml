@@ -121,8 +121,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-catalog/src/roster/preferences.rs"
-find = '''const RELAYED: [&str; 3] = ["pi", "opencode", "devin"];'''
-replace = '''const RELAYED: [&str; 2] = ["pi", "opencode"];'''
+find = '''const RELAYED: [&str; 2] = ["pi", "devin"];'''
+replace = '''const RELAYED: [&str; 1] = ["pi"];'''
 
 # --- the order of the pick lists and of the Agents page by tier ---
 

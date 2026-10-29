@@ -68,7 +68,7 @@ pub struct Options {
     pub transcripts: Option<PathBuf>,
 }
 
-/// The cases and the harnesses the words ask for, or all the cases and OpenCode.
+/// The cases and the harnesses the words ask for, or all the cases and Devin.
 pub fn options(
     cases: &[String],
     hook: Option<&str>,
@@ -83,7 +83,7 @@ pub fn options(
             &Harness::ALL,
             Harness::name,
             "harness",
-            &[Harness::OpenCode],
+            &[Harness::Devin],
         )?,
         transcripts: transcripts.map(PathBuf::from),
     })
@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn every_case_is_run_unless_some_are_named_and_the_any_harness_ones_run_on_opencode_unless_a_harness_is(
+    fn every_case_is_run_unless_some_are_named_and_the_any_harness_ones_run_on_devin_unless_a_harness_is(
     ) {
         let all = options(&[], None, &[], None).unwrap();
         let names: Vec<&str> = all.cases.iter().map(|case| case.name()).collect();
@@ -141,7 +141,7 @@ mod tests {
                 "tell"
             ]
         );
-        assert_eq!(all.harnesses, [Harness::OpenCode]);
+        assert_eq!(all.harnesses, [Harness::Devin]);
         assert_eq!(all.hook.name, "stop");
         assert!(all.transcripts.is_none());
 

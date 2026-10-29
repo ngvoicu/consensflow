@@ -283,7 +283,6 @@ mod tests {
         for kind in [
             Some("claude-code"),
             Some("codex"),
-            Some("opencode"),
             Some("devin"),
             Some("kimi"),
             Some("Pi"),

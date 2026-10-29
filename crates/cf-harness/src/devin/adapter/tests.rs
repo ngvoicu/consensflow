@@ -674,12 +674,7 @@ fn a_start_reads_whether_the_tui_took_a_paste_from_the_store_with_no_window_open
         Some(false),
         "an earlier attempt's row is no word of this one"
     );
-    for harness in [
-        Harness::Claude,
-        Harness::Codex,
-        Harness::Pi,
-        Harness::Opencode,
-    ] {
+    for harness in [Harness::Claude, Harness::Codex, Harness::Pi] {
         assert_eq!(took(harness, "mild-coin", EPOCH_MS), None);
     }
     let missing = Env::from_vars([

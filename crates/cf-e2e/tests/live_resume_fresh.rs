@@ -459,13 +459,7 @@ mod tests {
         let tokens: Vec<String> = Harness::ALL.into_iter().map(token_of).collect();
         assert_eq!(
             tokens,
-            [
-                "FRESH_CLAUDE",
-                "FRESH_OPENCODE",
-                "FRESH_PI",
-                "FRESH_DEVIN",
-                "FRESH_CODEX"
-            ]
+            ["FRESH_CLAUDE", "FRESH_PI", "FRESH_DEVIN", "FRESH_CODEX"]
         );
         assert_eq!(the_ask("FRESH_PI"), "Reply with exactly one line: FRESH_PI");
     }

@@ -1,7 +1,7 @@
 //! `Node's sources are gone for good`: nothing imports what the deletion took
 //! away, step 4 of the Rust rewrite: Node's daemon, CLI and ledger (`src/`,
-//! `bin/cf.mjs`) and the host libraries they shared (`hosts/lib/`, but for the
-//! question door the OpenCode plugin loads). What stays runs the native daemon and
+//! `bin/cf.mjs`) and the host libraries they shared (`hosts/lib/`, the last of
+//! which, OpenCode's question door, went with OpenCode). What stays runs the native daemon and
 //! `cf`, or fixtures of its own.
 //!
 //! The dangling-import check is the guard of the imports: a script that imports a
@@ -43,9 +43,6 @@ const DELETED: [&str; 7] = [
     "hosts/lib/quota.js",
     "hosts/lib/windows.js",
 ];
-
-/// The one library of the host extensions that stays.
-const DOOR: &str = "question-door.js";
 
 /// This file holds samples of what it looks for, which are not imports.
 const SELF: &str = "crates/cf-e2e/tests/cli/off_node.rs";
@@ -170,7 +167,7 @@ fn dangling(root: &Path) -> Found<Vec<String>> {
 }
 
 /// What the deletion took away that the tree `root` has again, and any host
-/// library beside the question door.
+/// library at all.
 fn revived(root: &Path) -> Found<Vec<String>> {
     let mut found = Vec::new();
     for path in DELETED {
@@ -186,7 +183,7 @@ fn revived(root: &Path) -> Found<Vec<String>> {
             };
             let name = first.as_os_str().to_string_lossy();
             let beside = format!("hosts/lib/{name}");
-            if !name.starts_with('.') && name != DOOR && !found.contains(&beside) {
+            if !name.starts_with('.') && !found.contains(&beside) {
                 found.push(beside);
             }
         }
@@ -315,16 +312,10 @@ fn reads_the_scripts_it_is_to_hold() -> Outcome {
         "tests/pi-extension.test.mjs",
         "app/tests/core-page.spec.mjs",
         "app/scripts/bundle-ui.mjs",
-        "hosts/opencode-extension/consensflow-session.mjs",
+        "hosts/pi-extension/consensflow-delivery.mjs",
     ] {
         assert!(held.iter().any(|held| held == file), "{file} is read");
     }
-    let plugin = "hosts/opencode-extension/consensflow-session.mjs";
-    assert_eq!(
-        imports_in(&files::read_string(&under(&repository(), plugin))?, plugin)?,
-        [format!("hosts/lib/{DOOR}")],
-        "and the one library they load"
-    );
     Ok(())
 }
 
@@ -343,10 +334,6 @@ fn holds_the_deleted_tree_deleted() -> Outcome {
         Vec::<String>::new(),
         "Node's sources are gone: use the native side"
     );
-    assert!(
-        under(&repository(), &format!("hosts/lib/{DOOR}")).exists(),
-        "the question door stays"
-    );
     Ok(())
 }
 
@@ -364,7 +351,6 @@ fn finds_a_deleted_path_named_and_not_a_rust_crates_own_or_what_stays() -> Outco
     for text in [
         "crates/cf-ledger/src/ledger.rs",
         "crates/cf-daemon/src/screens/pages/agents.html",
-        "hosts/lib/question-door.js",
         "hosts/pi-extension/consensflow-delivery.mjs",
     ] {
         assert!(!named.is_match(text), "{text}");
@@ -387,22 +373,22 @@ fn names_none_of_them_anywhere_but_where_a_recording_or_an_older_release_says_th
 mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
     use super::*;
 
-    /// A tree of the shape the checks read (a script in each root, the OpenCode
-    /// plugin and the question door it loads) with the `planted` files besides, or
-    /// in place of those, on disk: the tree and the files it holds.
+    /// The host extension of the tree.
+    const EXTENSION: &str = "hosts/pi-extension/consensflow-delivery.mjs";
+
+    /// A tree of the shape the checks read (a script in each root, a host
+    /// extension and the module beside it that it loads) with the `planted` files
+    /// besides, or in place of those, on disk: the tree and the files it holds.
     fn on_tree(planted: &[(&str, &str)]) -> Found<(tempfile::TempDir, Vec<String>)> {
-        let plugin = format!("import {{ ask }} from '../lib/{DOOR}'\n");
-        let example = format!("import {{ ask }} from '../hosts/lib/{DOOR}'\n");
+        let extension = "import { ask } from './helper.mjs'\n".to_owned();
+        let example = "import { ask } from '../hosts/pi-extension/helper.mjs'\n".to_owned();
         let mut tree: BTreeMap<String, String> = BTreeMap::from([
             ("tests/example.test.mjs".to_owned(), example),
             ("app/tests/page.spec.mjs".to_owned(), String::new()),
             ("app/scripts/build.mjs".to_owned(), String::new()),
+            (EXTENSION.to_owned(), extension),
             (
-                "hosts/opencode-extension/consensflow-session.mjs".to_owned(),
-                plugin,
-            ),
-            (
-                format!("hosts/lib/{DOOR}"),
+                "hosts/pi-extension/helper.mjs".to_owned(),
                 "export const ask = () => {}\n".to_owned(),
             ),
         ]);
@@ -485,12 +471,11 @@ mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
     }
 
     #[test]
-    fn finds_the_plugin_of_opencode_importing_a_library_that_is_gone() -> Outcome {
-        let plugin = "hosts/opencode-extension/consensflow-session.mjs";
-        let (root, _) = on_tree(&[(plugin, "import { quotaOf } from '../lib/quota.js'\n")])?;
+    fn finds_a_host_extension_importing_a_library_that_is_gone() -> Outcome {
+        let (root, _) = on_tree(&[(EXTENSION, "import { quotaOf } from '../lib/quota.js'\n")])?;
         assert_eq!(
             dangling(root.path())?,
-            [format!("{plugin} imports hosts/lib/quota.js")]
+            [format!("{EXTENSION} imports hosts/lib/quota.js")]
         );
         Ok(())
     }
@@ -534,7 +519,7 @@ mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
     }
 
     #[test]
-    fn finds_a_host_library_put_back_and_any_other_beside_the_question_door() -> Outcome {
+    fn finds_a_host_library_put_back_whatever_its_name() -> Outcome {
         let (root, _) = on_tree(&[("hosts/lib/presets.js", ""), ("hosts/lib/newcomer.js", "")])?;
         let mut found = revived(root.path())?;
         found.sort();

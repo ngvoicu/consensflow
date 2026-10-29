@@ -41,18 +41,6 @@
       "preset": "endymion"
     },
     {
-      "id": "mani",
-      "name": "Mani",
-      "kind": "opencode",
-      "toolsPolicy": "workspace-write",
-      "skillsPolicy": "default",
-      "createdAt": "2026-07-28T15:05:56.000Z",
-      "updatedAt": "2026-07-28T15:05:56.000Z",
-      "model": "openrouter/moonshotai/kimi-k3",
-      "description": "Kimi K3 via opencode.",
-      "preset": "mani"
-    },
-    {
       "id": "pygmalion",
       "name": "Pygmalion",
       "kind": "image",

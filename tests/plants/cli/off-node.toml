@@ -10,16 +10,6 @@ off-node = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "off_
 e2e-lib-checkout = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "checkout::"]
 
 [[plant]]
-name = "off node: the OpenCode plugin imports a host library of Node's that is gone"
-meant = "has_every_script_import_files_that_are_there"
-runs = ["off-node"]
-
-[[plant.edit]]
-file = "hosts/opencode-extension/consensflow-session.mjs"
-find = "} from '../lib/question-door.js'"
-replace = "} from '../lib/quota.js'"
-
-[[plant]]
 name = "off node: a page spec imports a helper that is gone"
 meant = "has_every_script_import_files_that_are_there"
 runs = ["off-node"]

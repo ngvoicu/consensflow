@@ -156,7 +156,7 @@ fn kimi_is_complex_before_any_effort_rule_is_read() {
     let catalog = catalog();
     for effort in [None, Some(""), Some("low"), Some("bogus"), Some("max")] {
         let profile = catalog.profile(&Settings {
-            kind: Some("opencode"),
+            kind: Some("pi"),
             model: Some("openrouter/moonshotai/kimi-k3"),
             effort,
             ..Settings::default()
@@ -166,7 +166,7 @@ fn kimi_is_complex_before_any_effort_rule_is_read() {
     }
     // Off the catalog the same name earns nothing.
     let unknown = catalog.profile(&Settings {
-        kind: Some("opencode"),
+        kind: Some("pi"),
         model: Some("openrouter/moonshotai/kimi-k3-preview/kimi-k3"),
         effort: Some("max"),
         ..Settings::default()
@@ -301,7 +301,6 @@ fn the_prefix_of_a_model_names_its_road_before_its_harness_does() {
     let catalog = catalog();
     for (model, route) in [
         ("openrouter/x/y", "OpenRouter · API"),
-        ("opencode/y", "OpenCode Zen"),
         ("openai-codex/y", "Codex subscription"),
         ("anthropic/y", "Anthropic · API"),
     ] {
@@ -317,7 +316,7 @@ fn the_prefix_of_a_model_names_its_road_before_its_harness_does() {
         ("codex", "Codex login"),
         ("devin", "Devin account"),
         ("pi", "pi"),
-        ("opencode", "opencode"),
+        ("kimi", "kimi"),
     ] {
         let profile = catalog.profile(&Settings {
             kind: Some(kind),
@@ -333,14 +332,14 @@ fn muse_s_contributor_routes_say_so_with_a_note_and_the_free_one_says_free() {
     let presets = vec![
         preset(
             "free",
-            "opencode",
-            "opencode/muse-spark-1.3-contributor-free",
+            "pi",
+            "openrouter/meta/muse-spark-1.3-contributor-free",
             Some("high"),
         ),
         preset(
             "paid",
-            "opencode",
-            "opencode/muse-spark-1.3-contributor",
+            "pi",
+            "openrouter/meta/muse-spark-1.3-contributor",
             Some("high"),
         ),
         preset(
@@ -362,8 +361,8 @@ fn muse_s_contributor_routes_say_so_with_a_note_and_the_free_one_says_free() {
             ..Settings::default()
         })
     };
-    let free = on("opencode/muse-spark-1.3-contributor-free", "opencode");
-    assert_eq!(free.route_label, "OpenCode Zen · Contributor · Free");
+    let free = on("openrouter/meta/muse-spark-1.3-contributor-free", "pi");
+    assert_eq!(free.route_label, "OpenRouter · API · Contributor · Free");
     assert_eq!(
         free.route_note.as_deref(),
         Some("Prompts and replies may train Meta models.")
@@ -372,8 +371,8 @@ fn muse_s_contributor_routes_say_so_with_a_note_and_the_free_one_says_free() {
         (free.model_key.as_str(), free.model_label.as_str()),
         ("muse-spark-1.3", "Muse Spark 1.3")
     );
-    let paid = on("opencode/muse-spark-1.3-contributor", "opencode");
-    assert_eq!(paid.route_label, "OpenCode Zen · Contributor");
+    let paid = on("openrouter/meta/muse-spark-1.3-contributor", "pi");
+    assert_eq!(paid.route_label, "OpenRouter · API · Contributor");
     assert_eq!(
         paid.route_note.as_deref(),
         Some("Prompts and replies may train Meta models.")
@@ -382,10 +381,10 @@ fn muse_s_contributor_routes_say_so_with_a_note_and_the_free_one_says_free() {
     assert_eq!(plain.route_label, "OpenRouter · API");
     assert_eq!(plain.route_note, None);
     // Not a preset's pair: the model is called by its id and the route has no note.
-    let unlisted = on("opencode/muse-spark-1.3-contributor-free", "pi");
+    let unlisted = on("openrouter/meta/muse-spark-1.3-contributor-free", "codex");
     assert_eq!(
         unlisted.model_key,
-        "opencode/muse-spark-1.3-contributor-free"
+        "openrouter/meta/muse-spark-1.3-contributor-free"
     );
     assert_eq!(unlisted.route_note, None);
 }

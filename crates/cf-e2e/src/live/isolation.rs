@@ -22,8 +22,7 @@
 //! lands: `XDG_DATA_HOME` and `XDG_CONFIG_HOME` scratch folders with the login reachable
 //! read-only ([`Seed::Reach`] is how Devin's reaches the other tools' folders), and
 //! `MUSE_NO_AUTO_UPDATE=1`, `MUSE_LOGIN=0` as plain values beside those folders, in the plan
-//! of a `Harness::Muse` arm of [`Isolation::of_machine_lasting`]. **OpenCode**, which a later change takes out of
-//! ConsensFlow, keeps running on the owner's folders: Devin's scratch reaches them.
+//! of a `Harness::Muse` arm of [`Isolation::of_machine_lasting`].
 //!
 //! **A login that refreshes.** A refresh token is used once, so a copy that refreshes leaves
 //! the owner's file with a token that no longer works. Pi refreshes an OAuth entry that has
@@ -101,7 +100,7 @@ enum Seed {
         left: Duration,
     },
     /// A link in `to` to each entry of the owner's folder `from` but the one named `except`:
-    /// what other programs of the rig keep in a folder the variables move (OpenCode's login
+    /// what other programs of the rig keep in a folder the variables move (another tool's login
     /// in `XDG_DATA_HOME`), left as it is for them. Where the folders are links' (Devin's, on Unix).
     #[cfg(unix)]
     Reach {
@@ -273,7 +272,7 @@ pub struct Isolation {
 impl Isolation {
     /// The home of `harness` for a live suite ([`RUN`]), copying the login of the owner whose
     /// home is `home` (Codex's: its own folder, `CODEX_HOME`); none for Claude Code, whose config
-    /// folder is [`super::login`]'s, for OpenCode (the owner's), and where the platform's layout
+    /// folder is [`super::login`]'s, and where the platform's layout
     /// is not known (Devin's on Windows).
     pub fn of_machine(harness: Harness, home: &Path) -> Result<Option<Self>> {
         Self::of_machine_lasting(harness, home, RUN)
@@ -628,7 +627,6 @@ impl HarnessHome for Isolation {
 const fn proper(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "Claude Code",
-        Harness::OpenCode => "OpenCode",
         Harness::Pi => "Pi",
         Harness::Devin => "Devin",
         Harness::Codex => "Codex",

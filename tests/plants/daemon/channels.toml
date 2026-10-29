@@ -17,46 +17,6 @@ find = "Self::zero_bytes(error, None)"
 replace = "Self::uncertain(error)"
 
 [[plant]]
-name = "channels, OpenCode: a send the plugin gives no head to is refused"
-meant = "the_plugin_drops_the_connection_after_the_post"
-runs = [
-  ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "channels", "opencode_through"],
-]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/send.rs"
-find = '''
-        _ => return Ok(uncertain()),
-    };'''
-replace = '''
-        _ => return Ok(refused("transport".to_owned())),
-    };'''
-
-[[plant]]
-name = "channels, OpenCode: a conversation on its default effort is seeded with another"
-meant = "sends_explicit_native_default_rather_than_falling_back_to_roster_or_agent_effort"
-runs = [
-  ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "channels", "seed::sends_"],
-]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/seed.rs"
-find = '.unwrap_or("default")'
-replace = '.unwrap_or("max")'
-
-[[plant]]
-name = "channels, OpenCode: a session made in another folder is taken"
-meant = "rejects_malformed_invalid_id_wrong_dir_and_oversized_responses"
-runs = [
-  ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "channels", "create::rejects_malformed"],
-]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/create.rs"
-find = 'body.get("directory").and_then(Value::as_str) != Some(canonical)'
-replace = 'body.get("directory").is_none()'
-
-[[plant]]
 name = "channels, Pi: a failure after the inbox rename is a refusal"
 meant = "an_error_after_the_inbox_rename"
 runs = [

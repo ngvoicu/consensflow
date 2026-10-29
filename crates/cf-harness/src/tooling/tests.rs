@@ -300,7 +300,7 @@ fn a_turn_is_interrupted_as_the_harness_says() {
     );
     // Devin's rewind opens at a turn just ended: a second Escape, and one more a second later.
     assert_eq!(keys("devin"), json!({ "presses": 2, "closeAfterMs": 1000 }));
-    for kind in ["codex", "pi", "opencode"] {
+    for kind in ["codex", "pi"] {
         assert_eq!(keys(kind)["presses"], json!(1), "{kind}");
     }
 }
@@ -316,7 +316,7 @@ fn a_window_takes_what_it_is_handed_pasted_or_over_a_channel_as_the_harness_says
             "{kind}"
         );
     }
-    for kind in ["codex", "pi", "opencode"] {
+    for kind in ["codex", "pi"] {
         assert_eq!(
             input(kind),
             json!({ "pasted": false, "clear": null }),
@@ -387,7 +387,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     // screen shows: Codex's own question is its window's opened alone.
     let none = json!({ "asks": false, "key": null, "grants": false, "servers": false, "prompt": false, "names": false });
     assert_eq!(read("codex", &codex), none);
-    for kind in ["pi", "opencode", "devin"] {
+    for kind in ["pi", "devin"] {
         assert_eq!(read(kind, &claude), none, "{kind}");
     }
     let home = tempfile::tempdir().unwrap();
@@ -551,33 +551,33 @@ fn a_script_of_another_shape_cannot_open_a_window_and_the_error_says_so() {
 #[test]
 fn the_newest_session_of_a_folder_is_asked_of_the_store_the_environment_names() {
     let root = tempfile::tempdir().unwrap();
-    let store = root.path().join("opencode.db");
+    let store = root.path().join("devin").join("cli").join("sessions.db");
+    fs::create_dir_all(store.parent().unwrap()).unwrap();
     let db = rusqlite::Connection::open(&store).unwrap();
     db.execute_batch(
-        "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, parent_id TEXT, time_created INTEGER);
-         INSERT INTO session VALUES ('mine', '/work/a', NULL, 5000);",
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, working_directory TEXT, created_at INTEGER);
+         INSERT INTO sessions VALUES ('mine', '/work/a', 5);",
     )
     .unwrap();
     drop(db);
+    // Devin's store is in its data folder: `%APPDATA%` on Windows, `XDG_DATA_HOME` elsewhere.
+    let data = root.path().to_str().unwrap();
     let asked = |kind: &str, workspace: &str, since: Value| {
         answer(&ask(
             "newest_session",
             json!({
                 "kind": kind, "workspace": workspace, "since": since,
-                "env": { "OPENCODE_DB": store.to_str().unwrap() },
+                "env": { "XDG_DATA_HOME": data, "APPDATA": data, "HOME": "/nowhere" },
             }),
         ))
     };
     assert_eq!(
-        asked("opencode", "/work/a", json!(1000)).unwrap(),
+        asked("devin", "/work/a", json!(1000)).unwrap(),
         json!("mine")
     );
     // Nothing yet is null, which is not a failure.
-    assert_eq!(
-        asked("opencode", "/work/a", json!(6000)).unwrap(),
-        Value::Null
-    );
-    assert_eq!(asked("opencode", "/work/b", json!(0)).unwrap(), Value::Null);
+    assert_eq!(asked("devin", "/work/a", json!(6000)).unwrap(), Value::Null);
+    assert_eq!(asked("devin", "/work/b", json!(0)).unwrap(), Value::Null);
     // Claude and Pi are opened on an id they are given.
     let refused = asked("claude-code", "/work/a", json!(0)).unwrap_err();
     assert!(
@@ -587,7 +587,7 @@ fn the_newest_session_of_a_folder_is_asked_of_the_store_the_environment_names() 
     assert!(asked("kimi", "/work/a", json!(0))
         .unwrap_err()
         .contains("no harness runs as kimi"));
-    assert!(asked("opencode", "/work/a", Value::Null)
+    assert!(asked("devin", "/work/a", Value::Null)
         .unwrap_err()
         .contains("names no since"));
 }
@@ -610,8 +610,8 @@ fn the_specmint_variant_a_harness_has_installed_is_asked_of_its_adapter_in_the_h
             json!({ "kind": kind, "variant": variant, "env": env }),
         ))
     };
-    // Codex, OpenCode, Pi and Devin read the agents' folder: it has the variant there.
-    for kind in ["codex", "opencode", "pi", "devin"] {
+    // Codex, Pi and Devin read the agents' folder: it has the variant there.
+    for kind in ["codex", "pi", "devin"] {
         assert_eq!(
             asked(kind, "tdd").unwrap(),
             json!({ "installed": true, "skill": skills.join("SKILL.md").to_str().unwrap() }),
@@ -652,7 +652,7 @@ fn the_input_box_is_read_as_the_adapter_reads_it_and_a_harness_with_no_reader_re
     );
     assert_eq!(read("claude-code", &["no box"]), Value::Null);
     assert_eq!(read("devin", &[RULE, "❭", RULE]), json!("empty"));
-    for kind in ["codex", "pi", "opencode"] {
+    for kind in ["codex", "pi"] {
         assert_eq!(read(kind, &[RULE, "❯", RULE]), Value::Null, "{kind}");
     }
 }

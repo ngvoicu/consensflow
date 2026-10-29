@@ -12,10 +12,10 @@ use super::body::property;
 use super::Screens;
 use crate::api::answer::Answer;
 
-/// What both routes say of a harness that is none of the five.
+/// What both routes say of a harness that is none of the four.
 const UNKNOWN: &str = "Unknown harness";
 
-/// `['claude', 'codex', 'opencode', 'pi', 'devin'].includes(id)`: a text that
+/// `['claude', 'codex', 'pi', 'devin'].includes(id)`: a text that
 /// names one of them, and nothing else does, whatever it is.
 fn known(id: Option<&Value>) -> Result<Harness, String> {
     id.and_then(Value::as_str)

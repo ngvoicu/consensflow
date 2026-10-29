@@ -798,49 +798,6 @@ find = '''
         }'''
 replace = ""
 
-[[plant]]
-name = "resume tasks: OpenCode's plugin is posted the message once its connection is up, whatever the host admits"
-meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted"
-runs = ["harness-admission"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/send.rs"
-find = "        .bound(wires.loopback.hand_over(request, target.host))"
-replace = "        .bound(wires.loopback.send(request))"
-
-[[plant]]
-name = "resume tasks: an OpenCode send the host did not admit once its connection was up is uncertain"
-meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted"
-runs = ["harness-admission"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/send.rs"
-find = '''
-        Some(Err(failed)) if failed == NOT_ADMITTED => {
-            return Ok(claim_refused(&json!({ "cause": failed })));
-        }'''
-replace = ""
-
-[[plant]]
-name = "resume tasks: OpenCode posts the first message once its connection is up, whatever the host admits"
-meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_its_connection_is_made"
-runs = ["harness-admission"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/seed.rs"
-find = "            .bound(self.wires.loopback.hand_over(request, host))"
-replace = "            .bound(self.wires.loopback.send(request))"
-
-[[plant]]
-name = "resume tasks: an OpenCode first message the host did not admit is uncertain"
-meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_the_server_is_asked"
-runs = ["harness-admission"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/seed.rs"
-find = "            Some(Err(failed)) if failed == NOT_ADMITTED => return Err(failed),"
-replace = ""
-
 # --- a question's door ---
 
 [[plant]]
@@ -1713,22 +1670,6 @@ runs = ["engine-closed-given-nothing"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''        self.withdrawn.set(handed == HandOver::Withdrawn);'''
 replace = '''        self.withdrawn.set(false);'''
-
-[[plant]]
-name = "resume tasks: OpenCode reads its first message as its window opens"
-meant = "devin_reads_its_first_message_as_it_opens_opencode_posts_it_and_the_others_are_delivered_it"
-runs = ["harness-first-message"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/adapter.rs"
-find = '''
-    fn first_message(&self) -> FirstMessage {
-        FirstMessage::Started
-    }'''
-replace = '''
-    fn first_message(&self) -> FirstMessage {
-        FirstMessage::Opened
-    }'''
 
 [[plant]]
 name = "resume tasks: the players keep the handed column in the rows of the message table"

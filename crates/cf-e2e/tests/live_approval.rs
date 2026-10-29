@@ -1,8 +1,8 @@
 //! Real harnesses behind the human's gate: the proof that a project with
 //! "human approval required" checked sends its messages, which the fake agents of
 //! the rig cannot give. It is opt-in (`cargo xtask live approval`, `npm run
-//! live:approval`): it spends the machine's quota on all five harnesses (Claude
-//! Code, OpenCode, Pi, Devin and Codex, each on its cheap model) and needs each
+//! live:approval`): it spends the machine's quota on four harnesses (Claude
+//! Code, Pi, Devin and Codex, each on its cheap model) and needs each
 //! one installed and logged in, so it is ignored unless asked for and is no part
 //! of `check` or of CI.
 //!
@@ -15,7 +15,7 @@
 //! know nothing of the shell that runs this: the rig gives them an environment of
 //! its own.
 //!
-//! Five projects, a harness the chief of each ([`plan`]): the worker, the
+//! Four projects, a harness the chief of each ([`plan`]): the worker, the
 //! advisor and the reviewer are the next three after it in the order of
 //! [`cf_e2e::live::Harness::ALL`], so that every harness holds every seat once.
 //! Each project is a folder in the run's home (`git init`, a README, the bench's
@@ -105,7 +105,7 @@ fn limits() -> Result<(Vec<Harness>, Vec<plan::Step>)> {
 /// is the error, before anything is spent.
 fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
     let mut needed: Vec<Harness> = Vec::new();
-    for harness in plan.iter().flat_map(plan::Planned::needs) {
+    for harness in plan.iter().flat_map(|planned| planned.seats.harnesses()) {
         if !needed.contains(&harness) {
             needed.push(harness);
         }
@@ -129,7 +129,7 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
 }
 
 #[test]
-#[ignore = "opt-in: spends the machine's quota on all five harnesses; cargo xtask live approval (npm run live:approval)"]
+#[ignore = "opt-in: spends the machine's quota on four harnesses; cargo xtask live approval (npm run live:approval)"]
 fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat() -> Result {
     let log = Log::begin("live approval")?;
     let (chiefs, steps) = limits()?;

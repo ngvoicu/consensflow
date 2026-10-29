@@ -68,7 +68,7 @@ recorded: the recorder checked every case).
 | `$VERSION` | any text: the version in `package.json` | writes the build's version as `$VERSION` in what it reads |
 | `$NODE`, `$REPO` | the files and output of `setup` and `doctor`: the runtime that ran the CLI, and this repository, which a launcher names (`$REPO/bin/cf.mjs`) | makes a launcher that names them with a program that is there (its own) and the `cf.mjs` beside the binary under test, and writes what the binary says of them back as the names (`names.rs`) |
 | `$HASH` | the folder an extension's bundle is published in (`extensions/pi/$HASH/…`) | writes the 64 hex digits of the folder as `$HASH` |
-| `$PAYLOAD` | the text of every file of an extension: its bytes are the repository's own, which the install tests of `cf-harness` hold (`tests/launch/pi/install.rs`, `tests/launch/opencode/install.rs`) | writes `$PAYLOAD` for a file whose bytes are the repository's file's at the path after the hash, as they must be; OpenCode's `tui.json`, which is made where it is put, for one that is `{"plugin":["file:///…/consensflow-session.mjs"]}` and nothing else |
+| `$PAYLOAD` | the text of every file of an extension: its bytes are the repository's own, which the install tests of `cf-harness` hold (`tests/launch/pi/install.rs`) | writes `$PAYLOAD` for a file whose bytes are the repository's file's at the path after the hash, as they must be |
 | `$CF` | not in a recording: the player's own, for the binary under test | writes the path of the binary as `$CF` in what it reads: the launcher this build writes runs it |
 
 ## What the Rust player does with a recording

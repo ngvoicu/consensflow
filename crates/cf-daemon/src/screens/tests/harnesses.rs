@@ -1,5 +1,5 @@
 //! The harness diagnostics' routes, over scripted feeds and programs: a harness
-//! that is none of the five is refused before the machine is asked anything, a
+//! that is none of the four is refused before the machine is asked anything, a
 //! check is kept five minutes, and an update says what became of it.
 
 use cf_harness::testing::EPOCH_MS;
@@ -53,7 +53,7 @@ async fn every_harness_is_checked_in_the_order_the_page_lists_them() {
     assert_eq!(status, 200);
     let rows: Vec<&Value> = body["harnesses"].as_array().unwrap().iter().collect();
     let ids: Vec<&str> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["devin", "claude", "codex", "opencode", "pi"]);
+    assert_eq!(ids, ["devin", "claude", "codex", "pi"]);
     assert_eq!(
         rows[1].to_string(),
         format!(
@@ -115,7 +115,6 @@ async fn an_update_of_a_harness_that_is_not_installed_says_so_by_its_name() {
     for (id, name) in [
         ("claude", "Claude"),
         ("codex", "Codex"),
-        ("opencode", "OpenCode"),
         ("pi", "Pi"),
         ("devin", "Devin"),
     ] {

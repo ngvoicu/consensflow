@@ -15,19 +15,12 @@ pub enum Harness {
     Claude,
     Codex,
     Pi,
-    Opencode,
     Devin,
 }
 
 impl Harness {
     /// Every harness, in the order the page and the roster list them.
-    pub const ALL: [Harness; 5] = [
-        Harness::Claude,
-        Harness::Codex,
-        Harness::Pi,
-        Harness::Opencode,
-        Harness::Devin,
-    ];
+    pub const ALL: [Harness; 4] = [Harness::Claude, Harness::Codex, Harness::Pi, Harness::Devin];
 
     /// The CLI's own name (`claude`), as the page and the launcher say it.
     pub fn as_str(self) -> &'static str {
@@ -35,7 +28,6 @@ impl Harness {
             Harness::Claude => "claude",
             Harness::Codex => "codex",
             Harness::Pi => "pi",
-            Harness::Opencode => "opencode",
             Harness::Devin => "devin",
         }
     }
@@ -181,7 +173,7 @@ pub struct AgentView {
     #[serde(skip_serializing_if = "is_false")]
     pub unsupported: bool,
     /// Kept out of the list the human sees: a Claude or OpenAI model through
-    /// Pi or OpenCode, while they keep to their own harnesses. Said by
+    /// Pi or Devin, while they keep to their own harnesses. Said by
     /// `listAgents` alone, and last.
     #[serde(skip_serializing_if = "is_false")]
     pub hidden: bool,
@@ -194,7 +186,7 @@ pub struct AgentView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
-    /// Claude and OpenAI models reached through Pi or OpenCode are hidden.
+    /// Claude and OpenAI models reached through Pi or Devin are hidden.
     pub own_harness_only: bool,
 }
 
@@ -211,7 +203,7 @@ mod tests {
         Profile {
             model_key: "muse-spark-1.3".into(),
             model_label: "Muse Spark 1.3".into(),
-            route_label: "OpenCode Zen · Contributor · Free".into(),
+            route_label: "OpenRouter · Contributor · Free".into(),
             route_note: Some("Prompts and replies may train Meta models.".into()),
             work_tier: WorkTier::Light,
         }
@@ -219,14 +211,14 @@ mod tests {
 
     fn entry() -> CatalogEntry {
         CatalogEntry {
-            name: "gefjon".into(),
+            name: "eos".into(),
             designer: false,
-            model: "opencode/muse-spark-1.3-contributor-free".into(),
+            model: "openrouter/meta/muse-spark-1.3-contributor-free".into(),
             effort: Some("xhigh".into()),
-            description: "OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH".into(),
+            description: "Pi Muse Spark 1.3 Contributor FREE XHIGH".into(),
             detail: "Collaborative coding and task breakdown.".into(),
             profile: muse(),
-            preset: "gefjon".into(),
+            preset: "eos".into(),
         }
     }
 
@@ -236,7 +228,6 @@ mod tests {
             (Harness::Claude, "claude", "claude-code"),
             (Harness::Codex, "codex", "codex"),
             (Harness::Pi, "pi", "pi"),
-            (Harness::Opencode, "opencode", "opencode"),
             (Harness::Devin, "devin", "devin"),
         ];
         for (harness, name, kind) in names {
@@ -252,7 +243,7 @@ mod tests {
     #[test]
     fn the_harnesses_are_listed_as_the_roster_lists_them() {
         let names: Vec<_> = Harness::ALL.into_iter().map(Harness::as_str).collect();
-        assert_eq!(names, ["claude", "codex", "pi", "opencode", "devin"]);
+        assert_eq!(names, ["claude", "codex", "pi", "devin"]);
     }
 
     #[test]
@@ -296,7 +287,7 @@ mod tests {
     fn a_profile_writes_its_fields_in_the_order_the_catalog_builds_them() {
         assert_eq!(
             serde_json::to_string(&muse()).unwrap(),
-            r#"{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenCode Zen · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"}"#
+            r#"{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"}"#
         );
     }
 
@@ -309,7 +300,7 @@ mod tests {
         let written = serde_json::to_string(&plain).unwrap();
         assert!(!written.contains("routeNote"), "{written}");
         assert!(written
-            .ends_with(r#""routeLabel":"OpenCode Zen · Contributor · Free","workTier":"light"}"#));
+            .ends_with(r#""routeLabel":"OpenRouter · Contributor · Free","workTier":"light"}"#));
     }
 
     #[test]
@@ -317,11 +308,11 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&entry()).unwrap(),
             concat!(
-                r#"{"name":"gefjon","model":"opencode/muse-spark-1.3-contributor-free","effort":"xhigh","#,
-                r#""description":"OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH","#,
+                r#"{"name":"eos","model":"openrouter/meta/muse-spark-1.3-contributor-free","effort":"xhigh","#,
+                r#""description":"Pi Muse Spark 1.3 Contributor FREE XHIGH","#,
                 r#""detail":"Collaborative coding and task breakdown.","#,
-                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenCode Zen · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
-                r#""preset":"gefjon"}"#
+                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
+                r#""preset":"eos"}"#
             )
         );
     }
@@ -335,7 +326,7 @@ mod tests {
         };
         let written = serde_json::to_string(&image).unwrap();
         assert!(
-            written.starts_with(r#"{"name":"gefjon","designer":true,"model":"#),
+            written.starts_with(r#"{"name":"eos","designer":true,"model":"#),
             "{written}"
         );
         assert!(!written.contains("\"effort\""), "{written}");
@@ -347,15 +338,15 @@ mod tests {
     fn a_lookup_answers_the_entry_with_its_harness_after_the_preset() {
         let found = FoundEntry {
             entry: entry(),
-            harness: Harness::Opencode,
+            harness: Harness::Pi,
         };
         let written = serde_json::to_string(&found).unwrap();
         assert!(
-            written.ends_with(r#""preset":"gefjon","harness":"opencode"}"#),
+            written.ends_with(r#""preset":"eos","harness":"pi"}"#),
             "{written}"
         );
         assert!(
-            written.starts_with(r#"{"name":"gefjon","model":"#),
+            written.starts_with(r#"{"name":"eos","model":"#),
             "{written}"
         );
     }
@@ -398,7 +389,7 @@ mod tests {
             concat!(
                 r#"{"name":"mine","harness":"kimi","designer":true,"model":"moonshot-ai/kimi-k3","#,
                 r#""workTier":"complex","effort":"high","description":"Mine","preset":"mine","custom":true,"#,
-                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenCode Zen · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
+                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
                 r#""unsupported":true,"hidden":true}"#
             )
         );

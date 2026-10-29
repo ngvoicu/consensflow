@@ -8,7 +8,6 @@ use std::rc::Rc;
 use cf_proto::agents::Harness;
 use serde::{Serialize, Serializer};
 
-use crate::opencode;
 use crate::pi;
 
 /// What is known of one harness's CLI.
@@ -23,13 +22,12 @@ pub struct Row {
     pub checked_at: i64,
     pub version: Version,
     pub update: Update,
-    /// Whether a window can be opened on the CLI: Devin's always, and
-    /// OpenCode's where it is one ConsensFlow does not support yet.
+    /// Whether a window can be opened on the CLI: Devin's always.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub setup: Option<Setup>,
     #[serde(skip_serializing_if = "Distribution::is_unlooked")]
     pub distribution: Distribution,
-    /// The extension made for the CLI (Pi's and OpenCode's alone).
+    /// The extension made for the CLI (Pi's alone).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension: Option<Extension>,
 }
@@ -71,8 +69,7 @@ pub enum Update {
     NotChecked,
     /// The release was read, and says nothing of being newer: the versions
     /// are no three whole numbers each, or no window is opened on the CLI
-    /// ([`Setup::NotSupportedYet`]) or on the release (OpenCode 2), which is
-    /// then offered as no update.
+    /// ([`Setup::NotSupportedYet`]), which is then offered as no update.
     Unknown(Release),
     Available(Release),
     Current(Release),
@@ -101,8 +98,8 @@ pub enum Setup {
     UpdateRequired {
         reason: String,
     },
-    /// The CLI is newer than ConsensFlow supports yet (OpenCode 2), and no
-    /// update is the way out.
+    /// The CLI is newer than ConsensFlow supports yet, and no update is the
+    /// way out.
     NotSupportedYet {
         reason: String,
     },
@@ -174,16 +171,6 @@ impl Extension {
             pi::Extension::NotInstalled => Self::not_installed(),
             pi::Extension::InstalledUnverified { path } => Self::unverified(path),
             pi::Extension::Error { reason } => Self::failed(reason),
-        }
-    }
-
-    /// OpenCode's plugin, as it was prepared: its settings file is the
-    /// launch's, and not part of what the row says.
-    pub(super) fn of_opencode(prepared: opencode::Extension) -> Self {
-        match prepared {
-            opencode::Extension::NotInstalled => Self::not_installed(),
-            opencode::Extension::InstalledUnverified { path, .. } => Self::unverified(path),
-            opencode::Extension::Error { reason } => Self::failed(reason),
         }
     }
 }

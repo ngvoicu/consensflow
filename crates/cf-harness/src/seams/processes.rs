@@ -464,6 +464,70 @@ mod tests {
             });
     }
 
+    /// The process `/bin/sh` left in the background, whose id it wrote in `file`: killed
+    /// when this is dropped, whatever the test came to.
+    #[cfg(unix)]
+    struct Left<'a> {
+        file: &'a Path,
+    }
+
+    #[cfg(unix)]
+    impl Left<'_> {
+        fn pid(&self) -> Option<nix::unistd::Pid> {
+            let written = std::fs::read_to_string(self.file).ok()?;
+            written.trim().parse().ok().map(nix::unistd::Pid::from_raw)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for Left<'_> {
+        fn drop(&mut self) {
+            if let Some(pid) = self.pid() {
+                let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+            }
+        }
+    }
+
+    /// What a child's stop waits for (`shared::child`): a program that has exited has
+    /// ended, though a program it left holds its error stream open, which nothing here
+    /// reads, for thirty seconds more. Its stream is closed only then (T-566: OpenCode's
+    /// throwaway server's case, `a_server_that_has_exited_is_stopped_though_a_program_
+    /// holds_its_error_stream`, which went with OpenCode's channel).
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_has_exited_has_ended_though_a_program_it_left_holds_its_error_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("left");
+        let left = Left { file: &file };
+        let program = Program {
+            executable: "/bin/sh".into(),
+            args: vec![
+                "-c".to_owned(),
+                r#"/bin/sleep 30 </dev/null >/dev/null & echo $! > "$0""#.to_owned(),
+                file.to_string_lossy().into_owned(),
+            ],
+            cwd: None,
+            env: Env::from_vars([("PATH", "/usr/bin:/bin")]),
+        };
+        let processes = SystemProcesses::new(Env::default());
+        let (ended, closed) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let child = processes.spawn(program, Streams::Quiet).unwrap();
+                let ended = tokio::time::timeout(Duration::from_secs(10), child.ended()).await;
+                let closed = tokio::time::timeout(Duration::from_millis(300), child.closed()).await;
+                (ended, closed)
+            });
+        let pid = left.pid();
+        let holding = pid.is_some_and(|pid| nix::sys::signal::kill(pid, None).is_ok());
+        drop(left);
+        assert!(holding, "the program it left holds the stream ({pid:?})");
+        assert!(ended.is_ok(), "it has exited, so it has ended");
+        assert!(closed.is_err(), "its error stream is held open");
+    }
+
     #[test]
     fn a_cli_that_is_not_there_is_unread_before_any_run() {
         let processes: Rc<dyn Processes> = Rc::new(ScriptedProcesses::default());

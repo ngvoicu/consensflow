@@ -33,7 +33,7 @@
 //!
 //! ```text
 //! cargo xtask live tell                    Claude, the default: both cases
-//! cargo xtask live tell codex opencode     the ones named, one after the other
+//! cargo xtask live tell codex pi           the ones named, one after the other
 //! cargo xtask live tell --case monitor     Claude's turn with a Monitor
 //! cargo xtask live tell -- --list          the check, listed
 //! ```

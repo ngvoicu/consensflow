@@ -264,7 +264,6 @@ fn a_variant_not_found_installed_is_placed_in_the_folder_kept_for_its_harness_an
         (Harness::Claude, "claude"),
         (Harness::Pi, "pi"),
         (Harness::Devin, "devin"),
-        (Harness::Opencode, "opencode"),
         (Harness::Codex, "codex"),
     ] {
         for variant in Variant::ALL {
@@ -366,11 +365,6 @@ fn the_own_copy_is_written_whole_at_the_place_the_role_text_named_and_the_harnes
             copy.root,
             kept_for(&fake, "claude", variant),
             "the folder Claude is given"
-        );
-        assert_eq!(
-            copy.skills(),
-            path::join(&[&copy.root, ".claude", "skills"]),
-            "the folder OpenCode is given"
         );
         let folder = Path::new(skill.path()).parent().expect("a folder");
         assert_eq!(

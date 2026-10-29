@@ -1,9 +1,8 @@
 //! The rig: a real daemon and the real pane host, connected as the app connects
 //! them, in a home of the case's own, with a stand-in `claude` in the windows
 //! it opens (and a stand-in `devin`, for a case that asks for one:
-//! [`Config::devin`]; an `opencode` 1.x: [`Config::opencode`]; an `opencode`
-//! that has updated itself to 2: [`Config::opencode_2`]; or each where it
-//! installs itself, off a `PATH` that is the Finder's:
+//! [`Config::devin`]; or each where it installs itself, off a `PATH` that is
+//! the Finder's:
 //! [`Config::as_the_finder_starts_it`]). The daemon is `cf ui --json --no-open`;
 //! the pane
 //! host is `consensflow-bridge`, which gives each window a terminal of its own
@@ -104,8 +103,6 @@ pub struct Config {
     isolated: Vec<Arc<dyn HarnessHome>>,
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
-    /// The stand-in `opencode`: of an OpenCode 1.x, or of one that is 2.
-    opencode: Option<PathBuf>,
     finder: bool,
     masker: Option<Masker>,
     reports: Option<PathBuf>,
@@ -175,7 +172,6 @@ impl Config {
             isolated: Vec::new(),
             codex: None,
             devin: None,
-            opencode: None,
             finder: false,
             masker: None,
             reports: None,
@@ -188,7 +184,7 @@ impl Config {
     /// As the Finder starts an app's daemon when the login shell gives it no
     /// `PATH`: on the system's alone, `/usr/bin:/bin:/usr/sbin:/sbin`, with no
     /// stand-in on it. Each is where its harness installs itself: `claude` (and a
-    /// Devin's, an OpenCode's) in the home's `.local/bin`, and a Codex's in the
+    /// Devin's) in the home's `.local/bin`, and a Codex's in the
     /// machine's own folder of programs, the one Homebrew's `codex` is in
     /// (`/opt/homebrew/bin`), which is the rig's (`install::tool_folder`). The
     /// owner's machine the night a task to a Codex worker was refused
@@ -269,29 +265,6 @@ impl Config {
     #[must_use]
     pub fn devin(mut self, program: impl Into<PathBuf>) -> Self {
         self.devin = Some(program.into());
-        self
-    }
-
-    /// With the `opencode` the windows find first on their `PATH` the stand-in
-    /// `program` (the `fake-opencode-2` binary of this crate): the OpenCode of a
-    /// machine that has updated itself to 2, which says so to `--version`, answers
-    /// nothing else, and writes down what it is asked in `opencode.jsonl` of the
-    /// rig's folder ([`Rig::opencode_asked`]).
-    #[must_use]
-    pub fn opencode_2(mut self, program: impl Into<PathBuf>) -> Self {
-        self.opencode = Some(program.into());
-        self
-    }
-
-    /// With the `opencode` the windows find first on their `PATH` the stand-in
-    /// `program` (the `fake-opencode-1` binary of this crate): an OpenCode 1.x the
-    /// daemon launches a window on as it launches one on OpenCode, which serves
-    /// what the launch asks of OpenCode's server and writes down what it is asked
-    /// and the requests it is sent in `opencode.jsonl` of the rig's folder
-    /// ([`Rig::opencode_asked`], [`Rig::opencode_requests`]).
-    #[must_use]
-    pub fn opencode(mut self, program: impl Into<PathBuf>) -> Self {
-        self.opencode = Some(program.into());
         self
     }
 

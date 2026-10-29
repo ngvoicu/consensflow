@@ -57,13 +57,13 @@ impl Cursor {
 /// What the input box of a `harness` window holds, where `screen` (its last lines
 /// as drawn, the pane host's `bottom`) shows it, the cursor where `cursor` says;
 /// none where it shows no box the harness's reader knows, or the harness has no
-/// reader (Codex, Pi and OpenCode take their messages through their own channels,
+/// reader (Codex and Pi take their messages through their own channels,
 /// which no typing holds back).
 pub fn read(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Option<InputBox> {
     match harness {
         Harness::Claude => crate::claude::input_box::read(screen, cursor),
         Harness::Devin => crate::devin::input_box::read(screen, cursor),
-        Harness::Codex | Harness::Pi | Harness::Opencode => None,
+        Harness::Codex | Harness::Pi => None,
     }
 }
 
@@ -75,7 +75,7 @@ pub fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Opt
     let mark = match harness {
         Harness::Claude => crate::claude::input_box::MARK,
         Harness::Devin => crate::devin::input_box::MARK,
-        Harness::Codex | Harness::Pi | Harness::Opencode => return None,
+        Harness::Codex | Harness::Pi => return None,
     };
     match read(harness, screen, cursor)? {
         InputBox::Empty => Some(String::new()),

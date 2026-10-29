@@ -152,7 +152,7 @@ if (window.parent !== window) {
     <button type="button">Clear filters</button>
   </div>
   <p class="tier-guide">The work tier is what a task finds an agent by.</p>
-  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi, OpenCode and Devin</label>
+  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and Devin</label>
   <div id="agents"></div>
   </section>
 
@@ -180,7 +180,7 @@ const el = (tag, className, text) => {
   return node;
 };
 
-const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', devin: 'Devin' };
+const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', pi: 'Pi', devin: 'Devin' };
 const WORK_TIERS = {"critical":{"label":"Critical work","description":"Important reviews, architecture, hard problems and important questions. No coding or routine advice."},"complex":{"label":"Complex work","description":"Demanding implementation, investigation, planning and substantial reviews."},"standard":{"label":"Standard work","description":"Feature work, tests, research, planning and ordinary reviews."},"light":{"label":"Light work","description":"Bounded fixes, lookups and routine tasks; verify the model is suitable."}};
 const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'not-applicable'];
 const effortValue = p => p.designer ? 'not-applicable' : (p.effort || 'default');
@@ -311,7 +311,7 @@ function renderAgents(data) {
   const mine = offered.filter(p => p.custom).length;
   document.querySelector('#lede').textContent = offered.length + ' agents, the catalog’s and your own; a project’s staff is picked from them.' +
     (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours, defined here.') +
-    (hidden === 0 ? '' : ' ' + hidden + ' hidden on Pi, OpenCode and Devin: Claude and OpenAI models run on their own harnesses.') +
+    (hidden === 0 ? '' : ' ' + hidden + ' hidden on Pi and Devin: Claude and OpenAI models run on their own harnesses.') +
     (missing === 0 ? '' : ' ' + missing + ' on a harness not installed here: see Harnesses.');
   const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }

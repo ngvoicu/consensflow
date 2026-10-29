@@ -103,23 +103,8 @@ fn each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_fin
         )),
         Some(RoleText::File("/d/role".to_owned()))
     );
-    // OpenCode: the last of the instructions its configuration lists.
-    assert_eq!(
-        role_of(&frame(
-            &json!(["opencode"]),
-            &json!({ "OPENCODE_CONFIG_CONTENT": r#"{"instructions":["/user/rules.md","/o/role"]}"# })
-        )),
-        Some(RoleText::File("/o/role".to_owned()))
-    );
     // A window given its role in none of these ways is one the run cannot read.
     assert_eq!(role_of(&frame(&json!(["claude"]), &json!({}))), None);
-    assert_eq!(
-        role_of(&frame(
-            &json!(["opencode"]),
-            &json!({ "OPENCODE_CONFIG_CONTENT": "{}" })
-        )),
-        None
-    );
 }
 
 #[test]
@@ -140,14 +125,12 @@ fn a_window_of_no_specs_names_no_skill_on_its_command_line_or_in_its_environment
     );
     assert!(failed.contains("specmint-core"), "{failed}");
     let in_env = frame(
-        &json!(["opencode"]),
-        &json!({ "OPENCODE_CONFIG_CONTENT": r#"{"skills":{"paths":["/r/specmint-tdd"]}}"# }),
+        &json!(["devin"]),
+        &json!({ "CF_DEVIN_ROLE_FILE": "/r/skills/specmint-tdd/SKILL.md" }),
     );
     let failed = carries_no_skill(&in_env).unwrap_err();
     assert!(
-        failed.starts_with(
-            "the window's environment names a Specmint skill: OPENCODE_CONFIG_CONTENT="
-        ),
+        failed.starts_with("the window's environment names a Specmint skill: CF_DEVIN_ROLE_FILE="),
         "{failed}"
     );
 }

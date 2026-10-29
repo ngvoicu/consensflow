@@ -680,7 +680,7 @@ fn every_event_a_heading_reads_is_logged_within_its_ceiling_however_long_what_it
             project.id,
             &NewMember {
                 agent: agent.clone(),
-                harness: "opencode".into(),
+                harness: "claude-code".into(),
                 designer: false,
                 roles: vec!["worker".into()],
                 tier: "standard".into(),
@@ -690,10 +690,10 @@ fn every_event_a_heading_reads_is_logged_within_its_ceiling_however_long_what_it
     let session = "\u{1}".repeat(NATIVE_SESSION_MAX);
     for participant in [member.id, id_of(&project, "chief")] {
         ledger
-            .start_conversation(participant, "opencode")
+            .start_conversation(participant, "claude-code")
             .expect("a conversation");
         let followed = ledger
-            .follow_conversation(participant, "opencode", &session)
+            .follow_conversation(participant, "claude-code", &session)
             .expect("followed");
         ledger.end_conversation(followed.id).expect("ended");
     }

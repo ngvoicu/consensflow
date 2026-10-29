@@ -22,7 +22,7 @@ fn commit(variant: Variant) -> String {
 }
 
 /// The folder the copy of `variant` is kept in for `harness` (`claude`, `pi`,
-/// `devin`, `opencode` or `codex`), in ConsensFlow's own folder `home`: what a
+/// `devin` or `codex`), in ConsensFlow's own folder `home`: what a
 /// harness that reads the skills of the folders it is given is given.
 pub fn root(home: &str, harness: &str, variant: Variant) -> String {
     path::join(&[
@@ -34,7 +34,7 @@ pub fn root(home: &str, harness: &str, variant: Variant) -> String {
     ])
 }
 
-/// The folder of skills in it: what OpenCode is told to read.
+/// The folder of skills in it.
 pub fn skills(home: &str, harness: &str, variant: Variant) -> String {
     path::join(&[&root(home, harness, variant), ".claude", "skills"])
 }

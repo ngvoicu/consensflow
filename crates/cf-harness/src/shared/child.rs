@@ -5,6 +5,10 @@
 //! (one the server started, or one started beside it that was left a copy) holds
 //! up the stream's end, not the server's, nor the port it freed.
 
+// Its one caller left with OpenCode's channel; Muse's MSP child (`muse/msp.rs`,
+// T-829) stops its child with it once that lands, and takes this allowance away.
+#![cfg_attr(not(test), allow(dead_code))]
+
 use crate::seams::processes::{Child, Ending};
 use crate::seams::{arm, Time};
 

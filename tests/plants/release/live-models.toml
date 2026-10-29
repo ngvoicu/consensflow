@@ -16,16 +16,15 @@
 # (Codex's app-server, resume-cut's Claude) and of xtask's words catch each plant.
 #
 # A live agent need not be in the catalog (asked for the owner's Nemotron 3.5 Super VL,
-# 2026-10-16, which the catalog has since taken as Buri; every row of the catalog can be named,
-# which `every_agent_of_the_catalog_can_be_named_by_its_model_and_effort` holds): the roster
+# 2026-10-16; every row of the catalog can be named, which
+# `every_agent_of_the_catalog_can_be_named_by_its_model_and_effort` holds): the roster
 # keeps a row of the human's own on any model, and the live suites' rows are such rows. The rig case
 # (on a model the case holds is in no row of the catalog)
 # `live_members::a_task_for_a_member_on_a_model_the_flag_names_…` holds it end to end: the flag's
 # row, written as the suites write it, is taken by the real daemon as a member, and a task given it
-# has the daemon launch the member's window on a stand-in OpenCode 1.x (`fake-opencode-1`; not
-# `fake-opencode`, which is cf-harness's stand-in of its channel tests) with that model, and post
-# its first message with the model and the effort (`variant`). The rig's runs
-# build the native `cf` from the sources as they are planted, so they say `builds`.
+# has the daemon launch the member's window on the stand-in Claude with that model and that
+# effort. The rig's runs build the native `cf` from the sources as they are planted, so they say
+# `builds`.
 #
 # Every name holds `live models`, so `npm run plants:release -- "live models"` runs them all.
 
@@ -130,16 +129,6 @@ runs = ["e2e-live"]
 file = "crates/cf-e2e/src/live/agents.rs"
 find = '        Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],'
 replace = '        Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max"],'
-
-[[plant]]
-name = "live models: OpenCode takes no xhigh, so Buri cannot be named"
-meant = "every_agent_of_the_catalog_can_be_named_by_its_model_and_effort"
-runs = ["e2e-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/agents.rs"
-find = '        Harness::OpenCode => &["minimal", "low", "medium", "high", "xhigh", "max"],'
-replace = '        Harness::OpenCode => &["minimal", "low", "medium", "high", "max"],'
 
 # --claude-model beside it.
 
@@ -278,7 +267,7 @@ find = "    let mut row = agent_on(model);"
 replace = "    let mut row = agent_on(&Model::cheap(model.harness));"
 
 [[plant]]
-name = "live models: the roster drops an OpenCode agent of the human's own on a model no catalog row has"
+name = "live models: the roster drops a Claude agent of the human's own on a model no catalog row has"
 meant = "a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_launched_on_it"
 runs = ["e2e-rig-live-members"]
 
@@ -290,7 +279,7 @@ find = '''
 replace = '''
             .filter(|row| self.entry_of(row).is_none())
             .filter(|row| {
-                row.kind() != Some("opencode")
+                row.kind() != Some("claude-code")
                     || self
                         .presets()
                         .iter()
@@ -299,40 +288,50 @@ replace = '''
             .cloned()'''
 
 [[plant]]
-name = "live models: an OpenCode window is opened on no model"
+name = "live models: a Claude window is opened on no model"
 meant = "a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_launched_on_it"
 runs = ["e2e-rig-live-members"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/window_args.rs"
 find = '''
-        Harness::Opencode => {
+        Harness::Claude => {
+            if let Some(model) = model {
+                flag("--model", model.to_owned());
+            }
+            if let Some(effort) = effort {
+                flag("--effort", effort.to_owned());
+            }
+        }'''
+replace = '''
+        Harness::Claude => {
+            if let Some(effort) = effort {
+                flag("--effort", effort.to_owned());
+            }
+        }'''
+
+[[plant]]
+name = "live models: a Claude window is opened on no effort"
+meant = "a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_launched_on_it"
+runs = ["e2e-rig-live-members"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = '''
+        Harness::Claude => {
+            if let Some(model) = model {
+                flag("--model", model.to_owned());
+            }
+            if let Some(effort) = effort {
+                flag("--effort", effort.to_owned());
+            }
+        }'''
+replace = '''
+        Harness::Claude => {
             if let Some(model) = model {
                 flag("--model", model.to_owned());
             }
         }'''
-replace = '''
-        Harness::Opencode => {}'''
-
-[[plant]]
-name = "live models: the daemon posts an OpenCode window's first message with no effort"
-meant = "a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_launched_on_it"
-runs = ["e2e-rig-live-members"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/adapter.rs"
-find = "                variant: self.effort.as_deref().filter(|_| fresh),"
-replace = "                variant: None,"
-
-[[plant]]
-name = "live models: the daemon posts an OpenCode window's first message with no model"
-meant = "a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_launched_on_it"
-runs = ["e2e-rig-live-members"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/seed.rs"
-find = "    if let Some(model) = seed.model.filter(|model| !model.is_empty()) {"
-replace = "    if let Some(model) = seed.model.filter(|_| false) {"
 
 # What the report says each window was launched on.
 
@@ -406,38 +405,6 @@ runs = ["e2e-live-resume-cut"]
 file = "crates/cf-e2e/tests/live_resume_cut.rs"
 find = "    match model.filter(|_| harness == Harness::Claude) {"
 replace = "    match model.filter(|_| false) {"
-
-# An OpenCode effort a window opened without the daemon would not get.
-
-[[plant]]
-name = "live models: a window opened without the daemon is opened on an OpenCode effort"
-meant = "a_window_opened_without_the_daemon_is_never_opened_on_an_opencode_effort_it_would_not_get"
-runs = ["e2e-rig-launches"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/window/open.rs"
-find = "        without_the_daemon(&agent)?;"
-replace = ""
-
-[[plant]]
-name = "live models: an OpenCode effort is refused only where it is a thinking"
-meant = "an_opencode_effort_is_refused_before_anything_is_spent_for_its_plain_window_takes_none"
-runs = ["e2e-live-resume-cut"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/window/open.rs"
-find = '        text("effort").or(text("thinking")),'
-replace = '        text("thinking"),'
-
-[[plant]]
-name = "live models: resume-cut opens its windows before it refuses an OpenCode effort"
-meant = "an_opencode_effort_is_refused_before_anything_is_spent_for_its_plain_window_takes_none"
-runs = ["e2e-live-resume-cut"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_resume_cut.rs"
-find = "        window::without_the_daemon(&agent_of(*harness, model.as_deref(), models))?;"
-replace = ""
 
 # The runs of agents of their own.
 

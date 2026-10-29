@@ -161,10 +161,6 @@ type Outcome = cf_e2e::Outcome;
 /// The stand-in for a window's harness program, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
-/// The stand-in for an OpenCode 1.x, which the daemon launches a window on as it
-/// launches one on OpenCode, built for these tests.
-const FAKE_OPENCODE: &str = env!("CARGO_BIN_EXE_fake-opencode-1");
-
 /// A rig whose windows run the stand-in agent.
 fn rig() -> cf_e2e::Result<Rig> {
     Rig::start(config())

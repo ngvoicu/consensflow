@@ -85,14 +85,7 @@ fn names_an_effort_wherever_its_harness_has_one_or_is_a_listed_exception() {
     // established.
     let blank_on_purpose: HashSet<&str> = [
         "metis",  // MiniMax M3, on pi
-        "mimir",  // MiniMax M3, on opencode
         "triton", // Laguna S 2.1 free, on pi
-        "aegir",  // Laguna S 2.1 free, on opencode
-        // Added 2026-09-06 with the OpenCode Zen road — same rule, new route.
-        // Zen's Nemotron 3 Ultra entry publishes no reasoning options at all,
-        // where OpenRouter's does: that is why ymir names `high` and audhumla,
-        // the same model on the other road, names nothing.
-        "audhumla", // Nemotron 3 Ultra free on OpenCode Zen
         // Devin's SWE-1.6 (2026-10-02): Devin lists it with no levels.
         "hapi",
         // The rest of what Devin lists with no levels (2026-10-25): Adaptive,
@@ -106,7 +99,6 @@ fn names_an_effort_wherever_its_harness_has_one_or_is_a_listed_exception() {
         "radjedef",
         // MiMo V2.6 Pro (2026-09-30): reasoning on or off, no level in any catalog.
         "selene", // on pi
-        "idun",   // on opencode
         // Codex Images, among Codex's agents since 2026-10-03: an image agent's
         // window is Codex on its own model, with no effort of its own.
         "pygmalion",
@@ -123,32 +115,6 @@ fn names_an_effort_wherever_its_harness_has_one_or_is_a_listed_exception() {
             "{}: {} has effort levels, so this one must name one",
             entry.name,
             harness.as_str()
-        );
-    }
-}
-
-// The zoo is the same models through OpenCode: a pair that shares a model
-// must share the level too, or one name means two different agents.
-#[test]
-fn keeps_each_opencode_twin_at_its_pi_twin_s_effort() {
-    let catalog = catalog();
-    for entry in listed(&catalog, Harness::Opencode) {
-        let twins: Vec<&CatalogEntry> = listed(&catalog, Harness::Pi)
-            .iter()
-            .filter(|p| p.model == entry.model)
-            .collect();
-        let twin = twins
-            .iter()
-            .find(|p| p.effort == entry.effort)
-            .or(twins.first());
-        let Some(twin) = twin else { continue };
-        if entry.effort.is_none() {
-            continue;
-        }
-        assert_eq!(
-            entry.effort, twin.effort,
-            "{} and {} share {} but not the effort",
-            entry.name, twin.name, entry.model
         );
     }
 }
@@ -191,12 +157,6 @@ fn carries_the_models_verified_live_on_2026_08_21_newest_of_each_family() {
                 .any(|e| e.model == model),
             "pi is missing {model}"
         );
-        assert!(
-            listed(&catalog, Harness::Opencode)
-                .iter()
-                .any(|e| e.model == model),
-            "opencode is missing {model}"
-        );
     }
     // Superseded versions must not linger in a curated list — and a retired
     // endpoint is superseded twice over: stealth/ox-alpha answers 404 now.
@@ -211,49 +171,11 @@ fn carries_the_models_verified_live_on_2026_08_21_newest_of_each_family() {
     }
 }
 
-// Added 2026-09-06. Two new roads to models this catalog already carried, and
-// one new road for GPT 6 Astra. Every id below was probed on the CLI that
-// runs it, at the level its row names, before it was written down.
 #[test]
-fn carries_opencode_zen_only_where_the_account_can_actually_reach_it() {
-    // Zen lists 102 models on models.dev and offers 7 through the CLI, because
-    // this account has no Zen credential. Only reachable ids belong here, and
-    // each of these was probed: Nemotron 3.5 Super VL answered on the Mac and
-    // on zeewin on 2026-10-16, and its `xhigh` is the ceiling Zen's models.dev
-    // entry lists, not a level a run proved (OpenCode validates no variant).
-    // pi has no Zen provider at all, so these rows are opencode-only by
-    // necessity, not by preference.
-    let catalog = catalog();
-    let mut zen: Vec<&str> = listed(&catalog, Harness::Opencode)
-        .iter()
-        .filter(|e| e.model.starts_with("opencode/"))
-        .map(|e| e.model.as_str())
-        .collect();
-    zen.sort_unstable();
-    assert_eq!(
-        zen,
-        [
-            "opencode/muse-spark-1.3-contributor-free",
-            "opencode/nemotron-3-ultra-free",
-            "opencode/nemotron-3.5-super-vl-free",
-        ]
-    );
-    assert_eq!(
-        listed(&catalog, Harness::Pi)
-            .iter()
-            .filter(|e| e.model.starts_with("opencode/"))
-            .count(),
-        0,
-        "pi has no Zen provider — a Zen row there would never run"
-    );
-}
-
-#[test]
-fn reaches_gpt_6_astra_on_all_three_engines_that_answer_for_it() {
+fn reaches_gpt_6_astra_on_both_engines_that_answer_for_it() {
     // codex through the ChatGPT login (astraeus/asteria/celaeno), pi through its own
-    // copy of that login, opencode through OpenRouter — three roads, three
-    // model strings, so no twin rule couples them. `ultra` stays codex-only:
-    // neither of the new roads publishes it.
+    // copy of that login — two roads, two model strings, so no twin rule couples
+    // them. `ultra` stays codex-only: pi's road does not publish it.
     let catalog = catalog();
     assert!(listed(&catalog, Harness::Codex)
         .iter()
@@ -261,29 +183,23 @@ fn reaches_gpt_6_astra_on_all_three_engines_that_answer_for_it() {
     assert!(listed(&catalog, Harness::Pi)
         .iter()
         .any(|e| e.model == "openai-codex/gpt-6-astra"));
-    assert!(listed(&catalog, Harness::Opencode)
+    let mut levels: Vec<Option<&str>> = listed(&catalog, Harness::Pi)
         .iter()
-        .any(|e| e.model == "openrouter/openai/gpt-6-astra"));
-    for harness in [Harness::Pi, Harness::Opencode] {
-        let mut levels: Vec<Option<&str>> = listed(&catalog, harness)
-            .iter()
-            .filter(|e| e.model.contains("gpt-6-astra"))
-            .map(|e| e.effort.as_deref())
-            .collect();
-        levels.sort_unstable();
-        assert_eq!(
-            levels,
-            [
-                Some("high"),
-                Some("low"),
-                Some("max"),
-                Some("medium"),
-                Some("xhigh")
-            ],
-            "{}: five Astra levels, and no ultra",
-            harness.as_str()
-        );
-    }
+        .filter(|e| e.model.contains("gpt-6-astra"))
+        .map(|e| e.effort.as_deref())
+        .collect();
+    levels.sort_unstable();
+    assert_eq!(
+        levels,
+        [
+            Some("high"),
+            Some("low"),
+            Some("max"),
+            Some("medium"),
+            Some("xhigh")
+        ],
+        "pi: five Astra levels, and no ultra"
+    );
 }
 
 #[test]

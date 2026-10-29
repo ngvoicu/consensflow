@@ -12,9 +12,9 @@
 # account may need them. Codex's turn a limit cut (`usage_limit_exceeded`,
 # `rate_limit_exceeded`) is a refusal for quota, with the reset its rate limits
 # name before or after it (`crates/cf-harness/src/codex/record.rs`), and so is
-# Anthropic's spent extra usage, a 400, in Pi's, Claude Code's and OpenCode's
-# words (`crates/cf-harness/src/shared/quota.rs`, `claude/record/project.rs`,
-# `opencode/record/answer.rs`). The engine's cases are
+# Anthropic's spent extra usage, a 400, in Pi's and Claude Code's words
+# (`crates/cf-harness/src/shared/quota.rs`, `claude/record/project.rs`). The
+# engine's cases are
 # `crates/cf-engine/tests/dispatcher/quota_waits.rs`; the rig's are
 # `crates/cf-e2e/tests/regressions/a_quota_wait_ended_failed.rs`, whose stand-in
 # Codex is refused mid-task in Codex's shape, and
@@ -35,7 +35,6 @@
 quota-wait-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota"]
 quota-wait-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 quota-wait-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
-quota-wait-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 quota-wait-refusals = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
 quota-wait-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_quota_wait_ended_failed::"], builds = true }
 quota-wait-continues = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "claude_continues_by_itself_after_its_limit::"], builds = true }
@@ -220,16 +219,6 @@ replace = '''
             || record.get("error").and_then(Value::as_str) == Some("rate_limit")
             || spent && false,
 '''
-
-[[plant]]
-name = "quota wait: Anthropic's spent extra usage, a 400 in OpenCode's words, is a failure"
-meant = "opencode::record::tests::answers::anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset"
-runs = ["quota-wait-opencode"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = "                || refused_for_quota(&failure)"
-replace = "                || refused_for_quota(&failure) && false"
 
 [[plant]]
 name = "quota wait: the stand-in Codex answers the brief its usage limit was to cut"

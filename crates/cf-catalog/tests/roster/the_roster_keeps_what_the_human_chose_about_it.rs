@@ -5,7 +5,7 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn hides_claude_and_openai_models_on_pi_and_opencode_when_they_are_kept_to_their_own_harnesses() {
+fn hides_claude_and_openai_models_on_pi_and_devin_when_they_are_kept_to_their_own_harnesses() {
     let home = Home::new();
     let catalog = catalog();
     let roster = home.roster(&catalog);
@@ -30,9 +30,9 @@ fn hides_claude_and_openai_models_on_pi_and_opencode_when_they_are_kept_to_their
             .hidden
     };
     assert_eq!(
-        ["kronos", "baldr", "phoebe", "bil", "aurora", "apollo", "diana", "ares", "gefjon"].map(hidden),
-        [true, true, true, true, true, false, false, false, false],
-        "Opus, Luna and Sol through Pi or OpenCode; never on Claude Code or Codex, never Grok or Muse"
+        ["kronos", "phoebe", "aurora", "osiris", "apollo", "diana", "ares", "eos"].map(hidden),
+        [true, true, true, true, false, false, false, false],
+        "Opus, Luna and Sol through Pi or Devin; never on Claude Code or Codex, never Grok or Muse"
     );
     assert_eq!(
         home.raw()["preferences"],

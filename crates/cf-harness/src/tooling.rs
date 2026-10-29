@@ -18,7 +18,7 @@
 //! | `interrupt` | `kind`: the keys that interrupt a turn in the harness's window | `{presses, closeAfterMs}`: Escape that many times in a row and, where `closeAfterMs` is not null, once more that long after |
 //! | `input` | `kind`: how the harness's windows take what they are handed | `{pasted, clear}`: whether it is pasted into the window's input box, and the keys that empty the box (null for a harness whose windows take it over a channel) |
 //! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
-//! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (OpenCode, Devin or Codex) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
+//! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (Devin or Codex) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
 //! | `specmint` | `kind`, `variant`, `env`: where the harness has the Specmint variant installed for its user (the adapter's own look, in the places the harness reads), with a home that is the one `env` names | `{installed, skill}`: whether the harness has it, and the file of its `SKILL.md` (where ConsensFlow's own copy would be written, for a launch of a made-up id, where it has none) |
 //! | `devin_launch` | `launch` (a lowercase uuid), `role`, `directory`, `resume`, `message`, `agent` (`model`, `effort`), `instructions` (the role's text), `cf` (the `cf` its session hook runs), `env`: a Devin window as the adapter prepares it for that role | `{command, args, env, dropEnv, session}` as `start` answers, the command being the program the adapter found: its `--config` (the owner's, with ConsensFlow's hooks) and the launch's files are written under the ConsensFlow home `env` names, and Devin is asked its version, as it is at every launch |
 //! | `pi_launch` | `launch`, `role`, `directory`, `resume`, `message`, `agent` (`model`, `thinking`), `instructions`, `env`: a Pi window as the adapter prepares it for that role | `{command, args, env, dropEnv, session}` as `devin_launch` answers: its extension and role skill are written under the ConsensFlow home `env` names, and the `APPEND_SYSTEM.md` Pi would find by itself in `directory` or the agent folder is given before the role's text |
@@ -150,7 +150,7 @@ fn trust(question: &Value) -> Result<Value, String> {
             crate::claude::trust::shows_prompt(&screen),
             crate::claude::trust::names_choices(&screen),
         ),
-        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false, false),
+        Harness::Codex | Harness::Pi | Harness::Devin => (None, false, false),
     };
     let pressed = match key {
         Some(
