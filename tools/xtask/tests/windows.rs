@@ -104,6 +104,36 @@ fn run_script_kept(keep: &Path, n: usize) -> String {
     out(&ran)
 }
 
+/// The words a fake `ssh` or `scp` was given, as the fake child wrote them, but for the bounds
+/// that every connection of a run is given, which are there (the same eight words, in a row) and
+/// are left out, so that a case reads the words it is about.
+fn arg_lines_without_the_bounds(report: &str) -> Vec<&str> {
+    let mut lines = arg_lines(report);
+    let bounds: Vec<String> = [
+        "-o",
+        "ConnectTimeout=30",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=8",
+    ]
+    .into_iter()
+    .map(arg_line)
+    .collect();
+    let at = lines
+        .iter()
+        .position(|line| *line == bounds[0])
+        .unwrap_or_else(|| panic!("no bounds among {lines:?}"));
+    let given: Vec<String> = lines
+        .drain(at..at + bounds.len())
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(given, bounds, "{lines:?}");
+    lines
+}
+
 /// The run's own name in the `host:folder.<id>.tgz` its scp was asked to send to.
 fn id_in_scp(destination: &str) -> String {
     let name = destination
@@ -277,7 +307,7 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
     let programs: Vec<&str> = report.split("cwd: ").skip(1).collect();
     assert_eq!(programs.len(), 2, "scp, then ssh: {report}");
 
-    let scp = arg_lines(programs[0]);
+    let scp = arg_lines_without_the_bounds(programs[0]);
     assert_eq!(scp.len(), 3, "{scp:?}");
     assert_eq!(scp[0], arg_line("-q"));
     assert!(scp[1].ends_with("tree.tgz\""), "{}", scp[1]);
@@ -288,7 +318,7 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
         arg_line(format!("zeewin:consensflow-build.{id}.tgz"))
     );
 
-    let ssh = arg_lines(programs[1]);
+    let ssh = arg_lines_without_the_bounds(programs[1]);
     assert_eq!(ssh.len(), 2, "{ssh:?}");
     assert_eq!(ssh[0], arg_line("zeewin"));
     let script = script_in(ssh[1]);
@@ -350,7 +380,10 @@ fn a_run_starts_no_ssh_when_the_tree_could_not_be_sent() {
     );
     assert_eq!(ran.status.code(), Some(1));
     let said = err(&ran);
-    assert!(said.starts_with("windows: `scp -q "), "{said}");
+    assert!(
+        said.starts_with("windows: `scp -q -o ConnectTimeout=30 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "),
+        "{said}"
+    );
     assert!(
         said.contains(" zeewin:consensflow-build.")
             && said.ends_with(".tgz` ended with status 3\n"),
@@ -439,13 +472,13 @@ fn a_run_asks_for_the_folder_the_build_and_the_variables_it_was_given() {
     assert!(ran.status.success(), "{}", err(&ran));
     let report = out(&ran);
     let programs: Vec<&str> = report.split("cwd: ").skip(1).collect();
-    let id = id_in_scp(arg_lines(programs[0])[2]);
+    let id = id_in_scp(arg_lines_without_the_bounds(programs[0])[2]);
     assert_eq!(
-        arg_lines(programs[0])[2],
+        arg_lines_without_the_bounds(programs[0])[2],
         arg_line(format!("zeewin:build-2.{id}.tgz"))
     );
     // The folder is on the command line, and nothing the run is asked for is.
-    let script = script_in(arg_lines(programs[1])[1]);
+    let script = script_in(arg_lines_without_the_bounds(programs[1])[1]);
     assert!(
         script.contains("$dir = Join-Path $env:USERPROFILE 'build-2'\n"),
         "{script}"
@@ -536,13 +569,17 @@ fn script(folder: &Path, name: &str, body: &str) {
 
     let path = folder.join(name);
     // An ssh answers the machine's state first (the runner asks it of every machine before it
-    // sends a run, T-777), unless the case does: the laptop's zeelin is another question.
-    let body = if name == "ssh" && !body.contains("BatchMode") {
-        format!(
-            "case \"$*\" in *zeelin*) ;; *BatchMode=yes*) echo \"free 614\"; exit 0 ;; esac\n{body}"
-        )
-    } else {
-        body.to_owned()
+    // sends a run, T-777; a probe is the connection with one unanswered question to give up on),
+    // but for the laptop's zeelin, which is another question. Then the options the runner puts
+    // before the host and the files are left out, so that the body reads the host and the
+    // command, or the files, where it always did.
+    let leaves_out_the_options = "quiet=; if [ \"$1\" = -q ]; then quiet=-q; shift; fi\nwhile [ \"$1\" = -o ]; do shift 2; done\nif [ -n \"$quiet\" ]; then set -- -q \"$@\"; fi\n";
+    let body = match name {
+        "ssh" => format!(
+            "case \"$*\" in *zeelin*) ;; *ServerAliveCountMax=1\\ *) echo \"free 614\"; exit 0 ;; esac\n{leaves_out_the_options}{body}"
+        ),
+        "scp" => format!("{leaves_out_the_options}{body}"),
+        _ => body.to_owned(),
     };
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
@@ -658,7 +695,7 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
         fakes.path(),
         "ssh",
         &format!(
-            r#"case "$*" in *BatchMode=yes*) echo "free 614"; exit 0 ;; esac; printf '%s\t%s\n' "$$" "$2" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; while {}; do /bin/sleep 0.2; done"#,
+            r#"printf '%s\t%s\n' "$$" "$2" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; while {}; do /bin/sleep 0.2; done"#,
             // Its parent is the `xtask` the case starts, which waits for it: its owner is the test.
             cf_base::fixture::owner_there(std::process::id())
         ),

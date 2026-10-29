@@ -1,6 +1,7 @@
 //! What the stand-in Codex reads of the arguments it was started with. Its server
-//! is given the developer instructions the daemon gives a window, as a `-c`
-//! setting (`developer_instructions`): what a thread it starts begins with. Its TUI
+//! may be given developer instructions as a `-c` setting (`developer_instructions`),
+//! as a human's own configuration gives Codex's: what a thread it starts begins
+//! with where its start names none (the window's role is named there, by the broker). Its TUI
 //! is given the words that open it after those the broker adds (`--remote <url>
 //! --remote-auth-token-env <name>`): the thread it resumes (`resume <thread>`) and
 //! the message it begins its first turn with; and it asks to resume the thread as
@@ -32,8 +33,7 @@ pub fn asked<'a>(args: &'a [String], own: Option<&Path>) -> &'a [String] {
 }
 
 /// The developer instructions the server was given: the JSON string after
-/// `-c developer_instructions=`, as the daemon writes it. None where it was given
-/// none.
+/// `-c developer_instructions=`, as Codex reads it. None where it was given none.
 pub fn developer_instructions(args: &[String]) -> Option<String> {
     args.windows(2)
         .filter(|pair| pair[0] == "-c")

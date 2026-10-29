@@ -23,8 +23,8 @@ use super::{
     carrier_body, delivery_body, own_steps, require_on_board, require_task_state, task_by_id,
 };
 use crate::messages::{
-    drop_queued_but_told, fold, leave_pause_notes, put_back_paused_answers, queued_paused_answers,
-    say_again, tell_sent_back, told_waiting, warnings_on_their_way, warnings_queued,
+    drop_queued_but_told, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
+    queued_paused_answers, say_again, tell_sent_back, warnings_on_their_way, warnings_queued,
     withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
@@ -37,8 +37,8 @@ use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
 /// The assignee's answer finishes the task and is queued for whoever asked for
-/// it; the chief's own step is finished by its word (`own_steps`). While words
-/// told to its window are on their way to it (`told_waiting`), the answer is to
+/// it; the chief's own step is finished by its word (`own_steps`). While notes
+/// to its window about it are on their way there (`notes_waiting`), the answer is to
 /// a task without them and is refused, whoever gives it (Astra's look at round
 /// 4, 2026-10-16: a worker's `cf task done` finished the task before the words
 /// came, and they never did).
@@ -83,7 +83,7 @@ fn record(
         }
         require_task_state(&task, states, "record a result for")?;
         if let Some(assignee) = task.assignee_id {
-            if told_waiting(store, assignee, task.id)? {
+            if notes_waiting(store, assignee, task.id)? {
                 return Err(LedgerError::refused_with(
                     "words-on-their-way",
                     format!(

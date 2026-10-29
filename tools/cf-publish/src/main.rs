@@ -26,6 +26,7 @@ fn main() -> ExitCode {
         ref_name: variable("GITHUB_REF_NAME"),
         gh_repo: variable("GH_REPO"),
         github_repository: variable("GITHUB_REPOSITORY"),
+        test_key: variable("CF_PUBLISH_TEST_KEY"),
     };
     let status = cf_publish::run(
         &args,

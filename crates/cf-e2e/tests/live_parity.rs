@@ -197,7 +197,7 @@ fn a_claude_member_window_loads_what_the_same_claude_loads_in_a_terminal() -> Re
 }
 
 #[test]
-#[ignore = "opt-in: spends the machine's Claude quota on one one-word task; cargo xtask live parity --claude-config <empty folder> -- a_real_claude_member"]
+#[ignore = "opt-in: spends the machine's Claude quota on one one-word task; cargo xtask live parity -- a_real_claude_member"]
 fn a_real_claude_member_window_has_the_terminals_lang_and_its_rcs_export() -> Result {
     let log = Log::begin("live parity (the terminal's environment)")?;
     terminal_env::run(&log)

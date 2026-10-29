@@ -5,7 +5,10 @@
 //! writes once the tree is unpacked, which must be the one this program sent: another
 //! ends the run, and a run that ended well without saying one did not end well; and
 //! when this program is stopped, or what the run says can no longer be written, it is
-//! ended whole before anything else is done.
+//! ended whole before anything else is done. A run whose connection ssh gave up for its
+//! silence ([`reach`]: `Timeout, server … not responding.` on the error stream, and 255, with no
+//! line of the machine's about how the command ended) is neither one that ended nor one that
+//! failed: [`Ended::Silent`].
 //!
 //! ssh's input is closed (the run has none to give it), and its two streams are
 //! pipes, each read on a thread of its own that hands what it reads on, whole, to
@@ -23,6 +26,7 @@ use std::time::Duration;
 use cf_base::env::Env;
 
 use super::interrupt::Interrupt;
+use super::reach;
 use super::script::{exit_said, EXIT_MARK, TREE_MARK};
 use super::tail::{Marked, Tail};
 use super::Error;
@@ -41,6 +45,10 @@ pub enum Ended {
     /// With this status, the remote command's own, as far as it is known: what the
     /// machine said of it, or else ssh's (`exited` says which, and why).
     Exited(i32),
+    /// With this status, the machine's or ssh's, before the machine had said which tree it
+    /// unpacked: the command was not started there as far as is known (the machine's lock refused
+    /// the run, 75; the unpack failed; the connection ended first), so it left nothing to bring back.
+    Unstarted(i32),
     /// Because this program was stopped: ssh is gone, the run may not be.
     Stopped,
     /// Because what it wrote could not be written: ssh is gone, the run may not be.
@@ -48,6 +56,9 @@ pub enum Ended {
     /// Because the machine said it had unpacked another tree than the one sent, in
     /// this line: ssh is gone, the run may not be.
     WrongTree(String),
+    /// Because ssh gave the machine up for its silence, and said so: nothing is known of how the
+    /// command ended, and the run may be going on there still.
+    Silent,
 }
 
 /// The stream a chunk was written to.
@@ -104,12 +115,14 @@ pub fn stream(
     ];
     let mut tail = Tail::default();
     let mut said_tree = Marked::new(TREE_MARK);
+    let mut said_silence = Marked::new(reach::SILENCE_MARK);
     match watch(
         &arriving,
         console,
         interrupt,
         &mut tail,
         &mut said_tree,
+        &mut said_silence,
         tree,
     ) {
         Watched::Stop => {
@@ -133,7 +146,15 @@ pub fn stream(
                 return Ok(Ended::Stopped);
             };
             let said = tail.last_line().as_deref().and_then(exit_said);
-            let (ended, note) = exited(status.code(), said, said_tree.found().is_some(), interrupt);
+            let silent = said_silence.found().is_some_and(reach::says_silence);
+            let tree_said = said_tree.found().is_some();
+            let (ended, note) = exited(status.code(), said, tree_said, silent, interrupt);
+            // The line is said right after the unpack and before the command: a run that ended
+            // without it never began.
+            let ended = match ended {
+                Ended::Exited(status) if !tree_said => Ended::Unstarted(status),
+                ended => ended,
+            };
             if let Some(note) = note {
                 if let Err(cause) = writeln!(console.err, "windows: {note}") {
                     return Ok(Ended::Unwritten(cause));
@@ -165,10 +186,15 @@ pub fn stream(
 /// (`tree_said` is false) has told nothing worth a pass: it is answered as 1, as a
 /// run that did not say how it ended is. A failure needs no tree said: the lock's
 /// refusal and an unpack that failed end before there is one.
+///
+/// ssh's 255 with its words about a peer it gave up on (`silent`) and no line of the machine's
+/// is [`Ended::Silent`], not a status: the command did not end, as far as is known, and the
+/// connection did. A stop heard comes first, as it does for any 255.
 fn exited(
     code: Option<i32>,
     said: Option<i32>,
     tree_said: bool,
+    silent: bool,
     interrupt: &Interrupt,
 ) -> (Ended, Option<String>) {
     let holds = |status: i32| (0..=255).contains(&status);
@@ -190,6 +216,9 @@ fn exited(
     }
     if matches!(code, None | Some(255)) && interrupt.heard_after_failure() {
         return (Ended::Stopped, None);
+    }
+    if silent && code == Some(255) {
+        return (Ended::Silent, None);
     }
     let no_line = format!("no `{EXIT_MARK}N` line ended the output");
     match code {
@@ -226,13 +255,15 @@ enum Watched {
 /// fails; what the standard output says is kept at its end in `tail` as it goes.
 /// The line it says of the tree it unpacked is read as it goes by, and held against
 /// the one it must be (`tree`): the line is written first, so
-/// that a person can read what the machine said.
+/// that a person can read what the machine said. What the error stream says is read for
+/// ssh's words about a peer it gave up on (`said_silence`).
 fn watch(
     arriving: &Receiver<Chunk>,
     console: &mut Console,
     interrupt: &Interrupt,
     tail: &mut Tail,
     said_tree: &mut Marked,
+    said_silence: &mut Marked,
     tree: &str,
 ) -> Watched {
     loop {
@@ -244,6 +275,8 @@ fn watch(
                 if stream == Stream::Out {
                     tail.push(&bytes);
                     said_tree.push(&bytes);
+                } else {
+                    said_silence.push(&bytes);
                 }
                 let to: &mut dyn Write = match stream {
                     Stream::Out => &mut *console.out,

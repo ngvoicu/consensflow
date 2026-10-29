@@ -159,11 +159,7 @@ impl Rig {
 
     fn program(&self, name: &str, body: &str) {
         let path = self.bin.path().join(name);
-        let body = if name == "ssh" {
-            crate::windows::testing::ssh_stand_in(body)
-        } else {
-            body.to_owned()
-        };
+        let body = crate::windows::testing::stand_in(name, body);
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -541,6 +537,72 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
     );
 }
 
+/// A run the machine did not take: its lock refused it (75), or the unpack failed, so it said no
+/// tree and the command was never started. It left nothing to bring back, and the listing that
+/// asks for it is a connection more: over one that had died it held both machines for two hours
+/// (zeewin2, 2026-10-27, T-804).
+#[test]
+fn a_run_the_machine_did_not_take_brings_no_report_back_and_asks_for_none() {
+    for (said, why) in [
+        (
+            75,
+            "A run is still going on this machine (process 7): one at a time.",
+        ),
+        (1, "could not unpack the tree"),
+    ] {
+        let rig = Rig::with_tree();
+        rig.remote("long/run.md", "report");
+        rig.lists(&[("long/run.md", 6)]);
+        rig.program(
+            "ssh",
+            &format!(
+                r#"printf 'ssh\t%s\n' "$1" >> "$CF_LOG"; echo "{why}"; echo "== exit {said}"; exit 1"#
+            ),
+        );
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let ended = run_keeping(
+            &rig.context,
+            &Machine::at("zeewin"),
+            &rig.options(),
+            &mut Console {
+                out: &mut out,
+                err: &mut err,
+            },
+            &Interrupt::default(),
+        );
+        assert_eq!(ended.unwrap(), Outcome::NotStarted(said), "{said}");
+        assert_eq!(rig.here("long/run.md"), None, "{said}");
+        assert_eq!(String::from_utf8(err).unwrap(), "", "{said}");
+        // The tree was sent and the run was asked, and that is all that was asked of the machine.
+        let log = rig.log();
+        assert_eq!(log.len(), 2, "{said}: {log:?}");
+        assert!(log[0].starts_with("scp\t"), "{said}: {log:?}");
+        assert_eq!(log[1], "ssh\tzeewin", "{said}: {log:?}");
+    }
+}
+
+/// And a command that ended with the refusal's own status after the machine took the run (it said
+/// its tree) did run, and left what it left.
+#[test]
+fn a_command_that_ended_with_75_after_the_machine_took_it_brings_its_reports_back() {
+    let rig = Rig::with_tree().runs_ending_with(75);
+    rig.remote("long/run.md", "report");
+    rig.lists(&[("long/run.md", 6)]);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ended = run_keeping(
+        &rig.context,
+        &Machine::at("zeewin"),
+        &rig.options(),
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+        &Interrupt::default(),
+    );
+    assert_eq!(ended.unwrap(), Outcome::Exited(75));
+    assert_eq!(rig.here("long/run.md").as_deref(), Some("report"));
+}
+
 /// The matrix runs its evals through the same machine, and the eval's own report is one of what
 /// stays there: it is brought back after each run too.
 #[test]
@@ -657,4 +719,72 @@ fn a_case_names_a_queue_folder_of_its_own() {
     let rig = Rig::new();
     let queues = rig.context.env.path("CF_WINDOWS_QUEUES").unwrap();
     assert!(queues.starts_with(rig.bin.path()), "{queues:?}");
+}
+
+/// What the rig's `ssh` and `scp` were given, a line for each: the program, then all its words.
+fn calls(rig: &Rig) -> Vec<String> {
+    fs::read_to_string(rig.bin.path().join("log.calls"))
+        .map(|text| text.lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+/// What a run's connections are given: they end 135 s after the peer's last word.
+const RUN_BOUNDS: &str =
+    "-o ConnectTimeout=30 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=8";
+
+#[test]
+fn the_listing_and_every_copy_of_the_reports_end_when_the_peer_goes_silent() {
+    let rig = Rig::new();
+    rig.remote("a.md", "x");
+    rig.lists(&[("a.md", 1)]);
+    let (ended, _) = rig.bring();
+    ended.unwrap();
+    let calls = calls(&rig);
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(
+        calls[0].starts_with(&format!("ssh {RUN_BOUNDS} zeewin ")),
+        "{calls:?}"
+    );
+    assert!(
+        calls[1].starts_with(&format!("scp -q {RUN_BOUNDS} zeewin:")),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn a_listing_whose_connection_went_silent_says_so_and_not_that_ssh_failed() {
+    let rig = Rig::new();
+    rig.program(
+        "ssh",
+        r#"echo "Timeout, server $1 not responding." >&2; exit 255"#,
+    );
+    let (ended, said) = rig.bring();
+    ended.unwrap();
+    assert_eq!(
+        said,
+        "windows: the reports on the machine could not be listed, and none was brought back: the connection to zeewin went silent for 135 s\n"
+    );
+}
+
+#[test]
+fn a_copy_whose_connection_went_silent_is_said_and_the_others_are_not_tried() {
+    let rig = Rig::new();
+    for name in ["a.md", "b.md", "c.md"] {
+        rig.remote(name, "x");
+    }
+    rig.lists(&[("a.md", 1), ("b.md", 1), ("c.md", 1)]);
+    rig.program(
+        "scp",
+        r#"printf 'scp\t%s\t%s\n' "$2" "$3" >> "$CF_LOG"; echo "Timeout, server zeewin not responding." >&2; exit 255"#,
+    );
+    let (ended, said) = rig.bring();
+    ended.unwrap();
+    assert_eq!(
+        copied(&rig.log()),
+        ["zeewin:consensflow-build/evals/reports/a.md"]
+    );
+    assert_eq!(
+        said,
+        "windows: the report a.md could not be brought back: the connection to zeewin went silent for 135 s, and the others are not tried\n"
+    );
 }

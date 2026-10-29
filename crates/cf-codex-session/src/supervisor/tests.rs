@@ -14,6 +14,9 @@ use sha2::{Digest, Sha256};
 use super::*;
 use crate::broker::tests::fixture::{Behaviour, FakeCodex};
 
+/// The board's token a window's environment holds: a secret.
+const TOKEN: &str = "board-token-SECRET-0123456789";
+
 const BRIDGE: &str =
     r#"{"launchId":"launch-1","port":0,"token":"private-launch-token-1234567890"}"#;
 
@@ -30,12 +33,38 @@ impl Home {
 
     /// A short path, so a socket in it fits.
     fn bridged(bridge: Option<&str>) -> Self {
+        Self::made(bridge, None)
+    }
+
+    /// A home whose window's role is a file holding `role`, named as a launch names it.
+    fn with_role(role: &str) -> Self {
+        Self::made(Some(BRIDGE), Some(Ok(role)))
+    }
+
+    /// A home whose window names `file`, in the home, as its role's, which is not there.
+    fn naming_a_missing_role(file: &str) -> Self {
+        Self::made(Some(BRIDGE), Some(Err(file)))
+    }
+
+    /// A home with `bridge`, and a role's file: one holding the text of `Ok`, or one
+    /// named `Err` and not written.
+    fn made(bridge: Option<&str>, role: Option<Result<&str, &str>>) -> Self {
         let dir = tempfile::Builder::new()
             .prefix("cf-sup-")
             .tempdir_in("/tmp")
             .unwrap();
-        let mut vars = vec![("CONSENSFLOW_HOME", dir.path().to_str().unwrap().to_string())];
+        let mut vars = vec![
+            ("CONSENSFLOW_HOME", dir.path().to_str().unwrap().to_string()),
+            ("CONSENSFLOW_TOKEN", TOKEN.to_string()),
+        ];
         vars.extend(bridge.map(|bridge| ("CF_CODEX_SESSION_BRIDGE", bridge.to_string())));
+        if let Some(role) = role {
+            let file = dir.path().join(role.err().unwrap_or("role.md"));
+            if let Ok(text) = role {
+                fs::write(&file, text).unwrap();
+            }
+            vars.push((ROLE_VARIABLE, file.to_str().unwrap().to_string()));
+        }
         let env = Env::from_vars(vars);
         Self { dir, env }
     }
@@ -75,6 +104,18 @@ impl Home {
     }
 }
 
+/// That a program's command line holds nothing of ConsensFlow's own variables: not
+/// the board's token, which every user of the machine would read there, nor a name.
+fn no_secret_on(args: &[&str]) {
+    for arg in args {
+        assert!(
+            !arg.contains(TOKEN),
+            "the board's token is on the command line"
+        );
+        assert!(!arg.contains("CONSENSFLOW_"), "{arg}");
+    }
+}
+
 #[test]
 fn says_why_codexs_server_could_not_start_with_what_it_wrote_and_leaves_nothing_behind() {
     let home = Home::new();
@@ -95,16 +136,12 @@ fn says_why_codexs_server_could_not_start_with_what_it_wrote_and_leaves_nothing_
         "Codex server could not start: not logged in\n"
     );
     assert!(home.left_behind().is_empty(), "{:?}", home.left_behind());
-    // The server was given the backend's arguments, ConsensFlow's own
-    // variables in its shell policy, and where to listen.
+    // The server was given the backend's arguments and where to listen, and
+    // nothing of ConsensFlow's own variables: the broker gives those to each thread.
     let given = fs::read_to_string(&args).unwrap();
     let given: Vec<_> = given.lines().collect();
-    let home_policy = format!(
-        "shell_environment_policy.set.CONSENSFLOW_HOME={:?}",
-        home.dir.path().to_str().unwrap()
-    );
     assert_eq!(
-        &given[..8],
+        &given[..6],
         [
             "-c",
             "model=\"gpt-5.6-luna\"",
@@ -112,20 +149,19 @@ fn says_why_codexs_server_could_not_start_with_what_it_wrote_and_leaves_nothing_
             "approval_policy=\"never\"",
             "-c",
             "sandbox_mode=\"danger-full-access\"",
-            "-c",
-            home_policy.as_str(),
         ]
     );
-    assert_eq!(&given[8..10], ["app-server", "--listen"]);
+    assert_eq!(&given[6..8], ["app-server", "--listen"]);
     assert!(
-        given[10].starts_with(&format!(
+        given[8].starts_with(&format!(
             "unix://{}/tmp/codex-",
             home.dir.path().to_str().unwrap()
-        )) && given[10].ends_with("/native.sock"),
+        )) && given[8].ends_with("/native.sock"),
         "{}",
-        given[10]
+        given[8]
     );
-    assert_eq!(given.len(), 11);
+    assert_eq!(given.len(), 9);
+    no_secret_on(&given);
 }
 
 /// Codex's server and TUI run for as long as the window does. On macOS std makes a new socket
@@ -331,6 +367,49 @@ fn a_flag_that_wants_a_value_and_has_none_is_refused_before_anything_starts() {
 }
 
 #[test]
+fn a_role_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refused_before_anything_starts()
+{
+    for home in [Home::naming_a_missing_role("gone.md"), Home::with_role("")] {
+        let started = home.dir.path().join("started");
+        let codex = home.codex(&format!("echo started > '{}'", started.display()));
+        let failed = home
+            .supervise(codex, &[], Duration::from_secs(5))
+            .unwrap_err()
+            .to_string();
+        let file = home.env.path(ROLE_VARIABLE).unwrap().display().to_string();
+        assert!(
+            failed == format!("its role file {file} holds nothing")
+                || failed.starts_with(&format!("could not read its role from {file}: ")),
+            "{failed}"
+        );
+        assert!(!started.exists(), "Codex started without its role");
+        assert!(!home.dir.path().join("tmp").exists(), "nothing was made");
+    }
+}
+
+#[test]
+fn a_role_variable_set_to_nothing_is_refused_before_anything_starts() {
+    let home = Home::made(Some(BRIDGE), None);
+    let env = Env::from_vars(
+        home.env
+            .iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .chain([(OsString::from(ROLE_VARIABLE), OsString::new())]),
+    );
+    let started = home.dir.path().join("started");
+    let codex = home.codex(&format!("echo started > '{}'", started.display()));
+    let setup = Setup {
+        startup: Duration::from_secs(5),
+        ..Setup::standard()
+    };
+    let failed = crate::block_on_local(supervise_with(&env, &[codex.into_os_string()], setup))
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(failed.to_string(), "CF_CODEX_ROLE_FILE names no file");
+    assert!(!started.exists(), "Codex started without its role");
+}
+
+#[test]
 fn no_program_named_is_said() {
     let home = Home::new();
     let setup = Setup {
@@ -393,17 +472,12 @@ fn a_window_on_loopback_as_windows_runs_one_hands_the_server_its_tokens_hash_and
     let hash = given.last().copied().unwrap();
     assert_eq!(hash.len(), 64);
     assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()), "{hash}");
-    let policy = format!(
-        "shell_environment_policy.set.CONSENSFLOW_HOME={:?}",
-        home.dir.path().to_str().unwrap()
-    );
+    no_secret_on(&given);
     assert_eq!(
         given[..given.len() - 1],
         [
             "-c",
             "model=\"gpt-5.6-luna\"",
-            "-c",
-            policy.as_str(),
             "app-server",
             "--listen",
             "ws://127.0.0.1:0",
@@ -451,6 +525,33 @@ fn a_window_on_loopback_as_windows_runs_one_hands_the_server_its_tokens_hash_and
         !home.dir.path().join("tmp").exists(),
         "no socket folder on loopback"
     );
+}
+
+#[test]
+fn a_windows_role_is_on_neither_programs_command_line() {
+    let role = "Your ConsensFlow role is worker. The code word is ROLE-ON-NO-LINE.";
+    let home = Home::with_role(role);
+    let code = crate::block_on_local(async {
+        let codex = FakeCodex::start(Behaviour::Ready).await;
+        let program = codex_on_loopback(&home, codex.address.port(), "");
+        let setup = Setup {
+            startup: Duration::from_secs(10),
+            endpoint: |_| Endpoint::loopback(),
+            ..Setup::standard()
+        };
+        let args = [program.into_os_string(), "-m".into(), "gpt-5.6-luna".into()];
+        supervise_with(&home.env, &args, setup).await
+    })
+    .unwrap();
+    assert_eq!(code.unwrap(), 7, "the window opened");
+    // (What the programs inherit is the window's own environment, which a test's
+    // process does not have: the rig's stand-in Codex says it is told nothing of
+    // the file, `regressions/a_codex_windows_role_was_on_its_command_line.rs`.)
+    for program in ["server", "tui"] {
+        let args = fs::read_to_string(home.dir.path().join(format!("{program}-args"))).unwrap();
+        assert!(!args.contains("ROLE-ON-NO-LINE"), "{program}");
+        no_secret_on(&args.lines().collect::<Vec<_>>());
+    }
 }
 
 #[test]
@@ -512,6 +613,7 @@ fn the_servers_standard_error_is_read_for_as_long_as_it_runs_not_only_until_it_i
             env: &home.env,
             executable: &codex,
             bridge: Bridge::parse(BRIDGE).unwrap(),
+            role: None,
             split: Split::default(),
             endpoint: Endpoint::open(&home.env).unwrap(),
             bypass: false,

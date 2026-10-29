@@ -247,7 +247,7 @@ fn once(remote: &mut dyn Remote, run: &Options, log: &Path) -> Result<Done, Erro
     let (status, extra) = match ended {
         Ok(Outcome::Stopped) => return Ok(Done::Stopped),
         Ok(Outcome::Refused(why)) => return Ok(Done::Refused(why)),
-        Ok(Outcome::Exited(status)) => (status, String::new()),
+        Ok(Outcome::Exited(status) | Outcome::NotStarted(status)) => (status, String::new()),
         // It could not start, or went wrong on the way: the reason is for the log.
         Err(error) => {
             let reason = format!("windows: {error}\n");

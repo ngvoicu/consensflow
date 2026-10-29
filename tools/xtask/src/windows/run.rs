@@ -13,11 +13,16 @@
 //! the run's whole tree on the machine and takes its record away, which Windows'
 //! SSH server does not do when the connection goes. A stop heard before ssh has
 //! started ends nothing there, for nothing has started.
+//!
+//! A connection that goes silent is ended by ssh, after the bounds of [`reach`], and is told as
+//! what it is ([`Error::Silent`]): it is no result of the command's. A run whose connection
+//! went silent is ended there as a stop's is, if the machine can be asked.
 
 use super::interrupt::Interrupt;
 use super::machine::Machine;
 use super::options::Options;
 use super::queue::{self, Queues, Waited, Who};
+use super::reach;
 use super::script::{
     command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
     Refusal, Script, BUILD_STEPS, TREE_MARK,
@@ -33,6 +38,10 @@ use crate::process::{self, Invocation};
 pub enum Outcome {
     /// The command ended there with this status, which is the run's own.
     Exited(i32),
+    /// The machine ended the run before it began, with this status, which is the run's own: it
+    /// said no tree (its lock refused the run, or the unpack failed). The command was not
+    /// started, so nothing of it is left to bring back.
+    NotStarted(i32),
     /// The machine may not take a run now, and why (the person is told): nothing was sent,
     /// and the run answers [`REFUSED`], as the machine's own lock refuses one.
     Refused(String),
@@ -97,9 +106,9 @@ pub fn check(options: &Options) -> Result<(), Refusal> {
     Plan::new(&Machine::at("zeewin"), options, &run_id()).map(drop)
 }
 
-/// ssh to `host`, asked to run `line` there.
+/// ssh to `host`, asked to run `line` there, and ended when the peer goes silent ([`reach::RUN`]).
 pub(super) fn ssh(context: &Context, host: &str, line: &str) -> Invocation {
-    Invocation::new("ssh", &context.root).arg(host).arg(line)
+    reach::ssh(context, host, reach::RUN).arg(line)
 }
 
 /// Runs `options.command` on `machine` from this checkout as it is now; what it
@@ -164,8 +173,7 @@ pub fn run(
         return Ok(Outcome::Stopped);
     }
     let tarball = packed?;
-    let scp = Invocation::new("scp", &context.root)
-        .arg("-q")
+    let scp = reach::scp(context, reach::RUN)
         .arg(&tarball)
         .arg(&plan.upload);
     let sent = process::capture(&scp, &context.env);
@@ -180,6 +188,12 @@ pub fn run(
         .and_then(|()| console.err.write_all(sent.stderr.as_bytes()))
         .map_err(Error::Output)?;
     if sent.code != 0 {
+        if reach::went_silent(&sent.stderr) {
+            return Err(Error::Silent(format!(
+                "{} while the tree was being sent, and ssh ended it: nothing was started there",
+                reach::silent_words(&machine.host, reach::RUN)
+            )));
+        }
         return Err(Error::step(&scp, sent.code, ""));
     }
 
@@ -187,6 +201,7 @@ pub fn run(
     let tree_said = format!("{TREE_MARK}{identity}");
     match session::stream(&run, &context.env, console, interrupt, &tree_said)? {
         Ended::Exited(status) => Ok(Outcome::Exited(status)),
+        Ended::Unstarted(status) => Ok(Outcome::NotStarted(status)),
         Ended::WrongTree(said) => {
             let ended = end_there(context, machine, &plan)?;
             Err(Error::WrongTree {
@@ -198,6 +213,15 @@ pub fn run(
         Ended::Stopped => {
             say_if_not_ended(end_there(context, machine, &plan)?, console)?;
             Ok(Outcome::Stopped)
+        }
+        Ended::Silent => {
+            // The network may be back, and the run is not read by anyone any more: it is ended
+            // there if the machine can be asked, as a stop's is, so that it holds the machine no longer.
+            let ended = end_there(context, machine, &plan)?;
+            Err(Error::Silent(format!(
+                "{} and ssh ended it, so how the command ended is not known: {ended}",
+                reach::silent_words(&machine.host, reach::RUN)
+            )))
         }
         Ended::Unwritten(cause) => {
             say_if_not_ended(end_there(context, machine, &plan)?, console)?;

@@ -13,7 +13,7 @@
 //!
 //! The laptop is poker-lab's too: its jobs hold `~/.compile-lock` (with an `owner` file in it)
 //! in the laptop's Ubuntu, `zeelin` (10.6.0.6 port 22, in WSL2), while they run. So before a run
-//! is sent there zeelin is asked, with a short timeout ([`PROBE_TIMEOUT_S`]), whether the owner
+//! is sent there zeelin is asked, with short bounds ([`reach::PROBE`]), whether the owner
 //! file is there: a run that finds it ends at once with 75, as the machine's own lock refuses a
 //! run, having sent nothing. What zeelin does when it cannot say is read by whether ssh got a
 //! connection (T-610). With WSL stopped nothing listens on port 22, and the laptop's firewall
@@ -47,6 +47,7 @@
 
 use super::interrupt::Interrupt;
 use super::queue::{queued_words, Queues};
+use super::reach;
 use super::script::{encode_script, LOCK, OWNER};
 use cf_base::time::{Clock, SystemClock};
 
@@ -62,10 +63,6 @@ pub const NAMES: [&str; 2] = ["zeewin2", "zeewin"];
 /// emptied, 2026-10-25): a run that filled the disk would stop the laptop, and poker-lab's jobs,
 /// whose WSL disk grows on the same C:.
 const FLOOR_GIB: u64 = 50;
-
-/// How long a probe of the laptop waits to connect, and for a peer that went silent, in seconds:
-/// zeelin answers only while WSL runs.
-const PROBE_TIMEOUT_S: u32 = 5;
 
 /// What a machine takes at once, less than all it has: the run script gives the builds and the
 /// tests these (`CARGO_BUILD_JOBS`, `RUST_TEST_THREADS`), and a run that names its own wins.
@@ -228,6 +225,13 @@ impl Machine {
         let answer =
             process::capture(&asked, &context.env).map_err(|failure| failure.to_string())?;
         if answer.code != 0 {
+            if reach::went_silent(&answer.stderr) {
+                return Err(format!(
+                    "{} did not say what it has free: {}",
+                    self.name,
+                    reach::silent_words(&self.host, reach::PROBE)
+                ));
+            }
             return Err(format!(
                 "{} did not say what it has free (ssh ended with status {}{})",
                 self.name,
@@ -294,18 +298,14 @@ enum Lock {
     Unknown(String),
 }
 
-/// `ssh` to `host` as a probe is: it asks nothing of a person and waits [`PROBE_TIMEOUT_S`] for
-/// the connection (and the banner, which `ConnectTimeout` covers) and for a peer that goes silent.
-/// What it runs there is not bounded: a program that hangs with sshd alive holds it.
+/// `ssh` to `host` as a probe is: it asks nothing of a person and waits [`reach::PROBE`]'s bounds
+/// for the connection (and the banner, which `ConnectTimeout` covers) and for a peer that goes
+/// silent. What it runs there is not bounded: a program that hangs with sshd alive holds it.
 fn probe(context: &Context, host: &str) -> Invocation {
-    let timeout = format!("ConnectTimeout={PROBE_TIMEOUT_S}");
-    Invocation::new("ssh", &context.root)
-        .args(["-o", &timeout, "-o", "BatchMode=yes"])
-        .args(["-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1"])
-        .arg(host)
+    reach::ssh(context, host, reach::PROBE)
 }
 
-/// Asks `shared`'s Linux whether its lock is held, waiting [`PROBE_TIMEOUT_S`] for it.
+/// Asks `shared`'s Linux whether its lock is held, waiting [`reach::PROBE`]'s bounds for it.
 fn lock_of(context: &Context, shared: &Shared) -> Lock {
     let asked = probe(context, &shared.linux).arg(format!(
         "if [ -e ~/{} ]; then echo held; else echo free; fi",
@@ -318,11 +318,15 @@ fn lock_of(context: &Context, shared: &Shared) -> Lock {
             said => Lock::Unknown(format!("it said {said:?}")),
         },
         Ok(answer) => {
-            let why = format!(
-                "ssh ended with status {}{}",
-                answer.code,
-                said_as(&answer.stderr)
-            );
+            let why = if reach::went_silent(&answer.stderr) {
+                reach::silent_words(&shared.linux, reach::PROBE)
+            } else {
+                format!(
+                    "ssh ended with status {}{}",
+                    answer.code,
+                    said_as(&answer.stderr)
+                )
+            };
             // ssh says `ssh: connect to host …` where it made no connection, and nothing of the sort
             // after one: a banner that never came, a key it refused, a login that failed.
             if answer.stderr.contains("ssh: connect to host") {

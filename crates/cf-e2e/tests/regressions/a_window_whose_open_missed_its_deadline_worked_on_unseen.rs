@@ -53,6 +53,11 @@ const ENDED_WITHIN: Duration = Duration::from_secs(30);
 /// How long the host has to answer an open the rig let go late.
 const ANSWERED_WITHIN: Duration = Duration::from_secs(60);
 
+/// How long a held window's processes have to start what its first starts: Codex's
+/// supervisor starts the server and the TUI within a fraction of a second of its own
+/// start, which the daemon gives up on [`OPEN_DEADLINE_MS`] later.
+const GROWN_WITHIN: Duration = Duration::from_secs(10);
+
 /// The first brief, whose window is given up on.
 const FIRST: &str = "FIRST_BRIEF_OK";
 
@@ -203,15 +208,28 @@ fn held(rig: &Rig) -> cf_e2e::Result<Value> {
 }
 
 /// The processes of the window held by its answer: the host started it, and the
-/// answer that says which process it is waits in the rig.
-fn held_tree(rig: &Rig, window: &Value) -> cf_e2e::Result<Vec<Identity>> {
+/// answer that says which process it is waits in the rig. The first process starts the
+/// others after the host has it (Codex's supervisor its server, then its TUI), so its
+/// tree is read until it holds `at_least` processes, for at most [`GROWN_WITHIN`]: read
+/// once, it was the supervisor alone one run in three under load (T-815), and the
+/// supervisor and its server without the TUI more often, which the case's later check
+/// that every process ended did not then cover. The last read is what is returned, for
+/// the case to say what it found.
+fn held_tree(rig: &Rig, window: &Value, at_least: usize) -> cf_e2e::Result<Vec<Identity>> {
     rig.wait_for("the held window's process", secs(10), || {
         Ok(rig.window_process(window).is_some())
     })?;
     let root = rig
         .window_process(window)
         .unwrap_or(Identity { pid: 0, started: 0 });
-    tree_of(root)
+    let reading = std::time::Instant::now();
+    loop {
+        let tree = tree_of(root)?;
+        if tree.len() >= at_least || reading.elapsed() >= GROWN_WITHIN {
+            return Ok(tree);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 #[test]
@@ -277,7 +295,7 @@ fn an_open_whose_answer_came_after_its_deadline_has_every_process_of_its_window_
     rig.hold_open(&board.worker(), Held::TheAnswer);
     board.dispatch(FIRST)?;
     let given_up = held(&rig)?;
-    let tree = held_tree(&rig, &given_up)?;
+    let tree = held_tree(&rig, &given_up, 1)?;
     board.fails()?;
     rig.wait_for(
         "every process of the window given up on to end",
@@ -374,9 +392,9 @@ fn a_codex_thread_a_window_given_up_on_held_is_free_for_the_task_sent_again() ->
     rig.hold_open(&board.worker(), Held::TheAnswer);
     board.reopen("SECOND_OK")?;
     let given_up = held(&rig)?;
-    let tree = held_tree(&rig, &given_up)?;
+    let tree = held_tree(&rig, &given_up, 3)?;
     assert!(
-        tree.len() > 1,
+        tree.len() >= 3,
         "the supervisor runs Codex's server and TUI: {tree:?}"
     );
     board.fails()?;

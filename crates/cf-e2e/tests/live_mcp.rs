@@ -57,7 +57,7 @@ use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
-use cf_e2e::live::mcp_server::{self as server, Server};
+use cf_e2e::live::mcp_server::{self as server, Runtime, Server};
 use verdict::{judge, Seen, ANSWER};
 
 /// The stand-in for the chief's window, built for these tests: the program the
@@ -229,10 +229,10 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
 ) -> Result {
     let log = Log::begin("live mcp")?;
     let claude = log.found(Harness::Claude)?;
-    let python = live::working_command("python3", &["--version"])?;
+    let runtime = Runtime::of_machine()?;
     let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-mcp");
     files::make_dir(&made)?;
-    let server = Server::write(&made, &python)?;
+    let server = Server::write(&made, &runtime)?;
     let shim = live::shimmed_claude_with_servers(
         &made,
         claude.command(),

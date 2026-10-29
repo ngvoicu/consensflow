@@ -54,6 +54,24 @@
 //! the end of its command and the lock with it, and every run after it is refused, naming
 //! its process, until it ends or someone ends that process on the machine.
 //!
+//! **A connection to a peer that went silent is ended, and told as that** (T-804). Every
+//! `ssh` and `scp` this runner starts is built in [`reach`], which gives it `BatchMode=yes`,
+//! `ConnectTimeout=30`, `ServerAliveInterval=15` and `ServerAliveCountMax=8` (a probe: 5, 5 and 1):
+//! a peer that says nothing and answers nothing for 135 s after its last word is given up by ssh,
+//! which says `Timeout, server … not responding.` and ends with 255, and a drop of under a minute
+//! (the laptop is reached through a tunnel over Wi-Fi) is not the end of a run that is alive on
+//! the machine. Without the bounds ssh waits for a peer that is gone until the system's keepalive
+//! gives up (2 h 10 min on macOS), and the run that waits holds the lead tool's queue and the
+//! runs behind it for both machines (zeewin2, 2026-10-27: the listing of the reports of a run
+//! that was refused, over a connection that died at 11:50, held them until 13:50). The words are
+//! the run's: `the connection to zeewin2 went silent for 135 s …`, with the status [`SILENT`]
+//! (69), not the 255 that a command can end with nor the 1 of a failed test. A run whose
+//! connection went silent is ended there as a stop's is, if the machine can be asked (that ssh is
+//! bounded too), and says whether it was: a machine that cannot be reached keeps the run, and
+//! the lock with it, as above; the next run is told that a run goes on there and waits for it in
+//! its queue (`windows-silent.sh` shows it on zeewin). A `--host` that was never reached fails
+//! on its host key instead of asking for it: `BatchMode`.
+//!
 //! A run frees the machine before it says how it ended: its records and its lock go first
 //! (`Free-Machine`, which `Exit-Run` calls), and the line `== exit N` is written after them,
 //! so that the machine holds nothing of a run whose line was read, whatever the PowerShell does
@@ -199,7 +217,9 @@
 //! brought back to the main checkout's `evals/reports` here, the files it lacks (a long run's report and
 //! ledger among them: the sweep of a later run removes what is older than two weeks from the
 //! machine's copy), and says so on the error stream; the status is the command's own either way
-//! ([`fetch`]).
+//! ([`fetch`]). Only a run that began has anything to bring back: one that ended before the
+//! machine said its tree (its lock refused it, with 75; its unpack failed) asks nothing of the
+//! machine after it ([`run::Outcome::NotStarted`]).
 //!
 //! `windows-matrix` is the evals there: each `--scenario` for each `--pair
 //! chief:staff`, one run after another through the same run, with `--env` given
@@ -207,7 +227,7 @@
 //! run at the end.
 //!
 //! The modules: [`options`] (the words), [`machine`] (which machine, and how ssh reaches its
-//! PowerShell), [`script`] (the PowerShell that goes, as
+//! PowerShell), [`reach`] (the one place that builds `ssh` and `scp`, with the bounds), [`script`] (the PowerShell that goes, as
 //! text, and the line it ends by), [`tree`] (the tarball), [`session`] (ssh, as it
 //! goes, and the answer), [`tail`] (the last line of what it said), [`interrupt`]
 //! (a stop), [`run`] (one run), [`fetch`] (the reports brought back) and [`matrix`].
@@ -218,6 +238,7 @@ mod machine;
 mod matrix;
 mod options;
 mod queue;
+mod reach;
 mod run;
 mod script;
 mod session;
@@ -281,6 +302,13 @@ impl std::fmt::Display for Ending {
 /// The status of a run that was stopped, as a program ends that Ctrl-C stops.
 const STOPPED: i32 = 130;
 
+/// The status of a run whose connection went silent and was ended ([`Error::Silent`]): sysexits'
+/// `EX_UNAVAILABLE`, a service that cannot be reached. It is no command's status, as 255 (ssh's
+/// own) can be, and it is none of the machine's lock (75) or of a stop (130): the caller who reads
+/// it knows that nothing is known of how the command ended, and that it is not a failure of the
+/// tests.
+pub const SILENT: i32 = 69;
+
 /// Why a run on the machine did not happen: what, in words, as the command says it.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -322,12 +350,25 @@ pub enum Error {
     },
     #[error("could not wait for ssh: {0}")]
     Wait(io::Error),
+    /// A connection went silent and ssh ended it (after the bounds of [`reach`]), told as that:
+    /// what the command came to is not known, and the words say what is known of the run.
+    #[error("{0}")]
+    Silent(String),
     /// The machine could not be asked whether a run may go to it now.
     #[error("{0}")]
     Unready(String),
 }
 
 impl Error {
+    /// The status the command ends with for this error: [`SILENT`] for a connection that went
+    /// silent, and 1 for the rest.
+    fn status(&self) -> i32 {
+        match self {
+            Self::Silent(_) => SILENT,
+            _ => 1,
+        }
+    }
+
     /// The step `invocation` ended with `status` and said `stderr`.
     fn step(invocation: &Invocation, status: i32, stderr: &str) -> Self {
         let said = stderr.trim();
@@ -364,12 +405,12 @@ fn windows(context: &Context, args: &[OsString], console: &mut Console) -> Resul
         return Ok(STOPPED);
     };
     match fetch::run_keeping(context, &machine, &options, console, &interrupt) {
-        Ok(Outcome::Exited(status)) => Ok(status),
+        Ok(Outcome::Exited(status) | Outcome::NotStarted(status)) => Ok(status),
         Ok(Outcome::Refused(_)) => Ok(run::REFUSED),
         Ok(Outcome::Stopped) => Ok(STOPPED),
         Err(error) => {
             writeln!(console.err, "windows: {error}")?;
-            Ok(1)
+            Ok(error.status())
         }
     }
 }
@@ -400,7 +441,7 @@ fn windows_matrix(
         Ok(status) => Ok(status),
         Err(error) => {
             writeln!(console.err, "windows-matrix: {error}")?;
-            Ok(1)
+            Ok(error.status())
         }
     }
 }

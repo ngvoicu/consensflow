@@ -87,18 +87,13 @@ fn each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_fin
         )),
         Some(RoleText::Inline("the role".to_owned()))
     );
-    // Codex: the developer's instructions, a JSON string in a `-c` setting.
+    // Codex: a file its broker reads, named in its environment.
     assert_eq!(
         role_of(&frame(
-            &json!([
-                "cf",
-                "codex-session",
-                "-c",
-                r#"developer_instructions="line one\n\nline \"two\"""#
-            ]),
-            &json!({})
+            &json!(["cf", "codex-session", "/bin/codex"]),
+            &json!({ "CF_CODEX_ROLE_FILE": "/c/role" })
         )),
-        Some(RoleText::Inline("line one\n\nline \"two\"".to_owned()))
+        Some(RoleText::File("/c/role".to_owned()))
     );
     // Devin: a file its session-start hook reads, named in its environment.
     assert_eq!(
@@ -162,13 +157,9 @@ fn what_codex_says_of_the_human_s_own_skills_is_no_skill_of_the_window_and_no_te
     let codex = format!(
         "Codex's own words, and the human's: a skill called specmint-core is installed.\n\nYour ConsensFlow role is chief. The following role instructions are already loaded.{SECTION_TEXT}"
     );
-    let setting = format!(
-        "developer_instructions={}",
-        serde_json::to_string(&codex).unwrap()
-    );
     carries_no_skill(&frame(
-        &json!(["cf", "codex-session", "-c", setting]),
-        &json!({}),
+        &json!(["cf", "codex-session", "/bin/codex"]),
+        &json!({ "CF_CODEX_ROLE_FILE": "/c/developer-instructions.md" }),
     ))
     .unwrap();
     // The text the run judges is the part that follows what Codex gives every window.

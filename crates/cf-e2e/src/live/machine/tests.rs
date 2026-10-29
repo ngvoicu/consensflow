@@ -2,6 +2,7 @@
 //! its windows need, and the rig that gives them to the windows.
 
 use std::fs;
+use std::time::Duration;
 
 use super::*;
 
@@ -280,6 +281,57 @@ fn a_rig_given_a_claude_config_of_its_own_keeps_its_claude_windows_there() {
 }
 
 #[test]
+fn every_harness_found_runs_on_a_home_of_the_runs_own_but_for_the_two_that_are_not_ours_to_give() {
+    // The windows of Codex, Pi and Devin (where it is known how) run on a home with a copy
+    // of the login: not a case's to remember to make.
+    let mut isolated = vec![Harness::Codex, Harness::Pi];
+    if cfg!(unix) {
+        isolated.push(Harness::Devin);
+    }
+    for harness in isolated {
+        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
+        assert!(found.isolation().is_some(), "{harness:?}");
+    }
+    // Claude Code's is a config folder ([`Login`]), and OpenCode keeps the person's.
+    for harness in [Harness::Claude, Harness::OpenCode] {
+        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
+        assert!(found.isolation().is_none(), "{harness:?}");
+    }
+}
+
+#[test]
+fn an_install_on_a_home_of_the_runs_own_is_given_the_persons_home_and_none_of_the_variables_it_reads_a_login_by(
+) {
+    let codex = Installed::at(Harness::Codex, "/codex/bin/codex", "/home/me/.codex")
+        .with_isolation(Arc::new(Isolation::codex(
+            Path::new("/home/me"),
+            Path::new("/home/me/.codex"),
+        )));
+    let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/home/me").with_isolation(Arc::new(
+        Isolation::pi(
+            Path::new("/home/me"),
+            Path::new("/home/me/.pi/agent"),
+            "openrouter/x",
+            Duration::from_secs(60),
+        ),
+    ));
+    let debug = format!("{:?}", rig(&[codex, pi], "/the/stand-in"));
+    // None of the variables the person's login is read by: not Codex's, the XDG folder or Pi's.
+    for owners in ["CODEX_HOME", "XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR"] {
+        assert!(
+            !debug.contains(&format!("(\"{owners}\"")),
+            "{owners}: {debug}"
+        );
+    }
+    // Their home is the windows' all the same: the folders of the project are below it (Devin's
+    // window, opened below a folder of the rig's own, which macOS spells through the `/var` link
+    // of its temporary folder, showed no answer: 2026-10-27).
+    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
+    // What the rig has instead of the rest: a home for each, asked for its variables when it starts.
+    assert_eq!(debug.matches("Isolation {").count(), 2, "{debug}");
+}
+
+#[test]
 fn a_rig_for_several_harnesses_has_each_ones_folders_once_and_claude_without_its_config_dir() {
     let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine");
     let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/machine").with_node("/node/bin");
@@ -429,6 +481,9 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
     );
 }
 
+// Windows makes the shim as a `.cmd` and a Node script, by what the product's code says a
+// window of the real program opens on (the wrapper's own tests; the live suites run it).
+#[cfg(unix)]
 #[test]
 fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has_them_write_where_the_real_one_does(
 ) {
@@ -440,11 +495,6 @@ fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has
         folder.path(),
         Path::new("/the/fake-agent"),
     );
-    if cfg!(windows) {
-        // A shim is a shell script: on Windows there is none to start.
-        assert!(made.unwrap_err().to_string().contains("macOS and Linux"));
-        return;
-    }
     let debug = format!("{:?}", made.unwrap());
     let shim = folder.path().join("claude-shimmed");
     assert!(
@@ -521,8 +571,10 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
         serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
             .unwrap();
     let root = home.path().join(".consensflow-candidate").join("live");
+    // As Claude Code keeps a folder: on Windows with `/` for `\`.
     assert_eq!(
-        held["projects"][root.to_string_lossy().as_ref()]["hasTrustDialogAccepted"],
+        held["projects"][claude_project_key(&root.to_string_lossy()).as_str()]
+            ["hasTrustDialogAccepted"],
         true,
         "{held}"
     );
@@ -548,6 +600,44 @@ fn a_config_seeded_in_an_empty_folder_holds_the_trust_alone() {
     assert_eq!(
         held["projects"].as_object().map(|projects| projects.len()),
         Some(1)
+    );
+}
+
+#[test]
+fn claude_code_keeps_a_folder_on_windows_with_forward_slashes_and_elsewhere_as_it_is() {
+    let folder = r"C:\Users\AGV\.consensflow-candidate\live";
+    assert_eq!(
+        project_key(folder, true),
+        "C:/Users/AGV/.consensflow-candidate/live"
+    );
+    // The verbatim prefix a canonical path has on Windows is not part of the folder.
+    assert_eq!(
+        project_key(r"\\?\C:\Users\AGV\live", true),
+        "C:/Users/AGV/live"
+    );
+    // A backslash is a character of a name on the other systems.
+    assert_eq!(project_key(folder, false), folder);
+    assert_eq!(project_key("/home/me/live", true), "/home/me/live");
+    assert_eq!(claude_project_key("/home/me/live"), "/home/me/live");
+}
+
+#[cfg(windows)]
+#[test]
+fn the_live_root_is_trusted_on_windows_by_the_key_claude_code_looks_it_up_by() {
+    let config = tempfile::tempdir().unwrap();
+    seed_claude_trust(config.path(), Path::new(r"C:\Users\AGV")).unwrap();
+    let held: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
+            .unwrap();
+    let projects = held["projects"].as_object().unwrap();
+    assert_eq!(
+        projects.keys().collect::<Vec<_>>(),
+        ["C:/Users/AGV/.consensflow-candidate/live"],
+        "{held}"
+    );
+    assert_eq!(
+        projects["C:/Users/AGV/.consensflow-candidate/live"]["hasTrustDialogAccepted"],
+        true
     );
 }
 
