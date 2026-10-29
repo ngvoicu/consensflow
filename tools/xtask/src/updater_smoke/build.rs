@@ -7,8 +7,8 @@
 //! override is the product's own.
 //!
 //! An old tag's tree is built the way that tag builds: with its own `npm run`
-//! scripts, and the npm packages of this repository (the Tauri CLI among them),
-//! which may be newer than the Tauri crates its own lock holds.
+//! scripts and the npm packages its own locks name (the Tauri CLI among them),
+//! installed into the export from npm's cache, not this tree's.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -212,16 +212,9 @@ pub fn build_app(build: &Build, env: &Env) -> Result<PathBuf> {
     let text = serde_json::to_string_pretty(&config)
         .map_err(|cause| Error::new(format!("could not write the override: {cause}")))?;
     fs::write(&override_file, format!("{text}\n")).map_err(files("write", &override_file))?;
-    let mut tauri = Invocation::new(tauri_bin(build.checkout), &app)
+    let tauri = Invocation::new(tauri_bin(build.checkout), &app)
         .args(["build", "--bundles", "app", "--config"])
         .arg(&override_file);
-    // A release exported from its tag builds with the npm packages of the repo it was exported
-    // from (`export_release`), the Tauri CLI among them, and its own lock's Tauri crates. Once
-    // Tauri moves on (T-930: the plugin-dialog crate 2.7 the releases before 3.0.7 lock, and the
-    // package 2.8 beside the CLI 2.12), the CLI refuses that mismatch unless told it is meant.
-    if build.checkout.join(MARK).exists() {
-        tauri = tauri.arg("--ignore-version-mismatches");
-    }
     ran(&tauri, &env)?;
     let built = built_app(build.checkout);
     assert_built_with(
@@ -237,16 +230,17 @@ pub fn build_app(build: &Build, env: &Env) -> Result<PathBuf> {
 const MARK: &str = ".exported-from";
 
 /// What a build offline cannot fetch, and the checkout it is built in is given
-/// from `repo`: the node modules, and the Node and console-host downloads (the
-/// releases that ship Node fetch it).
-const SHARED: [&[&str]; 3] = [
-    &["node_modules"],
-    &["app", "node_modules"],
-    &["app", ".cache"],
-];
+/// from `repo`: the Node and console-host downloads (the releases that ship Node
+/// fetch them), which are the same whichever release asks.
+const SHARED: [&[&str]; 1] = [&["app", ".cache"]];
+
+/// The folders of a release whose npm packages its build runs: each that has a
+/// lock is given the packages it names, by `npm ci --offline`.
+const LOCKED: [&[&str]; 2] = [&[], &["app"]];
 
 /// The checkout of a release, exported from its tag (or any commit) into `into`
-/// (once: a tag does not change) and given the caches of `repo` to build from.
+/// (once: a tag does not change), given the download cache of `repo` and the npm
+/// packages of its own locks to build from.
 pub fn export_release(repo: &Path, into: &Path, tag: &str, env: &Env) -> Result<PathBuf> {
     let mark = into.join(MARK);
     if fs::read_to_string(&mark).is_ok_and(|text| text.trim() == tag) {
@@ -296,6 +290,26 @@ pub fn export_release(repo: &Path, into: &Path, tag: &str, env: &Env) -> Result<
             let target = fs::canonicalize(&from).map_err(files("find", &from))?;
             let link = under(into, shared);
             link_dir(&target, &link).map_err(files("link", &link))?;
+        }
+    }
+    // The release is built with the npm packages it shipped with, the Tauri CLI among them, as its
+    // own locks name them, from npm's cache: this repository's may be another Tauri's, whose CLI
+    // refuses the release's crates, or build an app no user has (T-930). An export it fails in is
+    // left unmarked, and made again by the next run.
+    for locked in LOCKED {
+        let folder = under(into, locked);
+        if folder.join("package-lock.json").is_file() {
+            ran(
+                &Invocation::new("npm", &folder).args(["ci", "--offline"]),
+                env,
+            )
+            .map_err(|cause| {
+                Error::new(format!(
+                    "the npm packages of the release {tag} are not all in npm's cache ({cause}): \
+                     `npm ci` in {} online once puts them there",
+                    folder.display()
+                ))
+            })?;
         }
     }
     fs::write(&mark, format!("{tag}\n")).map_err(files("write", &mark))?;

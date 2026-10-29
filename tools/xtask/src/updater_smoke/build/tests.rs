@@ -195,23 +195,62 @@ mod with_programs {
         );
     }
 
-    #[test]
-    fn a_release_is_exported_from_its_tag_once_with_the_caches_of_the_repo_it_is_built_from() {
-        let folder = tempfile::tempdir().unwrap();
-        let repo = folder.path().join("repo");
+    /// An `npm` that writes what it was asked, and where, into `calls`, and ends with
+    /// `status`; where it ends well it leaves the folder's `node_modules`, as `npm ci` does.
+    fn npm_in(folder: &Path, status: i32) -> (Env, PathBuf) {
+        let calls = folder.join("npm-calls");
+        program(
+            &folder.join("programs"),
+            "npm",
+            &format!(
+                "echo \"npm $* in $(pwd)\" >> '{}'\n[ {status} -eq 0 ] && mkdir -p node_modules/own\nexit {status}",
+                calls.display()
+            ),
+        );
+        let process = Env::from_process();
+        let mut path = folder.join("programs").into_os_string();
+        if let Some(search) = process.search_path() {
+            path.push(":");
+            path.push(search);
+        }
+        let env = Env::from_vars(
+            process
+                .iter()
+                .filter(|(name, _)| *name != "PATH")
+                .map(|(name, value)| (name.to_os_string(), value.to_os_string()))
+                .chain([("PATH".into(), path)]),
+        );
+        (env, calls)
+    }
+
+    /// A repository whose tag `v3.0.0-alpha.82` holds a lock in its root and its app, and
+    /// whose own folder holds node modules and the download cache.
+    fn repo_with_a_release(repo: &Path) -> Repo<'_> {
         fs::create_dir_all(repo.join("app")).unwrap();
-        let git = Repo::new(&repo);
+        let git = Repo::new(repo);
         fs::write(repo.join("biome.json"), "{}").unwrap();
+        fs::write(repo.join("package-lock.json"), "{}").unwrap();
         fs::write(repo.join("app").join("package.json"), "{\"name\":\"old\"}").unwrap();
+        fs::write(repo.join("app").join("package-lock.json"), "{}").unwrap();
         git.git(&["add", "-A"]);
         git.commit("the release", Some("v3.0.0-alpha.82"));
         fs::write(repo.join("app").join("package.json"), "{\"name\":\"new\"}").unwrap();
         git.git(&["add", "-A"]);
         git.commit("after it", None);
-        // The caches a build needs and a fetch is not given: two of the three are there.
+        // The repository's own packages, which the release is not built with, and the
+        // download cache, which it is given.
         fs::create_dir_all(repo.join("node_modules").join("a")).unwrap();
         fs::create_dir_all(repo.join("app").join("node_modules").join("b")).unwrap();
-        let env = Env::from_process();
+        fs::create_dir_all(repo.join("app").join(".cache").join("c")).unwrap();
+        git
+    }
+
+    #[test]
+    fn a_release_is_exported_from_its_tag_once_with_its_own_packages_and_the_repos_downloads() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("repo");
+        let git = repo_with_a_release(&repo);
+        let (env, calls) = npm_in(folder.path(), 0);
         let into = folder.path().join("exports").join("flip-source");
         fs::create_dir_all(into.parent().unwrap()).unwrap();
 
@@ -231,26 +270,41 @@ mod with_programs {
             "v3.0.0-alpha.82\n"
         );
         assert!(!PathBuf::from(format!("{}.tar", into.display())).exists());
+        // Its packages are its own locks', installed from npm's cache, in each folder that has one.
+        let real = fs::canonicalize(&into).unwrap();
         assert_eq!(
-            fs::canonicalize(into.join("node_modules")).unwrap(),
-            fs::canonicalize(repo.join("node_modules")).unwrap()
+            fs::read_to_string(&calls).unwrap(),
+            format!(
+                "npm ci --offline in {0}\nnpm ci --offline in {0}/app\n",
+                real.display()
+            )
         );
-        assert!(into.join("app").join("node_modules").join("b").is_dir());
+        for packages in [
+            into.join("node_modules"),
+            into.join("app").join("node_modules"),
+        ] {
+            assert!(
+                !fs::symlink_metadata(&packages).unwrap().is_symlink()
+                    && packages.join("own").is_dir(),
+                "{} is the release's own, not the repository's",
+                packages.display()
+            );
+        }
+        // The downloads are the repository's, linked.
         assert!(
-            fs::symlink_metadata(into.join("node_modules"))
+            fs::symlink_metadata(into.join("app").join(".cache"))
                 .unwrap()
                 .is_symlink(),
             "a link, not a copy"
         );
-        assert!(
-            fs::symlink_metadata(into.join("app").join(".cache")).is_err(),
-            "what is not there to give is left out"
-        );
+        assert!(into.join("app").join(".cache").join("c").is_dir());
 
-        // Once: what a build left in it stays, since a tag does not change.
+        // Once: what a build left in it stays, since a tag does not change, and npm is not
+        // asked again.
         fs::write(into.join("built"), "yes").unwrap();
         export_release(&repo, &into, "v3.0.0-alpha.82", &env).unwrap();
         assert!(into.join("built").exists());
+        assert_eq!(fs::read_to_string(&calls).unwrap().lines().count(), 2);
         // Another tag is another tree.
         git.git(&["tag", "v3.0.0-alpha.84"]);
         export_release(&repo, &into, "v3.0.0-alpha.84", &env).unwrap();
@@ -263,6 +317,33 @@ mod with_programs {
             fs::read_to_string(into.join(MARK)).unwrap(),
             "v3.0.0-alpha.84\n"
         );
+    }
+
+    #[test]
+    fn a_release_whose_packages_npm_has_not_kept_is_refused_unmarked_and_made_again() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("repo");
+        repo_with_a_release(&repo);
+        let into = folder.path().join("exports").join("flip-source");
+        fs::create_dir_all(into.parent().unwrap()).unwrap();
+        let (offline, _) = npm_in(&folder.path().join("offline"), 1);
+        let said = export_release(&repo, &into, "v3.0.0-alpha.82", &offline)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            said.contains(
+                "the npm packages of the release v3.0.0-alpha.82 are not all in npm's cache"
+            ) && said.contains("`npm ci` in "),
+            "{said}"
+        );
+        assert!(
+            !into.join(MARK).exists(),
+            "an export that failed is not kept"
+        );
+        let (online, calls) = npm_in(&folder.path().join("online"), 0);
+        export_release(&repo, &into, "v3.0.0-alpha.82", &online).unwrap();
+        assert_eq!(fs::read_to_string(&calls).unwrap().lines().count(), 2);
+        assert!(into.join(MARK).exists());
     }
 
     #[test]
@@ -377,12 +458,11 @@ mod with_programs {
         );
     }
 
-    /// A release exported from its tag holds its own lock's Tauri crates, and is built by this
-    /// repository's CLI beside this repository's npm packages: the CLI is told the mismatch is
-    /// meant, or it refuses the build (T-930). A build of this checkout is not told: the test
-    /// above holds its call to the override alone.
+    /// A release exported from its tag is built by the Tauri CLI its own lock installed, held
+    /// to the CLI's check of its crates against its packages as the release was: never told a
+    /// mismatch is meant, which would build an app no user has (T-930).
     #[test]
-    fn a_release_exported_from_its_tag_is_built_past_the_clis_version_check() {
+    fn a_release_exported_from_its_tag_is_built_held_to_the_clis_version_check() {
         let folder = tempfile::tempdir().unwrap();
         let (tree, calls, env) = checkout_with_programs(folder.path(), 0);
         fs::write(tree.join(MARK), "v3.0.6-alpha.3\n").unwrap();
@@ -404,7 +484,7 @@ mod with_programs {
             .unwrap();
         assert!(
             tauri.contains(&format!(
-                "build --bundles app --config {} --ignore-version-mismatches in ",
+                "build --bundles app --config {} in ",
                 work.join("tauri-as-is.json").display()
             )),
             "{tauri}"

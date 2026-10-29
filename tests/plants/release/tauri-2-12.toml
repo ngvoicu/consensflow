@@ -1,10 +1,11 @@
 # What the Tauri 2.12 upgrade keeps of the updater smoke's builds (T-930). The smoke builds the
-# installed releases from their tags with this repository's npm packages, the Tauri CLI among them,
-# and each tag's own lock of the Tauri crates. The CLI refuses a build whose `tauri-plugin-*`
-# crates and `@tauri-apps/plugin-*` packages differ in their minor version, which they do once
-# Tauri moves on (the releases before 3.0.7 lock tauri-plugin-dialog 2.7; 3.0.7's package is 2.8):
-# an exported release is built with `--ignore-version-mismatches` (updater_smoke/build.rs). One
-# plant takes it out; a test fails.
+# installed releases from their tags, and an update is only proven against the release users have:
+# each export is given the npm packages its own locks name (the Tauri CLI among them), installed
+# from npm's cache by `npm ci --offline`, and is built held to that CLI's check of its crates
+# against its packages (updater_smoke/build.rs). Linking this repository's packages instead built
+# an old release with another Tauri's CLI, which refuses its crates (the releases before 3.0.7 lock
+# tauri-plugin-dialog 2.7; 3.0.7's package is 2.8) unless told the mismatch is meant. One plant
+# puts one of those back; a test fails.
 #
 # Every name holds `tauri-2-12`, so `cargo xtask plants release "tauri-2-12:"` runs them all.
 
@@ -12,11 +13,32 @@
 smoke-build = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::build::"]
 
 [[plant]]
-name = "tauri-2-12: an exported release is built held to the CLI's version check"
-meant = "a_release_exported_from_its_tag_is_built_past_the_clis_version_check"
+name = "tauri-2-12: an exported release is built past the CLI's version check"
+meant = "a_release_exported_from_its_tag_is_built_held_to_the_clis_version_check"
 runs = ["smoke-build"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/build.rs"
-find = '        tauri = tauri.arg("--ignore-version-mismatches");'
-replace = "        let _ = &mut tauri;"
+find = "    ran(&tauri, &env)?;"
+replace = """
+    let tauri = if build.checkout.join(MARK).exists() {
+        tauri.arg("--ignore-version-mismatches")
+    } else {
+        tauri
+    };
+    ran(&tauri, &env)?;"""
+
+[[plant]]
+name = "tauri-2-12: an exported release is built with the repository's npm packages, not its own"
+meant = "a_release_is_exported_from_its_tag_once_with_its_own_packages_and_the_repos_downloads"
+runs = ["smoke-build"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = 'const SHARED: [&[&str]; 1] = [&["app", ".cache"]];'
+replace = 'const SHARED: [&[&str]; 3] = [&["node_modules"], &["app", "node_modules"], &["app", ".cache"]];'
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = '        if folder.join("package-lock.json").is_file() {'
+replace = '        if folder.join("package-lock.json").is_file() && locked.len() > 9 {'
