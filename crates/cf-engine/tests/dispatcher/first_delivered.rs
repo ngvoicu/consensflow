@@ -201,6 +201,55 @@ fn a_first_message_its_window_refused_is_handed_again_at_the_next_step() {
     context.close();
 }
 
+/// A first message its harness refused for being at work (Pi's extension, D9; Calliope's
+/// P3 on T-919) went nowhere: it is owed still, held, and pasted at a later ready look,
+/// once.
+#[test]
+fn a_first_message_refused_for_being_busy_is_pasted_later_once() {
+    let context = delivered();
+    let busy = Rc::new(Cell::new(false));
+    let refusing = Rc::clone(&busy);
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
+        let admission = if refusing.get() {
+            cf_harness::contract::Admission::Busy {
+                reason: "Pi is at work".to_owned(),
+            }
+        } else {
+            taking()
+        };
+        Box::pin(async move { Ok(admission) })
+    }));
+    let (_, brief) = briefed(&context);
+    context.pass().unwrap();
+    context.settle();
+    busy.set(true);
+    passes(&context, 3);
+    assert!(times_handed(&context, SEAM, brief) >= 1, "it was tried");
+    assert_eq!(context.message(brief).state, "delivering", "owed still");
+    assert!(
+        held(&context, brief)
+            .iter()
+            .any(|reason| reason.contains("refused its first message for being at work")),
+        "{:?}",
+        held(&context, brief)
+    );
+    let given = |context: &Context| {
+        context
+            .adapter
+            .agent("zeus")
+            .items
+            .iter()
+            .filter(|item| item.role == Role::User && item.text.contains(&marker_of(brief)))
+            .count()
+    };
+    assert_eq!(given(&context), 0, "nothing went in");
+    busy.set(false);
+    passes(&context, 3);
+    assert_eq!(given(&context), 1, "pasted once");
+    assert_eq!(context.message(brief).state, "delivered");
+    context.close();
+}
+
 #[test]
 fn a_window_never_ready_for_its_first_message_in_the_launch_s_time_is_given_up_and_its_brief_fails()
 {

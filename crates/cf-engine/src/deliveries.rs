@@ -584,7 +584,6 @@ impl Dispatcher {
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
@@ -713,6 +712,9 @@ impl Dispatcher {
             self.changed();
             return Ok(());
         }
+        // The window took the paste: its hold ends here, and not before, as a paste it
+        // refused is no paste and keeps the hold's clock (Calliope's P3 on T-919).
+        record.delivery.borrow_mut().held = None;
         // A window that closed while its harness took the message had nothing
         // on its way to settle when it went: the message goes again, unless the
         // harness's record shows it took it (`in_flight`).
@@ -870,6 +872,13 @@ impl Dispatcher {
         }
         if let Admission::Refused { reason } = &outcome {
             let reason = format!("its window refused its first message: {reason}");
+            return self.held_once(record, first.message, &reason).await;
+        }
+        // Refused for being at work (Pi's extension, D9): nothing went in, so it is owed
+        // still, and goes at a later ready look (Calliope's P3 on T-919).
+        if let Admission::Busy { reason } = &outcome {
+            let reason =
+                format!("its harness refused its first message for being at work: {reason}");
             return self.held_once(record, first.message, &reason).await;
         }
         record.delivery.borrow_mut().held = None;

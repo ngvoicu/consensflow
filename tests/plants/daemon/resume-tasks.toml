@@ -489,7 +489,7 @@ find = '''
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 replace = '''
         if self
             .next_in_line(record)?
@@ -497,7 +497,7 @@ replace = '''
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 
 [[plant]]
 name = "resume tasks: a delivery whose project closes during the look before the paste goes into it"
@@ -514,7 +514,7 @@ find = '''
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 replace = '''
         if self
             .next_in_line(record)?
@@ -522,7 +522,7 @@ replace = '''
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 
 # Round 5 hands the check before the paste to the hand-over itself (the host that
 # admits it); main's own deliver hands the adapter a host that admits everything.
