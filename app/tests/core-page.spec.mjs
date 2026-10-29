@@ -7774,8 +7774,8 @@ test('meets the chief from its card: Start holds what comes for it, the button c
     .poll(() => held.locator('.strip').evaluateAll((all) => all.map((s) => s.dataset.message)))
     .toEqual(['41', '40'])
   await expect(held.locator('.strip-route')).toHaveText([
-    'Question from @zeus · T-3 · held until your meeting ends',
-    'Result from @zeus · T-2 · held until your meeting ends',
+    'Question from @zeus · T-3 · held',
+    'Result from @zeus · T-2 · held',
   ])
   // A held message only reads: marked read, it would never reach the chief.
   await expect.poll(() => named(held.locator('button'))).toEqual(['Open task', 'Open task'])
@@ -7825,9 +7825,23 @@ test("keeps the chief's head inside its card in a meeting, however narrow, and d
         })
         .map((part) => part.textContent)
     })
+  // The chief's buttons keep together, each line of them ending at the head's end: wrapped
+  // one by one, History stayed by the name and the other two went under it, at the left.
+  const shortLines = () =>
+    card.evaluate((card) => {
+      const ends = new Map()
+      for (const button of card.querySelectorAll('.terminal-head button')) {
+        const box = button.getBoundingClientRect()
+        const line = Math.round(box.top)
+        ends.set(line, Math.max(ends.get(line) ?? 0, box.right))
+      }
+      const end = Math.max(...ends.values())
+      return [...ends.values()].filter((right) => right < end - 1).length
+    })
   for (const width of [700, 880, 1440]) {
     await page.setViewportSize({ width, height: 900 })
     await expect.poll(outside, { message: `the head at ${width}px` }).toEqual([])
+    await expect.poll(shortLines, { message: `the buttons' lines at ${width}px` }).toBe(0)
   }
   // A closed project draws no card: nothing on it acts, and its Close ended any meeting.
   await chooseProject(page, 'foundry')

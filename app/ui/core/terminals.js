@@ -463,23 +463,28 @@ export class TerminalsView {
       () => this.#onHistory(entry.participant),
       `Read everything kept of ${name}'s conversations`,
     )
+    // The chief's buttons wrap together, at the head's end, when the card is narrow.
+    const chiefTools = () => {
+      const group = element('span', 'terminal-tools')
+      group.append(
+        history,
+        button(
+          'Switch chief',
+          'quiet-button',
+          () => this.#onSwitchChief(entry.participant),
+          'Switch the chief to another agent',
+        ),
+        button(
+          entry.meeting ? `Stop meeting (${(board.held ?? []).length})` : 'Start meeting',
+          'quiet-button',
+          () => this.#onMeeting(entry.participant, !entry.meeting),
+        ),
+      )
+      return group
+    }
     const tools =
       participant.role === 'chief'
-        ? [
-            history,
-            button(
-              'Switch chief',
-              'quiet-button',
-              () => this.#onSwitchChief(entry.participant),
-              'Switch the chief to another agent',
-            ),
-            button(
-              entry.meeting ? `Stop meeting (${(board.held ?? []).length})` : 'Start meeting',
-              'quiet-button',
-              () => this.#onMeeting(entry.participant, !entry.meeting),
-            ),
-            about(lane, board, agent, now, this.#onTryAgain),
-          ]
+        ? [chiefTools(), about(lane, board, agent, now, this.#onTryAgain)]
         : [
             element('span', 'terminal-meta', participant.harness ?? ''),
             history,

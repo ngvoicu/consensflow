@@ -666,7 +666,7 @@ export class BoardView {
       element(
         'span',
         'strip-route',
-        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${gated ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${gated ? ' · needs your approval' : ''}${held ? ' · held until your meeting ends' : ''}`,
+        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${gated ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${gated ? ' · needs your approval' : ''}${held ? ' · held' : ''}`,
       ),
       element('span', 'strip-age', age(message.createdAt, now)),
     )

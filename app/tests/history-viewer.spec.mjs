@@ -365,7 +365,7 @@ test.describe('the History button', () => {
     page,
   }) => {
     await open(page)
-    await expect(chiefCard(page).locator('.terminal-head > button')).toHaveText([
+    await expect(chiefCard(page).locator('.terminal-head button')).toHaveText([
       'History',
       'Switch chief',
       'Start meeting',
@@ -383,7 +383,7 @@ test.describe('the History button', () => {
     })
     await changed(page)
     await expect(chiefCard(page).locator('.terminal-host')).toHaveCount(0)
-    await expect(chiefCard(page).locator('.terminal-head > button')).toHaveText([
+    await expect(chiefCard(page).locator('.terminal-head button')).toHaveText([
       'History',
       'Switch chief',
       'Start meeting',

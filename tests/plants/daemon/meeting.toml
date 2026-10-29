@@ -420,8 +420,19 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''${held ? ' · held until your meeting ends' : ''}'''
+find = '''${held ? ' · held' : ''}'''
 replace = ''''''
+
+[[plant]]
+name = "meeting page ui: the chief's buttons wrap one by one"
+meant = "keeps the chief's head inside its card in a meeting, however narrow, and draws no meeting on a closed project"
+runs = ["meeting-page-ui"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''.terminal-tools { display: flex;'''
+replace = '''.terminal-tools { display: contents;'''
 
 # --- the rig: a real daemon and pane host, a stand-in chief ---
 
