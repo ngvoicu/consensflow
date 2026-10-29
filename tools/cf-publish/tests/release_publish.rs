@@ -258,13 +258,18 @@ mod who_may_publish {
             }
         }
         // The gate job's token is the other one in the workflow, and it reads
-        // CI's runs and writes nothing (tests/release_tool.rs holds its step).
+        // CI's runs and writes nothing (tests/release_tool.rs holds its step). A
+        // job's text runs on through the comments before the next job (`job`), and
+        // the publisher's speak of the write token: what the gate runs is held to it.
         let gate = job(&text, "gate");
         assert_eq!(
             live(&gate).matches("GH_TOKEN: ${{ github.token }}").count(),
             1
         );
-        assert!(!gate.contains("write"), "the gate's token writes: {gate}");
+        assert!(
+            !live(&gate).contains("write"),
+            "the gate's token writes: {gate}"
+        );
         let live = live(&text.replace(&gate, ""));
         for word in [
             "GH_TOKEN:",
