@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use cf_base::env::Env;
 use serde_json::{json, Value};
 
-use super::bundle::{remove_all, under};
+use super::bundle::{name_as_the_smokes, remove_all, under, IDENTITY};
 use super::evidence::Kind;
 use super::signing::{clean_env, tauri_bin};
 use super::versions::flip_tag;
@@ -124,7 +124,10 @@ pub fn built_app(checkout: &Path) -> PathBuf {
 
 /// The override a build is given: the run's public key, and the version where the build is the update.
 pub fn override_config(public_key: &str, version: Option<&str>) -> Value {
-    let mut config = json!({ "plugins": { "updater": { "pubkey": public_key } } });
+    let mut config = json!({
+        "identifier": IDENTITY,
+        "plugins": { "updater": { "pubkey": public_key } }
+    });
     if let (Some(version), Some(config)) = (version, config.as_object_mut()) {
         config.insert("version".into(), json!(version));
     }
@@ -192,6 +195,14 @@ fn ran(invocation: &Invocation, env: &Env) -> Result {
 /// configuration has it (`signingIdentity: "-"`), and nothing in the environment
 /// can say otherwise.
 pub fn build_app(build: &Build, env: &Env) -> Result<PathBuf> {
+    let check = under(build.checkout, &UPDATE_CHECK);
+    ensure!(
+        !fs::read_to_string(&check).is_ok_and(|text| text.contains(LIVE_IDENTITY_CHECK)),
+        "{} checks for the live app's identity, and an app built from it would take no update \
+         of the smoke's ({IDENTITY}): name no checkout of that release, and the smoke exports it \
+         from its tag to check for its own",
+        check.display()
+    );
     let app = build.checkout.join("app");
     let env = clean_env(env);
     ran(
@@ -222,11 +233,50 @@ pub fn build_app(build: &Build, env: &Env) -> Result<PathBuf> {
         &product_key_of(build.checkout)?,
         &format!("the app built from {}", build.checkout.display()),
     )?;
+    name_as_the_smokes(&built, &env)?;
     Ok(built)
 }
 
-/// The mark an export leaves: the tag it was made from.
+/// The mark an export leaves: the tag it was made from, and the identity its update's
+/// check was made to take.
 const MARK: &str = ".exported-from";
+
+/// Where a release checks the identity of the installed app and of its update.
+const UPDATE_CHECK: [&str; 4] = ["app", "src-tauri", "src", "update_install.rs"];
+
+/// How a release checks that identity: word for word, the live app's.
+const LIVE_IDENTITY_CHECK: &str = "!= \"dev.ngvoicu.consensflow\"";
+
+/// The check of the export of a release: the smoke's identity where the release names
+/// the live app's (the releases before the app took its own identity from its build).
+/// Nothing else of the release is changed, and a release that still names the live app's
+/// identity outside its tests once that is done is refused, the line named.
+fn check_for_the_smokes_identity(into: &Path) -> Result {
+    let check = under(into, &UPDATE_CHECK);
+    let Ok(text) = fs::read_to_string(&check) else {
+        return Ok(());
+    };
+    let smoke = format!("!= \"{IDENTITY}\"");
+    let patched = text.replace(LIVE_IDENTITY_CHECK, &smoke);
+    // What its tests say is their own: the check is what comes before them.
+    let checked = patched.split("#[cfg(test)]").next().unwrap_or_default();
+    let release = format!("\"{}\"", cf_base::bundle::RELEASE);
+    if let Some((at, line)) = checked
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains(&release))
+    {
+        return Err(Error::new(format!(
+            "{}:{}: the release still names the live app's identity where the export rewrites \
+             its check ({}), and its app would take no update of the smoke's: rewrite this \
+             spelling of it too",
+            check.display(),
+            at + 1,
+            line.trim()
+        )));
+    }
+    fs::write(&check, patched).map_err(files("write", &check))
+}
 
 /// What a build offline cannot fetch, and the checkout it is built in is given
 /// from `repo`: the node modules, and the Node and console-host downloads (the
@@ -241,7 +291,8 @@ const SHARED: [&[&str]; 3] = [
 /// (once: a tag does not change) and given the caches of `repo` to build from.
 pub fn export_release(repo: &Path, into: &Path, tag: &str, env: &Env) -> Result<PathBuf> {
     let mark = into.join(MARK);
-    if fs::read_to_string(&mark).is_ok_and(|text| text.trim() == tag) {
+    let marked = format!("{tag} {IDENTITY}");
+    if fs::read_to_string(&mark).is_ok_and(|text| text.trim() == marked) {
         return Ok(into.to_path_buf());
     }
     remove_all(into)?;
@@ -279,6 +330,7 @@ pub fn export_release(repo: &Path, into: &Path, tag: &str, env: &Env) -> Result<
         unpacked.stderr.trim()
     );
     remove_all(&archive)?;
+    check_for_the_smokes_identity(into)?;
     // A second root configuration inside the checkout would stop its linter from running.
     remove_all(&into.join("biome.json"))?;
     for shared in SHARED {
@@ -290,7 +342,7 @@ pub fn export_release(repo: &Path, into: &Path, tag: &str, env: &Env) -> Result<
             link_dir(&target, &link).map_err(files("link", &link))?;
         }
     }
-    fs::write(&mark, format!("{tag}\n")).map_err(files("write", &mark))?;
+    fs::write(&mark, format!("{marked}\n")).map_err(files("write", &mark))?;
     Ok(into.to_path_buf())
 }
 

@@ -6,6 +6,7 @@ use std::fs;
 use std::time::Duration;
 
 use super::*;
+use crate::updater_smoke::processes::alive;
 use crate::updater_smoke::say::Line;
 use crate::updater_smoke::testing::stand_in_for_the_app;
 
@@ -208,6 +209,7 @@ fn a_failure_the_page_reports_ends_the_wait_unless_the_case_is_about_it() {
     let waits = Waits::new(Duration::from_millis(300));
     let patient = App(Arc::new(Inner {
         reports: Arc::clone(&expected.0.reports),
+        first: None,
         child: Mutex::new(None),
         control: Mutex::new(None),
         waits,
@@ -320,6 +322,78 @@ fn every_process_the_app_has_been_is_ended_with_what_is_under_it() {
     assert_eq!(app.exited().unwrap().signal, Some(9));
 }
 
+/// A pid a report says is ended only where it is a process the smoke started, or one started
+/// since in its group: a process that ran before the app (the live app beside the smoke), or
+/// one of another group, is left running whatever a report says of it, as is its group.
+#[test]
+fn a_pid_a_report_names_that_the_smoke_did_not_start_is_never_ended() {
+    // A process of its own group that ran before the app, as the live app does.
+    let sleep = crate::process::Invocation::new("/bin/sleep", std::path::Path::new(".")).arg("60");
+    let mut before =
+        crate::process::spawn(&sleep, &Env::default(), std::process::Stdio::null(), true).unwrap();
+    let stand = Stand::new();
+    let app = stand.start(
+        &format!(
+            "say update-boot '{{}}'\nprintf 'consensflow-selftest {{\"event\":\"x\",\"pid\":%s,\"data\":{{}}}}\\n' {}\nreads",
+            before.id()
+        ),
+        &[],
+    );
+    let _kills = Kills(app.clone());
+    app.wait_for("the report of the pid", |event| event.name() == "x")
+        .unwrap();
+    app.kill_recorded();
+    crate::updater_smoke::processes::until("the app is gone", Duration::from_secs(60), || {
+        Ok((!app.any_alive()).then_some(()))
+    })
+    .unwrap();
+    let still = before.try_wait().unwrap().is_none();
+    let _ = before.kill();
+    let _ = before.wait();
+    assert!(still, "a process the smoke did not start was ended");
+}
+
+/// An app that has ended, and is not reaped, is no process the system says (a zombie): what
+/// it left in its group is ended all the same, by the group of the child the smoke still holds.
+#[test]
+fn what_an_app_that_ended_left_in_its_group_is_ended() {
+    let stand = Stand::new();
+    let marker = stand.folder.path().join("left");
+    let app = stand.start(
+        &format!("/bin/sleep 60 &\necho $! > '{}'\nexit 0", marker.display()),
+        &[],
+    );
+    let _kills = Kills(app.clone());
+    let left: u32 = crate::updater_smoke::processes::until(
+        "the sleep is left",
+        Duration::from_secs(60),
+        || {
+            Ok(fs::read_to_string(&marker)
+                .ok()
+                .and_then(|text| text.trim().parse().ok()))
+        },
+    )
+    .unwrap();
+    // The app has ended, its child is held un-reaped: a zombie.
+    crate::updater_smoke::processes::until("the app ends", Duration::from_secs(60), || {
+        Ok((!app.any_alive()).then_some(()))
+    })
+    .unwrap();
+    assert!(alive(left));
+    app.kill_recorded();
+    let gone = crate::updater_smoke::processes::until(
+        "what it left is ended",
+        Duration::from_secs(10),
+        || Ok((!alive(left)).then_some(())),
+    );
+    if gone.is_err() {
+        if let Some(started) = cf_process::Started::of(left) {
+            crate::updater_smoke::processes::kill(&started);
+        }
+    }
+    gone.unwrap();
+}
+
 #[test]
 fn a_report_names_a_pid_only_when_it_says_one_that_is_a_process() {
     let event = |text: &str| Event(serde_json::from_str(text).unwrap());
@@ -347,4 +421,59 @@ fn a_report_names_a_pid_only_when_it_says_one_that_is_a_process() {
         named.json(),
         r#"{"event":"update-boot","data":{"currentVersion":"1.0.0"}}"#
     );
+}
+
+/// The live app's identity is never started: a stand-in that would have reported is
+/// refused before it runs, in a bundle of that identity, and runs in one of the smoke's.
+#[test]
+fn an_app_of_the_live_apps_identity_is_never_started() {
+    let stand = Stand::new();
+    for (identity, started) in [
+        ("dev.ngvoicu.consensflow", false),
+        ("dev.ngvoicu.consensflow.smoke", true),
+    ] {
+        let app = stand.folder.path().join(identity).join("ConsensFlow.app");
+        let macos = app.join("Contents").join("MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(
+            app.join("Contents").join("Info.plist"),
+            format!("<plist><dict><key>CFBundleIdentifier</key><string>{identity}</string></dict></plist>"),
+        )
+        .unwrap();
+        let ran = stand.folder.path().join(format!("{identity}.ran"));
+        let binary = macos.join("app");
+        stand_in_for_the_app(&binary, &format!("touch '{}'\nreads", ran.display()));
+        let cwd = fs::canonicalize(stand.folder.path()).unwrap();
+        let launched = launch_app(
+            &Launch {
+                binary: &binary,
+                env: &Env::from_vars([("PATH", "/usr/bin:/bin")]),
+                cwd: &cwd,
+                expected: &[],
+                waits: Waits::new(Duration::from_secs(30)),
+            },
+            &stand.say,
+        );
+        match launched {
+            Ok(app) => {
+                let _kills = Kills(app.clone());
+                assert!(started, "{identity} was started");
+                crate::updater_smoke::processes::until(
+                    "the stand-in runs",
+                    Duration::from_secs(30),
+                    || Ok(ran.exists().then_some(())),
+                )
+                .unwrap();
+                app.close_input();
+            }
+            Err(refused) => {
+                assert!(!started, "{identity} was refused: {refused}");
+                assert!(
+                    refused.to_string().contains("the live app's identity"),
+                    "{refused}"
+                );
+                assert!(!ran.exists(), "{identity} ran");
+            }
+        }
+    }
 }

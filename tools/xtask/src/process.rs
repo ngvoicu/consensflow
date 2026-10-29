@@ -113,11 +113,23 @@ pub enum Failure {
     NoFolder { program: String, folder: PathBuf },
     #[error("could not run `{program}`: {cause}")]
     Refused { program: String, cause: io::Error },
+    /// The program is an app of the live app's identity, which nothing xtask runs starts
+    /// ([`cf_base::bundle`]).
+    #[error("{0}")]
+    LiveApp(String),
+}
+
+/// Refuses a program that is an app a test may not start, or reaches one by its words,
+/// before anything starts.
+fn startable(invocation: &Invocation) -> Result<(), Failure> {
+    cf_base::bundle::command_startable_by_a_test(Path::new(&invocation.program), &invocation.args)
+        .map_err(Failure::LiveApp)
 }
 
 /// Runs `invocation` to its end, its input and output being xtask's own: the
 /// code it exited with.
 pub fn run(invocation: &Invocation, env: &Env) -> Result<i32, Failure> {
+    startable(invocation)?;
     command(invocation, env)
         .status()
         .map(|status| code(&status))
@@ -128,6 +140,7 @@ pub fn run(invocation: &Invocation, env: &Env) -> Result<i32, Failure> {
 /// and a nonzero code is an answer, for the caller to read: only a program that
 /// did not start is an error.
 pub fn capture(invocation: &Invocation, env: &Env) -> Result<Captured, Failure> {
+    startable(invocation)?;
     let output = command(invocation, env)
         .stdin(Stdio::null())
         .output()
@@ -150,6 +163,7 @@ pub fn spawn(
     stdin: Stdio,
     own_group: bool,
 ) -> Result<Child, Failure> {
+    startable(invocation)?;
     let mut command = command(invocation, env);
     command
         .stdin(stdin)
@@ -216,6 +230,22 @@ fn failure(invocation: &Invocation, cause: io::Error) -> Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in named `name` in `folder`, which leaves `ran` when it runs: what a program that
+    /// reaches apps by its words would do, done harmlessly, should a refusal fail to come.
+    #[cfg(unix)]
+    fn reaching_stand_in(
+        folder: &std::path::Path,
+        name: &str,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let ran = folder.join(format!("{name}.ran"));
+        let program = folder.join(name);
+        std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (program, ran)
+    }
 
     #[test]
     fn a_command_line_is_shown_with_what_has_a_space_in_it_quoted() {
@@ -382,5 +412,62 @@ mod tests {
             matches!(&said, Failure::NoFolder { folder, .. } if *folder == gone),
             "{said}"
         );
+    }
+
+    /// No program of an app of the live app's identity is started, any way xtask starts one;
+    /// one of the smoke's is (2026-10-28: an updater smoke's copy of the app of that identity
+    /// came to the front over the live app).
+    #[cfg(unix)]
+    #[test]
+    fn no_app_of_the_live_apps_identity_is_started() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let app_of = |identity: &str| {
+            let app = root.path().join(identity).join("ConsensFlow.app");
+            let macos = app.join("Contents").join("MacOS");
+            std::fs::create_dir_all(&macos).unwrap();
+            std::fs::write(
+                app.join("Contents").join("Info.plist"),
+                format!("<plist><dict><key>CFBundleIdentifier</key><string>{identity}</string></dict></plist>"),
+            )
+            .unwrap();
+            let ran = root.path().join(format!("{identity}.ran"));
+            let program = macos.join("app");
+            std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            (Invocation::new(&program, root.path()), ran)
+        };
+        let env = Env::from_vars([("PATH", "/usr/bin:/bin")]);
+        let (live, ran) = app_of("dev.ngvoicu.consensflow");
+        for refused in [
+            run(&live, &env).err().map(|it| it.to_string()),
+            capture(&live, &env).err().map(|it| it.to_string()),
+            spawn(&live, &env, Stdio::null(), false)
+                .err()
+                .map(|it| it.to_string()),
+        ] {
+            let refused = refused.unwrap_or_default();
+            assert!(refused.contains("the live app's identity"), "{refused}");
+        }
+        assert!(!ran.exists(), "the live app's program ran");
+        let (smoke, ran) = app_of("dev.ngvoicu.consensflow.smoke");
+        assert_eq!(capture(&smoke, &env).unwrap().code, 0);
+        assert!(ran.exists(), "the smoke's program did not run");
+        // A program that reaches apps by its words, told to reach the live app: never started.
+        let (osascript, ran) = reaching_stand_in(root.path(), "osascript");
+        let quit = Invocation::new(&osascript, root.path()).args([
+            "-e",
+            "tell application id \"dev.ngvoicu.consensflow\" to quit",
+        ]);
+        let refused = capture(&quit, &env)
+            .err()
+            .map(|it| it.to_string())
+            .unwrap_or_default();
+        assert!(
+            refused.contains("a test reaches no app but the smoke's"),
+            "{refused}"
+        );
+        assert!(!ran.exists(), "the stand-in for osascript ran");
     }
 }

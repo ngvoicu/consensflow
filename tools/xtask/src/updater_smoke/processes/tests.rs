@@ -123,7 +123,9 @@ mod on_unix {
     impl Drop for Tree {
         fn drop(&mut self) {
             if let Some(mut child) = self.0.take() {
-                kill_tree(child.id());
+                if let Some(started) = Started::of(child.id()) {
+                    kill_tree(&started);
+                }
                 let _ = child.kill();
                 let _ = child.wait();
             }
@@ -156,7 +158,7 @@ mod on_unix {
         })
         .unwrap();
 
-        kill_tree(root);
+        kill_tree(&Started::of(root).unwrap());
 
         until("the tree is gone", patience, || {
             Ok(tree.iter().all(|pid| !alive(*pid)).then_some(()))
@@ -171,7 +173,7 @@ mod on_unix {
         let pid = child.id();
         assert!(alive(pid));
         assert!(!gone(pid));
-        kill(pid);
+        kill(&Started::of(pid).unwrap());
         // Ended and not yet reaped is a zombie, which is not alive.
         until("the sleep is gone", Duration::from_secs(60), || {
             Ok(gone(pid).then_some(()))

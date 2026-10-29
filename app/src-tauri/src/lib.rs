@@ -238,8 +238,9 @@ pub const PRODUCTION_IDENTIFIER: &str = "dev.ngvoicu.consensflow";
 /// `~/.consensflow` — the live instance's state. The kernel lock refuses that
 /// only while the live app runs; after a reboot the newer build would open
 /// and migrate the live state. So the build decides: the release keeps the
-/// default, everything else gets `~/.consensflow-candidate`. An explicit,
-/// non-empty `CONSENSFLOW_HOME` always wins — tests and smokes set one.
+/// default, everything else gets `~/.consensflow-candidate`, but a smoke's build, which
+/// starts on no home but the one its smoke names. An explicit, non-empty
+/// `CONSENSFLOW_HOME` always wins — tests and smokes set one.
 fn isolated_home(
     identifier: &str,
     debug: bool,
@@ -252,8 +253,49 @@ fn isolated_home(
     if identifier == PRODUCTION_IDENTIFIER && !debug {
         return Ok(None);
     }
+    if identifier == cf_base::bundle::SMOKE {
+        return Err(format!(
+            "{} is a smoke's build, which starts only on the home its smoke \
+             names (CONSENSFLOW_HOME): without one it would run on the Candidate's",
+            cf_base::bundle::SMOKE
+        ));
+    }
     home.map(|home| Some(home.join(".consensflow-candidate")))
         .ok_or_else(|| "this build needs HOME to find ~/.consensflow-candidate".to_string())
+}
+
+/// The title of the app's window: the product's name, and where the build is of another
+/// identity than the release's and its name does not say so already, what that identity is
+/// (`dev.ngvoicu.consensflow.smoke` reads "ConsensFlow Smoke"), so that no window of a test's
+/// build reads as the live app's.
+fn window_title(name: &str, identifier: &str) -> String {
+    if identifier == PRODUCTION_IDENTIFIER {
+        return name.to_owned();
+    }
+    let said = identifier
+        .strip_prefix(PRODUCTION_IDENTIFIER)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .map_or_else(
+            || identifier.to_owned(),
+            |suffix| {
+                let words: Vec<String> = suffix
+                    .split(['-', '.', '_'])
+                    .filter(|word| !word.is_empty())
+                    .map(|word| {
+                        let mut letters = word.chars();
+                        letters.next().map_or_else(String::new, |first| {
+                            first.to_uppercase().chain(letters).collect()
+                        })
+                    })
+                    .collect();
+                words.join(" ")
+            },
+        );
+    if name.to_lowercase().contains(&said.to_lowercase()) {
+        name.to_owned()
+    } else {
+        format!("{name} {said}")
+    }
 }
 
 /// The variables a Claude Code session exports to its own children. A
@@ -463,8 +505,9 @@ pub fn run() {
         // The terminal's command names this bundle's `cf`, whichever build wrote it.
         launcher::repair_in_background(app.handle());
         updates::setup(app)?;
-        // The product name, so a candidate's window never reads as the live app's.
-        let title = app.package_info().name.clone();
+        // The product name, and the identity where it is not the release's, so that no
+        // candidate's or test's window reads as the live app's.
+        let title = window_title(&app.package_info().name, &app.config().identifier);
         // The page runs on while its window is hidden, minimised or behind a locked
         // screen: it acknowledges the windows' output, and the pane host stops reading a
         // window that is owed too much of it, its agent waiting on its terminal. WebKit's
@@ -697,6 +740,62 @@ mod tests {
         );
         assert!(ran.status.success(), "{said}");
         assert!(said.contains("1 passed"), "the test did not run: {said}");
+    }
+
+    /// A smoke's build is started by its smoke, which names its home: one opened by
+    /// hand, or by anything else, would run on the Candidate's home, its lock and its
+    /// roster, and it starts on none.
+    #[test]
+    fn a_smoke_build_starts_only_on_the_home_its_smoke_names() {
+        const SMOKE: &str = "dev.ngvoicu.consensflow.smoke";
+        for configured in [None, Some(OsStr::new(""))] {
+            let refused = isolated_home(SMOKE, false, configured, Some(Path::new(HOME)));
+            assert!(
+                refused
+                    .as_ref()
+                    .is_err_and(|said| said.contains("CONSENSFLOW_HOME")),
+                "{refused:?}"
+            );
+        }
+        assert_eq!(
+            isolated_home(
+                SMOKE,
+                false,
+                Some(OsStr::new("/smoke/home")),
+                Some(Path::new(HOME))
+            ),
+            Ok(None)
+        );
+    }
+
+    /// No window of a test's build reads as the live app's: its identity is in its title.
+    #[test]
+    fn a_window_says_which_build_it_is_when_it_is_not_the_releases() {
+        for (name, identifier, title) in [
+            ("ConsensFlow", PRODUCTION_IDENTIFIER, "ConsensFlow"),
+            (
+                "ConsensFlow",
+                "dev.ngvoicu.consensflow.smoke",
+                "ConsensFlow Smoke",
+            ),
+            (
+                "ConsensFlow Candidate",
+                "dev.ngvoicu.consensflow.candidate",
+                "ConsensFlow Candidate",
+            ),
+            (
+                "ConsensFlow",
+                "dev.ngvoicu.consensflow.paste-probe",
+                "ConsensFlow Paste Probe",
+            ),
+            (
+                "ConsensFlow",
+                "dev.example.other",
+                "ConsensFlow dev.example.other",
+            ),
+        ] {
+            assert_eq!(window_title(name, identifier), title, "{identifier}");
+        }
     }
 
     #[test]
