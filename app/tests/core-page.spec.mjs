@@ -386,6 +386,17 @@ async function open(page, data = model()) {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
       },
+      // A meeting with the chief, as the daemon has it: the time it began, or none, and what it
+      // held is let go at its Stop.
+      'project.meeting': ({ project, on }) => {
+        const board = data.boards[project]
+        if (on) board.project.meeting = board.project.meeting ?? new Date().toISOString()
+        else {
+          delete board.project.meeting
+          delete board.held
+        }
+        return answer({ project: board.project })
+      },
       // A project renamed, and a line written under its name, as the daemon does it: checked,
       // kept on the project of the list and on the one of its board, and refused in its words.
       'project.rename': ({ project, name }) => {
@@ -7692,10 +7703,137 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
   // The chief's window opens and closes with the project: its card has no Open, only its
-  // History and Switch chief.
+  // History, Switch chief and Start meeting.
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['History', 'Switch chief'])
+    .toEqual(['History', 'Switch chief', 'Start meeting'])
+})
+
+/** A message for the chief that its meeting with the human holds: queued, as the daemon lists it. */
+const heldForChief = (id, kind, sender, taskNumber, body) => ({
+  id,
+  kind,
+  state: 'queued',
+  sender,
+  recipient: 'chief',
+  taskNumber,
+  body,
+  questions: null,
+  choices: null,
+  createdAt: at(2),
+})
+
+test('meets the chief from its card: Start holds what comes for it, the button counts it, its card and For you list it, and Stop lets it go', async ({
+  page,
+}) => {
+  const data = model()
+  // An approval project: what waits for the human's approval is a list of its own.
+  data.boards[1].project.gate = true
+  data.boards[1].gated = [
+    {
+      id: 30,
+      kind: 'task',
+      state: 'gated',
+      sender: 'chief',
+      recipient: 'zeus',
+      taskNumber: 4,
+      body: 'Add the tests',
+      questions: null,
+      choices: null,
+      createdAt: at(3),
+    },
+  ]
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  const status = card.locator('.terminal-status')
+  await card.getByRole('button', { name: 'Start meeting' }).click()
+  await expect.poll(() => calls(page, 'project.meeting')).toEqual([{ project: 1, on: true }])
+  await expect
+    .poll(() => named(card.locator('button')))
+    .toEqual(['History', 'Switch chief', 'Stop meeting (0)'])
+  await expect(status).toHaveText('In a meeting · nothing held yet')
+  await expect(status).toHaveAttribute('data-state', 'meeting')
+  // What comes for the chief now waits, as the daemon's next board says: a member's question
+  // first, then the oldest.
+  await page.evaluate(
+    (held) => {
+      window.__model.boards[1].held = held
+      window.__listeners.get('state-changed')()
+    },
+    [
+      heldForChief(41, 'question', 'zeus', 3, 'Which parser?'),
+      heldForChief(40, 'result', 'zeus', 2, 'Lexer done; 14 tests pass.'),
+    ],
+  )
+  await expect
+    .poll(() => named(card.locator('button')))
+    .toEqual(['History', 'Switch chief', 'Stop meeting (2)'])
+  await expect(status).toHaveText('In a meeting · 2 messages held')
+  const held = page.getByRole('list', { name: 'Held for your meeting' })
+  await expect
+    .poll(() => held.locator('.strip').evaluateAll((all) => all.map((s) => s.dataset.message)))
+    .toEqual(['41', '40'])
+  await expect(held.locator('.strip-route')).toHaveText([
+    'Question from @zeus · T-3 · held until your meeting ends',
+    'Result from @zeus · T-2 · held until your meeting ends',
+  ])
+  // A held message only reads: marked read, it would never reach the chief.
+  await expect.poll(() => named(held.locator('button'))).toEqual(['Open task', 'Open task'])
+  // What waits for approval stays apart, and each is counted once.
+  const waiting = page.getByRole('list', { name: 'Waiting for you' })
+  await expect
+    .poll(() => waiting.locator('.strip').evaluateAll((all) => all.map((s) => s.dataset.message)))
+    .toEqual(['30'])
+  await expect(page.locator('.foryou-status')).toHaveText('1 waiting · 2 held · 1 note')
+
+  await card.getByRole('button', { name: 'Stop meeting (2)' }).click()
+  await expect
+    .poll(() => calls(page, 'project.meeting'))
+    .toEqual([
+      { project: 1, on: true },
+      { project: 1, on: false },
+    ])
+  await expect
+    .poll(() => named(card.locator('button')))
+    .toEqual(['History', 'Switch chief', 'Start meeting'])
+  await expect(held).toHaveCount(0)
+  await expect(status).toHaveText('Working')
+  await expect(page.locator('.foryou-status')).toHaveText('1 waiting · 1 note')
+})
+
+test("keeps the chief's head inside its card in a meeting, however narrow, and draws no meeting on a closed project", async ({
+  page,
+}) => {
+  const data = closedFoundry()
+  data.boards[1].project.meeting = at(5)
+  data.boards[1].held = [
+    heldForChief(41, 'question', 'zeus', 3, 'Which parser?'),
+    heldForChief(40, 'result', 'zeus', 2, 'Lexer done; 14 tests pass.'),
+  ]
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  await expect(card.getByRole('button', { name: 'Stop meeting (2)' })).toBeVisible()
+  // Every part of the head inside the card: the head wraps (name and buttons, then what the
+  // chief is doing), and nothing runs past its edge.
+  const outside = () =>
+    card.evaluate((card) => {
+      const edge = card.getBoundingClientRect()
+      return [...card.querySelectorAll('.terminal-head > *, .terminal-head button')]
+        .filter((part) => {
+          const box = part.getBoundingClientRect()
+          return box.left < edge.left || box.right > edge.right
+        })
+        .map((part) => part.textContent)
+    })
+  for (const width of [700, 880, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect.poll(outside, { message: `the head at ${width}px` }).toEqual([])
+  }
+  // A closed project draws no card: nothing on it acts, and its Close ended any meeting.
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('main.main')).toHaveAttribute('data-suspended', 'true')
+  await expect(page.getByRole('button', { name: /meeting/ })).toHaveCount(0)
+  await expect(page.getByRole('list', { name: 'Held for your meeting' })).toHaveCount(0)
 })
 
 /**
@@ -7771,11 +7909,11 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
     reviewer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }),
   ).toBeVisible()
   // The chief's terminal has nothing to show or hide, on its row or its card:
-  // its row has no tools, and its card reads its history and switches the chief.
+  // its row has no tools, and its card reads its history, switches the chief and meets it.
   await expect(page.locator('tr[data-handle="chief"] .row-head button')).toHaveCount(0)
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['History', 'Switch chief'])
+    .toEqual(['History', 'Switch chief', 'Start meeting'])
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)

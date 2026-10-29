@@ -369,6 +369,14 @@ export function laneStatus(lane, board, now) {
   if (lane.switching) {
     return ['switching', `Switching the chief to ${lane.switching.agent} after this turn`]
   }
+  // A meeting with the human: what comes for the chief waits until its Stop.
+  if (participant.role === 'chief' && board.project?.meeting) {
+    const held = board.held?.length ?? 0
+    return [
+      'meeting',
+      `In a meeting · ${held === 0 ? 'nothing held yet' : `${plural(held, 'message')} held`}`,
+    ]
+  }
   // A stop its window ignored in every round: the human can cancel the task to end it.
   if (lane.unstopped) {
     return ['unstopped', `Did not stop for T-${lane.unstopped.task}: still on its earlier turn`]
@@ -534,6 +542,9 @@ export class BoardView {
   #forYou(inbox, board, now) {
     // What waits for the human's approval.
     const waiting = board.gated ?? []
+    // What the human's meeting with the chief holds for it, in the order it will go: the
+    // human reads it here, and it goes to the chief after the Stop.
+    const held = board.held ?? []
     // The chief waits for the human only in its terminal: its own question,
     // or a prompt. Messages for the chief stay its own, however long it waits.
     const chief = board.lanes.find((lane) => lane.participant.role === 'chief')
@@ -552,9 +563,13 @@ export class BoardView {
       element(
         'span',
         'foryou-status',
-        count === 0 && unread === 0
+        count === 0 && held.length === 0 && unread === 0
           ? 'Nothing waiting'
-          : [count === 0 ? null : `${count} waiting`, unread === 0 ? null : plural(unread, 'note')]
+          : [
+              count === 0 ? null : `${count} waiting`,
+              held.length === 0 ? null : `${held.length} held`,
+              unread === 0 ? null : plural(unread, 'note'),
+            ]
               .filter(Boolean)
               .join(' · '),
       ),
@@ -575,6 +590,12 @@ export class BoardView {
       )
     }
     if (strips.childElementCount > 0) section.append(strips)
+    if (held.length > 0) {
+      const list = element('ol', 'strips')
+      list.setAttribute('aria-label', 'Held for your meeting')
+      for (const message of held) list.append(this.#messageStrip(message, board, now, true))
+      section.append(element('h3', 'foryou-sub', 'Held for your meeting'), list)
+    }
     if (unread > 0) {
       const list = element('ol', 'strips')
       list.setAttribute('aria-label', 'Notes for you')
@@ -627,7 +648,11 @@ export class BoardView {
     return item
   }
 
-  #messageStrip(message, board, now) {
+  /**
+   * A message's strip. One `held` by a meeting only reads: it is the chief's,
+   * and one marked read would never reach it.
+   */
+  #messageStrip(message, board, now, held = false) {
     const item = element('li', 'strip strip-message')
     item.dataset.kind = message.kind
     item.dataset.message = String(message.id)
@@ -641,11 +666,12 @@ export class BoardView {
       element(
         'span',
         'strip-route',
-        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${gated ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${gated ? ' · needs your approval' : ''}`,
+        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${gated ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${gated ? ' · needs your approval' : ''}${held ? ' · held until your meeting ends' : ''}`,
       ),
       element('span', 'strip-age', age(message.createdAt, now)),
     )
     if (gated) item.dataset.gated = 'true'
+    if (held) item.dataset.held = 'true'
     item.append(line)
     const actions = element('div', 'strip-actions')
     if (gated && acts(board)) actions.append(...this.#gateActions(message))
@@ -666,7 +692,7 @@ export class BoardView {
         ),
       )
     }
-    if (!gated && acts(board)) {
+    if (!gated && !held && acts(board)) {
       actions.append(
         button(
           'Mark read',

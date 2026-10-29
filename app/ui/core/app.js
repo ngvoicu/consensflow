@@ -315,6 +315,8 @@ const terminals = new TerminalsView(stage, {
   onSwitchChief: (chief) => act(() => switchChief.open(chief)),
   // Every card reads its participant's whole history.
   onHistory: (participant) => void historyViewer.open(participant),
+  // The human meets the chief from its card: what comes for it waits until the Stop.
+  onMeeting: (chief, on) => act(() => daemon('project.meeting', { project: chief.projectId, on })),
   onTryAgain: (chief) => tryAgain(chief),
   // A session's terminal is hidden from its card as from its lane.
   onHideTerminal: (participant) => hideSession(participant),

@@ -368,6 +368,7 @@ test.describe('the History button', () => {
     await expect(chiefCard(page).locator('.terminal-head > button')).toHaveText([
       'History',
       'Switch chief',
+      'Start meeting',
     ])
     // A session's terminal, once the human shows it, reads its own history.
     const viewer = await openSession(page)
@@ -375,7 +376,7 @@ test.describe('the History button', () => {
     expect(await asked(page)).toEqual([{ project: 1, handle: 'zeus-amber-pine', tools: false }])
     await expect(viewer.locator('.history-body')).toContainText('Write the lexer')
     await viewer.getByRole('button', { name: 'Close' }).click()
-    // The chief's window goes down: its card stays, with History.
+    // The chief's window goes down: its card stays, with History, and the meeting's button.
     await page.evaluate(() => {
       const chief = window.__model.board.lanes.find((l) => l.participant.handle === 'chief')
       Object.assign(chief, { pane: null, activity: { state: 'closed' } })
@@ -385,6 +386,7 @@ test.describe('the History button', () => {
     await expect(chiefCard(page).locator('.terminal-head > button')).toHaveText([
       'History',
       'Switch chief',
+      'Start meeting',
     ])
     await openChief(page)
   })

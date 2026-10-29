@@ -23,6 +23,9 @@ meeting-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::r
 meeting-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::meeting"]
 # The names of the page's operations, which the app forwards, and which of them wake the dispatcher.
 meeting-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+# The page's button, its count, the chief's line and the held strips, in the browser Playwright
+# keeps (each plant's `prepare` bundles the page's xterm first, as `npm run test:ui` does).
+meeting-page-ui = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "meets the chief from its card|keeps the chief's head inside its card in a meeting"]
 # The rig's cases.
 meeting-rig-held = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "meeting::a_meeting_started_on_the_page_holds_the_chiefs_messages_and_its_stop_lets_them_go_question_first"], builds = true }
 meeting-rig-quit = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "meeting::the_apps_quit_ends_a_meeting_and_what_it_held_goes_in_after_the_resume"], builds = true }
@@ -340,6 +343,85 @@ find = '''    value.and_then(Value::as_bool).ok_or_else(|| {
 replace = '''    Some(value.and_then(Value::as_bool).unwrap_or(false)).ok_or_else(|| {
         LedgerError::refused(
             "invalid-meeting",'''
+
+[[plant]]
+name = "meeting page ui: the Stop does not count what the meeting holds"
+meant = "meets the chief from its card: Start holds what comes for it, the button counts it, its card and For you list it, and Stop lets it go"
+runs = ["meeting-page-ui"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''              entry.meeting ? `Stop meeting (${(board.held ?? []).length})` : 'Start meeting','''
+replace = '''              entry.meeting ? 'Stop meeting' : 'Start meeting','''
+
+[[plant]]
+name = "meeting page ui: the button asks the daemon for the meeting as it is"
+meant = "meets the chief from its card: Start holds what comes for it, the button counts it, its card and For you list it, and Stop lets it go"
+runs = ["meeting-page-ui"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''              () => this.#onMeeting(entry.participant, !entry.meeting),'''
+replace = '''              () => this.#onMeeting(entry.participant, entry.meeting),'''
+
+[[plant]]
+name = "meeting page ui: the Start is never a Stop"
+meant = "keeps the chief's head inside its card in a meeting, however narrow, and draws no meeting on a closed project"
+runs = ["meeting-page-ui"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''    entry.meeting = Boolean(board.project?.meeting)'''
+replace = '''    entry.meeting = false'''
+
+[[plant]]
+name = "meeting page ui: a held message can be marked read"
+meant = "meets the chief from its card: Start holds what comes for it, the button counts it, its card and For you list it, and Stop lets it go"
+runs = ["meeting-page-ui"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''    if (!gated && !held && acts(board)) {'''
+replace = '''    if (!gated && acts(board)) {'''
+
+[[plant]]
+name = "meeting page ui: For you does not list what the meeting holds"
+meant = "meets the chief from its card: Start holds what comes for it, the button counts it, its card and For you list it, and Stop lets it go"
+runs = ["meeting-page-ui"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''    const held = board.held ?? []
+'''
+replace = '''    const held = []
+'''
+
+[[plant]]
+name = "meeting page ui: the chief's card does not say a meeting is on"
+meant = "meets the chief from its card: Start holds what comes for it, the button counts it, its card and For you list it, and Stop lets it go"
+runs = ["meeting-page-ui"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''  if (participant.role === 'chief' && board.project?.meeting) {'''
+replace = '''  if (participant.role === 'chief' && board.project?.meeting && false) {'''
+
+[[plant]]
+name = "meeting page ui: a held strip reads as a message waiting for nothing"
+meant = "meets the chief from its card: Start holds what comes for it, the button counts it, its card and For you list it, and Stop lets it go"
+runs = ["meeting-page-ui"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''${held ? ' · held until your meeting ends' : ''}'''
+replace = ''''''
 
 # --- the rig: a real daemon and pane host, a stand-in chief ---
 
