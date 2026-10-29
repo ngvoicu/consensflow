@@ -47,7 +47,7 @@ in three ways, each made by hand:
   four commands that take one say how it ends (B6): the six prints that hold the usage,
   `cf task --help` among them, where the `--file` example follows the heredoc's;
 - the reply of each case that gives a window words (`cf task add`, `resume`, `tell`: ten
-  cases) has a last line, `Sent: <n> characters, ending "<its last words>".` (B6);
+  cases) has a last line, `Sent: <n> characters, ending "<its last words>".` (B6; it begins `T-3: sent` since T-957, below);
 - the daemon's traces of the same commands were changed with them.
 ## The usage after `cf task edit`
 
@@ -133,3 +133,14 @@ result`, in the six prints of `board.json` that hold it (`cf`, `cf help`, `cf --
 script from the binary's own output, and nothing else in them moved. The daemon's traces
 hold no `cf task finish` line (`cf-board-028` and `-029` are departed for that, and are not
 played), so none was changed.
+
+## The last line of a reply names its task
+
+Board task T-957 (3.0.7, from T-689): the line that ends the reply of `cf task add`, `reopen`,
+`resume`, `edit` and `cf tell` begins with the task, `T-3: sent 24 characters, ending "…".`,
+where it began `Sent:`. A chief that read only that last line (a harness shows a command's
+output cut, `crates/cf/src/board/cut.rs`) did not learn the number of the task it had just
+added. The ten cases of `board.json` that carry the line were changed by a script from each
+case's own first word (`T-3 is on the board …` gives `T-3`), and nothing else in them moved.
+The daemon's traces changed with them, by hand and in the same words alone
+(`crates/cf-daemon/tests/goldens/README.md`).

@@ -80,3 +80,12 @@ more: its line reads `cf task list [--all]` and says what the flag adds, in ever
 in `cf-board-028` and `-029`. Changed by hand, in those words alone. The recordings of the
 crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them, and one
 more there: the case `cf task list --json` carries an `idle` key (see that folder's README).
+
+The last line of the replies that give a window words (board task T-957, 3.0.7, from T-689)
+names its task: `T-1: sent 16 characters, ending "Write the parser".` where it read
+`Sent: 16 characters, …`, so a chief that sees only the last line of a command's output knows
+which task it is about. Twenty-five `stdout` strings of twelve traces (`cf-board-004`, `-008`,
+`-009`, `-010`, `-011`, `-014`, `-015`, `-016`, `-017`, `-020`, `-021`, `-022`) changed, each by
+a script that read the number from the string's own first word (`T-1 is on the board …`), and
+nothing else in them moved. The crates' own goldens (`crates/cf/tests/goldens/board.json`)
+changed with them.

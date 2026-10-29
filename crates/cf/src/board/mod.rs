@@ -291,7 +291,7 @@ fn tell(
         brief::brief_of(&words, given, input)?,
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
-    let sent = brief::sent(&what);
+    let sent = brief::sent(number, &what);
     let mut answer = board.post(
         &format!("/api/tasks/{number}/tell"),
         &Value::Object(body_of(what)),

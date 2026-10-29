@@ -1,0 +1,51 @@
+# Board friction, one round of five small fixes and a sixth (board task T-957, 3.0.7, which
+# folds T-689, T-675, T-637, T-798 and T-691 and the field issue of 2026-10-29 on `--after`).
+# Each fix has its tests red first on the old behaviour, and each rule has a plant here: one
+# plant takes one rule out, and a test of it fails. Every name begins with `board friction`, so
+# `npm run plants:daemon -- "board friction"` runs them all, and the words of a filter pick
+# one fix (`"board friction: answer"`).
+
+[run]
+friction-tell = ["cargo", "test", "--offline", "-p", "cf", "--test", "tell"]
+
+# --- T-689: the last line of a reply names its task ---
+
+[[plant]]
+name = "board friction: the last line of a brief's reply has no T- before the task"
+meant = "the_reply_says_how_many_characters_went_and_how_they_end"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''        "T-{task}: sent {} characters, ending \"{}{}\".",'''
+replace = '''        "{task}: sent {} characters, ending \"{}{}\".",'''
+
+[[plant]]
+name = "board friction: cf tell's last line names no task"
+meant = "a_tell_to_a_queued_task_says_the_words_wait_for_its_window_and_nothing_is_paused"
+runs = ["friction-tell"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = "    let sent = brief::sent(number, &what);"
+replace = "    let sent = brief::sent(\"\", &what);"
+
+[[plant]]
+name = "board friction: cf task add's last line names another task than the one added"
+meant = "a_test_is_asked_for_a_tester_of_a_tier_and_says_whom_it_waits_for"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    let sent = brief::sent(&number, &brief);"
+replace = "    let sent = brief::sent(0, &brief);"
+
+[[plant]]
+name = "board friction: cf task edit's last line names another task than the one edited"
+meant = "a_new_brief_is_posted_to_the_task_and_said_to_be_the_tasks_now"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "        format!(\"\\n{}\", brief::sent(number, &text))"
+replace = "        format!(\"\\n{}\", brief::sent(0, &text))"
