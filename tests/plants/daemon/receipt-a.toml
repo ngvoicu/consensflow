@@ -60,9 +60,9 @@ runs = [
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/message.rs"
-find = '        Some(message) => Ok(Answer::ok(json!({ "message": value(&message)? }))),'
+find = '        (Some(message), None) => Ok(Answer::ok(json!({ "message": value(&message)? }))),'
 replace = '''
-        Some(message) => {
+        (Some(message), None) => {
             if message.kind == "answer" && message.recipient_id == caller.participant.id {
                 let mut ledger = context.ledger.borrow_mut();
                 ledger.receive_read(caller.participant.id, &[message.id], cf_ledger::Read::Inbox)?;

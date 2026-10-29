@@ -1882,8 +1882,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/message.rs"
-find = "        Some(message) if Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse("
-replace = "        Some(message) if false && Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse("
+find = "        Some(message) => Waits::now(context, caller)?.until(message),"
+replace = "        Some(message) => Waits::now(context, caller)?.until(message).filter(|_| false),"
 
 [[plant]]
 name = "resume tasks: an inbox lists the text of what no window was handed while the project is closed"
@@ -1943,10 +1943,10 @@ runs = ["daemon-routes"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/waits.rs"
 find = '''
-        self.closed
+        if self.closed
             && matches!'''
 replace = '''
-        true
+        if true
             && matches!'''
 
 [[plant]]
@@ -1956,9 +1956,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/waits.rs"
-find = '''
-            && message.sender.as_deref() != Some(self.reader)'''
-replace = ""
+find = "        if message.sender.as_deref() == Some(self.reader) {"
+replace = "        if message.sender.as_deref() == Some(self.reader) && false {"
 
 # --- round 11: the Enter pressed once more never sends words twice (both reviews of 2026-10-20) ---
 
