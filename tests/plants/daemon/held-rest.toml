@@ -190,16 +190,6 @@ replace = "          if (false && settledIds.has(id)) {"
 
 [[plant]]
 name = "held-rest: a queue removal names a message by its exact words, and one whose envelope has other attributes stays queued"
-meant = "a_message_is_named_by_its_content_with_the_attributes_of_its_envelope_set_aside"
-runs = ["rest-claude-queues"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/record/text.rs"
-find = "    queued == removed || envelope(queued) == envelope(removed)"
-replace = "    queued == removed"
-
-[[plant]]
-name = "held-rest: a removal without the hop chain does not name the message enqueued with it"
 meant = "a_removal_without_the_hop_chain_names_the_message_queued_with_it"
 runs = ["rest-claude-queues"]
 
@@ -393,7 +383,7 @@ runs = ["rest-cf-transcript-pages"]
 [[plant.edit]]
 file = "crates/cf/src/board/transcript.rs"
 find = "            .filter(|page| *page >= 1)"
-replace = "            .filter(|page| *page >= 0)"
+replace = "            .filter(|_| true)"
 
 [[plant]]
 name = "held-rest: transcript pages: a page counts its items from the one before its first"

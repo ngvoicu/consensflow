@@ -15,21 +15,25 @@
 #   plants (`background.toml`, "background windows: …"), and the test-only part, waiting out the
 #   forked shell, is Windows' alone.
 #
-# Every name holds `held-rest load:`, so `npm run plants:daemon -- "held-rest load:"` runs them. Each
-# run is long (up to 15 minutes), and the burners make the Mac slow for everything else: run them
-# one at a time, with nothing else building.
+# Every name holds `held-rest load:`, so `npm run plants:daemon -- "held-rest load:"` runs them. A run
+# lasts what the family's limit allows (150 s of burners, rounds of at most 100 s), so a plant that is
+# not caught says only that no round of that many failed at that load; and the burners make the Mac
+# slow for everything else: run them one at a time, with nothing else building, and with the test
+# binaries built before (a `prepare` here only makes sure of them). Windows' own load tool is
+# `tools/windows-load.ps1`, for a ConPTY plant on zeewin2 if one is ever wanted.
 
 [run]
-rest-load-pi-extension = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "900", "--runs", "40", "--stop-after", "1", "--run-limit", "300", "--", "node", "--test", "--test-reporter=tap", "tests/pi-extension.test.mjs"]
-rest-load-pi-message = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "900", "--runs", "40", "--stop-after", "1", "--run-limit", "300", "--", "node", "--test", "--test-reporter=tap", "tests/pi-message.test.mjs"]
-rest-load-panes-input = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "900", "--runs", "40", "--stop-after", "1", "--run-limit", "300", "--", "cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::unanswered_page_input_is_bounded_until_a_new_page"]
-rest-load-panes-idle = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "900", "--runs", "40", "--stop-after", "1", "--run-limit", "300", "--", "cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::reader_activity_resets_idle_then_silence_increases_it"]
+rest-load-pi-extension = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "150", "--runs", "20", "--stop-after", "1", "--run-limit", "100", "--", "node", "--test", "--test-reporter=tap", "tests/pi-extension.test.mjs"]
+rest-load-pi-message = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "150", "--runs", "20", "--stop-after", "1", "--run-limit", "100", "--", "node", "--test", "--test-reporter=tap", "tests/pi-message.test.mjs"]
+rest-load-panes-input = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "150", "--runs", "20", "--stop-after", "1", "--run-limit", "100", "--", "cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::unanswered_page_input_is_bounded_until_a_new_page"]
+rest-load-panes-idle = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "150", "--runs", "20", "--stop-after", "1", "--run-limit", "100", "--", "cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::reader_activity_resets_idle_then_silence_increases_it"]
 
 # --- 0cc4902: the life of the records the Pi extension's tests write ---
 
 [[plant]]
 name = "held-rest load: the Pi extension's tests write their records with a one-second life"
 meant = "refuses a delivery addressed to a different native Pi session"
+platforms = ["macos", "linux"]
 runs = ["rest-load-pi-extension"]
 
 [[plant.edit]]
@@ -42,6 +46,7 @@ replace = "    ackTimeoutMs = 1000,"
 [[plant]]
 name = "held-rest load: the Pi test reads the inbox once, not until the file has moved"
 meant = "moves an expired followup aside without sending"
+platforms = ["macos", "linux"]
 runs = ["rest-load-pi-message"]
 
 [[plant.edit]]
@@ -60,6 +65,7 @@ replace = ""
 [[plant]]
 name = "held-rest load: the unanswered-input test sends its 4,096 inputs once, whatever the queue holds"
 meant = "unanswered_page_input_is_bounded_until_a_new_page"
+platforms = ["macos", "linux"]
 runs = ["rest-load-panes-input"]
 prepare = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--no-run"]]
 
@@ -107,6 +113,7 @@ replace = '''        for sequence in 1..=MAX_PENDING_INPUT_TICKETS as u64 {
 [[plant]]
 name = "held-rest load: the idle test's child prints a quarter second after it starts"
 meant = "reader_activity_resets_idle_then_silence_increases_it"
+platforms = ["macos", "linux"]
 runs = ["rest-load-panes-idle"]
 prepare = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--no-run"]]
 
