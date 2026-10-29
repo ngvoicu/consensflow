@@ -176,11 +176,11 @@ fn a_harness_not_installed_here_is_never_asked() {
 
 #[test]
 fn a_harness_with_no_adapter_is_said_to_have_none() {
-    let home = home(&["opencode"]);
+    let home = home(&["devin"]);
     let lists = lists(&home, ByKind(vec![]));
     assert_eq!(
-        done(lists.get(&home.ledger, Harness::Opencode, false)),
-        Err("opencode has no adapter".to_owned())
+        done(lists.get(&home.ledger, Harness::Devin, false)),
+        Err("devin has no adapter".to_owned())
     );
 }
 
