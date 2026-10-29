@@ -119,6 +119,7 @@ replace = '''
 name = "updater product: the installed app takes a bundle with no cf"
 meant = "without-cf"
 runs = ["smoke-bridge-refused"]
+platforms = ["macos"]
 builds = true
 prepare = [
   ["cargo", "xtask", "smoke-updater", "--export-bridge", "--cache", "app/src-tauri/target/updater-smoke"],
@@ -138,6 +139,7 @@ replace = ""
 name = "updater product: the installed app takes a bundle whose seal is broken"
 meant = "tampered"
 runs = ["smoke-bridge-refused"]
+platforms = ["macos"]
 builds = true
 prepare = [
   ["cargo", "xtask", "smoke-updater", "--export-bridge", "--cache", "app/src-tauri/target/updater-smoke"],

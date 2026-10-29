@@ -14,6 +14,11 @@ use serde_json::Value;
 /// The environment variable that holds a [`Bridge`] as JSON.
 pub const BRIDGE_VARIABLE: &str = "CF_CODEX_SESSION_BRIDGE";
 
+/// The environment variable that names the file of a window's role: the developer
+/// instructions the broker gives the window's main threads as they start, so that
+/// the text is on no command line. A window whose launch names none is given none.
+pub const ROLE_VARIABLE: &str = "CF_CODEX_ROLE_FILE";
+
 /// The shortest token a broker accepts.
 const MIN_TOKEN: usize = 24;
 

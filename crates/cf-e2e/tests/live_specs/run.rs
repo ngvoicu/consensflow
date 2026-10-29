@@ -12,8 +12,7 @@ use std::time::Duration;
 use cf_e2e::live::report::Check;
 use cf_e2e::live::trace::Trace;
 use cf_e2e::live::window::trust_claude;
-use cf_e2e::live::{self, agents, ask, cleanup, cut, members, warnings, Harness, Installed, Log};
-use cf_e2e::process::own_var;
+use cf_e2e::live::{self, agents, ask, cut, members, warnings, Harness, Installed, Log};
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::{Error, Result};
 
@@ -212,26 +211,6 @@ fn steps_of(ctx: &Ctx, planned: &Planned, log: &Log) -> Vec<Check> {
     checks
 }
 
-/// Has Pi forget what it kept of a project's folder, now that its windows are gone: its
-/// sessions, in its own folder. (Claude Code's are in the config folder of the run, which
-/// goes with it.)
-fn forget(known: &[String], log: &Log) {
-    let Some(home) = own_var("HOME").map(PathBuf::from) else {
-        return;
-    };
-    let removed = cleanup::remove(&cleanup::records(&home, known));
-    if !removed.is_empty() {
-        log.say(format!(
-            "removed what Pi kept of the folder: {}",
-            removed
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-}
-
 /// Runs the project `planned`: what each of its steps checked.
 pub fn project(planned: &Planned, machine: &Machine, options: &Options, log: &Log) -> Vec<Check> {
     let log = log.scoped(planned.name());
@@ -259,7 +238,6 @@ pub fn project(planned: &Planned, machine: &Machine, options: &Options, log: &Lo
         ));
     }
     let mut checks = Vec::new();
-    let mut known = Vec::new();
     let setup = agents::write_roster(&rig, &project::roster(planned), &log)
         .and_then(|()| settings(&rig, planned, options))
         .and_then(|settings| project::folder(&rig, planned).map(|folder| (settings, folder)));
@@ -278,9 +256,6 @@ pub fn project(planned: &Planned, machine: &Machine, options: &Options, log: &Lo
                     None => "the harness has not got it installed, so ConsensFlow's own copy is the chief's".to_owned(),
                 },
             ));
-            if !live::keep_requested() {
-                known = cleanup::paths(&folder);
-            }
             match open(planned, machine, &rig, &folder, &log) {
                 Err(why) => {
                     log.say(format!("setup FAILED: {why}"));
@@ -307,6 +282,5 @@ pub fn project(planned: &Planned, machine: &Machine, options: &Options, log: &Lo
         log.say(format!("closing the rig: {why}"));
         checks.push(failed(planned, "close", why));
     }
-    forget(&known, &log);
     checks
 }

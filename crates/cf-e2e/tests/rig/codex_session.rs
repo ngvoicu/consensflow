@@ -224,9 +224,9 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
             socket.display()
         );
     }
-    // The server gets the model and the bypass as configuration, and
-    // ConsensFlow's own variables set in its shell policy.
-    let root = serde_json::to_string(&s.root.path().to_string_lossy())?;
+    // The server gets the model and the bypass as configuration, and nothing of
+    // ConsensFlow's own variables: the board's token is a secret, and every user of
+    // the machine reads a command line. The broker gives them to each thread.
     let mut expected: Vec<String> = [
         "-c",
         "model=\"native-model\"",
@@ -234,19 +234,11 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
         "approval_policy=\"never\"",
         "-c",
         "sandbox_mode=\"danger-full-access\"",
-        "-c",
+        "app-server",
     ]
     .iter()
     .map(|word| (*word).to_owned())
     .collect();
-    expected.extend([
-        format!("shell_environment_policy.set.CONSENSFLOW_HOME={root}"),
-        "-c".to_owned(),
-        "shell_environment_policy.set.CONSENSFLOW_TOKEN=\"window-token\"".to_owned(),
-        "-c".to_owned(),
-        "shell_environment_policy.set.CONSENSFLOW_URL=\"http://127.0.0.1:1\"".to_owned(),
-        "app-server".to_owned(),
-    ]);
     if cfg!(windows) {
         expected.extend(
             [
@@ -287,6 +279,27 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
         ],
         [Value::Null, Value::Null],
         "an OpenAI API key never reaches Codex"
+    );
+    for run in server_runs.iter().chain(&tui_runs) {
+        let args = run["args"].to_string();
+        assert!(
+            !args.contains("window-token") && !args.contains("CONSENSFLOW_"),
+            "ConsensFlow's variables are on Codex's command line: {args}"
+        );
+    }
+    // The thread the TUI started was given them for its commands, in its config.
+    let config = &server_runs[1]["started"]["config"];
+    assert_eq!(
+        config["shell_environment_policy.set.CONSENSFLOW_TOKEN"], "window-token",
+        "{config}"
+    );
+    assert_eq!(
+        config["shell_environment_policy.set.CONSENSFLOW_URL"],
+        "http://127.0.0.1:1"
+    );
+    assert_eq!(
+        config["shell_environment_policy.set.CONSENSFLOW_HOME"],
+        s.root.path().to_string_lossy().as_ref()
     );
     // The fresh thread the TUI started is the broker's to deliver to, with the bypass.
     assert_eq!(

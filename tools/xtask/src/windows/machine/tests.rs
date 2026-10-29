@@ -284,7 +284,8 @@ mod asked {
     /// The laptop's two sides, as the stand-in ssh answers for them: zeelin says `zeelin` (`held`,
     /// `free`) of poker-lab's lock, or is not asked at all (`down`: the connection times out, as
     /// the laptop's firewall makes of a port nothing listens on, measured 2026-10-26; `refused`),
-    /// or connects and cannot say (`stalled`: no banner; `key`: a host key that changed; `denied`;
+    /// or connects and cannot say (`silent`: ssh gave the peer up for its silence, after a
+    /// connection was made; `stalled`: no banner; `key`: a host key that changed; `denied`;
     /// `nonsense`: a login banner in place of the answer; `killed`: ssh ended by a signal, which
     /// leaves status 1 and no words). zeewin2 answers the disk script with `zeewin2` (`free N`,
     /// then `run` if `running`), or does not answer (`none`).
@@ -311,6 +312,7 @@ esac
 case "$answer" in
   none|down) echo "ssh: connect to host 10.6.0.6 port 22: Operation timed out" >&2; exit 255 ;;
   refused) echo "ssh: connect to host 10.6.0.6 port 22: Connection refused" >&2; exit 255 ;;
+  silent) printf 'Timeout, server 10.6.0.6 not responding.\n' >&2; exit 255 ;;
   stalled) printf 'Connection timed out during banner exchange\nConnection to 10.6.0.6 port 22 timed out\n' >&2; exit 255 ;;
   key) echo "Host key verification failed." >&2; exit 255 ;;
   denied) echo "zee@10.6.0.6: Permission denied (publickey)." >&2; exit 255 ;;
@@ -691,6 +693,30 @@ esac
         assert_eq!(
             log.lines().next().unwrap(),
             "zeelin\tif [ -e ~/.compile-lock/owner ]; then echo held; else echo free; fi"
+        );
+    }
+
+    #[test]
+    fn a_zeelin_whose_connection_went_silent_is_told_as_that_and_the_run_is_refused_all_the_same() {
+        // A connection was made, so Ubuntu may be running a job: refused, as a banner that never
+        // came is, and the reason is the silence, with the seconds ssh waited for the peer.
+        let laptop = Laptop::new("silent", "free 614");
+        let Ok(Ready::Refused(why)) = laptop.ready() else {
+            panic!("a zeelin that went silent was not a refusal");
+        };
+        assert!(
+            why.contains("(the connection to zeelin went silent for 10 s)"),
+            "{why}"
+        );
+        assert!(!why.contains("status 255"), "{why}");
+    }
+
+    #[test]
+    fn a_zeewin2_whose_connection_went_silent_when_asked_what_it_has_free_is_told_as_that() {
+        let laptop = Laptop::new("free", "silent");
+        assert_eq!(
+            laptop.ready(),
+            Err("zeewin2 did not say what it has free: the connection to zeewin2 went silent for 10 s".into())
         );
     }
 }

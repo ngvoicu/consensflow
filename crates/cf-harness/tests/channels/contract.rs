@@ -376,3 +376,38 @@ channel! {
         }),
     }
 }
+
+/// Calliope's P2 on T-697, its class: every file the harness writes that holds a prompt is
+/// its owner's alone. A message through Pi's inbox is the words of a prompt: the inbox, the
+/// record and the acknowledgements' folder ConsensFlow makes are its owner's, as the
+/// launch's own files are, where Node's defaults made them anyone's to read.
+#[cfg(unix)]
+#[test]
+fn a_message_through_pis_inbox_is_its_owners_alone() {
+    run(async {
+        let window = Window::open(Answers::Acknowledges(
+            json!({ "admitted": true, "mode": "tui" }),
+        ));
+        let pane = pane("p1-zeus", 3);
+        let host = AnsweringHost::new(|_| Ok(Claim::Granted.answer()));
+        let target = pi::Target {
+            launch_id: "launch-pi",
+            inbox: window.inbox.to_str().unwrap(),
+            ack: window.ack.to_str().unwrap(),
+            ack_timeout_ms: 5_000,
+            session: "cf-1-zeus-0000abcd",
+            pane: &pane,
+            host: &host as &dyn PaneHost,
+        };
+        pi::send(&SystemTime, &SystemEntropy, &target, TEXT)
+            .await
+            .unwrap();
+        let modes = window.modes.borrow().clone();
+        window.finish();
+        assert_eq!(
+            modes,
+            [[0o700, 0o600, 0o700]],
+            "the inbox, the record, the acknowledgements"
+        );
+    });
+}

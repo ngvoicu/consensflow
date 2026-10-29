@@ -23,7 +23,7 @@ log=$out/$label.log; load=$out/$label.load
   while :; do
     if [ $seen = 0 ] && grep -q '^== tree' "$log" 2>/dev/null; then seen=1; date +%s > "$out/$label.tree-at"; fi
     if [ $seen = 1 ]; then
-      printf '%s %s\n' "$(date +%T)" "$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$machine" "$SAMPLE" 2>/dev/null | tr -d '\r')" >> "$load"
+      printf '%s %s\n' "$(date +%T)" "$(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 "$machine" "$SAMPLE" 2>/dev/null | tr -d '\r')" >> "$load"
     fi
     sleep 30
   done ) &

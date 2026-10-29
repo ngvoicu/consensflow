@@ -3,6 +3,7 @@
   "files": {
     "includes": [
       "tests/**",
+      "install/*.mjs",
       "app/ui/*.js",
       "app/ui/core/**",
       "app/tests/**",

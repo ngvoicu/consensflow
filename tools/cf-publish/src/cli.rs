@@ -7,6 +7,9 @@
 //!     says whether the old feeds serve the bridge, which a later release needs
 //! cf-publish feeds check --dir <dir> --version <v> --base <url>
 //!     says whether, once published, the files and the feeds serve what the rule says
+//! cf-publish sums --dir <dist> --version <v>
+//!     writes the SHA256SUMS of the release built in <dist>, and the copy of it the
+//!     signing job signs, whose name it prints
 //! cf-publish publish --dir <dist> --tag v<version> --base <url> [--repo <owner>/<repo>]
 //!     publishes the release built in <dist>, and moves its feeds
 //! ```
@@ -19,7 +22,8 @@
 //! (`GITHUB_EVENT_NAME`, `GITHUB_REF_TYPE` and `GITHUB_REF_NAME`).
 //!
 //! Every failure ends the run with status 1 and one line on stderr, prefixed by
-//! the command (`feeds: ` or `publish: `); a refusal of the rule is that too.
+//! the command (`feeds: `, `sums: ` or `publish: `); a refusal of the rule is
+//! that too.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,6 +39,7 @@ use crate::manifest::Manifest;
 use crate::publish::{publish_release, Means, Publication};
 use crate::read::Patience;
 use crate::rule::{plan_feeds, role_of, Role};
+use crate::sums::{update_key, write_sums};
 use crate::version::Version;
 
 /// What the workflow's run says about itself, read once by `main`: `publish`
@@ -51,6 +56,9 @@ pub struct Environment {
     pub gh_repo: Option<String>,
     /// `GITHUB_REPOSITORY`.
     pub github_repository: Option<String>,
+    /// `CF_PUBLISH_TEST_KEY`, the tests' own key, which a build with the tests'
+    /// kit (`test-support`) checks SHA256SUMS against; never read otherwise.
+    pub test_key: Option<String>,
 }
 
 /// The words after a command's name, by option.
@@ -255,6 +263,18 @@ fn feeds(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Result<u8
     }
 }
 
+/// `cf-publish sums …`: the SHA256SUMS of the release built in `--dir`, and the
+/// copy of it that is signed ([`write_sums`]).
+fn sums(args: &[String], out: &mut dyn Write) -> Result<u8, Failure> {
+    let options = Options::parse(args, &["dir", "version"], &[])?;
+    let (Some(dir), Some(version)) = (options.get("dir"), options.get("version")) else {
+        return Err(Failure::new("sums needs --dir and --version"));
+    };
+    let signed = write_sums(Path::new(dir), &Version::parse(version)?)?;
+    writeln!(out, "{signed}")?;
+    Ok(0)
+}
+
 /// `cf-publish publish …`: the release built in `--dir`, for the push of the
 /// version tag `--tag` and no other run.
 fn publish(args: &[String], env: &Environment, out: &mut dyn Write) -> Result<u8, Failure> {
@@ -288,6 +308,7 @@ fn publish(args: &[String], env: &Environment, out: &mut dyn Write) -> Result<u8
         )));
     }
     let manifest = Manifest::embedded()?;
+    let key = signing_key(env)?;
     let out = RefCell::new(out);
     let log = |line: &str| {
         let _ = writeln!(out.borrow_mut(), "publish: {line}");
@@ -299,6 +320,7 @@ fn publish(args: &[String], env: &Environment, out: &mut dyn Write) -> Result<u8
         repo,
         manifest: &manifest,
         patience: Patience::default(),
+        key: &key,
     };
     let means = Means {
         gh: &ProcessGh,
@@ -321,16 +343,31 @@ fn publish(args: &[String], env: &Environment, out: &mut dyn Write) -> Result<u8
     Ok(0)
 }
 
+/// The key SHA256SUMS must be signed by: the update key this binary was built
+/// with. A build with the tests' kit (`test-support`, never the release's) takes
+/// the tests' own from `CF_PUBLISH_TEST_KEY`, for the tests that run the
+/// workflow's steps as written.
+fn signing_key(env: &Environment) -> Result<String, Failure> {
+    #[cfg(feature = "test-support")]
+    if let Some(key) = &env.test_key {
+        return Ok(key.clone());
+    }
+    #[cfg(not(feature = "test-support"))]
+    let _ = &env.test_key;
+    update_key()
+}
+
 /// Runs the command line `args` (without the program's name): the status it
 /// ends with, 0 when it finished and 1 when it could not or the rule refused.
 pub fn run(args: &[String], env: &Environment, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let (who, result) = match args.first().map(String::as_str) {
         Some("feeds") => ("feeds", feeds(&args[1..], out, err)),
+        Some("sums") => ("sums", sums(&args[1..], out)),
         Some("publish") => ("publish", publish(&args[1..], env, out)),
         _ => (
             "cf-publish",
             Err(Failure::new(
-                "usage: cf-publish feeds plan|prerequisites|check, or publish",
+                "usage: cf-publish feeds plan|prerequisites|check, sums, or publish",
             )),
         ),
     };

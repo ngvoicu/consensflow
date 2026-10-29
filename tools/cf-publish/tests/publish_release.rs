@@ -10,6 +10,7 @@
 
 use std::fs;
 
+use cf_publish::testing::signing::{sign, sign_legacy};
 use cf_publish::testing::worlds::{before, before_with, did, gap, mentioning, releasing};
 use cf_publish::testing::{latest_json, published_assets, Served, BRIDGE, LATER, OLDER};
 
@@ -93,7 +94,11 @@ mod publishing_the_bridge {
         );
         let filled = world.github.trace()[publishing - 1].after[&tag].clone();
         assert!(filled.draft, "the release was a draft until then");
-        assert_eq!(filled.assets.len(), 7, "with all its files");
+        assert_eq!(
+            filled.assets.len(),
+            8,
+            "with all its files, SHA256SUMS and its signature"
+        );
     }
 
     #[test]
@@ -206,6 +211,173 @@ mod publishing_the_bridge {
                 format!("missing {path}")
             );
             assert_eq!(world.github.calls(), Vec::<Vec<String>>::new());
+        }
+    }
+}
+
+mod publishing_only_a_signed_sha256sums {
+    use super::*;
+
+    #[test]
+    fn is_refused_without_the_signature_or_the_sums_it_signs_before_anything_is_asked() {
+        for name in ["SHA256SUMS.sig", "SHA256SUMS"] {
+            let world = before(LATER);
+            fs::remove_file(world.dir.path().join(name)).unwrap();
+            let refused = world.publish().unwrap_err().to_string();
+            assert!(refused.starts_with(&format!("missing {name}")), "{refused}");
+            assert_eq!(world.github.calls(), Vec::<Vec<String>>::new(), "{name}");
+        }
+    }
+
+    #[test]
+    fn is_refused_when_what_was_signed_is_not_what_the_files_built_say() {
+        let world = before(LATER);
+        let installer = world
+            .dir
+            .path()
+            .join(format!("nsis/ConsensFlow_{LATER}_x64-setup.exe"));
+        fs::write(
+            installer,
+            "an installer built again after the sums were signed",
+        )
+        .unwrap();
+        assert_eq!(
+            world.publish().unwrap_err().to_string(),
+            "the SHA256SUMS that was signed does not list the files built here"
+        );
+        assert_eq!(world.github.calls(), Vec::<Vec<String>>::new());
+    }
+
+    #[test]
+    fn is_refused_for_a_signature_the_installers_would_refuse_before_anything_is_asked() {
+        let sums_of = |world: &cf_publish::testing::worlds::Before| {
+            fs::read(world.dir.path().join("SHA256SUMS")).unwrap()
+        };
+        type Case = (&'static str, fn(&[u8]) -> String, &'static str);
+        let cases: [Case; 4] = [
+            (
+                "a signature that is no signature",
+                |_| "dW50cnVzdGVkIGNvbW1lbnQ6IHgK".to_string(),
+                "the signature file is not a minisign signature",
+            ),
+            (
+                "another release's",
+                |sums| sign(sums, "ConsensFlow_9.9.9_SHA256SUMS"),
+                "the signature is for",
+            ),
+            (
+                "an update archive's",
+                |sums| sign(sums, "ConsensFlow.app.tar.gz"),
+                "the signature is for",
+            ),
+            (
+                "of other bytes",
+                |_| sign(b"other bytes", &format!("ConsensFlow_{LATER}_SHA256SUMS")),
+                "it does not sign SHA256SUMS under the update key",
+            ),
+        ];
+        for (name, signature, refused) in cases {
+            let world = before(LATER);
+            fs::write(
+                world.dir.path().join("SHA256SUMS.sig"),
+                signature(&sums_of(&world)),
+            )
+            .unwrap();
+            let said = world.publish().unwrap_err().to_string();
+            assert!(
+                said.starts_with("SHA256SUMS.sig does not hold: ") && said.contains(refused),
+                "{name}: {said}"
+            );
+            assert_eq!(world.github.calls(), Vec::<Vec<String>>::new(), "{name}");
+        }
+        // minisign's legacy kind, correctly signed by the key for this release: the installers
+        // take only the prehashed kind, and so does the publisher (allow_legacy is false).
+        let world = before(LATER);
+        let legacy = sign_legacy(&sums_of(&world), &format!("ConsensFlow_{LATER}_SHA256SUMS"));
+        fs::write(world.dir.path().join("SHA256SUMS.sig"), legacy).unwrap();
+        let said = world.publish().unwrap_err().to_string();
+        assert!(
+            said.starts_with(
+                "SHA256SUMS.sig does not hold: it does not sign SHA256SUMS under the update key"
+            ),
+            "{said}"
+        );
+        assert_eq!(world.github.calls(), Vec::<Vec<String>>::new());
+        // CRLF line ends, which the installers refuse.
+        let world = before(LATER);
+        let sig = fs::read_to_string(world.dir.path().join("SHA256SUMS.sig")).unwrap();
+        let text = String::from_utf8(decode(&sig))
+            .unwrap()
+            .replace('\n', "\r\n");
+        fs::write(
+            world.dir.path().join("SHA256SUMS.sig"),
+            encode(text.as_bytes()),
+        )
+        .unwrap();
+        let said = world.publish().unwrap_err().to_string();
+        assert!(said.contains("not a minisign signature"), "{said}");
+    }
+
+    #[test]
+    fn checks_the_signature_under_the_update_key_the_installers_pin() {
+        let pinned = fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../install/install.sh"
+        ))
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix("    key=").map(str::to_string))
+        .unwrap();
+        assert_eq!(cf_publish::sums::update_key().unwrap(), pinned);
+    }
+
+    /// Base64, both ways, for the tests that change a signature file.
+    fn decode(text: &str) -> Vec<u8> {
+        let letters = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut bits = Vec::new();
+        for byte in text.trim().bytes().filter(|b| *b != b'=') {
+            let value = letters.iter().position(|l| *l == byte).unwrap();
+            bits.extend((0..6).rev().map(|at| (value >> at) & 1));
+        }
+        bits.as_chunks::<8>()
+            .0
+            .iter()
+            .map(|byte| byte.iter().fold(0u8, |n, bit| n << 1 | *bit as u8))
+            .collect()
+    }
+
+    fn encode(bytes: &[u8]) -> String {
+        let letters = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let bits: Vec<u8> = bytes
+            .iter()
+            .flat_map(|b| (0..8).rev().map(move |at| (b >> at) & 1))
+            .collect();
+        let mut out: String = bits
+            .chunks(6)
+            .map(|six| {
+                let n = (0..6).fold(0usize, |n, at| {
+                    n << 1 | usize::from(*six.get(at).unwrap_or(&0))
+                });
+                letters[n] as char
+            })
+            .collect();
+        while !out.len().is_multiple_of(4) {
+            out.push('=');
+        }
+        out
+    }
+
+    #[test]
+    fn publishes_the_sums_that_were_signed_and_their_signature_as_they_are() {
+        let world = before(LATER);
+        world.publish().unwrap();
+        let tag = format!("v{LATER}");
+        for name in ["SHA256SUMS", "SHA256SUMS.sig"] {
+            assert_eq!(
+                world.github.asset_text(&tag, name),
+                fs::read_to_string(world.dir.path().join(name)).unwrap(),
+                "{name}"
+            );
         }
     }
 }

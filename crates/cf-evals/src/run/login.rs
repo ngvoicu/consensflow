@@ -68,7 +68,7 @@ pub fn lasting(planned: Duration) -> Duration {
 }
 
 /// The login the windows of a run that is planned to take `planned` run on, if the run has a
-/// real Claude Code (`real`) and the machine a login to copy (none on Windows).
+/// real Claude Code (`real`) and the machine a login to copy.
 pub fn throwaway(real: bool, planned: Duration) -> Option<Arc<Throwaway>> {
     if !real {
         return None;

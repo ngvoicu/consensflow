@@ -17,6 +17,10 @@
 //!   the config folder its windows run on, with a copy of the machine's login,
 //!   removed with the run, and the check that the run left the person's own
 //!   setup as it was (see **Claude Code and the person's `~/.claude`**, below).
+//! - [`isolation`] is the same for Codex, Pi and Devin: the home each one's windows run on
+//!   (`CODEX_HOME`, `PI_CODING_AGENT_DIR`, the XDG folders), with a copy of the login and
+//!   nothing else of the person's, set by the rig over everything it and a case set, and
+//!   the check that the run left the person's own files as they were.
 //! - [`agents`] says which model each harness runs on in a live test, and what
 //!   its roster row is.
 //! - [`window`] opens a real harness's window as the app opens one, trusts its
@@ -35,8 +39,7 @@
 //! - [`tree`] says what a worker's turn left running: the processes its window's
 //!   tree started in it, as the pane host lists them.
 //! - [`human`] plays the human at a project whose chief is a real harness (the
-//!   page's calls, and the keys typed into the chief's window), and [`cleanup`]
-//!   takes away what Pi kept of a run's folder.
+//!   page's calls, and the keys typed into the chief's window).
 //! - [`wire`] says Devin's wire log in runs of what its records are, and how it ends.
 //! - [`report`] says what each check of a run came to, and ends the run with
 //!   them ([`report::conclude`]).
@@ -48,7 +51,8 @@
 //! Keychain alone, and a throwaway `CLAUDE_CONFIG_DIR` opens on "Not logged in", so
 //! [`login::Login`] copies the login (`claudeAiOauth` only, never the MCP servers'
 //! tokens) from the Keychain item `Claude Code-credentials` of the user's own account
-//! (`-a $USER`: the item of the account `unknown` is a dead one) into a folder of the
+//! (`-a $USER`: the item of the account `unknown` is a dead one), or, on Linux and on
+//! Windows, from `~/.claude/.credentials.json` (T-835), into a folder of the
 //! run's own, mode 600, with the first-run dialogs answered, and removes the whole
 //! folder when the run is over, however it ends. A suite does nothing for it: the
 //! `Installed` that [`machine::installed`] (and so [`Log::found`]) gives for Claude
@@ -60,8 +64,10 @@
 //! within two hours (a refresh by the copy would log the person out of the Keychain's),
 //! says it loudly if the copy was refreshed all the same, and fails if the person's
 //! `settings.json` changed, or `~/.claude.json`, `history.jsonl` or `projects` gained
-//! anything of the run's folders. Windows and a machine with no login to copy are as
-//! they were. `--keep` never keeps the folder, which holds a login: it copies the
+//! anything of the run's folders. A run with no home to look for the login in has none to
+//! copy, and is as it was. On Windows each Claude window starts through a `.cmd` and a Node
+//! script ([`machine::windows_wrapper`]), where the shell scripts of the other machines are.
+//! `--keep` never keeps the folder, which holds a login: it copies the
 //! conversations and sessions Claude Code kept there into the kept home first
 //! ([`login::Login`], `<kept home>/home/.claude`: the rig's root, where `--keep` says the home stays). The evals (`cf-evals`) are held to the same: their
 //! Claude windows run on a throwaway folder of this kind, and a run states how long it takes,
@@ -82,9 +88,9 @@ pub mod agents;
 pub mod ask;
 pub mod calls;
 pub mod claude;
-pub mod cleanup;
 pub mod codex;
 pub mod human;
+pub mod isolation;
 pub mod login;
 pub mod machine;
 pub mod mcp_server;
@@ -108,12 +114,13 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::process::{own_var, Run};
-use crate::rig::Rig;
+use crate::rig::{HarnessHome, Rig};
 use crate::{files, Error, Result};
 
 pub use machine::{
-    codex, command, installed, isolated_claude, rig, rig_with_claude_config, rig_with_stand_ins,
-    shimmed_claude, shimmed_claude_with_servers, working_command, Harness, Installed, ISOLATION,
+    claude_project_key, codex, command, installed, isolated_claude, rig, rig_with_claude_config,
+    rig_with_stand_ins, shimmed_claude, shimmed_claude_with_servers, windows_wrapper,
+    working_command, Harness, Installed, ISOLATION,
 };
 pub use who::{between, Who};
 
@@ -370,12 +377,16 @@ fn said_version(found: Result<Installed>) -> String {
 /// says it is, and where its login is read from (Claude Code's, where its windows run
 /// on a config folder of the run's own: where it is copied from).
 fn found_line(install: &Installed, version: &str) -> String {
-    let login = match install.claude_config() {
-        Some(config) => format!(
+    let login = match (install.claude_config(), install.isolation()) {
+        (Some(config), _) => format!(
             "its login is copied from {} into a config folder of the run's own",
             config.described()
         ),
-        None => format!("its login is read from {}", install.home().display()),
+        (None, Some(isolation)) => format!(
+            "its login is copied from {} into a home of the run's own",
+            isolation.described()
+        ),
+        (None, None) => format!("its login is read from {}", install.home().display()),
     };
     format!(
         "{} is {} ({version}); {login}",

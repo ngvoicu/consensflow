@@ -13,6 +13,7 @@ mod handoff;
 mod hold;
 mod lifecycle;
 mod questions;
+mod role;
 mod switching;
 mod transport;
 

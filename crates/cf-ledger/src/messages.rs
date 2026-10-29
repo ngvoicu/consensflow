@@ -76,8 +76,8 @@ pub(crate) use receipt::{
 pub(crate) use roles::{note_role, role_notes_to};
 pub(crate) use taken_back::take_back;
 pub(crate) use told::{
-    drop_queued_but_told, kept_through_leaving, launch_called_off, tell_queued, told_unreceived,
-    told_waiting, Dropped,
+    drop_queued_but_told, kept_through_leaving, launch_called_off, notes_waiting, tell_queued,
+    told_unreceived, Dropped,
 };
 pub use told::{is_told, waiting_for_the_reopen};
 

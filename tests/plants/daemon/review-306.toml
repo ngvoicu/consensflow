@@ -260,8 +260,8 @@ runs = ["ledger-told-edges"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "            if told_waiting(store, assignee, task.id)? {"
-replace = "            if false && told_waiting(store, assignee, task.id)? {"
+find = "            if notes_waiting(store, assignee, task.id)? {"
+replace = "            if false && notes_waiting(store, assignee, task.id)? {"
 
 # B3 on main's carriers (the merge of 2026-10-21): words told while the brief waited ride in its
 # paste, and a start keeps them in a brief being pasted (`release_stranded`), which the branch's

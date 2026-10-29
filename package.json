@@ -35,6 +35,8 @@
     "build:cf": "cargo xtask build-cf",
     "smoke": "cargo xtask smoke",
     "smoke:updater": "cargo xtask smoke-updater",
+    "install:real": "node install/real-install.mjs",
+    "site:installers": "node install/to-site.mjs",
     "load": "cargo xtask test load",
     "candidate": "cargo xtask candidate",
     "bench:core": "cargo xtask live bench",

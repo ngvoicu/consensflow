@@ -98,6 +98,9 @@ serde = { version = "1.0", features = ["derive"] }
 # that Node wrote reads back, and goes out again, as Node had it.
 serde_json = { version = "1.0", features = ["preserve_order", "float_roundtrip"] }
 sha2 = "0.10"
+# A minisign signature checked as the app's updater checks one (tauri-plugin-updater
+# depends on it): the publisher's check of the signed SHA256SUMS.
+minisign-verify = "0.2.5"
 subtle = "2"
 # Archives, read and written by the tools (an update's tar.gz, the portable exe's
 # runtime). Already in the build, through the app.

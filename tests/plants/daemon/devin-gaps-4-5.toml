@@ -1,0 +1,193 @@
+# Gaps 4 and 5 of the Devin arrival gaps main has too (consensflow-sme's
+# `issues/devin-arrival-gaps-main-has-too.md`, item 7 of 3.0.6), each fix with a test that failed
+# on the code before it (T-697):
+#
+# - gap 4: a note a start let go of from the paste it rode in (`release_stranded`, migration
+#   0019) holds its task's result by its own state, whoever wrote it: ConsensFlow's own notes, not
+#   only told words, but for a continuation, which the task's move withdraws (`notes_waiting` in
+#   `crates/cf-ledger/src/messages/told.rs`; tests the engine's `restart` and the ledger's
+#   `told_edges` and `continuations`);
+# - gap 5: what a Devin launch proves of its first message behind `/bypass` (its prompt and the
+#   sessions its wire log named) is kept when its folder goes, at a start's sweep or a window's
+#   close, read by the record reader, and forgotten once a start has settled what was on its way
+#   (`crates/cf-harness/src/devin/kept.rs`, `shared/launch_files.rs`, `devin/record/wires.rs`,
+#   `crates/cf-daemon/src/start.rs`); each launch folder goes on its own.
+#
+# Each plant takes one rule out again. The names begin with `devin gaps 4 5`.
+
+[run]
+engine-restart = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "restart::"]
+ledger-told-edges = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "told_edges::"]
+ledger-continuations = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "continuations::"]
+harness-launch-files = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "launch_files"]
+harness-devin-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record"]
+harness-channels = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "channels", "contract::"]
+daemon-restart = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::restart::"]
+
+[[plant]]
+name = "devin gaps 4 5: a note of ConsensFlow's own a start let go of holds no result"
+meant = "notes_a_start_let_go_of_hold_their_task_till_each_reaches_the_worker_whatever_its_answer_quotes"
+runs = ["engine-restart", "ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "                AND m.kind = 'note' AND m.urgent = 0\n"
+replace = "                AND m.kind = 'note' AND m.urgent = 0 AND m.sender_id IS NOT NULL\n"
+
+[[plant]]
+name = "devin gaps 4 5: a continuation still queued holds its task's result"
+meant = "every_move_of_its_task_out_of_the_work_withdraws_a_continuation_still_queued_in_the_same_write"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "            .is_none_or(|body| continuation_tasks(body).is_none())"
+replace = "            .is_none_or(|body| continuation_tasks(body).is_none() || !body.is_empty())"
+
+[[plant]]
+name = "devin gaps 4 5: a start's sweep keeps nothing of a Devin launch"
+meant = "a_first_message_devin_stored_behind_bypass_is_settled_as_received_though_the_start_swept_its_launch"
+runs = ["daemon-restart", "harness-launch-files"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/launch_files.rs"
+find = "            match remove_launch(home, harness, &launch, &name) {"
+replace = "            match remove(&launch) {"
+
+[[plant]]
+name = "devin gaps 4 5: a window's close keeps nothing of a Devin launch"
+meant = "a_sweep_keeps_what_a_devin_launch_proves_of_its_first_message_behind_bypass"
+runs = ["harness-launch-files"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/launch_files.rs"
+find = "        if let Err(error) = remove_launch(home, harness, Path::new(&folder), launch.as_str()) {"
+replace = "        if let Err(error) = remove(Path::new(&folder)) {"
+
+[[plant]]
+name = "devin gaps 4 5: the record reader reads nothing that was kept"
+meant = "a_first_message_behind_bypass_is_read_from_what_a_start_kept_of_its_swept_launch"
+runs = ["harness-devin-record", "daemon-restart"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            .chain(self.kept.iter().map(String::as_str))"
+replace = "            .chain(self.kept.iter().take(0).map(String::as_str))"
+
+[[plant]]
+name = "devin gaps 4 5: what was kept proves a first message for any session"
+meant = "a_first_message_behind_bypass_is_read_from_what_a_start_kept_of_its_swept_launch"
+runs = ["harness-devin-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/kept.rs"
+find = "            .filter(|kept| kept.sessions.iter().any(|named| named == session))"
+replace = "            .filter(|kept| !kept.sessions.is_empty() || session.is_empty())"
+
+[[plant]]
+name = "devin gaps 4 5: what was kept going changes nothing the reader read"
+meant = "a_first_message_behind_bypass_is_read_from_what_a_start_kept_of_its_swept_launch"
+runs = ["harness-devin-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        let kept_changed = kept != self.kept;"
+replace = "        let kept_changed = kept.len() > self.kept.len();"
+
+[[plant]]
+name = "devin gaps 4 5: what was kept outlives the start's settle"
+meant = "a_first_message_devin_stored_behind_bypass_is_settled_as_received_though_the_start_swept_its_launch"
+runs = ["daemon-restart"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "            for stayed in cf_harness::forget_kept(home) {"
+replace = "            for stayed in cf_harness::forget_kept(&format!(\"{home}/elsewhere\")) {"
+
+[[plant]]
+name = "devin gaps 4 5: one launch folder that cannot go stops the sweep there"
+meant = "a_folder_that_cannot_go_stops_no_other"
+runs = ["harness-launch-files"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/launch_files.rs"
+find = "                Err(error) => failed.push((launch.to_string_lossy().into_owned(), error)),"
+replace = "                Err(error) => return Err(NotRemoved(vec![(launch.to_string_lossy().into_owned(), error)])),"
+
+# T-762, Calliope's review of T-697 (T-725): the kept copy of a prompt is its owner's alone, and
+# so is a message through Pi's inbox (the class); a keep that fails is said as the keep; a kept
+# file that cannot be read fails no reader; a settle that fails keeps what was kept; a chief's
+# Devin handoff behind /bypass whose window closed while it was on its way is received.
+
+[[plant]]
+name = "devin gaps 4 5: the kept copy of a prompt is anyone's to read"
+meant = "a_sweep_keeps_what_a_devin_launch_proves_of_its_first_message_behind_bypass"
+runs = ["harness-launch-files"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/kept.rs"
+find = "    make_folder(kept, 0o700, Mkdir::Sync).map_err(failed)?;"
+replace = "    make_folder(kept, 0o777, Mkdir::Sync).map_err(failed)?;"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/kept.rs"
+find = "    write_file(&partial, said.as_bytes(), 0o600).map_err(failed)?;"
+replace = "    write_file(&partial, said.as_bytes(), 0o666).map_err(failed)?;"
+
+[[plant]]
+name = "devin gaps 4 5: a message through Pi's inbox is anyone's to read"
+meant = "a_message_through_pis_inbox_is_its_owners_alone"
+runs = ["harness-channels"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "    write_file(Path::new(temporary), text.as_bytes(), 0o600)"
+replace = "    write_file(Path::new(temporary), text.as_bytes(), 0o666)"
+
+[[plant]]
+name = "devin gaps 4 5: a keep that fails is said as the folder's removal"
+meant = "a_keep_that_fails_is_said_as_the_keep"
+runs = ["harness-launch-files"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/launch_files.rs"
+find = "                    \"what proves its first message could not be kept in {}: {error}\","
+replace = "                    \"{}: {error}\","
+
+[[plant]]
+name = "devin gaps 4 5: a kept file no reader can read fails every session's proof"
+meant = "a_kept_file_no_reader_can_read_fails_no_session"
+runs = ["harness-devin-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/kept.rs"
+find = '''
+            if let Ok(said) = fs::read(path::join(&[kept, &name])) {
+                self.0.insert(name, Kept::of(&said));
+            }'''
+replace = '''
+            let Ok(said) = fs::read(path::join(&[kept, &name])) else {
+                self.0.clear();
+                return;
+            };
+            self.0.insert(name, Kept::of(&said));'''
+
+[[plant]]
+name = "devin gaps 4 5: what was kept goes with a settle that failed"
+meant = "what_was_kept_of_swept_launches_outlives_a_settle_that_failed_and_goes_with_one_that_settled"
+runs = ["daemon-restart"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "    match contain(settling).await {"
+replace = "    let settled = contain(settling).await;\n    let _ = cf_harness::forget_kept(home);\n    match settled {"
+
+[[plant]]
+name = "devin gaps 4 5: a Devin chief's handoff behind /bypass goes again after its window closed"
+meant = "a_devin_chiefs_first_message_behind_bypass_is_received_though_its_window_closed_while_delivering"
+runs = ["daemon-restart"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/launch_files.rs"
+find = "        if let Err(error) = remove_launch(home, harness, Path::new(&folder), launch.as_str()) {"
+replace = "        if let Err(error) = remove(Path::new(&folder)) {"

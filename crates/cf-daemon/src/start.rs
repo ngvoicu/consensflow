@@ -20,6 +20,7 @@
 //! pass loop, and the end of the start.
 
 use std::cell::{OnceCell, RefCell};
+use std::future::Future;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -30,7 +31,7 @@ use cf_base::file::{make_folder, Mkdir};
 use cf_base::home::config_root;
 use cf_catalog::{roster_path, Catalog, CatalogError};
 use cf_engine::runtime::begin;
-use cf_engine::seams::{Limits, Seams};
+use cf_engine::seams::{EngineError, Limits, Seams};
 use cf_engine::Dispatcher;
 use cf_harness::admin::feed::Feed;
 use cf_harness::admin::HarnessAdmin;
@@ -477,24 +478,21 @@ async fn run(
     // What was on its way into a window is settled, and the loop is woken
     // either way. Nothing is opened: what was open waits, suspended, for the
     // human's Resume. It is begun here, where Node began its resume, and what
-    // its first part woke is run to its end.
+    // its first part woke is run to its end ([`settle`]).
     let (settling, settle_errors) = (Rc::clone(&dispatcher), Rc::clone(&errors));
     let settle_kick = Rc::clone(&kick);
-    let settle = begin(&*spawn, async move {
-        match contain(settling.settle_after_restart()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(failed)) => {
-                settle_errors.log().error(
-                    "settling what was on its way failed",
-                    Some(&failed.to_string()),
-                );
-            }
-            Err(panicked) => settle_errors.caught("settling what was on its way failed", &panicked),
-        }
+    let settled_home = home.to_string_lossy().into_owned();
+    let settled = begin(&*spawn, async move {
+        settle(
+            settling.settle_after_restart(),
+            &settled_home,
+            &settle_errors,
+        )
+        .await;
         settle_kick();
     })
     .await;
-    drop(settle);
+    drop(settled);
     spawn.drain();
 
     Ok(Daemon {
@@ -509,6 +507,35 @@ async fn run(
             spawn,
         },
     })
+}
+
+/// The start's settle of what was on its way into a window, `settling`, run to its end in
+/// the daemon's `home`: what was kept of Devin's launches whose folders went (at this
+/// start's sweep, or a window's close before it) goes once it is settled. A settle that
+/// failed, or panicked, is written down and leaves it for the next start's
+/// (`cf_harness::forget_kept`; Sol's P1 on B5's round 12, Calliope's P3 on T-697).
+async fn settle(
+    settling: impl Future<Output = Result<(), EngineError>>,
+    home: &str,
+    errors: &Errors,
+) {
+    match contain(settling).await {
+        Ok(Ok(())) => {
+            for stayed in cf_harness::forget_kept(home) {
+                errors.log().error(
+                    "what a start kept of a launch could not be removed",
+                    Some(&stayed),
+                );
+            }
+        }
+        Ok(Err(failed)) => {
+            errors.log().error(
+                "settling what was on its way failed",
+                Some(&failed.to_string()),
+            );
+        }
+        Err(panicked) => errors.caught("settling what was on its way failed", &panicked),
+    }
 }
 
 mod finishing;

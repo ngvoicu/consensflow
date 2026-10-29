@@ -25,6 +25,8 @@ failure-reason-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib"
 engine-future-sizes = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "dispatcher::tests::an_operations_work_is_small"]
 failure-reason-ask = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "testing::ask"]
 failure-reason-live-suite = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
+# The kit's homes (`live/isolation.rs`), where the copy of a harness's login a live suite runs on is made.
+failure-reason-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation"]
 failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 failure-reason-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 failure-reason-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
@@ -912,17 +914,17 @@ replace = '''
 '''
 
 [[plant]]
-name = "failure reason: the live suite's copy of Codex's login is readable by others"
-meant = "a_copy_of_a_login_is_readable_by_its_owner_alone"
-runs = ["failure-reason-live-suite"]
+name = "failure reason: the live suite's copy of a harness's login is readable by others"
+meant = "a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothing_else_of_the_owners"
+runs = ["failure-reason-live-homes"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/tests/live_paste_screen.rs"
+file = "crates/cf-e2e/src/live/login.rs"
 find = '''
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        .mode(0o600)
 '''
 replace = '''
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o644);
+        .mode(0o644)
 '''
 
 [[plant]]
