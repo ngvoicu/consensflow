@@ -1,0 +1,22 @@
+# What the Tauri 2.12 upgrade keeps of the updater smoke's builds (T-930). The smoke builds the
+# installed releases from their tags with this repository's npm packages, the Tauri CLI among them,
+# and each tag's own lock of the Tauri crates. The CLI refuses a build whose `tauri-plugin-*`
+# crates and `@tauri-apps/plugin-*` packages differ in their minor version, which they do once
+# Tauri moves on (the releases before 3.0.7 lock tauri-plugin-dialog 2.7; 3.0.7's package is 2.8):
+# an exported release is built with `--ignore-version-mismatches` (updater_smoke/build.rs). One
+# plant takes it out; a test fails.
+#
+# Every name holds `tauri-2-12`, so `cargo xtask plants release "tauri-2-12:"` runs them all.
+
+[run]
+smoke-build = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::build::"]
+
+[[plant]]
+name = "tauri-2-12: an exported release is built held to the CLI's version check"
+meant = "a_release_exported_from_its_tag_is_built_past_the_clis_version_check"
+runs = ["smoke-build"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = '        tauri = tauri.arg("--ignore-version-mismatches");'
+replace = "        let _ = &mut tauri;"

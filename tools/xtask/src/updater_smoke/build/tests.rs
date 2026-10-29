@@ -377,6 +377,40 @@ mod with_programs {
         );
     }
 
+    /// A release exported from its tag holds its own lock's Tauri crates, and is built by this
+    /// repository's CLI beside this repository's npm packages: the CLI is told the mismatch is
+    /// meant, or it refuses the build (T-930). A build of this checkout is not told: the test
+    /// above holds its call to the override alone.
+    #[test]
+    fn a_release_exported_from_its_tag_is_built_past_the_clis_version_check() {
+        let folder = tempfile::tempdir().unwrap();
+        let (tree, calls, env) = checkout_with_programs(folder.path(), 0);
+        fs::write(tree.join(MARK), "v3.0.6-alpha.3\n").unwrap();
+        let work = folder.path().join("work");
+        build_app(
+            &Build {
+                checkout: &tree,
+                work: &work,
+                public_key: "RUNKEY",
+                version: None,
+            },
+            &env,
+        )
+        .unwrap();
+        let calls = fs::read_to_string(&calls).unwrap();
+        let tauri = calls
+            .lines()
+            .find(|line| line.starts_with("tauri "))
+            .unwrap();
+        assert!(
+            tauri.contains(&format!(
+                "build --bundles app --config {} --ignore-version-mismatches in ",
+                work.join("tauri-as-is.json").display()
+            )),
+            "{tauri}"
+        );
+    }
+
     #[test]
     fn an_app_that_is_not_the_update_is_built_with_no_version_of_its_own_to_give() {
         let folder = tempfile::tempdir().unwrap();

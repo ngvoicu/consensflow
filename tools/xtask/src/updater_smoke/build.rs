@@ -7,7 +7,8 @@
 //! override is the product's own.
 //!
 //! An old tag's tree is built the way that tag builds: with its own `npm run`
-//! scripts and the Tauri CLI it has, which are not this tree's.
+//! scripts, and the npm packages of this repository (the Tauri CLI among them),
+//! which may be newer than the Tauri crates its own lock holds.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -211,9 +212,16 @@ pub fn build_app(build: &Build, env: &Env) -> Result<PathBuf> {
     let text = serde_json::to_string_pretty(&config)
         .map_err(|cause| Error::new(format!("could not write the override: {cause}")))?;
     fs::write(&override_file, format!("{text}\n")).map_err(files("write", &override_file))?;
-    let tauri = Invocation::new(tauri_bin(build.checkout), &app)
+    let mut tauri = Invocation::new(tauri_bin(build.checkout), &app)
         .args(["build", "--bundles", "app", "--config"])
         .arg(&override_file);
+    // A release exported from its tag builds with the npm packages of the repo it was exported
+    // from (`export_release`), the Tauri CLI among them, and its own lock's Tauri crates. Once
+    // Tauri moves on (T-930: the plugin-dialog crate 2.7 the releases before 3.0.7 lock, and the
+    // package 2.8 beside the CLI 2.12), the CLI refuses that mismatch unless told it is meant.
+    if build.checkout.join(MARK).exists() {
+        tauri = tauri.arg("--ignore-version-mismatches");
+    }
     ran(&tauri, &env)?;
     let built = built_app(build.checkout);
     assert_built_with(
