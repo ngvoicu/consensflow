@@ -84,8 +84,9 @@ file = "crates/cf-ledger/src/projects.rs"
 find = '''
             if state == "open" {
                 resume_with_project(store, id)?;
-            }'''
-replace = ""
+            } else {'''
+replace = '''
+            if state != "open" {'''
 
 [[plant]]
 name = "resume tasks: the human's Resume leaves the work the Close paused paused, as 3.0.4 did"
@@ -97,8 +98,9 @@ file = "crates/cf-ledger/src/projects.rs"
 find = '''
             if state == "open" {
                 resume_with_project(store, id)?;
-            }'''
-replace = ""
+            } else {'''
+replace = '''
+            if state != "open" {'''
 
 # --- the mark ---
 
