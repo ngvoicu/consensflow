@@ -30,7 +30,7 @@ use serde_json::Value;
 
 /// The stand-in agent, built (it is built for the tests of `crates/cf-e2e` too).
 fn stand_in() -> PathBuf {
-    let ran = Run::new(env!("CARGO"))
+    let ran = Run::cargo()
         .args([
             "build",
             "--locked",
@@ -42,7 +42,6 @@ fn stand_in() -> PathBuf {
             "fake-agent",
         ])
         .cwd(checkout::root())
-        .inheriting_env()
         .unlimited()
         .run()
         .unwrap();

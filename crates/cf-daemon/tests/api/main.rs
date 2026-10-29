@@ -32,6 +32,8 @@
 mod checks;
 mod frames;
 mod names;
+// The cargo a test starts: one file for every crate that starts one.
+#[path = "../../../cf-process/src/nested_cargo.rs"]
 mod nested_cargo;
 mod player;
 mod relay;

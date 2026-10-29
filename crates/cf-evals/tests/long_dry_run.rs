@@ -54,7 +54,7 @@ use serde_json::Value;
 
 /// The stand-in `name` of `crates/cf-e2e`, built.
 fn stand_in(name: &str) -> PathBuf {
-    let ran = Run::new(env!("CARGO"))
+    let ran = Run::cargo()
         .args([
             "build",
             "--locked",
@@ -66,7 +66,6 @@ fn stand_in(name: &str) -> PathBuf {
             name,
         ])
         .cwd(checkout::root())
-        .inheriting_env()
         .unlimited()
         .run()
         .unwrap();

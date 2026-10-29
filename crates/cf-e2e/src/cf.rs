@@ -117,7 +117,7 @@ fn built(
 ) -> Result<&'static Path> {
     built_by(
         cell,
-        Run::new(env!("CARGO")),
+        Run::cargo(),
         &checkout::root(),
         (package, bin, more),
         before,

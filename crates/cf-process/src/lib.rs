@@ -20,6 +20,12 @@ mod hand_over;
 mod job;
 mod live;
 mod memory;
+// The cargo a test starts. Every crate that starts one includes this file by its path (a crate of
+// ours may take no dependency for it); here it is held to its cases.
+#[cfg(test)]
+mod nested_cargo;
+#[cfg(test)]
+mod nested_cargo_tests;
 mod owned;
 mod runnable;
 mod search;
