@@ -102,8 +102,8 @@ mod devin_bypass_first;
 mod devin_compaction;
 #[path = "rig/devin_stamped.rs"]
 mod devin_stamped;
-#[cfg(unix)]
 #[path = "rig/harness_homes.rs"]
+#[cfg(unix)]
 mod harness_homes;
 #[path = "rig/help.rs"]
 mod help;
