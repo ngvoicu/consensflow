@@ -25,8 +25,8 @@
 //! - the mutation tests: `plants`, with their data in `tests/plants`;
 //! - how long CI takes: `ci_times` (`ci-times`), which reads the jobs' and steps'
 //!   times of CI's runs against the limits `ci.yml` gives them;
-//! - the releases: `release` (`release alpha`, and `release promote` of a tested
-//!   alpha to its plain version);
+//! - the releases: `release` (`release alpha`, `release promote` of a tested
+//!   alpha to its plain version, and `release verify` of a published one);
 //! - what spends real quota and is no part of the gate: `live` (one command for
 //!   every live test of `crates/cf-e2e`, whatever its name) and `evals` (`eval`,
 //!   `eval summary`, `eval long` and `watch`, which hand their words to

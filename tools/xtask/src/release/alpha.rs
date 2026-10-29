@@ -83,6 +83,9 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
              an alpha never moves it; read the publish job of run {run}"
         )));
     }
+    // Published and served: the release's files, its signature and the feed held to
+    // what T-862 checked by hand.
+    release.verify_published(&version, run)?;
     Ok(format!(
         "released {version} on {}: {ALPHA_FEED} serves it, {STABLE_FEED} is as it was\n",
         short(&commit)

@@ -37,6 +37,7 @@
 //!    and upstream; its Release run checks CI's green gate of that commit (its
 //!    `gate` job), and is watched to its end; both feeds read until they serve
 //!    `X.Y.Z`. A Release run that fails on a flake is finished with `gh run rerun`.
+//! 7. The published release verified, as `release alpha` ends with (`release verify`).
 //!
 //! Nothing goes back to `main`: the branch's one commit is the version, and
 //! `main`'s next alpha needs a version after `X.Y.Z` (`X.Y.(Z+1)-alpha.1` or
@@ -162,6 +163,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
     })?;
     release.wait_for_feed(ALPHA_FEED, &plain, run)?;
     release.wait_for_feed(STABLE_FEED, &plain, run)?;
+    release.verify_published(&plain, run)?;
     Ok(format!(
         "released {plain} from {alpha}'s commit {} as {} on {branch}: {ALPHA_FEED} and {STABLE_FEED} serve it\n\
          nothing goes back to main: its next alpha needs a version after {plain} ({}-alpha.1 or later)\n",

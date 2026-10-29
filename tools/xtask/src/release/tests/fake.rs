@@ -7,7 +7,9 @@
 //! and a run's jobs as the Actions API does; a push of `main` or of a `release/` branch to
 //! upstream starts CI, a push of a tag starts the Release run, which (when it
 //! ends green) puts the version
-//! on the feeds a release of its channel moves; `curl` reads those feeds; and
+//! on the feeds a release of its channel moves and hosts the release itself (the
+//! files `gh release download` and `curl -o` give, signed by a key the checkout
+//! pins); `curl` reads those feeds; and
 //! `cargo update` writes the lockfile's version as cargo does. Nothing here
 //! reaches GitHub or moves a feed.
 
@@ -19,9 +21,72 @@ use std::time::Duration;
 use cf_base::env::Env;
 use serde_json::json;
 
+use sha2::{Digest, Sha256};
+
 use crate::process::{self, Captured, Invocation};
 use crate::release::system::System;
-use crate::release::{Error, Pace, Release};
+use crate::release::{Error, Pace, Release, DOWNLOADS};
+
+/// The key the stand-in checkout pins in `tauri.conf.json`, as that file writes it
+/// (the base64 of the key's two lines); the archive below is signed with it, by
+/// Tauri's own signer. A second key, signing nothing, for a checkout that pins the
+/// wrong one. No secret key is kept.
+pub const SIGNING_KEY: &str = include_str!("fixtures/signing.pub");
+pub const OTHER_KEY: &str = include_str!("fixtures/other.pub");
+/// The update archive of every stand-in release, and its `.sig` as the signer wrote it.
+pub const ARCHIVE: &[u8] = include_bytes!("fixtures/archive.bin");
+pub const ARCHIVE_SIG: &str = include_str!("fixtures/archive.bin.sig");
+
+/// The files of a stand-in release by their names, as a published one holds them.
+pub type Files = BTreeMap<String, Vec<u8>>;
+
+/// The name of the update archive of `version`'s release.
+pub fn archive_name(version: &str) -> String {
+    format!("ConsensFlow_{version}_aarch64.app.tar.gz")
+}
+
+/// Where the feed of `version` says to fetch its archive.
+pub fn archive_url(version: &str) -> String {
+    format!("{DOWNLOADS}/v{version}/{}", archive_name(version))
+}
+
+/// SHA-256 of `bytes`, as `sha256sum` writes it.
+pub fn sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The files `version`'s release publishes when nothing is wrong with it: the
+/// update archive and its signature, the feed's entry, an installer or two, and
+/// a SHA256SUMS over every one but itself.
+pub fn good_release(version: &str) -> Files {
+    let mut files = Files::new();
+    let archive = archive_name(version);
+    files.insert(archive.clone(), ARCHIVE.to_vec());
+    files.insert(format!("{archive}.sig"), ARCHIVE_SIG.as_bytes().to_vec());
+    files.insert(
+        format!("ConsensFlow_{version}_aarch64.dmg"),
+        format!("the DMG of {version}\n").into_bytes(),
+    );
+    files.insert(
+        format!("ConsensFlow_{version}_x64-setup.exe"),
+        format!("the installer of {version}\n").into_bytes(),
+    );
+    files.insert("latest.json".to_owned(), latest(version).into_bytes());
+    files.insert("SHA256SUMS".to_owned(), sums_of(&files).into_bytes());
+    files
+}
+
+/// A SHA256SUMS over `files`, as `sha256sum` writes it.
+pub fn sums_of(files: &Files) -> String {
+    files
+        .iter()
+        .filter(|(name, _)| *name != "SHA256SUMS")
+        .map(|(name, bytes)| format!("{}  {name}\n", sha256(bytes)))
+        .collect()
+}
 
 /// Writes `text` to `path`, in folders made for it.
 pub fn write(path: &Path, text: &str) {
@@ -88,9 +153,17 @@ pub fn version_files(version: &str) -> Vec<(&'static str, String)> {
         ),
         (
             "app/src-tauri/tauri.conf.json",
-            format!("{{\n  \"productName\": \"ConsensFlow\",\n  \"version\": \"{version}\"\n}}\n"),
+            conf(version, SIGNING_KEY.trim()),
         ),
     ]
+}
+
+/// `tauri.conf.json` at `version`, pinning `key` for the updater.
+pub fn conf(version: &str, key: &str) -> String {
+    format!(
+        "{{\n  \"productName\": \"ConsensFlow\",\n  \"version\": \"{version}\",\n  \
+         \"plugins\": {{\n    \"updater\": {{\n      \"pubkey\": \"{key}\"\n    }}\n  }}\n}}\n"
+    )
 }
 
 /// A checkout and its two remotes, in a temporary tree, and the notes of a release.
@@ -168,6 +241,15 @@ impl World {
     pub fn commit(&self, message: &str) {
         git(&self.root, &["add", "-A"]);
         git(&self.root, &["commit", "-q", "-m", message]);
+    }
+
+    /// Makes the checkout pin `key` for the updater, and commits it.
+    pub fn pin(&self, version: &str, key: &str) {
+        write(
+            &self.root.join("app/src-tauri/tauri.conf.json"),
+            &conf(version, key),
+        );
+        self.commit("pin another key");
     }
 
     pub fn push_main(&self) {
@@ -257,6 +339,16 @@ pub struct Fake {
     pub runs: Vec<FakeRun>,
     /// What each feed serves, by its name.
     pub feeds: BTreeMap<String, String>,
+    /// The releases published, by tag: their files, as `gh release download` gives them.
+    pub releases: BTreeMap<String, Files>,
+    /// What a download from an address gives instead of the release's file there.
+    pub downloads: BTreeMap<String, Vec<u8>>,
+    /// What is done to the files a release run publishes, by its version, once they
+    /// are made: a byte changed after SHA256SUMS was written, say.
+    pub published_with: Option<fn(&str, &mut Files)>,
+    /// Whether a green Release run that publishes puts the release's files up, as it
+    /// does the feeds' entries; not, and `gh release download` finds none.
+    pub publishes_files: bool,
     /// What a finished Release run puts on a feed, and the reads of it before it shows.
     waiting: Vec<(String, String, u32)>,
     /// The reads of a feed before a publish shows on it.
@@ -331,6 +423,10 @@ impl Fake {
             upstream: world.upstream.clone(),
             runs: Vec::new(),
             feeds,
+            releases: BTreeMap::new(),
+            downloads: BTreeMap::new(),
+            published_with: None,
+            publishes_files: true,
             waiting: Vec::new(),
             feed_lag: 0,
             conclusions: BTreeMap::new(),
@@ -480,6 +576,13 @@ impl Fake {
                 .iter()
                 .any(|run| run.id == id && run.conclusion == "success");
             if green && self.publishes {
+                let mut files = good_release(version);
+                if let Some(then) = self.published_with {
+                    then(version, &mut files);
+                }
+                if self.publishes_files {
+                    self.releases.insert(target.to_owned(), files);
+                }
                 let mut feeds = vec!["feed-alpha"];
                 if !version.contains('-') || self.alpha_moves_stable {
                     feeds.push("feed-stable");
@@ -524,6 +627,21 @@ impl Fake {
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
         match words.as_slice() {
             ["api", path] => said(&self.api(path)),
+            ["release", "download", tag, ..] => {
+                let Some(files) = self.releases.get(*tag) else {
+                    return Captured {
+                        code: 1,
+                        stdout: String::new(),
+                        stderr: "release not found".to_owned(),
+                    };
+                };
+                let dir =
+                    PathBuf::from(flag("--dir").expect("a release is downloaded into a folder"));
+                for (name, bytes) in files {
+                    fs::write(dir.join(name), bytes).unwrap();
+                }
+                said("")
+            }
             ["workflow", "run", workflow, ..] => {
                 assert_eq!(
                     *workflow, "release.yml",
@@ -684,6 +802,27 @@ impl Fake {
         answer
     }
 
+    /// `curl -o path address`: the file a release holds at `address`, or what
+    /// `downloads` says is there, written to `path`; 404 where there is none.
+    fn download(&self, path: &str, address: &str) -> Captured {
+        let held = address
+            .strip_prefix(DOWNLOADS)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .and_then(|rest| rest.split_once('/'))
+            .and_then(|(tag, name)| self.releases.get(tag)?.get(name));
+        match self.downloads.get(address).or(held) {
+            Some(bytes) => {
+                fs::write(path, bytes).unwrap();
+                said("")
+            }
+            None => Captured {
+                code: 22,
+                stdout: String::new(),
+                stderr: "curl: (22) The requested URL returned error: 404".to_owned(),
+            },
+        }
+    }
+
     fn curl(&mut self, address: &str) -> Captured {
         let feed = address
             .strip_suffix("/latest.json")
@@ -767,7 +906,17 @@ fn said(stdout: &str) -> Captured {
 
 /// A feed's latest.json, naming `version`.
 pub fn latest(version: &str) -> String {
-    json!({ "version": version, "notes": "notes", "platforms": {} }).to_string()
+    json!({
+        "version": version,
+        "notes": "notes",
+        "platforms": {
+            "darwin-aarch64": {
+                "signature": ARCHIVE_SIG.trim(),
+                "url": archive_url(version),
+            }
+        },
+    })
+    .to_string()
 }
 
 impl System for Fake {
@@ -811,7 +960,10 @@ impl System for Fake {
                 Ok(ran)
             }
             "gh" => Ok(self.gh(&args)),
-            "curl" => Ok(self.curl(args.last().unwrap())),
+            "curl" => Ok(match args.iter().position(|arg| arg == "-o") {
+                Some(at) => self.download(&args[at + 1], args.last().unwrap()),
+                None => self.curl(args.last().unwrap()),
+            }),
             "cargo" => {
                 assert_eq!(args, ["update", "--workspace", "--offline"]);
                 Ok(self.cargo(&invocation.cwd))

@@ -119,6 +119,85 @@ fn an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by
 }
 
 #[test]
+fn a_published_release_is_checked_once_the_feeds_serve_it_and_what_held_is_said() {
+    let (world, mut fake) = ready();
+    let (outcome, said) = released(&world, &mut fake, false);
+    outcome.unwrap();
+    // After the tag's run, and after the feeds were read: the release's files, then the feed.
+    let lines = fake.lines();
+    let tagged = lines
+        .iter()
+        .position(|line| line.starts_with(&format!("git push -q upstream v{ALPHA}")))
+        .unwrap();
+    let downloaded = lines
+        .iter()
+        .position(|line| line.starts_with(&format!("gh release download v{ALPHA} ")))
+        .unwrap();
+    let last_feed_read = lines
+        .iter()
+        .rposition(|line| line.starts_with("curl") && line.ends_with("feed-stable/latest.json"))
+        .unwrap();
+    assert!(tagged < downloaded, "{lines:#?}");
+    assert!(last_feed_read < downloaded, "{lines:#?}");
+    for line in [
+        "verify: SHA256SUMS lists 5 files, each in the release and hashing as listed".to_owned(),
+        format!("verify: ConsensFlow_{ALPHA}_aarch64.app.tar.gz is signed by the key v{ALPHA}'s tauri.conf.json pins"),
+        format!("verify: a copy of ConsensFlow_{ALPHA}_aarch64.app.tar.gz with one byte changed is refused"),
+        format!("verify: feed-alpha serves {ALPHA}: its latest.json is the release's"),
+    ] {
+        assert!(said.contains(&line), "{line}: {said}");
+    }
+}
+
+#[test]
+fn a_release_that_does_not_verify_once_published_says_it_is_published_and_never_to_run_again() {
+    let (world, mut fake) = ready();
+    // The installer is changed after SHA256SUMS was written.
+    fake.published_with = Some(|version, files| {
+        files
+            .get_mut(&format!("ConsensFlow_{version}_aarch64.dmg"))
+            .unwrap()[0] ^= 1;
+    });
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert!(
+        said.starts_with(&format!(
+            "release run 1002 ended green and the feeds serve {ALPHA}, so the release is published, \
+             yet checking it found v{ALPHA} does not verify, 1 problem:\n- ConsensFlow_{ALPHA}_aarch64.dmg hashes to "
+        )),
+        "{said}"
+    );
+    assert!(
+        said.ends_with(&format!(
+            "; run nothing again: `cargo xtask release verify {ALPHA}` checks it again"
+        )),
+        "{said}"
+    );
+    // The tag stays, and so does the release: nothing was undone.
+    assert!(World::tagged(&world.upstream, &format!("v{ALPHA}")).is_some());
+    assert_eq!(fake.serves("feed-alpha").as_deref(), Some(ALPHA));
+}
+
+#[test]
+fn a_release_that_cannot_be_read_once_published_is_told_as_published_too() {
+    let (world, mut fake) = ready();
+    fake.publishes_files = false;
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert!(
+        said.starts_with(&format!(
+            "release run 1002 ended green and the feeds serve {ALPHA}, so the release is published, \
+             yet it could not be checked (v{ALPHA} has no release to download: "
+        )),
+        "{said}"
+    );
+    assert!(
+        said.ends_with(&format!(
+            "; run nothing again: `cargo xtask release verify {ALPHA}` checks it again"
+        )),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_dry_run_watches_ci_says_it_would_trial_and_tag_and_starts_and_tags_nothing() {
     let (world, mut fake) = ready();
     let head = world.head();

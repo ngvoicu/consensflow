@@ -52,7 +52,12 @@
 //!    smoke-test the packages before `publish`;
 //! 9. `feed-alpha` read until it serves the version, and `feed-stable` checked
 //!    to serve the release it served before. A feed is read again on a 404 or
-//!    a network error, within its reads.
+//!    a network error, within its reads;
+//! 10. the published release verified (`release verify X.Y.Z` is the same check on
+//!     any published version): every file against `SHA256SUMS`, the update
+//!     archive's `.sig` against the key pinned at the tag, and the feed's entry
+//!     against the release's. What it finds is said as a release that is published
+//!     (never as a reason to run again).
 //!
 //! `--dry-run` does 1 to 5 and says what it would start and tag.
 //!
@@ -92,6 +97,7 @@ mod promote;
 pub(crate) mod system;
 #[cfg(test)]
 mod tests;
+mod verify;
 
 use std::ffi::OsString;
 use std::fs;
@@ -116,6 +122,12 @@ pub const COMMANDS: &[Command] = &[
         about: "Release the plain X.Y.Z of a tested alpha from the alpha's commit, the version alone changed, to both feeds",
         usage: "X.Y.Z-alpha.N --notes FILE [--dry-run]",
         run: Run::Native(promote),
+    },
+    Command {
+        words: &["release", "verify"],
+        about: "Check a published release: its files against SHA256SUMS, its update archive's signature against the key pinned at its tag, and the feeds that serve it",
+        usage: "X.Y.Z[-alpha.N]",
+        run: Run::Native(verify),
     },
 ];
 
@@ -459,6 +471,19 @@ fn promote(context: &Context, args: &[OsString], console: &mut Console) -> Resul
         pace: Pace::REAL,
     };
     let outcome = promote::release(&mut release, &options);
+    finish(outcome, console.out, release.said)
+}
+
+fn verify(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+    let version = verify::version_of(args)?;
+    let mut system = Real::new(&context.env);
+    let mut release = Release {
+        root: context.root.clone(),
+        system: &mut system,
+        said: console.err,
+        pace: Pace::REAL,
+    };
+    let outcome = verify::release(&mut release, &version);
     finish(outcome, console.out, release.said)
 }
 

@@ -195,6 +195,39 @@ fn a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_writ
 }
 
 #[test]
+fn a_promoted_release_is_checked_once_both_feeds_serve_it_and_a_bad_one_is_told_as_published() {
+    let (world, mut fake) = released();
+    let (outcome, said) = promoted(&world, &mut fake, ALPHA, false);
+    outcome.unwrap();
+    // A plain version is served by both feeds, and both are held to the release.
+    for feed in ["feed-alpha", "feed-stable"] {
+        let line = format!("verify: {feed} serves {PLAIN}: its latest.json is the release's");
+        assert!(said.contains(&line), "{line}: {said}");
+    }
+    let (world, mut fake) = released();
+    fake.published_with = Some(|version, files| {
+        files
+            .get_mut(&format!("ConsensFlow_{version}_aarch64.dmg"))
+            .unwrap()[0] ^= 1;
+    });
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    let run = fake.runs_of("release.yml", "push")[0].id;
+    assert!(
+        said.starts_with(&format!(
+            "release run {run} ended green and the feeds serve {PLAIN}, so the release is published, \
+             yet checking it found v{PLAIN} does not verify, 1 problem:"
+        )),
+        "{said}"
+    );
+    assert!(
+        said.ends_with(&format!(
+            "; run nothing again: `cargo xtask release verify {PLAIN}` checks it again"
+        )),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_promotion_dry_run_makes_the_commit_and_pushes_and_tags_nothing() {
     for moved in [false, true] {
         let (world, mut fake) = if moved { moved_on() } else { released() };

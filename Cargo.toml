@@ -66,6 +66,9 @@ libc = "0.2"
 # transcript are searched for their ends, and a line for its escapes. Already
 # in the build, through serde_json and regex.
 memchr = "2"
+# The check of an update's signature as an installed app makes it (Tauri's updater
+# verifies with it): `cargo xtask release verify`. Already in the build, through Tauri.
+minisign-verify = "0.2"
 # A checked close, which std does not give (cf-base forbids unsafe code).
 nix = { version = "0.28", default-features = false }
 # Info.plist, read by the release tool that checks an update's bundle. Already

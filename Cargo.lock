@@ -5765,6 +5765,7 @@ dependencies = [
  "cf-release",
  "flate2",
  "memchr",
+ "minisign-verify",
  "nix",
  "plist",
  "quick-xml",

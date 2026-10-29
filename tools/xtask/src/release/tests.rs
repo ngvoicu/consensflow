@@ -7,6 +7,7 @@
 mod alpha;
 mod fake;
 mod promote;
+mod verify;
 
 use std::ffi::OsString;
 use std::path::Path;

@@ -4,6 +4,7 @@
 
 [run]
 release-commands = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "release::"]
+dispatch-plan = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "dispatch::tests::every_command_of_the_plan_is_there_once"]
 
 [[plant]]
 name = "release: a pre-release that is not alpha.N is taken for an alpha"
@@ -1082,3 +1083,322 @@ find = '''
                     .to_owned(),'''
 replace = '''
                 Some(_) => "nothing was tagged".to_owned(),'''
+
+# `release verify`, and the step the releases end with (T-869): the files against SHA256SUMS,
+# the update archive's signature against the key the tag pins, the control, the feeds.
+
+[[plant]]
+name = "release: a file that hashes otherwise than SHA256SUMS lists is taken"
+meant = "a_file_with_a_byte_changed_since_sha256sums_was_written_fails_naming_both_hashes"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            if got != *hash {"
+replace = "            if got.is_empty() {"
+
+[[plant]]
+name = "release: a file SHA256SUMS lists that the release lacks is hashed anyway"
+meant = "a_file_sha256sums_lists_that_the_release_lacks_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            if !names.contains(name) {"
+replace = "            if names.is_empty() {"
+
+[[plant]]
+name = "release: a file the release holds that SHA256SUMS does not list is taken"
+meant = "a_file_the_release_holds_that_sha256sums_does_not_list_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''name != "SHA256SUMS" && !listed.contains_key(name)'''
+replace = "false"
+
+[[plant]]
+name = "release: a line of SHA256SUMS that is no hash and name is let by"
+meant = "the_lines_of_sha256sums_are_read_as_sha256sum_writes_them_and_any_other_is_told"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            None => odd.push(line.to_owned()),"
+replace = "            None => {}"
+
+[[plant]]
+name = "release: a name written in binary mode keeps its star"
+meant = "the_lines_of_sha256sums_are_read_as_sha256sum_writes_them_and_any_other_is_told"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "rest.strip_prefix([' ', '*'])"
+replace = "rest.strip_prefix(' ')"
+
+[[plant]]
+name = "release: the archive's signature is not checked"
+meant = "an_archive_with_a_byte_changed_fails_its_hash_and_its_signature"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if let Err(cause) = key.verify(&bytes, &parsed, false) {"
+replace = "        if let Err(cause) = Result::<(), minisign_verify::Error>::Ok(()) {"
+
+[[plant]]
+name = "release: the key is the checkout's, not the tag's"
+meant = "the_key_is_the_one_the_tag_pins_not_the_one_the_checkout_pins_now"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''let spec = format!("{tag}:{CONF}");'''
+replace = '''let spec = format!("HEAD:{CONF}");'''
+
+[[plant]]
+name = "release: the key is read from another file than the one that pins it"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''const CONF: &str = "app/src-tauri/tauri.conf.json";'''
+replace = '''const CONF: &str = "app/src-tauri/tauri.conf.json5";'''
+
+[[plant]]
+name = "release: a tag the checkout lacks is not fetched"
+meant = "a_tag_the_checkout_lacks_is_fetched_by_name_from_upstream"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''self.git(&["fetch", "-q", "--no-tags", "upstream", &fetch])'''
+replace = '''self.git(&["fetch", "-q", "--no-tags", "upstream", "HEAD"])'''
+
+[[plant]]
+name = "release: the control changes no byte"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            Some(first) => *first ^= 1,"
+replace = "            Some(first) => *first ^= 0,"
+
+[[plant]]
+name = "release: the control is taken as passed when the check refuses nothing"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if key.verify(&bytes, &parsed, false).is_ok() {"
+replace = "        if key.verify(&bytes, &parsed, false).is_err() {"
+
+[[plant]]
+name = "release: a feed that serves a later release is held to this one"
+meant = "a_feed_that_serves_a_later_release_is_told_and_not_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if served > ours {"
+replace = "        if served.as_str().is_empty() {"
+
+[[plant]]
+name = "release: a feed that serves an earlier release is held to this one"
+meant = "a_feed_that_serves_an_earlier_release_or_none_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if served < ours {"
+replace = "        if served.as_str().is_empty() {"
+
+[[plant]]
+name = "release: a feed's latest.json is not held to the release's"
+meant = "a_feed_whose_latest_json_is_not_the_releases_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''        if body != read("latest.json")? {'''
+replace = "        if body.is_empty() {"
+
+[[plant]]
+name = "release: a feed's signature is not held to the .sig"
+meant = "a_feed_whose_signature_is_not_the_sig_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if signed.trim() != read(signature)?.trim() {"
+replace = "        if signed.is_empty() {"
+
+[[plant]]
+name = "release: a feed's archive is not held to the release's"
+meant = "a_feed_whose_address_gives_another_archive_than_the_releases_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        } else if sha256_of(&fetched)? != sha256_of(&folder.join(archive))? {"
+replace = "        } else if false {"
+
+[[plant]]
+name = "release: a feed's archive that cannot be read is let by"
+meant = "a_feed_whose_address_gives_nothing_fails_with_what_curl_said"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''
+        if answered.code != 0 {
+            report.problems.push(format!(
+                "{feed}'s archive could not be read'''
+replace = '''
+        if false {
+            report.problems.push(format!(
+                "{feed}'s archive could not be read'''
+
+[[plant]]
+name = "release: an alpha's feed-stable is held to it too"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "    if version.contains('-') {"
+replace = "    if false {"
+
+[[plant]]
+name = "release: a plain version's feed-stable is not checked"
+meant = "a_plain_version_is_served_by_both_feeds_and_both_are_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        vec![ALPHA_FEED, STABLE_FEED]"
+replace = "        vec![ALPHA_FEED]"
+
+[[plant]]
+name = "release: an update archive or signature the release lacks is let by"
+meant = "an_update_archive_or_signature_the_release_lacks_fails_for_the_update_needs_both"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        if lacking {"
+replace = "        if false {"
+
+[[plant]]
+name = "release: the folder the files were downloaded into is left"
+meant = "it_only_reads_whatever_the_checkout_holds_and_leaves_nothing_behind"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        let removed = fs::remove_dir_all(&folder);"
+replace = "        let removed: io::Result<()> = Ok(());"
+
+[[plant]]
+name = "release: the folder that held the download folder is left"
+meant = "it_only_reads_whatever_the_checkout_holds_and_leaves_nothing_behind"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "        let _ = fs::remove_dir(&parent);"
+replace = "        let _ = &parent;"
+
+[[plant]]
+name = "release: a flag is taken for the version to verify"
+meant = "the_command_takes_the_version_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            Some(text) if version.is_none() && !text.starts_with('-') => {"
+replace = "            Some(text) if version.is_none() => {"
+
+[[plant]]
+name = "release: a second version is taken for the first"
+meant = "the_command_takes_the_version_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = "            Some(text) if version.is_none() && !text.starts_with('-') => {"
+replace = "            Some(text) if !text.starts_with('-') => {"
+
+[[plant]]
+name = "release: a release that does not verify is passed by the command"
+meant = "a_file_with_a_byte_changed_since_sha256sums_was_written_fails_naming_both_hashes"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''
+    if !report.problems.is_empty() {
+        return Err(refused(does_not_verify(version, &report.problems)));'''
+replace = '''
+    if report.held.is_empty() {
+        return Err(refused(does_not_verify(version, &report.problems)));'''
+
+[[plant]]
+name = "release: the release run's end is not followed by the check of the release"
+meant = "a_published_release_is_checked_once_the_feeds_serve_it_and_what_held_is_said"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    release.verify_published(&version, run)?;"
+replace = ""
+
+[[plant]]
+name = "release: a promotion is not followed by the check of its release"
+meant = "a_promoted_release_is_checked_once_both_feeds_serve_it_and_a_bad_one_is_told_as_published"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "    release.verify_published(&plain, run)?;"
+replace = ""
+
+[[plant]]
+name = "release: a published release that does not verify is let by"
+meant = "a_release_that_does_not_verify_once_published_says_it_is_published_and_never_to_run_again"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''
+        if !report.problems.is_empty() {
+            return Err(refused(format!(
+                "{published}, yet checking it found'''
+replace = '''
+        if false {
+            return Err(refused(format!(
+                "{published}, yet checking it found'''
+
+[[plant]]
+name = "release: why a published release could not be checked is not said"
+meant = "a_release_that_cannot_be_read_once_published_is_told_as_published_too"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '"{published}, yet it could not be checked ({cause}); {read_by_hand}"'
+replace = '"{published}, yet it could not be checked; {read_by_hand}"'
+
+[[plant]]
+name = "release: release verify is not a command"
+meant = "every_command_of_the_plan_is_there_once"
+runs = ["dispatch-plan"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''        words: &["release", "verify"],'''
+replace = '''        words: &["release", "verifx"],'''
