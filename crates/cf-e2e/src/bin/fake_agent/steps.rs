@@ -36,6 +36,13 @@
 //!   notification of its task `completed`, wakes the turn that answers the report. The
 //!   monitor ends once the case lets it ([`MONITOR_MAY_END`]), so the case sees what the turn
 //!   the job's end woke led to before the monitor's end wakes another.
+//! - A line `CLAUDE-MONITOR-ENDS <seconds> <words>` is T-906 (2026-10-29): a turn
+//!   that arms a Monitor on a command (its call names it, so the monitor is a command's), the
+//!   command a shell runs, answers the words at once, and ends. `seconds` later the monitor
+//!   expires as Claude Code 2.1.312 ends one on Windows: the shell alone, by its number (its
+//!   tree kill falls back to that there), which leaves what the shell ran running with no
+//!   parent, and then Claude Code's own notice of the expiry, which has no status and wakes
+//!   a turn that answers `Saw <the notice>`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -63,6 +70,8 @@ pub struct Step {
     pub said: String,
     pub job: Option<String>,
     pub monitor: Option<(String, u64)>,
+    /// The command the monitor's call names, where it names one.
+    pub watches: Option<String>,
 }
 
 impl Step {
@@ -72,6 +81,7 @@ impl Step {
             said: format!("Step {number} of {of}"),
             job: None,
             monitor: None,
+            watches: None,
         }
     }
 
@@ -81,6 +91,7 @@ impl Step {
             said: "Running it in the background".to_owned(),
             job: Some(id.to_owned()),
             monitor: None,
+            watches: None,
         }
     }
 
@@ -90,6 +101,15 @@ impl Step {
             said: "Watching it with Monitor".to_owned(),
             job: None,
             monitor: Some((id.to_owned(), timeout_ms)),
+            watches: None,
+        }
+    }
+
+    /// [`Step::arming`] of a monitor whose call names the command it watches.
+    pub fn arming_on(id: &str, timeout_ms: u64, command: &str) -> Self {
+        Self {
+            watches: Some(command.to_owned()),
+            ..Self::arming(id, timeout_ms)
         }
     }
 }
@@ -164,6 +184,16 @@ pub fn monitor_event(id: &str, event: &str) -> String {
 pub fn monitor_ended(id: &str, report: &str) -> String {
     format!(
         "{NOTIFICATION}\n<task-id>{id}</task-id>\n<tool-use-id>toolu-{id}</tool-use-id>\n<status>completed</status>\n<summary>Monitor \"ticks\" stream ended</summary>\n<result>{report}</result>\n</task-notification>"
+    )
+}
+
+/// What Claude Code queues as it ends the monitor `id` whose time ran out (2.1.312's
+/// words of one that saw no event): a notification with no status, its notice the
+/// `<event>`, which a line of the command's could say too, and nothing after its close.
+/// The turn it wakes answers `Saw <notice>`, as any event's does.
+pub fn expired(id: &str, seconds: u64) -> String {
+    format!(
+        "{NOTIFICATION}\n<task-id>{id}</task-id>\n<summary>Monitor event: \"watched\"</summary>\n<event>[Monitor expired after {seconds}s with no events delivered. Re-arm it if you still need the watch \u{2014} and widen the filter if silence was unexpected.]</event>\n</task-notification>"
     )
 }
 
@@ -244,6 +274,7 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
     static STEPS: OnceLock<Regex> = OnceLock::new();
     static JOB: OnceLock<Regex> = OnceLock::new();
     static MONITOR: OnceLock<Regex> = OnceLock::new();
+    static ENDS: OnceLock<Regex> = OnceLock::new();
     if let Some(report) = report_of(text) {
         return Some(Ok((Vec::new(), Reply::Text(report))));
     }
@@ -279,6 +310,19 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
                 )
             }),
         );
+    }
+    if let Some(ends) = pattern::once(&ENDS, r"(?m)^CLAUDE-MONITOR-ENDS (\d+) (.+)$").captures(text)
+    {
+        let Ok(seconds) = ends[1].parse::<u64>() else {
+            return Some(Err(format!("CLAUDE-MONITOR-ENDS {}", &ends[1])));
+        };
+        let words = ends[2].to_owned();
+        return Some(watch_a_command(window, seconds).map(|watching| {
+            (
+                vec![Step::arming_on(&watching, seconds * 1_000, WATCHED)],
+                Reply::Text(words),
+            )
+        }));
     }
     let job = pattern::once(
         &JOB,
@@ -398,6 +442,34 @@ fn watch_a_job(
     Ok((job, watching))
 }
 
+/// The command a `CLAUDE-MONITOR-ENDS`'s monitor watches, as its call names it.
+const WATCHED: &str = "exec sleep 611";
+
+/// How long the command a `CLAUDE-MONITOR-ENDS`'s monitor watches runs: past any case, so
+/// that what its shell ran is still there when the case looks.
+const WATCHED_SECONDS: u64 = 300;
+
+/// Arms the monitor of a `CLAUDE-MONITOR-ENDS` on a command a shell runs, and the id Claude
+/// Code gives it: `seconds` later its shell alone is ended, by its number, and Claude Code's
+/// notice of its expiry wakes the window.
+fn watch_a_command(window: &Window, seconds: u64) -> Result<String, String> {
+    thread::sleep(THINKING);
+    let watching = window.tasks.begin();
+    let (file, shell) = window
+        .jobs
+        .start_ended_by_its_shell("watched", WATCHED_SECONDS)?;
+    until_up(&file)?;
+    let (tasks, wake) = (window.tasks.clone(), window.wake.clone());
+    let notice = expired(&watching, seconds);
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(seconds));
+        shell.end();
+        tasks.ended();
+        let _ = wake.send(notice);
+    });
+    Ok(watching)
+}
+
 /// Waits for the case to let the monitor that watches the job `file` end, or for
 /// [`MONITOR_HELD`].
 fn until_let_end(file: &Path) {
@@ -425,6 +497,9 @@ pub fn write(records: &mut Records, pid: u32, session: &str, steps: &[Step]) -> 
             pid,
             json!({
                 "type": "assistant",
+                // As Claude Code writes every record of the main conversation: a call of a
+                // record that says no sidechain is no call of the main one to its reader.
+                "isSidechain": false,
                 "message": {
                     "id": message,
                     "role": "assistant",
@@ -433,7 +508,10 @@ pub fn write(records: &mut Records, pid: u32, session: &str, steps: &[Step]) -> 
                         {
                             "type": "tool_use", "id": call,
                             "name": if step.monitor.is_some() { "Monitor" } else { "Bash" },
-                            "input": {},
+                            "input": step.watches.as_ref().map_or_else(
+                                || json!({}),
+                                |command| json!({ "command": command, "description": "watched" }),
+                            ),
                         },
                     ],
                     "stop_reason": "tool_use",

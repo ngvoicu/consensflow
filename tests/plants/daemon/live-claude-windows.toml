@@ -248,18 +248,18 @@ file = "crates/cf-e2e/tests/live_monitor_wait.rs"
 find = '''    !leaves || (detached.is_some() && group == detached)'''
 replace = '''    detached.is_some() && group == detached'''
 
-# T-858: on Windows `pane.commands` answers `null` by design (no process groups: cf-proto's panes.rs), so the
-# five checks of `live monitor-wait` that read what the host finds in the window failed at every run (zeewin2,
-# 2026-10-28: 9 of 14 held, the reader's). They are replaced there by the one that holds the host to its
-# documented answer.
+# T-858: on Windows `pane.commands` answered `null` (no process groups: cf-proto's panes.rs), so the five
+# checks of `live monitor-wait` that read what the host finds in the window failed at every run (zeewin2,
+# 2026-10-28). T-906 has the host tell them there by the shells Claude starts (`Servers::ByShell`): three
+# of the five hold on Windows again, and only the two that need a group or a start time are left out.
 [[plant]]
-name = "windows live: a platform that tells commands loses the checks that read them"
-meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+name = "windows live: a platform with process groups loses the checks that need them"
+meant = "a_platform_with_no_groups_keeps_the_checks_of_the_commands_the_host_tells_and_drops_the_groups_own"
 runs = ["live-monitor-wait-host"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
-find = '''    if tells {
+find = '''    if groups {
         return checks;
     }'''
 replace = '''    if false {
@@ -267,24 +267,24 @@ replace = '''    if false {
     }'''
 
 [[plant]]
-name = "windows live: a platform that tells no command keeps the checks that read them"
-meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+name = "windows live: a platform with no process groups keeps the checks that need a group or a start time"
+meant = "a_platform_with_no_groups_keeps_the_checks_of_the_commands_the_host_tells_and_drops_the_groups_own"
 runs = ["live-monitor-wait-host"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
-find = '''        .filter(|check| !READ_COMMANDS.contains(&check.what.as_str()))'''
-replace = '''        .filter(|check| !READ_COMMANDS.is_empty() || check.what.is_empty())'''
+find = '''        .filter(|check| !GROUPS_ONLY.contains(&check.what.as_str()))'''
+replace = '''        .filter(|check| !GROUPS_ONLY.is_empty() || check.what.is_empty())'''
 
 [[plant]]
-name = "windows live: a host that counted a command where it cannot tell passes"
-meant = "a_platform_with_no_groups_holds_the_host_to_telling_no_command_and_drops_the_checks_of_what_it_finds"
+name = "windows live: a platform with no process groups drops every check of the commands the host tells, as before T-906"
+meant = "a_platform_with_no_groups_keeps_the_checks_of_the_commands_the_host_tells_and_drops_the_groups_own"
 runs = ["live-monitor-wait-host"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
-find = '''        !seen.is_empty() && seen.iter().all(Option::is_none),'''
-replace = '''        true,'''
+find = '''const GROUPS_ONLY: [&str; 2] = ["first-turn-call", "call-margin"];'''
+replace = '''const GROUPS_ONLY: [&str; 5] = ["first-turn-call", "mcp-not-a-command", "commands-armed", "expiries-end", "call-margin"];'''
 
 # T-858: `live resume-cut` on Windows: a resumed Claude window's screen read blank for 120 s though it had
 # printed its whole prompt (zeewin2): Claude titles its window with a string ended by ST, and the rig's

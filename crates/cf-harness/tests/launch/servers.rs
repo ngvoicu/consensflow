@@ -2,8 +2,11 @@
 //! which the pane host tells a turn's work from them by). Claude Code and Pi keep
 //! them in the group of their window's program and run what their agents start in
 //! groups of their own; Codex opens them with its window, each in a group of its
-//! own. All three say so where there are process groups. OpenCode and Devin have
-//! not been probed, and say nothing on every platform.
+//! own. All three say so where there are process groups. Where there are none
+//! (Windows), Claude Code says it runs each command in a shell of its own (T-906); the
+//! others' trees there were not probed, and none of them leaves a Monitor whose end a
+//! look decides. OpenCode and Devin have not been probed, and say nothing on every
+//! platform.
 
 use cf_base::env::Env;
 use cf_harness::launch;
@@ -29,21 +32,28 @@ fn claude_and_pi_keep_their_servers_in_the_windows_group_and_codex_opens_them_wi
             kept
         }
     };
-    assert_eq!(says(Harness::Claude, &unix), known(Servers::InGroup));
+    let claude = if cfg!(windows) {
+        Servers::ByShell
+    } else {
+        Servers::InGroup
+    };
+    assert_eq!(says(Harness::Claude, &unix), claude);
     assert_eq!(says(Harness::Pi, &unix), known(Servers::InGroup));
     assert_eq!(says(Harness::Codex, &unix), known(Servers::AtLaunch));
 }
 
 #[test]
-fn on_windows_no_harness_says_so_whose_job_object_has_no_groups() {
+fn on_windows_claude_says_it_runs_each_command_in_a_shell_and_no_other_harness_says_anything() {
+    // T-906: Claude's adapter said `Unknown` here, and the host told none of a Claude
+    // window's commands, whatever it could see.
     let windows = Env::from_vars([("OS", "Windows_NT")]);
     for harness in Harness::ALL {
-        assert_eq!(
-            says(harness, &windows),
-            Servers::Unknown,
-            "{}",
-            harness.as_str()
-        );
+        let said = if harness == Harness::Claude {
+            Servers::ByShell
+        } else {
+            Servers::Unknown
+        };
+        assert_eq!(says(harness, &windows), said, "{}", harness.as_str());
     }
 }
 

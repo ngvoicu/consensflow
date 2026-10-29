@@ -66,6 +66,8 @@ mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 mod a_job_that_still_ran_was_taken_for_ended;
 #[path = "regressions/a_message_the_chief_took_was_typed_in_again_under_load.rs"]
 mod a_message_the_chief_took_was_typed_in_again_under_load;
+#[path = "regressions/a_monitor_claude_ended_by_its_shell_held_its_task.rs"]
+mod a_monitor_claude_ended_by_its_shell_held_its_task;
 #[path = "regressions/a_paste_devin_held_pasted_again_after_a_switch_and_a_restart.rs"]
 mod a_paste_devin_held_pasted_again_after_a_switch_and_a_restart;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
