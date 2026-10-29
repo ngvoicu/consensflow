@@ -151,6 +151,61 @@ fn an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_i
     Ok(())
 }
 
+/// T-931 P2-1, through the daemon: a brief taller than the window, taken back before its
+/// first word, sits in a box whose first line is out of the host's last lines. The resume
+/// is not pasted behind it, nor is the box cleared blind: the worker waits, in words the
+/// board shows, and goes on by itself once the human has emptied the box.
+#[test]
+fn a_brief_taken_back_taller_than_the_window_waits_in_words_until_the_human_empties_the_box(
+) -> Outcome {
+    let Some(config) = muse_rig_of(20_000) else {
+        return Ok(());
+    };
+    let rig = Rig::start(config)?;
+    let project = project(&rig, &echo_worker())?;
+    // 60 short lines: too many for the host's last 40, too few characters for Muse to fold
+    // them into one line.
+    let tall: String = (1..=60).map(|line| format!("\\nline {line:02}")).collect();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier standard Reply with exactly: T1_DONE{tall}"),
+    )?;
+    in_its_turn(&rig, &project, 1, secs(90))?;
+    let pane = pane_of(&project)?;
+    let id = pane["id"].as_str().unwrap_or_default().to_owned();
+    let paused = rig.page("task.pause", json!({ "project": project.id(), "task": 1 }))?;
+    assert_eq!(paused["ok"], true, "{paused}");
+    rig.wait_for("Muse to write the turn taken back", secs(60), || {
+        Ok(has(&the_session(&rig).1, "run/run_retracted"))
+    })?;
+    let resumed = rig.page("task.resume", json!({ "project": project.id(), "task": 1 }))?;
+    assert_eq!(resumed["ok"], true, "{resumed}");
+    let worker = worker(&project)?;
+    let mut said = String::new();
+    rig.wait_for("the worker to wait for its box, in words", secs(60), || {
+        let activity = project.lane(&worker)?["activity"].clone();
+        said = activity["reason"].as_str().unwrap_or_default().to_owned();
+        Ok(activity["state"] == "waiting" && said.contains("out of view"))
+    })?;
+    assert_eq!(rig.keys_pressed(&id, &[3]), 0, "nothing cleared blind");
+    assert_eq!(
+        messages(&the_session(&rig).1).len(),
+        1,
+        "nothing pasted behind it"
+    );
+    // The human empties the box, as Muse empties one that holds words.
+    rig.types(&pane, &[3])?;
+    rig.wait_for("T-1 to be answered", secs(120), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let words = messages(&the_session(&rig).1);
+    assert_eq!(words.len(), 2, "{words:?}");
+    assert_eq!(words[1].matches("Reply with exactly: T1_DONE").count(), 1);
+    assert_eq!(rig.keys_pressed(&id, &[3]), 0, "the daemon pressed none");
+    rig.close()?;
+    Ok(())
+}
+
 #[test]
 fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_once() -> Outcome {
     let Some(config) = muse_rig_of(20_000) else {

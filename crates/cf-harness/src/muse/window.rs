@@ -264,6 +264,12 @@ impl Window for MuseWindow {
                         "Muse did not resume the session: {said}"
                     )));
                 }
+                // A taken-back message in a box the screen does not show whole is the
+                // human's to empty, in words the board shows, until the box shows whole
+                // (T-931 P2-1): it is neither cleared blind nor pasted behind.
+                if self.restored.get() && screen::box_cut(&lines) {
+                    return Ok(Readiness::Held(Held::ForHuman(OUT_OF_VIEW.to_owned())));
+                }
                 if !screen::shows_prompt(&lines) {
                     return Ok(Readiness::Held(Held::Because(STARTING.to_owned())));
                 }

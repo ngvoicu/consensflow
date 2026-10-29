@@ -599,6 +599,11 @@ pub enum Held {
     /// A harness that said no more than "not yet" (Devin's `false`).
     Unsaid,
     Because(String),
+    /// Held for what only the human can do in the window, said in these words: the board
+    /// shows them as the window's wait, and readiness is asked again at every look, so the
+    /// hold lifts by itself once the human has done it (Muse's taken-back brief in a box
+    /// whose first line is out of view, T-931 P2-1).
+    ForHuman(String),
 }
 
 impl Held {
@@ -608,7 +613,7 @@ impl Held {
             Held::Unsent => "you have typed in this window and not sent it",
             Held::ShowsAnother => "the window shows another conversation",
             Held::Unsaid => "a paste is on its way",
-            Held::Because(reason) => reason,
+            Held::Because(reason) | Held::ForHuman(reason) => reason,
         }
     }
 }

@@ -66,6 +66,28 @@ pub(crate) fn words(screen: &[String]) -> Option<String> {
     Some(words.trim_end().to_owned())
 }
 
+/// Whether `screen` shows the tail of a box whose first line, with the mark, is out of
+/// view: no box is read whole, and above the last rule, up to the rule before it or the
+/// screen's top, are lines with words and no mark. A box holding more lines than the window
+/// keeps them under its rule and scrolls its first line out (T-829's probe, Muse 1.4.14).
+pub(crate) fn box_cut(screen: &[String]) -> bool {
+    if boxed(screen).is_some() {
+        return false;
+    }
+    let Some(last) = screen.iter().rposition(|line| is_rule(line)) else {
+        return false;
+    };
+    let top = screen[..last]
+        .iter()
+        .rposition(|line| is_rule(line))
+        .map_or(0, |rule| rule + 1);
+    let inside = &screen[top..last];
+    inside.iter().any(|line| !line.trim().is_empty())
+        && !inside
+            .iter()
+            .any(|line| line.trim_start().starts_with(MARK))
+}
+
 /// Whether `screen` shows Muse's prompt: its input box, which it draws once it is up,
 /// at work or at rest.
 pub(crate) fn shows_prompt(screen: &[String]) -> bool {

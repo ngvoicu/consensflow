@@ -546,3 +546,54 @@ fn a_paste_whose_enter_waited_for_the_resume_past_its_arrival_window_goes_once()
     );
     assert_eq!(clears(&context), 1, "with nothing pressed before it");
 }
+
+/// T-931 P2-1: a window held for what only the human can do in it (Muse's taken-back brief
+/// in a box whose first line is out of view) says so on the board, in the window's words,
+/// and is asked again at every look: once the human has done it, the words go in.
+#[test]
+fn a_window_held_for_the_human_waits_in_its_words_on_the_board_and_goes_on_once_it_lifts() {
+    use cf_harness::contract::{Held, Readiness};
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    const WORDS: &str = "the box is out of view: empty it in the window";
+    let lifted = Rc::new(Cell::new(false));
+    let seen = Rc::clone(&lifted);
+    context.adapter.ready.replace(Some(Rc::new(move || {
+        Ok::<_, String>(if seen.get() {
+            Readiness::Ready
+        } else {
+            Readiness::Held(Held::ForHuman(WORDS.to_owned()))
+        })
+    })));
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "chief".to_owned(),
+                task: None,
+                body: "Use tabs".to_owned(),
+            },
+        )
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let activity = context.dispatcher.activity(chief);
+    assert_eq!(
+        (activity.state.as_str(), activity.reason.as_deref()),
+        ("waiting", Some(WORDS))
+    );
+    assert_eq!(context.message(note.id).state, "queued");
+    assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
+    lifted.set(true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).state, "delivered");
+    assert_ne!(context.dispatcher.activity(chief).state.as_str(), "waiting");
+}

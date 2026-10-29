@@ -313,16 +313,8 @@ fn a_turn_taken_back_whose_box_is_out_of_view_is_refused_in_words_and_nothing_is
     // A put-back brief taller than the host's last lines: Muse keeps the box's tail in
     // view under its rule, and its first line, with the mark, is out of it (T-829's probe,
     // Muse 1.4.14, 45 lines in a 40-row window).
-    let mut tall = vec!["── Voice input (⌥ + v to start) ──────────────────────".to_owned()];
-    tall.extend((9..=45).map(|line| format!("  l{line:02}")));
-    tall.extend([RULE.to_owned(), "  echo · /work · YOLO".to_owned()]);
     let host = ScriptedHost::default();
-    host.answer(
-        "pane.snapshot",
-        [Answer::Now(Ok(
-            json!({ "ok": true, "bottom": tall, "unsent": false, "typed": 0 }),
-        ))],
-    );
+    host.answer("pane.snapshot", [tall_box()]);
     let refused = finished(window.deliver(&host, &pane(), "The next one.")).unwrap();
     let Admission::Refused { reason } = refused else {
         panic!("not refused: {refused:?}");
@@ -344,6 +336,49 @@ fn a_turn_taken_back_whose_box_is_out_of_view_is_refused_in_words_and_nothing_is
     assert_eq!(
         asked(&host),
         ["pane.snapshot", "keys [3]", "paste The next one."]
+    );
+}
+
+/// The screen of a window whose box holds a put-back brief taller than the host's last
+/// lines: the box's tail under its rule, its first line, with the mark, out of view (T-829's
+/// probe, Muse 1.4.14, 45 lines in a 40-row window).
+fn tall_box() -> Answer {
+    let mut tall = vec!["── Voice input (⌥ + v to start) ──────────────────────".to_owned()];
+    tall.extend((9..=45).map(|line| format!("  l{line:02}")));
+    tall.extend([RULE.to_owned(), "  echo · /work · YOLO".to_owned()]);
+    Answer::Now(Ok(
+        json!({ "ok": true, "bottom": tall, "unsent": false, "typed": 0 }),
+    ))
+}
+
+/// T-931 P2-1: the engine asks readiness before a paste, so the out-of-view box is said
+/// there, as the human's to empty ([`Held::ForHuman`], which the board shows): the window
+/// waits, in words, for the box to show whole, and goes on by itself once it does.
+#[test]
+fn a_taken_back_brief_out_of_view_holds_the_window_for_the_human_until_it_shows_whole() {
+    let home = Home::new();
+    let session = v7(100);
+    home.log(&session, 40_085, &taken_back());
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
+    assert!(finished(window.observe()).unwrap().took_back);
+    let host = ScriptedHost::default();
+    host.answer("pane.snapshot", [tall_box()]);
+    assert_eq!(
+        finished(window.ready(&host, &pane())).unwrap(),
+        Readiness::Held(Held::ForHuman(OUT_OF_VIEW.to_owned()))
+    );
+    // The human emptied the box: it shows whole, and the window is ready again.
+    host.answer("pane.snapshot", [at_prompt("")]);
+    assert_eq!(
+        finished(window.ready(&host, &pane())).unwrap(),
+        Readiness::Ready
+    );
+    // A screen still starting, with no box at all, is no box out of view.
+    host.answer("pane.snapshot", [snapshot(&["  Muse Code 1.4.14", ""])]);
+    assert_eq!(
+        finished(window.ready(&host, &pane())).unwrap(),
+        Readiness::Held(Held::Because(STARTING.to_owned()))
     );
 }
 

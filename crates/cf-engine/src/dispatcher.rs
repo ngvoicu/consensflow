@@ -757,6 +757,7 @@ impl Dispatcher {
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.prelude = None;
+            delivery.for_human = None;
             // A greeting still to go was the exited window's session's: the next launch
             // withdraws it with every role note that waits (`withdraw_replacements`).
             delivery.greeting = None;
@@ -1189,6 +1190,16 @@ impl Dispatcher {
                     state: ActivityState::Waiting,
                     reason: waiting.reason.clone(),
                 }
+            } else if let Some(words) = record
+                .delivery
+                .borrow()
+                .for_human
+                .clone()
+                .filter(|_| observed.settled)
+            {
+                // Held for what only the human can do in it: said as the window's wait,
+                // and asked again at every look (`Held::ForHuman`).
+                Activity::because(ActivityState::Waiting, words)
             } else {
                 let state = if observed.settled {
                     ActivityState::Idle

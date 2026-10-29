@@ -96,6 +96,10 @@ pub(crate) struct DeliveryPart {
     pub(crate) unread: Option<Unread>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
+    /// A message waits for what only the human can do in the window, in the window's words
+    /// ([`Held::ForHuman`]): the board says them as the window's wait, and the window is
+    /// asked again at every look.
+    pub(crate) for_human: Option<String>,
     /// For the message on its way, pasted into a conversation the window left: how many
     /// items that conversation's record held while it read a turn at work, and since when
     /// it has held as many (`arrival`'s `watch_left`).
@@ -410,7 +414,14 @@ impl Dispatcher {
         // the engine emptied holds the human's words now, which an interrupt of ours
         // may put back there: it is no longer known empty (Calliope's review of
         // 2026-10-21, round 12).
-        record.delivery.borrow_mut().unsent = held == Some(Held::Unsent);
+        {
+            let mut part = record.delivery.borrow_mut();
+            part.unsent = held == Some(Held::Unsent);
+            part.for_human = match &held {
+                Some(Held::ForHuman(words)) => Some(words.clone()),
+                _ => None,
+            };
+        }
         if held == Some(Held::Unsent) {
             record.delivery.borrow_mut().emptied = None;
         }
@@ -700,6 +711,10 @@ impl Dispatcher {
                 {
                     let mut part = record.delivery.borrow_mut();
                     part.unsent = unsent;
+                    part.for_human = match &held {
+                        Held::ForHuman(words) => Some(words.clone()),
+                        _ => None,
+                    };
                     // What the human typed is theirs to send: the launch's time is not
                     // spent while it waits for them, as it is not while the window asks
                     // whether to trust its folder (`trust`), and the box holds their
