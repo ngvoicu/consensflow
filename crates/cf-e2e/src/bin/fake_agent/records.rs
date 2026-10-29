@@ -168,6 +168,11 @@ impl Records {
         self.effort = effort;
     }
 
+    /// The model its answers run on, where the launch or the human named one.
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
     /// The record `fields` make, numbered as the next: an answer of its own says the
     /// model it ran on, in its message, and the effort, beside it, as Claude Code 2.1.312
     /// writes them (one of Claude Code's own, `<synthetic>`, says its own).

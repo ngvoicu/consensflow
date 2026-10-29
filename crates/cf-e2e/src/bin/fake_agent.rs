@@ -8,9 +8,9 @@
 //! attachments, as Claude's input box makes them: a `[Image #N]` for each at the head of
 //! the message, the lines gone, and a record of the paths after it (`images`).
 //!
-//! A window launched on the model `CF_TEST_GONE_MODEL` names says its account has no such
-//! model, in Claude Code's words, and ends with the code 1, as a launch on a model that is
-//! gone does. Its answers say the model and effort it was launched on (`--model`,
+//! A window launched on the model `CF_TEST_GONE_MODEL` names opens, and each turn fails at
+//! once in Claude Code's words, its record a `<synthetic>` API error naming the model, the
+//! window up still, as Claude Code 2.1.312's does (`gone_launch.py`, 2026-10-29). Its answers say the model and effort it was launched on (`--model`,
 //! `--effort`), and `/model <model> [<effort>]` typed alone switches them, as the human's
 //! own switch in Claude Code's window does, with the key that keeps it to the
 //! conversation: the records of the command name no model, and the next answer does.
@@ -266,17 +266,6 @@ fn run(
         own_var(variable)
             .is_some_and(|wanted| !wanted.is_empty() && is_session_of(&participant, &wanted))
     };
-    // A model its account no longer has: the window says so in Claude Code's words and
-    // ends, as a launch on one does (CHF-02).
-    if launch.model.is_some() && launch.model == own_var("CF_TEST_GONE_MODEL") {
-        let model = launch.model.as_deref().unwrap_or_default();
-        let mut out = io::stdout().lock();
-        out.write_all(gone_model(model).as_bytes())
-            .and_then(|()| out.flush())
-            .map_err(|failed| failed.to_string())?;
-        thread::sleep(Duration::from_millis(300));
-        leave(&status_file, 1);
-    }
     if named("CF_TEST_NO_LOGIN") || named("CF_TEST_NO_LOGIN_EXITS") {
         let mut out = io::stdout().lock();
         out.write_all(NO_LOGIN.as_bytes())
@@ -586,7 +575,7 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
     done
 }
 
-/// What Claude Code says of a launch on a model the account does not have.
+/// What Claude Code says of a turn on a model the account does not have.
 fn gone_model(model: &str) -> String {
     format!(
         "There's an issue with the selected model ({model}). It may not exist or you may not have access to it. Run /model to pick a different model.\r\n"
@@ -820,12 +809,19 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     }
     // What it did before it answers: the steps a worker's progress is, among them the call
     // that runs a job in the background or arms a monitor, and what it answers.
-    let (worked, reply) = match tool::reply(text, window).or_else(|| build::reply(text, window)) {
-        Some(reply) => (Vec::new(), reply?),
-        None => match steps::reply(text, window) {
-            Some(worked) => worked?,
-            None => (Vec::new(), reply_to(text, window)?),
-        },
+    let gone = records
+        .model()
+        .is_some_and(|model| own_var("CF_TEST_GONE_MODEL").as_deref() == Some(model));
+    let (worked, reply) = if gone {
+        (Vec::new(), Reply::Gone)
+    } else {
+        match tool::reply(text, window).or_else(|| build::reply(text, window)) {
+            Some(reply) => (Vec::new(), reply?),
+            None => match steps::reply(text, window) {
+                Some(worked) => worked?,
+                None => (Vec::new(), reply_to(text, window)?),
+            },
+        }
     };
     steps::write(records, pid, &window.session, &worked).map_err(failed)?;
     // The message id numbers the records so far, this one not yet among them.
@@ -842,6 +838,26 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     json!({
                         "type": "user",
                         "message": { "role": "user", "content": [{ "type": "text", "text": INTERRUPTED }] },
+                    }),
+                )
+                .map_err(failed)?;
+        }
+        Reply::Gone => {
+            // Claude Code's own record of the refusal: a `<synthetic>` API error in the
+            // model's name, the window up still (`tools/probes/chief-harness/gone_launch.py`).
+            let model = records.model().unwrap_or_default().to_owned();
+            records
+                .append(
+                    pid,
+                    json!({
+                        "type": "assistant",
+                        "isApiErrorMessage": true,
+                        "message": {
+                            "id": id,
+                            "role": "assistant",
+                            "model": "<synthetic>",
+                            "content": [{ "type": "text", "text": gone_model(&model).trim_end() }],
+                        },
                     }),
                 )
                 .map_err(failed)?;

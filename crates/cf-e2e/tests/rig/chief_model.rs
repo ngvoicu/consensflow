@@ -1,8 +1,9 @@
 //! A chief is a harness and a model (CHF-10), over the daemon, the pane host and the
 //! stand-in Claude: the human switches the chief's model in its window, and a Close and a
 //! Resume reopen it on the switched model and effort; a conversation whose record names no
-//! model reopens on the model picked for it; and a model its account no longer has starts
-//! the chief on the harness's own default, with one note, the project left open.
+//! model reopens on the model picked for it; and a model its account no longer has (its
+//! first turn failing in Claude Code's own record) starts the chief on the harness's own
+//! default, with one note, the project left open.
 
 use std::time::Duration;
 
@@ -156,8 +157,11 @@ fn a_chief_whose_model_is_gone_starts_on_its_harnesss_default_and_the_human_is_t
     let project = opened(&rig)?;
     let first = chief_window(&rig, project, 1)?;
     assert_eq!(after(&first, "--model"), "fake-chief");
-    // Its window says the model is gone and ends; the chief opens again at once on Claude
-    // Code's own default, which the stand-in's list cannot name: no `--model`.
+    // Its window opens, as Claude Code's does on a model the account lacks, and its first
+    // turn fails in Claude Code's words, its record a `<synthetic>` API error naming the
+    // model: the window is closed and the chief opens again at once on Claude Code's own
+    // default, which the stand-in's list cannot name: no `--model`.
+    rig.tell(project, "Reply with exactly: HELLO")?;
     let again = chief_window(&rig, project, 2)?;
     assert_eq!(after(&again, "--model"), "", "{:?}", again["argv"]);
     let board = Project::new(&rig, project);

@@ -612,7 +612,7 @@ replace = ''
 [[plant]]
 name = 'chief: a gone model at a turn is a failed turn'
 meant = "a_turn_that_fails_on_a_gone_model_closes_the_window_and_starts_the_chief_on_the_default"
-runs = ["chm-dispatcher"]
+runs = ["chm-dispatcher", "chm-rig"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
