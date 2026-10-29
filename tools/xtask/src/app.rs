@@ -26,8 +26,6 @@
 
 use std::ffi::OsString;
 
-use std::io::Write;
-
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process::{self, Invocation};

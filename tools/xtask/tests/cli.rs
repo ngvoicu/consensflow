@@ -52,7 +52,10 @@ fn a_help_and_a_refusal_start_nothing() {
     for (args, said) in [
         (vec![], "xtask: a command is required\n"),
         (vec!["deploy"], "xtask: unknown command: deploy\n"),
-        (vec!["app"], "xtask: app takes a command: test, clippy\n"),
+        (
+            vec!["app"],
+            "xtask: app takes a command: test, clippy, fresh\n",
+        ),
     ] {
         let ran = xtask(&checkout(), no_programs.path(), &[], &args);
         assert_eq!(ran.status.code(), Some(2), "{args:?}");

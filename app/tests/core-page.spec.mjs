@@ -4690,6 +4690,7 @@ test('Agents asked for while the daemon starts says it waits, a click meanwhile 
     await expect(agents).toBeHidden()
     // Clicked again, and Harnesses too: nothing more is asked while the first waits.
     await openScreen(page, 'Agents')
+    expect(await asked()).toBe(1)
     await openScreen(page, 'Harnesses')
     await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeHidden()
     expect(await asked()).toBe(1)

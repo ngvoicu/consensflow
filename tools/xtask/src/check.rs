@@ -365,6 +365,7 @@ mod tests {
             lines[6..],
             [
                 "cargo test --offline --",
+                "cargo xtask app fresh",
                 "cargo xtask plants cli --check",
                 "cargo xtask plants daemon --check",
                 "cargo xtask plants release --check",
