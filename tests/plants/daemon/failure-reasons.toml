@@ -28,7 +28,6 @@ failure-reason-live-suite = ["cargo", "test", "--offline", "-p", "cf-e2e", "--te
 failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 failure-reason-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 failure-reason-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
-failure-reason-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 failure-reason-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record"]
 failure-reason-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_failure_said_no_reason::"], builds = true }
 
@@ -210,19 +209,6 @@ find = '''
 replace = '''
                 self.open_tools.clear();
                 self.failed = false;
-'''
-
-[[plant]]
-name = "failure reason: OpenCode's failed reply keeps none of its error's words"
-meant = "a_failed_reply_keeps_the_words_of_its_error"
-runs = ["failure-reason-opencode"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = '''
-            record.failure = error_words(error);
-'''
-replace = '''
 '''
 
 [[plant]]
@@ -427,20 +413,6 @@ find = '''
 '''
 replace = '''
         false
-'''
-
-[[plant]]
-name = "failure reason: OpenCode's failed reply quotes its whole error, response and all"
-meant = "a_failed_reply_keeps_the_words_of_its_error"
-runs = ["failure-reason-opencode"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = '''
-            record.failure = error_words(error);
-'''
-replace = '''
-            record.failure = Some(failure);
 '''
 
 [[plant]]

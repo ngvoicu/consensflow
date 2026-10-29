@@ -91,22 +91,6 @@ find = "        Box::pin(cf_process::Child::ended(self))"
 replace = "        Box::pin(cf_process::Child::closed(self))"
 
 [[plant]]
-name = "ci flakes: the stand-in's server holds nothing after it ends"
-meant = "a_server_that_has_exited_is_stopped_though_a_program_holds_its_error_stream"
-runs = ["harness-channels-create"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/bin/fake_opencode.rs"
-find = '''
-        let held = std::process::Command::new("/bin/sleep")
-            .arg("30")
-'''
-replace = '''
-        let held = std::process::Command::new("/bin/true")
-            .arg("30")
-'''
-
-[[plant]]
 name = "ci flakes: a program is ended only once its error stream has closed"
 meant = "a_program_is_ended_when_it_exits_and_closed_when_its_error_stream_has_closed_too"
 runs = ["process-child-ended"]

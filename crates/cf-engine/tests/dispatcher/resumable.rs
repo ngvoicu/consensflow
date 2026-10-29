@@ -124,7 +124,7 @@ fn a_conversation_the_human_switched_the_window_to_is_resumed_on_what_its_harnes
 #[test]
 fn a_chief_whose_harness_makes_its_sessions_before_any_turn_is_resumed_though_nothing_was_said_in_it(
 ) {
-    let (context, project) = chief_on("opencode");
+    let (context, project) = chief_on("pi");
     let chief = context.id(project, "chief");
     let before = native_of(&context, chief);
 

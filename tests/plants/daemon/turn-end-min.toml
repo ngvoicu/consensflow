@@ -39,7 +39,6 @@ tem-panes-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "
 tem-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests"]
 tem-panes-background = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::"]
 tem-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
-tem-opencode-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 tem-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading"]
 tem-launch-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::"]
 tem-engine-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end"]
@@ -840,18 +839,6 @@ runs = ["tem-engine-turn-end"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '    if thread.task.requester == "human" {'
 replace = '    if false {'
-
-[[plant]]
-name = "turn-end-min reader: OpenCode's compaction summary is a reply of the member's"
-meant = "the_summary_a_compaction_writes_is_marked_so_and_the_answer_before_it_is_not"
-runs = ["tem-opencode-record"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = '''
-        let compaction = message.get("summary") == Some(&Value::Bool(true))
-            || message.get("mode").and_then(Value::as_str) == Some("compaction");'''
-replace = '        let compaction = false;'
 
 [[plant]]
 name = "turn-end-min: the close note says the work runs on"

@@ -1,8 +1,8 @@
 //! A harness ConsensFlow has no adapter for (Pi stands for one in these
-//! tests): no work for a member on it, no window opened, no project, member or
-//! chief on it.
+//! tests, on an engine whose fake is made without it): no work for a member on
+//! it, no window opened, no project, member or chief on it.
 
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Made};
 use cf_engine::{SwitchTo, SwitchWhen};
 use cf_ledger::{NewMember, NewTask, ProjectView};
 use serde_json::json;
@@ -11,6 +11,14 @@ use crate::fixtures::{assert_match, notes};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["a harness ConsensFlow has no adapter for"];
+
+/// An engine whose fake answers for Claude Code alone, so Pi has no adapter.
+fn without_pi() -> Context {
+    Context::made(Made {
+        harnesses: vec!["claude-code"],
+        codex: false,
+    })
+}
 
 /// A worker of the standard tier on Pi joins the staff (`onPi`).
 fn on_pi(context: &Context, project: &ProjectView) {
@@ -32,7 +40,7 @@ fn on_pi(context: &Context, project: &ProjectView) {
 
 #[test]
 fn gives_a_member_on_it_no_work_says_why_and_every_pass_goes_on() {
-    let context = Context::new();
+    let context = without_pi();
     let project = context.with_staff(&[]);
     on_pi(&context, &project);
     context.create_task(
@@ -63,7 +71,7 @@ fn gives_a_member_on_it_no_work_says_why_and_every_pass_goes_on() {
 
 #[test]
 fn fails_what_was_given_to_a_member_on_it_by_name_and_its_requester_hears_why() {
-    let context = Context::new();
+    let context = without_pi();
     let project = context.with_staff(&[]);
     on_pi(&context, &project);
     context.give(project.id, "hera", "Parser");
@@ -84,7 +92,7 @@ fn fails_what_was_given_to_a_member_on_it_by_name_and_its_requester_hears_why() 
 
 #[test]
 fn opens_no_project_member_or_chief_on_it() {
-    let context = Context::new();
+    let context = without_pi();
     let refused = context
         .open_project(json!({
             "directory": "/work/app",
