@@ -45,19 +45,43 @@ pub struct Installed {
     pub version: String,
 }
 
-/// The Muse installed in the home of whoever runs the tests (`~/.local/bin`, where its
-/// installer puts it), or why there is none to run: Muse's rig cases run on a Mac with
+/// The Muse of whoever runs the tests, found as the product's launch finds it
+/// ([`installed_on`]), or why there is none to run: Muse's rig cases run on a Mac with
 /// Muse Code installed. The Windows machines have none yet (MUS-20), nor has CI.
 pub fn installed() -> std::result::Result<Installed, String> {
     if !cfg!(target_os = "macos") {
         return Err("Muse Code's rig cases run on a Mac with Muse installed; this machine is no Mac (the Windows machines have no Muse yet, MUS-20)".to_owned());
     }
-    let home = own_var("HOME").ok_or("no home to find Muse Code in")?;
-    let bin = Path::new(&home).join(".local").join("bin");
+    installed_on(
+        &own_var("PATH").unwrap_or_default(),
+        own_var("HOME").as_deref(),
+    )
+}
+
+/// [`installed`], on the `PATH` `path` and the home `home`: the first `muse` on the `PATH`,
+/// as the product's launch takes it (`cf_harness::muse::launch`), its link followed to the
+/// launcher it names, and the `.muse-version` beside that launcher and the
+/// `muse-bin-<version>` it names. The installer's place in the home (`~/.local/bin`) is
+/// read only where the `PATH` has no `muse`. So a run is pointed at another Muse (one
+/// downloaded into a scratch folder, T-905) by its `PATH`, and the person's home and Muse
+/// are left as they are.
+fn installed_on(path: &str, home: Option<&str>) -> std::result::Result<Installed, String> {
+    let launcher = match crate::live::machine::find("muse", path, None) {
+        Some(found) => found,
+        None => Path::new(home.ok_or("no muse on the PATH, and no home to find Muse Code in")?)
+            .join(".local")
+            .join("bin")
+            .join("muse"),
+    };
+    let real = fs::canonicalize(&launcher).unwrap_or_else(|_| launcher.clone());
+    let bin = real.parent().unwrap_or(Path::new("."));
     let version = fs::read_to_string(bin.join(".muse-version"))
         .map(|line| line.trim().to_owned())
         .map_err(|_| {
-            "Muse Code is not installed on this machine (no ~/.local/bin/.muse-version)".to_owned()
+            format!(
+                "Muse Code is not installed on this machine (no .muse-version beside {})",
+                launcher.display()
+            )
         })?;
     let binary = bin.join(format!("muse-bin-{version}"));
     if !binary.is_file() {
@@ -428,9 +452,67 @@ pub mod members {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::path::Path;
+
     use serde_json::json;
 
+    #[cfg(unix)]
+    use super::installed_on;
     use super::used_percent;
+    #[cfg(unix)]
+    use crate::files;
+
+    /// A Muse install in `bin`: its launcher, the version line, and the binary it names.
+    #[cfg(unix)]
+    fn install(bin: &Path, version: &str) {
+        files::write_executable(&bin.join("muse"), "#!/bin/sh\n").unwrap();
+        files::write(&bin.join(".muse-version"), format!("{version}\n")).unwrap();
+        files::write_executable(&bin.join(format!("muse-bin-{version}")), "#!/bin/sh\n").unwrap();
+    }
+
+    /// The tester's T-905: a Muse downloaded into a scratch folder is run by putting that
+    /// folder first on the `PATH`, as the product's launch finds Muse, and never by moving
+    /// the home, which would put the person's own Muse at risk. (A Mac's: the kit runs Muse
+    /// on no other machine, and a Windows `PATH` takes a launcher by its extension.)
+    #[cfg(unix)]
+    #[test]
+    fn the_kit_runs_the_first_muse_on_the_path_and_the_home_s_only_where_the_path_has_none() {
+        let home = tempfile::tempdir().unwrap();
+        install(&home.path().join(".local").join("bin"), "1.4.13-R6996.1");
+        let scratch = tempfile::tempdir().unwrap();
+        install(scratch.path(), "1.4.14-R7309.1");
+        let empty = tempfile::tempdir().unwrap();
+        let home_of = home.path().to_str();
+        let path = std::env::join_paths([empty.path(), scratch.path()]).unwrap();
+        let found = installed_on(path.to_str().unwrap(), home_of).unwrap();
+        assert_eq!(found.version, "1.4.14-R7309.1");
+        assert_eq!(
+            found.binary,
+            std::fs::canonicalize(scratch.path())
+                .unwrap()
+                .join("muse-bin-1.4.14-R7309.1")
+        );
+        // A `PATH` with no `muse`: the installer's place in the home.
+        let found = installed_on(empty.path().to_str().unwrap(), home_of).unwrap();
+        assert_eq!(found.version, "1.4.13-R6996.1");
+    }
+
+    /// A `muse` on the `PATH` that is a link (Homebrew's, the person's own) is read where it
+    /// leads, as the product reads the launcher's `.muse-version`.
+    #[cfg(unix)]
+    #[test]
+    fn a_muse_on_the_path_that_is_a_link_is_read_beside_the_launcher_it_names() {
+        let real = tempfile::tempdir().unwrap();
+        install(real.path(), "1.4.14-R7309.1");
+        let linked = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(real.path().join("muse"), linked.path().join("muse")).unwrap();
+        let found = installed_on(linked.path().to_str().unwrap(), None).unwrap();
+        assert_eq!(found.version, "1.4.14-R7309.1");
+        assert!(found
+            .binary
+            .starts_with(std::fs::canonicalize(real.path()).unwrap()));
+    }
 
     /// T-829's live run (Muse 1.4.14, 2026-10-28): a window of the subscription in which
     /// nothing was used yet answers no allowance with `server_sent_no_usage`, which is no

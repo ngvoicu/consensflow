@@ -42,6 +42,7 @@ muse-role-cleared = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", 
 muse-role-came-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::tests"]
 muse-live-kit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::"]
 muse-e2e-files = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "files::"]
+muse-kit-find = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::tests::"]
 muse-base-file = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::"]
 muse-rig-env = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install"]
 muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
@@ -3108,6 +3109,28 @@ runs = ["muse-lib"]
 file = "crates/cf-harness/src/muse/paths.rs"
 find = '''    Ok(real_path(&data_home(env)?).join("muse"))'''
 replace = '''    Ok(data_home(env)?.join("muse"))'''
+
+# The kit finds the machine's Muse as the product's launch does: the first `muse` on the PATH, its
+# link followed, so a run is pointed at another Muse by its PATH and never by its home (T-905).
+[[plant]]
+name = "muse: the kit reads the home's Muse whatever the PATH holds"
+meant = "the_kit_runs_the_first_muse_on_the_path_and_the_home_s_only_where_the_path_has_none"
+runs = ["muse-kit-find"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    let launcher = match crate::live::machine::find("muse", path, None) {'''
+replace = '''    let launcher = match None::<std::path::PathBuf>.filter(|_| !path.is_empty()) {'''
+
+[[plant]]
+name = "muse: the kit reads a linked muse's version beside the link"
+meant = "a_muse_on_the_path_that_is_a_link_is_read_beside_the_launcher_it_names"
+runs = ["muse-kit-find"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    let real = fs::canonicalize(&launcher).unwrap_or_else(|_| launcher.clone());'''
+replace = '''    let real = launcher.clone();'''
 
 # Muse meets chief-meeting Phase 1 (integration D1, T-946; Calliope's T-945): a hold for the human
 # goes through the one clock of a held head message and its ten-minute note (P2-1), and leaves the

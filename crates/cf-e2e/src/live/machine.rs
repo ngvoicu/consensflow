@@ -39,6 +39,7 @@ use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config, HarnessHome};
 use crate::{checkout, files, Error, Result};
 
+pub(crate) use path::find;
 pub use path::{command, working_command};
 pub use wrapper::{
     isolated_claude, shimmed_claude, shimmed_claude_with_servers, windows_wrapper, ISOLATION,
