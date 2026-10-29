@@ -1052,7 +1052,7 @@ replace = '''    dialog.addEventListener('close', () => {
 
 [[plant]]
 name = "specs viewer: the daemon's banner stays on its line under the command bar, under an open modal"
-meant = "draws the daemon's notice over an open modal, and over each modal opened after it"
+meant = "the daemon stopping and coming back leaves the viewer as it was, and its notice is drawn over it"
 runs = ["viewer-banner"]
 
 [[plant.edit]]
