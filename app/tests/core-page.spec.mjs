@@ -4757,7 +4757,7 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
     const harnesses = await openScreen(page, 'Harnesses')
     await expect(harnesses).toBeVisible()
     const screen = harnesses.frameLocator('iframe')
-    await expect(screen.locator('.host')).toHaveCount(5)
+    await expect(screen.locator('.host')).toHaveCount(6)
     await expect(
       screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^pi$/ }) }),
     ).toContainText('Version 1.2.3')
