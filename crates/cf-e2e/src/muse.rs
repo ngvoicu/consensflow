@@ -263,6 +263,8 @@ pub fn has(records: &[Value], wanted: &str) -> bool {
 /// Muse with the person's login (its secret in the keychain, found by `real_home`) and
 /// the settings in `config_home`, a throwaway folder: no model turn.
 pub fn usage(install: &Installed, real_home: &Path, config_home: &Path) -> Result<Value> {
+    // By its real path: Muse takes a data folder reached through a link for unsafe (T-931).
+    let config_home = &files::real_path(config_home);
     crate::process::Run::new(&install.binary)
         .args(["usage", "--json"])
         .var("HOME", real_home)

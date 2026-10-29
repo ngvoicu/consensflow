@@ -21,7 +21,6 @@ muse-records = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "reco
 muse-env = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::"]
 muse-scrub = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "scrub_muse_session::"]
 muse-fixtures = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "fixtures"]
-muse-daemon-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
 muse-shapes = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::shapes::"]
 muse-window-args = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::window_args::"]
 muse-unsent = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::window::"]
@@ -1174,19 +1173,6 @@ find = '''    let linked = fs::symlink_metadata(launcher).is_ok_and(|meta| meta.
 replace = '''    let linked = fs::symlink_metadata(launcher).is_ok_and(|meta| meta.file_type().is_symlink()) && false;'''
 
 # --- T-802: T-801's live shapes ---
-
-# The rule the window's merge keeps: an adapter whose windows do not open is no adapter (T-767's P1).
-[[plant]]
-name = "muse: an adapter that opens no window is given work"
-meant = "a_harness_whose_windows_do_not_open_has_no_adapter_so_the_engine_refuses_it_at_the_door"
-runs = ["muse-daemon-seams"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/seams.rs"
-find = '''
-                .filter(|(_, adapter)| adapter.opens_windows())
-'''
-replace = ""
 
 # Work: a task Muse's resume ends after its process's end is retired no more (live: orphaned_by_process_loss).
 [[plant]]

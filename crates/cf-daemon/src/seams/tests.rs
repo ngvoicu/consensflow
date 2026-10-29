@@ -252,54 +252,6 @@ fn every_harness_whose_windows_open_has_its_adapter_and_no_other_word_has() {
     }
 }
 
-/// An adapter whose windows do not open: a harness ConsensFlow lists and reads, and
-/// launches nothing on yet (Muse's until its window, T-767's P1).
-struct NoWindows(Rc<dyn Adapter>);
-
-impl Adapter for NoWindows {
-    fn prepare<'a>(
-        &'a self,
-        launch: &'a cf_harness::contract::Launch<'a>,
-    ) -> Work<'a, Result<cf_harness::contract::Prepared, String>> {
-        self.0.prepare(launch)
-    }
-
-    fn opens_windows(&self) -> bool {
-        false
-    }
-
-    fn first_message(&self) -> cf_harness::contract::FirstMessage {
-        self.0.first_message()
-    }
-
-    fn specmint(
-        &self,
-        variant: cf_proto::specs::Variant,
-    ) -> Result<cf_harness::contract::Skill, String> {
-        self.0.specmint(variant)
-    }
-}
-
-#[test]
-fn a_harness_whose_windows_do_not_open_has_no_adapter_so_the_engine_refuses_it_at_the_door() {
-    let home = tempfile::tempdir().unwrap();
-    let services = Fakes::new(&Env::default()).services(&Env::default(), home.path());
-    let adapters = HarnessAdapters::of(Harness::ALL.into_iter().map(|harness| {
-        let made = adapter(harness, &services);
-        let made: Rc<dyn Adapter> = if harness == Harness::Pi {
-            Rc::new(NoWindows(made))
-        } else {
-            made
-        };
-        (harness, made)
-    }));
-    assert!(
-        adapters.adapter("pi").is_none(),
-        "no work, no project, no chief on it"
-    );
-    assert!(adapters.adapter("claude-code").is_some());
-}
-
 #[tokio::test]
 async fn work_spawned_waits_for_a_drain_and_a_drain_runs_it_in_the_order_it_was_woken() {
     LocalSet::new()

@@ -85,7 +85,7 @@ pub(super) fn environment(
         // Muse takes a data folder reached through a link for unsafe (`/tmp` on a Mac, where
         // a plant run makes its rigs: Muse 1.4.14 then writes no `route_facts`, and a fresh
         // window never learns its session, T-829): the same folder, by its real path.
-        let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let real = files::real_path(root);
         let data = real.join("home").join(".local").join("share");
         env.push(("XDG_DATA_HOME".to_owned(), text(&data)));
     }
@@ -209,7 +209,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
         Some((install, crate::muse::Run::Live { real_home })) => {
             crate::muse::seed_live_home(&home, real_home)?;
             // By its real path, as `environment` gives the rig's Muse data folder.
-            let rig_home = std::fs::canonicalize(&home).unwrap_or_else(|_| home.clone());
+            let rig_home = files::real_path(&home);
             crate::muse::write_live_stand_in(
                 &own,
                 install,

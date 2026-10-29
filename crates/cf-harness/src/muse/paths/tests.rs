@@ -26,9 +26,12 @@ fn the_data_folder_is_xdg_s_and_an_empty_one_is_none_as_muse_reads_it() {
 
 #[test]
 fn a_session_s_log_is_in_the_folder_named_for_it_under_a_date_and_never_a_child_s() {
-    let home = tempfile::tempdir().unwrap();
-    let env = env_of(&[("XDG_DATA_HOME", home.path().to_str().unwrap())]);
-    let sessions = home.path().join("muse").join("sessions");
+    let dir = tempfile::tempdir().unwrap();
+    // By its real path, as Muse's data folder is read (the temp folder may be reached
+    // through a link).
+    let home = fs::canonicalize(dir.path()).unwrap();
+    let env = env_of(&[("XDG_DATA_HOME", home.to_str().unwrap())]);
+    let sessions = home.join("muse").join("sessions");
     let write = |relative: &str| {
         let file = sessions.join(relative);
         fs::create_dir_all(file.parent().unwrap()).unwrap();

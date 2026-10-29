@@ -159,10 +159,12 @@ pub(super) fn integration(
     make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
     let said = path::join(&[&root, SAID]);
     let hooks = hooks(env, added_hook(pane_cf, role_file, &said))?;
+    let mut given = vec![(NO_UPDATE.0.to_owned(), NO_UPDATE.1.to_owned())];
+    given.extend(super::paths::data_home_given(env).map(|real| ("XDG_DATA_HOME".to_owned(), real)));
     Ok(Integration {
         program,
         args: vec!["-c".to_owned(), format!("hooks={}", js::stringify(&hooks))],
-        env: vec![(NO_UPDATE.0.to_owned(), NO_UPDATE.1.to_owned())],
+        env: given,
         said: PathBuf::from(said),
     })
 }

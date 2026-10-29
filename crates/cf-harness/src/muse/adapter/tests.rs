@@ -120,8 +120,15 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no
         ]
     );
     assert_eq!(
-        prepared.env,
-        [("MUSE_NO_AUTO_UPDATE".to_owned(), "1".to_owned())]
+        prepared.env[0],
+        ("MUSE_NO_AUTO_UPDATE".to_owned(), "1".to_owned())
+    );
+    assert!(
+        prepared.env[1..]
+            .iter()
+            .all(|(name, _)| name == "XDG_DATA_HOME"),
+        "{:?}",
+        prepared.env
     );
     assert_eq!(prepared.drop_env, ["META_API_KEY"]);
     assert_eq!(prepared.native_session, None);
@@ -177,6 +184,32 @@ fn a_resumed_window_opens_on_its_session_with_no_message_on_its_command_line() {
     );
     assert_eq!(prepared.native_session.as_deref(), Some(session));
     assert_eq!(adapter(&env).first_message(), FirstMessage::Delivered);
+}
+
+/// T-931 P3-2: Muse 1.4.14 takes a data folder reached through a link for unsafe
+/// (`unsafe_registry_root`: a Mac's `/tmp`), writes no `route_facts`, and a fresh window
+/// never learns its session. The window's Muse is given the same folder by its real path,
+/// and ConsensFlow reads its sessions there.
+#[cfg(unix)]
+#[test]
+fn a_data_folder_reached_through_a_link_is_given_to_muse_by_its_real_path() {
+    let folder = tempfile::tempdir().unwrap();
+    let real = folder.path().join("real");
+    fs::create_dir_all(&real).unwrap();
+    let linked = folder.path().join("linked");
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+    let env = installed(&linked, Some("1.4.13-R6996.1"));
+    let prepared = prepared(&env, None).unwrap();
+    let data = fs::canonicalize(&real).unwrap().join("data");
+    assert!(
+        prepared.env.contains(&(
+            "XDG_DATA_HOME".to_owned(),
+            data.to_string_lossy().into_owned()
+        )),
+        "{:?}",
+        prepared.env
+    );
+    assert_eq!(paths::data(&env).unwrap(), data.join("muse"));
 }
 
 #[test]

@@ -17,6 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
+use cf_base::file::real_path;
 use cf_base::path;
 
 use crate::shared::paths::{home, set};
@@ -24,13 +25,29 @@ use crate::shared::paths::{home, set};
 /// The log of a session in its folder.
 const LOG: &str = "session.jsonl";
 
-/// Muse's data folder.
-pub(crate) fn data(env: &Env) -> Result<PathBuf, String> {
-    let base = match set(env, "XDG_DATA_HOME") {
+/// The folder Muse's data folder is in, as the environment names it.
+fn data_home(env: &Env) -> Result<PathBuf, String> {
+    Ok(PathBuf::from(match set(env, "XDG_DATA_HOME") {
         Some(data) => data,
         None => path::join(&[&home(env)?, ".local", "share"]),
-    };
-    Ok(PathBuf::from(base).join("muse"))
+    }))
+}
+
+/// Muse's data folder, by its real path: where a window's Muse writes when it is given
+/// that path ([`data_home_given`]).
+pub(crate) fn data(env: &Env) -> Result<PathBuf, String> {
+    Ok(real_path(&data_home(env)?).join("muse"))
+}
+
+/// What a window's Muse is told its data folder's folder is (`XDG_DATA_HOME`): its real
+/// path, where the environment names it through a link. Muse 1.4.14 takes a data folder
+/// reached through one for unsafe (`unsafe_registry_root`, a Mac's `/tmp`) and writes
+/// no `route_facts`, so a fresh window would never learn its session (T-829's probe,
+/// T-931). None where the path is its real one.
+pub(crate) fn data_home_given(env: &Env) -> Option<String> {
+    let given = data_home(env).ok()?;
+    let real = real_path(&given);
+    (real != given).then(|| real.to_string_lossy().into_owned())
 }
 
 /// Muse's settings, `muse/settings.json` in `XDG_CONFIG_HOME`, else in `.config` in the
