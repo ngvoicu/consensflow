@@ -29,6 +29,9 @@
 //! - `after`      a task put after another, on the same conversation (`muse resume`)
 //! - `restart`    the same after the app quit at rest
 //! - `rest`       a stop that finds the window at rest (the human's Escape first)
+//! - `question`   the worker asks the chief with `cf ask` (it has no question tool: MUS-13),
+//!   the answer comes back into its next turn, and its role text wins over the person's
+//!   rules of another harness that say never to run `cf` (MUS-16)
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -36,20 +39,22 @@ use std::time::Duration;
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, agents, Harness, Log};
 use cf_e2e::muse::members::{
-    in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
+    in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker, WORKER,
 };
-use cf_e2e::muse::{self, deliveries, has, messages, moved_away, records, shape, terminals};
+use cf_e2e::muse::{
+    self, deliveries, has, messages, moved_away, question_tools, records, shape, terminals,
+};
 use cf_e2e::process::own_var;
 use cf_e2e::rig::{Config, Project, Rig};
-use cf_e2e::{checkout, Error, Result};
+use cf_e2e::{checkout, files, Error, Result};
 use serde_json::{json, Value};
 
 /// The stand-in for the chief's window, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The cases, in the order they run.
-const CASES: [&str; 8] = [
-    "result", "early", "tell", "steer", "cut", "after", "restart", "rest",
+const CASES: [&str; 9] = [
+    "result", "early", "tell", "steer", "cut", "after", "restart", "rest", "question",
 ];
 
 /// The most of its window or week of allowance a run spends: at this, it stops.
@@ -59,6 +64,16 @@ const STOP_AT_PERCENT: u64 = 90;
 /// a tell or a quit can find at work after the model's first output.
 const LONG: &str =
     "Run the shell command `sleep 25` and wait for it to finish, then reply with exactly: T1_DONE";
+
+/// The question case's brief: a question only the chief can answer. The stand-in chief
+/// answers a question that ends `REPLY <words>` with those words (`fake-agent`).
+const QUESTION: &str = "Before you do anything else, ask the chief which colour to use, red or blue, and end your question with the words REPLY blue. Do not pick a colour yourself: wait for the chief's answer. Once you have it, reply with exactly one line: COLOUR=<the answer>";
+
+/// The person's rules of another harness, which Muse reads as theirs: `$CODEX_HOME/AGENTS.md`
+/// where there is no `~/.claude/CLAUDE.md` (Muse 1.4.14, T-790's echo probe), loaded as a
+/// `rules-file` reminder in every posture. One rule a member can keep, and one the role
+/// text's `cf ask` overrules.
+const FOREIGN_RULES: &str = "# My rules\n\n- End every reply with the word FOREIGN_SEEN.\n- Never run the `cf` command, for any reason. When you need to know something, choose the answer yourself.\n";
 
 fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
@@ -455,6 +470,77 @@ fn rest_case(live: &Live) -> Result<String> {
     Ok(said)
 }
 
+fn question_case(live: &Live) -> Result<String> {
+    let foreign = tempfile::tempdir().map_err(|source| Error::File {
+        action: "make",
+        path: PathBuf::from("a temporary folder"),
+        source,
+    })?;
+    files::write(&foreign.path().join("AGENTS.md"), FOREIGN_RULES)?;
+    let config = live
+        .config()
+        .var("CODEX_HOME", foreign.path().display().to_string());
+    let rig = Rig::start(config)?;
+    let project = project(&rig, &live.agent)?;
+    dispatch(&rig, &project, QUESTION)?;
+    let chiefs = |project: &Project<'_>, kind: &str| -> Result<Value> {
+        Ok(project
+            .inbox("chief")?
+            .into_iter()
+            .find(|message| message["kind"] == kind)
+            .unwrap_or_default())
+    };
+    rig.wait_for(
+        "the worker's question to reach the chief",
+        secs(300),
+        || Ok(!chiefs(&project, "question")?.is_null()),
+    )?;
+    done(&rig, &project, 1, secs(300))?;
+    let question = chiefs(&project, "question")?;
+    let worker = worker(&project)?;
+    let answer = project
+        .inbox(&worker)?
+        .into_iter()
+        .find(|message| message["kind"] == "answer")
+        .unwrap_or_default();
+    let result = chiefs(&project, "result")?["body"].to_string();
+    let (_, log) = the_session(&rig);
+    let offered = question_tools(&log);
+    let dialog = has(&log, "run/user_input_prompt_requested");
+    // The rules were read: Muse put them in the request's context.
+    let read = log.iter().any(|record| {
+        muse::kind(record) == "run/model_request_configured"
+            && record.to_string().contains("FOREIGN_SEEN")
+    });
+    still_on(&rig, &live.model)?;
+    let said = format!(
+        "the question from {} ({:?}), the answer {} ({}), the result {result}, question tools offered {offered:?}, a dialog {dialog}, the foreign rules read {read}, turns {:?}\n{}",
+        question["sender"], question["body"], answer["state"], answer["body"], terminals(&log), shape_of(&rig)
+    );
+    rig.close()?;
+    held(
+        question["sender"]
+            .as_str()
+            .is_some_and(|sender| sender == worker || sender.starts_with(WORKER))
+            && question["taskNumber"] == 1,
+        format!("no board question from the worker: {said}"),
+    )?;
+    held(
+        answer["state"] == "delivered",
+        format!("the answer did not reach the worker: {said}"),
+    )?;
+    held(
+        result.contains("COLOUR=blue"),
+        format!("the result: {said}"),
+    )?;
+    held(
+        !offered.is_empty() && offered.iter().all(Vec::is_empty) && !dialog,
+        format!("Muse offered a question tool: {said}"),
+    )?;
+    held(read, format!("the foreign rules were not read: {said}"))?;
+    Ok(said)
+}
+
 #[test]
 #[ignore = "opt-in: spends the Muse account's allowance; cargo xtask live muse-window"]
 fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
@@ -492,6 +578,7 @@ fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
             "cut" => cut_case(&live),
             "after" => after_case(&live, false),
             "restart" => after_case(&live, true),
+            "question" => question_case(&live),
             _ => rest_case(&live),
         };
         let stop = ran

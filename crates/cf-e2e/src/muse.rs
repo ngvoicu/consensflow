@@ -259,6 +259,26 @@ pub fn has(records: &[Value], wanted: &str) -> bool {
     records.iter().any(|record| kind(record) == wanted)
 }
 
+/// The question tools each model request of the log offered, in order: the names among
+/// its `toolset.active_tools` (`run/model_request_configured`) Muse asks the person with,
+/// `request_user_input` and the `request_user_input_async` `--yolo` adds (1.4.14).
+pub fn question_tools(records: &[Value]) -> Vec<Vec<String>> {
+    records
+        .iter()
+        .filter(|record| kind(record) == "run/model_request_configured")
+        .map(|record| {
+            record["payload"]["event"]["toolset"]["active_tools"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|tool| tool.starts_with("request_user_input"))
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect()
+}
+
 /// What `muse usage --json` says of the account's allowance now, asked of the machine's
 /// Muse with the person's login (its secret in the keychain, found by `real_home`) and
 /// the settings in `config_home`, a throwaway folder: no model turn.
@@ -430,7 +450,7 @@ pub mod members {
 mod tests {
     use serde_json::json;
 
-    use super::used_percent;
+    use super::{question_tools, used_percent};
 
     /// T-829's live run (Muse 1.4.14, 2026-10-28): a window of the subscription in which
     /// nothing was used yet answers no allowance with `server_sent_no_usage`, which is no
@@ -448,5 +468,37 @@ mod tests {
         assert_eq!(used_percent(&used), Some((23, 4)));
         let none = json!({ "schemaVersion": 1, "allowance": null, "reason": "no_allowance" });
         assert_eq!(used_percent(&none), None);
+    }
+
+    /// Each request's question tools, as Muse 1.4.14 on echo wrote them (T-790's probe):
+    /// both under `--yolo`, none with `--disable-request-user-input`.
+    #[test]
+    fn the_question_tools_of_each_request_are_read_from_its_toolset() {
+        let request = |tools: &[&str]| {
+            json!({ "payload": { "kind": "run", "event": {
+                "kind": "model_request_configured",
+                "toolset": { "source": "default", "mode": "all", "active_tools": tools },
+            } } })
+        };
+        let log = [
+            request(&[
+                "read_file",
+                "request_user_input",
+                "request_user_input_async",
+                "bash",
+            ]),
+            json!({ "payload": { "kind": "run", "event": { "kind": "started" } } }),
+            request(&["read_file", "bash"]),
+        ];
+        assert_eq!(
+            question_tools(&log),
+            [
+                vec![
+                    "request_user_input".to_owned(),
+                    "request_user_input_async".to_owned()
+                ],
+                Vec::new(),
+            ]
+        );
     }
 }

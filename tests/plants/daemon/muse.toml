@@ -30,6 +30,10 @@ muse-hook-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "dispatch", 
 # their plants say `harnesses = ["muse"]` and are not run there: T-829).
 muse-rig-resume = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::a_muse_worker_cut"]
 muse-rig-take-back = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::an_interrupt_before"]
+muse-rig-launch = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::a_task_goes_from_its_brief"]
+# T-790: the live kit's question tools, and the rig's reading of a request's.
+muse-live-agents = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::agents"]
+muse-e2e-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::tests"]
 # T-829: the engine's clear of a withheld paste, the live runs' seats, and the plant runner.
 muse-withheld = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "withheld_enter::"]
 muse-box-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::the_engine_is_told"]
@@ -3061,3 +3065,61 @@ runs = ["muse-lib"]
 file = "crates/cf-harness/src/muse/paths.rs"
 find = '''    Ok(real_path(&data_home(env)?).join("muse"))'''
 replace = '''    Ok(data_home(env)?.join("muse"))'''
+
+# MUS-13 (T-790): a member's window has no question tool (`--disable-request-user-input`) and
+# asks with `cf ask`; the chief keeps its dialog.
+[[plant]]
+name = "muse: a member's window keeps its question tools"
+meant = "a_members_window_has_no_question_tool_and_the_chiefs_keeps_its_own"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            if launch.role != "chief" {
+                argv.push(NO_QUESTION_TOOL.to_owned());
+            }'''
+replace = '''            let _ = NO_QUESTION_TOOL;'''
+
+[[plant]]
+name = "muse: the chief's window loses its question tool too"
+meant = "a_members_window_has_no_question_tool_and_the_chiefs_keeps_its_own"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            if launch.role != "chief" {'''
+replace = '''            if !launch.role.is_empty() {'''
+
+[[plant]]
+name = "muse: an echo member's window is launched with its question tools"
+meant = "a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole"
+runs = ["muse-rig-launch"]
+harnesses = ["muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            if launch.role != "chief" {
+                argv.push(NO_QUESTION_TOOL.to_owned());
+            }'''
+replace = '''            let _ = NO_QUESTION_TOOL;'''
+
+[[plant]]
+name = "muse: the live kit tells a Muse member to use the question tool it has not"
+meant = "only_pi_and_muse_members_have_no_tool_to_ask_a_question_with"
+runs = ["muse-live-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        Harness::Muse | Harness::Pi => None,'''
+replace = '''        Harness::Muse => Some("request_user_input tool"),
+        Harness::Pi => None,'''
+
+[[plant]]
+name = "muse: a request's async question tool is not read as one"
+meant = "the_question_tools_of_each_request_are_read_from_its_toolset"
+runs = ["muse-e2e-reads"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''                .filter(|tool| tool.starts_with("request_user_input"))'''
+replace = '''                .filter(|tool| *tool == "request_user_input")'''

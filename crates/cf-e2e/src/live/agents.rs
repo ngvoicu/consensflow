@@ -349,15 +349,15 @@ pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
 }
 
 /// What each harness calls its tool for asking the person it works for a
-/// question, as a brief names it; Pi has none.
+/// question, as a brief names it: Pi has none, and a Muse member is launched
+/// without its own (`--disable-request-user-input`, T-790). Both ask with `cf ask`.
 pub fn question_tool(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("AskUserQuestion tool"),
         Harness::OpenCode => Some("question tool"),
         Harness::Codex => Some("request_user_input tool"),
         Harness::Devin => Some("ask_user_question tool"),
-        Harness::Muse => Some("request_user_input tool"),
-        Harness::Pi => None,
+        Harness::Muse | Harness::Pi => None,
     }
 }
 
@@ -747,12 +747,14 @@ mod tests {
         }
     }
 
+    /// T-790: a Muse member is launched without its question tools
+    /// (`--disable-request-user-input`), so no brief tells it to use one.
     #[test]
-    fn only_pi_has_no_tool_to_ask_a_question_with() {
+    fn only_pi_and_muse_members_have_no_tool_to_ask_a_question_with() {
         for harness in Harness::ALL {
             assert_eq!(
                 question_tool(harness).is_none(),
-                harness == Harness::Pi,
+                matches!(harness, Harness::Pi | Harness::Muse),
                 "{harness:?}"
             );
         }

@@ -48,7 +48,7 @@ const RIG: &str = "crates/cf-e2e/src/rig/install.rs";
 
 /// The sources that name the `cf` under test and set no variable themselves: the
 /// kit whose environment their `cf` is given, or none where it looks for no harness.
-const THROUGH: [(&str, Option<&str>); 14] = [
+const THROUGH: [(&str, Option<&str>); 15] = [
     ("app/tests/agents-server.mjs", Some("tests/helpers.mjs")),
     // Its probe names the cf a copy is made of, and starts only cargo.
     ("crates/cf-e2e/src/bundle.rs", None),
@@ -60,6 +60,8 @@ const THROUGH: [(&str, Option<&str>); 14] = [
     ("crates/cf-e2e/tests/cli/roster.rs", Some(SCRATCH)),
     ("crates/cf-e2e/tests/cli/tool_folders.rs", None),
     ("crates/cf-e2e/tests/daemon/core_daemon.rs", None),
+    // Its cf, in a Muse window's shell, asks a listener of the test's for an inbox: no harness.
+    ("crates/cf-e2e/tests/live_muse_posture.rs", None),
     // It names the cf a rig is copied from, and starts it in the rig's environment.
     (
         "crates/cf-e2e/tests/regressions/a_cf_a_build_took_away_left_a_window_none.rs",

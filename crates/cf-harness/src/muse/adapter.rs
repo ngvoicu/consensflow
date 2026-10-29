@@ -8,9 +8,18 @@
 //! its record is the session's log (`record`).
 //!
 //! Full permission is the posture every harness's window runs in (the owner's decision
-//! of 2026-09-19) until MUS-16 says otherwise: `--yolo` turns approval and the sandbox
-//! off and trusts the workspace for the run, so no trust dialog is asked and none is
-//! saved. It keeps Muse's question tool, which MUS-13's door answers.
+//! of 2026-09-19), and Muse's too (MUS-16, T-790): `--yolo` turns approval and the
+//! sandbox off and trusts the workspace for the run, so no trust dialog is asked and
+//! none is saved. A softer mode keeps Muse's sandbox, which refuses a write outside the
+//! project and the temporary folders, and with its default network (`proxy-only`) the
+//! member's `cf` its connection to the daemon (Muse 1.4.14, `live_muse_posture`).
+//!
+//! A member's window has no question tool (MUS-13, T-790): Muse sends no `PreToolUse`
+//! for `request_user_input` (T-705, 1.4.13), nor for the `request_user_input_async`
+//! that `--yolo` adds (1.4.14), so no hook can answer one from the board, and nobody
+//! watches a member's window to answer its dialog. `--disable-request-user-input`
+//! withholds both, and the member asks with `cf ask`, as its role text says and as
+//! Pi's does. The chief keeps its dialog, which the human answers in its window.
 
 use std::rc::Rc;
 
@@ -30,6 +39,9 @@ use crate::seams::Services;
 use crate::shared::paths::agents_skills;
 use crate::shared::role::write_role;
 use crate::shared::{specmint, window_args};
+
+/// Withholds Muse's question tools for the run: a member asks with `cf ask`.
+const NO_QUESTION_TOOL: &str = "--disable-request-user-input";
 
 /// Muse Code, as the engine launches its windows.
 pub struct MuseAdapter {
@@ -87,6 +99,9 @@ impl Adapter for MuseAdapter {
             let mut argv = vec![integration.program];
             argv.extend(integration.args);
             argv.extend(invocation.args);
+            if launch.role != "chief" {
+                argv.push(NO_QUESTION_TOOL.to_owned());
+            }
             Ok(Prepared {
                 argv,
                 env: integration.env,
