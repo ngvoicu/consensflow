@@ -547,6 +547,8 @@ fn the_commands_are_not_told_of_a_window_whose_servers_are_not_in_its_group() {
         None,
         Kept::of(Servers::AtLaunch, Some(10)),
         Kept::of(Servers::AtLaunch, None),
+        // A window in the window's group where there are no groups claims what cannot be.
+        Kept::of(Servers::InGroup, None),
     ] {
         assert_eq!(commands(&marked(&[], kept, None), &tree), None, "{kept:?}");
     }
@@ -608,7 +610,7 @@ fn where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and
     // Claude Code had ended held its task until Finish.
     let baseline = marked(
         &[member(10, "claude.exe", "claude.exe", None)],
-        Kept::of(Servers::InGroup, None),
+        Kept::of(Servers::ByShell, None),
         Some("claude"),
     );
     assert!(baseline.tells_commands());
@@ -649,7 +651,7 @@ fn where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and
 fn where_the_platform_has_no_groups_what_ran_at_the_rest_a_look_names_is_no_command() {
     let mut baseline = marked(
         &[member(10, "claude.exe", "claude.exe", None)],
-        Kept::of(Servers::InGroup, None),
+        Kept::of(Servers::ByShell, None),
         Some("claude"),
     );
     // A shell the harness started before the rest, which runs on: a server the user

@@ -159,8 +159,9 @@ fn a_process_whose_group_cannot_be_read_is_told_by_its_ancestry_and_by_nothing_e
 
 #[test]
 fn a_group_the_platform_does_not_say_makes_no_process_a_server_by_where_it_is() {
-    // Windows: a job object has no groups. The way is kept (the commands are told by
-    // their chain, T-906), and no process is the harness's by a group.
+    // Windows: a job object has no groups. The way is kept (a harness that runs its
+    // commands in shells has them told by their chain, T-906), and no process is the
+    // harness's by a group.
     assert_eq!(
         Kept::of(Servers::InGroup, None),
         Some(Kept {
@@ -170,6 +171,13 @@ fn a_group_the_platform_does_not_say_makes_no_process_a_server_by_where_it_is() 
     );
     assert_eq!(Kept::of(Servers::Unknown, Some(PANE)), None);
     assert_eq!(Kept::of(Servers::Unknown, None), None);
+    assert_eq!(
+        Kept::of(Servers::ByShell, None),
+        Some(Kept {
+            group: None,
+            servers: Servers::ByShell
+        })
+    );
     assert_eq!(
         Kept::of(Servers::AtLaunch, Some(PANE)),
         Some(Kept {
@@ -187,7 +195,7 @@ fn a_group_the_platform_does_not_say_makes_no_process_a_server_by_where_it_is() 
         ungrouped(started(21, "bash.exe -c sleep 9", PANE, 10)),
     ];
     let launch: HashSet<ProcessKey> = tree.iter().map(|member| member.key).collect();
-    for servers in [Servers::InGroup, Servers::AtLaunch] {
+    for servers in [Servers::InGroup, Servers::AtLaunch, Servers::ByShell] {
         let kept = Kept::of(servers, None).expect("a known way");
         assert!(own(kept, &launch, &tree).is_empty(), "{servers:?}");
     }

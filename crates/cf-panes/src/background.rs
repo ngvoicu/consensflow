@@ -170,16 +170,21 @@ impl Baseline {
         self.protected(tree);
     }
 
-    /// Whether the host can tell the commands of the window's harness: a window whose
-    /// harness keeps its servers in the window's group, as the daemon said at a mark (by
-    /// their groups where the platform has them, by their chains where it has none:
-    /// [`Baseline::commands`]). Asked before the tree is walked (Calliope on 472b1d96).
+    /// Whether the host can tell the commands of the window's harness, as the daemon said at
+    /// a mark how it keeps its servers: in the window's group, on a platform with groups,
+    /// by their groups; in no group, its commands each in a shell of its own
+    /// ([`Servers::ByShell`]), by their chains ([`Baseline::commands`]). Asked before the
+    /// tree is walked (Calliope on 472b1d96).
     pub fn tells_commands(&self) -> bool {
         self.commands_kept().is_some()
     }
 
     fn commands_kept(&self) -> Option<Kept> {
-        self.kept.filter(|kept| kept.servers == Servers::InGroup)
+        // A window in the window's group where there are no groups claims what cannot be.
+        self.kept
+            .filter(|kept| kept.servers == Servers::InGroup)
+            .filter(|kept| kept.group.is_some())
+            .or(self.kept.filter(|kept| kept.servers == Servers::ByShell))
     }
 
     /// The window is at rest, its tree `tree`: kept, under the number answered, for a
@@ -209,8 +214,8 @@ impl Baseline {
     /// leaves nothing out.
     ///
     /// **Where the platform has no groups** (a Windows job object, T-906) no process is a
-    /// command by its group, and they are told by their chain instead
-    /// ([`Baseline::chained`]).
+    /// command by its group: a harness that runs each command in a shell of its own
+    /// ([`Servers::ByShell`]) has them told by their chain instead ([`Baseline::chained`]).
     pub fn commands(
         &self,
         tree: &[Member],
@@ -218,7 +223,7 @@ impl Baseline {
         before: &dyn Fn(&Member) -> bool,
     ) -> Option<Background> {
         let kept = self.commands_kept()?;
-        let Some(group) = kept.group else {
+        let Some(group) = kept.group.filter(|_| kept.servers == Servers::InGroup) else {
             return Some(listed(self.chained(tree, since)));
         };
         let empty = HashSet::new();
@@ -228,7 +233,8 @@ impl Baseline {
         Some(listed(harness::commands(group, tree, rest, before)))
     }
 
-    /// The commands of a window whose platform has no groups (a Windows job object): what
+    /// The commands of a window whose harness runs each in a shell of its own, on a platform
+    /// with no groups (a Windows job object, [`Servers::ByShell`]): what
     /// began after the rest `since`, where it is one kept, else after the window's launch,
     /// that is the work a turn's is proved by ([`work`]: a shell the harness started, and a
     /// chain of processes that run down from it while it runs); never what is the harness's

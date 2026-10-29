@@ -169,7 +169,9 @@ fn is_server(kept: Kept, launch: &HashSet<ProcessKey>, member: &Member) -> bool 
                     .group
                     .is_some_and(|window| member.group.is_some_and(|group| group != window))
         }
-        Servers::Unknown => false,
+        // Where the harness runs its commands in shells and its servers as programs, no
+        // process is a server by where it is.
+        Servers::ByShell | Servers::Unknown => false,
     }
 }
 

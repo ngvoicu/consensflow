@@ -71,6 +71,14 @@ pub enum Servers {
     /// process, which is in the window's group. What any of them starts later is
     /// the harness's.
     AtLaunch,
+    /// Where the platform has no process groups to keep them in (a Windows job object,
+    /// which holds the window's processes whole): the harness runs every command of its
+    /// agent in a shell it starts for that command (Claude Code's Git Bash `bash.exe`, or
+    /// PowerShell), and starts its servers as the programs they are (`node`, `uvx`, npm's
+    /// `cmd.exe /c npx …`), never in a shell of its own. No process is the harness's by
+    /// where it is; a command is such a shell, and what runs under it while it runs
+    /// (`cf-panes`' `background`). Claude Code on Windows (T-906).
+    ByShell,
     /// Not known: no process is told for the harness's by where it is, so only what
     /// the host can prove the harness's by its program (a program named for it
     /// that is beside its own binary, and what descends from one) is left alone, and
@@ -155,11 +163,11 @@ pub struct Background {
 /// agent so (a Bash call, a Monitor's, a background job's, in the foreground or not, and
 /// what one `exec`s keeps the group), and its hooks and status line, a moment each; its
 /// MCP servers and helpers stay in the window's group. The host tells them only of a
-/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]).
-/// On a platform with no groups (a Windows job object) a command is what a chain proves
-/// the agent's, as the turn's work is (`cf-panes`' `background`): a shell the harness
-/// started after the rest the request names, or the window's launch, and what runs down
-/// from it, and what began since with no parent in the tree (T-906). It is
+/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]), on
+/// a platform with groups, and of one whose harness runs each command in a shell of its
+/// own where there are none ([`Servers::ByShell`], a Windows job object): there a command
+/// is such a shell the harness started after the rest the request names, or the window's
+/// launch, and what runs under it while it runs (T-906). It is
 /// `null` too where a process of the window cannot be read (another user's, as a command
 /// that `exec`s `sudo` becomes), which may be a command: the answer says so then
 /// ([`CommandsAnswer`]). What ran at the rest the request
@@ -446,6 +454,7 @@ mod tests {
         for (word, servers) in [
             ("inGroup", Servers::InGroup),
             ("atLaunch", Servers::AtLaunch),
+            ("byShell", Servers::ByShell),
         ] {
             let body = json!({ "id": "p1-zeus", "generation": 4, "servers": word });
             let said: MarkRequest = serde_json::from_value(body.clone()).unwrap();
@@ -482,6 +491,7 @@ mod tests {
         assert_eq!(said.servers, Servers::Unknown);
         assert!(said.servers.is_unknown());
         assert!(!Servers::InGroup.is_unknown() && !Servers::AtLaunch.is_unknown());
+        assert!(!Servers::ByShell.is_unknown());
     }
 
     #[test]

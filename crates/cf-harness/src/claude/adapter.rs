@@ -237,9 +237,16 @@ impl Adapter for ClaudeAdapter {
     /// servers as it takes its first message, after the window's turn is marked.
     /// What a server starts is the harness's whatever group it starts it in: the
     /// browser of `@playwright/mcp` and `chrome-devtools-mcp` leaves it.
+    ///
+    /// On Windows a job object has no groups, and Claude Code runs every command of its
+    /// agent in a shell it starts for it (Git Bash's `bash.exe`: T-375's scripts, T-858's
+    /// `exec sleep 611` in a Monitor) and its servers as their programs (npm's are a
+    /// `cmd.exe /c npx …`, which is no shell): [`Servers::ByShell`]. Said `Unknown` before
+    /// T-906, it left the host telling none of its commands, and a Monitor that Claude Code
+    /// had ended held its task until Finish.
     fn servers(&self) -> Servers {
         if self.env.on_windows() {
-            Servers::Unknown
+            Servers::ByShell
         } else {
             Servers::InGroup
         }

@@ -480,7 +480,7 @@ mod windows {
         );
         read_until(&table, &key, &output, "READY#");
         table
-            .mark(&key, Servers::InGroup, Some("claude"))
+            .mark(&key, Servers::ByShell, Some("claude"))
             .expect("mark the turn");
         table.write(&key, b"\r").expect("go on");
         read_until(&table, &key, &output, "RESTING#");

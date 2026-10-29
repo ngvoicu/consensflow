@@ -40,6 +40,8 @@ tem-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "ho
 tem-panes-background = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::"]
 tem-engine-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_answers::"]
 tem-panes-windows-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::turn::tests::windows::"]
+tem-harness-servers = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "servers::"]
+tem-rig-shell-ended = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_monitor_claude_ended_by_its_shell_held_its_task::"]
 tem-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 tem-opencode-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 tem-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading"]
@@ -926,8 +928,8 @@ runs = ["tem-panes-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background.rs"
-find = '        self.kept.filter(|kept| kept.servers == Servers::InGroup)'
-replace = '        self.kept.filter(|kept| kept.servers != Servers::Unknown)'
+find = '            .filter(|kept| kept.servers == Servers::InGroup)'
+replace = '            .filter(|kept| kept.servers != Servers::Unknown)'
 
 [[plant]]
 name = "turn-end-min reader: a monitor's notice with a status is kept as its end"
@@ -2011,3 +2013,55 @@ runs = ["tem-panes-windows-commands"]
 file = "crates/cf-panes/src/pty/turn.rs"
 find = '                Some(members) => Read::All(members),'
 replace = '                Some(_) => Read::Unreadable,'
+
+# The second half of T-906: Claude's adapter told the host `Unknown` on Windows, so the host's rule
+# above never engaged on a real window (two zeewin2 live `tell` runs held the task). Claude Code says
+# `ByShell` there, and the host tells by chain only a harness that says so; `InGroup` where there
+# are no groups claims what cannot be. The rig case runs the real adapter and host, with the
+# stand-in ending the monitor's shell alone as Claude Code 2.1.312 does on Windows.
+
+[[plant]]
+name = "turn-end-min harness: Claude says nothing of its servers on Windows"
+meant = "on_windows_claude_says_it_runs_each_command_in_a_shell_and_no_other_harness_says_anything"
+runs = ["tem-harness-servers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """        if self.env.on_windows() {
+            Servers::ByShell"""
+replace = """        if self.env.on_windows() {
+            Servers::Unknown"""
+
+[[plant]]
+name = "turn-end-min rig (Windows): Claude says nothing of its servers on Windows"
+meant = "a_monitor_whose_shell_claude_code_ended_lets_its_task_go_though_what_the_shell_ran_runs_on"
+platforms = ["windows"]
+runs = ["tem-rig-shell-ended"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """        if self.env.on_windows() {
+            Servers::ByShell"""
+replace = """        if self.env.on_windows() {
+            Servers::Unknown"""
+
+[[plant]]
+name = "turn-end-min host: a harness that runs its commands in shells has them told by no chain"
+meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            .or(self.kept.filter(|kept| kept.servers == Servers::ByShell))'
+replace = '            .or(None)'
+
+[[plant]]
+name = "turn-end-min host: a window in the window's group where there are no groups is told its commands"
+meant = "the_commands_are_not_told_of_a_window_whose_servers_are_not_in_its_group"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            .filter(|kept| kept.group.is_some())'
+replace = '            .filter(|kept| kept.group.is_some() || kept.group.is_none())'
