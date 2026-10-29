@@ -139,7 +139,7 @@ runs = ["engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''
-            part.starts_given_up = 0;'''
+        record.window.borrow_mut().starts_given_up = 0;'''
 replace = ""
 
 [[plant]]

@@ -813,8 +813,8 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if project.state != "open" {
             return Ok(());
         }
-        // A chief whose model is gone with no other to start it on stays closed'''
-replace = '''        // A chief whose model is gone with no other to start it on stays closed'''
+        // A chief whose window keeps failing to start is tried again ever more slowly.'''
+replace = '''        // A chief whose window keeps failing to start is tried again ever more slowly.'''
 
 [[plant]]
 name = "project settings: the daemon refuses the approval of a closed project"

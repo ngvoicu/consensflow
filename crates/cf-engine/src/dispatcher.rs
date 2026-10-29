@@ -885,8 +885,10 @@ impl Dispatcher {
             // nothing: the chief opens again at once on the harness's default (CHF-06).
             // A refusal at launch has no record to say it in, so its screen is read; a
             // window that came up, or ended with no failure, is read in no screen's words
-            // (Calliope's P1, T-955).
-            let up = record.window.borrow().up;
+            // (Calliope's P1, T-955). A window came up where its harness's record shows
+            // anything of it (`named`): nothing is handed a window before (Claude Code's
+            // `started` answers at once, before Claude Code has run).
+            let up = record.window.borrow().named;
             if project.state == "open" && !own && !up && shown.ended_failing() {
                 if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))? {
                     self.reopen_without(&record, gone);

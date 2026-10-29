@@ -779,16 +779,6 @@ find = '            if project.state == "open" && !own && !up && shown.ended_fai
 replace = '            if project.state == "open" && !own && shown.ended_failing() {'
 
 [[plant]]
-name = "chief: a window that came up is never marked so"
-meant = "a_chief_that_came_up_and_ended_with_a_gone_models_words_on_its_screen_keeps_its_model"
-runs = ["chm-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = '            part.up = true;'
-replace = '            part.up = false;'
-
-[[plant]]
 name = "chief: a code-0 exit is taken for a launch's refusal"
 meant = "a_launch_that_ended_with_code_0_before_it_came_up_keeps_its_model"
 runs = ["chm-dispatcher"]
