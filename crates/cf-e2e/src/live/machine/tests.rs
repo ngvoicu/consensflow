@@ -706,3 +706,22 @@ fn a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks() {
         None
     );
 }
+
+/// T-946: the members kit launched the machine's Muse with the owner's home and folders, and
+/// its run wrote the owner's `~/.config/muse`. A rig that seats Muse runs it through the rig's
+/// own live launcher, which gives it the rig's folders (`crate::muse::write_live_stand_in`).
+#[cfg(unix)]
+#[test]
+fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
+    let bin = tempfile::tempdir().unwrap();
+    crate::files::write_executable(&bin.path().join("muse"), "#!/bin/sh\n").unwrap();
+    crate::files::write(&bin.path().join(".muse-version"), "1.4.14-R7309.1\n").unwrap();
+    crate::files::write_executable(&bin.path().join("muse-bin-1.4.14-R7309.1"), "#!/bin/sh\n")
+        .unwrap();
+    let muse = Installed::at(Harness::Muse, bin.path().join("muse"), "/home/me");
+    let config = rig(&[muse], "/the/stand-in");
+    assert_eq!(config.muse_live_home(), Some(Path::new("/home/me")));
+    // A rig that seats no Muse runs none.
+    let codex = Installed::at(Harness::Codex, "/bin/echo", "/home/me");
+    assert_eq!(rig(&[codex], "/the/stand-in").muse_live_home(), None);
+}

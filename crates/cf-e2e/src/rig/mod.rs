@@ -308,6 +308,15 @@ impl Config {
         self
     }
 
+    /// The person's home a live Muse of the rig finds its keychain login by, where the rig
+    /// runs the machine's Muse live ([`Config::muse_live`]).
+    pub fn muse_live_home(&self) -> Option<&Path> {
+        match &self.muse {
+            Some((_, crate::muse::Run::Live { real_home })) => Some(real_home),
+            _ => None,
+        }
+    }
+
     /// With the `opencode` the windows find first on their `PATH` the stand-in
     /// `program` (the `fake-opencode-2` binary of this crate): the OpenCode of a
     /// machine that has updated itself to 2, which says so to `--version`, answers

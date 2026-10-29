@@ -65,7 +65,10 @@ pub fn installed() -> std::result::Result<Installed, String> {
 /// read only where the `PATH` has no `muse`. So a run is pointed at another Muse (one
 /// downloaded into a scratch folder, T-905) by its `PATH`, and the person's home and Muse
 /// are left as they are.
-fn installed_on(path: &str, home: Option<&str>) -> std::result::Result<Installed, String> {
+pub(crate) fn installed_on(
+    path: &str,
+    home: Option<&str>,
+) -> std::result::Result<Installed, String> {
     let launcher = match crate::live::machine::find("muse", path, None) {
         Some(found) => found,
         None => Path::new(home.ok_or("no muse on the PATH, and no home to find Muse Code in")?)

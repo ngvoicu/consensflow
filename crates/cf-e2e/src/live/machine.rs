@@ -505,6 +505,9 @@ fn rig_keeping_claude_in(
         if let Some(isolation) = install.isolation() {
             config = config.isolated(Arc::clone(isolation) as Arc<dyn HarnessHome>);
         }
+        if install.harness == Harness::Muse {
+            config = config.muse_live(muse_of(install), &install.home);
+        }
         if install.harness == Harness::Claude {
             // A folder the run was given wins: its caller made it and copied the login
             // into it. Otherwise the kit's own copy of the login, where it has one.
@@ -516,6 +519,24 @@ fn rig_keeping_claude_in(
         }
     }
     config
+}
+
+/// The machine's Muse that `install` names, as its rig's own launcher runs it: a rig that seats
+/// Muse runs it through that launcher, which gives its windows the rig's folders and the
+/// person's home for its keychain alone ([`crate::muse::write_live_stand_in`]), and never on
+/// the person's own `~/.config/muse` and `~/.local/share/muse` (T-946: the members kit's live
+/// pacing run wrote them). A Muse the launcher cannot be made for stops the run before anything
+/// is spent.
+fn muse_of(install: &Installed) -> crate::muse::Installed {
+    let folder = install
+        .command
+        .parent()
+        .map(|folder| folder.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let home = install.home.to_string_lossy();
+    crate::muse::installed_on(&folder, Some(&home)).unwrap_or_else(|why| {
+        panic!("a rig that seats Muse runs it through its own launcher, and {why}")
+    })
 }
 
 /// A rig for `installs`, one of which is the machine's Claude Code, whose Claude
