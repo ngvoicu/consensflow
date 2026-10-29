@@ -287,14 +287,7 @@ pub(crate) fn create_task(
         for number in &blocking {
             let waits = store.task_row(project_id, *number)?;
             if waits.state != "open" {
-                return Err(LedgerError::refused_with(
-                    "not-on-the-board",
-                    format!(
-                        "T-{number} is {}: only a task still on the board can wait for a new one",
-                        waits.state
-                    ),
-                    409,
-                ));
+                return Err(cannot_wait_for_a_new_one(&waits));
             }
             // A plan has no circles: what the new task waits for, near or far, cannot wait for it.
             if upstream(store, task_id, waits.id)? {
@@ -364,6 +357,35 @@ pub(crate) fn create_task(
             asked: moved,
         })
     })
+}
+
+/// The refusal of a `--before` that names a task which is not on the board: only
+/// an open one can wait for a new task. A task in a window is not pulled back, by
+/// design, so the refusal says what to do instead (T-675, the field report of
+/// 2026-10-27, where a chief cancelled a running review and added it again with
+/// its whole brief restated): add the new task alone, stop the one in its window
+/// with a pause and send it on when the new task is accepted, or add it again
+/// with `--needs`. The new task is not on the board, since the refusal rolls it
+/// back, so it is not named by number.
+fn cannot_wait_for_a_new_one(waits: &TaskRow) -> LedgerError {
+    let number = waits.number;
+    let instead = match waits.state.as_str() {
+        "queued" | "working" | "waiting" => format!(
+            "a task in a window is not pulled back. Add the new task without --before, pause T-{number} now (cf task pause T-{number}), and send it on with cf task resume T-{number} \"…\" once the new task is accepted; or cancel it and add it again with --needs on the new task"
+        ),
+        "paused" => format!(
+            "a task in a window is not pulled back. Add the new task without --before, and send T-{number} on with cf task resume T-{number} \"…\" once the new task is accepted; or cancel it and add it again with --needs on the new task"
+        ),
+        _ => "add that work again with --needs on the new task if it is still wanted".to_owned(),
+    };
+    LedgerError::refused_with(
+        "not-on-the-board",
+        format!(
+            "T-{number} is {}: only a task still on the board can wait for a new one; {instead}",
+            waits.state
+        ),
+        409,
+    )
 }
 
 /// Whether `task_id` needs `other_id`, directly or through the tasks it needs.

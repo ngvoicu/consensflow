@@ -289,12 +289,15 @@ mod tests {
     #[test]
     fn a_text_of_several_lines_is_the_one_answer_to_an_ask_of_one_question() {
         let questions = asked_once();
-        let words = "Approve live tests, but:\n- only on the cheap models\n- stop at the first red\n";
+        let words =
+            "Approve live tests, but:\n- only on the cheap models\n- stop at the first red\n";
         let body = json!(words);
         let picks = require_choices(&questions, None, Some(&body)).unwrap();
         assert_eq!(
             picks,
-            [vec!["Approve live tests, but:\n- only on the cheap models\n- stop at the first red"]],
+            [vec![
+                "Approve live tests, but:\n- only on the cheap models\n- stop at the first red"
+            ]],
             "the lines are not answers of their own: the whole text is one"
         );
         assert_eq!(

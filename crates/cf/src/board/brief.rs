@@ -267,7 +267,10 @@ mod tests {
 
     #[test]
     fn characters_are_counted_as_people_count_them_and_a_long_last_word_is_cut() {
-        assert_eq!(sent(3, "漢字 🙂"), "T-3: sent 4 characters, ending \"漢字 🙂\".");
+        assert_eq!(
+            sent(3, "漢字 🙂"),
+            "T-3: sent 4 characters, ending \"漢字 🙂\"."
+        );
         let long = format!("see {}", "y".repeat(200));
         assert_eq!(
             sent(3, &long),

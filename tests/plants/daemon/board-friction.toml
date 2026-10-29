@@ -10,6 +10,7 @@ friction-tell = ["cargo", "test", "--offline", "-p", "cf", "--test", "tell"]
 friction-answer-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "questions::"]
 friction-answer-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "questions::"]
 friction-answer-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers"]
+friction-cancel = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "cancel_failed"]
 
 # --- T-689: the last line of a reply names its task ---
 
@@ -92,5 +93,67 @@ runs = ["friction-answer-ledger", "friction-answer-route"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/questions.rs"
-find = this ask has {count} questions; give one answer to each, one line each in the order asked (a label or your own words)
-replace = one answer per question ({count})
+find = '            "this ask has {count} questions; give one answer to each, one line each in the order asked (a label or your own words)"'
+replace = '            "one answer per question ({count})"'
+
+# --- T-675: a failed task is cancelled; a task in a window refused as --before says what to do ---
+
+[[plant]]
+name = "board friction: cancel: a failed task cannot be cancelled"
+meant = "a_failed_task_is_cancelled_as_an_open_one_is"
+runs = ["friction-cancel"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        &["paused", "failed"],'
+replace = '        &["paused"],'
+
+[[plant]]
+name = "board friction: cancel: a failed task's window is not stopped or told"
+meant = "a_failed_task_whose_window_is_still_up_is_cancelled_and_its_requester_hears_it_was_stopped"
+runs = ["friction-cancel"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        Some(assignee) if MEMBER_ROLES.contains(&assignee.role.as_str()) => store'
+replace = '        Some(assignee) if task.state != "failed" && MEMBER_ROLES.contains(&assignee.role.as_str()) => store'
+
+[[plant]]
+name = "board friction: cancel: the waiters of a failed task are told to let it finish"
+meant = "what_waits_for_a_failed_task_still_refuses_its_cancel_and_is_told_to_reopen_it"
+runs = ["friction-cancel"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        (Ending::Cancelled, "failed") => format!("reopen T-{number} and let it finish"),'
+replace = '        (Ending::Cancelled, "failed") => format!("let T-{number} finish"),'
+
+[[plant]]
+name = "board friction: cancel: a failed task is cancelled while a task waits for it"
+meant = "what_waits_for_a_failed_task_still_refuses_its_cancel_and_is_told_to_reopen_it"
+runs = ["friction-cancel"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    let waiting = waiters(store, task)?;\n    if waiting.is_empty() {"
+replace = "    let waiting = waiters(store, task)?;\n    if waiting.is_empty() || task.state == \"failed\" {"
+
+[[plant]]
+name = "board friction: before: a task working in its window is refused without a way forward"
+meant = "a_task_in_a_window_cannot_wait_for_a_new_one_and_the_refusal_says_what_to_do_instead"
+runs = ["friction-cancel"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '        "queued" | "working" | "waiting" => format!('
+replace = '        "queued" | "working" | "waiting" if false => format!('
+
+[[plant]]
+name = "board friction: before: a paused task is refused without a way forward"
+meant = "a_task_in_a_window_cannot_wait_for_a_new_one_and_the_refusal_says_what_to_do_instead"
+runs = ["friction-cancel"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '        "paused" => format!('
+replace = '        "paused" if false => format!('

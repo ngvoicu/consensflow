@@ -50,3 +50,10 @@ hand. Say a file is restored only once you have checked it: its diff, or what it
 2026-10-15, when a worker on the owner's Windows machine overwrote a file that held
 uncommitted work with `git checkout`, and other workers said they had restored files they
 had not.
+
+The chief's role text says what to do with a task already in a window that must wait for a new
+one (board task T-957, 3.0.7, from T-675): `A task already in a window is not pulled back: pause
+it, and resume it once the new task is accepted; or cancel it and add it again with the need.`
+where it said `finish it, or cancel it and add it again with the need`. The refusal of
+`--before` for such a task says the same (`crates/cf-ledger/src/tasks/giving.rs`). Changed by
+hand, in those words alone, in the twelve role prints of `text.json` that hold the chief's text.

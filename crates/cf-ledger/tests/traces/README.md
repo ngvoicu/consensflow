@@ -112,3 +112,11 @@ the text of the table (`cf_ledger::testing::hold_apart_what_node_never_writes` a
 `hold_apart_what_node_never_had_in_its_schema`). No answer of Node's says anything of
 it, a message's view never holds it, and the ledger logs no event for it: such a note's
 event is any note's own.
+
+The refusal of a `--before` that names a task already in a window (board task T-957, 3.0.7,
+from T-675) says what to do instead. `ledger-tasks-012`'s one refusal, `T-1 is queued: only
+a task still on the board can wait for a new one`, goes on with `; a task in a window is not
+pulled back. Add the new task without --before, pause T-1 now (cf task pause T-1), and send
+it on with cf task resume T-1 "…" once the new task is accepted; or cancel it and add it
+again with --needs on the new task`: changed by hand, in those words alone, and the same
+words in `cf-board-016` of the daemon's goldens.

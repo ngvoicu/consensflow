@@ -4,8 +4,10 @@
 //! decide on, so a decision taken before the requester was given it withdraws
 //! it, in the decision's own transaction: accepting and sending back do
 //! (`withdraw_result`). A cancel has no such step to take: a task is called
-//! off only before it is done, and `call_off` withdraws every message of it
-//! still on its way, a result an older build left among them. A task is not
+//! off only before it is done, or once it failed, which the chief can neither
+//! reopen to any good nor leave on the board for good (T-675), and `call_off`
+//! withdraws every message of it still on its way, a result an older build left
+//! among them. A task is not
 //! called off while an open task waits for it (`require_unawaited`): what
 //! waits for a task is released when it is accepted, so the waiter would be
 //! blocked for good. A member's removal cancels the member's tasks whatever
@@ -377,7 +379,8 @@ pub(crate) fn reopen_task(
 /// A task is called off, and whoever asked for it hears so in the same
 /// step, unless it cancelled the task itself: what was cancelled, and the
 /// window that was stopped when a member's had begun on it (the daemon
-/// stops that window on its next look). Whoever told the window words it
+/// stops that window on its next look). A task that failed is called off
+/// the same way: its window, if one is left, is stopped like any other's. Whoever told the window words it
 /// never had hears that they went, but the one who called the task off.
 /// Refused, `waited-for`, while an open or paused task waits for it.
 pub(crate) fn cancel_task(
@@ -447,7 +450,12 @@ pub(crate) fn call_off(
 ) -> Result<CalledOff, LedgerError> {
     store.participant_by_handle(project_id, by)?;
     let task = store.task_row(project_id, number)?;
-    let cancellable = [&["open", "queued"], &ACTIVE_TASK_STATES[..], &["paused"]].concat();
+    let cancellable = [
+        &["open", "queued"],
+        &ACTIVE_TASK_STATES[..],
+        &["paused", "failed"],
+    ]
+    .concat();
     require_task_state(&task, &cancellable, "cancel")?;
     require_unawaited(store, &task, ending)?;
     let dropped = Dropped::of(store, &task)?;
@@ -529,9 +537,11 @@ fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<()
         _ => ("wait", "them".to_owned()),
     };
     let number = task.number;
-    let otherwise = match ending {
-        Ending::Cancelled => format!("let T-{number} finish"),
-        Ending::Declined => format!("pass T-{number} on"),
+    let otherwise = match (ending, task.state.as_str()) {
+        // A failed task finishes only once it is reopened.
+        (Ending::Cancelled, "failed") => format!("reopen T-{number} and let it finish"),
+        (Ending::Cancelled, _) => format!("let T-{number} finish"),
+        (Ending::Declined, _) => format!("pass T-{number} on"),
     };
     Err(LedgerError::refused_with(
         "waited-for",
