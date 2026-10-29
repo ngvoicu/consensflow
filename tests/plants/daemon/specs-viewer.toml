@@ -55,6 +55,7 @@ viewer-refresh = ["node", "app/node_modules/@playwright/test/cli.js", "test", "a
 # The page's modals, in the browser: a viewer opened in the task that shut it, and the rest of what holds
 # an open modal whole (`app/tests/modal-stack.spec.mjs`).
 viewer-modals = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/modal-stack.spec.mjs", "-g", "task that shut it"]
+viewer-banner = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/modal-stack.spec.mjs", "-g", "its notice is drawn over it"]
 viewer-colours = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "in the page's colours"]
 
 # --- the daemon: the names a path is made of ---
@@ -1048,6 +1049,16 @@ find = '''    dialog.addEventListener('close', () => {
 '''
 replace = '''    dialog.addEventListener('close', () => {
 '''
+
+[[plant]]
+name = "specs viewer: the daemon's banner stays on its line under the command bar, under an open modal"
+meant = "draws the daemon's notice over an open modal, and over each modal opened after it"
+runs = ["viewer-banner"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  const over = !daemonDown.hidden && document.querySelector('dialog[open]') !== null"
+replace = "  const over = false"
 
 [[plant]]
 name = "specs viewer: the registry's cell of escaped pipes is copied again at each pipe"
