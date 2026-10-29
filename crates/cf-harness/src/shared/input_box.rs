@@ -15,7 +15,7 @@ use crate::contract::{Pane, PaneHost};
 
 /// What an input box on the screen holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InputBox {
+pub enum InputBox {
     /// Nothing is typed in it.
     Empty,
     /// Something is, or something that may be.

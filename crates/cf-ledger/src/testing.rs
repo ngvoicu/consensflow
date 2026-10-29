@@ -117,11 +117,12 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// migration 0017, the one of migration 0018, the one of migration 0020, the one
 /// of migration 0021, the one of migration 0022 and the one of migration 0024
 /// (their name and, in every row, the value at its place), the table migration
-/// 0020 made (a long item's parts), and the stop in the event rows that paused a
-/// task. A dump from before the migrations has none of them, and is left as it
-/// is.
+/// 0020 made (a long item's parts), the stop in the event rows that paused a
+/// task, and the look in the event rows of a delivery's begin, retry or failure.
+/// A dump from before the migrations has none of them, and is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     hold_apart_the_stop_of_logged_pauses(tables);
+    hold_apart_the_look_of_logged_deliveries(tables);
     for (table, column) in NODE_NEVER_WRITES
         .into_iter()
         .chain(specs::COLUMNS)
@@ -251,6 +252,21 @@ fn hold_apart_the_stop_of_logged_pauses(tables: &mut Map<String, Value>) {
     });
 }
 
+/// The events of a delivery that may carry what the engine's look read of the
+/// window (3.0.7 chief-meeting, CMT-08), which Node's never did.
+const LOOKED: [&str; 3] = ["delivery.begun", "delivery.retried", "delivery.failed"];
+
+/// The event rows of [`LOOKED`] without their look, the last key of their data.
+fn hold_apart_the_look_of_logged_deliveries(tables: &mut Map<String, Value>) {
+    for kind in LOOKED {
+        edit_logged_data(tables, &format!("'{kind}'"), |text| {
+            if let Some(at) = text.find(",\"look\":").filter(|_| text.ends_with("}'")) {
+                *text = format!("{}}}'", &text[..at]);
+            }
+        });
+    }
+}
+
 /// The quoted JSON of the `data` of each row of the `event` table whose `kind`
 /// is `kind` (quoted as SQLite quotes it), `edit`ed in place.
 fn edit_logged_data(tables: &mut Map<String, Value>, kind: &str, edit: impl Fn(&mut String)) {
@@ -355,15 +371,22 @@ pub fn hold_apart_the_resume_mark_in_tables(tables: &mut Map<String, Value>) {
 }
 
 /// `events`, as the recorder writes what a ledger logged (`kind` and `data`
-/// among them), without the one thing this ledger adds to an event Node logs
+/// among them), without the two things this ledger adds to events Node logs
 /// too: the stop a pause counted, in the `data` of the event that moved the
-/// task to paused. Nothing else of what it logs is held apart: an event
-/// of a kind Node never logs is a difference.
+/// task to paused, and what the engine's look read of a window, in the `data`
+/// of a delivery's begin, retry or failure. Nothing else of what it logs is
+/// held apart: an event of a kind Node never logs is a difference.
 pub fn hold_apart_what_node_never_logs(events: &mut [Value]) {
     for event in events {
         let paused = event["kind"] == "task.state" && event["data"]["to"] == "paused";
-        if let (true, Some(Value::Object(data))) = (paused, event.get_mut("data")) {
-            data.shift_remove("stop");
+        let looked = LOOKED.iter().any(|kind| event["kind"] == *kind);
+        if let Some(Value::Object(data)) = event.get_mut("data") {
+            if paused {
+                data.shift_remove("stop");
+            }
+            if looked {
+                data.shift_remove("look");
+            }
         }
     }
 }
@@ -388,6 +411,40 @@ mod tests {
                 json!({ "kind": "task.state", "data": { "task": 1, "from": "paused", "to": "queued", "stop": 2 } }),
                 json!({ "kind": "message.read", "data": { "message": 4, "stop": 9 } }),
             ]
+        );
+    }
+
+    #[test]
+    fn takes_the_look_out_of_a_deliverys_events_and_their_rows_and_nothing_else() {
+        let mut events = [
+            json!({ "kind": "delivery.begun", "data": { "message": 4, "attempt": 1, "look": { "restMs": 3000 } } }),
+            json!({ "kind": "delivery.retried", "data": { "message": 4, "reason": "lost", "look": { "lastItem": "u-1" } } }),
+            json!({ "kind": "message.read", "data": { "message": 4, "look": 9 } }),
+        ];
+        hold_apart_what_node_never_logs(&mut events);
+        assert_eq!(
+            events,
+            [
+                json!({ "kind": "delivery.begun", "data": { "message": 4, "attempt": 1 } }),
+                json!({ "kind": "delivery.retried", "data": { "message": 4, "reason": "lost" } }),
+                json!({ "kind": "message.read", "data": { "message": 4, "look": 9 } }),
+            ]
+        );
+        let begun = r#"'{"message":4,"attempt":1,"look":{"status":"idle","lastItem":"u-1","restMs":3000}}'"#;
+        let read = r#"'{"message":4,"look":9}'"#;
+        let mut tables = json!({
+            "event": {
+                "columns": ["id", "kind", "data"],
+                "rows": [["1", "'delivery.begun'", begun], ["2", "'message.read'", read]],
+            },
+        });
+        hold_apart_what_node_never_writes(tables.as_object_mut().unwrap());
+        assert_eq!(
+            tables["event"]["rows"],
+            json!([
+                ["1", "'delivery.begun'", r#"'{"message":4,"attempt":1}'"#],
+                ["2", "'message.read'", read],
+            ])
         );
     }
 

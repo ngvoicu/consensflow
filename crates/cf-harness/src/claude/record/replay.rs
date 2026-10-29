@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::patterns::QUIET_COMMAND;
 use super::project::{
-    Assistant, Block, Boundary, Call, Compacting, Hook, Projected, ToolResult, User,
+    Absorbed, Assistant, Block, Boundary, Call, Compacting, Hook, Projected, ToolResult, User,
 };
 use super::{Candidate, Terminal, Transcript, TypedCompact};
 use crate::shared::quota::exhausted_quota;
@@ -30,6 +30,7 @@ impl Transcript {
             // Claude Code's notification brought into a turn under way: the jobs it says are
             // over have ended. Queued, it ended none: a message a human typed is queued alike.
             Projected::Notified(text, at) => self.jobs.ended_by(text, at.as_deref()),
+            Projected::Absorbed(message) => self.absorbed(message, seq),
             Projected::Enqueue(content) => self.queues.enqueue(content.clone()?),
             Projected::Dequeue => self.queues.dequeue(),
             Projected::PopAll(content) => self.queues.pop_all(content.clone()?),
@@ -57,6 +58,18 @@ impl Transcript {
         let id = id_of(hook.uuid.as_ref(), "claude hook context", seq)?;
         self.items.push(id, Role::Custom, &hook.text, at, seq);
         Ok(())
+    }
+
+    /// A human's message Claude Code took into the turn under way: the user's item, so the
+    /// record shows the message that arrived, and nothing else. It begins no turn and ends
+    /// none, and the turn goes on as it was; the queue's `remove` that took it in has taken
+    /// it out of the queue already.
+    fn absorbed(&mut self, message: &Absorbed, seq: usize) {
+        let number = Value::from(seq);
+        // `record.timestamp ?? seq`.
+        let at = message.at.as_ref().unwrap_or(&number);
+        let id = Arc::clone(&message.uuid);
+        self.items.push(id, Role::User, &message.text, at, seq);
     }
 
     /// An assistant's record: a fragment of a message, the tool calls it
@@ -245,6 +258,8 @@ impl Transcript {
             self.items.summary(id, &record.text, at, seq);
         } else if record.transcript_only {
             self.items.push(id, Role::Custom, &record.text, at, seq);
+        } else if record.notification {
+            self.items.notification(id, &record.text, at, seq);
         } else {
             self.items.push(id, Role::User, &record.text, at, seq);
         }

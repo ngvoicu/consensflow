@@ -75,6 +75,10 @@
     "live:task-working": "cargo xtask live task-working",
     "live:harnesses": "cargo xtask live harnesses",
     "live:pi-parity": "cargo xtask live pi-parity",
+    "live:absorbed": "cargo xtask live absorbed",
+    "live:pacing": "cargo xtask live pacing",
+    "test:kit-paced": "CF_KIT_PACED=1 cargo test --offline -p cf-engine --test dispatcher",
+    "live:stopped": "cargo xtask live stopped",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

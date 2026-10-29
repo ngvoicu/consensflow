@@ -49,7 +49,10 @@
 # remove everything.
 #
 # Errors are thrown, never `exit`: under `irm | iex` an exit would close the
-# PowerShell window it runs in. Everything is inside the script block, run on
+# PowerShell window it runs in. A refusal writes its words first, plain, and its
+# error says only that the run stopped: PowerShell 7 draws a thrown error with
+# colours and this script's line around it, which a person should not have to
+# read the reason through. Everything is inside the script block, run on
 # the last line, so a download cut short runs nothing. It writes only in a
 # folder of its own under TEMP, consensflow-install.<pid>.<12 hex>, removed at
 # the end, and where the installer puts the app. A run that is killed leaves that
@@ -66,9 +69,14 @@
     $key = 'RWTirTrEjU6epgN2c8yV2aIfRHzcCHVBi9zddieRVM5SahwhDFJlFd7Q'
     $quitWait = 120
 
-    function Stop-CfInstall([string]$why) {
-        throw "consensflow: $why`nconsensflow: nothing was installed."
+    # Refuses: `$why` written as words, then the error that stops the run, which
+    # says `$last` alone.
+    function Stop-Cf([string]$why, [string]$last) {
+        Write-Host "consensflow: $why"
+        throw "consensflow: $last"
     }
+
+    function Stop-CfInstall([string]$why) { Stop-Cf $why 'nothing was installed.' }
 
     $usage = @'
 Install ConsensFlow on this PC.
@@ -105,19 +113,19 @@ remove everything.
         if ($word -eq '--alpha' -or $word -eq '-Alpha') { $channel = 'alpha' }
         elseif ($word -eq '--stable' -or $word -eq '-Stable') { $channel = 'stable' }
         elseif ($word -eq '--version' -or $word -eq '-Version') {
-            if ($i + 1 -ge $words.Count) { throw 'consensflow: --version needs a release, for example --version 3.0.7' }
+            if ($i + 1 -ge $words.Count) { Stop-CfInstall '--version needs a release, for example --version 3.0.7' }
             $i++
             $version = [string]$words[$i]
             $asked = $version
         }
         elseif ($word.StartsWith('--version=')) { $version = $word.Substring('--version='.Length); $asked = $version }
         elseif ($word -eq '--help' -or $word -eq '-h' -or $word -eq '-Help') { return $usage }
-        else { throw "consensflow: unknown option '$word' (see --help)" }
+        else { Stop-CfInstall "unknown option '$word' (see --help)" }
     }
-    if ($channel -cne 'stable' -and $channel -cne 'alpha') { throw "consensflow: the channel is stable or alpha, not '$channel'" }
+    if ($channel -cne 'stable' -and $channel -cne 'alpha') { Stop-CfInstall "the channel is stable or alpha, not '$channel'" }
     if ($version) {
         $version = $version -replace '^v', ''
-        if ($version -cnotmatch '\A[0-9][0-9A-Za-z.+-]*\z') { throw "consensflow: a version is a release number such as 3.0.7, not '$version'" }
+        if ($version -cnotmatch '\A[0-9][0-9A-Za-z.+-]*\z') { Stop-CfInstall "a version is a release number such as 3.0.7, not '$version'" }
     }
 
     # PowerShell 7 runs on Linux and macOS too: $IsWindows is there, and false.
@@ -630,11 +638,11 @@ remove everything.
         $after = Get-CfInstalled
         if (-not $after -or -not [string]::Equals([string]$after.DisplayVersion, $version, [StringComparison]::Ordinal)) {
             $said = if ($after) { $after.DisplayVersion } else { 'nothing' }
-            throw "consensflow: the installer ran, and Windows lists ConsensFlow as version '$said', not $version."
+            Stop-Cf "the installer ran, and Windows lists ConsensFlow as version '$said', not $version." 'the install did not end as it should.'
         }
         $dir = $after.InstallLocation.Trim('"')
         if (-not (Test-Path -LiteralPath (Join-Path $dir 'ConsensFlow.exe'))) {
-            throw "consensflow: the installer ran, and $dir has no ConsensFlow.exe."
+            Stop-Cf "the installer ran, and $dir has no ConsensFlow.exe." 'the install did not end as it should.'
         }
         Write-Host "consensflow: ConsensFlow $version is installed in $dir. Open it from the Start menu."
     } finally {

@@ -40,6 +40,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 use crate::background::leaving;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
+use crate::pacing;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
@@ -152,6 +153,14 @@ impl Dispatcher {
             || Activity::of(ActivityState::Closed),
             |record| record.window.borrow().activity.clone(),
         )
+    }
+
+    /// Why the message at the head of `participant`'s window's queue does not go in now,
+    /// where it is held (by the pacing, the window's readiness, or a box to empty): the
+    /// one place that says it (T-842's P2). None where nothing is held.
+    pub fn held_back(&self, participant: i64) -> Option<crate::deliveries::HeldBack> {
+        self.record(participant)
+            .and_then(|record| record.delivery.borrow().held.clone())
     }
 
     /// Whether a message waits for this participant until the human sends
@@ -1143,14 +1152,18 @@ impl Dispatcher {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
-                    // A look that failed says nothing of what is on its way in (`arrival`).
+                    // A look that failed says nothing of what is on its way in (`arrival`),
+                    // nor of the window's rest (`pacing`).
                     self.unknown(record, "a look at it failed");
+                    self.rest_ends(record);
                     self.set_activity(record, Activity::because(ActivityState::Unknown, reason))?;
                 }
                 return Ok(());
             }
         };
         record.delivery.borrow_mut().lost = observed.lost().len();
+        // Which look this is, for a rest to be read over looks that follow each other.
+        let looked = self.looked(record);
         // Quota belongs to the member: a session that runs out takes its member out.
         let owner = self.member_of(project, participant);
         // A window with nothing in its record may still be drawing its screen.
@@ -1198,6 +1211,21 @@ impl Dispatcher {
                             participant.handle
                         ),
                     ),
+                    // A record that cannot be read lets no message in (CMT-05), though the
+                    // look reads the window at rest: its lane says so (T-842's P2).
+                    None if state == ActivityState::Idle
+                        && observed
+                            .reading
+                            .as_deref()
+                            .is_some_and(cf_harness::records::Reading::read_failed) =>
+                    {
+                        Activity::because(state, pacing::unreadable(&observed))
+                    }
+                    // A window whose harness says nothing of its rest is read at rest by
+                    // the pacing's fallback, and its lane says so.
+                    None if state == ActivityState::Idle && !self.idle_word(record) => {
+                        Activity::because(state, pacing::FALLBACK)
+                    }
                     None => Activity::of(state),
                 }
             };
@@ -1315,6 +1343,11 @@ impl Dispatcher {
             && observed.settled
             && observed.waiting.is_none();
         let idle = free && !drawing;
+        self.note_rest(record, &observed, idle, looked);
+        self.recheck_if_due(record, &observed, idle).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
         if record.pending_switch.borrow().is_some() {
             return self
                 .await_switch(project, participant, record, &observed, idle)
@@ -1332,12 +1365,37 @@ impl Dispatcher {
                 self.queue_wake_up_if_due(project, participant)?;
             }
             let next = self.next_in_line(record)?;
+            // A hold is the head's: a message that left the head of its queue (withdrawn,
+            // its task paused or cancelled) is held back no more (Calliope's re-check of
+            // `a0aecd192`, T-854). And what a look read of the human's input is this look's.
+            {
+                let mut part = record.delivery.borrow_mut();
+                part.input = None;
+                let head = next.as_ref().map(|next| next.id);
+                if part
+                    .held
+                    .as_ref()
+                    .is_some_and(|held| Some(held.message) != head)
+                {
+                    part.held = None;
+                }
+            }
             if let Some(next) = next {
                 // Another task's message goes into a window of its own (`ownership`).
                 if let Some(owner) = self.barred(participant, record, &next) {
                     return self
                         .keep_apart(project, participant, record, &next, owner)
                         .await;
+                }
+                // Typed in only once the window has rested long enough (`pacing`); a wait
+                // says why, once a reason.
+                match self.paced(record, &next).await? {
+                    pacing::Pace::Go => {}
+                    pacing::Pace::Wait(why) => return self.held_once(record, next.id, &why).await,
+                    pacing::Pace::Gone => return Ok(()),
+                }
+                if self.forgotten(record) {
+                    return Ok(());
                 }
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.deliver(&held, next).await })

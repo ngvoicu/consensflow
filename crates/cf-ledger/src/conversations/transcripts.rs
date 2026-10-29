@@ -556,7 +556,7 @@ pub(crate) fn copied_items_since(
         .prepare(
             "SELECT t.item_id, t.text FROM transcript t JOIN conversation c ON c.id = t.conversation_id
        WHERE c.participant_id = ? AND c.ended_at IS NULL AND t.role = 'user'
-         AND instr(t.text, ?) > 0 AND t.copied_at >= ?
+         AND t.compaction = 0 AND instr(t.text, ?) > 0 AND t.copied_at >= ?
        ORDER BY t.seq",
         )?
         .query_map(params![participant_id, text, since], |row| {

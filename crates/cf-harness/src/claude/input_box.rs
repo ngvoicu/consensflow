@@ -49,6 +49,18 @@ mod tests {
         ))
     }
 
+    /// A paste whose Enter Claude Code had not taken when it was stopped, as the screen
+    /// showed it for ninety seconds (`cargo xtask live stopped`, Claude Code 2.1.311, 3.0.7
+    /// chief-meeting CMT-24): the placeholder of a long paste is in the box, and the box
+    /// holds it, so the paste is pressed Enter again and never pasted on top of it.
+    #[test]
+    fn a_long_paste_folded_into_its_placeholder_in_the_box_is_held_there() {
+        let screen = lines(&format!(
+            "  Get to finished work sooner with Opus 5.5. Switch anytime with /model.\n  1 more notice hidden\n\n{RULE}\n❯ [Pasted text #1 +41 lines]\n{RULE}\n  paste again to expand                                ◐ medium · /effort"
+        ));
+        assert_eq!(read(&screen), Some(InputBox::Holds));
+    }
+
     #[test]
     fn a_box_with_nothing_after_its_prompt_is_empty() {
         assert_eq!(read(&boxed("❯ ")), Some(InputBox::Empty));

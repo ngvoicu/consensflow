@@ -14,13 +14,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{HumanInput, Servers};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use crate::records::{
     Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
 };
+/// What an input box on the screen holds ([`Window::input_box`]).
+pub use crate::shared::input_box::InputBox;
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -423,6 +425,12 @@ pub trait Window {
     ) -> Work<'a, Option<String>> {
         Box::pin(async { None })
     }
+    /// What the pane host said of the human's input into the window at its last
+    /// [`Window::ready`], for the trace of a delivery that look held; none where that look
+    /// read no snapshot of the pane, or the harness's reads none.
+    fn human_input(&self) -> Option<HumanInput> {
+        None
+    }
     /// Whether the engine asks [`Window::ready`] of the window before it has drawn its
     /// screen too, only for a window that says it never will be fit for work
     /// ([`Readiness::Unfit`]), which is given up then: a harness whose readiness has
@@ -468,6 +476,42 @@ pub trait Window {
     /// it; one that writes nothing of a turn it was interrupted in (Claude,
     /// before its first word) reads the looks that follow by it.
     fn interrupted(&self) {}
+    /// Whether the harness has a word of its own that its window is at rest, apart
+    /// from its record (Claude Code's status, Codex's broker, Pi's extension, Devin's
+    /// store and wire log, OpenCode's TUI status). One that has none is read at rest
+    /// for a delivery only by the fallback: its record's turn ended, its screen quiet
+    /// and no key of the human's, each for the settle (`pacing`), and the board says
+    /// the fallback is in use.
+    fn idle_word(&self) -> bool {
+        true
+    }
+    /// Whether the harness's live word, apart from its record, said at the last look
+    /// that the window is at work (Codex's broker: Codex called the thread busy before
+    /// its rollout shows the turn). Nothing is typed into a window at work (`pacing`);
+    /// the record's word stands for everything else. False from a harness that has no
+    /// such word, or said none.
+    fn at_work(&self) -> bool {
+        false
+    }
+    /// The harness is asked its live word again, where [`Window::at_work`] said the
+    /// window is at work while its record has read the turn over for the settle: a
+    /// notice the harness's word missed leaves it at work for good otherwise (Codex's
+    /// broker and a lost `turn/completed`, T-842's P2). A harness with no such word asks
+    /// nothing.
+    fn recheck(&self) -> Work<'_, ()> {
+        Box::pin(async {})
+    }
+    /// What the window's input box holds on its screen now, where its harness takes a
+    /// message pasted into that box (Claude Code, Devin): a paste whose Enter did not take
+    /// still sits there (3.0.7 chief-meeting, CMT-24). None where the screen shows no box
+    /// its reader knows, or the harness takes its messages through a channel of its own.
+    fn input_box<'a>(
+        &'a self,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        Box::pin(async { None })
+    }
 }
 
 /// A window's pane, by the pane host's id and the generation it opened in.
@@ -597,6 +641,12 @@ pub enum Admission {
         queued: bool,
     },
     Refused {
+        reason: String,
+    },
+    /// Refused because the harness is at work: nothing went in, and the message
+    /// waits for the window's next rest, with no attempt spent (Pi's extension
+    /// sends nothing while Pi is busy; 3.0.7 chief-meeting, D9).
+    Busy {
         reason: String,
     },
     Uncertain {

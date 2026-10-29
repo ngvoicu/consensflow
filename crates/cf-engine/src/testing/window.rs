@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts, Waiting, Window,
-    Work, NOT_ADMITTED,
+    Admission, Held, InputBox, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts,
+    Waiting, Window, Work, NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Lines, Reading, Record, Role, Settlement};
 use serde_json::{json, Value};
@@ -189,6 +189,12 @@ impl Window for FakeWindow {
         Box::pin(async move { came_up.and_then(|came_up| came_up()) })
     }
 
+    /// The test's word of what the pane host said of the human's input: no call of Node's
+    /// fake.
+    fn human_input(&self) -> Option<cf_proto::panes::HumanInput> {
+        self.fake.human_input.borrow().clone()
+    }
+
     /// The test's word of what the box shows: no call of Node's fake.
     fn unsent_words<'a>(
         &'a self,
@@ -292,6 +298,10 @@ impl Window for FakeWindow {
                 }
                 Ok(Admission::Admitted { queued: false }) => json!({ "admitted": true }),
                 Ok(Admission::Refused { reason }) => json!({ "admitted": false, "reason": reason }),
+                // No Node fake was ever busy: said as its refusals were, and why.
+                Ok(Admission::Busy { reason }) => {
+                    json!({ "admitted": false, "busy": true, "reason": reason })
+                }
                 Ok(Admission::Uncertain { reason }) => {
                     json!({ "admitted": null, "reason": reason })
                 }
@@ -326,6 +336,37 @@ impl Window for FakeWindow {
             wrapped.after().await;
             Ok(observed)
         })
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
+    fn at_work(&self) -> bool {
+        self.fake.of_launch(&self.launch, |agent| agent.at_work)
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
+    fn recheck(&self) -> Work<'_, ()> {
+        self.fake.of_launch(&self.launch, |agent| {
+            agent.rechecked += 1;
+            if let Some(at_work) = agent.at_work_after_recheck {
+                agent.at_work = at_work;
+            }
+        });
+        Box::pin(async {})
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
+    fn input_box<'a>(
+        &'a self,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        let held = self.fake.input_box.get();
+        Box::pin(async move { held })
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
+    fn idle_word(&self) -> bool {
+        self.fake.idle_word.get()
     }
 
     /// Not written down: the JavaScript fake was never asked.

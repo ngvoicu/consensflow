@@ -76,6 +76,14 @@ jobs:
       # agents' own tests.
       - run: cargo test -p cf-e2e --lib --bins
         timeout-minutes: 10
+      # The engine's kit again, with the gate's pacing on in every case (the
+      # plain kit is the workspace job's): what a case that asks for no settle
+      # would hide (T-842's P1). As `cargo xtask check` runs it, a test holds
+      # the two alike (tools/xtask/src/check.rs).
+      - run: cargo test --package cf-engine --test dispatcher
+        env:
+          CF_KIT_PACED: 1
+        timeout-minutes: 15
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The harnesses' crate as the daemon builds it, without the test kit

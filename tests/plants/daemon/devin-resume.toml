@@ -528,8 +528,8 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''        Ok(Some(started)) if started == identity.started => match held.end() {'''
-replace = '''        Ok(Some(_)) => match held.end() {'''
+find = '''        Ok(Some(started)) if started == identity.started => match act(&*held) {'''
+replace = '''        Ok(Some(_)) => match act(&*held) {'''
 
 # Round 5 (Astra, P1): Windows' process table is read as JSON, where a command line of
 # many lines is one string; read as lines, an argument made up a process of the window.
@@ -692,8 +692,16 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''            Outcome::Failed(why) => said.failed.push((process.clone(), why)),'''
-replace = '''            Outcome::Failed(_) => said.gone.push(process.clone()),'''
+find = '''
+        match end_one(holds, process.identity) {
+            Outcome::Ended => said.ended.push(process.clone()),
+            Outcome::Gone => said.gone.push(process.clone()),
+            Outcome::Failed(why) => said.failed.push((process.clone(), why)),'''
+replace = '''
+        match end_one(holds, process.identity) {
+            Outcome::Ended => said.ended.push(process.clone()),
+            Outcome::Gone => said.gone.push(process.clone()),
+            Outcome::Failed(_) => said.gone.push(process.clone()),'''
 
 [[plant]]
 name = "devin resume: the leaving run says nothing of the looks at the machine that failed"

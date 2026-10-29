@@ -121,4 +121,12 @@ impl Held for Fake {
         self.ended.borrow_mut().push(self.pid);
         Ok(())
     }
+
+    fn pause(&self, _pause: super::Pause) -> io::Result<()> {
+        if self.now == Some(Now::Unending) {
+            return Err(io::Error::other("refused"));
+        }
+        self.ended.borrow_mut().push(self.pid);
+        Ok(())
+    }
 }
