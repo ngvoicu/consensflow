@@ -242,7 +242,11 @@ fn a_window_is_followed_to_the_conversation_the_human_switched_it_to() {
 }
 
 #[test]
-fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_the_record() {
+fn a_look_keeps_the_records_quota_where_the_log_says_none_and_the_rest_from_the_record() {
+    // Devin's reader says no quota of its own (its refusals are the wire log's, until the next
+    // prompt), so a record that carries one is a synthetic one: the look's precedence is the one
+    // place's (`observed_from`: the move, the live word, the record's), and a silent log takes
+    // nothing from it (T-853).
     let dir = tempfile::tempdir().unwrap();
     let wire = dir.path().join("wire.jsonl");
     fs::write(&wire, shows("mild-coin")).unwrap();
@@ -263,7 +267,14 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         true,
     );
     let observed = finished(window.observe()).unwrap();
-    assert_eq!(observed.quota, None, "the log says nothing of the quota");
+    assert_eq!(
+        observed.quota,
+        Some(Arc::new(Quota::Exhausted {
+            at: Some("2026-01-01T00:00:00.000Z".to_owned()),
+            resets_at: None,
+        })),
+        "the log says nothing of the quota: the record's stands"
+    );
     assert!(
         observed.settled && observed.failed,
         "the rest is the record's"

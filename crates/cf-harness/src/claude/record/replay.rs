@@ -12,8 +12,8 @@ use super::project::{
     Absorbed, Assistant, Block, Boundary, Call, Compacting, Hook, Projected, ToolResult, User,
 };
 use super::{Candidate, Terminal, Transcript, TypedCompact};
-use crate::shared::quota::exhausted_quota;
-use crate::shared::record::reading::{native_id, Role};
+use crate::shared::quota::{exhausted_quota, unavailable_quota};
+use crate::shared::record::reading::{native_id, ModelMoved, Role};
 
 impl Transcript {
     /// The record at `seq` among the transcript's, with its `place` in the
@@ -72,6 +72,63 @@ impl Transcript {
         self.items.push(id, Role::User, &message.text, at, seq);
     }
 
+    /// The main conversation's assistant answered from `model`.
+    ///
+    /// What holds the window is Claude Code's own `fallback` block, the one word it gives of
+    /// switching on its own (a fallback model on overload; seen in the wild, 2.1.205). A
+    /// model that only changes in the records (`message.model` drifts when an alias is
+    /// repointed from under a running session, at a restart on another model, at each flip
+    /// of `opusplan`) is a drift, which is told and never held on: of 1013 transcripts,
+    /// 26 changes had no `/model` or `/fast` between and all but the real fallbacks were
+    /// those (T-816). The human's own `/model` or `/fast` puts the model where they chose, and
+    /// ends what was held or told before it.
+    fn answered_from(
+        &mut self,
+        model: &Arc<str>,
+        fallback: Option<&(Arc<str>, Arc<str>)>,
+        at: Option<&Value>,
+    ) {
+        let asked = std::mem::take(&mut self.model_asked);
+        let previous = self.model.replace(Arc::clone(model));
+        let at = at.and_then(Value::as_str).map(str::to_owned);
+        if let Some((from, to)) = fallback {
+            self.model_moved = Some(Arc::new(ModelMoved {
+                from: from.to_string(),
+                to: to.to_string(),
+                because: "Claude Code fell back to another model (its own `fallback` record)"
+                    .to_owned(),
+                at,
+            }));
+            self.model_drift = None;
+        } else if asked {
+            self.model_moved = None;
+            self.model_drift = None;
+        } else if let Some(from) = previous
+            .filter(|from| from != model)
+            .filter(|from| !self.within_the_alias(from, model))
+        {
+            self.model_drift = Some(Arc::new(ModelMoved {
+                from: from.to_string(),
+                to: model.to_string(),
+                because: "its records name another model with no word of Claude Code's own for it (an alias repointed, a restart, or opusplan)".to_owned(),
+                at,
+            }));
+        }
+    }
+
+    /// Whether `from` and `model` are both models the launch's alias runs on by itself: Claude
+    /// Code's `opusplan` plans on Opus and works on Sonnet, and its records name each in turn
+    /// (the human chose both by choosing it). A launch that named another model, or none, names
+    /// no such pair.
+    fn within_the_alias(&self, from: &str, model: &str) -> bool {
+        let families = self.launch_model.as_deref().map_or(&[][..], alias_families);
+        let within = |id: &str| {
+            let id = id.to_ascii_lowercase();
+            families.iter().any(|family| id.contains(family))
+        };
+        within(from) && within(model)
+    }
+
     /// An assistant's record: a fragment of a message, the tool calls it
     /// makes and the results it holds; its refusal when the API refused; and
     /// its answer, if it ended the turn. Claude Code's own close of a turn it
@@ -103,6 +160,9 @@ impl Transcript {
         }
         // The latest assistant record has the last word on quota.
         self.quota = None;
+        if let Some(model) = &record.model {
+            self.answered_from(model, record.fallback.as_ref(), record.at.as_ref());
+        }
         let message_id = id_of(record.message_id.as_ref(), "claude message", seq)?;
         self.active_assistant = Some(Arc::clone(&message_id));
         let item = self.items.assistant(Arc::clone(&message_id), at, seq);
@@ -142,6 +202,10 @@ impl Transcript {
             if record.rate_limited {
                 let at_ms = date_parse(record.at.as_ref())?;
                 let quota = exhausted_quota(&record.text, at_ms, &self.local)?;
+                self.quota = Some(Arc::new(quota));
+            } else if let Some(refusal) = record.account {
+                let at_ms = date_parse(record.at.as_ref())?;
+                let quota = unavailable_quota(at_ms, refusal, &record.text)?;
                 self.quota = Some(Arc::new(quota));
             }
             self.terminal = Some(Terminal::Native);
@@ -233,6 +297,7 @@ impl Transcript {
             self.jobs
                 .ended_by(&record.text, record.at.as_ref().and_then(Value::as_str));
         }
+        self.model_asked |= record.model_command;
         if record.interrupt {
             let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
             self.items.push(id, Role::User, &record.text, at, seq);
@@ -401,4 +466,16 @@ fn date_parse(value: Option<&Value>) -> Result<f64, String> {
     #[allow(clippy::cast_precision_loss)]
     let ms = time::parse(&text).map_or(f64::NAN, |ms| ms as f64);
     Ok(ms)
+}
+
+/// The model families a launch's alias runs on by itself, with or without a context suffix
+/// (`opusplan[1m]`): `opusplan` plans on Opus and works on Sonnet, and `default` is Opus, and
+/// Sonnet past half the limit on Max. Any other name is one model, or an alias that is repointed
+/// (which is news, told once), and names none.
+fn alias_families(launch_model: &str) -> &'static [&'static str] {
+    let name = launch_model.trim().to_ascii_lowercase();
+    match name.split('[').next().unwrap_or_default() {
+        "opusplan" | "default" => &["opus", "sonnet"],
+        _ => &[],
+    }
 }

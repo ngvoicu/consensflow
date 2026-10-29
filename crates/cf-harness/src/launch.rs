@@ -9,6 +9,7 @@ use crate::claude::ClaudeAdapter;
 use crate::codex::CodexAdapter;
 use crate::contract::Adapter;
 use crate::devin::DevinAdapter;
+use crate::muse::MuseAdapter;
 use crate::pi::PiAdapter;
 use crate::seams::Services;
 
@@ -19,5 +20,6 @@ pub fn adapter(harness: Harness, services: &Services) -> Rc<dyn Adapter> {
         Harness::Codex => Rc::new(CodexAdapter::new(services)),
         Harness::Devin => Rc::new(DevinAdapter::new(services)),
         Harness::Pi => Rc::new(PiAdapter::new(services)),
+        Harness::Muse => Rc::new(MuseAdapter::new(services)),
     }
 }

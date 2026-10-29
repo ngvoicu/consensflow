@@ -184,6 +184,13 @@ pub trait Runner {
     fn gitless(&mut self) -> Option<PathBuf> {
         None
     }
+
+    /// Why the machine lacks the harness `harness` a plant's runs need, in words
+    /// ([`super::kit::lacks`]): none where it has it, as a runner that runs nothing
+    /// says.
+    fn lacks(&mut self, _harness: &str) -> Option<String> {
+        None
+    }
 }
 
 impl Ran {
@@ -666,6 +673,10 @@ pub fn refused(command: &[String], context: &Context) -> Option<String> {
 }
 
 impl Runner for Execute {
+    fn lacks(&mut self, harness: &str) -> Option<String> {
+        super::kit::lacks(harness, self.checkout.env.path("HOME"))
+    }
+
     fn temp_in(&mut self, folder: &Path) {
         let kept = self
             .checkout

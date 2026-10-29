@@ -17,7 +17,7 @@
 
 use std::fs::{self, File, Metadata};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 mod append;
@@ -147,9 +147,56 @@ pub fn settled(written_ms: f64, looked_ms: i64) -> bool {
     written_ms + WRITE_TIME_STEP_MS < looked
 }
 
+/// `path` by its real one, its links resolved: a program that takes a folder reached
+/// through a link for unsafe (Muse 1.4.14 its data folder through a Mac's `/tmp`, T-829)
+/// is given the same folder. A path not there yet is its nearest folder that is, by its
+/// real path, and the rest as given. As given on Windows, where the real path is a
+/// verbatim one (`\\?\`) that programs do not take (T-931), and where none of it can
+/// be read.
+pub fn real_path(path: &Path) -> PathBuf {
+    real_path_on(path, cfg!(windows))
+}
+
+/// [`real_path`], on Windows where `windows` says so.
+fn real_path_on(path: &Path, windows: bool) -> PathBuf {
+    if windows {
+        return path.to_path_buf();
+    }
+    let mut rest = Vec::new();
+    for ancestor in path.ancestors() {
+        if let Ok(real) = fs::canonicalize(ancestor) {
+            return rest.iter().rev().fold(real, |real, part| real.join(part));
+        }
+        match ancestor.file_name() {
+            Some(name) => rest.push(name.to_owned()),
+            None => break,
+        }
+    }
+    path.to_path_buf()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_real_path_resolves_a_link_on_unix_and_is_as_given_on_windows_and_where_none_is_there() {
+        let folder = tempfile::tempdir().unwrap();
+        let real = folder.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let resolved = std::fs::canonicalize(&real).unwrap();
+        #[cfg(unix)]
+        {
+            let linked = folder.path().join("linked");
+            std::os::unix::fs::symlink(&real, &linked).unwrap();
+            assert_eq!(real_path_on(&linked, false), resolved);
+        }
+        // Windows' real path is a verbatim one (`\\?\C:\…`), which programs do not take.
+        assert_eq!(real_path_on(&real, true), real);
+        // A path not there yet: its nearest folder that is, by its real path.
+        let gone = real.join("not").join("yet");
+        assert_eq!(real_path_on(&gone, false), resolved.join("not").join("yet"));
+    }
     use std::time::{Duration, SystemTime};
 
     #[test]

@@ -234,7 +234,7 @@ runs = ["lost-queue-adapter"]
 # its own, so the plant takes both away (each alone: 7 of 7 cases pass; both: 3 fail).
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            let options = told(self.relaunched.as_ref(), &session);"
+find = "            let options = told(self.relaunched.as_ref(), self.model.as_deref(), &session);"
 replace = "            let options = Options::default();"
 
 [[plant.edit]]

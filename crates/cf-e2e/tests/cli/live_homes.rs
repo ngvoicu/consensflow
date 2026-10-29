@@ -51,7 +51,7 @@ const KIT: [&str; 4] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 6] = [
+const BY_HAND: [(&str, &str, &str); 11] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -84,6 +84,35 @@ const BY_HAND: [(&str, &str, &str); 6] = [
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "APPDATA",
         "the same read of the machine's Devin config, as Windows names its folder",
+    ),
+    // Muse has no row of the kit's on this branch: integration D1 adds it (after a run wrote
+    // into the owner's ~/.config/muse), and these five go when it lands, Muse's two live
+    // suites then given the kit's home as every other harness's are (T-729, the Muse round).
+    (
+        "crates/cf-e2e/tests/live_muse_background.rs",
+        "HOME",
+        "Muse finds its login by the real HOME (the keychain's); its config, data, cache and \
+         runtime folders are the case's own, made empty: no kit row for Muse until D1",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_background.rs",
+        "XDG_CONFIG_HOME",
+        "the case's own config folder for Muse, made empty: no kit row for Muse until D1",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_background.rs",
+        "XDG_DATA_HOME",
+        "the case's own data folder for Muse, made empty: no kit row for Muse until D1",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_reads.rs",
+        "XDG_CONFIG_HOME",
+        "the case's own config folder for Muse's reads, made empty: no kit row for Muse until D1",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_reads.rs",
+        "XDG_DATA_HOME",
+        "the case's own data folder for Muse's reads, made empty: no kit row for Muse until D1",
     ),
 ];
 

@@ -124,9 +124,35 @@ pub fn find(root: &Path, wanted: &dyn Fn(&str) -> bool) -> Option<PathBuf> {
     None
 }
 
+/// `path` by its real one, its links resolved: Muse takes a data folder reached through a
+/// link for unsafe (`/tmp` on a Mac, where a plant run makes its rigs, T-829). As given on
+/// Windows, where the real path is a verbatim one (`\\?\`) that programs do not take
+/// (T-931), and where it cannot be read. The product's rule is `cf_base::file::real_path`.
+pub fn real_path(path: &Path) -> PathBuf {
+    real_path_on(path, cfg!(windows))
+}
+
+/// [`real_path`], on Windows where `windows` says so.
+fn real_path_on(path: &Path, windows: bool) -> PathBuf {
+    if windows {
+        return path.to_path_buf();
+    }
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_real_path_is_as_given_on_windows_whose_real_paths_are_verbatim_ones() {
+        let folder = tempfile::tempdir().unwrap();
+        assert_eq!(real_path_on(folder.path(), true), folder.path());
+        assert_eq!(
+            real_path_on(folder.path(), false),
+            fs::canonicalize(folder.path()).unwrap()
+        );
+    }
 
     #[test]
     fn a_file_is_written_in_folders_made_for_it_and_over_what_it_held() {

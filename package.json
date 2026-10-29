@@ -43,6 +43,7 @@
     "bench:records-memory": "cargo xtask bench records-memory",
     "live:paste": "cargo xtask live paste",
     "live:paste-screen": "cargo xtask live paste-screen",
+    "live:muse-reads": "cargo xtask live muse-reads",
     "live:agent": "cargo xtask live agent",
     "live:interrupt": "cargo xtask live interrupt",
     "live:stops": "cargo xtask live stops",
@@ -80,6 +81,7 @@
     "live:pacing": "cargo xtask live pacing",
     "test:kit-paced": "CF_KIT_PACED=1 cargo test --offline -p cf-engine --test dispatcher",
     "live:stopped": "cargo xtask live stopped",
+    "live:muse-window": "cargo xtask live muse-window",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

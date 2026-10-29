@@ -81,6 +81,32 @@ impl Ledger {
         messages::note_hold(&mut self.store, project_id, to, number, handle, until)
     }
 
+    /// ConsensFlow tells `to` that T-`number` is held with `handle` because its
+    /// account is unavailable for `because` (MUS-23): no reset, only the human's word.
+    pub fn note_hold_unavailable(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        number: i64,
+        handle: &str,
+        because: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_hold_unavailable(&mut self.store, project_id, to, number, handle, because)
+    }
+
+    /// ConsensFlow tells `to` that T-`number` is held with `handle` because its harness moved
+    /// its window's model on its own, `because` (MUS-24): no reset, only the human's word.
+    pub fn note_hold_moved(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        number: i64,
+        handle: &str,
+        because: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_hold_moved(&mut self.store, project_id, to, number, handle, because)
+    }
+
     /// A stall of the same pass adds T-`number` to the pause note `note`
     /// instead of a note of its own. None when the note cannot take it: its
     /// reader has it, or it was withdrawn.

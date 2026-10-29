@@ -732,6 +732,31 @@ fn a_held_tasks_own_turn_gives_its_answer_alone_though_the_daemon_restarted_in_i
     );
 }
 
+#[test]
+fn a_paste_that_landed_while_the_reader_still_reads_the_failure_is_not_gone_on_over() {
+    // T-853's P3-1: the words that resume a held task went into its window and the record shows
+    // them, but the harness's reader clears the turn's failure only a little later. The failure
+    // it still reads is the turn before the words, and the task does not go on again over them.
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    context.advance(2 * 3_600_000 + 60_000);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 1);
+    context.adapter.with(&session, |agent| agent.failed = true);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        pasted_saying(&context, &session, "Resumed:"),
+        1,
+        "not pasted again: {:?}",
+        tiers.task(1).task.state
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
+}
+
 /// T-1 held with zeus, no reset named, its hold note given the chief; the hour
 /// passes and the words that resume it go in, and the window writes a word of
 /// its answer a second later, not complete: a call it makes.

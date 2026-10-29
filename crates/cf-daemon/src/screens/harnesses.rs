@@ -1,7 +1,7 @@
 //! The harness diagnostics' routes: what is known of each harness's CLI here,
 //! and its update. Both are the harness admin's
 //! ([`HarnessAdmin`](cf_harness::admin::HarnessAdmin)): the screen only checks
-//! that the harness asked about is one of the five, before the machine is asked
+//! that the harness asked about is one of the six, before the machine is asked
 //! anything, and says what the admin answered, or why it would not (a harness
 //! that is not installed is asked to update: `Claude is not installed`).
 
@@ -12,10 +12,10 @@ use super::body::property;
 use super::Screens;
 use crate::api::answer::Answer;
 
-/// What both routes say of a harness that is none of the four.
+/// What both routes say of a harness that is none of the five.
 const UNKNOWN: &str = "Unknown harness";
 
-/// `['claude', 'codex', 'pi', 'devin'].includes(id)`: a text that
+/// `['claude', 'codex', 'pi', 'devin'].includes(id)`, and `muse` since 3.0.6: a text that
 /// names one of them, and nothing else does, whatever it is.
 fn known(id: Option<&Value>) -> Result<Harness, String> {
     id.and_then(Value::as_str)

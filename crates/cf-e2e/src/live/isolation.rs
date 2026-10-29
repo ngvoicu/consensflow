@@ -630,6 +630,7 @@ const fn proper(harness: Harness) -> &'static str {
         Harness::Pi => "Pi",
         Harness::Devin => "Devin",
         Harness::Codex => "Codex",
+        Harness::Muse => "Muse Code",
     }
 }
 

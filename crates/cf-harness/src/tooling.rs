@@ -28,6 +28,8 @@
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
 //! | `devin_config` | `env`: the owner's own config of Devin, read as the adapter reads it for a launch, in the config folder `env` names | the config, an object: its comments and trailing commas left out, and an empty one where there is none |
 //! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt, grants, servers}`: the key it presses next toward a yes (`down`, `up`, `enter`), or null where the lines show no such question or the harness never asks one, whether they are the harness's prompt, and whether the question is the one of a trusted folder's grants or Claude's dialog of new servers of `.mcp.json`; with `directory`, `trusts` too: `{folder, inside, servers_above}`, what a yes trusts for a window opened in that project's folder, and the nearest folder above it whose `.mcp.json` Claude reads too |
+//! | `muse_models` | `env`: the models Muse's host lists (`model/list` of one bounded `muse serve`, no model turn), as the daemon reads them | `{stale, models: [{id, label, efforts, defaultEffort, contributor, markedDefault}], default, warnings}`: whether the list is Muse's bundled one, each model with its efforts, the model a member is given where its agent names none (never a contributor model), and the warning of each contributor model |
+//! | `muse_usage` | `env`: what `muse usage --json` says of the account (no model turn), as the daemon reads it | the quota as the engine is told it (`{state, ...}`), or null where it says nothing known |
 //! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
 //! | `models` | `kind`, `env`, `fetch`: the models the harness lists, read as the daemon reads them (no model turn), `fetch` being the human's Refresh | `{models, stale, how, default, warnings}`: each model as the home keeps it, whether the list is stale, how it was read, the model a harness is started on where nothing names one, and the warning of each contributor model by its `--model` |
 //!
@@ -47,6 +49,7 @@
 
 mod launch;
 mod models;
+mod muse;
 mod readiness;
 mod session;
 
@@ -86,6 +89,8 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "pi_launch" => launch::pi_launch(question),
         "devin_ready" => launch::devin_ready(question),
         "devin_took" => launch::devin_took(question),
+        "muse_models" => muse::models(question),
+        "muse_usage" => muse::usage(question),
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
         "devin_config" => launch::devin_config(question),
@@ -95,7 +100,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "models" => models::models(question),
         "last_used" => models::last_used(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, input_box, unsent, models and last_used"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent, models and last_used"
         )),
     }
 }
@@ -151,7 +156,7 @@ fn trust(question: &Value) -> Result<Value, String> {
             crate::claude::trust::shows_prompt(&screen),
             crate::claude::trust::names_choices(&screen),
         ),
-        Harness::Codex | Harness::Pi | Harness::Devin => (None, false, false),
+        Harness::Codex | Harness::Pi | Harness::Devin | Harness::Muse => (None, false, false),
     };
     let pressed = match key {
         Some(

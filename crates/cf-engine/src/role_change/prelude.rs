@@ -103,8 +103,21 @@ impl Dispatcher {
         Ok(head)
     }
 
-    /// The head of `record`'s queue, the prelude a launch put ahead of it first.
+    /// The head of `record`'s queue, the prelude a launch put ahead of it first, and the
+    /// greeting of a session no hook greeted before the rest (`greet_switched`).
     fn head_of_line(&self, record: &Record) -> Result<Option<MessageView>, EngineError> {
+        if let Some(greeting) = self.greeting(record)? {
+            let busy = self
+                .seams
+                .ledger
+                .borrow()
+                .pending(record.id)?
+                .iter()
+                .any(|other| other.state == "delivering");
+            if greeting.state == "queued" && !busy {
+                return Ok(Some(greeting));
+            }
+        }
         let ledger = self.seams.ledger.borrow();
         let prelude = record.delivery.borrow().prelude.clone();
         let Some(prelude) = prelude else {

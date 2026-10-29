@@ -234,7 +234,7 @@ fn a_launch_s_files_are_forgotten_from_every_harness_s_folder() {
 }
 
 #[test]
-fn every_harness_the_ledger_names_has_its_adapter_and_no_other_word_has() {
+fn every_harness_whose_windows_open_has_its_adapter_and_no_other_word_has() {
     let home = tempfile::tempdir().unwrap();
     let services = Fakes::new(&Env::default()).services(&Env::default(), home.path());
     let adapters = HarnessAdapters::new(&services);

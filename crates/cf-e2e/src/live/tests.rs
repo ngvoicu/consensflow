@@ -113,10 +113,18 @@ fn no_live_test_sets_or_clears_the_config_folder_of_its_claude_code() {
 
 /// The live tests whose windows run agents of their own, not the models of
 /// [`agents`]: the catalog's agents named (`live_agent.rs`), and the catalog's
-/// image designer (`live_designer.rs`); and the one that runs no window and no model at
-/// all, which reads what each harness lists of its models (`live_models.rs`): a `--models`
-/// would be read by nothing there too.
-const OWN_AGENTS: [&str; 3] = ["live_agent.rs", "live_designer.rs", "live_models.rs"];
+/// image designer (`live_designer.rs`); Muse's background work, one turn on its own
+/// model in its own TUI (`live_muse_background.rs`); the one that runs no window and no
+/// model at all, which reads what Muse says of its models and its allowance
+/// (`live_muse_reads.rs`); and the one that reads what each harness lists of its models
+/// (`live_models.rs`): a `--models` would be read by nothing there too.
+const OWN_AGENTS: [&str; 5] = [
+    "live_agent.rs",
+    "live_designer.rs",
+    "live_models.rs",
+    "live_muse_background.rs",
+    "live_muse_reads.rs",
+];
 
 /// A run that does not begin with `Log::begin` takes a `--models` that no window
 /// could be asked for as far as its first window, and says nowhere what its
@@ -383,5 +391,30 @@ fn a_claude_whose_windows_run_on_a_copy_of_the_login_says_where_it_is_copied_fro
         found_line(&claude, "2.1.308"),
         "claude is /home/me/.local/bin/claude (2.1.308); its login is copied from the Keychain \
          into a config folder of the run's own"
+    );
+}
+
+/// T-931 P2-2: a harness the run left out is said in its report's title and body, where a
+/// green run is read, not once at its start.
+#[test]
+fn a_run_that_left_a_harness_out_says_so_in_its_report() {
+    let log = Log::new("live approval");
+    log.leave_out(vec![
+        "muse is left out of every seat: this machine cannot run it (no muse)".to_owned(),
+    ]);
+    assert_eq!(
+        log.titled("what each step came to"),
+        "what each step came to (muse left out)"
+    );
+    assert!(
+        log.reported("ok  a step")
+            .ends_with("muse is left out of every seat: this machine cannot run it (no muse)"),
+        "{}",
+        log.reported("ok  a step")
+    );
+    let whole = Log::new("live approval");
+    assert_eq!(
+        whole.titled("what each step came to"),
+        "what each step came to"
     );
 }

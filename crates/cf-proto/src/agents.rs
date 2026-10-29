@@ -16,11 +16,20 @@ pub enum Harness {
     Codex,
     Pi,
     Devin,
+    /// Meta's Muse Code (`muse`): detected and read since 3.0.6 (T-703); no
+    /// window is opened on it yet.
+    Muse,
 }
 
 impl Harness {
     /// Every harness, in the order the page and the roster list them.
-    pub const ALL: [Harness; 4] = [Harness::Claude, Harness::Codex, Harness::Pi, Harness::Devin];
+    pub const ALL: [Harness; 5] = [
+        Harness::Claude,
+        Harness::Codex,
+        Harness::Pi,
+        Harness::Devin,
+        Harness::Muse,
+    ];
 
     /// The CLI's own name (`claude`), as the page and the launcher say it.
     pub fn as_str(self) -> &'static str {
@@ -29,6 +38,7 @@ impl Harness {
             Harness::Codex => "codex",
             Harness::Pi => "pi",
             Harness::Devin => "devin",
+            Harness::Muse => "muse",
         }
     }
 
@@ -229,6 +239,7 @@ mod tests {
             (Harness::Codex, "codex", "codex"),
             (Harness::Pi, "pi", "pi"),
             (Harness::Devin, "devin", "devin"),
+            (Harness::Muse, "muse", "muse"),
         ];
         for (harness, name, kind) in names {
             assert_eq!(harness.as_str(), name);
@@ -243,7 +254,7 @@ mod tests {
     #[test]
     fn the_harnesses_are_listed_as_the_roster_lists_them() {
         let names: Vec<_> = Harness::ALL.into_iter().map(Harness::as_str).collect();
-        assert_eq!(names, ["claude", "codex", "pi", "devin"]);
+        assert_eq!(names, ["claude", "codex", "pi", "devin", "muse"]);
     }
 
     #[test]
