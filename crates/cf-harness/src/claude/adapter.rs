@@ -92,7 +92,7 @@ use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
 use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
-use crate::shared::{pane, specmint, window_args};
+use crate::shared::{compacting, pane, specmint, window_args};
 
 /// Claude Code, as the engine launches its windows.
 pub struct ClaudeAdapter {
@@ -496,6 +496,14 @@ impl Window for ClaudeWindow {
 
     fn names_trust_choices(&self, screen: &[String]) -> bool {
         super::trust::names_choices(screen)
+    }
+
+    fn ready_sign(&self) -> Option<&str> {
+        Some(super::trust::PROMPT)
+    }
+
+    fn compacting(&self, screen: &[String]) -> bool {
+        compacting::drawn(screen, &compacting::CLAUDE)
     }
 
     fn trust_servers(&self, screen: &[String]) -> Vec<String> {

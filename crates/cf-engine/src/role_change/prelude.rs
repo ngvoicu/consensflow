@@ -41,6 +41,7 @@ use std::rc::Rc;
 
 use cf_ledger::{LedgerError, MessageView, ParticipantView, ProjectView};
 
+use crate::at_work::OnWork;
 use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -201,6 +202,8 @@ impl Dispatcher {
             session: None,
             owed: None,
             late: false,
+            work: OnWork::default(),
+            not_ready: None,
         })
     }
 

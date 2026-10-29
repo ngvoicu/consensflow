@@ -41,6 +41,9 @@ mod a_close_waited_for_a_codex_chiefs_server_to_end;
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
 #[path = "regressions/a_codex_chiefs_lost_turn_end_held_its_next_result.rs"]
 mod a_codex_chiefs_lost_turn_end_held_its_next_result;
+#[path = "regressions/a_codex_window_compacting_before_its_first_message_was_closed.rs"]
+#[cfg(unix)]
+mod a_codex_window_compacting_before_its_first_message_was_closed;
 // The stand-in Codex is a script, so Unix's, and so are `ps` and `pgrep`.
 #[path = "regressions/a_codex_windows_role_was_on_its_command_line.rs"]
 #[cfg(unix)]

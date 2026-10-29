@@ -412,6 +412,20 @@ pub trait Window {
     fn names_trust_choices(&self, _screen: &[String]) -> bool {
         false
     }
+    /// The words of the screen line that [`Window::shows_prompt`] reads the harness's
+    /// prompt by, for the human told of a window whose first message waited for it in
+    /// vain; none where no prompt is read before a first message (the default).
+    fn ready_sign(&self) -> Option<&str> {
+        None
+    }
+    /// Whether `screen` (the window's last lines) shows its harness compacting the
+    /// conversation's context now, the status it draws while it does: the window is at
+    /// work, however long that takes, and what it was handed waits for it (Codex's
+    /// "• Compacting context (2m 57s • esc to interrupt)", T-901). False where it shows
+    /// none, and from a harness that draws no such status (the default).
+    fn compacting(&self, _screen: &[String]) -> bool {
+        false
+    }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
         &'a self,

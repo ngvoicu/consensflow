@@ -92,6 +92,55 @@ pub fn said_by(text: &str, role: &str) -> Vec<String> {
         .collect()
 }
 
+/// What the turn that took a message did before it, as a rollout says it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Turn {
+    /// The message was written after a compaction its turn began with, and the seconds
+    /// from the turn's start to the compaction's end.
+    pub compacted: Option<f64>,
+    /// The message is in the rollout.
+    pub taken: bool,
+}
+
+/// The turn of the rollout `records` that took the message holding `words`: whether a
+/// compaction came between its start and the message, as Codex 0.165 compacts a long
+/// thread at the start of a turn (`task_started`, `compacted`, then the message).
+pub fn turn_taking(records: &[Value], words: &str) -> Turn {
+    let message = records.iter().position(|record| {
+        record["type"] == "response_item"
+            && record["payload"]["role"] == "user"
+            && record["payload"].to_string().contains(words)
+    });
+    let Some(message) = message else {
+        return Turn {
+            compacted: None,
+            taken: false,
+        };
+    };
+    let began = records[..message].iter().rposition(|record| {
+        record["type"] == "event_msg" && record["payload"]["type"] == "task_started"
+    });
+    let compacted = began.and_then(|began| {
+        let compaction = records[began..message]
+            .iter()
+            .find(|record| record["type"] == "compacted")?;
+        let from = seconds_of(records[began]["timestamp"].as_str()?)?;
+        let to = seconds_of(compaction["timestamp"].as_str()?)?;
+        Some(to - from)
+    });
+    Turn {
+        compacted,
+        taken: true,
+    }
+}
+
+/// The seconds of an RFC 3339 time.
+#[allow(clippy::cast_precision_loss)]
+fn seconds_of(at: &str) -> Option<f64> {
+    let at: jiff::Timestamp = at.parse().ok()?;
+    Some(at.as_millisecond() as f64 / 1000.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

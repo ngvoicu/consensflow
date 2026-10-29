@@ -34,6 +34,8 @@ pub const TRUST_PROMPT: &str = "Ready for work (a test's prompt)";
 /// names the question's choices without asking it: a conversation that quotes them.
 pub const TRUST_UNPLACED: &str = "Do you trust this folder? (a test's question, its choice lost)";
 pub const TRUST_QUOTED: &str = "Yes, I trust this folder / No, exit (a test's quote of them)";
+/// The line a test window's screen shows while its harness compacts its conversation.
+pub const COMPACTING: &str = "• Compacting the conversation (a test's compaction)";
 
 pub(super) struct FakeWindow {
     seam: String,
@@ -128,6 +130,14 @@ impl Window for FakeWindow {
             && [TRUST_QUESTION, TRUST_UNPLACED, TRUST_QUOTED]
                 .iter()
                 .any(|words| holds(screen, words))
+    }
+
+    fn ready_sign(&self) -> Option<&str> {
+        self.trusts.is_some().then_some(TRUST_PROMPT)
+    }
+
+    fn compacting(&self, screen: &[String]) -> bool {
+        holds(screen, COMPACTING)
     }
 
     fn follow(&self, session: &str) {

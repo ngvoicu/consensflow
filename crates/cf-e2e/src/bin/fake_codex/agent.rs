@@ -30,7 +30,10 @@
 //!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
-//! anything else is acknowledged. A message that says `QUOTA-OUT` is refused for
+//! anything else is acknowledged. A message whose line begins `COMPACT <seconds>` has
+//! the thread compacted first, as Codex 0.165 compacts a long thread at the start of a
+//! turn: the turn begins, nothing more is written for that long, then the compaction
+//! and only after it the message (T-901, the field's rollout of 2026-10-28). A message that says `QUOTA-OUT` is refused for
 //! the usage limit, as the stand-in agent's is (`CF_TEST_QUOTA_OUT` names the
 //! member whose sessions are refused, while `CF_TEST_QUOTA_FILE`, when it is set,
 //! is there): the turn works as long as it says and ends as Codex 0.163 ends one
@@ -337,6 +340,13 @@ impl Agent {
                 "collaboration_mode_kind": "default",
             }),
         );
+        if let Some(compacting) = compacts_for(text) {
+            thread::sleep(compacting);
+            self.write(
+                "compacted",
+                json!({ "message": "", "replacement_history": [] }),
+            );
+        }
         // The first turn of a thread writes what the thread begins with: the
         // developer's instructions, which no later turn, and no resume, writes again.
         if !self.instructed.swap(true, Ordering::Relaxed) {
@@ -521,11 +531,25 @@ fn rollout_of(home: &Path, thread: &str) -> PathBuf {
         ))
 }
 
+/// How long the thread is compacted for before the message `text` is taken, where it
+/// says: its line `COMPACT <seconds> <words>`.
+fn compacts_for(text: &str) -> Option<Duration> {
+    static COMPACT: OnceLock<Regex> = OnceLock::new();
+    pattern::once(&COMPACT, r"(?m)^COMPACT (\d+) ")
+        .captures(text)
+        .and_then(|compact| compact[1].parse().ok())
+        .map(Duration::from_secs)
+}
+
 /// How long the message `text` has the agent work, and what it says at the end.
 fn what_it_says(text: &str) -> (Duration, String) {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static COMPACT: OnceLock<Regex> = OnceLock::new();
 
+    if let Some(compact) = pattern::once(&COMPACT, r"(?m)^COMPACT \d+ (.+)$").captures(text) {
+        return what_it_says(&compact[1]);
+    }
     if let Some(slow) = pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         let seconds = slow[1].parse().unwrap_or(0);
         let (_, said) = what_it_says(&slow[2]);
@@ -561,6 +585,15 @@ mod tests {
             what_it_says("hello\nsecond"),
             (Duration::ZERO, "noted: hello".to_owned())
         );
+    }
+
+    #[test]
+    fn a_message_that_says_compact_has_the_thread_compacted_that_long_first() {
+        let brief =
+            "[ConsensFlow m-4 · T-1 · task from @chief]\nCOMPACT 30 Reply with exactly: DONE";
+        assert_eq!(compacts_for(brief), Some(Duration::from_secs(30)));
+        assert_eq!(what_it_says(brief), (Duration::ZERO, "DONE".to_owned()));
+        assert_eq!(compacts_for("Reply with exactly: DONE"), None);
     }
 
     #[test]
