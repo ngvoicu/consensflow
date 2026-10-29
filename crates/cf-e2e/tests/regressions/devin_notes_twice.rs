@@ -136,11 +136,27 @@ fn delivered(project: &Project, id: i64) -> cf_e2e::Result<bool> {
 #[test]
 fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each() -> Outcome
 {
-    let rig = Rig::start(
-        arrival(config().devin(FAKE_DEVIN))
-            .var("FAKE_DEVIN_FIRST_WORD_MS", FIRST_WORD_MS)
-            .var("FAKE_DEVIN_WORK_MS", work_ms()),
-    )?;
+    once_each(None)
+}
+
+/// The same with no settle (3.0.7's pacing turned off, `CONSENSFLOW_SETTLE_MS=0`): the
+/// pacing's settle alone keeps a window read at rest in the first seconds of a turn from
+/// being given a note, so the rule that waits for Devin's record holds here by itself
+/// (T-842's P3: the early-rest plant was caught only with the settle taken out too).
+#[test]
+fn two_notes_that_come_together_after_a_cancel_go_in_once_each_with_no_settle() -> Outcome {
+    once_each(Some("0"))
+}
+
+/// The case, its daemon's settle `settle` milliseconds where it names one.
+fn once_each(settle: Option<&str>) -> Outcome {
+    let mut config = arrival(config().devin(FAKE_DEVIN))
+        .var("FAKE_DEVIN_FIRST_WORD_MS", FIRST_WORD_MS)
+        .var("FAKE_DEVIN_WORK_MS", work_ms());
+    if let Some(settle) = settle {
+        config = config.var("CONSENSFLOW_SETTLE_MS", settle);
+    }
+    let rig = Rig::start(config)?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;

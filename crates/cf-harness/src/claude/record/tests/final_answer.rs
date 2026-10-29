@@ -154,4 +154,14 @@ fn the_turn_a_jobs_end_wakes_has_its_own_final_answer_after_the_one_of_the_turn_
     );
     assert_eq!(record.items[4].text.as_ref(), notice);
     assert_eq!(record.items[5].text.as_ref(), "All 33 mutants are killed.");
+    // The notification is the harness's own words, no human's (T-842's P3: one that
+    // quoted a header took a message for arrived); the user's record before it is not.
+    assert_eq!(
+        (record.items[0].synthetic, record.items[4].synthetic),
+        (false, true)
+    );
+    assert!(
+        !record.items[4].commentary,
+        "still a user's item, as Node read it"
+    );
 }

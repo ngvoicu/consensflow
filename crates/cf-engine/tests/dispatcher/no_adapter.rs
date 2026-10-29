@@ -16,7 +16,7 @@ const SUITES: &[&str] = &["a harness ConsensFlow has no adapter for"];
 fn without_pi() -> Context {
     Context::made(Made {
         harnesses: vec!["claude-code"],
-        codex: false,
+        ..Made::default()
     })
 }
 

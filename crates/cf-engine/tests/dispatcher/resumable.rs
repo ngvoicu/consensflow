@@ -31,6 +31,7 @@ fn chief_on(harness: &'static str) -> (Context, i64) {
     let context = Context::made(Made {
         harnesses: vec![harness],
         codex: false,
+        ..Made::default()
     });
     let project = context
         .open_project(json!({

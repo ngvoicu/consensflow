@@ -97,6 +97,7 @@ fn the_broker_is_asked_with_the_launch_s_token_and_nothing_else() {
         Some(Shown {
             session: Session::Thread(THREAD.to_owned()),
             available: true,
+            idle: None,
         })
     );
     let asked = stage.fakes.loopback.take_asked();
@@ -141,6 +142,7 @@ fn a_word_is_read_as_a_web_reply_is_read() {
     let shown = Some(Shown {
         session: Session::Thread(THREAD.to_owned()),
         available: true,
+        idle: None,
     });
     // A byte order mark is taken off, and any white space around it is JSON's.
     stage.says(&format!("\u{feff}{said}"), 200);
@@ -183,8 +185,35 @@ fn a_window_available_is_one_the_broker_says_is_available_in_a_flag() {
         Some(Shown {
             session: Session::Unnamed,
             available: false,
+            idle: None,
         })
     );
+}
+
+/// The broker's word that its thread is idle (3.0.7 chief-meeting, CMT-06), read only
+/// from a flag: anything else, and a broker of a release before it, says nothing.
+#[test]
+fn a_thread_is_idle_or_at_work_only_where_the_broker_says_so_in_a_flag() {
+    let stage = Stage::new();
+    for (idle, expected) in [
+        (json!(true), Some(true)),
+        (json!(false), Some(false)),
+        (json!(null), None),
+        (json!(0), None),
+        (json!("idle"), None),
+    ] {
+        let body =
+            json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
+        stage.says(&body.to_string(), 200);
+        assert_eq!(
+            stage.shown().map(|shown| shown.idle),
+            Some(expected),
+            "{idle}"
+        );
+    }
+    let older = json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true });
+    stage.says(&older.to_string(), 200);
+    assert_eq!(stage.shown().map(|shown| shown.idle), Some(None));
 }
 
 #[test]
@@ -230,6 +259,7 @@ fn an_id_in_a_list_is_read_as_the_id_by_javascript_s_test_and_is_no_thread_of_th
             Some(Shown {
                 session: Session::Wrapped,
                 available: true,
+                idle: None,
             })
         );
     }

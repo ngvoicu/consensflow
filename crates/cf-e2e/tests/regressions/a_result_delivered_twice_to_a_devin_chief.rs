@@ -453,7 +453,11 @@ fn two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_ea
 }
 
 #[test]
-fn a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_that_quote_its_header(
+/// Since 3.0.7 (chief-meeting, CMT-23, the chief's decision of 2026-10-26): a record that
+/// holds a message's header after its hand-over, in an item the proof cannot match, is never
+/// pasted over. The human's words that quote it are such an item: the result is taken for
+/// arrived, unproven, and the chief is told once that it can read it. Before, it went again.
+fn a_result_whose_paste_devins_tui_dropped_is_not_pasted_over_the_humans_words_that_quote_its_header(
 ) -> Outcome {
     let rig = Rig::start(a_rig("2000", "5000").var("FAKE_DEVIN_DROP", FIRST.words))?;
     let (project, tier) = a_project(&rig)?;
@@ -481,46 +485,45 @@ fn a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_tha
         secs(50),
     )?;
     // The human's turn, and the daemon's arrival window of the window's rest after it: the
-    // paste goes again, and its record shows it.
-    rig.wait_for("the dropped paste to go again", secs(240), || {
-        Ok(of_message(&rig.events(), "delivery.begun", first).len() >= 2)
-    })?;
-    rig.wait_for("the result to be confirmed", secs(180), || {
-        Ok(!of_message(&rig.events(), "delivery.confirmed", first).is_empty())
-    })?;
-
+    // paste would have gone again, and does not: the record holds its header.
+    rig.wait_for(
+        "the result to be taken for arrived, unproven",
+        secs(240),
+        || Ok(!of_message(&rig.events(), "delivery.unproven", first).is_empty()),
+    )?;
     let events = rig.events();
-    let retried = of_message(&events, "delivery.retried", first);
     assert_eq!(
         (
             of_message(&events, "delivery.begun", first).len(),
-            retried.len()
+            of_message(&events, "delivery.retried", first).len()
         ),
-        (2, 1),
-        "pasted twice, the dropped paste and once again: {retried:?}"
+        (1, 0),
+        "pasted once, never over the human's words"
     );
-    // The human's words came between the paste and the retry, a turn of the chief's, and
-    // the daemon says so in the reason: the window was at rest the arrival window since its
-    // last turn (`arrival`). A retry with no turn between reads the bare words.
-    let turn_between = format!(
-        "the harness record never showed it in the {} s its window was at rest since its last turn",
-        ARRIVAL_MS / 1_000
-    );
+    let shape = &of_message(&events, "delivery.unproven", first)[0]["data"]["shape"];
+    assert_eq!(shape["before"], "words", "{shape}");
+    let settled = result_of(&project, FIRST)?
+        .ok_or_else(|| Error::Daemon("the result is gone".to_owned()))?;
     assert_eq!(
-        retried[0]["data"]["reason"].as_str(),
-        Some(turn_between.as_str()),
-        "{retried:?}"
+        (
+            settled["state"].clone(),
+            settled["receipt"]["unproven"].clone()
+        ),
+        (json!("delivered"), json!(true))
     );
-    let marker = format!("{HEADER}{first} ");
-    let pastes: Vec<Message> = devin_store::messages(&store_of(&rig))?
+    let told: Vec<String> = project
+        .inbox("chief")?
         .into_iter()
-        .filter(|message| message.role == "user" && message.text.starts_with(&marker))
+        .filter(|message| message["sender"].is_null())
+        .filter_map(|message| message["body"].as_str().map(str::to_owned))
+        .filter(|body| body.contains("couldn't be proven"))
         .collect();
-    assert_eq!(pastes.len(), 1, "given once: {pastes:?}");
-    assert!(
-        pastes[0].text.contains(FIRST.words) && pastes[0].text.contains("cf task accept T-1"),
-        "whole: {:?}",
-        pastes[0].text
+    assert_eq!(
+        told,
+        [format!(
+            "m-{first}'s arrival couldn't be proven from the record; it was not pasted again. @chief can read it with `cf inbox read m-{first}`."
+        )],
+        "the chief is told once"
     );
     rig.close()?;
     Ok(())
