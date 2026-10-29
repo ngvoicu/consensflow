@@ -290,6 +290,20 @@ replace = '''            --alpha) channel=stable ;;'''
 
 # --- install.ps1 ---
 
+# A refusal's reason is written as words before the error that stops the run: PowerShell 7
+# draws a thrown error with colours and the script's line around it (T-881, CI run 40824566567).
+[[plant]]
+name = "installers: install.ps1 says no reason when it refuses"
+meant = "install.ps1 in Windows PowerShell › on Windows › a release with no signed SHA256SUMS, as before 3.0.7-alpha.1, is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''        Write-Host "consensflow: $why"
+'''
+replace = ""
+
 [[plant]]
 name = "installers: install.ps1 installs whatever its signature check says"
 meant = "install.ps1 in Windows PowerShell › on Windows › a flipped bit in the signature is refused"

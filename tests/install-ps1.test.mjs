@@ -56,6 +56,26 @@ const shells = [
 
 const setupName = (version) => `ConsensFlow_${version}_x64-setup.exe`
 
+/**
+ * The folder `dir` as `shell` reads it when it is TEMP: the script names its folders by
+ * `[IO.Path]::GetTempPath()`, which gives the long form of a TEMP given in its short one
+ * (GitHub's runner's is `C:\Users\RUNNER~1\…`, and the script said `C:\Users\runneradmin\…`).
+ * The cases' paths are made below it, so what they expect is what the script says.
+ */
+function asTempOf(shell, dir) {
+  if (!windows) return dir
+  const read = spawnSync(
+    shell,
+    ['-NoProfile', '-NonInteractive', '-Command', '[IO.Path]::GetTempPath()'],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, TEMP: dir, TMP: dir },
+    },
+  )
+  assert.equal(read.status, 0, read.stderr)
+  return read.stdout.trim().replace(/\\+$/, '')
+}
+
 for (const [label, shell] of shells) {
   test(`install.ps1 orders versions as SemVer does, in ${label}`, () => {
     const lines = readFileSync(INSTALL_PS1, 'utf8').split('\n')
@@ -186,7 +206,7 @@ for (const [label, shell] of shells) {
     }
 
     before(async () => {
-      work = mkdtempSync(path.join(os.tmpdir(), 'cf-install-ps1-'))
+      work = asTempOf(shell, mkdtempSync(path.join(os.tmpdir(), 'cf-install-ps1-')))
       key = makeKey()
       Object.assign(
         files,
