@@ -89,10 +89,12 @@ runs = ["parent-sessions-host"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = '''        if !env.contains_key(name) {
+find = '''    for name in parent_session_variables() {
+        if !env.contains_key(name) {
             command.env_remove(name);
         }'''
-replace = '''        command.env_remove(name);'''
+replace = '''    for name in parent_session_variables() {
+        command.env_remove(name);'''
 
 # --- the daemon ---
 
