@@ -75,29 +75,36 @@ fn snapshot(folder: &Path) -> BTreeMap<PathBuf, Entry> {
 }
 
 /// What changed from `before` to `after` under `place`: each path added, changed or
-/// removed, said with it.
+/// removed, said with it, its folders parted by `/` on every system.
 fn changes(
     place: &str,
     before: &BTreeMap<PathBuf, Entry>,
     after: &BTreeMap<PathBuf, Entry>,
 ) -> Vec<String> {
+    let named = |path: &Path| {
+        path.components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    };
     let mut said = Vec::new();
     for (path, entry) in after {
         match before.get(path) {
-            None => said.push(format!("{place}/{} added", path.display())),
-            Some(was) if was != entry => said.push(format!("{place}/{} changed", path.display())),
+            None => said.push(format!("{place}/{} added", named(path))),
+            Some(was) if was != entry => said.push(format!("{place}/{} changed", named(path))),
             Some(_) => {}
         }
     }
     for path in before.keys().filter(|path| !after.contains_key(*path)) {
-        said.push(format!("{place}/{} removed", path.display()));
+        said.push(format!("{place}/{} removed", named(path)));
     }
     said
 }
 
 /// Whether a change is the stand-in Claude's own, as Claude Code keeps them in its
 /// configuration folder: its transcripts (`projects`), and the status of each running
-/// window (`sessions/<pid>.json`, which it takes away as it ends, leaving the folder).
+/// window (`sessions/<pid>.json`, which it takes away as it ends, leaving the folder; on
+/// Windows a window the rig's close ends leaves its file too).
 fn the_harnesses_own(change: &str) -> bool {
     ["home/.claude/projects", "home/.claude/sessions"]
         .iter()
