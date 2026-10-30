@@ -112,10 +112,34 @@ async function readSpecs() {
 // The daemon down: the banner says why and what comes next, and stays until
 // the daemon is back, when everything is read again.
 const daemonDown = $('#daemon-down')
+
+/**
+ * Where the banner is drawn. It is the page's line under the command bar, which an open modal
+ * and its backdrop cover: so while one is open it is shown in the top layer, over the dialog,
+ * where the human sees it; and shown again whenever another modal opens, to stay over that one.
+ * It takes no clicks, so the dialog it is over is as it was.
+ */
+function placeDaemonDown() {
+  const over = !daemonDown.hidden && document.querySelector('dialog[open]') !== null
+  if (daemonDown.matches(':popover-open')) daemonDown.hidePopover()
+  if (over) {
+    daemonDown.popover = 'manual'
+    daemonDown.showPopover()
+  } else {
+    daemonDown.removeAttribute('popover')
+  }
+}
+new MutationObserver(placeDaemonDown).observe(document.body, {
+  attributes: true,
+  attributeFilter: ['open'],
+  subtree: true,
+})
+
 function daemonStatus({ available, cause, retrying }) {
   const wasDown = !daemonDown.hidden
   daemonDown.hidden = available
   if (available) {
+    placeDaemonDown()
     if (wasDown) void act(readAgents)
     return
   }
@@ -124,6 +148,7 @@ function daemonStatus({ available, cause, retrying }) {
     ...(cause ? [` ${sentence(cause)}`] : []),
     retrying ? ' Starting it again…' : ' Quit ConsensFlow and open it again.',
   )
+  placeDaemonDown()
 }
 
 /** "It stopped." for "it stopped": a cause read as a sentence of its own. */

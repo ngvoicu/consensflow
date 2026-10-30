@@ -4,13 +4,14 @@
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use cf_base::text::console_text;
 use cf_harness::contract::{
     Adapter, Admission, Held, Interrupt, Readiness, Records, Waiting, NOT_ADMITTED,
 };
-use cf_harness::records::{Record, Settlement};
+use cf_harness::records::{ModelMoved, Quota, Record, Settlement};
 use cf_harness::seams::Time;
 use cf_harness::testing::{
     finished, AnsweringHost, Driver, ScriptedHost, EPOCH_MS, FIRST_MESSAGE_MS,
@@ -228,6 +229,27 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
     *typed_in_box.borrow_mut() = "❭ probe words".to_owned();
     *cursor.borrow_mut() = json!({ "line": 3, "col": 2, "shown": true, "plainAfter": 10 });
     assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+}
+
+/// T-829: the engine presses no key into a box its harness reads empty: the window says
+/// so of a box that shows only Devin's hint, and not of one with words in it or of a
+/// screen with no box.
+#[test]
+fn the_engine_is_told_the_box_is_empty_only_where_devin_reads_it_so() {
+    const RULE: &str = "────────────────────────────────────────";
+    let home = Home::new();
+    let adapter = home.adapter();
+    let window = window(&adapter, &Request::resumed("mild-coin"));
+    let drawn = |typed: &str, plain_after: u64| {
+        json!({
+            "ok": true,
+            "bottom": [format!("{RULE} (bypass permissions on) ─"), typed, RULE, "SWE-2 Medium"],
+            "cursor": { "line": 1, "col": 2, "shown": true, "plainAfter": plain_after },
+        })
+    };
+    assert!(window.box_read_empty(&drawn("❭ Ask Devin anything about your code", 0)));
+    assert!(!window.box_read_empty(&drawn("❭ probe words", 10)));
+    assert!(!window.box_read_empty(&json!({ "ok": true, "bottom": ["SWE-2 Medium"] })));
 }
 
 /// Both reviews of 2026-10-16, round 4: a paste asks the host whether it still
@@ -450,4 +472,66 @@ fn reads_devins_own_refusal_from_the_wire_log_until_the_next_prompt() {
         "sessionId": "dev-1",
     }));
     assert_eq!(quota()["state"], "exhausted");
+}
+
+#[test]
+fn a_move_the_record_holds_outranks_the_refusal_the_wire_log_says_and_the_records_own_stands_beside_a_silent_wire(
+) {
+    // The look's one precedence (T-853): the move, then what the window says now, then the
+    // record's own. Devin's reader says neither a move nor a refusal today; a record that does is
+    // not lost by the wire's word, nor its refusal replaced by a wire that says none.
+    let prompt = json!({ "jsonrpc": "2.0", "id": 2, "method": "session/prompt", "params": { "sessionId": "dev-1" } });
+    let limit = json!({
+        "sessionId": "dev-1",
+        "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+                "type": "text",
+                "text": "Reached overall message rate limit. Your limit will reset in 35 minutes.",
+            },
+        },
+    });
+    let moved = Arc::new(ModelMoved {
+        from: "swe-1.6".to_owned(),
+        to: "swe-1.5".to_owned(),
+        because: "Devin moved the model".to_owned(),
+        at: None,
+    });
+    let refused = Arc::new(Quota::Unavailable {
+        at: None,
+        because: "its billing was refused".to_owned(),
+    });
+    let look = |record: Record, wire: &[&Value]| {
+        let home = Home::new();
+        let adapter = home.adapter_over(Some(Said::new(record) as Rc<dyn Records>));
+        let window = window(&adapter, &Request::resumed("dev-1"));
+        home.selects("dev-1");
+        for line in wire {
+            home.appends(&format!("{line}\n"));
+        }
+        finished(window.observe()).unwrap().quota
+    };
+    let with_move = Record {
+        model_moved: Some(Arc::clone(&moved)),
+        ..settled("x")
+    };
+    assert_eq!(
+        look(with_move, &[&prompt, &limit]).as_deref(),
+        Some(&moved.as_quota()),
+        "the wire's refusal does not hide the move"
+    );
+    let with_refusal = Record {
+        quota: Some(Arc::clone(&refused)),
+        ..settled("x")
+    };
+    assert_eq!(
+        look(with_refusal.clone(), &[]).as_deref(),
+        Some(&*refused),
+        "a silent wire does not take the record's refusal"
+    );
+    let wire = look(with_refusal, &[&prompt, &limit]);
+    assert!(
+        matches!(wire.as_deref(), Some(Quota::Exhausted { .. })),
+        "what the window says now outranks the record's: {wire:?}"
+    );
 }

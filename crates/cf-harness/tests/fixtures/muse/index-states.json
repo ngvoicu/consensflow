@@ -1,0 +1,174 @@
+[
+ {
+  "step": "first session answered, open",
+  "rows": [],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080"
+  ]
+ },
+ {
+  "step": "first session quit cleanly",
+  "rows": [],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080"
+  ]
+ },
+ {
+  "step": "second session up",
+  "rows": [
+   [
+    "01a1792d-f7d1-7f33-ba12-78116525a080",
+    1,
+    1
+   ]
+  ],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080",
+   "01a1792e-4bca-7b81-bf75-df89417ca3a4"
+  ]
+ },
+ {
+  "step": "second session answered, open",
+  "rows": [
+   [
+    "01a1792d-f7d1-7f33-ba12-78116525a080",
+    1,
+    1
+   ]
+  ],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080",
+   "01a1792e-4bca-7b81-bf75-df89417ca3a4"
+  ]
+ },
+ {
+  "step": "second session quit cleanly",
+  "rows": [
+   [
+    "01a1792d-f7d1-7f33-ba12-78116525a080",
+    1,
+    1
+   ]
+  ],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080",
+   "01a1792e-4bca-7b81-bf75-df89417ca3a4"
+  ]
+ },
+ {
+  "step": "third session killed at rest",
+  "rows": [
+   [
+    "01a1792d-f7d1-7f33-ba12-78116525a080",
+    1,
+    1
+   ],
+   [
+    "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+    1,
+    1
+   ]
+  ],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080",
+   "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+   "01a1792e-9fd3-7341-91d3-72a57104cb37"
+  ]
+ },
+ {
+  "step": "third session resumed",
+  "rows": [
+   [
+    "01a1792d-f7d1-7f33-ba12-78116525a080",
+    1,
+    1
+   ],
+   [
+    "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+    1,
+    1
+   ],
+   [
+    "01a1792e-9fd3-7341-91d3-72a57104cb37",
+    1,
+    0
+   ]
+  ],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080",
+   "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+   "01a1792e-9fd3-7341-91d3-72a57104cb37"
+  ]
+ },
+ {
+  "step": "third session resumed and quit",
+  "rows": [
+   [
+    "01a1792d-f7d1-7f33-ba12-78116525a080",
+    1,
+    1
+   ],
+   [
+    "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+    1,
+    1
+   ]
+  ],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080",
+   "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+   "01a1792e-9fd3-7341-91d3-72a57104cb37"
+  ]
+ },
+ {
+  "step": "a fourth window up",
+  "rows": [
+   [
+    "01a1792d-f7d1-7f33-ba12-78116525a080",
+    1,
+    1
+   ],
+   [
+    "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+    1,
+    1
+   ],
+   [
+    "01a1792e-9fd3-7341-91d3-72a57104cb37",
+    1,
+    1
+   ]
+  ],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080",
+   "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+   "01a1792e-9fd3-7341-91d3-72a57104cb37",
+   "01a1792e-ffdb-7c23-9dc5-4d9dd6e505ea"
+  ]
+ },
+ {
+  "step": "the fourth window quit",
+  "rows": [
+   [
+    "01a1792d-f7d1-7f33-ba12-78116525a080",
+    1,
+    1
+   ],
+   [
+    "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+    1,
+    1
+   ],
+   [
+    "01a1792e-9fd3-7341-91d3-72a57104cb37",
+    1,
+    1
+   ]
+  ],
+  "logs": [
+   "01a1792d-f7d1-7f33-ba12-78116525a080",
+   "01a1792e-4bca-7b81-bf75-df89417ca3a4",
+   "01a1792e-9fd3-7341-91d3-72a57104cb37"
+  ]
+ }
+]

@@ -443,6 +443,8 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         session: None,
         owed: None,
         late: false,
+        work: crate::at_work::OnWork::default(),
+        not_ready: None,
     };
     assert!(
         context
@@ -512,4 +514,30 @@ fn a_replacement_whose_recipient_has_no_conversation_any_more_is_confirmed_and_r
         "there was no conversation to have told"
     );
     context.close();
+}
+
+/// T-931 P1-1: the note that greets a session no hook greeted is no launch's prelude: a
+/// chief whose window comes up after it was told has its count of failed starts cleared,
+/// as after any launch that came up.
+#[test]
+fn a_chief_that_comes_up_after_its_greeting_was_told_has_its_failed_starts_cleared() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let record = context.dispatcher.record_of(chief);
+    record.window.borrow_mut().relaunch = Some(crate::windows::Relaunch {
+        failures: 1,
+        at: 0,
+        reopens: false,
+    });
+    context.dispatcher.came_up(&record);
+    assert!(record.window.borrow().relaunch.is_none());
 }

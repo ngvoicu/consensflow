@@ -60,6 +60,7 @@ fn each_harness_reads_its_own_record() {
         read(Harness::Opencode),
         "unreadable: no opencode store for s"
     );
+    assert_eq!(read(Harness::Muse), "unreadable: no muse session log for s");
     // Devin's store is opened, not found: its failure is the platform's.
     let devin = read(Harness::Devin);
     assert!(devin.starts_with("unreadable: "), "{devin}");
@@ -148,18 +149,26 @@ fn a_transcript_is_had_where_its_harness_keeps_it_and_never_in_a_store() {
         &[".pi", "agent", "sessions", "--work--"],
         "2026-10-05T01-00-00-000Z_s.jsonl",
     );
+    keep(
+        &[
+            ".local", "share", "muse", "sessions", "2026", "10", "26", "s",
+        ],
+        "session.jsonl",
+    );
     // A file in each store's place is no transcript.
     keep(&[".local", "share", "opencode"], "opencode.db");
     keep(&[".local", "share", "devin", "cli"], "sessions.db");
-    for harness in [Harness::Claude, Harness::Codex, Harness::Pi] {
+    for harness in [Harness::Claude, Harness::Codex, Harness::Pi, Harness::Muse] {
         assert!(had(harness, "s"), "{harness:?}");
         assert!(!had(harness, "q7"), "{harness:?}: another session");
     }
     for harness in [Harness::Opencode, Harness::Devin] {
         assert!(!had(harness, "s"), "{harness:?}");
     }
-    // Claude's file and Codex's are named by the session whole; Pi's holds it.
+    // Claude's file and Codex's are named by the session whole, as Muse's folder is;
+    // Pi's holds it.
     assert!(!had(Harness::Claude, "S"));
+    assert!(!had(Harness::Muse, "S") && !had(Harness::Muse, "2026"));
     assert!(!had(Harness::Codex, "05T01"));
     assert!(had(Harness::Pi, "000Z_"));
 }
@@ -167,7 +176,7 @@ fn a_transcript_is_had_where_its_harness_keeps_it_and_never_in_a_store() {
 #[test]
 fn a_transcript_looked_for_with_no_home_is_the_failure() {
     let env = Env::default();
-    for harness in [Harness::Claude, Harness::Codex, Harness::Pi] {
+    for harness in [Harness::Claude, Harness::Codex, Harness::Pi, Harness::Muse] {
         assert_eq!(
             has_transcript(harness, "s", &env).unwrap_err(),
             "missing home in env",

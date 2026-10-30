@@ -377,8 +377,8 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/launch_files.rs"
-find = '''const FOLDERS: [&str; 5] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER];'''
-replace = '''const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "specmint"];'''
+find = '''const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "muse"];'''
+replace = '''const FOLDERS: [&str; 7] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "muse", "specmint"];'''
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/launch_files.rs"

@@ -98,7 +98,11 @@ fn assert_whole(order: &Order, chains: [(&str, usize); 2]) {
     );
 }
 
-/// Runs a scenario on the local set the daemon runs on, in real time.
-async fn scene<F: Future>(scenario: F) -> F::Output {
-    LocalSet::new().run_until(scenario).await
+/// Runs a scenario on the local set the daemon runs on, in real time. The scenario is put
+/// on the heap as `scene` is called, so that a test's own future holds a pointer to it and
+/// not the scenario: a test of two scenes held both inline, which a debug build's daemon
+/// futures made too big for a Windows test thread's 2 MiB (integration D1, T-946, zeewin2).
+fn scene<F: Future>(scenario: F) -> impl Future<Output = F::Output> {
+    let scenario = Box::pin(scenario);
+    async move { LocalSet::new().run_until(scenario).await }
 }

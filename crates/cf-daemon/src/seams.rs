@@ -163,14 +163,14 @@ impl LaunchFiles for LaunchFolders {
     }
 }
 
-/// An adapter for each harness, built once with the daemon's services, by the
-/// word the ledger names the harness with.
+/// An adapter for each harness, built once with the daemon's services, by the word the
+/// ledger names the harness with.
 pub struct HarnessAdapters {
     by_harness: HashMap<Harness, Rc<dyn Adapter>>,
 }
 
 impl HarnessAdapters {
-    /// An adapter for each harness there is, built from `services`.
+    /// An adapter for each harness, built from `services`.
     pub fn new(services: &Services) -> Self {
         Self {
             by_harness: Harness::ALL

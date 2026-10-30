@@ -29,6 +29,8 @@ struct Fake<A: FnMut(&[String]) -> Answer> {
     /// The temp folder it was given, and for each command whether it was there.
     temp: Option<PathBuf>,
     temp_there: Vec<bool>,
+    /// The harnesses the machine lacks, each with why (`lacks`).
+    lacking: Vec<(String, String)>,
 }
 
 impl<A: FnMut(&[String]) -> Answer> Fake<A> {
@@ -43,6 +45,7 @@ impl<A: FnMut(&[String]) -> Answer> Fake<A> {
             state_of: None,
             stops_in_state: VecDeque::new(),
             states: 0,
+            lacking: Vec::new(),
         }
     }
 }
@@ -82,6 +85,13 @@ impl<A: FnMut(&[String]) -> Answer> Runner for Fake<A> {
 
     fn temp_in(&mut self, folder: &Path) {
         self.temp = Some(folder.to_path_buf());
+    }
+
+    fn lacks(&mut self, harness: &str) -> Option<String> {
+        self.lacking
+            .iter()
+            .find(|(lacked, _)| lacked == harness)
+            .map(|(_, why)| why.clone())
     }
 }
 
@@ -255,6 +265,7 @@ fn plant(name: &str, edits: &[(&str, &str, &str)], runs: &[(&str, bool)]) -> Pla
         prepare: Vec::new(),
         requires: Vec::new(),
         platforms: Vec::new(),
+        harnesses: Vec::new(),
         edits: edits
             .iter()
             .map(|(file, find, replace)| Edit {
@@ -1798,6 +1809,35 @@ fn a_plant_for_another_system_is_skipped_neither_caught_nor_missed_and_not_check
         "{said}"
     );
     assert!(runner.ran.is_empty());
+}
+
+/// T-829 (a P3 of Calliope's T-824): the rig's Muse cases pass saying why on a machine
+/// without Muse, so their plants read as missed there. A plant whose runs need a harness
+/// the machine lacks is not run, and says why, neither caught nor missed.
+#[test]
+fn a_plant_whose_runs_need_a_harness_the_machine_lacks_is_not_run_and_says_why() {
+    let (_folder, context) = checkout();
+    let mut muse = upper("p: muse", &[("first", false)]);
+    muse.harnesses = vec!["muse".into()];
+    let both = family(vec![muse.clone(), upper("p: every", &[("first", false)])]);
+    let mut runner = Fake::new(|_| passes());
+    runner.lacking = vec![("muse".into(), "Muse isn't installed".into())];
+    let (status, said) = go(&context, &both, &mut runner);
+    assert!(
+        said.contains("SKIPPED (absent)   p: muse: not run: Muse isn't installed\n"),
+        "{said}"
+    );
+    assert!(said.contains("MISSED"), "the other plant is run: {said}");
+    assert_eq!(status.unwrap(), 1, "{said}");
+    assert!(
+        said.ends_with("0 of 1 plants caught, 1 not run (a harness this machine lacks)\n"),
+        "{said}"
+    );
+    // On a machine that has it, it is run as any plant is.
+    let mut runner = Fake::new(|_| catches(&context, "m::the_test"));
+    let (status, said) = go(&context, &family(vec![muse]), &mut runner);
+    assert_eq!(status.unwrap(), 0, "{said}");
+    assert!(said.ends_with("1 of 1 plants caught\n"), "{said}");
 }
 
 #[test]

@@ -40,7 +40,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
-        let Some(snapshot) = self.snapshot_now(&pane).await else {
+        let Some(snapshot) = self.snapshot_now(&pane, true).await else {
             self.unknown(record, NO_ANSWER);
             return Ok(false);
         };'''
@@ -116,7 +116,7 @@ runs = ["engine-unknown-looks"]
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
-        let Some(snapshot) = self.snapshot_now(&pane).await else {
+        let Some(snapshot) = self.snapshot_now(&pane, true).await else {
             self.unknown(record, NO_ANSWER);
             return Ok(false);
         };'''

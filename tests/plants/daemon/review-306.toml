@@ -752,8 +752,14 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;'''
-replace = '''                    self.tell_failed(&project, task, teller, &because, &told, None)?;'''
+find = '''
+                        &told,
+                        Some(teller),
+                        &words,'''
+replace = '''
+                        &told,
+                        None,
+                        &words,'''
 
 [[plant]]
 name = "review 306: the teller of words that never reach the window hears nothing of its own that wait"
@@ -762,8 +768,14 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;'''
-replace = '''                    self.tell_failed(&project, task, teller, &because, &[], Some(teller))?;'''
+find = '''
+                        &told,
+                        Some(teller),
+                        &words,'''
+replace = '''
+                        &[],
+                        Some(teller),
+                        &words,'''
 
 # Calliope's re-check T-510, its P3s (T-658).
 

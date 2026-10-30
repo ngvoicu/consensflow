@@ -38,11 +38,30 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
     release.ci_passed(&commit, Left::Nothing)?;
     if options.dry_run {
         return Ok(format!(
-            "dry run: every check passed; {tag} would be tagged on {} with {} and pushed to origin and upstream\n",
+            "dry run: every check passed; a hand run of release.yml would be started on {}, and once it \
+             ended green {tag} would be tagged on it with {} and pushed to origin and upstream\n",
             short(&commit),
             notes.display()
         ));
     }
+
+    // The same jobs as the tag's run, tried first: a tag whose run fails is
+    // never moved, so what it would fail on is found out before there is one.
+    // A hand run is of main's head, and CI may have been waited for a long
+    // while: main must still be the commit CI passed, as upstream has it, or
+    // the run would be of something else. (A main that moves after this, before
+    // GitHub takes its head, is `trial`'s to find: it is looked for by the commit.)
+    let head = release.main_as_upstream_has_it()?;
+    if head != commit {
+        return Err(refused(format!(
+            "main moved on from {} to {} while CI was watched: a hand run is of main's head, and this release \
+             is of {}; run again",
+            short(&commit),
+            short(&head),
+            short(&commit)
+        )));
+    }
+    release.trial(&commit)?;
 
     let before = release.newest_run("release.yml", Some(&commit), Some("push"))?;
     release.tag_and_push(&tag, &notes, &commit)?;
@@ -53,6 +72,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         event: Some("push"),
         before,
         left: Left::Tag(&tag),
+        head: None,
     })?;
     release.wait_for_feed(ALPHA_FEED, &version, run)?;
     // By the release it names, read as the one before was: a 404 is no change.
@@ -63,6 +83,9 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
              an alpha never moves it; read the publish job of run {run}"
         )));
     }
+    // Published and served: the release's files, its signature and the feed held to
+    // what T-862 checked by hand.
+    release.verify_published(&version, run)?;
     Ok(format!(
         "released {version} on {}: {ALPHA_FEED} serves it, {STABLE_FEED} is as it was\n",
         short(&commit)

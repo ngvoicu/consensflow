@@ -77,7 +77,7 @@ use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
 use crate::shared::left_open::LeftOpen;
-use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
+use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{pane, specmint, window_args};
 
@@ -570,6 +570,10 @@ impl DevinWindow {
 impl Window for DevinWindow {
     fn opened(&self, _pid: Option<u32>) {}
 
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Devin, snapshot)
+    }
+
     /// The window is on `session` from now on: a switch to full permission begun for
     /// the conversation it was on is that one's, and another's time runs from the
     /// first look that finds it in the normal mode.
@@ -750,9 +754,9 @@ impl Window for DevinWindow {
             .await;
             let wire = wire?;
             self.looked.set(self.history().map(|seen| seen.prompts));
-            let mut observed = record_state(Arc::clone(&reading));
+            // What Devin's wire says of its quota is the live word beside the record's.
+            let mut observed = observed_from(Arc::clone(&reading), wire.quota);
             observed.waiting = dialog_waiting(observed.reading.as_deref());
-            observed.quota = wire.quota;
             // What the record held when the window was opened with no message is the old
             // process's, whatever it says of the turn: no process is in a turn that was
             // cut, and one the record cannot end ended. The window has been given nothing

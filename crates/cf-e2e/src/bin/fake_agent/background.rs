@@ -61,7 +61,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -171,7 +171,7 @@ impl Server {
 }
 
 /// What a job is started as, besides its group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct How {
     /// It launches a browser of its own once it is ready.
     browser: bool,
@@ -184,6 +184,8 @@ struct How {
     detached: bool,
     /// The shell `exec`s it, and is it from then on.
     in_place: bool,
+    /// What ends its shell alone, where something may ([`Jobs::start_ended_by_its_shell`]).
+    shell_end: Option<ShellEnd>,
 }
 
 /// The jobs one window starts.
@@ -251,6 +253,7 @@ impl Jobs {
             command: false,
             detached: false,
             in_place: false,
+            shell_end: None,
         };
         self.begin(SERVER, SERVER_SECONDS, false, group, how, || {})
             .map(|_| ())
@@ -274,6 +277,7 @@ impl Jobs {
             command: true,
             detached,
             in_place: false,
+            shell_end: None,
         };
         self.begin(label, seconds, deaf, Group::Own, how, then)
     }
@@ -292,8 +296,30 @@ impl Jobs {
             command: true,
             detached: false,
             in_place: true,
+            shell_end: None,
         };
         self.begin(label, seconds, false, Group::Own, how, then)
+    }
+
+    /// [`Jobs::start`] of a command whose shell can be ended alone, by its number, which
+    /// leaves what it runs running with no parent: as Claude Code 2.1.312 ends a command on
+    /// Windows, whose tree kill falls back to the shell there (T-906). What it returns ends
+    /// the shell when asked ([`ShellEnd`]).
+    pub fn start_ended_by_its_shell(
+        &self,
+        label: &str,
+        seconds: u64,
+    ) -> Result<(PathBuf, ShellEnd), String> {
+        let end = ShellEnd::default();
+        let how = How {
+            browser: false,
+            command: true,
+            detached: false,
+            in_place: false,
+            shell_end: Some(end.clone()),
+        };
+        let file = self.begin(label, seconds, false, Group::Own, how, || {})?;
+        Ok((file, end))
     }
 
     /// [`Jobs::start`], as `how` says: the browser the job launches, if it launches
@@ -336,7 +362,8 @@ impl Jobs {
             );
         }
         // The window's environment, which every program of a window has.
-        let mut job = Self::running(&program, words, how)?
+        let shell_end = how.shell_end.clone();
+        let mut job = Self::running(&program, words, &how)?
             .inheriting_env()
             .closed_input()
             .spawn()
@@ -346,7 +373,15 @@ impl Jobs {
         // leaves the job running, as a window's end leaves what it started.
         thread::spawn(move || {
             while !job.has_exited() {
+                if shell_end.as_ref().is_some_and(ShellEnd::asked) {
+                    // The shell alone, by its number: what it runs is left.
+                    job.kill();
+                    break;
+                }
                 thread::sleep(LOOK);
+            }
+            if let Some(end) = &shell_end {
+                end.done.store(true, Ordering::SeqCst);
             }
             then();
         });
@@ -355,7 +390,7 @@ impl Jobs {
 
     /// The program that runs the job `words` say: this one, as it is, or where `how`
     /// says it is a command of the agent's, a shell that runs it ([`in_a_shell`]).
-    fn running(program: &Path, words: Vec<OsString>, how: How) -> Result<Run, String> {
+    fn running(program: &Path, words: Vec<OsString>, how: &How) -> Result<Run, String> {
         if how.in_place && cfg!(unix) {
             Ok(Run::new("/bin/sh")
                 .args(["-c", IN_PLACE])
@@ -367,6 +402,29 @@ impl Jobs {
         } else {
             Ok(Run::new(program).args(words))
         }
+    }
+}
+
+/// What ends a job's shell alone ([`Jobs::start_ended_by_its_shell`]): asked once, and done
+/// once the shell is gone.
+#[derive(Debug, Clone, Default)]
+pub struct ShellEnd {
+    asked: Arc<AtomicBool>,
+    done: Arc<AtomicBool>,
+}
+
+impl ShellEnd {
+    /// Ends the shell, and waits up to [`UP`] for it to be gone.
+    pub fn end(&self) {
+        self.asked.store(true, Ordering::SeqCst);
+        let deadline = std::time::Instant::now() + UP;
+        while !self.done.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            thread::sleep(LOOK);
+        }
+    }
+
+    fn asked(&self) -> bool {
+        self.asked.load(Ordering::SeqCst)
     }
 }
 

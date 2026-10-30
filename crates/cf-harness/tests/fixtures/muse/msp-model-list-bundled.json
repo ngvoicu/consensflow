@@ -1,0 +1,33 @@
+{
+ "jsonrpc": "2.0",
+ "id": 3,
+ "result": {
+  "providerId": "meta",
+  "profileId": "tbh",
+  "source": "bundledCatalog",
+  "models": [
+   {
+    "modelId": "muse-spark-1.2",
+    "displayLabel": "muse-spark-1.2",
+    "providerId": "meta",
+    "profileId": null,
+    "releaseDate": null,
+    "description": null,
+    "contextLimit": null,
+    "outputLimit": null,
+    "cost": null,
+    "isActive": false,
+    "isDefault": false,
+    "variants": [
+     "minimal",
+     "low",
+     "medium",
+     "high",
+     "xhigh"
+    ],
+    "reasoningEffortVariants": [],
+    "defaultReasoningEffort": "high"
+   }
+  ]
+ }
+}

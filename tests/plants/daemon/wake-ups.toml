@@ -343,7 +343,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused' AND t.state = 'working'))"
 
 [[plant]]
@@ -353,7 +354,8 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused' AND t.state = 'working'))"
 
 [[plant]]
@@ -363,7 +365,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused'))"
 
 [[plant]]
@@ -373,7 +376,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused'))"
 
 [[plant]]
@@ -383,7 +387,8 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused'))"
 
 [[plant]]

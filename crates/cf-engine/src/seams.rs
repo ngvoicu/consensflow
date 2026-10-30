@@ -361,8 +361,9 @@ pub trait BackgroundWork {
 pub enum CommandsSeen {
     /// So many run in the window.
     Running(usize),
-    /// The host answered that it cannot tell them: a platform with no groups, or a harness
-    /// that keeps its servers otherwise.
+    /// The host answered that it cannot tell them: a harness that keeps its servers
+    /// otherwise, or a platform whose tree the host does not read (a Windows job tells them
+    /// by their chain since T-906).
     Untold,
     /// The host answered that a process of the window cannot be read (another user's):
     /// a later look may read them all.

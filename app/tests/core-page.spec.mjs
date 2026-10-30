@@ -1242,6 +1242,60 @@ test("shows a tester's test tasks as cards on its row like any task, and a test 
   await expect(waiting.locator('.card-route')).toHaveText('for a standard tester')
 })
 
+test('says an account that refused for its billing or login is unavailable, with no time, and tries it again on the human’s word', async ({
+  page,
+}) => {
+  // MUS-23: nothing resets such an account, so no time is shown and nothing is said to wait for a reset.
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana').participant.outUntil =
+    '9999-12-31T23:59:59.998Z'
+  await open(page, data)
+  const diana = page.locator('tr[data-handle="diana"]')
+  await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  await expect(diana.locator('.row-status')).toHaveText(
+    'Unavailable: its account was refused for billing or login. Press Try again now once it works',
+  )
+  await diana.getByRole('button', { name: 'Try @diana again now, once its account works' }).click()
+  expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
+})
+
+test('says a member whose harness moved its model on its own is held, why in the words the engine gave, and what to do', async ({
+  page,
+}) => {
+  // MUS-24: the move holds the member as a refused account does, and the row says what moved,
+  // and that only the human's word for that member lets it go on.
+  const data = model()
+  const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+  diana.participant.outUntil = '9999-12-31T23:59:59.999Z'
+  diana.activity = {
+    state: 'out',
+    reason:
+      'moved: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose',
+  }
+  await open(page, data)
+  await expect(page.locator('tr[data-handle="diana"] .row-status')).toHaveText(
+    'Held: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose. Press Try again now once it is on the model you chose',
+  )
+  await expect(
+    page.getByRole('button', {
+      name: 'Try @diana again now, once it is on the model you chose',
+    }),
+  ).toBeVisible()
+})
+
+test('says a held member whose engine lost its words after a restart is held for its model, not for a billing', async ({
+  page,
+}) => {
+  const data = model()
+  const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+  diana.participant.outUntil = '9999-12-31T23:59:59.999Z'
+  diana.activity = null
+  await open(page, data)
+  const status = page.locator('tr[data-handle="diana"] .row-status')
+  await expect(status).toHaveText(/^Held: its model moved on its own\. Press Try again now/)
+  await expect(status).not.toContainText('billing')
+})
+
 test('names the day of a reset that is not today, and tries a member or the chief out of quota again', async ({
   page,
 }) => {
@@ -1283,6 +1337,30 @@ test('a task held while its member is out of quota says when it goes on', async 
   await open(page, data)
   await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
     /^out of quota until (\S+ )?\d\d:\d\d · from /,
+  )
+})
+
+test('a task held for an account no time resets says it waits for the human, not for a time', async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  lane.tasks.push(
+    task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, {
+      heldUntil: '9999-12-31T23:59:59.998Z',
+    }),
+  )
+  lane.tasks.push(
+    task(10, 'Write the notes', 'paused', 'chief', 'zeus', 5, {
+      heldUntil: '9999-12-31T23:59:59.999Z',
+    }),
+  )
+  await open(page, data)
+  await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
+    /^unavailable until you say it works again · from /,
+  )
+  await expect(page.locator('button.card[data-task="10"] .card-route')).toHaveText(
+    /^held until you say its model may go on · from /,
   )
 })
 
@@ -4679,7 +4757,7 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
     const harnesses = await openScreen(page, 'Harnesses')
     await expect(harnesses).toBeVisible()
     const screen = harnesses.frameLocator('iframe')
-    await expect(screen.locator('.host')).toHaveCount(5)
+    await expect(screen.locator('.host')).toHaveCount(6)
     await expect(
       screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^pi$/ }) }),
     ).toContainText('Version 1.2.3')

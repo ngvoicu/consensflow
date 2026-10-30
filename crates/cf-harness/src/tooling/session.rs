@@ -37,6 +37,7 @@ pub(super) fn newest(
         Harness::Claude | Harness::Pi => Err(format!(
             "{kind} opens on a session id of its own choosing: none to find"
         )),
+        Harness::Muse => Err(format!("{kind} opens no window yet: none to find")),
     }
 }
 

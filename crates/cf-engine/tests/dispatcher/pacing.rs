@@ -8,7 +8,7 @@
 
 use std::rc::Rc;
 
-use cf_engine::testing::{Context, Made};
+use cf_engine::testing::{Context, Made, TRUST_PROMPT};
 use cf_harness::contract::{Admission, InputBox, Readiness};
 use cf_harness::records::Role;
 use serde_json::{json, Value};
@@ -261,6 +261,9 @@ fn the_look_that_lets_a_message_go_is_in_its_delivery_begun() {
 fn a_harness_with_no_idle_word_of_its_own_waits_for_a_quiet_screen_too_and_says_so() {
     let context = paced();
     context.adapter.idle_word.set(false);
+    context
+        .host
+        .set_snapshot(json!({ "bottom": [TRUST_PROMPT] }));
     let project = chief_at_rest(&context);
     let chief = context.id(project, "chief");
     assert_eq!(
@@ -270,15 +273,81 @@ fn a_harness_with_no_idle_word_of_its_own_waits_for_a_quiet_screen_too_and_says_
     let note = context.note(project, "zeus", "chief", "One");
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": SETTLE - 1 }));
+        .set_snapshot(json!({ "outputQuietMs": SETTLE - 1, "bottom": [TRUST_PROMPT] }));
     context.pass().unwrap();
     context.advance(SETTLE);
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": SETTLE }));
+        .set_snapshot(json!({ "outputQuietMs": SETTLE, "bottom": [TRUST_PROMPT] }));
     context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+}
+
+/// T-946: Muse 1.4.14 held still six seconds as it started, before its first frame, and the
+/// fallback read its window at rest by its record and a quiet screen: the live pacing run
+/// typed its turn into a Muse that took no keys yet, and the words stayed in its box. A
+/// window read by the fallback is up only once its harness shows its own sign of it, its
+/// prompt: until then its lane says it is starting, and nothing is typed into it.
+#[test]
+fn a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_prompt() {
+    let context = paced();
+    context.adapter.idle_word.set(false);
+    // Its screen is quiet, its harness still starting: no prompt drawn.
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 6 * SETTLE, "bottom": ["Muse Code 1.4.14", ""] }));
+    let project = chief_at_rest(&context);
+    let chief = context.id(project, "chief");
+    let note = context.note(project, "zeus", "chief", "One");
+    for _ in 0..3 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    let activity = context.dispatcher.activity(chief);
+    assert_ne!(activity.state.as_str(), "idle", "{activity:?}");
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 6 * SETTLE, "bottom": [TRUST_PROMPT] }));
+    for _ in 0..3 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+}
+
+/// The same for a window whose record already holds items, as one opened again on its
+/// conversation: a record read at rest is no sign that the harness is up (Muse resumes a
+/// session seconds before its first frame too, T-946).
+#[test]
+fn a_window_read_by_the_fallback_whose_record_has_items_is_not_at_rest_before_its_prompt() {
+    let context = paced();
+    context.adapter.idle_word.set(false);
+    // Its screen is quiet, its harness still starting: no prompt drawn.
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 6 * SETTLE, "bottom": ["Muse Code 1.4.14", ""] }));
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    // Its record holds an answer before its harness has drawn its prompt.
+    context
+        .adapter
+        .answer("chief", "What the session said before");
+    let note = context.note(project.id, "zeus", "chief", "One");
+    for _ in 0..3 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 6 * SETTLE, "bottom": [TRUST_PROMPT] }));
+    for _ in 0..3 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
     assert_eq!(pasted(&context, "chief"), [note.id]);
 }
 

@@ -140,6 +140,47 @@ describe('the registry', () => {
     )
   })
 
+  it('reads its columns by their names, in whatever order, each as it is named', () => {
+    // A kluris registry has Progress before Priority; the names are read in any case.
+    const rows = (head) =>
+      readRegistry(
+        [
+          head,
+          '|---|---|---|---|---|---|',
+          '| kluris-v3-rust | Kluris 3 | completed | 52/52 | high | 2026-10-28 |',
+        ].join('\n'),
+      ).rows[0]
+    const as = ({ id, title, status, priority, progress, updated, done, total }) => [
+      id,
+      title,
+      status,
+      priority,
+      progress,
+      updated,
+      done,
+      total,
+    ]
+    assert.deepEqual(as(rows('| ID | Title | Status | Progress | Priority | Updated |')), [
+      'kluris-v3-rust',
+      'Kluris 3',
+      'completed',
+      'high',
+      '52/52',
+      '2026-10-28',
+      52,
+      52,
+    ])
+    // Another order: the cells of each row are those of the names above them.
+    const scrambled = readRegistry(
+      [
+        '| UPDATED | priority | Title | PROGRESS | id | Status |',
+        '|---|---|---|---|---|---|',
+        '| 2026-10-09 | medium | API | 2/8 | api | paused |',
+      ].join('\n'),
+    ).rows[0]
+    assert.deepEqual(as(scrambled), ['api', 'API', 'paused', 'medium', '2/8', '2026-10-09', 2, 8])
+  })
+
   it('is none where the text holds no such table', () => {
     assert.equal(readRegistry('# Our specs\n\n| Spec | State |\n|---|---|\n| a | b |\n'), null)
     // As many columns as Specmint's, but other ones.
@@ -153,6 +194,15 @@ describe('the registry', () => {
       readRegistry('| ID | Title | Status | Priority | Progress | Updated |\n| no rule |'),
       null,
     )
+    // One of the six twice, one missing, or one more.
+    for (const head of [
+      '| ID | Title | Status | Status | Progress | Updated |',
+      '| ID | Title | Status | Progress | Updated |',
+      '| ID | Title | Status | Priority | Progress | Updated | Owner |',
+    ]) {
+      const rule = `|${'---|'.repeat(head.split('|').length - 2)}`
+      assert.equal(readRegistry(`${head}\n${rule}\n| a | b | c | d | e | f |`), null, head)
+    }
     assert.equal(readRegistry(''), null)
   })
 

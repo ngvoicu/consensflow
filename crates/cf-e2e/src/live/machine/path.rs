@@ -93,7 +93,7 @@ pub(super) fn runs(found: PathBuf, name: &str, probe: &[&str]) -> Result<PathBuf
 }
 
 /// [`command`] on the `path` and the extensions it is given.
-pub(super) fn find(command: &str, path: &str, extensions: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn find(command: &str, path: &str, extensions: Option<&str>) -> Option<PathBuf> {
     candidates(command, path, extensions).into_iter().next()
 }
 
