@@ -11,7 +11,7 @@
 
 [run]
 nested-cargo = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "nested_cargo"]
-nested-cargo-rule = ["cargo", "test", "--offline", "-p", "xtask", "--test", "cargo_in_tests"]
+nested-cargo-rule = ["cargo", "test", "--offline", "-p", "xtask", "--target-dir", "app/src-tauri/target/xtask-check", "--test", "cargo_in_tests"]
 nested-cargo-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::"]
 nested-cargo-release = ["cargo", "test", "--offline", "-p", "cf-release", "--lib", "process::"]
 
