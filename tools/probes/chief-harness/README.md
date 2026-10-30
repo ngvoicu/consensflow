@@ -13,6 +13,7 @@ real home>` (Devin stalls in a workspace under the Mac's `/var` symlink).
 | `claude_alias_tail.py [alias\|tail]` | Claude's alias pinning in the record; the cost of a tail read of a 120 MB transcript | 3 one-line turns (alias) |
 | `muse_model.py` (a Python with `pyte`; Mac) | Muse's `/model` in its window, and what its record says before and after a resume | 4 one-line turns on Muse Spark at minimal |
 | `native_switch.py <harness> --ask <harness-ask>` (a Python with `pyte`; Mac; Muse with `--muse-after-d1`, once the live kit's Muse row is on the base) | CHF-10: the human's `/model` in the window with the key that keeps it to the conversation (Claude `s`, Codex `s`, Pi Enter, Devin `opt+↵`), then what ConsensFlow's own reader (`harness-ask` `last_used`) says, a headless reopen on it, and whether the switch wrote a model to the throwaway's settings | 4 one-line turns on the cheap models (the fourth is the reopen's) |
+| `gone_launch.py` (a Python with `pyte`; Mac) | CHF-06 after T-955's P1: whether Claude Code's window on a model its account lacks ends at launch or writes a record first | no model turn (the model is refused) |
 | `tuidrive.py` | T-445's pty driver (pyte), which `muse_model.py` and `native_switch.py` drive the windows with | |
 | `moved_lines.py <repo> <file.md> <old> <new>` | CHF-01: each `file:line` a research or spec names, at the base it was read against and on another; which moved, by how much, and which changed | none |
 
@@ -83,3 +84,12 @@ check waits for integration D1's Muse row of the live kit, after a run wrote int
 owner's `~/.config/muse`. Muse has no key that keeps a switch to one conversation (Enter
 saves the default, here the throwaway's `settings.json`) and no headless resume that takes
 a prompt, so its reopen is a window.
+
+### Claude Code's window on a gone model (CHF-06, 2026-10-29, the Mac, 2.1.312)
+
+`gone_launch.py`: the window does not end. It opens, and its first turn fails at once with
+a `<synthetic>` assistant entry, `isApiErrorMessage`, in the model's own name: "There's an
+issue with the selected model (claude-gone-9-9). It may not exist or you may not have
+access to it. Run /model to pick a different model." Claude's reader takes it as the
+turn's failure, which is where a chief's gone model is heard; the rig's stand-in does the
+same since.
