@@ -554,8 +554,7 @@ fn a_file_dated_ahead_of_the_clock_is_read_again_only_for_a_step_after_it_is_fou
 /// ahead of this one's), rewritten at its size in its tick within a step of the look that
 /// first found it so, is told by its bytes.
 #[test]
-fn a_file_dated_ahead_of_the_clock_rewritten_within_a_step_of_being_found_is_not_the_one_read()
-{
+fn a_file_dated_ahead_of_the_clock_rewritten_within_a_step_of_being_found_is_not_the_one_read() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("t.jsonl");
     let found = EPOCH_MS;

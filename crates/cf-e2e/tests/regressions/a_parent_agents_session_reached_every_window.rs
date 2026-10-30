@@ -88,7 +88,10 @@ fn no_window_is_given_the_session_of_an_agent_the_app_was_started_from() -> Outc
         .into_iter()
         .filter(|frame| is_worker(frame) || frame["id"] == chief)
         .collect();
-    assert!(frames.len() >= 2, "the chief's window and the worker's: {frames:?}");
+    assert!(
+        frames.len() >= 2,
+        "the chief's window and the worker's: {frames:?}"
+    );
     for frame in &frames {
         let given: Vec<String> = names(frame)
             .into_iter()

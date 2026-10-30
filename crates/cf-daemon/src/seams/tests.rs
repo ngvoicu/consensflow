@@ -136,10 +136,17 @@ fn no_window_is_given_a_harness_session_a_terminal_was_asked_in() {
     let mut named = vec!["LANG"];
     named.extend(&marked);
     let mut vars = vec![
-        (TERMINAL_ENV.to_owned(), serde_json::to_string(&named).unwrap()),
+        (
+            TERMINAL_ENV.to_owned(),
+            serde_json::to_string(&named).unwrap(),
+        ),
         ("LANG".to_owned(), "en_GB.UTF-8".to_owned()),
     ];
-    vars.extend(marked.iter().map(|name| ((*name).to_owned(), "the-parent's".to_owned())));
+    vars.extend(
+        marked
+            .iter()
+            .map(|name| ((*name).to_owned(), "the-parent's".to_owned())),
+    );
     let window = WindowEnv::new(&Env::from_vars(vars), "http://127.0.0.1:1", "/bundle/bin");
     let started = window.env(participant(&scene.project, "zeus"), &scene.project);
     let names: Vec<&str> = started.iter().map(|(name, _)| name.as_str()).collect();

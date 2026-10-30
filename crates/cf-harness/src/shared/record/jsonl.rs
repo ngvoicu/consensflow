@@ -78,7 +78,7 @@ pub(crate) struct Seen {
     /// A hash of the bytes from `offset` to `size`: the tail, and what follows the
     /// last whole line that is no record yet (a line still being written, torn lines
     /// waiting).
-    rest: u64,
+    rest: ReadHash,
     /// An unterminated last record already visited: its bytes, after `offset`.
     tail: Vec<u8>,
     /// How many records were visited.
@@ -249,9 +249,7 @@ pub(crate) fn read_on_with(
             if hash_of(&mut handle, ReadHash::default(), 0, seen.offset)? != seen.read {
                 return Ok(Looked::NotTheFile);
             }
-            if hash_of(&mut handle, ReadHash::default(), seen.offset, size)?.0.finish()
-                == seen.rest
-            {
+            if hash_of(&mut handle, ReadHash::default(), seen.offset, size)? == seen.rest {
                 return Ok(Looked::Held(Seen {
                     looked_ms,
                     ..seen.clone()
@@ -385,7 +383,7 @@ pub(crate) fn read_on_with(
         seen.map_or(0, |seen| seen.offset),
         offset,
     )?;
-    let rest = hash_of(&mut handle, ReadHash::default(), offset, at)?.0.finish();
+    let rest = hash_of(&mut handle, ReadHash::default(), offset, at)?;
     Ok(Looked::Read(Seen {
         identity: file_identity,
         size: at,

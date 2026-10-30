@@ -282,9 +282,7 @@ runs = ["harness-lib-record"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/jsonl.rs"
-find = '''            if hash_of(&mut handle, ReadHash::default(), seen.offset, size)?.0.finish()
-                == seen.rest
-            {
+find = '''            if hash_of(&mut handle, ReadHash::default(), seen.offset, size)? == seen.rest {
                 return Ok(Looked::Held(Seen {
                     looked_ms,
                     ..seen.clone()

@@ -350,9 +350,9 @@ mod tests {
             for name in names {
                 assert!(
                     !name.is_empty()
-                        && name
-                            .bytes()
-                            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'),
+                        && name.bytes().all(|byte| byte.is_ascii_uppercase()
+                            || byte.is_ascii_digit()
+                            || byte == b'_'),
                     "{}: {name:?} is no variable's name",
                     harness.as_str()
                 );
@@ -398,7 +398,12 @@ mod tests {
                 assert!(is_parent_session_variable(name), "{name}");
             }
         }
-        for name in ["CONSENSFLOW_HOME", "CONSENSFLOW_TERMINAL_ENV", "CLAUDE_CONFIG_DIR", "PATH"] {
+        for name in [
+            "CONSENSFLOW_HOME",
+            "CONSENSFLOW_TERMINAL_ENV",
+            "CLAUDE_CONFIG_DIR",
+            "PATH",
+        ] {
             assert!(!is_parent_session_variable(name), "{name}");
         }
     }

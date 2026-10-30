@@ -216,7 +216,10 @@ fn a_log_dated_ahead_of_the_clock_is_read_again_only_for_a_step_after_it_is_foun
     let log = Log::new();
     let ahead = EPOCH_MS + 86_400_000;
     log.write_at(&shows("native-a"), ahead);
-    assert_eq!(log.wire.read(EPOCH_MS).unwrap().shown.as_deref(), Some("native-a"));
+    assert_eq!(
+        log.wire.read(EPOCH_MS).unwrap().shown.as_deref(),
+        Some("native-a")
+    );
     // Within the step: rewritten at its size and its time, it is told by its bytes.
     log.write_at(&shows("native-b"), ahead);
     assert_eq!(
