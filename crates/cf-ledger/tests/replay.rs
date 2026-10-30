@@ -129,7 +129,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-messages-011", 10, "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
     ("ledger-messages-013", 10, READ_AT_ONCE),
     ("ledger-messages-014", 10, READ_AT_ONCE),
-    ("ledger-messages-015", 11, READ_AT_ONCE),
+    ("ledger-messages-015", 10, PICK_ROOM),
     ("ledger-messages-016", 12, ANSWERED_AS_IT_WAITED),
     ("ledger-messages-017", 10, DOOR_READ),
     ("ledger-messages-022", 12, DOOR_READ),
@@ -217,6 +217,8 @@ const LEFT_THE_PAUSE: &str =
 /// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
 const DOOR_READ: &str =
     "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";
+/// A pick that does not fit the answer says how long the longest could be.
+const PICK_ROOM: &str = "a pick that does not fit the answer is refused as `pick too long` with how long the longest could be, the headers of the questions and the other picks counted (T-969), where Node said the body limit and took a pick of the limit's own length to refuse it as a body; the choice answer that follows lands queued, not read";
 /// An answer is received, not read at its creation.
 const READ_AT_ONCE: &str =
     "a choice answer lands queued: Node marked it read and stamped it at its creation, two clock readings more";
