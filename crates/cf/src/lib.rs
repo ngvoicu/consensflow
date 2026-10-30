@@ -3,6 +3,7 @@
 //! answered here against the daemon's API; anywhere else it is the CLI's
 //! standalone commands, which `standalone` answers, and `ui`, the daemon's,
 //! which `main` runs before any of this (`native_ui`).
+//! In a window `cf ui` is not the daemon's: it says so, and why.
 //! `cf hook <harness>` is what a harness's hooks run, in a window or
 //! not; it says only what its harness reads, and never fails.
 //! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.
@@ -60,6 +61,15 @@ pub fn native_ui(env: &Env, args: &[OsString]) -> Option<i32> {
     (asked && !standalone::asks_for_help(&words)).then(|| cf_daemon::ui(env, rest))
 }
 
+/// What `cf ui` says where a member's token is set, which is a window of a board: it starts
+/// ConsensFlow's own daemon, outside one. It names the variables to take away
+/// ([`WINDOW_VARIABLES`], which a test holds the words to) and never their values; an app
+/// opened from a window had a daemon that never started (T-868) until it took them away itself.
+const UI_IN_A_WINDOW: &str = "`cf ui` starts ConsensFlow's own daemon, and this is a window of \
+    a ConsensFlow board (CONSENSFLOW_TOKEN is set), where cf is that board's command and has no \
+    `ui`. Run it in a terminal outside the window, or unset CONSENSFLOW_URL, CONSENSFLOW_TOKEN, \
+    CONSENSFLOW_PARTICIPANT and CONSENSFLOW_PROJECT first.";
+
 /// Runs the command in `args`: its exit code. Only a failure to write is an error.
 pub fn run(
     env: &Env,
@@ -78,6 +88,12 @@ pub fn run(
     if given.first().is_some_and(|first| first == "hook") {
         let harness = given.get(1).map(|arg| arg.to_string_lossy());
         return hook::run(harness.as_deref(), env, input, out);
+    }
+    // The daemon's `cf ui` is no board command, and `main` left it to this when a token is
+    // set (`native_ui`): said in words, where the board would call it an unknown command.
+    if given.first().is_some_and(|first| first == "ui") && env.text("CONSENSFLOW_TOKEN").is_some() {
+        writeln!(err, "cf: {UI_IN_A_WINDOW}")?;
+        return Ok(1);
     }
     match Board::from_env(env) {
         Some(board) => board::run(&given, json, &board, input, out, err),

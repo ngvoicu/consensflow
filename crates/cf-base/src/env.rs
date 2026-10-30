@@ -23,6 +23,30 @@ pub const TOOL_FOLDERS: &str = "CONSENSFLOW_TOOL_FOLDERS";
 /// the app's own terminal would not have otherwise (T-540).
 pub const TERMINAL_ENV: &str = "CONSENSFLOW_TERMINAL_ENV";
 
+/// What a window gives its member to reach its board with: the address of the board's daemon,
+/// the member's token, and the project and member it is. A program that holds them is a client
+/// of that board, as `cf` is in a window, where it is the board's command and `cf ui`, the
+/// daemon's own, is none; so a program started from a window that is meant to be nothing of
+/// that board's is not to be given them.
+pub const WINDOW_VARIABLES: [&str; 4] = [
+    "CONSENSFLOW_URL",
+    "CONSENSFLOW_TOKEN",
+    "CONSENSFLOW_PARTICIPANT",
+    "CONSENSFLOW_PROJECT",
+];
+
+/// Whether `name` is one of the [`WINDOW_VARIABLES`], as the system compares names: on
+/// Windows in any case.
+pub fn is_window_variable(name: &str) -> bool {
+    WINDOW_VARIABLES.iter().any(|window| {
+        if cfg!(windows) {
+            window.eq_ignore_ascii_case(name)
+        } else {
+            *window == name
+        }
+    })
+}
+
 /// The folders a package manager of the system puts its programs in, which a
 /// login shell puts on the PATH and an app the Finder started is not given:
 /// on a Mac, Homebrew's (`/opt/homebrew`, and `/usr/local` on Intel, which the
@@ -364,6 +388,33 @@ mod tests {
                 std::env::join_paths([path.as_os_str(), other.as_os_str()]).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn a_windows_variables_are_the_four_a_member_reaches_its_board_with_and_nothing_else() {
+        for name in [
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+            "CONSENSFLOW_PROJECT",
+        ] {
+            assert!(WINDOW_VARIABLES.contains(&name), "{name}");
+            assert!(is_window_variable(name), "{name}");
+        }
+        assert_eq!(WINDOW_VARIABLES.len(), 4);
+        // ConsensFlow's others are no window's: a home a run chose stays the app's.
+        for name in [
+            "CONSENSFLOW_HOME",
+            "CONSENSFLOW_TOOL_FOLDERS",
+            "CONSENSFLOW_",
+            "CONSENSFLOW_TOKENS",
+            "TOKEN",
+            "",
+        ] {
+            assert!(!is_window_variable(name), "{name}");
+        }
+        // Names match in any case on Windows only.
+        assert_eq!(is_window_variable("Consensflow_Token"), cfg!(windows));
     }
 
     #[test]

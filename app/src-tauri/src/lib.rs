@@ -256,19 +256,35 @@ fn isolated_home(
         .ok_or_else(|| "this build needs HOME to find ~/.consensflow-candidate".to_string())
 }
 
-/// Which of the variables `names` the app was started with it does not keep: those that
-/// mark a harness's own session ([`cf_proto::agents::is_session_variable`]). A ConsensFlow
-/// started from inside one (`tauri dev`, a test or bench run, the app opened from an
-/// agent's shell) would hand them to every pane: Claude's `CLAUDE_CODE_CHILD_SESSION`
-/// switches off transcript saving, its `CLAUDE_CODE_SESSION_ID` or Codex's
-/// `CODEX_THREAD_ID` impersonates the parent, and the messaging socket and token reach
-/// into it. Only a session's identity is removed; configuration such as
-/// `CLAUDE_CONFIG_DIR` or `CLAUDE_CODE_USE_BEDROCK` stays.
-fn inherited_session_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+/// Which of the variables `names` the app was started with it does not keep: those of a
+/// session that started it ([`cf_proto::agents::is_parent_session_variable`]). A window of a
+/// board gives its member the board's (T-868): with its token set the bundled `cf` is that
+/// board's command, and `cf ui`, the daemon, is none, so the daemon never started. A harness
+/// marks its own session (`tauri dev`, a test or bench run, the app opened from an agent's
+/// shell, T-971): Claude's `CLAUDE_CODE_CHILD_SESSION` switches off transcript saving, its
+/// `CLAUDE_CODE_SESSION_ID` or Codex's `CODEX_THREAD_ID` impersonates the parent, and the
+/// messaging socket and token reach into it. Every program the app starts would have them:
+/// the terminal of the app's own, and the app an update restarts, which Tauri starts with a
+/// bare `Command` that holds whatever the process does. Configuration such as
+/// `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK` or `CONSENSFLOW_HOME` stays.
+fn inherited_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
     names
         .into_iter()
-        .filter(|name| cf_proto::agents::is_session_variable(name))
+        .filter(|name| cf_proto::agents::is_parent_session_variable(name))
         .collect()
+}
+
+/// Takes the variables the app does not keep ([`inherited_variables`]) out of its own
+/// environment, which every program it starts is given: the daemon, the login shell it asks
+/// for the human's environment, the terminals' panes, the opener, and the app an update
+/// restarts. Before any thread exists, as nothing may read the environment meanwhile.
+fn remove_inherited_variables() {
+    let names: Vec<String> = std::env::vars_os()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .collect();
+    for name in inherited_variables(names.iter().map(String::as_str)) {
+        std::env::remove_var(name);
+    }
 }
 
 /// How big the error log grows before it is moved aside.
@@ -431,12 +447,7 @@ pub fn run() {
             std::process::exit(1);
         }
     }
-    let names: Vec<String> = std::env::vars_os()
-        .filter_map(|(name, _)| name.into_string().ok())
-        .collect();
-    for name in inherited_session_variables(names.iter().map(String::as_str)) {
-        std::env::remove_var(name);
-    }
+    remove_inherited_variables();
     if let Some(log) = error_log() {
         redirect_stderr(&log);
     }
@@ -565,6 +576,33 @@ mod tests {
         );
     }
 
+    /// What a window gives its member (T-868) is none of an app's started from it; the rest of
+    /// ConsensFlow's variables are: the home a run chose, the smoke's switch, the daemon's own.
+    #[test]
+    fn the_variables_a_window_of_a_board_gives_its_member_are_never_inherited() {
+        let names = [
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+            "CONSENSFLOW_PROJECT",
+            "CONSENSFLOW_HOME",
+            "CONSENSFLOW_SELFTEST",
+            "CONSENSFLOW_TOOL_FOLDERS",
+            "CONSENSFLOW_TERMINAL_ENV",
+            "CF_PANE_PROCESS_OWNER",
+            "PATH",
+        ];
+        assert_eq!(
+            inherited_variables(names),
+            [
+                "CONSENSFLOW_URL",
+                "CONSENSFLOW_TOKEN",
+                "CONSENSFLOW_PARTICIPANT",
+                "CONSENSFLOW_PROJECT",
+            ]
+        );
+    }
+
     #[test]
     fn a_parent_claude_sessions_identity_is_never_inherited() {
         // Seen in a live Claude Code 2.1 session's environment on 2026-09-19.
@@ -581,7 +619,7 @@ mod tests {
             "PATH",
         ];
         assert_eq!(
-            inherited_session_variables(names),
+            inherited_variables(names),
             [
                 "CLAUDECODE",
                 "CLAUDE_CODE_CHILD_SESSION",
@@ -602,14 +640,14 @@ mod tests {
         for harness in cf_proto::agents::Harness::ALL {
             let names = harness.session_variables();
             assert_eq!(
-                inherited_session_variables(names.iter().copied()),
+                inherited_variables(names.iter().copied()),
                 names,
                 "{}",
                 harness.as_str()
             );
         }
         assert_eq!(
-            inherited_session_variables(["CODEX_HOME", "PI_CODING_AGENT_DIR", "AGENT", "PATH"]),
+            inherited_variables(["CODEX_HOME", "PI_CODING_AGENT_DIR", "AGENT", "PATH"]),
             Vec::<&str>::new()
         );
     }

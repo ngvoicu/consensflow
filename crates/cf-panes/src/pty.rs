@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use portable_pty::native_pty_system;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
 
-use cf_proto::agents::Harness;
+use cf_proto::agents::parent_session_variables;
 
 use crate::background::Baseline;
 use crate::ended::{Ended, EndedSlot};
@@ -282,16 +282,15 @@ fn advertise_terminal(
     }
 }
 
-/// A pane inherits nothing of a harness's session the host was started in (T-971): an
-/// app, a `tauri dev` or a test run started from an agent's shell holds its session's
-/// variables ([`Harness::session_variables`]), and a window given them is taken for that
-/// session, or reaches into it. What the frame's own `env` sets is the window's, and stays.
+/// A pane inherits nothing of a session the host was started in
+/// ([`parent_session_variables`]): an app, a `tauri dev` or a test run started from an
+/// agent's shell holds its session's variables (T-971), and one started from a board's
+/// window that board's (T-868); a window given them is taken for that session, or reaches
+/// into it. What the frame's own `env` sets is the window's, and stays.
 fn forget_parent_sessions(command: &mut CommandBuilder, env: &HashMap<String, String>) {
-    for harness in Harness::ALL {
-        for name in harness.session_variables() {
-            if !env.contains_key(*name) {
-                command.env_remove(name);
-            }
+    for name in parent_session_variables() {
+        if !env.contains_key(name) {
+            command.env_remove(name);
         }
     }
 }
@@ -1586,7 +1585,7 @@ mod tests {
         Sentinel,
     };
     use super::{PaneError, PaneTable, CANCELLED_KEPT};
-    use cf_proto::agents::Harness;
+    use cf_proto::agents::parent_session_variables;
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
         PtySize {
@@ -2400,16 +2399,16 @@ mod tests {
         assert_eq!(read_to_end(reader), b"role-value");
     }
 
-    /// Sets every harness's session variables in the test's own environment, the host's,
-    /// as an app started from an agent's shell has them, and takes them out again.
+    /// Sets every variable of a parent session in the test's own environment, the host's,
+    /// as an app started from an agent's shell or a board's window has them
+    /// ([`parent_session_variables`]: a board's window's and every harness's), and takes
+    /// them out again.
     pub(crate) struct InParentSessions;
 
     impl InParentSessions {
         pub(crate) fn set() -> Self {
-            for harness in Harness::ALL {
-                for name in harness.session_variables() {
-                    std::env::set_var(name, "from-the-parent-session");
-                }
+            for name in parent_session_variables() {
+                std::env::set_var(name, "from-the-parent-session");
             }
             Self
         }
@@ -2417,22 +2416,17 @@ mod tests {
 
     impl Drop for InParentSessions {
         fn drop(&mut self) {
-            for harness in Harness::ALL {
-                for name in harness.session_variables() {
-                    std::env::remove_var(name);
-                }
+            for name in parent_session_variables() {
+                std::env::remove_var(name);
             }
         }
     }
 
-    /// The names of `harness`'s session variables the pane's `env` printed, one a line.
+    /// The names of a parent session's variables the pane's `env` printed, one a line.
     #[cfg(unix)]
     fn held(printed: &[u8]) -> Vec<&'static str> {
         let printed = String::from_utf8_lossy(printed);
-        Harness::ALL
-            .into_iter()
-            .flat_map(Harness::session_variables)
-            .copied()
+        parent_session_variables()
             .filter(|name| {
                 printed
                     .lines()
@@ -2441,11 +2435,11 @@ mod tests {
             .collect()
     }
 
-    /// T-971: a pane's program holds none of a harness's session the host was started in,
-    /// whatever harness's, but those its frame sets itself.
+    /// T-971, T-868: a pane's program holds none of a session the host was started in, a
+    /// board's window's or any harness's, but what its frame sets itself.
     #[cfg(unix)]
     #[test]
-    fn a_pane_inherits_nothing_of_a_harness_session_the_host_was_started_in() {
+    fn a_pane_inherits_nothing_of_a_session_the_host_was_started_in() {
         let _pty_guard = serial_pty_test();
         let _sessions = InParentSessions::set();
         let table = PaneTable::new();
@@ -2971,7 +2965,7 @@ mod tests {
 
         use super::super::conpty_test::{line_echo, open, powershell, read_until, system};
         use super::super::{serial_pty_test, PaneEnvironment, PaneTable};
-        use super::Harness;
+        use super::parent_session_variables;
 
         fn number_after(text: &str, marker: &str) -> u32 {
             let at = text.find(marker).expect("marker printed") + marker.len();
@@ -3019,15 +3013,13 @@ mod tests {
             table.kill(&key).expect("kill the pane");
         }
 
-        /// T-971: as the Unix test of it says, on ConPTY: a pane's program holds none of a
-        /// harness's session the host was started in, but what its frame sets itself.
+        /// T-971, T-868: as the Unix test of it says, on ConPTY: a pane's program holds none
+        /// of a session the host was started in, but what its frame sets itself.
         #[test]
-        fn a_pane_inherits_nothing_of_a_harness_session_the_host_was_started_in() {
+        fn a_pane_inherits_nothing_of_a_session_the_host_was_started_in() {
             let _pty_guard = serial_pty_test();
             let _sessions = super::InParentSessions::set();
-            let names: Vec<String> = Harness::ALL
-                .into_iter()
-                .flat_map(Harness::session_variables)
+            let names: Vec<String> = parent_session_variables()
                 .map(|name| format!("'{name}'"))
                 .collect();
             // One line a name it holds, short of the pane's width, and the end.

@@ -121,15 +121,39 @@ impl Harness {
 /// Whether `name` marks a session of some harness's own ([`Harness::session_variables`]),
 /// as the system compares names: on Windows in any case.
 pub fn is_session_variable(name: &str) -> bool {
-    Harness::ALL.into_iter().any(|harness| {
-        harness.session_variables().iter().any(|marked| {
-            if cfg!(windows) {
-                marked.eq_ignore_ascii_case(name)
-            } else {
-                *marked == name
-            }
-        })
-    })
+    Harness::ALL
+        .into_iter()
+        .flat_map(Harness::session_variables)
+        .any(|marked| same_name(marked, name))
+}
+
+/// What no program ConsensFlow starts inherits from the session that started ConsensFlow,
+/// unless it is given it itself: a board's window's, which make a program that holds them
+/// that board's client ([`cf_base::env::WINDOW_VARIABLES`], T-868), and every harness's own
+/// ([`Harness::session_variables`], T-971). One list, which the app takes out of its own
+/// environment and of what it takes of a terminal's, the daemon out of what it gives a window
+/// of a terminal's, and the pane host out of what a pane inherits.
+pub fn parent_session_variables() -> impl Iterator<Item = &'static str> {
+    cf_base::env::WINDOW_VARIABLES.into_iter().chain(
+        Harness::ALL
+            .into_iter()
+            .flat_map(Harness::session_variables)
+            .copied(),
+    )
+}
+
+/// Whether `name` is one of the [`parent_session_variables`], as the system compares names.
+pub fn is_parent_session_variable(name: &str) -> bool {
+    parent_session_variables().any(|marked| same_name(marked, name))
+}
+
+/// Whether two variables' names are one name: on Windows in any case.
+fn same_name(one: &str, other: &str) -> bool {
+    if cfg!(windows) {
+        one.eq_ignore_ascii_case(other)
+    } else {
+        one == other
+    }
 }
 
 /// The work an agent suits, from the most serious to the lightest: what a
@@ -360,6 +384,23 @@ mod tests {
             assert!(!is_session_variable(name), "{name}");
         }
         assert_eq!(is_session_variable("claudecode"), cfg!(windows));
+    }
+
+    /// One list of what a program ConsensFlow starts never inherits: a board's window's and
+    /// every harness's session's, and nothing of a harness's or ConsensFlow's configuration.
+    #[test]
+    fn a_parent_session_is_a_boards_window_and_every_harness_session() {
+        for name in cf_base::env::WINDOW_VARIABLES {
+            assert!(is_parent_session_variable(name), "{name}");
+        }
+        for harness in Harness::ALL {
+            for name in harness.session_variables() {
+                assert!(is_parent_session_variable(name), "{name}");
+            }
+        }
+        for name in ["CONSENSFLOW_HOME", "CONSENSFLOW_TERMINAL_ENV", "CLAUDE_CONFIG_DIR", "PATH"] {
+            assert!(!is_parent_session_variable(name), "{name}");
+        }
     }
 
     #[test]

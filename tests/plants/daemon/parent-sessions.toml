@@ -5,7 +5,9 @@
 # `PI_SESSION_ID`…), and the pane host started every window from that environment, the login
 # shell the app asks had them too, and the daemon gave them back to every window named in
 # `CONSENSFLOW_TERMINAL_ENV`. Each harness's list is `Harness::session_variables` (cf-proto),
-# which a harness added to `Harness::ALL` must fill. The pane host takes every one out of what a
+# which a harness added to `Harness::ALL` must fill; with a board's window's
+# (`cf_base::env::WINDOW_VARIABLES`, T-868, tests/plants/cli/board-env.toml) it is one list,
+# `parent_session_variables`. The pane host takes every one out of what a
 # pane inherits unless the pane's frame sets it; the daemon gives a window none it took of a
 # terminal; the app takes them out of its own environment as it starts, and out of what it
 # takes of a terminal's. One plant takes one rule out; a test of it fails. The `rig:` plants
@@ -16,7 +18,7 @@
 
 [run]
 parent-sessions-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "agents::tests::"]
-parent-sessions-host = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_pane_inherits_nothing_of_a_harness_session"]
+parent-sessions-host = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_pane_inherits_nothing_of_a_session"]
 parent-sessions-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::tests::no_window_is_given_a_harness_session"]
 parent-sessions-app = ["cargo", "xtask", "app", "test", "harness_sessions_variable"]
 parent-sessions-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_parent_agents_session_reached_every_window::"], builds = true }
@@ -40,6 +42,21 @@ find = '''            Harness::Codex => &[
 replace = '''            Harness::Codex => &[],'''
 
 [[plant]]
+name = "parent-sessions: the one list leaves out every harness's session"
+meant = "a_parent_session_is_a_boards_window_and_every_harness_session"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''    cf_base::env::WINDOW_VARIABLES.into_iter().chain(
+        Harness::ALL
+            .into_iter()
+            .flat_map(Harness::session_variables)
+            .copied(),
+    )'''
+replace = '''    cf_base::env::WINDOW_VARIABLES.into_iter()'''
+
+[[plant]]
 name = "parent-sessions: a harness's home is taken for a mark of its session"
 meant = "a_harness_configuration_marks_no_session"
 runs = ["parent-sessions-proto"]
@@ -56,7 +73,7 @@ replace = '''                "CODEX_TOOL_CALL_ID",
 
 [[plant]]
 name = "parent-sessions: the pane host hands a pane the session it was started in"
-meant = "a_pane_inherits_nothing_of_a_harness_session_the_host_was_started_in"
+meant = "a_pane_inherits_nothing_of_a_session_the_host_was_started_in"
 runs = ["parent-sessions-host"]
 
 [[plant.edit]]
@@ -67,15 +84,15 @@ replace = ""
 
 [[plant]]
 name = "parent-sessions: the pane host takes out a session variable the window's frame sets"
-meant = "a_pane_inherits_nothing_of_a_harness_session_the_host_was_started_in"
+meant = "a_pane_inherits_nothing_of_a_session_the_host_was_started_in"
 runs = ["parent-sessions-host"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = '''            if !env.contains_key(*name) {
-                command.env_remove(name);
-            }'''
-replace = '''            command.env_remove(name);'''
+find = '''        if !env.contains_key(name) {
+            command.env_remove(name);
+        }'''
+replace = '''        command.env_remove(name);'''
 
 # --- the daemon ---
 
@@ -86,7 +103,7 @@ runs = ["parent-sessions-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/seams.rs"
-find = '''        .filter(|name| !is_session_variable(name))
+find = '''        .filter(|name| !is_parent_session_variable(name))
 '''
 replace = ""
 
@@ -99,8 +116,8 @@ runs = ["parent-sessions-app"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
-find = '''        .filter(|name| cf_proto::agents::is_session_variable(name))'''
-replace = '''        .filter(|name| name.starts_with("CLAUDE"))'''
+find = '''        .filter(|name| cf_proto::agents::is_parent_session_variable(name))'''
+replace = '''        .filter(|name| cf_base::env::is_window_variable(name))'''
 
 [[plant]]
 name = "parent-sessions: the app takes a session's variables of a terminal's environment"
@@ -109,8 +126,8 @@ runs = ["parent-sessions-app"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
-find = '''        || cf_proto::agents::is_session_variable(&name)'''
-replace = '''        || name.starts_with("CLAUDE")'''
+find = '''        || cf_proto::agents::is_parent_session_variable(&name)'''
+replace = '''        || cf_base::env::is_window_variable(&name)'''
 
 # --- end to end ---
 
@@ -122,7 +139,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/seams.rs"
-find = '''        .filter(|name| !is_session_variable(name))
+find = '''        .filter(|name| !is_parent_session_variable(name))
 '''
 replace = ""
 
