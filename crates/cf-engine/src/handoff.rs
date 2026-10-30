@@ -34,8 +34,7 @@ use pages::paginate;
 pub(crate) use text::name_of;
 use text::{defuse, delivered, first_line, typed_before, Shown};
 pub use viewer::{
-    whole_history_page, Delivery, Openings, ShownConversation, ShownItem, WholeHistoryPage,
-    HISTORY_ROOM, SHOWN_FIELD,
+    whole_history_page, Delivery, Openings, ShownItem, WholeHistoryPage, HISTORY_ROOM, SHOWN_FIELD,
 };
 
 /// How ConsensFlow's handoff to a chief the human switched in begins.

@@ -123,19 +123,9 @@ pub(crate) fn history(rig: &Rig, project: &Project) -> cf_e2e::Result<Value> {
     Ok(read["history"].clone())
 }
 
-/// Every item of every conversation of a page of the history.
+/// Every item of a page of the history, oldest first across its conversations.
 pub(crate) fn items(history: &Value) -> Vec<Value> {
-    history["conversations"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|conversation| {
-            conversation["items"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-        })
-        .collect()
+    history["items"].as_array().cloned().unwrap_or_default()
 }
 
 /// Whether an item is of `role` and its text holds `text`.

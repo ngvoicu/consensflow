@@ -1087,7 +1087,6 @@ dialog.history-viewer { width: min(980px, calc(100vw - 48px)); }
 dialog.history-viewer[open] { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
 .history-head { grid-row: 1; display: flex; align-items: baseline; gap: 12px; padding: 16px 22px 12px; border-bottom: 1px solid var(--line-soft); }
 .history-title { margin: 0; font-size: 17px; font-weight: 650; }
-.history-who { font: 11px var(--mono); color: var(--muted); }
 .history-hint { grid-row: 2; margin: 0; padding: 6px 22px; border-bottom: 1px solid var(--line-soft); font-size: 11.5px; color: var(--muted); }
 .history-bar { grid-row: 3; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 22px; border-bottom: 1px solid var(--line-soft); }
 .history-search { display: flex; gap: 6px; }
@@ -1105,9 +1104,6 @@ dialog.history-viewer[open] { grid-template-rows: auto auto auto minmax(0, 1fr) 
 .history-bar .quiet-button:disabled { opacity: .45; cursor: default; }
 .history-body { grid-row: 4; min-height: 0; overflow: auto; padding: 14px 28px 28px; display: grid; align-content: start; gap: 22px; background: var(--deep); }
 dialog.history-viewer .dialog-actions { grid-row: 5; }
-.history-conversation { display: grid; gap: 8px; }
-.history-heading { margin: 0; font-size: 14px; font-weight: 650; color: var(--seafoam); }
-.history-about { margin: 0; font: 11px var(--mono); color: var(--muted); }
 /* A part of a long item: which, and the way to read it whole. */
 .history-cut { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--amber); }
 .history-cut .quiet-button { padding: 2px 9px; font: 12px var(--ui); }

@@ -9,6 +9,12 @@
 # CHF-03's names hold `listing:` and Phase 1's (CHF-04 to CHF-10, with Muse's rows and the
 # fixes of Calliope's T-955) hold `chief:`: `npm run plants:daemon -- "listing:"` runs the
 # first, `-- "chief:"` the second.
+#
+# Phase 2's (CHF-11 to CHF-13, T-730) hold `timeline:`: the history is one stream of items
+# across a participant's conversations with no heading (crates/cf-ledger/src/conversations/history.rs,
+# crates/cf-engine/src/handoff/viewer.rs, app/ui/core/history-viewer.js), a conversation that shows
+# no item is passed, charged, and gone on past, and migration 0027 drops the indexes the headings
+# read. The heading plants of session-viewer.toml went with the headings.
 
 [run]
 ch-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "models::"]
@@ -39,6 +45,13 @@ chm-muse-models = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "m
 chm-muse-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::a_turn_on_a_model"]
 chm-page-muse = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the chief is picked as a harness"]
 chm-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "chief_model::"]
+tl-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history"]
+tl-ledger-plan = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "conversations::history::"]
+tl-ledger-schema = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "schema::"]
+tl-ledger-undo = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--lib", "testing::history_indexes::"]
+tl-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::"]
+tl-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::history::"]
+tl-ui = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs"]
 
 [[plant]]
 name = 'listing: a stale listing gives a default'
@@ -1006,3 +1019,126 @@ runs = ["chm-dispatcher"]
 file = "crates/cf-engine/src/windows.rs"
 find = '            part.took = false;'
 replace = '            part.took = part.took;'
+
+[[plant]]
+name = "timeline: only a search goes on past a conversation it went through, so a read stops at one that shows nothing"
+meant = "reads_past_thousands_of_conversations_that_show_no_item_to_the_one_item_before_them"
+runs = ["tl-daemon", "tl-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = """        // Through the whole conversation: the next read goes on past it.
+"""
+replace = """        // Through the whole conversation: the next read goes on past it.
+        if needle.is_none() {
+            return Ok(());
+        }
+"""
+
+[[plant]]
+name = "timeline: a read that went through a conversation goes on from its far side"
+meant = "pages_of_one_item_go_across_conversations_that_show_none_and_show_each_item_once_in_order"
+runs = ["tl-ledger", "tl-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        let edge = if self.newest_first { 0 } else { i64::MAX };"
+replace = "        let edge = if self.newest_first { i64::MAX } else { 0 };"
+
+[[plant]]
+name = "timeline: a conversation that shows nothing is charged nothing, so a read goes through every one"
+meant = "a_read_through_conversations_that_show_no_item_shows_none_and_reads_none_of_their_fields"
+runs = ["tl-ledger", "tl-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = """        if found.is_some() {
+            self.scanned.conversations += 1;
+        }
+"""
+replace = ""
+
+[[plant]]
+name = "timeline: a page is set out newest first"
+meant = "the_history_is_one_stream_of_items_oldest_first_across_three_conversations_on_two_harnesses"
+runs = ["tl-daemon", "tl-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = """    if !matches!(from, HistoryFrom::After(_)) {
+        items.reverse();
+    }
+"""
+replace = ""
+
+[[plant]]
+name = "timeline: an item does not say the conversation it stands in, so its long text is read nowhere"
+meant = "the_history_is_one_stream_of_items_oldest_first_across_three_conversations_on_two_harnesses"
+runs = ["tl-daemon", "tl-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "        conversation: row.key.conversation,"
+replace = "        conversation: 0,"
+
+[[plant]]
+name = "timeline: the next page goes on from the oldest item a full page dropped, not from the last it showed"
+meant = "takes_the_items_of_thousands_of_conversations_while_a_frame_has_room"
+runs = ["tl-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "    let last_taken = taken.last().map(|row| row.key);"
+replace = "    let last_taken = read.entries.last().map(|row| row.key);"
+
+[[plant]]
+name = "timeline: migration 0027 keeps the index of the chief's switches"
+meant = "the_ledger_keeps_no_index_of_what_the_history_s_headings_read"
+runs = ["tl-ledger-plan", "tl-ledger-schema"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0027.sql"
+find = """  DROP INDEX event_switch_index;
+"""
+replace = ""
+
+[[plant]]
+name = "timeline: undoing migration 0027 puts back an index 0020 never made so"
+meant = "undoing_migration_0027_leaves_the_schema_0026_left_and_the_ledger_migrates_again"
+runs = ["tl-ledger-undo"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing/history_indexes.rs"
+find = """        db.execute_batch(made)?;"""
+replace = """        db.execute_batch(&made.replace(" WHERE ", " WHERE 1 AND "))?;"""
+
+[[plant]]
+name = "timeline: the viewer reads a long item of no conversation"
+meant = "shows a long item by a part, and the whole of it on asking, read a part at a time"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "          conversation: item.conversation,"
+replace = "          conversation: item.row,"
+
+[[plant]]
+name = "timeline: a read that stopped with nothing to show says nothing is kept"
+meant = "says where a read stopped that found nothing to show, and goes on from there"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = """        ? 'Nothing to show yet: Older reads further back.'"""
+replace = """        ? 'Nothing is kept of this history yet.'"""
+
+[[plant]]
+name = "timeline: the viewer names whose history it shows"
+meant = "draws one stream of items across conversations, titled History and naming no conversation, harness or model"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = """<h2 class="history-title" id="history-title">History</h2>"""
+replace = """<h2 class="history-title" id="history-title">History of the chief</h2>"""
+

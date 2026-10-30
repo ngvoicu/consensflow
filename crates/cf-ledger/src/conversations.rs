@@ -55,15 +55,6 @@ pub const ID_SHOWN: usize = 256;
 /// session of.
 pub const NATIVE_SESSION_MAX: usize = 512;
 
-/// The most bytes of data an event the history's headings read holds: where
-/// a conversation began, was gone to or ended, and a Switch chief. What this
-/// build logs of them is a handle, a conversation's id, a native session, and
-/// harnesses and agents, and stays below it whatever they are (a native session
-/// of characters JSON escapes, six bytes each, is 3,072 bytes at most);
-/// migration 0020 writes what an older build logged longer as what a heading
-/// reads of it, and the size it was (`cutFromBytes`).
-pub const HEADING_EVENT_MAX: usize = 4_096;
-
 /// A participant's new native conversation; the one before it ends.
 pub(crate) fn start_conversation(
     store: &mut Store,

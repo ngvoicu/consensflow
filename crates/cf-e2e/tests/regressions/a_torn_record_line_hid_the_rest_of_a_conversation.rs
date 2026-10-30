@@ -67,16 +67,10 @@ fn copied(rig: &Rig, project: &Project, handle: &str) -> cf_e2e::Result<Vec<Stri
         "history.get",
         json!({ "project": project.id(), "handle": handle, "tools": true }),
     )?;
-    Ok(read["history"]["conversations"]
+    Ok(read["history"]["items"]
         .as_array()
         .into_iter()
         .flatten()
-        .flat_map(|conversation| {
-            conversation["items"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-        })
         .filter(|item| item["role"] == "assistant")
         .filter_map(|item| item["text"].as_str().map(str::to_owned))
         .collect())

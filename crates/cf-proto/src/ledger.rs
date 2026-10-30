@@ -193,44 +193,11 @@ pub struct ChiefConversation {
     pub items: Vec<HistoryItem>,
 }
 
-/// What ended a participant's conversation, as far as the ledger's log says.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "by", rename_all = "lowercase")]
-pub enum ConversationEnd {
-    /// The human's Switch chief, to the harness and agent the chief runs on after it.
-    Switch {
-        harness: String,
-        agent: Option<String>,
-    },
-    /// The window went to another conversation (`/clear`, `/new`, `/resume`):
-    /// one of the participant's own earlier ones (`resumed`), or one the ledger
-    /// had not seen, which is any of the three.
-    Window { resumed: bool },
-    /// A window opened on a fresh conversation in its place.
-    Fresh,
-}
-
-/// A participant's conversation as the history viewer heads it: the agent it
-/// ran on and what ended it where the ledger knows them, and how many of its
-/// items are tools' outputs, counted so far and no further (`more_tools`: that
-/// many, or more).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParticipantConversation {
-    #[serde(flatten)]
-    pub conversation: ConversationView,
-    pub agent: Option<String>,
-    pub ended_by: Option<ConversationEnd>,
-    pub tools: usize,
-    pub more_tools: bool,
-}
-
-/// Where an entry stands in a participant's history, in the order the viewer
-/// reads it: its conversation, and the row the ledger keeps its item in, which
-/// never changes, so that items stand in the order they were first copied
-/// whatever is copied again; row 0 is the conversation's heading, before its
-/// items. A search that stopped inside a long item says how many of its parts
-/// it went through (`part`, none where it went through the item whole).
+/// Where an item stands in a participant's history, in the order the viewer
+/// reads it: its conversation, and the row the ledger keeps it in, which never
+/// changes, so that items stand in the order they were first copied whatever is
+/// copied again. A search that stopped inside a long item says how many of its
+/// parts it went through (`part`, none where it went through the item whole).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryKey {
     pub conversation: i64,
@@ -274,31 +241,11 @@ pub struct HistoryRow {
     pub cut: Option<TextCut>,
 }
 
-/// What a read of the history takes, in the order it goes: an item, or the
-/// heading of a conversation that shows none (its key's row is 0), which a
-/// page shows in its place.
-#[derive(Debug, Clone, PartialEq)]
-pub enum HistoryEntry {
-    Heading(HistoryKey),
-    Item(HistoryRow),
-}
-
-impl HistoryEntry {
-    /// Where the entry stands.
-    pub fn key(&self) -> HistoryKey {
-        match self {
-            Self::Heading(key) => *key,
-            Self::Item(row) => row.key,
-        }
-    }
-}
-
 /// How much of the history a read went through: the conversations it came
 /// to, the rows it read, the lookups of parts of a long item's text it made
-/// (`parts`), the bytes of text it read of them, the bytes of the
-/// conversations' fields, the items' ids as a page shows them and their times,
-/// and the data of the events the headings read (`fields`), and the steps
-/// SQLite's machine took for it all.
+/// (`parts`), the bytes of text it read of them, the bytes of the items' ids as
+/// a page shows them and their times (`fields`), and the steps SQLite's machine
+/// took for it all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Scanned {
     pub conversations: usize,
@@ -309,17 +256,16 @@ pub struct Scanned {
     pub steps: usize,
 }
 
-/// One read of a participant's history: the conversations it took an entry
-/// of, headed, in the order it went; its entries, in that order; where the
-/// next read that way goes on (none: there is no more that way); whether the
-/// read stopped at the most a read goes through; how much it went through,
-/// and what that was charged of the most it may go through (`charged`, in
-/// bytes), which what a page reads besides is charged against too.
+/// One read of a participant's history: the items it took, across its
+/// conversations, in the order it went; where the next read that way goes on
+/// (none: there is no more that way); whether the read stopped at the most a
+/// read goes through; how much it went through, and what that was charged of
+/// the most it may go through (`charged`, in bytes), which what a page reads
+/// besides is charged against too.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistoryRead {
     pub participant: i64,
-    pub conversations: Vec<ParticipantConversation>,
-    pub entries: Vec<HistoryEntry>,
+    pub entries: Vec<HistoryRow>,
     pub resume: Option<HistoryKey>,
     pub bounded: bool,
     pub scanned: Scanned,
@@ -809,8 +755,7 @@ mod tests {
     }
 
     #[test]
-    fn says_a_compaction_s_summary_only_where_an_item_is_one_and_what_ended_a_conversation_by_its_kind(
-    ) {
+    fn says_a_compaction_s_summary_only_where_an_item_is_one() {
         let item = |compaction| HistoryItem {
             id: "s-1".into(),
             role: "user".into(),
@@ -826,18 +771,6 @@ mod tests {
         assert!(!serde_json::to_string(&item(false))
             .unwrap()
             .contains("compaction"));
-        let ends = [
-            ConversationEnd::Switch {
-                harness: "codex".into(),
-                agent: Some("maia".into()),
-            },
-            ConversationEnd::Window { resumed: true },
-            ConversationEnd::Fresh,
-        ];
-        assert_eq!(
-            serde_json::to_string(&ends).unwrap(),
-            r#"[{"by":"switch","harness":"codex","agent":"maia"},{"by":"window","resumed":true},{"by":"fresh"}]"#
-        );
     }
 
     #[test]

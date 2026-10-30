@@ -7,8 +7,7 @@ use std::sync::Arc;
 use cf_harness::contract::{Observed, Over};
 use cf_harness::records::{Item, Reading, Record, Role, Settlement};
 use cf_ledger::{
-    HistoryAsk, HistoryEntry, HistoryFrom, NewProject, ParticipantView, HISTORY_SCAN_BYTES,
-    PAGE_BYTES,
+    HistoryAsk, HistoryFrom, NewProject, ParticipantView, HISTORY_SCAN_BYTES, PAGE_BYTES,
 };
 use serde_json::json;
 
@@ -178,13 +177,12 @@ fn a_compaction_s_summary_is_copied_marked_as_one_where_its_reading_says_nothing
         .entries
         .iter()
         .rev()
-        .filter_map(|entry| match entry {
-            HistoryEntry::Item(row) => Some((
+        .map(|row| {
+            (
                 row.item.id.as_str(),
                 row.item.role.as_str(),
                 row.item.compaction,
-            )),
-            HistoryEntry::Heading(_) => None,
+            )
         })
         .collect();
     assert_eq!(marks, [("u-1", "user", false), ("s-1", "user", true)]);
