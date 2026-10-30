@@ -11,9 +11,9 @@
 //! with every place a program finds a home in pointed at decoys of its own, made before
 //! any daemon starts (the home, the harnesses' configuration folders, the temp folder),
 //! takes the size, time and bytes of every file in them and in the project's folder
-//! before and after, and names every change. The stand-in Claude's own transcripts, which
-//! the harness writes and ConsensFlow reads, are the one change that is not
-//! ConsensFlow's.
+//! before and after, and names every change. The stand-in Claude's own transcripts and
+//! window status files, which the harness writes and ConsensFlow reads, are the one change
+//! that is not ConsensFlow's: the first run (2026-10-30) found that and nothing else.
 
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hasher};
@@ -95,10 +95,13 @@ fn changes(
     said
 }
 
-/// Whether a change is the stand-in Claude's own: its transcripts, in its
-/// configuration folder's `projects`, as the harness keeps them.
+/// Whether a change is the stand-in Claude's own, as Claude Code keeps them in its
+/// configuration folder: its transcripts (`projects`), and the status of each running
+/// window (`sessions/<pid>.json`, which it takes away as it ends, leaving the folder).
 fn the_harnesses_own(change: &str) -> bool {
-    change.starts_with("home/.claude/projects")
+    ["home/.claude/projects", "home/.claude/sessions"]
+        .iter()
+        .any(|own| change.starts_with(own))
 }
 
 #[test]
