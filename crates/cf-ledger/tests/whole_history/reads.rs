@@ -327,6 +327,47 @@ fn search_to_the_bound(count: usize, size: usize) {
 }
 
 #[test]
+fn a_search_that_finds_more_than_a_page_holds_shows_what_its_room_holds_and_older_goes_on_from_there(
+) {
+    // A hundred items that each hold the words, of a kilobyte and a little more
+    // as a page holds them, and a room for ten: nothing reads a search's items
+    // before it knows the page has room, so each page holds ten, and Older
+    // goes on from the oldest shown to every item once, in order.
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    let copied: Vec<Value> = (0..100)
+        .map(|at| {
+            item(
+                &format!("w-{at}"),
+                "user",
+                &format!("word {}", "w".repeat(1_000)),
+            )
+        })
+        .collect();
+    ledger
+        .copy_transcript(conversation, &copied, 0)
+        .expect("copied");
+    let mut shown: Vec<String> = Vec::new();
+    let mut reads = 0;
+    let mut from = HistoryFrom::Newest;
+    loop {
+        let read = ledger
+            .read_history(project, "chief", &ask(from, Some("WORD"), false, 17_000))
+            .expect("a search");
+        reads += 1;
+        assert!(reads < 50, "no end");
+        assert!(read.entries.len() <= 10, "{} items", read.entries.len());
+        shown.extend(ids(&read));
+        let Some(place) = read.resume else { break };
+        from = HistoryFrom::Before(place);
+    }
+    shown.reverse();
+    let every: Vec<String> = (0..100).map(|at| format!("w-{at}")).collect();
+    assert_eq!(shown, every);
+    assert!(reads >= 10, "{reads} reads");
+}
+
+#[test]
 fn a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_goes_on_inside_the_item() {
     // The reviewers' item: 24 MiB of an agent's words, the words at its very end.
     let dir = tempfile::tempdir().expect("a folder");

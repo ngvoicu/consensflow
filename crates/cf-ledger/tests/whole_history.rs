@@ -218,6 +218,14 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
     let earlier = ledger.chief_history(project.id).expect("the history");
     assert_eq!(earlier.len(), 3);
     assert!(earlier[0].items[3].compaction && earlier[0].items[3].role == "user");
+    // Once the current one holds an item, it is read too, after the rest.
+    ledger
+        .copy_transcript(fourth.id, &[item("n-1", "user", "Now")], 0)
+        .expect("copied");
+    let now = everything(&ledger, project.id, "chief").expect("the history");
+    let ids: Vec<i64> = now.iter().map(|(id, _)| *id).collect();
+    assert_eq!(ids, [first.id, cleared.id, third.id, fourth.id]);
+    assert_eq!(lines(&now[3..]), [r#"["user: Now"]"#]);
 }
 
 #[test]

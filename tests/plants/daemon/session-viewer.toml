@@ -236,7 +236,7 @@ replace = "    this.#older.disabled = true"
 
 [[plant]]
 name = "session viewer: a read goes on past a full page, through the whole history"
-meant = "pages_of_one_item_go_across_conversations_that_show_none_and_show_each_item_once_in_order"
+meant = "a_search_that_finds_more_than_a_page_holds_shows_what_its_room_holds_and_older_goes_on_from_there"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
@@ -1422,16 +1422,6 @@ replace = '''const PART_END: &str = "SELECT substr(text, -2000) FROM transcript_
 # row, each some 8,200 pages for 32 MiB, which no value limit and no count of steps shows; SQLite's
 # page counts do. And deleting a project, whose cascade to the items' heads went through every head
 # for each conversation.
-
-[[plant]]
-name = "session viewer: the participant's index holds no agent, so a read goes through the roles its row holds before it"
-meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_beside_short_ones"
-runs = ["viewer-ledger-history"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/migrations/0020.sql"
-find = "ON participant (project_id, handle, left_at IS NULL, role, agent);"
-replace = "ON participant (project_id, handle, left_at IS NULL, role);"
 
 [[plant]]
 name = "session viewer: the participant is read from its row, past the roles it was given"

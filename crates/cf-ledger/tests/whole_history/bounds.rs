@@ -413,8 +413,12 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
         "the 10,000 conversations of tools' outputs, nothing shown",
         ask(HistoryFrom::Before(oldest_big), None, false, ROOM),
     );
+    // Before the five, the ten items of the conversation the chief was in then,
+    // and none of the 10,000 before it: the read goes through as many as its
+    // bound holds, and says where the next goes on.
+    assert_eq!(ids(&none_shown).len(), 10, "{:?}", none_shown.scanned);
     assert!(
-        none_shown.entries.is_empty() && none_shown.resume.is_some(),
+        none_shown.bounded && none_shown.resume.is_some(),
         "{:?}",
         none_shown.scanned
     );

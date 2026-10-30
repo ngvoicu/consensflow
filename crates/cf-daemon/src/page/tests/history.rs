@@ -698,6 +698,10 @@ async fn reads_past_thousands_of_conversations_that_show_no_item_to_the_one_item
                 assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(200)]);
                 assert!(said.len() <= PAGE_BYTES);
                 assert_eq!(headed(&answer), None, "{}", &said[..said.len().min(200)]);
+                // The 10,000 cost more than one read may go through: the first shows nothing.
+                if reads == 1 {
+                    assert_eq!(stream(&answer), [], "{}", &said[..said.len().min(200)]);
+                }
                 shown.extend(stream(&answer));
                 let older = &answer["history"]["older"];
                 if older.is_null() {

@@ -1037,7 +1037,7 @@ replace = """        // Through the whole conversation: the next read goes on pa
 
 [[plant]]
 name = "timeline: a read that went through a conversation goes on from its far side"
-meant = "pages_of_one_item_go_across_conversations_that_show_none_and_show_each_item_once_in_order"
+meant = "every_read_moves_however_little_it_may_go_through_and_older_reaches_the_oldest"
 runs = ["tl-ledger", "tl-daemon"]
 
 [[plant.edit]]
