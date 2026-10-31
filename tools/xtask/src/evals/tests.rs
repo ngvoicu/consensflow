@@ -37,6 +37,14 @@ fn each_command_is_a_verb_of_the_cf_evals_command_and_the_words_after_it_go_as_t
         )),
         "cargo run --locked --quiet --package cf-evals -- watch --project poker-lab --tokens"
     );
+    assert_eq!(
+        said(&invocation(
+            &root,
+            "chiefs",
+            &words("--chiefs claude,codex")
+        )),
+        "cargo run --locked --quiet --package cf-evals -- chiefs --chiefs claude,codex"
+    );
     // The long run looks at its project for hours: built in release.
     assert_eq!(
         said(&invocation(

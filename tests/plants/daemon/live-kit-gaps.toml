@@ -1,0 +1,121 @@
+# The live kit's gaps on real harnesses (T-972, 3.0.7; the regression audits T-961 and
+# T-962): the judges of the live suites this round added, held by their own tests.
+#
+# - `live own-cf`: a member's shell finds its window's own `cf` ahead of a decoy its profile
+#   puts first (`devin-shell-finds-installed-cf`, `devin-shell-on-windows-does-not-find-cf`):
+#   a decoy that was run fails the worker by its folder, only the daemon's own answer to
+#   `cf whoami` proves the window's `cf`, and the run's home puts the decoys first;
+# - `live paste-enter`: a paste the human sends with Enter goes on that Enter
+#   (`codex-windows-ignores-enter-after-paste`): the two shapes of typing, and the verdict;
+# - `eval chiefs`: the `conversation` eval for each chief harness (`chief-does-the-work-itself`).
+#
+# One plant takes one rule out; a test fails. Every name holds `live kit gaps`, so
+# `npm run plants:daemon -- "live kit gaps"` runs them all.
+
+[run]
+live-own-cf = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_own_cf"]
+live-paste-enter = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter"]
+evals-chiefs = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "chiefs::"]
+
+[[plant]]
+name = "live kit gaps: a decoy cf the worker's shell ran does not fail it"
+meant = "a_decoy_that_was_run_fails_it_by_its_folder_whatever_the_result_says"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
+find = "    for (label, calls) in &seen.decoys {"
+replace = "    for (label, calls) in seen.decoys.iter().filter(|_| false) {"
+
+[[plant]]
+name = "live kit gaps: any result proves the window's own cf, the stand-in's answer too"
+meant = "a_result_with_no_answer_of_the_daemons_proves_nothing_and_fails"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
+find = "        .is_some_and(|result| result.contains(&whoami_of(handle)));"
+replace = "        .is_some();"
+
+[[plant]]
+name = "live kit gaps: the run's profiles put the decoys last on the PATH"
+meant = "every_profile_puts_local_bin_first_then_the_package_managers_folder_by_whole_paths"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/home.rs"
+find = '''            "export PATH=\"{}:$PATH\"",'''
+replace = '''            "export PATH=\"$PATH:{}\"",'''
+
+[[plant]]
+name = "live kit gaps: the windows run on the person's HOME, not the run's"
+meant = "the_windows_run_on_the_runs_home_and_their_zsh_reads_its_profiles"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf.rs"
+find = '''    .with_var("HOME", root.clone())
+'''
+replace = ""
+
+[[plant]]
+name = "live kit gaps: a zsh with the person's HOME reads the person's profiles"
+meant = "the_windows_run_on_the_runs_home_and_their_zsh_reads_its_profiles"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf.rs"
+find = '''    .with_var("ZDOTDIR", root.clone());'''
+replace = "    ;"
+
+[[plant]]
+name = "live kit gaps: a person's paste and its Enter are typed in one write"
+meant = "at_once_is_one_write_of_the_paste_and_enter_and_then_enter_is_two"
+runs = ["live-paste-enter"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = "        Shape::ThenEnter => vec![paste, ENTER.to_vec()],"
+replace = "        Shape::ThenEnter => vec![[paste.as_slice(), ENTER].concat()],"
+
+[[plant]]
+name = "live kit gaps: a paste that needed another Enter holds"
+meant = "only_a_paste_that_went_on_its_own_enter_holds"
+runs = ["live-paste-enter"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = "        self == Went::After(0)"
+replace = "        self != Went::Never"
+
+[[plant]]
+name = "live kit gaps: eval chiefs runs OpenCode, which leaves, unasked"
+meant = "every_eval_harness_but_opencode_is_a_chief_unless_some_are_named"
+runs = ["evals-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/chiefs.rs"
+find = "            .filter(|name| *name != LEAVING)"
+replace = "            .filter(|name| !name.is_empty())"
+
+[[plant]]
+name = "live kit gaps: a chief of eval chiefs runs on its default model, not the cheap one"
+meant = "a_chiefs_run_is_its_own_staff_on_its_cheap_model_with_the_reports_kept_together"
+runs = ["evals-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/chiefs.rs"
+find = '''        "--model",
+        model,'''
+replace = '''        "--model",
+        "",'''
+
+[[plant]]
+name = "live kit gaps: a chief's line holds whatever its checks said"
+meant = "a_line_says_the_tasks_on_the_board_and_every_check_that_did_not_hold"
+runs = ["evals-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/chiefs.rs"
+find = "        held: failed.is_empty(),"
+replace = "        held: true,"

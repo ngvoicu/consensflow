@@ -47,6 +47,7 @@ fn every_command_of_the_plan_is_there_once() {
             "windows",
             "windows-matrix",
             "eval summary",
+            "eval chiefs",
             "eval long",
             "eval",
             "watch",
