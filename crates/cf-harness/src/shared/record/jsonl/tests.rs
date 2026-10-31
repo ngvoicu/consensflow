@@ -814,3 +814,64 @@ fn whole_records_run_together_in_one_line_are_each_read_in_their_place() {
     assert_eq!(read(looked).passed_over(), [2]);
     assert_eq!(*said.lock().unwrap(), [passed_over(&file, 2, 8)]);
 }
+
+/// What each look at a large transcript costs (T-1024), timed on a copy of a real one:
+/// `CF_MEASURE_JSONL=<the copy> cargo test -p cf-harness --lib measure_the_looks -- --ignored
+/// --nocapture`. The looks are those of a transcript's quiet moment after a write, by the
+/// file's own time: the first read, a look within the step, the look that settles it, and
+/// one after. It prints the file's size, each look's time and what it came to, three times
+/// over, and never a byte of the file.
+#[test]
+#[ignore = "a measurement: CF_MEASURE_JSONL names the large transcript to time the looks at"]
+fn measure_the_looks_at_a_large_transcript() {
+    let file = std::path::PathBuf::from(
+        std::env::var_os("CF_MEASURE_JSONL").expect("CF_MEASURE_JSONL names the file to measure"),
+    );
+    let metadata = fs::metadata(&file).unwrap();
+    // A file's time in whole milliseconds, as a look's is.
+    #[allow(clippy::cast_possible_truncation)]
+    let written = mtime_ms(&metadata).unwrap() as i64;
+    println!("size {} bytes", metadata.len());
+    for round in 1..=3 {
+        let mut records = 0usize;
+        let mut look = |seen: Option<&Seen>, after_ms: i64| {
+            let started = std::time::Instant::now();
+            let looked = read_on(
+                &file,
+                seen,
+                written + after_ms,
+                &mut |_, _| {
+                    records += 1;
+                    Ok(())
+                },
+                None,
+            )
+            .unwrap();
+            (looked, started.elapsed())
+        };
+        let said = |looked: &Looked| match looked {
+            Looked::Unchanged => "unchanged",
+            Looked::Held(_) => "held",
+            Looked::Read(_) => "read",
+            Looked::NotTheFile => "not the file",
+        };
+        let mut lines = Vec::new();
+        let (first, took) = look(None, 100);
+        lines.push(format!("first read {took:?} ({})", said(&first)));
+        let Looked::Read(mut seen) = first else {
+            panic!("the first look did not read");
+        };
+        for (name, after_ms) in [
+            ("a look within the step", 1_000),
+            ("the look that settles it", 2_500),
+            ("a look after", 3_000),
+        ] {
+            let (looked, took) = look(Some(&seen), after_ms);
+            lines.push(format!("{name} {took:?} ({})", said(&looked)));
+            if let Looked::Held(held) | Looked::Read(held) = looked {
+                seen = held;
+            }
+        }
+        println!("round {round}, {records} records: {}", lines.join("; "));
+    }
+}
