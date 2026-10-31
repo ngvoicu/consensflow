@@ -58,7 +58,8 @@ pub struct WholeHistoryPage {
     pub older: Option<HistoryKey>,
     /// Where the page after this one goes on from; none on the most recent.
     pub newer: Option<HistoryKey>,
-    /// A search stopped at the most a read goes through, before the page was full.
+    /// The read stopped at the most one goes through, before the page was full:
+    /// a search, or a read past conversations that show no item.
     pub partial: bool,
 }
 
