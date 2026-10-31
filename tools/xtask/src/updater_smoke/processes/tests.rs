@@ -123,7 +123,9 @@ mod on_unix {
     impl Drop for Tree {
         fn drop(&mut self) {
             if let Some(mut child) = self.0.take() {
-                kill_tree(child.id());
+                if let Some(started) = Started::of(child.id()) {
+                    kill_tree(&started);
+                }
                 let _ = child.kill();
                 let _ = child.wait();
             }
@@ -156,7 +158,7 @@ mod on_unix {
         })
         .unwrap();
 
-        kill_tree(root);
+        kill_tree(&Started::of(root).unwrap());
 
         until("the tree is gone", patience, || {
             Ok(tree.iter().all(|pid| !alive(*pid)).then_some(()))
@@ -171,7 +173,7 @@ mod on_unix {
         let pid = child.id();
         assert!(alive(pid));
         assert!(!gone(pid));
-        kill(pid);
+        kill(&Started::of(pid).unwrap());
         // Ended and not yet reaped is a zombie, which is not alive.
         until("the sleep is gone", Duration::from_secs(60), || {
             Ok(gone(pid).then_some(()))
@@ -182,4 +184,22 @@ mod on_unix {
         assert!(!alive(0));
         assert!(!alive(u32::MAX));
     }
+}
+
+/// The apps an update starts are the programs of the installed bundle's `Contents/MacOS/`,
+/// under either name of its folder: not its `cf`, nor another bundle's app.
+#[test]
+fn the_programs_of_a_bundle_are_found_under_either_name_of_its_folder() {
+    let table = parse_table(concat!(
+        "  11     1 S    /var/x/Applications/ConsensFlow.app/Contents/MacOS/app\n",
+        "  12     1 S    /private/var/x/Applications/ConsensFlow.app/Contents/MacOS/app --flag\n",
+        "  13    11 S    /var/x/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf ui --json\n",
+        "  14     1 S    /Applications/ConsensFlow.app/Contents/MacOS/app\n",
+        "  15     1 S    /var/x/Applications/ConsensFlow.app/Contents/MacOSX/app\n",
+    ));
+    let folders = [
+        "/var/x/Applications/ConsensFlow.app/Contents/MacOS/".to_string(),
+        "/private/var/x/Applications/ConsensFlow.app/Contents/MacOS/".to_string(),
+    ];
+    assert_eq!(started_from(&table, &folders), [11, 12]);
 }

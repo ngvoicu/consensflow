@@ -315,14 +315,19 @@ pub async fn subscribe_output<R: Runtime>(
 /// daemon's page with the UI token, which the board's page frames in a
 /// dialog of its own.
 #[tauri::command]
-pub fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
-    let Some(roster) = app.state::<AppRuntime>().daemon.roster() else {
-        return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
-    };
-    match agents_url(&roster, &page) {
-        Ok(url) => json!({"ok":true,"url":url.as_str()}),
-        Err(error) => json!({"ok":false,"error":error}),
-    }
+pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
+    let daemon = Arc::clone(&app.state::<AppRuntime>().daemon);
+    // Off the async runtime: asked while the daemon is starting, it waits.
+    run_blocking("agents_screen", move || {
+        let Some(roster) = daemon.roster() else {
+            return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
+        };
+        match agents_url(&roster, &page) {
+            Ok(url) => json!({"ok":true,"url":url.as_str()}),
+            Err(error) => json!({"ok":false,"error":error}),
+        }
+    })
+    .await
 }
 
 const AGENTS_PAGES: &[&str] = &["", "harnesses"];
@@ -433,7 +438,13 @@ mod tests {
                 "{command} must not be scheduled before input admission"
             );
         }
-        for command in ["pane_input_wait", "pane_resize", "pane_ack"] {
+        // `agents_screen` waits for the daemon's first start, as a request does (T-951).
+        for command in [
+            "pane_input_wait",
+            "pane_resize",
+            "pane_ack",
+            "agents_screen",
+        ] {
             assert!(
                 source.contains(&format!("pub async fn {command}")),
                 "{command} can wait and must leave Tauri's main thread"

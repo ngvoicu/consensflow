@@ -6,7 +6,8 @@
 //! The steps are rustfmt; clippy for the workspace, for the app and for
 //! Windows (the workspace's, then the app's); the tests of the workspace, the engine's kit
 //! again with the gate's pacing on in every case (`CF_KIT_PACED`), the tests of xtask and of
-//! the app; the plants of
+//! the app, and the app's test build again, which has to find every part fresh (`cargo xtask
+//! app fresh`: a build script that makes every build dirty, T-978); the plants of
 //! every family, each checked to still apply to the sources (`cargo xtask
 //! plants <family> --check`); then the linter, the build of the native `cf` (the
 //! `bin/cf` the page's Playwright suite runs, `npm run test:ui`, which is no part
@@ -155,6 +156,7 @@ fn steps(
         at("cargo", &["test", "--package", "xtask", "--target-dir"])
             .arg(context.path(XTASK_TARGET)),
         app::test(context, &[]),
+        at("cargo", &["xtask", "app", "fresh"]),
     ]);
     // Each family's plants still apply to the sources: a plant whose text is gone, or whose
     // run is refused, fails the gate by its name (`plants::check`).
@@ -256,6 +258,7 @@ mod tests {
                 "cargo test --package cf-engine --test dispatcher".to_string(),
                 format!("cargo test --package xtask --target-dir {own_target}"),
                 "cargo test --offline --".to_string(),
+                "cargo xtask app fresh".to_string(),
                 "cargo xtask plants cli --check".to_string(),
                 "cargo xtask plants daemon --check".to_string(),
                 "cargo xtask plants release --check".to_string(),
@@ -284,6 +287,7 @@ mod tests {
                 root.clone(),
                 root.clone(),
                 root.clone(),
+                root.clone(),
                 root
             ]
         );
@@ -304,6 +308,7 @@ mod tests {
                 vec![PACED_VARIABLE.to_string()],
                 vec![],
                 vec!["TAURI_CONFIG".to_string()],
+                vec![],
                 vec![],
                 vec![],
                 vec![],
@@ -343,7 +348,7 @@ mod tests {
         let context = context();
         let steps = steps(&context, Path::new("xtask"), true, &families());
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
-        assert_eq!(lines.len(), 13);
+        assert_eq!(lines.len(), 14);
         assert!(lines.iter().all(
             |line| !line.contains("x86_64-pc-windows-msvc") && !line.contains("clippy-windows")
         ));
@@ -360,6 +365,7 @@ mod tests {
             lines[6..],
             [
                 "cargo test --offline --",
+                "cargo xtask app fresh",
                 "cargo xtask plants cli --check",
                 "cargo xtask plants daemon --check",
                 "cargo xtask plants release --check",

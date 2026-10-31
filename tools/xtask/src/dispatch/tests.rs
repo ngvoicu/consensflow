@@ -34,6 +34,7 @@ fn every_command_of_the_plan_is_there_once() {
             "portable inspect",
             "app test",
             "app clippy",
+            "app fresh",
             "clippy-windows",
             "--as-archiver",
             "test daemons",
@@ -170,7 +171,10 @@ fn a_group_of_commands_has_its_help_and_wants_a_command_of_it() {
         "{help}"
     );
     assert!(!help.contains("departures"), "{help}");
-    assert_eq!(parsed("app"), "usage app takes a command: test, clippy");
+    assert_eq!(
+        parsed("app"),
+        "usage app takes a command: test, clippy, fresh"
+    );
     assert_eq!(
         parsed("test"),
         "usage test takes a command: daemons, daemon-and-rig, integration, regressions, clis, agents, load"

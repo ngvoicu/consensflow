@@ -1,4 +1,4 @@
-//! The thin drivers that run cargo as processes: `app test`, `app clippy`,
+//! The thin drivers that run cargo as processes: `app test`, `app clippy`, `app fresh`,
 //! `clippy-windows` (and the archiver it has cc-rs run), `departures` and
 //! `smoke` (where there is a bundle to run it on: macOS), started
 //! the way `cargo xtask` starts them, from the folders a developer is in, against
@@ -320,6 +320,43 @@ fn an_archive_that_cannot_be_made_is_one_error_with_status_1() {
         "{said}"
     );
     assert!(said.ends_with('\n') && said.lines().count() == 1, "{said}");
+}
+
+/// `app fresh` builds the app's tests twice and fails where cargo says the second build made a
+/// part again, saying which part and why; a build cargo refuses ends it with cargo's status.
+#[test]
+fn app_fresh_fails_where_a_second_build_makes_a_part_again_and_says_which_and_why() {
+    let tools = programs(&["cargo"]);
+    let run = |said: &str, exit: &str| {
+        xtask(
+            &checkout(),
+            tools.path(),
+            &[
+                ("FAKE_CHILD_STDERR", said),
+                ("FAKE_CHILD_EXIT", exit),
+                ("FAKE_CHILD_QUIET", "1"),
+            ],
+            &["app", "fresh"],
+        )
+    };
+    let reason = "Dirty app v1.0.0 (/x): the file `tauri.macos.conf.json` is missing";
+    let dirty = run(&format!("       {reason}"), "0");
+    assert_eq!(dirty.status.code(), Some(1), "{}", err(&dirty));
+    assert!(
+        err(&dirty).ends_with(&format!(
+            "xtask app fresh: a second build, with nothing changed, made these again:\n  {reason}\n"
+        )),
+        "{}",
+        err(&dirty)
+    );
+    let fresh = run("       Fresh app v1.0.0 (/x)", "0");
+    assert_eq!(fresh.status.code(), Some(0), "{}", err(&fresh));
+    assert!(err(&fresh).ends_with("xtask app fresh: a second build found every part fresh\n"));
+    assert_eq!(run("", "101").status.code(), Some(101));
+
+    let no_programs = tempfile::tempdir().unwrap();
+    let words = xtask(&checkout(), no_programs.path(), &[], &["app", "fresh", "x"]);
+    assert_eq!(words.status.code(), Some(2));
 }
 
 /// The command lines of the thin drivers that run cargo and answer its status.

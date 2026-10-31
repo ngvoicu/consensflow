@@ -861,31 +861,49 @@ const switchChief = new SwitchChiefDialog($('#switch-chief-dialog'), {
 // frame never reaches the dialog around it, so a screen hands Escape up.
 // Closing one gives the focus back to the Settings button (its dialog closed
 // as the screen opened) and reads the agents again: a model or a tier may
-// have changed on it.
+// have changed on it. Asked as the app starts, a screen's address waits for the
+// daemon's start: the status line says so, and one screen is asked for at a
+// time, so clicks meanwhile queue nothing (T-978).
 const settingsButton = $('#settings-button')
 const settingsDialog = $('#settings-dialog')
 settingsButton.addEventListener('click', () => settingsDialog.showModal())
+/** How long a screen's address is waited for before the status line says why. */
+const SCREEN_WAIT_SAID_MS = 300
+let screenAsked = false
 for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
   const page = entry.dataset.agentsPage
   const dialog = document.getElementById(entry.getAttribute('aria-controls'))
   const frame = dialog.querySelector('iframe')
-  entry.addEventListener('click', () =>
-    act(async () => {
-      settingsDialog.close()
-      const screen = await invoke('agents_screen', { page })
-      if (screen?.ok !== true) {
-        throw new Error(screen?.error ?? 'The agents screens are not available.')
+  entry.addEventListener('click', () => {
+    settingsDialog.close()
+    if (screenAsked) return
+    screenAsked = true
+    const waiting = `${entry.textContent.trim()} opens once ConsensFlow's daemon is up.`
+    const saying = setTimeout(() => note(waiting), SCREEN_WAIT_SAID_MS)
+    void act(async () => {
+      try {
+        const screen = await invoke('agents_screen', { page })
+        if (screen?.ok !== true) {
+          throw new Error(screen?.error ?? 'The agents screens are not available.')
+        }
+        // A screen opened before keeps what the human left on it, its filters
+        // and drafts, and is told the agents may have changed since.
+        if (frame.src === screen.url) {
+          frame.contentWindow.postMessage('consensflow:refresh-agents', new URL(screen.url).origin)
+        } else {
+          frame.src = screen.url
+        }
+        dialog.showModal()
+      } finally {
+        clearTimeout(saying)
+        if (status.textContent === waiting) {
+          status.textContent = ''
+          delete status.dataset.tone
+        }
+        screenAsked = false
       }
-      // A screen opened before keeps what the human left on it, its filters
-      // and drafts, and is told the agents may have changed since.
-      if (frame.src === screen.url) {
-        frame.contentWindow.postMessage('consensflow:refresh-agents', new URL(screen.url).origin)
-      } else {
-        frame.src = screen.url
-      }
-      dialog.showModal()
-    }),
-  )
+    })
+  })
   window.addEventListener('message', (event) => {
     if (event.source === frame.contentWindow && event.data === 'consensflow:close') dialog.close()
   })

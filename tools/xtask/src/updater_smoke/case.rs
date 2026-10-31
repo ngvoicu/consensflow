@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_base::env::Env;
+use cf_process::Started;
 
 use super::app::{launch_app, App, Launch};
 use super::build::Release;
@@ -241,14 +242,11 @@ impl<'a> Case<'a> {
         if let Some(app) = &self.app {
             app.kill_recorded();
         }
-        let pids: BTreeSet<u32> = self
-            .sandbox
-            .recorded_pids()
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-        for pid in pids {
-            super::processes::kill(pid);
+        let first = self.app.as_ref().and_then(App::first);
+        for (pid, written) in self.sandbox.recorded_stand_ins().unwrap_or_default() {
+            if let Some(started) = stand_in_to_end(pid, written, first.as_ref()) {
+                super::processes::kill(&started);
+            }
         }
         self.feed.close();
         if !self.finished || self.inputs.keep {
@@ -383,6 +381,19 @@ pub fn release_panes(kase: &Case, app: &App, chiefs: &[u32]) -> Result {
     kase.waits.until("two stand-in chiefs close", || {
         Ok(chiefs.iter().all(|pid| gone(*pid)).then_some(()))
     })
+}
+
+/// The process a stand-in's file names, to end as the case ends: the number it says, where the
+/// process that has it now began since the app that started the stand-in (`first`) did, and no
+/// later than the file was written, when the stand-in that wrote it ran. A number is any
+/// process's once its stand-in has ended, and none is ended for it otherwise.
+fn stand_in_to_end(
+    pid: u32,
+    written: std::time::SystemTime,
+    first: Option<&Started>,
+) -> Option<Started> {
+    Started::of(pid)
+        .filter(|seen| seen.began_by(written) && first.is_some_and(|first| seen.began_since(first)))
 }
 
 #[cfg(test)]
