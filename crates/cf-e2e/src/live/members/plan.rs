@@ -42,12 +42,13 @@ pub fn stand_in_worker() -> Value {
 
 /// The work tier of the member of `harness`: its own, so that a task which names
 /// the tier lands on that harness. The daemon picks a member by tier alone, and a
-/// check that needs one harness's question tool must land on that harness.
+/// check that needs one harness's question tool must land on that harness. There are
+/// four tiers for six harnesses: Devin and Codex share one, and Pi and Muse another.
 const fn tier(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "complex",
         Harness::OpenCode => "light",
-        Harness::Pi => "standard",
+        Harness::Pi | Harness::Muse => "standard",
         Harness::Devin | Harness::Codex => "critical",
     }
 }
@@ -260,11 +261,12 @@ mod tests {
     }
 
     #[test]
-    fn each_harness_has_a_work_tier_of_its_own_but_devin_and_codex_that_share_the_critical_one() {
+    fn each_harness_has_a_work_tier_of_its_own_but_devin_and_codex_and_pi_and_muse_that_share_one()
+    {
         let tiers: Vec<&str> = Harness::ALL.into_iter().map(tier).collect();
         assert_eq!(
             tiers,
-            ["complex", "light", "standard", "critical", "critical"]
+            ["complex", "light", "standard", "critical", "critical", "standard"]
         );
     }
 

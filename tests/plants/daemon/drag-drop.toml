@@ -1054,7 +1054,7 @@ runs = ["app-test-file-drop"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
-find = '''        .on_window_event(file_drop::hear)
+find = '''                file_drop::hear(window, event);
 '''
 replace = ""
 
@@ -1076,9 +1076,9 @@ runs = ["app-test-file-drop"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
-find = '''        .on_window_event(file_drop::hear)
+find = '''        })
         .invoke_handler(page_commands())'''
-replace = '''        .on_window_event(file_drop::hear)'''
+replace = '''        })'''
 
 [[plant]]
 name = "file drop: a lookup refused while another runs does not say the app is busy"

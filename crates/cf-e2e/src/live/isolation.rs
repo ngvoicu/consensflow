@@ -18,12 +18,18 @@
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
 //!
-//! **Muse Code** (`wt/muse-harness`, not on this base) is one more row for the day it
-//! lands: `XDG_DATA_HOME` and `XDG_CONFIG_HOME` scratch folders with the login reachable
-//! read-only ([`Seed::Reach`] is how Devin's reaches the other tools' folders), and
-//! `MUSE_NO_AUTO_UPDATE=1`, `MUSE_LOGIN=0` as plain values beside those folders, in the plan
-//! of a `Harness::Muse` arm of [`Isolation::of_machine_lasting`]. **OpenCode**, which a later change takes out of
-//! ConsensFlow, keeps running on the owner's folders: Devin's scratch reaches them.
+//! **Muse Code** sets none of these: its windows run through the rig's own launcher
+//! ([`crate::muse::write_live_stand_in`], given by [`super::machine::rig`] to every rig that
+//! seats Muse), which gives each `XDG_CONFIG_HOME` and `XDG_DATA_HOME` in the rig's home, fresh
+//! settings and a copy of the login's metadata there, and the person's home for its keychain
+//! alone; so Devin's XDG folders and Muse's never meet. Its row watches the owner's
+//! `~/.config/muse` (`auth.json`, `settings.json`, `trust.json`) and the index of their
+//! sessions (T-946: the members kit's live pacing run wrote the owner's `~/.config/muse`).
+//!
+//! **OpenCode**, which a later change takes out of ConsensFlow, keeps running on the owner's
+//! folders: Devin's scratch reaches them. Every harness says its row, or why it has none, in
+//! [`Isolation::of_machine_lasting`], with no arm for "any other": one added later is a
+//! decision, not a silence.
 //!
 //! **A login that refreshes.** A refresh token is used once, so a copy that refreshes leaves
 //! the owner's file with a token that no longer works. Pi refreshes an OAuth entry that has
@@ -167,6 +173,27 @@ impl Plan {
         }
     }
 
+    /// Muse Code: nothing of the run's own, for the rig's launcher gives its windows their
+    /// folders; the owner's login metadata, settings and trust, and the index of their
+    /// sessions, which a session of the run's would be written into, are watched.
+    #[cfg(unix)]
+    fn muse(config: &Path, data: &Path) -> Self {
+        let config = config.join("muse");
+        Self {
+            folders: Vec::new(),
+            vars: Vec::new(),
+            seeds: Vec::new(),
+            watched: vec![
+                config.join("auth.json"),
+                config.join("settings.json"),
+                config.join("trust.json"),
+                data.join("muse").join("session-index.db"),
+            ],
+            records: Vec::new(),
+            described: config.join("auth.json").display().to_string(),
+        }
+    }
+
     /// Devin: the four folders of the XDG layout, where it keeps its login and config (and its
     /// sessions, logs and cache); the login (`credentials.toml`, an API key) and `config.json`
     /// are copied. Whatever else the owner keeps in the config and data folders is reached
@@ -220,6 +247,21 @@ impl Plan {
                 .to_string(),
         }
     }
+}
+
+/// The owner's folder `variable` names, or `below` in their `home` where it names none.
+#[cfg(unix)]
+fn xdg(home: &Path, variable: &str, below: &[&str]) -> PathBuf {
+    own_var(variable)
+        .filter(|value| !value.is_empty())
+        .map_or_else(
+            || {
+                below
+                    .iter()
+                    .fold(home.to_path_buf(), |path, part| path.join(part))
+            },
+            PathBuf::from,
+        )
 }
 
 /// A file of the run's home that holds a login, as it was copied.
@@ -299,25 +341,36 @@ impl Isolation {
                 Some(Self::pi(home, &agent, &model, run))
             }
             #[cfg(unix)]
-            Harness::Devin => {
-                let base = |variable: &str, below: &[&str]| {
-                    machine(variable).map_or_else(
-                        || {
-                            below
-                                .iter()
-                                .fold(home.to_path_buf(), |path, part| path.join(part))
-                        },
-                        PathBuf::from,
-                    )
-                };
-                Some(Self::devin(
-                    home,
-                    &base("XDG_CONFIG_HOME", &[".config"]),
-                    &base("XDG_DATA_HOME", &[".local", "share"]),
-                ))
-            }
-            _ => None,
+            Harness::Devin => Some(Self::devin(
+                home,
+                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+            )),
+            #[cfg(unix)]
+            Harness::Muse => Some(Self::muse(
+                home,
+                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+            )),
+            // Every harness says its home here, so that one added later is a decision and
+            // not a silence (T-946: Muse came after T-724's list and ran on the owner's):
+            // Claude Code's config folder is the kit's copy of its login (`super::login`);
+            // OpenCode runs on the owner's folders until ConsensFlow takes it out; Devin's
+            // and Muse's folders on Windows are not known.
+            Harness::Claude | Harness::OpenCode => None,
+            #[cfg(not(unix))]
+            Harness::Devin | Harness::Muse => None,
         })
+    }
+
+    /// Muse Code's: its windows run through the rig's own launcher, which gives each the
+    /// rig's folders and a copy of the login's metadata (`crate::muse::write_live_stand_in`,
+    /// [`super::machine::rig`]), so this home holds nothing and sets nothing; it watches the
+    /// owner's Muse files in `config` and `data` (the XDG folders of the owner whose home is
+    /// `home`), and fails a run that changed them.
+    #[cfg(unix)]
+    pub fn muse(home: &Path, config: &Path, data: &Path) -> Self {
+        Self::new(Harness::Muse, home, Plan::muse(config, data))
     }
 
     /// Codex's home, copying the login in `codex_home`, the owner's `CODEX_HOME` (in the home
@@ -632,6 +685,7 @@ const fn proper(harness: Harness) -> &'static str {
         Harness::Pi => "Pi",
         Harness::Devin => "Devin",
         Harness::Codex => "Codex",
+        Harness::Muse => "Muse Code",
     }
 }
 

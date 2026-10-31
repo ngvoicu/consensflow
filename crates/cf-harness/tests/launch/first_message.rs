@@ -1,9 +1,9 @@
 //! How a window's first message goes in (`Adapter::first_message`, which the
 //! engine reads to know how and when the message is handed over): Devin reads it
 //! from a file of the launch's own as it opens; OpenCode's is posted to its server
-//! once the window is up; Claude Code's, Pi's and Codex's are delivered once the
-//! window is up, as any later message is. None is on a command line, on any
-//! platform (T-432).
+//! once the window is up; Claude Code's, Pi's, Codex's and Muse Code's are
+//! delivered once the window is up, as any later message is. None is on a command
+//! line, on any platform (T-432).
 
 use cf_base::env::Env;
 use cf_harness::contract::FirstMessage;
@@ -27,7 +27,9 @@ fn devin_reads_its_first_message_as_it_opens_opencode_posts_it_and_the_others_ar
             let expected = match harness {
                 Harness::Devin => FirstMessage::Opened,
                 Harness::Opencode => FirstMessage::Started,
-                Harness::Claude | Harness::Pi | Harness::Codex => FirstMessage::Delivered,
+                Harness::Claude | Harness::Pi | Harness::Codex | Harness::Muse => {
+                    FirstMessage::Delivered
+                }
             };
             assert_eq!(
                 says(harness, &env),

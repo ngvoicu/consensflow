@@ -647,7 +647,7 @@ fn a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_refused_has_the_
     assert_eq!(
         to_chief,
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     let to_human: Vec<String> = context
@@ -793,7 +793,7 @@ fn a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_never_answered_i
     assert_eq!(
         to_chief,
         [format!(
-            "T-1 failed: what @chief told its window, {words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: what @chief told its window, {words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     held.open();

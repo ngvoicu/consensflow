@@ -261,7 +261,7 @@ mod tests {
         let failed = named("kimi").unwrap_err().to_string();
         assert_eq!(
             failed,
-            "no worker is called kimi: fake, claude, opencode, pi, devin, codex"
+            "no worker is called kimi: fake, claude, opencode, pi, devin, codex, muse"
         );
     }
 

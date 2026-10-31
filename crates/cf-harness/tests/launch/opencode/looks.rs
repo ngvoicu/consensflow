@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use cf_base::time::iso;
 use cf_harness::contract::{Held, Observed, Readiness, Records, Window};
-use cf_harness::records::{Quota, Reading, Record, Settlement};
+use cf_harness::records::{ModelMoved, Quota, Reading, Record, Settlement};
 use cf_harness::seams::Time;
 use cf_harness::testing::{finished, Driver, ScriptedHost, Served};
 use serde_json::{json, Value};
@@ -236,6 +236,35 @@ fn the_quota_the_window_waits_out_is_the_one_a_look_reports_not_the_one_its_reco
             resets_at: Some(iso(midnight)),
         })
     );
+}
+
+#[test]
+fn a_move_the_record_holds_outranks_the_quota_the_window_waits_out() {
+    // The look's one precedence (T-853): a model nobody chose first, then what the window says
+    // now, then the record's own.
+    let moved = Arc::new(ModelMoved {
+        from: "opencode/big-pickle".to_owned(),
+        to: "opencode/small-pickle".to_owned(),
+        because: "OpenCode switched the model".to_owned(),
+        at: None,
+    });
+    let stand = Stand::saying(Reading::Known(Record {
+        model_moved: Some(Arc::clone(&moved)),
+        ..working_record()
+    }));
+    let (stage, window) = window_on("ses_abc123", &stand);
+    let midnight = stage.fakes.time.wall_ms() + 5 * 3_600_000;
+    let waiting = shows(
+        Some("ses_abc123"),
+        json!({
+            "type": "retry",
+            "message": "Free usage exceeded, subscribe to Go",
+            "next": midnight,
+            "action": { "reason": "free_tier_limit" },
+        }),
+    );
+    let observed = look(&stage, &window, Some(waiting));
+    assert_eq!(observed.quota.as_deref(), Some(&moved.as_quota()));
 }
 
 #[test]

@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::records::{Item, Quota, Record, Role, Settlement};
+use crate::records::{Item, ModelMoved, Quota, Record, Role, Settlement};
 
 /// The reading a row's record is, or none where no reading says it.
 fn reading_of(record: &Value) -> Option<Reading> {
@@ -174,4 +174,104 @@ fn a_window_switched_away_settles_nothing_and_waits_for_nothing_and_one_unnamed_
         })
     );
     assert!(held.unnamed && held.settled && held.switched.is_none());
+}
+
+#[test]
+fn a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_until_the_human_says() {
+    // MUS-24: the move is the account's refusal for what only the human cures, so the engine
+    // holds the window's work and sends it nothing, as for a billing refusal.
+    let moved = Arc::new(ModelMoved {
+        from: "muse-spark-1.3".to_owned(),
+        to: "muse-spark-1.3-contributor".to_owned(),
+        because: "Muse switched on its own after its turn failed".to_owned(),
+        at: Some("2026-10-26T15:46:19.674Z".to_owned()),
+    });
+    let mut record = Record::new();
+    record.model_moved = Some(Arc::clone(&moved));
+    let observed = record_state(Arc::new(Reading::Known(record.clone())));
+    assert_eq!(
+        observed.quota.as_deref(),
+        Some(&Quota::Moved {
+            at: Some("2026-10-26T15:46:19.674Z".to_owned()),
+            because: "its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own after its turn failed), a model nobody chose".to_owned(),
+        })
+    );
+    // A refusal the same record shows (the 402 of T-705's recordings, which Muse moved the model
+    // after) does not hide it: the human who fixes the billing and tries again is told, besides,
+    // that the window runs on a model they never chose, or the same refusal's handled mark would
+    // let the engine paste into it (MUS-24).
+    let refused = Arc::new(Quota::Exhausted {
+        at: None,
+        resets_at: None,
+    });
+    record.quota = Some(refused);
+    let observed = record_state(Arc::new(Reading::Known(record)));
+    assert_eq!(observed.quota, Some(Arc::new(moved.as_quota())));
+}
+
+/// A record that says what it is given of its quota.
+fn quota_reading(moved: bool, refused: bool) -> Arc<Reading> {
+    let mut record = Record::new();
+    if moved {
+        record.model_moved = Some(Arc::new(ModelMoved {
+            from: "gpt-6-astra".to_owned(),
+            to: "gpt-6-safe".to_owned(),
+            because: "rerouted".to_owned(),
+            at: None,
+        }));
+    }
+    if refused {
+        record.quota = Some(Arc::new(Quota::Unavailable {
+            at: None,
+            because: "its billing was refused".to_owned(),
+        }));
+    }
+    Arc::new(Reading::Known(record))
+}
+
+#[test]
+fn the_quota_a_look_says_is_the_move_then_what_the_window_says_live_then_the_records() {
+    // One place builds a look from a record and the live words beside it (T-853): every adapter
+    // that reads a window's own status gets the one precedence, a model nobody chose first.
+    let live = Arc::new(Quota::Exhausted {
+        at: None,
+        resets_at: Some("2026-09-26T08:29:53.000Z".to_owned()),
+    });
+    let kind = |reading, live: Option<&Arc<Quota>>| {
+        observed_from(reading, live.cloned())
+            .quota
+            .map(|quota| match &*quota {
+                Quota::Moved { .. } => "moved",
+                Quota::Unavailable { .. } => "unavailable",
+                Quota::Exhausted { .. } => "exhausted",
+                _ => "other",
+            })
+    };
+    assert_eq!(kind(quota_reading(true, true), Some(&live)), Some("moved"));
+    assert_eq!(kind(quota_reading(true, false), Some(&live)), Some("moved"));
+    assert_eq!(kind(quota_reading(true, true), None), Some("moved"));
+    assert_eq!(
+        kind(quota_reading(false, true), Some(&live)),
+        Some("exhausted"),
+        "what the window says now outranks what its record kept"
+    );
+    assert_eq!(
+        kind(quota_reading(false, true), None),
+        Some("unavailable"),
+        "a window that says nothing keeps the record's own"
+    );
+    assert_eq!(
+        kind(quota_reading(false, false), Some(&live)),
+        Some("exhausted")
+    );
+    assert_eq!(kind(quota_reading(false, false), None), None);
+    // A record that could not be read says nothing of its own, and the live word stands.
+    assert_eq!(
+        observed_from(
+            Arc::new(Reading::missing("session yet")),
+            Some(live.clone())
+        )
+        .quota,
+        Some(live)
+    );
 }

@@ -92,6 +92,9 @@ fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
         Harness::Pi => ("openrouter/meta/muse-spark-1.3", None),
         Harness::Devin => ("swe-2", Some("medium")),
         Harness::Codex => ("gpt-5.6-luna", None),
+        // The owner's testing model of 2026-10-26: not a contributor model, at its least
+        // effort (the contributor model measured no saving, T-718).
+        Harness::Muse => ("muse-spark-1.3", Some("minimal")),
     }
 }
 
@@ -105,6 +108,7 @@ fn efforts(harness: Harness) -> &'static [&'static str] {
         Harness::Pi => &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
         Harness::OpenCode => &["minimal", "low", "medium", "high", "xhigh", "max"],
         Harness::Devin => &["low", "medium", "high", "xhigh", "max"],
+        Harness::Muse => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
     }
 }
 
@@ -141,19 +145,28 @@ impl fmt::Display for Model {
 
 /// The model of every harness in a run, in the order of [`Harness::ALL`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Models([Model; 5]);
+pub struct Models {
+    models: [Model; 6],
+    /// The harnesses the flags named, in the order they did.
+    named: Vec<Harness>,
+}
 
 impl Models {
     /// The model `harness` runs on.
     pub fn of(&self, harness: Harness) -> &Model {
-        &self.0[slot(harness)]
+        &self.models[slot(harness)]
+    }
+
+    /// The harnesses `--models` and `--claude-model` named, in the order they were.
+    pub fn named(&self) -> &[Harness] {
+        &self.named
     }
 
     /// What a run says of them in its first lines: what the flags give each
     /// harness, which a suite's own flag may override for its windows (the report
     /// says what each window was launched on: [`super::Log::launched`]).
     pub fn line(&self) -> String {
-        let each: Vec<String> = self.0.iter().map(Model::to_string).collect();
+        let each: Vec<String> = self.models.iter().map(Model::to_string).collect();
         format!(
             "the models --models and the cheap ones give: {}",
             each.join("; ")
@@ -210,8 +223,12 @@ pub fn parse(
     }
     if let Some(model) = claude_model.filter(|_| !named.contains(&Harness::Claude)) {
         chosen[slot(Harness::Claude)] = model_of(Harness::Claude, model, "--claude-model")?;
+        named.push(Harness::Claude);
     }
-    Ok(Models(chosen))
+    Ok(Models {
+        models: chosen,
+        named,
+    })
 }
 
 /// Where `harness` is in [`Harness::ALL`].
@@ -339,6 +356,7 @@ pub fn question_tool(harness: Harness) -> Option<&'static str> {
         Harness::OpenCode => Some("question tool"),
         Harness::Codex => Some("request_user_input tool"),
         Harness::Devin => Some("ask_user_question tool"),
+        Harness::Muse => Some("request_user_input tool"),
         Harness::Pi => None,
     }
 }
@@ -346,6 +364,21 @@ pub fn question_tool(harness: Harness) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// T-931 P2-2: the harnesses `--models` and `--claude-model` name are asked for: a
+    /// machine that lacks one is the run's error, not a harness left out.
+    #[test]
+    fn the_harnesses_the_model_flags_name_are_the_ones_asked_for() {
+        let models = parse(
+            Some("muse=muse-spark-1.3:minimal, pi=openai/gpt-6-luna"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(models.named(), [Harness::Muse, Harness::Pi]);
+        let claude = parse(None, Some("claude-sonnet-5-5")).unwrap();
+        assert_eq!(claude.named(), [Harness::Claude]);
+        assert!(parse(None, None).unwrap().named().is_empty());
+    }
 
     #[test]
     fn every_harness_has_one_agent_of_its_own_kind_on_its_cheap_model() {
@@ -361,7 +394,8 @@ mod tests {
                 "live-opencode",
                 "live-pi",
                 "live-devin",
-                "live-codex"
+                "live-codex",
+                "live-muse"
             ]
         );
         let models: Vec<&str> = rows
@@ -375,12 +409,14 @@ mod tests {
                 "opencode/muse-spark-1.3-contributor-free",
                 "openrouter/meta/muse-spark-1.3",
                 "swe-2",
-                "gpt-5.6-luna"
+                "gpt-5.6-luna",
+                "muse-spark-1.3"
             ]
         );
         assert!(rows.iter().all(|row| row["workTier"] == "standard"));
         assert_eq!(rows[0]["kind"], "claude-code");
         assert_eq!(rows[3]["effort"], "medium");
+        assert_eq!(rows[5]["effort"], "minimal");
         assert!(rows[0].get("effort").is_none());
     }
 
@@ -402,7 +438,7 @@ mod tests {
     fn given(models: Option<&str>, claude: Option<&str>) -> Vec<(String, Option<String>)> {
         parse(models, claude)
             .unwrap()
-            .0
+            .models
             .into_iter()
             .map(|model| (model.name, model.effort))
             .collect()
@@ -455,6 +491,7 @@ mod tests {
                 on("openai/gpt-6-luna", None),
                 on("swe-2", Some("max")),
                 on("gpt-6.1-sol", Some("high")),
+                on("muse-spark-1.3", Some("minimal")),
             ]
         );
         // Spaces around a piece, a harness, a model or an effort are let be, and so is
@@ -493,7 +530,7 @@ mod tests {
     fn a_flag_no_window_could_be_asked_for_is_refused_in_words_naming_the_harness_and_the_model() {
         assert_eq!(
             refused("gemini=gemini-3", None),
-            "--models names no harness called gemini (claude, opencode, pi, devin, codex): gemini=gemini-3"
+            "--models names no harness called gemini (claude, opencode, pi, devin, codex, muse): gemini=gemini-3"
         );
         assert_eq!(
             refused("=gpt-6", None),
@@ -590,7 +627,8 @@ mod tests {
             models.line(),
             "the models --models and the cheap ones give: claude claude-sonnet-5-5; \
              opencode opencode/muse-spark-1.3-contributor-free; pi openai/gpt-6-luna; \
-             devin swe-2, effort medium; codex gpt-6.1-sol, effort high"
+             devin swe-2, effort medium; codex gpt-6.1-sol, effort high; \
+             muse muse-spark-1.3, effort minimal"
         );
         // What a window launched on an agent runs on is the agent's: Pi's effort is its
         // thinking, and the stand-in agent's windows run on nothing of a harness.

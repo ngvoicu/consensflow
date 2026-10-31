@@ -112,6 +112,10 @@ impl Owner {
             ".local/share/devin/cli/trusted_workspaces.json",
             ".local/share/devin/cli/sessions.db",
             ".local/share/opencode/auth.json",
+            ".config/muse/auth.json",
+            ".config/muse/settings.json",
+            ".config/muse/trust.json",
+            ".local/share/muse/session-index.db",
         ] {
             write(&h.join(file), SENTINEL);
         }
@@ -133,6 +137,16 @@ impl Owner {
 
     fn codex(&self) -> Isolation {
         let mut made = Isolation::codex(self.home.path(), &self.path(".codex"));
+        made.parent = self.parent.path().to_path_buf();
+        made
+    }
+
+    fn muse(&self) -> Isolation {
+        let mut made = Isolation::muse(
+            self.home.path(),
+            &self.path(".config"),
+            &self.path(".local/share"),
+        );
         made.parent = self.parent.path().to_path_buf();
         made
     }
@@ -497,6 +511,12 @@ fn watched(owner: &Owner, which: &str) -> Vec<PathBuf> {
             ".pi/agent/mcp-auth.json",
         ],
         "codex" => &[".codex/auth.json", ".codex/config.toml"],
+        "muse" => &[
+            ".config/muse/auth.json",
+            ".config/muse/settings.json",
+            ".config/muse/trust.json",
+            ".local/share/muse/session-index.db",
+        ],
         _ => &[
             ".local/share/devin/credentials.toml",
             ".config/devin/config.json",
@@ -510,13 +530,14 @@ fn isolation_of(owner: &Owner, which: &str) -> Isolation {
     match which {
         "pi" => owner.pi("openrouter/x", hours(1)),
         "codex" => owner.codex(),
+        "muse" => owner.muse(),
         _ => owner.devin(),
     }
 }
 
 #[test]
 fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_what_it_holds() {
-    for which in ["pi", "codex", "devin"] {
+    for which in ["pi", "codex", "devin", "muse"] {
         let owner = Owner::new();
         let isolation = isolation_of(&owner, which);
         isolation.made_at(at(NOW)).unwrap();
@@ -723,5 +744,25 @@ fn a_harness_with_no_home_of_its_own_to_make_has_none() {
             Isolation::of_machine(harness, home).unwrap().is_some(),
             "{harness:?}"
         );
+    }
+}
+
+/// Every harness the kit can launch runs on a home of the run's own, or is named here with why
+/// it has none. T-724's test named the harnesses of its day, and `of_machine_lasting` took any
+/// other for one with no home, in silence: Muse Code, which came after, ran the live pacing run's
+/// chief on the owner's own `~/.config/muse` and `~/.local/share/muse` (T-946).
+#[test]
+fn every_harness_the_kit_can_launch_has_a_home_of_the_runs_own_or_a_reason_it_has_none() {
+    let home = Path::new("/home/me");
+    // Claude Code's config folder is the kit's copy of the login (`super::login`); OpenCode
+    // runs on the owner's folders, reached by Devin's home, until ConsensFlow takes it out.
+    let elsewhere = [Harness::Claude, Harness::OpenCode];
+    for harness in Harness::ALL {
+        if harness == Harness::Pi {
+            // Pi's home needs the run's model, which this test does not ask.
+            continue;
+        }
+        let made = Isolation::of_machine(harness, home).unwrap();
+        assert_eq!(made.is_some(), !elsewhere.contains(&harness), "{harness:?}");
     }
 }

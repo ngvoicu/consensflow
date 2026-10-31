@@ -87,7 +87,8 @@ pub fn run(
         .collect();
     if given.first().is_some_and(|first| first == "hook") {
         let harness = given.get(1).map(|arg| arg.to_string_lossy());
-        return hook::run(harness.as_deref(), env, input, out);
+        let rest = given.get(2..).unwrap_or_default();
+        return hook::run(harness.as_deref(), rest, env, input, out);
     }
     // The daemon's `cf ui` is no board command, and `main` left it to this when a token is
     // set (`native_ui`): said in words, where the board would call it an unknown command.

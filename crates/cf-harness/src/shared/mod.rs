@@ -2,6 +2,7 @@
 
 pub(crate) mod admission;
 pub(crate) mod child;
+pub(crate) mod compacting;
 pub(crate) mod directory;
 pub(crate) mod input_box;
 pub(crate) mod launch_files;

@@ -147,7 +147,8 @@ fn a_cli_is_found_in_npm_s_folder_when_path_lacks_it_as_the_cmd_windows_starts()
             Harness::Devin,
             Harness::Claude,
             Harness::Codex,
-            Harness::Opencode
+            Harness::Opencode,
+            Harness::Muse
         ]
     );
     // Another harness's shim is not this one's.

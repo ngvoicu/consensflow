@@ -17,16 +17,20 @@ pub enum Harness {
     Pi,
     Opencode,
     Devin,
+    /// Meta's Muse Code (`muse`): detected and read since 3.0.6 (T-703); no
+    /// window is opened on it yet.
+    Muse,
 }
 
 impl Harness {
     /// Every harness, in the order the page and the roster list them.
-    pub const ALL: [Harness; 5] = [
+    pub const ALL: [Harness; 6] = [
         Harness::Claude,
         Harness::Codex,
         Harness::Pi,
         Harness::Opencode,
         Harness::Devin,
+        Harness::Muse,
     ];
 
     /// The CLI's own name (`claude`), as the page and the launcher say it.
@@ -37,6 +41,7 @@ impl Harness {
             Harness::Pi => "pi",
             Harness::Opencode => "opencode",
             Harness::Devin => "devin",
+            Harness::Muse => "muse",
         }
     }
 
@@ -78,7 +83,10 @@ impl Harness {
     /// it gives a child session; Codex 0.165's sandbox (`codex sandbox -- env`) and the
     /// names its shell's environment is made of; Pi 1.4's `process.env` and its bash
     /// tool's; OpenCode 1.19's `process.env` and its terminal's; Devin 3000.11's terminal,
-    /// whose shell script names and unsets both.
+    /// whose shell script names and unsets both; Muse 1.4.14's hooks' and tools' (its
+    /// session and thread, its log, a Claude-shaped tool call id, its trace) and its
+    /// launcher's `MUSE_RELEASE_INFO`. A harness's own switches a launch sets
+    /// (`MUSE_NO_AUTO_UPDATE`) are its configuration, and none of this.
     pub fn session_variables(self) -> &'static [&'static str] {
         match self {
             Harness::Claude => &[
@@ -114,6 +122,16 @@ impl Harness {
             ],
             Harness::Opencode => &["OPENCODE", "OPENCODE_PID", "OPENCODE_TERMINAL"],
             Harness::Devin => &["WINDSURF_CASCADE_TERMINAL", "DEVIN_DISABLE_HISTEXPAND"],
+            Harness::Muse => &[
+                "MUSE_SESSION_ID",
+                "MUSE_THREAD_ID",
+                "MUSE_CURRENT_SESSION_LOG",
+                "MUSE_HUMAN_CONFIRMATION",
+                "MUSE_RELEASE_INFO",
+                "CLAUDE_CODE_TOOL_USE_ID",
+                "TRACEPARENT",
+                "TRACESTATE",
+            ],
         }
     }
 }
@@ -329,6 +347,7 @@ mod tests {
             (Harness::Pi, "pi", "pi"),
             (Harness::Opencode, "opencode", "opencode"),
             (Harness::Devin, "devin", "devin"),
+            (Harness::Muse, "muse", "muse"),
         ];
         for (harness, name, kind) in names {
             assert_eq!(harness.as_str(), name);
@@ -373,6 +392,8 @@ mod tests {
             "CODEX_HOME",
             "OPENAI_API_KEY",
             "PI_CODING_AGENT_DIR",
+            "MUSE_NO_AUTO_UPDATE",
+            "MUSE_AUTH_PATH",
             "OPENCODE_CONFIG",
             "AGENT",
             "CONSENSFLOW_HOME",
@@ -411,7 +432,10 @@ mod tests {
     #[test]
     fn the_harnesses_are_listed_as_the_roster_lists_them() {
         let names: Vec<_> = Harness::ALL.into_iter().map(Harness::as_str).collect();
-        assert_eq!(names, ["claude", "codex", "pi", "opencode", "devin"]);
+        assert_eq!(
+            names,
+            ["claude", "codex", "pi", "opencode", "devin", "muse"]
+        );
     }
 
     #[test]

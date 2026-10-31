@@ -106,6 +106,32 @@ fn window(
                 drop_env: &["ANTHROPIC_API_KEY"],
             }
         }
+        // `muse` opens the TUI at rest and `muse resume <id>` on the conversation; the
+        // first message is pasted once the window is up, as Claude's is. `--yolo` is
+        // the full-permission mode: no approval, no sandbox, the workspace trusted for
+        // the run (not saved). Contributor mode, in which Meta trains on what the
+        // window sees, is off for the run unless the agent's model is a contributor
+        // model, which only the human picks.
+        Harness::Muse => {
+            let mut args = match (resumed, session) {
+                (true, Some(session)) => words(&["resume", session]),
+                _ => Vec::new(),
+            };
+            args.extend(model_and_effort(harness, agent));
+            args.push("--yolo".to_owned());
+            if !given(agent.model).is_some_and(|model| model.ends_with(CONTRIBUTOR)) {
+                args.extend(words(&["--contributor-mode", "off"]));
+            }
+            Invocation {
+                command: "muse",
+                args,
+                prompt: None,
+                // As Claude's key: Muse uses a `META_API_KEY` in its environment before
+                // the human's login (Muse's docs), which would move the window onto that
+                // key's billing.
+                drop_env: &["META_API_KEY"],
+            }
+        }
         // `--session-id` creates the session the first time and resumes it after.
         Harness::Pi => {
             let session = session?;
@@ -174,6 +200,10 @@ fn window(
     })
 }
 
+/// How Muse names a model in its contributor mode, where Meta trains on what the
+/// model sees: `muse-spark-1.3-contributor`.
+const CONTRIBUTOR: &str = "-contributor";
+
 /// The flags that put a window on its agent's model and effort.
 fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
     let model = given(agent.model);
@@ -221,6 +251,14 @@ fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
         Harness::Opencode => {
             if let Some(model) = model {
                 flag("--model", model.to_owned());
+            }
+        }
+        Harness::Muse => {
+            if let Some(model) = model {
+                flag("--model", model.to_owned());
+            }
+            if let Some(effort) = effort {
+                flag("--reasoning-effort", effort.to_owned());
             }
         }
     }

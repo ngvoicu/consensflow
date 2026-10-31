@@ -57,7 +57,16 @@ pub struct Played {
     pub answered: usize,
     /// Each look Node failed at a torn line, by its name, with what it read here.
     pub departed: Vec<(String, String)>,
+    /// Each look whose refusal Node read as a quota that resets and this build reads as an
+    /// account unavailable, the account's billing being refused (MUS-23), by its name.
+    pub billing: Vec<String>,
 }
+
+/// The scenarios whose refusal is an account's billing: Node read it as a quota
+/// (`exhausted`, no reset), which has no reset to wait for, so this build says the account is
+/// unavailable (`Quota::Unavailable`, MUS-23). A look of one is held to Node's otherwise
+/// where its quota is that, and to nothing else.
+const BILLING: [&str; 1] = ["opencode: OpenRouter's spent credit is quota too"];
 
 /// Plays `scenario`, holding each look to Node's: how many it held, and the
 /// looks that departed from Node's on purpose. `ours` are the beginnings of
@@ -80,6 +89,7 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
         quotas: Vec::new(),
         answered: 0,
         departed: Vec::new(),
+        billing: Vec::new(),
     };
     for (index, step) in scenario.steps.iter().enumerate() {
         stage.step(step, index);
@@ -87,6 +97,7 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
     Played {
         answered: stage.answered,
         departed: stage.departed,
+        billing: stage.billing,
     }
 }
 
@@ -109,6 +120,8 @@ struct Stage<'a> {
     answered: usize,
     /// The looks Node failed at a torn line, and what they read here.
     departed: Vec<(String, String)>,
+    /// The looks that read an account's billing as unavailable, where Node read a quota.
+    billing: Vec<String>,
 }
 
 impl Stage<'_> {
@@ -268,6 +281,24 @@ impl Stage<'_> {
             holds_js_numbers(&read),
             "{name}: a number JavaScript rounds"
         );
+        let mut read = read;
+        // Node's quota for a billing refusal is an exhausted one with no reset: this build's
+        // is the account unavailable, with the reason in plain words (MUS-23).
+        if BILLING.contains(&self.scenario.name.as_str())
+            && read["quota"]["state"] == json!("unavailable")
+        {
+            assert!(
+                read["quota"]["because"]
+                    .as_str()
+                    .is_some_and(|because| because.starts_with("its billing was refused: ")),
+                "{name}: {}",
+                read["quota"]
+            );
+            read["quota"] = json!({
+                "state": "exhausted", "at": read["quota"]["at"].clone(), "resetsAt": null
+            });
+            self.billing.push(name.to_owned());
+        }
         let mut expected = self.scenario.readings[at].clone();
         if let Some(items) = expected.get_mut("items").and_then(Value::as_array_mut) {
             for item in items {

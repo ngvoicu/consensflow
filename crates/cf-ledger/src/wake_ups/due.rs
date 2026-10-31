@@ -134,7 +134,9 @@ const WITH_ITS_WINDOW: [&str; 2] = ["queued", "working"];
 /// way to the window, since a task reads `waiting` until the answer is received
 /// and, with no answer given, the question is the chief's to answer; those held
 /// for their member's quota (`paused` with a time it goes on by itself, which
-/// the daemon clears when it cannot); and, down any chain, those open behind a
+/// the daemon clears when it cannot; not one held until a time in the year 9999,
+/// which an account unavailable or a model moved is held until: it waits for the
+/// human, and the chief is woken for it, T-816); and, down any chain, those open behind a
 /// task that is itself on its way (a task open behind one that is done and
 /// undecided, failed or called off waits for the chief, and the recursion ends
 /// where the tasks do: nothing is circular). A task the chief holds itself is
@@ -153,7 +155,8 @@ fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerErr
                                       WHERE q.task_id = t.id AND q.kind = 'question'
                                         AND a.kind = 'answer'
                                         AND a.state IN ('gated', 'queued', 'delivering')))
-                      OR (t.state = 'paused' AND t.held_until IS NOT NULL))
+                      OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))
                  AND NOT EXISTS (SELECT 1 FROM participant c
                                  WHERE c.id = t.assignee_id AND c.role = 'chief')
                UNION

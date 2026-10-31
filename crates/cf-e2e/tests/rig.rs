@@ -119,6 +119,8 @@ mod live_member;
 mod live_members;
 #[path = "rig/live_support.rs"]
 mod live_support;
+#[path = "rig/muse_window.rs"]
+mod muse_window;
 #[path = "rig/pacing.rs"]
 mod pacing;
 #[path = "rig/pending_agents.rs"]

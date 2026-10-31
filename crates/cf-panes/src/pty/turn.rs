@@ -35,7 +35,7 @@ struct Tree {
 }
 
 /// What a look that must read all of a pane's tree found ([`Tree::readable_members`]).
-// Only a Mac reads a tree whole: a Windows job is asked of no commands.
+// Only a Mac's tree changes as it is read: a Windows job holds each process it looks at.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum Read {
     /// Every process of it, each read.
@@ -48,8 +48,8 @@ enum Read {
 
 impl Tree {
     /// [`Tree::members`], where every process the window's program and each of them
-    /// started can be read ([`Read`]; `ProcessTree::readable_members`): unreadable where the
-    /// platform cannot say (a Windows job is asked of no commands).
+    /// started can be read ([`Read`]; `ProcessTree::readable_members`, and the job's
+    /// `JobObject::readable_members`): unreadable where the platform cannot say.
     fn readable_members(&self) -> io::Result<Read> {
         #[cfg(target_os = "macos")]
         {
@@ -60,7 +60,14 @@ impl Tree {
                 Readable::Unsettled => Read::Unsettled,
             })
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        {
+            Ok(match self.job.readable_members()? {
+                Some(members) => Read::All(members),
+                None => Read::Unreadable,
+            })
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
         {
             Ok(Read::Unreadable)
         }
@@ -252,7 +259,8 @@ impl PaneTable {
         };
         #[cfg(target_os = "macos")]
         let before = |member: &Member| proved_before(seen.as_ref(), member);
-        // Elsewhere no start is read against a call.
+        // Elsewhere no start is read against a call: a Windows job's commands are told by
+        // their chain, from a rest or the window's launch (`Baseline::commands`).
         #[cfg(not(target_os = "macos"))]
         let before = {
             let _ = after;

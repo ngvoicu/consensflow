@@ -31,7 +31,10 @@ async fn the_agents_are_the_catalog_s_as_the_pickers_offer_them() {
     assert_eq!(body["preferences"], json!({ "ownHarnessOnly": false }));
     let efforts = body["efforts"].as_object().unwrap();
     let harnesses: Vec<&str> = efforts.keys().map(String::as_str).collect();
-    assert_eq!(harnesses, ["claude", "codex", "pi", "opencode", "devin"]);
+    assert_eq!(
+        harnesses,
+        ["claude", "codex", "pi", "opencode", "devin", "muse"]
+    );
     assert_eq!(
         efforts["claude"],
         json!(["low", "medium", "high", "xhigh", "max"])

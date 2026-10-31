@@ -61,7 +61,7 @@ use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::{Entropy, Loopback, Ports, Probes, Processes, Services, Time};
 use crate::shared::admission::admission;
-use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
+use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::specmint::OwnCopy;
 use crate::shared::{specmint, window_args};
 
@@ -349,7 +349,6 @@ impl Window for OpenCodeWindow {
                 .records
                 .look(Harness::Opencode, &session, &Options::default())
                 .await;
-            let mut observed = record_state(reading);
             let showing = window.as_ref().is_some_and(|shown| self.shows_ours(shown));
             let status = window
                 .as_ref()
@@ -364,7 +363,8 @@ impl Window for OpenCodeWindow {
                 Some(shown) => retry_quota(&shown.status, self.time.wall_ms())?,
                 None => None,
             };
-            observed.quota = retry.map(Arc::new).or(observed.quota);
+            // What the window waits out is the live word beside the record's.
+            let mut observed = observed_from(reading, retry.map(Arc::new));
             observed.settled = showing && !retrying && (observed.settled || idle);
             observed.waiting = dialog_waiting(observed.reading.as_deref());
             // Until its plugin answers, the window names no conversation: a

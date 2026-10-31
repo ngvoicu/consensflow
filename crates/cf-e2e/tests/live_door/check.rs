@@ -347,7 +347,7 @@ mod tests {
         let failed = named("kimi").unwrap_err().to_string();
         assert_eq!(
             failed,
-            "no door is called kimi: fake, claude, opencode, pi, devin, codex"
+            "no door is called kimi: fake, claude, opencode, pi, devin, codex, muse"
         );
         assert_eq!(Who::StandIn.name(), "fake");
         assert_eq!(Who::Harness(Harness::Devin).name(), "devin");

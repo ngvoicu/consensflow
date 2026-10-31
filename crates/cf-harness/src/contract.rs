@@ -78,7 +78,10 @@ pub trait Adapter {
     /// own ([`Servers::InGroup`]). Codex's supervisor opens its servers with the
     /// window, each in a group of its own, under the harness's own process, which
     /// starts the agent's commands ([`Servers::AtLaunch`]). Windows has no process
-    /// groups to tell by, and OpenCode and Devin have not been probed.
+    /// groups to tell by: Claude Code runs each command of its agent in a shell it
+    /// starts for it and its servers as their programs ([`Servers::ByShell`], T-906);
+    /// Pi's and Codex's trees there were not probed, and say nothing. OpenCode and Devin
+    /// have not been probed.
     fn servers(&self) -> Servers {
         Servers::Unknown
     }
@@ -358,6 +361,14 @@ pub trait Window {
     /// The window shows `session` now (a `/clear` or `/resume` in it): later
     /// looks follow it there.
     fn follow(&self, session: &str);
+    /// Whether the session `session`, which the window was switched to, was given the
+    /// window's role text as it began: by a hook of the harness's that greets every
+    /// session (Claude Code's SessionStart, a `/clear` too). No where none did (Muse
+    /// Code's `/clear` runs no hook, 1.4.13 and 1.4.14): the engine says the role
+    /// itself. Yes from a harness that says no more.
+    fn greeted(&self, _session: &str) -> bool {
+        true
+    }
     /// The conversation the window started on, where its harness says it
     /// itself; none where ConsensFlow named it. A window that waits for its
     /// harness to say it gives up by [`Launch::first_message_ms`], if not
@@ -392,6 +403,15 @@ pub trait Window {
     fn shows_prompt(&self, _screen: &[String]) -> bool {
         false
     }
+    /// Whether `snapshot` (the pane host's of the window: its last lines and its cursor)
+    /// shows the window's input box empty, as its harness's own reader reads it: the box
+    /// holds nothing a key would have to empty, and the key that empties one does harm in
+    /// an empty box (Control-C there arms the quit of Claude Code and Muse Code, which a
+    /// second one ends, and stops a turn at work). False where the harness reads no box,
+    /// or reads it holding anything.
+    fn box_read_empty(&self, _snapshot: &Value) -> bool {
+        false
+    }
     /// The servers its harness's dialog of new servers on `screen` (the window's last
     /// lines) would use, as its lines name them; none where they show none.
     fn trust_servers(&self, _screen: &[String]) -> Vec<String> {
@@ -407,6 +427,20 @@ pub trait Window {
     /// the question does and a conversation that quotes it may: a screen at its
     /// prompt that still names them may never have shown the question itself.
     fn names_trust_choices(&self, _screen: &[String]) -> bool {
+        false
+    }
+    /// The words of the screen line that [`Window::shows_prompt`] reads the harness's
+    /// prompt by, for the human told of a window whose first message waited for it in
+    /// vain; none where no prompt is read before a first message (the default).
+    fn ready_sign(&self) -> Option<&str> {
+        None
+    }
+    /// Whether `screen` (the window's last lines) shows its harness compacting the
+    /// conversation's context now, the status it draws while it does: the window is at
+    /// work, however long that takes, and what it was handed waits for it (Codex's
+    /// "• Compacting context (2m 57s • esc to interrupt)", T-901). False where it shows
+    /// none, and from a harness that draws no such status (the default).
+    fn compacting(&self, _screen: &[String]) -> bool {
         false
     }
     /// Whether a delivery may go in now, or why that could not be told.
@@ -481,7 +515,10 @@ pub trait Window {
     /// store and wire log, OpenCode's TUI status). One that has none is read at rest
     /// for a delivery only by the fallback: its record's turn ended, its screen quiet
     /// and no key of the human's, each for the settle (`pacing`), and the board says
-    /// the fallback is in use.
+    /// the fallback is in use. Such a harness gives its own sign that its window is up,
+    /// its prompt ([`Window::shows_prompt`]): a quiet screen before it is a harness still
+    /// starting, which takes no keys (Muse 1.4.14, T-946), and its window is not read at
+    /// rest until the prompt shows.
     fn idle_word(&self) -> bool {
         true
     }
@@ -617,6 +654,11 @@ pub enum Held {
     /// A harness that said no more than "not yet" (Devin's `false`).
     Unsaid,
     Because(String),
+    /// Held for what only the human can do in the window, said in these words: the board
+    /// shows them as the window's wait, and readiness is asked again at every look, so the
+    /// hold lifts by itself once the human has done it (Muse's taken-back brief in a box
+    /// whose first line is out of view, T-931 P2-1).
+    ForHuman(String),
 }
 
 impl Held {
@@ -626,7 +668,7 @@ impl Held {
             Held::Unsent => "you have typed in this window and not sent it",
             Held::ShowsAnother => "the window shows another conversation",
             Held::Unsaid => "a paste is on its way",
-            Held::Because(reason) => reason,
+            Held::Because(reason) | Held::ForHuman(reason) => reason,
         }
     }
 }
@@ -744,6 +786,15 @@ impl Observed {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => record.pending,
             Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Pending::default(),
+        }
+    }
+
+    /// The model the conversation's records say changed with none of its harness's own word
+    /// for it ([`Record::model_drift`]): none where it could not be read.
+    pub fn model_drift(&self) -> Option<&Arc<crate::records::ModelMoved>> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.model_drift.as_ref(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => None,
         }
     }
 

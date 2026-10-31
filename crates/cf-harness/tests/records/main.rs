@@ -24,6 +24,9 @@ use scenario::{a_reason_it_may_have, check, looks, our_reasons, scenarios, Reade
 /// The goldens' groups of scenarios.
 const GROUPS: [&str; 3] = ["sequences", "suite", "sweep"];
 
+/// How many looks read an account's billing as unavailable where Node read a quota (`play::BILLING`).
+const BILLING_LOOKS: usize = 1;
+
 #[test]
 fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
     let ours = our_reasons();
@@ -107,11 +110,13 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
     let mut answered = 0;
     let mut played = 0;
     let mut departed = Vec::new();
+    let mut billing = Vec::new();
     for group in GROUPS {
         for scenario in scenarios(group) {
             let play = play::play(&scenario, &ours);
             answered += play.answered;
             departed.extend(play.departed);
+            billing.extend(play.billing);
             played += 1;
         }
     }
@@ -150,4 +155,7 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
         "unreadable: empty codex rollout for corrupt".to_owned(),
     ));
     assert_eq!(departed, expected);
+    // Node read OpenRouter's spent credit (a 402) as a quota that resets; no reset can come of
+    // it, and this build says the account is unavailable instead (MUS-23).
+    assert_eq!(billing.len(), BILLING_LOOKS, "{billing:?}");
 }

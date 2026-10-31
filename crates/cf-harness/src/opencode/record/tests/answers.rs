@@ -193,7 +193,8 @@ fn a_refusal_for_quota_is_read_as_node_read_it() {
             conversation_items(false, 1_790_000_000_000)
         )
     );
-    // A failure with no message is said as its error's JSON, which names no reset.
+    // A failure with no message is said as its error's JSON, which names no reset. A 402 is
+    // the account's billing, no limit that resets (MUS-23): unavailable.
     let staged = Staged::new();
     staged.conversation(&json!({
         "role": "assistant",
@@ -203,7 +204,7 @@ fn a_refusal_for_quota_is_read_as_node_read_it() {
     assert_eq!(
         read_once(&staged),
         format!(
-            r#"{{"items":{},"inFlight":false,"asking":false,"failed":true,"quota":{{"state":"exhausted","at":"2026-09-21T14:13:20.000Z","resetsAt":null}},"settlement":"settled"}}"#,
+            r#"{{"items":{},"inFlight":false,"asking":false,"failed":true,"quota":{{"state":"unavailable","at":"2026-09-21T14:13:20.000Z","resetsAt":null,"because":"its billing was refused: {{\"name\":\"APIError\",\"data\":{{\"statusCode\":402}}}}"}},"settlement":"settled"}}"#,
             conversation_items(false, 1_790_000_000_000)
         )
     );

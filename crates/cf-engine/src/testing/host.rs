@@ -259,12 +259,19 @@ impl FakeHost {
         if let Some(own) = own {
             own(op, &body);
         }
+        let drawn_asked = body.get("bottom").is_some();
         self.requests.borrow_mut().push((op.to_owned(), body));
         let mut answer = Map::new();
         let refused = op == "pane.input" && self.refuse_keys.get();
         answer.insert("ok".to_owned(), json!(!refused));
         if op == "pane.snapshot" {
             answer.extend(self.snapshot.borrow().clone());
+            // The screen's last lines as drawn go only to a request that asks for them, as the
+            // pane host sends them (cf-panes' `pane.snapshot`): an engine that reads them from
+            // a snapshot it asked none of reads none (T-946).
+            if !drawn_asked {
+                answer.remove("bottom");
+            }
         }
         Value::Object(answer)
     }

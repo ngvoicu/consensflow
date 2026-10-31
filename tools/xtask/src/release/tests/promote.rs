@@ -3,7 +3,7 @@
 //! and never writes main, whether main moved on from the alpha or not.
 
 use super::fake::{git, git_says_yes, latest, version_files, write, Fake, World};
-use super::{advice, not_on_upstream, refusal};
+use super::{advice, not_on_upstream, red_run, refusal};
 use crate::release::{promote, Error, Options};
 
 const ALPHA: &str = "3.0.6-alpha.1";
@@ -144,7 +144,8 @@ fn a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_writ
             );
         }
         // The branch's push ran CI on the version commit, watched green before the tag;
-        // nothing is started by hand.
+        // nothing is started by hand: a hand run of the Release workflow holds the signing
+        // keys, and the `release` environment admits main and v* tags, not release/*.
         assert!(
             fake.when("gh workflow run").is_none(),
             "{:#?}",
@@ -191,6 +192,39 @@ fn a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_writ
         );
         assert!(said.contains("feed-stable serves 3.0.6"), "{said}");
     }
+}
+
+#[test]
+fn a_promoted_release_is_checked_once_both_feeds_serve_it_and_a_bad_one_is_told_as_published() {
+    let (world, mut fake) = released();
+    let (outcome, said) = promoted(&world, &mut fake, ALPHA, false);
+    outcome.unwrap();
+    // A plain version is served by both feeds, and both are held to the release.
+    for feed in ["feed-alpha", "feed-stable"] {
+        let line = format!("verify: {feed} serves {PLAIN}: its latest.json is the release's");
+        assert!(said.contains(&line), "{line}: {said}");
+    }
+    let (world, mut fake) = released();
+    fake.published_with = Some(|version, files| {
+        files
+            .get_mut(&format!("ConsensFlow_{version}_aarch64.dmg"))
+            .unwrap()[0] ^= 1;
+    });
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    let run = fake.runs_of("release.yml", "push")[0].id;
+    assert!(
+        said.starts_with(&format!(
+            "release run {run} ended green and the feeds serve {PLAIN}, so the release is published, \
+             yet checking it found v{PLAIN} does not verify, 1 problem:"
+        )),
+        "{said}"
+    );
+    assert!(
+        said.ends_with(&format!(
+            "; run nothing again: `cargo xtask release verify {PLAIN}` checks it again"
+        )),
+        "{said}"
+    );
 }
 
 #[test]
@@ -527,9 +561,12 @@ fn a_release_run_that_fails_says_to_rerun_it_and_a_run_again_names_the_same_run(
     let run = fake.runs_of("release.yml", "push")[0].id;
     assert_eq!(
         said,
-        format!(
-            "release run {run} ended failure: {tag} stays on upstream; {}",
-            advice(&tag, Some(run))
+        red_run(
+            "release",
+            run,
+            "failure",
+            "job mac ended failure, job windows / build ended failure",
+            &format!("{tag} stays on upstream; {}", advice(&tag, Some(run)))
         )
     );
     let promoted_commit = git(&world.upstream, &["rev-parse", BRANCH]);
