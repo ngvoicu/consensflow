@@ -70,15 +70,19 @@ fn each_command_is_a_verb_of_the_cf_evals_command_and_the_words_after_it_go_as_t
 }
 
 #[test]
-fn the_commands_are_the_ones_the_scripts_were_and_summary_and_long_are_found_before_eval() {
+fn the_commands_are_the_ones_the_scripts_were_and_summary_chiefs_and_long_are_found_before_eval() {
     let named: Vec<String> = COMMANDS
         .iter()
         .map(|command| command.words.join(" "))
         .collect();
-    assert_eq!(named, ["eval summary", "eval long", "eval", "watch"]);
+    assert_eq!(
+        named,
+        ["eval summary", "eval chiefs", "eval long", "eval", "watch"]
+    );
     let at = |words: &[&str]| COMMANDS.iter().position(|command| command.words == words);
     let eval = at(&["eval"]);
     assert!(at(&["eval", "summary"]) < eval, "{named:?}");
+    assert!(at(&["eval", "chiefs"]) < eval, "{named:?}");
     assert!(at(&["eval", "long"]) < eval, "{named:?}");
 }
 
@@ -98,6 +102,13 @@ fn what_each_command_takes_is_what_the_cf_evals_command_takes() {
     ];
     let summary: &[&str] = &["--reports", "--results"];
     let watch: &[&str] = &["--project", "--minutes", "--tokens", "--home"];
+    let chiefs: &[&str] = &[
+        "--scenario",
+        "--chiefs",
+        "--effort",
+        "--timeout-min",
+        "--reports",
+    ];
     let long: &[&str] = &[
         "--chief",
         "--staff",
@@ -124,6 +135,7 @@ fn what_each_command_takes_is_what_the_cf_evals_command_takes() {
     for (command, flags) in [
         ("eval", eval),
         ("eval summary", summary),
+        ("eval chiefs", chiefs),
         ("eval long", long),
         ("watch", watch),
     ] {

@@ -15,7 +15,8 @@
 
 use std::path::{Path, PathBuf};
 
-use cf_e2e::live::{calls, live_folder};
+use cf_e2e::live::calls;
+use cf_e2e::live::machine::live_folder;
 use cf_e2e::{files, Result};
 
 /// The folder below the live folders the home is.

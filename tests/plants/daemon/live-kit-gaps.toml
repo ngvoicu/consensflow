@@ -7,7 +7,9 @@
 #   `cf whoami` proves the window's `cf`, and the run's home puts the decoys first;
 # - `live paste-enter`: a paste the human sends with Enter goes on that Enter
 #   (`codex-windows-ignores-enter-after-paste`): the two shapes of typing, and the verdict;
-# - `eval chiefs`: the `conversation` eval for each chief harness (`chief-does-the-work-itself`).
+# - `eval chiefs`: the `conversation` eval for each chief harness (`chief-does-the-work-itself`);
+# - `live --set windows`: the regular Windows live run, the typed marks of `live parity` in it
+#   (`human-typing-loses-marks-in-devin-codex-on-windows`).
 #
 # One plant takes one rule out; a test fails. Every name holds `live kit gaps`, so
 # `npm run plants:daemon -- "live kit gaps"` runs them all.
@@ -16,6 +18,7 @@
 live-own-cf = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_own_cf"]
 live-paste-enter = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter"]
 evals-chiefs = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "chiefs::"]
+xtask-live = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "live::"]
 
 [[plant]]
 name = "live kit gaps: a decoy cf the worker's shell ran does not fail it"
@@ -119,3 +122,14 @@ runs = ["evals-chiefs"]
 file = "crates/cf-evals/src/chiefs.rs"
 find = "        held: failed.is_empty(),"
 replace = "        held: true,"
+
+[[plant]]
+name = "live kit gaps: the Windows live set leaves out the typed marks of parity"
+meant = "the_windows_set_holds_the_typed_marks_of_parity_for_codex_and_devin"
+runs = ["xtask-live"]
+
+[[plant.edit]]
+file = "tools/xtask/src/live.rs"
+find = """        "parity codex devin",
+"""
+replace = ""
