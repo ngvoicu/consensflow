@@ -45,12 +45,13 @@
 //! them on Windows only on purpose. The run fails when any worker's shell ran a decoy, or its
 //! `cf` could not be shown to be the window's own.
 //!
-//! **Known red (2026-10-31, T-972):** on the Mac, Codex 0.166.0 and Devin 3000.11.228 run
-//! their commands in a shell that reads the login profile, and run the decoy in `~/.local/bin`;
-//! their lines say so ([`verdict::KNOWN_RED`]). The suite stays red on them until the product
-//! makes the window's own `cf` win (a 3.0.7 task: the role texts naming it by its whole path).
-//! Claude Code, Pi and Muse find the window's own, and Codex on Windows (its PowerShell reads no
-//! profile of the run's home).
+//! **Known red (2026-10-31, T-972):** on the Mac, Devin 3000.11.228 runs its commands with one
+//! snapshot of a login zsh (`.zprofile`, then `.zshrc`), and runs the decoy in `~/.local/bin`;
+//! its line says so ([`verdict::KNOWN_RED`]). The suite stays red on it until the product makes
+//! the window's own `cf` win (a 3.0.7 task: the role texts naming it by its whole path). Codex
+//! 0.166.0, Claude Code 2.1.316, Pi 1.4.0 and Muse 1.4.14 find the window's own, and Codex
+//! 0.164.0 on Windows. (A first version of the run's home wrote a `.zshenv`, which every zsh
+//! reads, a plain `zsh -c` too: Codex ran the decoy then, through that file alone.)
 
 // The parts are in `live_own_cf/`: cargo looks for the modules of a test's root file beside
 // it, where each would be a suite of its own.

@@ -4,9 +4,10 @@
 //! its handle and role, which only the daemon the window belongs to knows: the handle the board
 //! gives the worker's participant (`live-devin-silver-island`), not its agent's id.
 
-/// What a decoy run says besides, for the harnesses whose shell reads the login profile
-/// (Codex and Devin, 2026-10-31): the gap is known and open, a product task's to close (the
-/// role texts naming the window's own `cf` by its whole path), and the suite stays red on it.
+/// What a decoy run says besides, for a harness whose shell reads the login profile (Devin,
+/// whose one login-shell snapshot reads `.zprofile` and `.zshrc`, 2026-10-31): the gap is known
+/// and open, a product task's to close (the role texts naming the window's own `cf` by its whole
+/// path), and the suite stays red on it.
 pub const KNOWN_RED: &str =
     "known red: the shell reads the login profile, so another `cf` on PATH comes first";
 
