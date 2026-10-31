@@ -144,9 +144,9 @@ runs = ["parent-sessions-proto"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/agents.rs"
-find = '''                "CODEX_TOOL_CALL_ID",
+find = '''                "CODEX_PLUGIN_METRICS_OUTPUT",
             ],'''
-replace = '''                "CODEX_TOOL_CALL_ID",
+replace = '''                "CODEX_PLUGIN_METRICS_OUTPUT",
                 "CODEX_HOME",
             ],'''
 
@@ -249,9 +249,11 @@ runs = ["parent-sessions-base"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/env.rs"
-find = '''        self.vars.retain(|name, _| !dropped(&name.to_string_lossy()));
+find = '''        self.vars
+            .retain(|name, _| !dropped(&name.to_string_lossy()));
 '''
-replace = '''        let _ = dropped;
+replace = '''        self.vars.retain(|_, _| true);
+        let _ = dropped;
 '''
 
 [[plant]]
