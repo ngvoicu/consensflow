@@ -1111,13 +1111,14 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
+        // The folder the window works in, as the system names it.
+        let directory = workspace(project);
         // The program of the last window on its conversation was proven gone: nothing
         // of it writes on.
         let previous_gone = match &conversation {
             Some(conversation) => self.seams.ledger.borrow().program_gone(conversation.id)?,
             None => false,
         };
-        let directory = workspace(project);
         let launch = Launch {
             id: launch_id,
             project: project.id,
