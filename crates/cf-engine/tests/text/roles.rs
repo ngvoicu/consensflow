@@ -500,3 +500,243 @@ fn gives_the_chief_only_the_named_card_nothing_of_the_board_and_leaves_the_other
     );
     assert!(instructions("chief", &staff).contains("You do not change the project yourself"));
 }
+
+// The rules of spec `smaller-contexts` (T-1009, SCX-06 to SCX-10): reviews that
+// end, fresh windows, targeted checks, briefs that say how a fact is known, and
+// results that begin with the outcome. Each sentence is held by a rule below, and
+// a plant drops it (`tests/plants/daemon/smaller-contexts.toml`).
+
+/// Whether `text` says `sentence`: its words in order, any white space between
+/// two of them (the texts are wrapped).
+fn says(text: &str, sentence: &str) -> bool {
+    let words: Vec<_> = sentence.split_whitespace().map(regex::escape).collect();
+    found(&words.join(r"\s+"), text)
+}
+
+/// Fails for each of `sentences` that `text` does not say.
+#[track_caller]
+fn assert_says(text: &str, whose: &str, sentences: &[&str]) {
+    for sentence in sentences {
+        assert!(says(text, sentence), "{whose} does not say: {sentence}");
+    }
+}
+
+/// The part of the chief's text under the heading `## {heading}`, up to the next.
+fn section<'a>(text: &'a str, heading: &str) -> &'a str {
+    let start = text
+        .find(&format!("\n## {heading}\n"))
+        .unwrap_or_else(|| panic!("no section {heading}"))
+        + 1;
+    let end = text[start + 3..]
+        .find("\n## ")
+        .map_or(text.len(), |at| start + 3 + at);
+    &text[start..end]
+}
+
+#[test]
+fn tells_the_chief_a_blocker_is_evidenced_and_the_rest_does_not_hold_the_work() {
+    let reviews = instructions("chief", &[zeus()]);
+    let reviews = section(&reviews, "Reviews");
+    assert_says(
+        reviews,
+        "the chief's Reviews",
+        &[
+            "A finding blocks the work only when it would make it fail (a wrong result, lost data, a break in normal use, a failure in a case that will really happen) and names the requirement, the case, the failure one would see, and the evidence.",
+            "Reopen for blockers only.",
+            "Whether a blocker belongs in this work at all is a separate question; dropping a capability is an answer to a blocker too.",
+            "The rest (naming, style, wording, unlikely cases, nice-to-haves) doesn't hold the work: accept it, and gather what is worth doing into one later task.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_a_second_review_checks_the_fixes_and_not_the_whole_work_again() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "Reviews"),
+        "the chief's Reviews",
+        &[
+            "A second review checks the fixes: give it the earlier findings by number and the change since.",
+            "It says of each whether it is fixed, still open, fixed only in part, or newly broken by a fix, and whether a fix broke what it touches; it doesn't review the whole work again.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_to_change_the_work_after_two_reviews_that_found_blockers_or_to_ask_the_human() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "Reviews"),
+        "the chief's Reviews",
+        &[
+            "When two reviews of the same work have both found blockers, stop sending it back as it is.",
+            "Change the work: simplify it, turn a capability off, split it, start a fresh window with a short, checked handoff, or try another approach.",
+            "If none fits, ask the human here.",
+            "Accepting work with an open blocker needs the human's yes.",
+        ],
+    );
+    // The earlier rule stays: the chief decides the work and the review, and
+    // nothing on the board sends a review back (CORE-27).
+    assert_says(
+        section(&text, "Reviews"),
+        "the chief's Reviews",
+        &["Then decide both: reopen the work with what must change, or accept it, and accept the review."],
+    );
+    assert!(!text.contains("Review round"));
+}
+
+#[test]
+fn tells_the_chief_to_ask_a_reviewer_for_no_pass_or_fail_first_line() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "Reviews"),
+        "the chief's Reviews",
+        &[
+            r#"Don't ask a reviewer for a pass-or-fail first line: its own "ready", "ready with notes" or "not ready" stands."#,
+        ],
+    );
+    assert!(!found(r"PUSH AS WRITTEN|FIX FIRST", &text));
+}
+
+#[test]
+fn tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_rounds_of_the_same_work(
+) {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "The one exception: continuing a window"),
+        "the chief's section on continuing a window",
+        &[
+            "After about three rounds of the same work (reopens, `--after`), a window's conversation is long and every step re-reads it.",
+            "For the next round add a new task that says where things stand (branch and head, done, left, findings still open), then accept the old one.",
+            "Accepting releases whatever `--needs` it, so if tasks wait on it, add the new task `--before` them first.",
+            "`--after` is for the next step of a window's own work, not for round after round.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_to_keep_its_own_checks_targeted_and_to_read_no_result_it_already_has() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &[
+            "Keep your own checks targeted (the diff stat, a grep, one test, the lines that changed); a deep check (the whole change, the suites) goes to a reviewer or tester.",
+            "A result already in your conversation needs no `cf task get`.",
+            "Look at an image yourself only when the decision needs your eyes; otherwise ask the member what it shows.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_to_put_commands_that_go_together_in_one_shell_call() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "Your commands"),
+        "the chief's command card",
+        &["Put commands that go together in one shell call, an accept and the next task for example: each call re-reads everything you hold."],
+    );
+}
+
+#[test]
+fn tells_the_chief_to_say_how_it_knows_each_fact_a_brief_has_a_member_act_on() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &[
+            r#"For each fact a brief states that the member will act on (a version, a commit, "X is on main", a machine's state), say in a few words how you know it: what you ran or read, and when."#,
+            "If you have not checked it, say so and ask the member to check it first and tell you if it does not hold.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_reviewer_to_begin_with_whether_the_work_is_ready_and_to_number_each_finding_and_say_if_it_blocks(
+) {
+    let text = instructions("reviewer", &[zeus()]);
+    assert_says(
+        &text,
+        "the reviewer",
+        &[
+            "Begin with whether the work is ready (ready, ready with notes, or not ready) and what the chief has to decide, in a few lines.",
+            "Then each finding, numbered so a later review can name it, with its evidence, its location and whether it blocks.",
+            "A finding blocks only when it would make the work fail, and then it names the requirement, the case and the failure one would see.",
+            "The rest is optional.",
+            "The work is ready when nothing blocks.",
+        ],
+    );
+    // The reviewer's rules are its own: no other member is asked to number findings.
+    for role in ["worker", "advisor", "tester", "designer"] {
+        let text = instructions(role, &[zeus()]);
+        assert!(
+            !says(&text, "numbered so a later review can name it"),
+            "{role}"
+        );
+    }
+}
+
+#[test]
+fn tells_the_reviewer_a_second_review_checks_the_earlier_findings_and_what_the_fixes_touch() {
+    assert_says(
+        &instructions("reviewer", &[zeus()]),
+        "the reviewer",
+        &[
+            "On a second review of the same work, check the earlier findings and what the fixes touch, not the whole work again: say of each finding whether it is fixed, still open, fixed only in part, or newly broken.",
+        ],
+    );
+}
+
+#[test]
+fn tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_begin_with_the_outcome_and_what_the_chief_decides(
+) {
+    for (role, begin) in [
+        (
+            "worker",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+        ),
+        (
+            "advisor",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+        ),
+        (
+            "tester",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+        ),
+        // The reviewer's outcome is whether the work is ready (its own rule above).
+        (
+            "reviewer",
+            "Begin with whether the work is ready (ready, ready with notes, or not ready) and what the chief has to decide, in a few lines.",
+        ),
+    ] {
+        assert_says(&instructions(role, &[zeus()]), role, &[begin]);
+    }
+    // The image designer's result is the files it saved and a line on what they show.
+    assert!(!says(
+        &instructions("designer", &[zeus()]),
+        "what the chief has to decide"
+    ));
+}
+
+#[test]
+fn tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_put_a_long_log_in_a_file_outside_the_tracked_files_and_give_its_path(
+) {
+    for (role, gives) in [
+        ("worker", "and the result gives its path."),
+        ("advisor", "and the answer gives its path."),
+        ("reviewer", "and the findings give its path."),
+        ("tester", "and the result gives its path."),
+    ] {
+        assert_says(
+            &instructions(role, &[zeus()]),
+            role,
+            &[&format!(
+                "A long log, table or listing goes in a file outside the project's tracked files (your scratch folder, or where the brief says), {gives}"
+            )],
+        );
+    }
+    assert!(!says(
+        &instructions("designer", &[zeus()]),
+        "A long log, table or listing"
+    ));
+}

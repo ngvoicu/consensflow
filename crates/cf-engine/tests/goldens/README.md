@@ -50,3 +50,24 @@ hand. Say a file is restored only once you have checked it: its diff, or what it
 2026-10-15, when a worker on the owner's Windows machine overwrote a file that held
 uncommitted work with `git checkout`, and other workers said they had restored files they
 had not.
+
+The chief's text, in each of the 12 `roleInstructions` rows that hold it, and the text of
+the worker, the advisor and the reviewer, in each of the 7 rows each has, moved on
+2026-10-31 for spec `smaller-contexts` (T-1009, `skill/core/chief.md` and
+`skill/core/staff.md`), in the words of those two files alone. The image designer's 6
+rows did not move, and the tester has none.
+- **The chief's** Reviews: a finding blocks only when it is evidenced; the rest does not
+  hold the work; a second review checks the earlier findings by number; after two reviews
+  that both found blockers the chief changes the work or asks the human; no pass-or-fail
+  first line is asked of a reviewer. Also the paragraph on a fresh window after about
+  three rounds (in the section on continuing a window; the old task is accepted, after the
+  new one is added `--before` the tasks that wait on it), the targeted checks at the end of
+  item 4 of "What you do", the facts a brief states and how they are known (item 3), and
+  the line on commands that go together in one shell call (the command card).
+- **The members'** result begins with the outcome and what the chief has to decide, and
+  puts a long log in a file outside the tracked files (worker, advisor, reviewer and
+  tester). The reviewer's begins with whether the work is ready, numbers its findings,
+  marks each blocking or not, and on a second review checks the earlier findings.
+The rows were moved by a script that put the new text where the old stood and left the
+staff table, the tiers and the note of this window's cf as they were; the test of this
+folder's rows holds that each equals what the engine renders.
