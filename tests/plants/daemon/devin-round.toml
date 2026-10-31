@@ -22,6 +22,11 @@
 #   the system names it (`cf-harness/src/tooling/session.rs`, `claude/computer_use.rs`).
 #   A link is a Unix one, so those plants are the Mac's and Linux's.
 #
+# - T-784, `live paste-screen devin` red 2 of 3 on Devin 3000.11.228: Devin draws a title of
+#   the conversation, made from the brief's words, in the line above its input, and the
+#   suite took any line naming a brief's mark for the brief
+#   (`crates/cf-e2e/tests/live_paste_screen.rs`).
+#
 # Every name holds `devin round`: `npm run plants:daemon -- "devin round"` runs them all.
 
 [run]
@@ -32,6 +37,7 @@ devin-round-resume-cut-read = ["cargo", "test", "--offline", "-p", "cf-e2e", "--
 devin-round-engine-folder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "canonical_folder::"]
 devin-round-session-folder = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::session::tests::"]
 devin-round-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use::tests::"]
+devin-round-paste-screen = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
 
 [[plant]]
 name = "devin round: a Devin model and its effort are joined, a variant's words before the level"
@@ -154,3 +160,13 @@ platforms = ["macos", "linux"]
 file = "crates/cf-harness/src/claude/computer_use.rs"
 find = '''                .map(|(folder, _)| real_path(folder).unwrap_or_else(|_| folder.clone()))'''
 replace = '''                .map(|(folder, _)| real_path(folder).map_or_else(|_| folder.clone(), |_| folder.clone()))'''
+
+[[plant]]
+name = "devin round: the paste-screen suite takes a line that names the brief's marks for the brief"
+meant = "a_title_devin_draws_from_the_briefs_words_is_the_windows_and_no_line_of_the_brief"
+runs = ["devin-round-paste-screen"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_screen.rs"
+find = '''    begun.starts_with("PSL-") || begun.starts_with("Reply with only the sum of")'''
+replace = '''    line.contains("PSL-") || begun.starts_with("Reply with only the sum of")'''
