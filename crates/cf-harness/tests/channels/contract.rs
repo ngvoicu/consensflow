@@ -1,7 +1,7 @@
 //! One contract for every channel's answer to a send (the owner's rule,
 //! 2026-10-02): every harness treats a message that may have been sent the same
 //! way. Each channel has a handover point (Pi's inbox rename, a paste's first
-//! byte, Codex's and OpenCode's POST):
+//! byte, Codex's POST):
 //! - refused before it, nothing reached the harness: `admitted: false` with
 //!   nothing written, and the dispatcher may send again at once;
 //! - any error at or after it may have reached the harness: `admitted: null`,
@@ -9,7 +9,7 @@
 //!   if the record never shows the message in time;
 //! - accepted: `admitted: true`.
 //!
-//! Codex's, OpenCode's and Pi's channels run every row here, against stand-ins
+//! Codex's and Pi's channels run every row here, against stand-ins
 //! for the pane host and the harness side. The channels that are pasted into
 //! their windows (Claude Code and Devin) have their rows in the library, through
 //! the same `write_paste` and `Sent` the adapters read (`shared/pane/tests.rs`,
@@ -21,17 +21,15 @@
 
 use std::fs;
 
-use cf_base::env::Env;
 use cf_harness::contract::PaneHost;
-use cf_harness::opencode::{self, Bridge};
-use cf_harness::seams::{SystemEntropy, SystemLoopback, SystemProcesses, SystemTime};
+use cf_harness::seams::{SystemEntropy, SystemLoopback, SystemTime};
 use cf_harness::testing::server::{Reply, Request, Server};
 use cf_harness::testing::AnsweringHost;
 use cf_harness::{codex, pi};
 use serde_json::{json, Value};
 
 use crate::pi_window::{Answers, Window};
-use crate::support::{pane, run, wires};
+use crate::support::{pane, run};
 
 const TEXT: &str = "the cache key is per conversation";
 
@@ -83,21 +81,6 @@ impl From<&pi::Answer> for Verdict {
         Self {
             admitted: answer.admitted,
             zero_bytes: answer.zero_bytes,
-        }
-    }
-}
-
-/// OpenCode's channel answers as an adapter reads a send: a refusal before the
-/// handover wrote nothing.
-impl From<&opencode::Sent> for Verdict {
-    fn from(sent: &opencode::Sent) -> Self {
-        Self {
-            admitted: if sent.ok {
-                Some(true)
-            } else {
-                sent.refused.then_some(false)
-            },
-            zero_bytes: sent.refused,
         }
     }
 }
@@ -184,7 +167,7 @@ impl Claim {
 }
 
 /// What a harness's own server does with a message posted to it (Codex's
-/// broker, OpenCode's plugin): it reads the POST, then answers or drops the
+/// broker): it reads the POST, then answers or drops the
 /// connection.
 #[derive(Debug, Clone, Copy)]
 enum Harness {
@@ -229,33 +212,6 @@ async fn through_codex(claim: Claim, harness: Harness) -> Verdict {
         .await
         .unwrap();
     Verdict::from(&answer)
-}
-
-/// A message sent through OpenCode's channel to a plugin that does as `harness`
-/// says, from a pane whose host answers as `claim` says.
-async fn through_opencode(claim: Claim, harness: Harness) -> Verdict {
-    let server = harness.start().await;
-    let channel = opencode::Channel {
-        launch_id: "launch-opencode".to_owned(),
-        endpoint: String::new(),
-        password: String::new(),
-        bridge: Bridge {
-            endpoint: server.endpoint(),
-            token: TOKEN.to_owned(),
-        },
-    };
-    let pane = pane("p1-hera", 3);
-    let host = AnsweringHost::new(move |_| Ok(claim.answer()));
-    let target = opencode::Target {
-        session: "ses_contract1",
-        pane: &pane,
-        host: &host as &dyn PaneHost,
-    };
-    let processes = SystemProcesses::new(Env::default());
-    let sent = opencode::send(wires(&processes), &channel, &target, TEXT)
-        .await
-        .unwrap();
-    Verdict::from(&sent)
 }
 
 /// A message sent through Pi's channel to an extension that does as `answers`
@@ -320,22 +276,6 @@ channel! {
     }
     accepted {
         the_broker_takes_it => through_codex(Claim::Granted, Harness::Takes),
-    }
-}
-
-channel! {
-    opencode_through_its_plugin:
-    refused {
-        the_pane_host_refuses_its_claim =>
-            through_opencode(Claim::Refused("the pane is gone"), Harness::Takes),
-        the_plugin_refuses_it => through_opencode(Claim::Granted, Harness::Refuses),
-    }
-    uncertain {
-        the_plugin_drops_the_connection_after_the_post =>
-            through_opencode(Claim::Granted, Harness::Drops),
-    }
-    accepted {
-        the_plugin_takes_it => through_opencode(Claim::Granted, Harness::Takes),
     }
 }
 

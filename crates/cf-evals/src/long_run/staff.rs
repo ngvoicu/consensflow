@@ -1,9 +1,7 @@
 //! The staff of a long run: every harness asked for that this machine has, each on
 //! the models it has here, not only its cheap one (the owner's word of 2026-10-15:
 //! "when you test with all harnesses use whatever they have there"), and the ones
-//! left out, each with why. A harness not on the `PATH` is left out, and so is an
-//! OpenCode of 2 or more, which ConsensFlow refuses until it supports it (OpenCode
-//! stays on 1.x).
+//! left out, each with why. A harness not on the `PATH` is left out.
 //!
 //! Each model of a harness has a worker of its own, and the first has the advisor
 //! and the reviewer too. The tasks reach a member by its work tier, so each harness
@@ -22,7 +20,7 @@ use crate::{Error, Result};
 /// What each harness's members run on unless `--models` says otherwise: models the
 /// harness has here, a strong one beside its cheap one (the catalog's presets and
 /// the evals' own cheap models).
-pub const MODELS: [(&str, &[&str]); 5] = [
+pub const MODELS: [(&str, &[&str]); 4] = [
     ("claude", &["claude-sonnet-5-5", "claude-opus-5-5"]),
     ("codex", &["gpt-5.6-luna", "gpt-6.1-sol"]),
     (
@@ -30,13 +28,6 @@ pub const MODELS: [(&str, &[&str]); 5] = [
         &[
             "openrouter/deepseek/deepseek-v4.1-flash",
             "openai-codex/gpt-6-astra",
-        ],
-    ),
-    (
-        "opencode",
-        &[
-            "openrouter/deepseek/deepseek-v4.1-flash",
-            "openrouter/openai/gpt-6-astra",
         ],
     ),
     ("devin", &["swe-2-medium", "claude-sonnet-5-5"]),
@@ -133,14 +124,6 @@ pub fn find(
                 name: name.clone(),
                 why: format!("not on this machine: {}", masked(&why)),
             }),
-            Ok((_, version)) if name == "opencode" && major(&version) >= Some(2) => {
-                left.push(LeftOut {
-                    name: name.clone(),
-                    why: format!(
-                        "OpenCode {version} is 2.x, which ConsensFlow refuses (OpenCode stays on 1.x)"
-                    ),
-                });
-            }
             Ok((command, version)) => found.push(Found {
                 name: name.clone(),
                 command,
@@ -149,14 +132,6 @@ pub fn find(
         }
     }
     (found, left)
-}
-
-/// The major version a harness's version line says: the first number in it.
-fn major(version: &str) -> Option<u64> {
-    version
-        .split(|at: char| !at.is_ascii_digit())
-        .find(|part| !part.is_empty())
-        .and_then(|part| part.parse().ok())
 }
 
 /// The roster rows and the project staff of the harnesses `names`: for each, a

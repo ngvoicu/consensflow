@@ -26,10 +26,8 @@
 //! `~/.config/muse` (`auth.json`, `settings.json`, `trust.json`) and the index of their
 //! sessions (T-946: the members kit's live pacing run wrote the owner's `~/.config/muse`).
 //!
-//! **OpenCode**, which a later change takes out of ConsensFlow, keeps running on the owner's
-//! folders: Devin's scratch reaches them. Every harness says its row, or why it has none, in
-//! [`Isolation::of_machine_lasting`], with no arm for "any other": one added later is a
-//! decision, not a silence.
+//! Every harness says its row, or why it has none, in [`Isolation::of_machine_lasting`], with
+//! no arm for "any other": one added later is a decision, not a silence.
 //!
 //! **A login that refreshes.** A refresh token is used once, so a copy that refreshes leaves
 //! the owner's file with a token that no longer works. Pi refreshes an OAuth entry that has
@@ -107,7 +105,7 @@ enum Seed {
         left: Duration,
     },
     /// A link in `to` to each entry of the owner's folder `from` but the one named `except`:
-    /// what other programs of the rig keep in a folder the variables move (OpenCode's login
+    /// what other programs of the rig keep in a folder the variables move (another tool's login
     /// in `XDG_DATA_HOME`), left as it is for them. Where the folders are links' (Devin's, on Unix).
     #[cfg(unix)]
     Reach {
@@ -315,7 +313,7 @@ pub struct Isolation {
 impl Isolation {
     /// The home of `harness` for a live suite ([`RUN`]), copying the login of the owner whose
     /// home is `home` (Codex's: its own folder, `CODEX_HOME`); none for Claude Code, whose config
-    /// folder is [`super::login`]'s, for OpenCode (the owner's), and where the platform's layout
+    /// folder is [`super::login`]'s, and where the platform's layout
     /// is not known (Devin's on Windows).
     pub fn of_machine(harness: Harness, home: &Path) -> Result<Option<Self>> {
         Self::of_machine_lasting(harness, home, RUN)
@@ -355,9 +353,8 @@ impl Isolation {
             // Every harness says its home here, so that one added later is a decision and
             // not a silence (T-946: Muse came after T-724's list and ran on the owner's):
             // Claude Code's config folder is the kit's copy of its login (`super::login`);
-            // OpenCode runs on the owner's folders until ConsensFlow takes it out; Devin's
-            // and Muse's folders on Windows are not known.
-            Harness::Claude | Harness::OpenCode => None,
+            // Devin's and Muse's folders on Windows are not known.
+            Harness::Claude => None,
             #[cfg(not(unix))]
             Harness::Devin | Harness::Muse => None,
         })
@@ -681,7 +678,6 @@ impl HarnessHome for Isolation {
 const fn proper(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "Claude Code",
-        Harness::OpenCode => "OpenCode",
         Harness::Pi => "Pi",
         Harness::Devin => "Devin",
         Harness::Codex => "Codex",

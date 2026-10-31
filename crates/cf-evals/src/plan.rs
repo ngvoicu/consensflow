@@ -21,8 +21,7 @@ use crate::{Error, Result};
 
 /// A harness an eval can run: the name it goes by on a command line, the kind its
 /// roster agent is, and the cheap model (brain: operations/test-models.md) it runs
-/// the staff on and, on OpenCode, the chief. OpenCode's free Muse Spark died
-/// mid-run twice out of two (a dead turn), so OpenCode runs a paid Go model.
+/// the staff on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Harness {
     pub name: &'static str,
@@ -31,7 +30,7 @@ pub struct Harness {
 }
 
 /// The harnesses of the evals, in the order they are listed.
-pub const HARNESSES: [Harness; 5] = [
+pub const HARNESSES: [Harness; 4] = [
     Harness {
         name: "claude",
         kind: "claude-code",
@@ -42,15 +41,10 @@ pub const HARNESSES: [Harness; 5] = [
         kind: "codex",
         model: "gpt-5.6-luna",
     },
-    // OpenRouter only since 2026-09-28: OpenCode Go is out of ConsensFlow.
+    // OpenRouter only since 2026-09-28.
     Harness {
         name: "pi",
         kind: "pi",
-        model: "openrouter/deepseek/deepseek-v4.1-flash",
-    },
-    Harness {
-        name: "opencode",
-        kind: "opencode",
         model: "openrouter/deepseek/deepseek-v4.1-flash",
     },
     // SWE-1.6 Slow, the free plan's, is not on Devin Pro (2026-10-03); SWE-2 is free there.
@@ -193,9 +187,8 @@ pub fn staff_for<S: AsRef<str>>(
     Ok(staff)
 }
 
-/// A Pi or OpenCode chief's model: a step above the staff's DeepSeek Flash and
-/// well below sol's price (2026-09-28, the owner's choice), the same for both so the
-/// two harnesses compare as harnesses.
+/// A Pi chief's model: a step above the staff's DeepSeek Flash and well below sol's
+/// price (2026-09-28, the owner's choice).
 pub const CHIEF_MODEL: &str = "openrouter/deepseek/deepseek-v4-pro-0813";
 
 /// The model a Claude Code chief runs on unless it is told another.
@@ -210,8 +203,8 @@ pub struct ChiefSetup {
 }
 
 /// The chief has no model of its own in the roster: it runs its harness's default.
-/// Claude Code and OpenCode take one from the environment (Opus, and DeepSeek V4
-/// Pro, unless `model` says otherwise), Codex and Pi from the eval's wrappers
+/// Claude Code takes one from the environment (Opus, unless `model` says
+/// otherwise), Codex and Pi from the eval's wrappers
 /// (Codex's cheap model, DeepSeek V4 Pro); Devin runs the model its own
 /// configuration names, so `model` is ignored there.
 pub fn chief_environment(chief: &str, model: Option<&str>) -> Result<ChiefSetup> {
@@ -221,16 +214,6 @@ pub fn chief_environment(chief: &str, model: Option<&str>) -> Result<ChiefSetup>
             let chosen = model.unwrap_or(CLAUDE_CHIEF_MODEL);
             ChiefSetup {
                 env: vec![("ANTHROPIC_MODEL".to_owned(), chosen.to_owned())],
-                model: chosen.to_owned(),
-            }
-        }
-        "opencode" => {
-            let chosen = model.unwrap_or(CHIEF_MODEL);
-            ChiefSetup {
-                env: vec![(
-                    "OPENCODE_CONFIG_CONTENT".to_owned(),
-                    json!({ "model": chosen }).to_string(),
-                )],
                 model: chosen.to_owned(),
             }
         }

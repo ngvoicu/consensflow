@@ -193,7 +193,7 @@ fn a_harness_that_is_not_installed_or_not_one_is_an_error() {
     let fixture = Fixture::new();
     for (id, words) in [
         ("devin", "Devin is not installed"),
-        ("opencode", "OpenCode is not installed"),
+        ("pi", "Pi is not installed"),
         ("claude", "Claude is not installed"),
         ("kimi", "Unknown harness"),
         ("", "Unknown harness"),

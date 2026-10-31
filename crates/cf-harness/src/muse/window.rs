@@ -201,7 +201,7 @@ impl Window for MuseWindow {
     /// A window that knows its session (a resumed one) is started; a fresh one waits
     /// for the log of the session its process opened, the one way it learns its session
     /// before its first message is pasted.
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async move {
             if self.session.borrow().is_some() {
                 return Ok(None);

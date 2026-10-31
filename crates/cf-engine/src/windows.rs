@@ -24,7 +24,7 @@ use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 
 use crate::at_work::OnWork;
-use crate::deliveries::{Admitting, Delivering};
+use crate::deliveries::Delivering;
 use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
@@ -878,11 +878,6 @@ impl Dispatcher {
             part.conversation = conversation_id;
             part.unproven = resumed_on.is_some() && !proven;
         }
-        // The first message that goes in once the window is up, where there is one.
-        let posted = delivering
-            .as_ref()
-            .map(|first| first.message)
-            .filter(|_| planned.first == FirstMessage::Started);
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;
@@ -904,25 +899,7 @@ impl Dispatcher {
         }
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
-        let admitting = Admitting::new(self, project.id);
-        let admitting = match posted {
-            Some(first) => admitting.handing(first, planned.carried.clone()),
-            None => admitting,
-        };
-        let started = caught(planned.window.started(&admitting)).await;
-        // A first message that was to go in once the window was up, its project
-        // closed first: it waits for the Resume, never handed over, and the window,
-        // given nothing, goes with the Close. One withdrawn meanwhile (a
-        // continuation whose task moved on) stays so, or goes again without what
-        // was withdrawn of its paste, and the window, up, is given what waits for
-        // it at the next pass. Neither is a launch that failed.
-        if let Some(failed) = admitting.turned_away() {
-            let delivering = record.delivery.borrow_mut().delivering.take();
-            if let Some(delivering) = delivering {
-                self.give_back(delivering.message, admitting.because())?;
-            }
-            return failed.map_or(Ok(()), Err);
-        }
+        let started = caught(planned.window.started()).await;
         let started = match started {
             // A window that never came up is given up, with its first message or
             // without one: a Codex chief opened again at rest after the app's restart
@@ -1172,8 +1149,8 @@ impl Dispatcher {
     /// the ledger admits it, which marks it handed (the project is open, and nothing
     /// of its paste was withdrawn since it was begun). One it turns away goes back to
     /// its queue, unless it was withdrawn itself, and the launch is over. A launch
-    /// whose window takes it once up hands nothing over now: it is admitted as it is
-    /// posted ([`FirstMessage::Started`]) or delivered ([`FirstMessage::Delivered`]).
+    /// whose window is delivered it once up hands nothing over now: it is admitted
+    /// as it is delivered ([`FirstMessage::Delivered`]).
     fn handed_on_open(
         &self,
         delivering: Option<&Delivering>,

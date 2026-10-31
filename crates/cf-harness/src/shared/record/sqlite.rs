@@ -1,5 +1,5 @@
 //! A harness's SQLite store, read as `node:sqlite`'s `DatabaseSync(file, {
-//! readOnly: true })` read it (OpenCode's store, Devin's sessions):
+//! readOnly: true })` read it (Devin's sessions):
 //! - read-only, and never waiting on a writer: a busy timeout of none, as
 //!   `DatabaseSync`'s default is;
 //! - with `DatabaseSync`'s other defaults: foreign keys enforced, and no
@@ -18,9 +18,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rusqlite::config::DbConfig;
-use rusqlite::types::{Value as Bound, ValueRef};
-use rusqlite::{params_from_iter, Connection, OpenFlags, Params, Statement};
-use serde_json::Value;
+use rusqlite::types::ValueRef;
+use rusqlite::{Connection, OpenFlags, Params, Statement};
 
 pub(crate) use cell::{greater_of, key_of, same_of, text_of, Cell, Unparsed};
 
@@ -97,37 +96,10 @@ impl Reads<'_> {
         first(&mut self.prepare(sql)?, params)
     }
 
-    /// `sql` prepared for gets with JavaScript's values (`db.prepare(sql)`):
-    /// one SQLite cannot prepare fails here, run or not.
-    pub(crate) fn prepare_js(&self, sql: &str) -> Result<Prepared<'_>, String> {
-        Ok(Prepared {
-            statement: self.prepare(sql)?,
-        })
-    }
-
     fn prepare(&self, sql: &str) -> Result<Statement<'_>, String> {
         self.connection
             .prepare(sql)
             .map_err(|error| error.to_string())
-    }
-}
-
-/// A statement prepared for gets with JavaScript's values.
-pub(crate) struct Prepared<'a> {
-    statement: Statement<'a>,
-}
-
-impl Prepared<'_> {
-    /// The first row it selects with JavaScript's `values` (`.get(...values)`),
-    /// each bound as `node:sqlite` binds it ([`arguments`]); a place no value
-    /// takes is NULL, as SQLite leaves a parameter unbound.
-    pub(crate) fn get(&mut self, values: &[&Value]) -> Result<Option<Row>, String> {
-        let mut bound = arguments(values)?;
-        let places = self.statement.parameter_count();
-        if bound.len() < places {
-            bound.resize(places, Bound::Null);
-        }
-        first(&mut self.statement, params_from_iter(bound))
     }
 }
 
@@ -183,38 +155,6 @@ impl Row {
         let at = self.columns.iter().position(|(held, _)| held == name)?;
         Some(self.columns.remove(at).1)
     }
-}
-
-/// The parameters `node:sqlite` binds for a statement's arguments, each a
-/// JavaScript value (`.get(...values)`): text as text, a number as a double,
-/// a flag as 1 or 0, null as NULL. An object or a list first is read as
-/// named parameters: of none, the arguments after it take the places from
-/// the first, as Node binds them; a name fails, as no statement here names
-/// one. An object or a list after the first fails, as Node cannot bind it.
-fn arguments(values: &[&Value]) -> Result<Vec<Bound>, String> {
-    let positional = match values.split_first() {
-        Some((Value::Object(named), rest)) => match named.keys().next() {
-            Some(name) => return Err(format!("unknown named parameter '{name}'")),
-            None => rest,
-        },
-        Some((Value::Array(named), rest)) if named.is_empty() => rest,
-        Some((Value::Array(_), _)) => return Err("unknown named parameter '0'".to_owned()),
-        _ => values,
-    };
-    positional
-        .iter()
-        .enumerate()
-        .map(|(at, value)| match value {
-            Value::Null => Ok(Bound::Null),
-            Value::Bool(flag) => Ok(Bound::Integer(i64::from(*flag))),
-            Value::Number(number) => Ok(Bound::Real(number.as_f64().unwrap_or(f64::NAN))),
-            Value::String(text) => Ok(Bound::Text(text.clone())),
-            Value::Array(_) | Value::Object(_) => Err(format!(
-                "provided value cannot be bound to SQLite parameter {}",
-                at + 1
-            )),
-        })
-        .collect()
 }
 
 /// A column's value as JavaScript held it. An integer past what a number

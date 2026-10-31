@@ -33,7 +33,7 @@ pub fn prepare_extension(env: &Env) -> Extension {
     if harness_path(Harness::Pi, env).is_none() {
         return Extension::NotInstalled;
     }
-    match prepare_private_integration(env, "pi", &[EXTENSION], &|_| Vec::new()) {
+    match prepare_private_integration(env, "pi", &[EXTENSION]) {
         Ok(root) => Extension::InstalledUnverified {
             path: path::join(&[&root, EXTENSION.0]),
         },

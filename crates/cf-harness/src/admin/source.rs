@@ -64,7 +64,6 @@ pub(super) fn name(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "Claude",
         Harness::Codex => "Codex",
-        Harness::Opencode => "OpenCode",
         Harness::Pi => "Pi",
         Harness::Devin => "Devin",
         Harness::Muse => "Muse Code",
@@ -76,7 +75,6 @@ fn feed(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
         Harness::Codex => "https://registry.npmjs.org/@openai/codex/latest",
-        Harness::Opencode => "https://registry.npmjs.org/opencode-ai/latest",
         Harness::Pi => "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest",
         Harness::Devin => "https://static.devin.ai/cli/current/manifest.json",
         // The manifest of the channel its launcher follows; read by [`muse_source`].
@@ -89,7 +87,6 @@ fn npm_package(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("@anthropic-ai/claude-code"),
         Harness::Codex => Some("@openai/codex"),
-        Harness::Opencode => Some("opencode-ai"),
         Harness::Pi => Some("@earendil-works/pi-coding-agent"),
         Harness::Devin | Harness::Muse => None,
     }
@@ -104,7 +101,6 @@ fn npm_package(harness: Harness) -> Option<&'static str> {
 fn own_installer(harness: Harness) -> &'static [(&'static str, &'static [&'static str])] {
     match harness {
         Harness::Codex => &[("/.codex/bin/", &["update"])],
-        Harness::Opencode => &[("/.opencode/bin/", &["upgrade"])],
         Harness::Pi => &[
             ("/.pi/bin/", &["update", "--self"]),
             ("/.pi/agent/bin/", &["update"]),

@@ -375,7 +375,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "url",
  "winapi-util",
  "windows-sys 0.61.2",
 ]
@@ -386,7 +385,6 @@ version = "3.0.6-alpha.3"
 dependencies = [
  "cf-base",
  "cf-proto",
- "serde",
  "serde_json",
  "thiserror 2.0.20",
  "ureq",
@@ -486,6 +484,7 @@ dependencies = [
  "cf-e2e",
  "cf-panes",
  "cf-process",
+ "flate2",
  "jiff",
  "nix 0.28.0",
  "portable-pty",

@@ -3,8 +3,8 @@
 //! them off, that it plans big work as a spec in the folder the project names, and
 //! carries the spec to the board, which the stand-in agents of the rig cannot give. It
 //! is opt-in (`cargo xtask live specs`, `npm run live:specs`): it spends the
-//! machine's quota on a chief of each of the five harnesses (Claude Code, OpenCode,
-//! Pi, Devin and Codex, each on its cheap model) and needs each one installed and
+//! machine's quota on a chief of each of five harnesses (Claude Code, Pi, Devin,
+//! Codex and Muse Code, each on its cheap model) and needs each one installed and
 //! logged in, so it is ignored unless asked for and is no part of `check` or of CI.
 //!
 //! The native daemon and the real pane host run in a home of the run's own (never

@@ -27,8 +27,8 @@
 //!                                                 long messages of those lengths, one of each
 //! ```
 //!
-//! Harnesses: the two the app pastes into, claude and devin (Codex, Pi and
-//! OpenCode take their messages through their own queues). They run one after
+//! Harnesses: the two the app pastes into, claude and devin (Codex and Pi
+//! take their messages through their own queues). They run one after
 //! another; the run fails when any message was not sent.
 //!
 //! This is the shape of a live test of one window: read what was asked for

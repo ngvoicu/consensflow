@@ -359,7 +359,7 @@ fn finishing_after_the_chief_read_the_note_leaves_the_note_as_it_was_read() {
 
 #[test]
 fn a_window_that_answers_the_tell_in_plain_text_has_its_words_put_to_the_chief_too() {
-    // OpenCode (T-534): no `cf answer`, the answer and the final words in one reply.
+    // T-534: no `cf answer`, the answer and the final words in one reply.
     let context = Context::new();
     let (project, _) = told_at_work(&context);
     context

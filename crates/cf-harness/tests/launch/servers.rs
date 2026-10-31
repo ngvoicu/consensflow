@@ -5,8 +5,7 @@
 //! own. All three say so where there are process groups. Where there are none
 //! (Windows), Claude Code says it runs each command in a shell of its own (T-906); the
 //! others' trees there were not probed, and none of them leaves a Monitor whose end a
-//! look decides. OpenCode and Devin have not been probed, and say nothing on every
-//! platform.
+//! look decides. Devin has not been probed, and says nothing on every platform.
 
 use cf_base::env::Env;
 use cf_harness::launch;
@@ -60,12 +59,5 @@ fn on_windows_claude_says_it_runs_each_command_in_a_shell_and_no_other_harness_s
 #[test]
 fn a_harness_that_was_not_probed_says_nothing_and_is_told_by_when_its_processes_began() {
     let unix = Env::from_vars([("OS", "Darwin")]);
-    for harness in [Harness::Opencode, Harness::Devin] {
-        assert_eq!(
-            says(harness, &unix),
-            Servers::Unknown,
-            "{}",
-            harness.as_str()
-        );
-    }
+    assert_eq!(says(Harness::Devin, &unix), Servers::Unknown);
 }

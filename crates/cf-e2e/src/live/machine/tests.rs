@@ -92,10 +92,9 @@ fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds
 
 #[test]
 fn the_harnesses_are_named_as_a_command_line_and_the_roster_name_them() {
-    let names: Vec<_> = Harness::ALL.iter().map(|harness| harness.name()).collect();
     assert_eq!(
-        names,
-        ["claude", "opencode", "pi", "devin", "codex", "muse"]
+        Harness::ALL.map(Harness::name),
+        ["claude", "pi", "devin", "codex", "muse"]
     );
     for harness in Harness::ALL {
         assert_eq!(Harness::from_name(harness.name()), Some(harness));
@@ -124,8 +123,8 @@ fn a_home_holds_a_login_when_it_holds_the_place_the_harness_keeps_it() {
     fs::write(home.path().join(".claude.json"), "{}").unwrap();
     assert!(held(Harness::Claude, home.path()));
     assert!(!held(Harness::Pi, home.path()));
-    fs::create_dir_all(home.path().join(".config").join("opencode")).unwrap();
-    assert!(held(Harness::OpenCode, home.path()));
+    fs::create_dir_all(home.path().join(".config").join("devin")).unwrap();
+    assert!(held(Harness::Devin, home.path()));
     // Codex's home is the folder itself: any folder that is there.
     assert!(held(Harness::Codex, home.path()));
     assert!(!held(Harness::Codex, &home.path().join("missing")));
@@ -295,11 +294,9 @@ fn every_harness_found_runs_on_a_home_of_the_runs_own_but_for_the_two_that_are_n
         let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
         assert!(found.isolation().is_some(), "{harness:?}");
     }
-    // Claude Code's is a config folder ([`Login`]), and OpenCode keeps the person's.
-    for harness in [Harness::Claude, Harness::OpenCode] {
-        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
-        assert!(found.isolation().is_none(), "{harness:?}");
-    }
+    // Claude Code's is a config folder ([`Login`]).
+    let found = with_homes(Installed::at(Harness::Claude, "/opt/bin/h", "/home/me")).unwrap();
+    assert!(found.isolation().is_none());
 }
 
 #[test]
@@ -670,13 +667,7 @@ fn a_harness_the_machine_lacks_is_left_out_of_every_seat_with_why_unless_it_was_
     let (kept, said) = seated(&[], no_muse).unwrap();
     assert_eq!(
         kept,
-        [
-            Harness::Claude,
-            Harness::OpenCode,
-            Harness::Pi,
-            Harness::Devin,
-            Harness::Codex
-        ]
+        [Harness::Claude, Harness::Pi, Harness::Devin, Harness::Codex]
     );
     assert_eq!(
         said,

@@ -55,8 +55,8 @@
 //! cargo xtask windows --host zeewin -- cargo xtask live notes devin
 //! ```
 //!
-//! Harnesses: the two the app pastes into, claude and devin (Codex, Pi and OpenCode
-//! take their messages through their own queues, and the daemon waits for the record
+//! Harnesses: the two the app pastes into, claude and devin (Codex and Pi take
+//! their messages through their own queues, and the daemon waits for the record
 //! of what they queued). The run fails when a note went into a chief's record twice, or
 //! never, or when the check could not hold a turn open to find out.
 
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn a_harness_the_daemon_never_pastes_into_is_refused_and_says_why() {
-        for queued in ["codex", "pi", "opencode"] {
+        for queued in ["codex", "pi"] {
             let failed = chiefs(&words(&[queued])).unwrap_err().to_string();
             assert!(failed.contains("its own queue"), "{queued}: {failed}");
             assert!(failed.starts_with(queued), "{failed}");

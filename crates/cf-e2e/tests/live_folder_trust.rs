@@ -7,7 +7,7 @@
 //! dip-agentos's workers stopped at Claude Code's "Do you trust this folder?" after
 //! `git init` (2026-10-19), and the owner's decision of 2026-10-20 has ConsensFlow
 //! answer it in the project's own folder. Its first runs (2026-10-21: Claude Code
-//! 2.1.305, Codex 0.163.0, Pi 1.3.0, OpenCode 1.19.3, Devin 3000.11.92) found:
+//! 2.1.305, Codex 0.163.0, Pi 1.3.0, Devin 3000.11.92) found:
 //!
 //! - Claude Code asks in a git repository it was never told to trust, whatever the
 //!   folders above it, and in a git repository below a trusted one; not in a plain
@@ -51,10 +51,10 @@
 //!   it names). Codex as ConsensFlow opens it, its window on the broker's server
 //!   (`cf codex-session`), asks nothing, chief and worker alike: there is nothing to
 //!   answer, and a Codex that starts asking there is what the projects part catches.
-//! - Pi, OpenCode and Devin (`--respect-workspace-trust false`) never ask.
+//! - Pi and Devin (`--respect-workspace-trust false`) never ask.
 //!
 //! Two parts. **windows**: the window of each harness whose bare window is the app's
-//! (Claude Code, Pi, OpenCode, Devin: Codex's is not), opened as the app opens one (its
+//! (Claude Code, Pi, Devin: Codex's is not), opened as the app opens one (its
 //! own command line for a new conversation; a Claude window shut out of the owner's MCP
 //! servers and browser, and not asked to trust its folder first), in folders of its own
 //! made fresh for the run, below the live folders: a plain folder, and a plain folder
@@ -1436,12 +1436,7 @@ mod tests {
             ]
         );
         for case in Case::ALL {
-            for harness in [
-                Harness::Codex,
-                Harness::Pi,
-                Harness::OpenCode,
-                Harness::Devin,
-            ] {
+            for harness in [Harness::Codex, Harness::Pi, Harness::Devin] {
                 assert!(!must_ask(harness, case), "{harness:?} {case:?}");
             }
         }

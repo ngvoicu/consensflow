@@ -16,7 +16,7 @@ use super::holds::Wrapped;
 use crate::seams::Adapters;
 
 /// The adapters the test's engine is made with: the fake under every
-/// harness the test names, as `{ 'claude-code': adapter, opencode: adapter }`,
+/// harness the test names, as `{ 'claude-code': adapter, pi: adapter }`,
 /// and a fake of its own under a harness the test gives one (`{ codex }`).
 pub struct FakeAdapters {
     fakes: Vec<(String, Rc<FakeAdapter>)>,

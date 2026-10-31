@@ -35,7 +35,7 @@ done
 ";
 
 /// The harnesses that have a stand-in on the box's PATH.
-const HARNESSES: [&str; 4] = ["claude", "codex", "pi", "opencode"];
+const HARNESSES: [&str; 3] = ["claude", "codex", "pi"];
 
 /// The folders of a machine, made.
 #[derive(Debug, Clone)]

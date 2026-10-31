@@ -104,7 +104,7 @@ fn shares_the_work_of_one_tier_across_harnesses_the_harness_with_the_fewest_task
             "staff": [
                 member("zeus", "claude-code"),
                 member("diana", "claude-code"),
-                member("ares", "opencode"),
+                member("ares", "pi"),
             ],
         }))
         .unwrap()

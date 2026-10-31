@@ -37,7 +37,7 @@ pub(crate) const CODEX_FOLDER: &str = "codex";
 /// The harness folders a launch's files are in, in the order Node goes through
 /// them. Codex's, which Node had no files for, comes after them, and Muse's, which
 /// came after Node, last.
-const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "muse"];
+const FOLDERS: [&str; 5] = ["claude", "pi", "devin", CODEX_FOLDER, "muse"];
 
 /// The folders a removal could not take, each with why: every other went.
 #[derive(Debug)]
@@ -74,7 +74,6 @@ pub(crate) fn harness_folder(harness: Harness) -> Option<&'static str> {
         Harness::Claude => Some("claude"),
         Harness::Pi => Some("pi"),
         Harness::Devin => Some("devin"),
-        Harness::Opencode => Some("opencode"),
         Harness::Muse => Some("muse"),
         Harness::Codex => None,
     }
@@ -191,7 +190,7 @@ mod tests {
         for relative in [
             format!("integrations/claude/{A}"),
             format!("integrations/pi/{A}"),
-            format!("integrations/opencode/{A}"),
+            format!("integrations/retired/{A}"),
             format!("integrations/codex/{A}"),
             format!("integrations/muse/{A}"),
             format!("integrations/claude/{B}"),
@@ -204,7 +203,7 @@ mod tests {
         forget_launch(&home, &LaunchId::new(A).unwrap()).unwrap();
         // An id that is not a launch id names nothing: no launch is made of it.
         assert!(LaunchId::new("..").is_none());
-        for harness in ["claude", "pi", "opencode", "codex", "muse"] {
+        for harness in ["claude", "pi", "codex", "muse"] {
             assert!(
                 !at(&format!("integrations/{harness}/{A}")).exists(),
                 "{harness}"
@@ -221,6 +220,9 @@ mod tests {
         );
         assert!(at("integrations/claude/not-a-launch").exists());
         assert!(at("extensions/pi").exists());
+        // A folder of a harness the build does not run is no harness's: neither a
+        // window's close nor a start takes what is in it.
+        assert!(at(&format!("integrations/retired/{A}")).exists());
         let nowhere = path::join(&[&home, "nowhere"]);
         assert_eq!(sweep_launches(&nowhere).unwrap(), 0);
     }
@@ -334,7 +336,6 @@ mod tests {
             format!("integrations/claude/{A}/inner"),
             format!("integrations/pi/{A}"),
             format!("integrations/devin/{B}"),
-            format!("integrations/opencode/{A}"),
         ] {
             fs::create_dir_all(dir.path().join(&relative)).unwrap();
             fs::write(dir.path().join(&relative).join("file"), "x").unwrap();
@@ -351,7 +352,6 @@ mod tests {
         for gone in [
             format!("integrations/pi/{A}"),
             format!("integrations/devin/{B}"),
-            format!("integrations/opencode/{A}"),
         ] {
             assert!(!dir.path().join(&gone).exists(), "{gone} went");
         }

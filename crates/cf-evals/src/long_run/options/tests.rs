@@ -12,10 +12,7 @@ fn a_long_run_with_no_words_is_two_hours_of_every_harness_under_a_claude_chief_w
 ) {
     let options = of("").unwrap();
     assert_eq!(options.chief, "claude");
-    assert_eq!(
-        options.staff,
-        ["claude", "codex", "pi", "opencode", "devin"]
-    );
+    assert_eq!(options.staff, ["claude", "codex", "pi", "devin"]);
     assert_eq!(options.budget, Duration::from_secs(2 * 3600));
     assert_eq!(options.every, Duration::from_secs(480));
     assert_eq!(options.look, Duration::from_secs(10));

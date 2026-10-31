@@ -1,7 +1,6 @@
 //! A closed project's windows are handed nothing, whatever wait the Close comes
 //! in: a launch whose project closed while its window was prepared opens none,
-//! a first message a window takes once it is up goes in only while its project
-//! is open, a delivery is handed over only if its project is open at the moment
+//! a delivery is handed over only if its project is open at the moment
 //! of the hand-over, after every wait of its adapter's own, and no key that sends
 //! goes into a window the Close could not close. What was not handed over waits
 //! for the Resume, with its attempt; a pause note withdrawn on its way keeps its
@@ -27,12 +26,8 @@ use crate::fixtures::{given, native_of};
 use crate::resume::{at_work, cut_notes, opened, quit_and_start};
 
 /// The words a pause says of a window's program the Close could not end.
-/// The three ways a window takes its first message ([`FirstMessage`]).
-const MODES: [FirstMessage; 3] = [
-    FirstMessage::Opened,
-    FirstMessage::Started,
-    FirstMessage::Delivered,
-];
+/// The two ways a window takes its first message ([`FirstMessage`]).
+const MODES: [FirstMessage; 2] = [FirstMessage::Opened, FirstMessage::Delivered];
 
 const SURVIVOR: &str =
     "@zeus-amber-pine's window closed, but its program (process 4242) could not be ended and may still run";
@@ -68,9 +63,8 @@ fn chief_at_rest(context: &Context) -> i64 {
 #[test]
 fn a_chief_launch_prepared_while_the_project_closes_opens_no_window_and_its_handoff_goes_in_once_after_the_resume(
 ) {
-    // A first message the window reads as it opens, one it takes once it is up
-    // (OpenCode's), which no hand-over as the pane is asked for keeps out, and one
-    // it is delivered once up (Claude Code's, Pi's, Codex's).
+    // A first message the window reads as it opens, and one it is delivered once
+    // up (Claude Code's, Pi's, Codex's).
     for first in MODES {
         let seeds = format!("{first:?}");
         let context = with_codex();
@@ -108,51 +102,13 @@ fn a_chief_launch_prepared_while_the_project_closes_opens_no_window_and_its_hand
     }
 }
 
-/// OpenCode's shape: the first message goes in through the window's own server
-/// once it is up, after a wait of its own.
-#[test]
-fn a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume(
-) {
-    let context = with_codex();
-    context.codex.first.set(FirstMessage::Started);
-    let project = chief_at_rest(&context);
-    let starting = context.codex.start_holds.hold(|_| true);
-    context
-        .switch_chief(project, to("codex", "astraeus"), SwitchWhen::Now, false)
-        .unwrap();
-    context.settle();
-    let closing = context.begin_close_project(project);
-    context.settle();
-    starting.open();
-    context.finish(closing).unwrap();
-
-    assert_eq!(handoffs_given(&context), 0, "the window was given nothing");
-    let waiting = handoff(&context, project);
-    assert_eq!((waiting.state.as_str(), waiting.attempts), ("queued", 0));
-    assert!(
-        context
-            .inbox(context.id(project, "human"))
-            .iter()
-            .all(|message| !message.body.contains("could not start")),
-        "a launch its project's Close stopped is no launch that failed"
-    );
-
-    context.resume_project(project).unwrap();
-    for _ in 0..2 {
-        context.pass().unwrap();
-    }
-    assert_eq!(handoffs_given(&context), 1);
-    assert_eq!(context.message(waiting.id).state, "delivered");
-}
-
 /// Sol's review of 2026-10-16, round 7: a reader of a closed project reads only
 /// what its window was handed, and a launch's first message its window reads as it
 /// opens is handed as its pane is asked for and not before (the ledger marks it so,
-/// `admit`). One the window takes once it is up (OpenCode's) is handed as it is
-/// posted, and one it is delivered once up (Claude Code's, Pi's, Codex's) as the
-/// step delivers it, neither as its pane is asked for.
+/// `admit`). One it is delivered once up (Claude Code's, Pi's, Codex's) is handed
+/// as the step delivers it, not as its pane is asked for.
 #[test]
-fn a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up(
+fn a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_the_step_delivers_it_once_the_window_is_up(
 ) {
     for first in MODES {
         let seeds = format!("{first:?}");
@@ -198,7 +154,7 @@ fn a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_
         }
         assert!(
             handed() || context.message(brief).state == "delivered",
-            "seeds {seeds}: once it is posted"
+            "seeds {seeds}: once it is handed over"
         );
     }
 }
@@ -262,7 +218,7 @@ fn a_paste_whose_carried_row_was_withdrawn_before_its_hand_over_hands_nothing_ov
 }
 
 /// Claude's keys that clear its input box, and the pane's claim a native send
-/// waits for (Codex, OpenCode, Pi), come after the engine's last look at the
+/// waits for (Codex, Pi), come after the engine's last look at the
 /// project: the hand-over itself asks.
 #[test]
 fn a_delivery_whose_adapter_still_waits_when_the_project_closes_hands_nothing_over_and_waits_for_the_resume(
@@ -777,37 +733,6 @@ fn a_task_taken_back_while_the_resume_s_launch_is_prepared_carries_no_continuati
         task.body
     );
     assert_eq!(context.message(note.id).state, "cancelled");
-}
-
-/// OpenCode's shape: the continuation goes in once the window is up, through its
-/// own server, and the human pauses T-1 while the window comes up. The pause
-/// withdraws it, and the post hands nothing over.
-#[test]
-fn a_continuation_a_window_takes_once_it_is_up_is_not_posted_when_its_task_is_paused_while_it_comes_up(
-) {
-    let context = Context::new();
-    context.adapter.first.set(FirstMessage::Started);
-    let tiers = at_work(&context);
-    let project = tiers.project.id;
-    let zeus = tiers.id("zeus-amber-pine");
-    let native = native_of(&context, zeus).expect("its conversation");
-    context.close_project(project).unwrap();
-    let starting = context
-        .adapter
-        .start_holds
-        .hold(move |asked| asked[0]["launch"]["nativeSession"] == native.as_str());
-    context.resume_project(project).unwrap();
-    context.settle();
-    let note = cut_notes(&context, zeus).pop().expect("the continuation");
-    context.human_pause(project, 1);
-    starting.open();
-    for _ in 0..3 {
-        context.pass().unwrap();
-    }
-
-    assert_eq!(tiers.task(1).task.state, "paused");
-    assert_eq!(context.message(note.id).state, "cancelled");
-    assert!(continuations_given(&context).is_empty());
 }
 
 /// What an earlier build left queued telling zeus's window to go on with two

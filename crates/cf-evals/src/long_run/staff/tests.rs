@@ -11,14 +11,14 @@ fn names(list: &[&str]) -> Vec<String> {
 #[test]
 fn each_harness_runs_on_the_models_it_has_unless_the_words_name_others() {
     let models = models_of(None).unwrap();
-    assert_eq!(models.len(), 5);
+    assert_eq!(models.len(), 4);
     assert_eq!(models[0].1, ["claude-sonnet-5-5", "claude-opus-5-5"]);
     let named = models_of(Some(
         "claude=claude-fable-5-1 + claude-haiku-4-5, devin=swe-2-medium",
     ))
     .unwrap();
     assert_eq!(named[0].1, ["claude-fable-5-1", "claude-haiku-4-5"]);
-    assert_eq!(named[4].1, ["swe-2-medium"]);
+    assert_eq!(named[3].1, ["swe-2-medium"]);
     assert_eq!(named[1].1, models[1].1, "codex is left as it was");
     for (line, said) in [
         (
@@ -35,62 +35,47 @@ fn each_harness_runs_on_the_models_it_has_unless_the_words_name_others() {
 }
 
 #[test]
-fn a_harness_not_on_the_machine_or_an_opencode_of_2_is_left_out_with_why() {
-    let (found, left) = find(
-        &names(&["claude", "codex", "opencode", "devin"]),
-        |name| match name {
-            "codex" => Err("codex was not found on the PATH".to_owned()),
-            "opencode" => Ok((PathBuf::from("/bin/opencode"), "2.0.29".to_owned())),
-            other => Ok((
-                PathBuf::from(format!("/bin/{other}")),
-                "1.0.0 (Claude Code)".to_owned(),
-            )),
-        },
-    );
+fn a_harness_not_on_the_machine_is_left_out_with_why() {
+    let (found, left) = find(&names(&["claude", "codex", "devin"]), |name| match name {
+        "codex" => Err("codex was not found on the PATH".to_owned()),
+        other => Ok((
+            PathBuf::from(format!("/bin/{other}")),
+            "1.0.0 (Claude Code)".to_owned(),
+        )),
+    });
     let found: Vec<&str> = found.iter().map(|one| one.name.as_str()).collect();
     assert_eq!(found, ["claude", "devin"]);
     assert_eq!(
         left,
-        [
-            LeftOut {
-                name: "codex".to_owned(),
-                why: "not on this machine: codex was not found on the PATH".to_owned()
-            },
-            LeftOut {
-                name: "opencode".to_owned(),
-                why: "OpenCode 2.0.29 is 2.x, which ConsensFlow refuses (OpenCode stays on 1.x)"
-                    .to_owned()
-            }
-        ]
+        [LeftOut {
+            name: "codex".to_owned(),
+            why: "not on this machine: codex was not found on the PATH".to_owned()
+        }]
     );
-    let (found, left) = find(&names(&["opencode"]), |_| {
-        Ok((PathBuf::from("/bin/opencode"), "opencode 1.19.0".to_owned()))
-    });
-    assert_eq!((found.len(), left.len()), (1, 0));
 }
 
 #[test]
 fn what_a_harness_says_of_its_version_is_kept_with_a_token_in_it_hidden() {
     // A wrapper that prints a credential beside the version: kept, said on the
     // console and written in the report from here, so hidden here.
-    let (found, left) = find(&names(&["pi", "opencode", "codex"]), |name| match name {
+    let (found, left) = find(&names(&["pi", "devin", "codex"]), |name| match name {
         "pi" => Ok((
             PathBuf::from("/bin/pi"),
             "1.2.3 token=abcd1234efgh".to_owned(),
         )),
-        "opencode" => Ok((
-            PathBuf::from("/bin/opencode"),
+        "devin" => Ok((
+            PathBuf::from("/bin/devin"),
             "2.0.1 OPENAI_API_KEY=sk-abcdefghijklmnop1234".to_owned(),
         )),
         _ => Err("codex: password=hunter2hunter".to_owned()),
     });
     assert_eq!(found[0].version, "1.2.3 token=[masked]");
     assert!(
-        left[0].why.contains("OPENAI_API_KEY=[masked]") && left[0].why.contains("is 2.x"),
+        found[1].version.contains("OPENAI_API_KEY=[masked]"),
         "{}",
-        left[0].why
+        found[1].version
     );
-    assert_eq!(left[1].why, "not on this machine: codex: password=[masked]");
+    assert_eq!(left[0].why, "not on this machine: codex: password=[masked]");
 }
 
 #[test]

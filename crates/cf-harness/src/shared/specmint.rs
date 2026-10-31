@@ -28,8 +28,7 @@
 //! a folder of its own and leaves the old one to the windows that still read it.
 //!
 //! Each harness loads it as it loads any skill: Claude is given its root as one
-//! more folder to read (`--add-dir`), OpenCode its skills folder as one more of
-//! its `skills.paths`, Pi the file as a second skill, and Codex and Devin read
+//! more folder to read (`--add-dir`), Pi the file as a second skill, and Codex and Devin read
 //! it by its path, which the chief's role text names.
 
 mod bundled;
@@ -147,12 +146,6 @@ impl OwnCopy {
     /// The skill's `SKILL.md`, which the chief's role text names.
     pub(crate) fn file(&self) -> String {
         path::join(&[&self.folder, "SKILL.md"])
-    }
-
-    /// The folder of skills the copy is in, which a harness that is told which
-    /// folders to read skills from (OpenCode) is given.
-    pub(crate) fn skills(&self) -> String {
-        path::join(&[&self.root, SKILLS[1], SKILLS[2]])
     }
 }
 

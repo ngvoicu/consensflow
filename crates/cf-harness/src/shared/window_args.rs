@@ -181,22 +181,6 @@ fn window(
                 drop_env: &[],
             }
         }
-        // OpenCode keeps the model and its variant with the session, and
-        // they are read back for a resumed one: only a new session is given
-        // them. Its first message goes through its own API once it starts.
-        Harness::Opencode => {
-            let mut args = session.map_or_else(Vec::new, |session| words(&["--session", session]));
-            if !resumed {
-                args.extend(model_and_effort(harness, agent));
-            }
-            args.push("--auto".to_owned());
-            Invocation {
-                command: "opencode",
-                args,
-                prompt: None,
-                drop_env: &[],
-            }
-        }
     })
 }
 
@@ -246,11 +230,6 @@ fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
                 let id =
                     effort.map_or_else(|| model.to_owned(), |effort| format!("{model}-{effort}"));
                 flag("--model", id);
-            }
-        }
-        Harness::Opencode => {
-            if let Some(model) = model {
-                flag("--model", model.to_owned());
             }
         }
         Harness::Muse => {

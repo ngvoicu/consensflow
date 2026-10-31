@@ -176,8 +176,7 @@ fn kimi_k3_1_pro_is_complex_at_max_standard_at_high_and_light_at_low_where_kimi_
         WorkTier::Light
     );
     // Devin lists no K3.1 Pro (3000.11.205); Pi reaches it through OpenRouter,
-    // at low, high and max (2026-10-25). OpenCode lists it too, and gains no
-    // preset: it leaves ConsensFlow (Gabriel, 2026-10-25).
+    // at low, high and max (2026-10-25).
     let catalog = catalog();
     for (name, harness, level, tier) in [
         ("themis", Harness::Pi, "max", WorkTier::Complex),
@@ -195,16 +194,14 @@ fn kimi_k3_1_pro_is_complex_at_max_standard_at_high_and_light_at_low_where_kimi_
         assert_eq!(entry.entry.profile.work_tier, tier, "{name}");
     }
     // Kimi K3 is complex work whatever its level, on every harness that carries it.
-    for name in ["endymion", "mani", "iabet", "imentet", "imsety"] {
+    for name in ["endymion", "iabet", "imentet", "imsety"] {
         let entry = found(&catalog, name);
         assert_eq!(entry.entry.profile.model_key, "kimi-k3", "{name}");
         assert_eq!(entry.entry.profile.work_tier, WorkTier::Complex, "{name}");
     }
-    for harness in [Harness::Devin, Harness::Opencode] {
-        assert!(listed(&catalog, harness)
-            .iter()
-            .all(|entry| !entry.model.contains("k3.1") && !entry.model.contains("k3-1")));
-    }
+    assert!(listed(&catalog, Harness::Devin)
+        .iter()
+        .all(|entry| !entry.model.contains("k3.1") && !entry.model.contains("k3-1")));
 }
 
 #[test]

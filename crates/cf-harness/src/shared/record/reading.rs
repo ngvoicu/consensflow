@@ -360,8 +360,8 @@ pub struct Item {
     /// A progress note, as Codex marks one: said only when true.
     pub commentary: bool,
     /// An assistant's item with nothing of the model's in it: Claude Code's close
-    /// of a turn it found cut, the step Pi writes of a run that failed or was aborted
-    /// before the model's first token, a message OpenCode made before the reply. No
+    /// of a turn it found cut, and the step Pi writes of a run that failed or was aborted
+    /// before the model's first token. No
     /// turn got through it. And a user's item with no human's words in it, the
     /// harness's own: Claude Code's `<task-notification>`. Never said: a reading is
     /// the one Node wrote.
@@ -526,7 +526,7 @@ mod tests {
         assert!(!missing.read_failed());
         assert!(Reading::unreadable("the records thread ended").read_failed());
         // A failure whose words begin as a missing record's do is a failure still:
-        // SQLite's own, in OpenCode's store.
+        // SQLite's own, in Devin's store.
         assert!(Reading::unreadable("no such column: id").read_failed());
         assert!(Reading::Unknown("missing session id".to_owned()).read_failed());
         assert!(!Reading::Known(Record::new()).read_failed());

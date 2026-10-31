@@ -3,9 +3,9 @@
 # second call, and a program another thread starts between the two keeps it: the port stays
 # listened on after the seam lets go, and the next to bind it is refused. It was seen as
 # `seams::tests::a_free_port_on_loopback_is_one_a_listener_may_take` failing once on a busy Mac
-# (T-349), and as `create::mints_distinct_ids_on_two_calls` failing with "opencode serve exited
-# early" twice (T-302, T-330): the stand-in that was to serve could not bind its port. The
-# tests are in the seam's own module; what is not planted here is the one line that gives the
+# (T-349), and twice as a stand-in server that "exited early" (T-302, T-330; those tests went
+# with the channel they tested): it could not bind its port. The tests are in the seam's own
+# module; what is not planted here is the one line that gives the
 # seam its look at a port (`free_loopback_from(drawn, listened_on)`), which only
 # `crates/cf-harness/tests/ports.rs` shows, under load, by hand.
 

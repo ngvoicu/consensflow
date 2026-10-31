@@ -1057,7 +1057,7 @@ mod tests {
                 workers: vec![Harness::Codex, Harness::Pi, Harness::Claude]
             }
         );
-        for wrong in ["codex", "opencode", "devin", "nobody"] {
+        for wrong in ["codex", "devin", "nobody"] {
             let failed = cases(&words(&[wrong]), (&[], &[]), &[], &[])
                 .unwrap_err()
                 .to_string();

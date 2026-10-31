@@ -86,14 +86,7 @@ mod tests {
         let keys: Vec<String> = Harness::ALL.into_iter().map(key_of).collect();
         assert_eq!(
             keys,
-            [
-                "KEY_CLAUDE",
-                "KEY_OPENCODE",
-                "KEY_PI",
-                "KEY_DEVIN",
-                "KEY_CODEX",
-                "KEY_MUSE"
-            ]
+            ["KEY_CLAUDE", "KEY_PI", "KEY_DEVIN", "KEY_CODEX", "KEY_MUSE"]
         );
         assert_eq!(
             the_key("KEY_PI"),
@@ -107,7 +100,10 @@ mod tests {
     #[test]
     fn what_is_typed_is_a_line_the_input_box_of_an_eighty_column_window_shows_whole() {
         // The prompt mark and a space come before it.
-        for typed in [the_key("KEY_OPENCODE"), ASKED.to_owned()] {
+        let keys = Harness::ALL
+            .into_iter()
+            .map(|harness| the_key(&key_of(harness)));
+        for typed in keys.chain([ASKED.to_owned()]) {
             assert!(!typed.contains('\n'), "{typed}");
             assert!(typed.chars().count() + 2 < 80, "{typed}");
         }

@@ -12,27 +12,27 @@ fn is_neither_edited_nor_removed_and_its_name_cannot_be_defined_again() {
     let refused =
         |answer: Result<AgentView, cf_base::refusal::Refusal>| answer.unwrap_err().message;
     assert!(
-        refused(roster.edit("gefjon", &body(json!({ "effort": "low" })), &mut Now))
+        refused(roster.edit("clio", &body(json!({ "effort": "low" })), &mut Now))
             .contains("catalog agent and stays")
     );
     assert!(
-        refused(roster.edit("gefjon", &body(json!({ "description": "x" })), &mut Now))
+        refused(roster.edit("clio", &body(json!({ "description": "x" })), &mut Now))
             .contains("catalog agent and stays")
     );
     assert!(roster
-        .remove("gefjon")
+        .remove("clio")
         .unwrap_err()
         .message
         .contains("not yours to remove"));
     assert!(refused(roster.add(
-        &body(json!({ "name": "gefjon", "harness": "codex", "model": "m" })),
+        &body(json!({ "name": "clio", "harness": "codex", "model": "m" })),
         &mut Now
     ))
     .contains("catalog agent: pick another name"));
     assert!(!home.path().exists(), "nothing was written");
-    let gefjon = &home.by_name(&catalog)["gefjon"];
+    let clio = &home.by_name(&catalog)["clio"];
     assert_eq!(
-        (gefjon.effort.as_deref(), gefjon.custom),
+        (clio.effort.as_deref(), clio.custom),
         (Some("xhigh"), false)
     );
 }

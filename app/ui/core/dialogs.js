@@ -30,7 +30,7 @@ const TIER_LABEL = {
   light: 'Light work',
 }
 /** The harnesses in the order agents of one tier are listed. */
-const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'devin']
+const HARNESS_ORDER = ['claude', 'codex', 'pi', 'devin']
 /**
  * The efforts in the order agents of one harness are listed, the hardest
  * thinking first: Codex's ultra above max, and the levels below low (Pi's
@@ -174,7 +174,6 @@ function nobodyRow(text) {
 export const HARNESS_NAMES = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
-  opencode: 'OpenCode',
   pi: 'Pi',
   devin: 'Devin',
 }
