@@ -1,7 +1,8 @@
 //! What a worker's run of `live own-cf` came to, from what it left: the calls each decoy wrote
 //! down beside itself (the proof a shell found it first, whatever the model then said), and the
 //! worker's result, in which the window's own `cf` answering `cf whoami` names the worker by
-//! its handle and role, which only the daemon the window belongs to knows.
+//! its handle and role, which only the daemon the window belongs to knows: the handle the board
+//! gives the worker's participant (`live-devin-silver-island`), not its agent's id.
 
 /// What was seen of one worker.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -12,6 +13,8 @@ pub struct Seen {
     pub result: Option<String>,
     /// The calls each decoy was given, by its label: a decoy given none is not here.
     pub decoys: Vec<(&'static str, Vec<String>)>,
+    /// The worker's handle, as the board names its participant: empty where it named none.
+    pub handle: String,
 }
 
 /// What the window's own `cf` says to `cf whoami` in the window of the worker `handle`: its
@@ -22,7 +25,8 @@ pub fn whoami_of(handle: &str) -> String {
 
 /// The verdict: `Ok` with what holds it, where the window's own `cf` answered and no decoy was
 /// run; else every reason it does not hold.
-pub fn judge(seen: &Seen, handle: &str) -> Result<String, Vec<String>> {
+pub fn judge(seen: &Seen) -> Result<String, Vec<String>> {
+    let handle = seen.handle.as_str();
     let mut problems = Vec::new();
     for (label, calls) in &seen.decoys {
         problems.push(format!(
@@ -33,10 +37,11 @@ pub fn judge(seen: &Seen, handle: &str) -> Result<String, Vec<String>> {
     if seen.state != "done" {
         problems.push(format!("the task is {}, not done", seen.state));
     }
-    let answered = seen
-        .result
-        .as_deref()
-        .is_some_and(|result| result.contains(&whoami_of(handle)));
+    let answered = !handle.is_empty()
+        && seen
+            .result
+            .as_deref()
+            .is_some_and(|result| result.contains(&whoami_of(handle)));
     match &seen.result {
         None if seen.state == "done" => {
             problems.push("the task is done, and no result reached the chief".to_owned());
@@ -73,24 +78,30 @@ pub fn found_line(result: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
+    /// The handle the board gives a Devin worker: its agent's id and two words.
+    const HANDLE: &str = "live-devin-silver-island";
+
     fn seen(state: &str, result: Option<&str>, decoys: Vec<(&'static str, Vec<String>)>) -> Seen {
         Seen {
             state: state.to_owned(),
             result: result.map(str::to_owned),
             decoys,
+            handle: HANDLE.to_owned(),
         }
     }
 
-    const ANSWER: &str = "1. @live-devin (worker) in project own-cf-devin, on T-1: Which cf\n\
+    const ANSWER: &str =
+        "1. @live-devin-silver-island (worker) in project own-cf-devin, on T-1: Which cf\n\
                           2. /x/consensflow/bin/cf\n3. /x/consensflow/bin:/usr/bin";
 
     #[test]
     fn the_windows_own_cf_answering_whoami_and_no_decoy_run_holds() {
-        let held = judge(&seen("done", Some(ANSWER), Vec::new()), "live-devin");
+        let held = judge(&seen("done", Some(ANSWER), Vec::new()));
         assert_eq!(
             held,
             Ok(
-                "the window's own cf answered `cf whoami` (@live-devin (worker)); no decoy was run"
+                "the window's own cf answered `cf whoami` (@live-devin-silver-island (worker)); \
+                 no decoy was run"
                     .to_owned()
             )
         );
@@ -102,7 +113,7 @@ mod tests {
             "~/.local/bin",
             vec!["whoami".to_owned(), "--version".to_owned()],
         )];
-        let failed = judge(&seen("done", Some(ANSWER), decoys), "live-devin").unwrap_err();
+        let failed = judge(&seen("done", Some(ANSWER), decoys)).unwrap_err();
         assert_eq!(
             failed,
             [
@@ -113,30 +124,48 @@ mod tests {
 
     #[test]
     fn a_result_with_no_answer_of_the_daemons_proves_nothing_and_fails() {
-        let failed = judge(
-            &seen("done", Some("stand-in cf: whoami"), Vec::new()),
-            "live-devin",
-        )
-        .unwrap_err();
+        let failed = judge(&seen("done", Some("stand-in cf: whoami"), Vec::new())).unwrap_err();
         assert_eq!(
             failed,
             [
                 "the result does not hold what the window's own cf answers to `cf whoami` \
-              (@live-devin (worker)): no cf was proven run"
+              (@live-devin-silver-island (worker)): no cf was proven run"
             ]
         );
-        // Another worker's handle is not this one's.
-        assert!(judge(&seen("done", Some(ANSWER), Vec::new()), "live-pi").is_err());
+        // Another worker's handle is not this one's, and the agent's id alone is no handle.
+        let mut other = seen("done", Some(ANSWER), Vec::new());
+        other.handle = "live-pi-noble-birch".to_owned();
+        assert!(judge(&other).is_err());
+        let mut bare = seen(
+            "done",
+            Some("@live-devin (worker) in project p"),
+            Vec::new(),
+        );
+        bare.handle = "live-devin-silver-island".to_owned();
+        assert!(judge(&bare).is_err());
+    }
+
+    #[test]
+    fn a_worker_the_board_named_no_handle_of_proves_nothing() {
+        // A `cf whoami` of a participant with no handle says `@ (worker)`: an empty handle
+        // found in it proves nothing of this worker.
+        let mut nameless = seen(
+            "done",
+            Some("@ (worker) in project own-cf-devin"),
+            Vec::new(),
+        );
+        nameless.handle = String::new();
+        assert!(judge(&nameless).is_err());
     }
 
     #[test]
     fn a_task_not_done_or_done_with_no_result_fails_saying_so() {
         assert_eq!(
-            judge(&seen("working", None, Vec::new()), "live-pi").unwrap_err(),
+            judge(&seen("working", None, Vec::new())).unwrap_err(),
             ["the task is working, not done"]
         );
         assert_eq!(
-            judge(&seen("done", None, Vec::new()), "live-pi").unwrap_err(),
+            judge(&seen("done", None, Vec::new())).unwrap_err(),
             ["the task is done, and no result reached the chief"]
         );
     }

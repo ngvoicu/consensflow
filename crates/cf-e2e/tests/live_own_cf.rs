@@ -150,7 +150,15 @@ fn observe(members: &mut Members, harness: Harness, home: &Home, log: &Log) -> R
     members.add(&agent, &[])?;
     let number = members.give(&agent, TASK)?;
     log.say(format!("T-{number} is given: {}", cut(TASK, 100)));
+    // The worker's handle, as the board names its participant: what `cf whoami` says.
+    let mut handle = String::new();
     let thread = find(log, "the worker's task to end", WORK, LOOK, || {
+        if handle.is_empty() {
+            handle = members.lane(&agent)?["participant"]["handle"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+        }
         let thread = members.task(number)?;
         Ok(is_over(&thread).then_some(thread))
     })?;
@@ -170,6 +178,7 @@ fn observe(members: &mut Members, harness: Harness, home: &Home, log: &Log) -> R
             state,
             result,
             decoys: home::called(home),
+            handle,
         },
         found,
     })
@@ -202,9 +211,8 @@ fn a_members_shell_finds_its_windows_own_cf_ahead_of_a_decoy_its_profile_puts_fi
         let before = who.version();
         let ran = run(harness, &log);
         let version = between(before, who.version());
-        let handle = agents::id(harness);
         let (held, detail) = match &ran {
-            Ok(ran) => match judge(&ran.seen, &handle) {
+            Ok(ran) => match judge(&ran.seen) {
                 Ok(why) => (true, why),
                 Err(problems) => (false, problems.join("; ")),
             },

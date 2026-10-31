@@ -37,8 +37,8 @@ runs = ["live-own-cf"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
-find = "        .is_some_and(|result| result.contains(&whoami_of(handle)));"
-replace = "        .is_some();"
+find = "            .is_some_and(|result| result.contains(&whoami_of(handle)));"
+replace = "            .is_some();"
 
 [[plant]]
 name = "live kit gaps: the run's profiles put the decoys last on the PATH"
@@ -143,3 +143,13 @@ runs = ["live-own-cf"]
 file = "crates/cf-e2e/tests/live_own_cf.rs"
 find = "        .filter(|harness| *harness != LEAVING)"
 replace = "        .filter(|_| true)"
+
+[[plant]]
+name = "live kit gaps: a worker the board named no handle of is judged by an empty one"
+meant = "a_worker_the_board_named_no_handle_of_proves_nothing"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
+find = "    let answered = !handle.is_empty()\n        && seen"
+replace = "    let answered = true\n        && seen"
