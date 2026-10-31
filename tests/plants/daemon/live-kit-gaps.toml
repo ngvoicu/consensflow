@@ -179,3 +179,13 @@ runs = ["e2e-lib-machine"]
 file = "crates/cf-e2e/src/live/machine.rs"
 find = "            let person = isolation.owner_home().to_string_lossy().into_owned();"
 replace = "            let person = { let _ = isolation; home.clone() };"
+
+[[plant]]
+name = "live kit gaps: every paste of a shape asks the same word"
+meant = "each_case_is_a_shape_and_a_length_and_asks_a_word_of_its_own"
+runs = ["live-paste-enter"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = "            let word = format!(\"PASTED{}\", cases.len());"
+replace = "            let word = format!(\"PASTED{}\", cases.len() / 3 * 3);"

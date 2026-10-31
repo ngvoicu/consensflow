@@ -116,6 +116,20 @@ pub fn texts(word: &str, long: usize) -> Vec<(&'static str, String)> {
     ]
 }
 
+/// Every case, in the order run: each shape, each length, each asking a word of its own
+/// (`PASTED0` to `PASTED5`), so that what a window answered names the paste it answered.
+pub fn cases() -> Vec<(Shape, &'static str, String)> {
+    let mut cases = Vec::new();
+    for shape in Shape::ALL {
+        for at in 0..3 {
+            let word = format!("PASTED{}", cases.len());
+            let (length, text) = texts(&word, LONG).swap_remove(at);
+            cases.push((shape, length, text));
+        }
+    }
+    cases
+}
+
 /// The length of the long paste: the one Codex kept in its box on zeewin.
 const LONG: usize = 7700;
 
@@ -206,13 +220,9 @@ type Ran = Vec<(Shape, &'static str, Result<(Went, String)>)>;
 fn pastes(harness: Harness, log: &Log) -> Result<Ran> {
     let members = Members::open(&plan(harness), Path::new(FAKE_AGENT), log)?;
     let mut ran = Vec::new();
-    let mut word = 0;
-    for shape in Shape::ALL {
-        for (length, text) in texts(&format!("PASTED{word}"), LONG) {
-            word += 1;
-            log.say(format!("{length} pasted {}", shape.name()));
-            ran.push((shape, length, case(&members, shape, &text, log)));
-        }
+    for (shape, length, text) in cases() {
+        log.say(format!("{length} pasted {}", shape.name()));
+        ran.push((shape, length, case(&members, shape, &text, log)));
     }
     members.close()?;
     Ok(ran)
@@ -295,6 +305,20 @@ mod tests {
         assert_eq!(texts[0].1.lines().count(), 1);
         assert!(texts[1].1.lines().count() > 1 && texts[1].1.contains('—'));
         assert!(texts[2].1.chars().count() >= LONG);
+    }
+
+    #[test]
+    fn each_case_is_a_shape_and_a_length_and_asks_a_word_of_its_own() {
+        let cases = cases();
+        assert_eq!(cases.len(), 6);
+        for (at, (shape, length, text)) in cases.iter().enumerate() {
+            assert_eq!(*shape, Shape::ALL[at / 3]);
+            assert_eq!(*length, ["a line", "a few lines", "a long paste"][at % 3]);
+            assert!(
+                text.ends_with(&format!("word PASTED{at}, and run no tools.")),
+                "{text}"
+            );
+        }
     }
 
     #[test]
