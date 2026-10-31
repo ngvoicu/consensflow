@@ -1543,26 +1543,6 @@
       "thinking": "medium"
     },
     {
-      "preset": "arvakr",
-      "id": "arvakr",
-      "name": "Arvakr",
-      "label": "OpenCode GPT 6.1 Sol LOW",
-      "description": "Small code changes and focused reviews.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6.1-sol",
-      "effort": "low"
-    },
-    {
-      "preset": "alsvidr",
-      "id": "alsvidr",
-      "name": "Alsvidr",
-      "label": "OpenCode GPT 6.1 Sol MEDIUM",
-      "description": "Implementation, code review and planning.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6.1-sol",
-      "effort": "medium"
-    },
-    {
       "preset": "electra",
       "id": "electra",
       "name": "Electra",
@@ -1603,26 +1583,6 @@
       "thinking": "medium"
     },
     {
-      "preset": "dagr",
-      "id": "dagr",
-      "name": "Dagr",
-      "label": "OpenCode GPT 6 Astra LOW (OpenRouter API)",
-      "description": "Small code changes and focused reviews.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6-astra",
-      "effort": "low"
-    },
-    {
-      "preset": "skirnir",
-      "id": "skirnir",
-      "name": "Skirnir",
-      "label": "OpenCode GPT 6 Astra MEDIUM (OpenRouter API)",
-      "description": "Implementation, code review and planning.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6-astra",
-      "effort": "medium"
-    },
-    {
       "preset": "terpsichore",
       "id": "terpsichore",
       "name": "Terpsichore",
@@ -1641,16 +1601,6 @@
       "kind": "pi",
       "model": "openrouter/anthropic/claude-fable-5.1",
       "thinking": "low"
-    },
-    {
-      "preset": "suttung",
-      "id": "suttung",
-      "name": "Suttung",
-      "label": "OpenCode Fable 5.1 LOW (OpenRouter API)",
-      "description": "Small code changes and focused reviews.",
-      "kind": "opencode",
-      "model": "openrouter/anthropic/claude-fable-5.1",
-      "effort": "low"
     },
     {
       "preset": "calliope",
@@ -1823,36 +1773,6 @@
       "thinking": "high"
     },
     {
-      "preset": "aurvandil",
-      "id": "aurvandil",
-      "name": "Aurvandil",
-      "label": "OpenCode GPT 6 Astra MAX",
-      "description": "Complex debugging, architecture and detailed review.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6-astra",
-      "effort": "max"
-    },
-    {
-      "preset": "delling",
-      "id": "delling",
-      "name": "Delling",
-      "label": "OpenCode GPT 6 Astra XHIGH",
-      "description": "Complex debugging, architecture and detailed review.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6-astra",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "vidar",
-      "id": "vidar",
-      "name": "Vidar",
-      "label": "OpenCode GPT 6 Astra HIGH",
-      "description": "Complex debugging, architecture and detailed review.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6-astra",
-      "effort": "high"
-    },
-    {
       "preset": "aether",
       "id": "aether",
       "name": "Aether",
@@ -1891,46 +1811,6 @@
       "kind": "pi",
       "model": "openai-codex/gpt-5.6-luna",
       "thinking": "xhigh"
-    },
-    {
-      "preset": "sunna",
-      "id": "sunna",
-      "name": "Sunna",
-      "label": "OpenCode GPT 6.1 Sol XHIGH",
-      "description": "Feature work, code review and technical planning.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6.1-sol",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "skinfaxi",
-      "id": "skinfaxi",
-      "name": "Skinfaxi",
-      "label": "OpenCode GPT 6.1 Sol HIGH",
-      "description": "Feature work, code review and technical planning.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-6.1-sol",
-      "effort": "high"
-    },
-    {
-      "preset": "jord",
-      "id": "jord",
-      "name": "Jord",
-      "label": "OpenCode GPT 5.6 Terra XHIGH",
-      "description": "Everyday implementation and tests.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-5.6-terra",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "bil",
-      "id": "bil",
-      "name": "Bil",
-      "label": "OpenCode GPT 5.6 Luna XHIGH",
-      "description": "Small fixes and focused coding tasks.",
-      "kind": "opencode",
-      "model": "openrouter/openai/gpt-5.6-luna",
-      "effort": "xhigh"
     },
     {
       "preset": "zeus",
@@ -2003,36 +1883,6 @@
       "thinking": "medium"
     },
     {
-      "preset": "saga",
-      "id": "saga",
-      "name": "Saga",
-      "label": "OpenCode Fable 5.1 XHIGH",
-      "description": "Complex debugging, architecture and detailed review.",
-      "kind": "opencode",
-      "model": "openrouter/anthropic/claude-fable-5.1",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "gunnlod",
-      "id": "gunnlod",
-      "name": "Gunnlod",
-      "label": "OpenCode Fable 5.1 HIGH",
-      "description": "Complex debugging, architecture and detailed review.",
-      "kind": "opencode",
-      "model": "openrouter/anthropic/claude-fable-5.1",
-      "effort": "high"
-    },
-    {
-      "preset": "kvasir",
-      "id": "kvasir",
-      "name": "Kvasir",
-      "label": "OpenCode Fable 5.1 MEDIUM",
-      "description": "Implementation, code review and planning.",
-      "kind": "opencode",
-      "model": "openrouter/anthropic/claude-fable-5.1",
-      "effort": "medium"
-    },
-    {
       "preset": "kronos",
       "id": "kronos",
       "name": "Kronos",
@@ -2061,36 +1911,6 @@
       "kind": "pi",
       "model": "openrouter/anthropic/claude-opus-5.5",
       "thinking": "medium"
-    },
-    {
-      "preset": "baldr",
-      "id": "baldr",
-      "name": "Baldr",
-      "label": "OpenCode Opus 5.5 XHIGH",
-      "description": "Feature work, code review and technical planning.",
-      "kind": "opencode",
-      "model": "openrouter/anthropic/claude-opus-5.5",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "hodr",
-      "id": "hodr",
-      "name": "Hodr",
-      "label": "OpenCode Opus 5.5 HIGH",
-      "description": "Feature work, code review and technical planning.",
-      "kind": "opencode",
-      "model": "openrouter/anthropic/claude-opus-5.5",
-      "effort": "high"
-    },
-    {
-      "preset": "vali",
-      "id": "vali",
-      "name": "Vali",
-      "label": "OpenCode Opus 5.5 MEDIUM",
-      "description": "Feature work, code review and technical planning.",
-      "kind": "opencode",
-      "model": "openrouter/anthropic/claude-opus-5.5",
-      "effort": "medium"
     },
     {
       "preset": "hermod",
@@ -2173,16 +1993,6 @@
       "thinking": "low"
     },
     {
-      "preset": "freya",
-      "id": "freya",
-      "name": "Freya",
-      "label": "OpenCode DeepSeek V4.1 Flash MAX (fast)",
-      "description": "Routine coding and second opinions.",
-      "kind": "opencode",
-      "model": "openrouter/deepseek/deepseek-v4.1-flash",
-      "effort": "max"
-    },
-    {
       "preset": "zephyros",
       "id": "zephyros",
       "name": "Zephyros",
@@ -2191,16 +2001,6 @@
       "kind": "pi",
       "model": "openrouter/deepseek/deepseek-v4.1-flash",
       "thinking": "max"
-    },
-    {
-      "preset": "sif",
-      "id": "sif",
-      "name": "Sif",
-      "label": "OpenCode Gemini 3.8 Flash HIGH (fast)",
-      "description": "Routine coding and second opinions.",
-      "kind": "opencode",
-      "model": "openrouter/google/gemini-3.8-flash",
-      "effort": "high"
     },
     {
       "preset": "hades",
@@ -2350,142 +2150,6 @@
       "thinking": "xhigh"
     },
     {
-      "preset": "odin",
-      "id": "odin",
-      "name": "Odin",
-      "label": "OpenCode DeepSeek V4 Pro MAX",
-      "description": "Complex code changes and analysis.",
-      "kind": "opencode",
-      "model": "openrouter/deepseek/deepseek-v4-pro-0813",
-      "effort": "max"
-    },
-    {
-      "preset": "thor",
-      "id": "thor",
-      "name": "Thor",
-      "label": "OpenCode Grok 4.7 XHIGH",
-      "description": "Complex code changes and analysis.",
-      "kind": "opencode",
-      "model": "openrouter/x-ai/grok-4.7",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "tyr",
-      "id": "tyr",
-      "name": "Tyr",
-      "label": "OpenCode Qwen3.8 Max XHIGH",
-      "description": "Complex code changes and analysis.",
-      "kind": "opencode",
-      "model": "openrouter/qwen/qwen3.8-max",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "bragi",
-      "id": "bragi",
-      "name": "Bragi",
-      "label": "OpenCode Qwen3.8 27B XHIGH",
-      "description": "Coding and analysis across longer tasks.",
-      "kind": "opencode",
-      "model": "openrouter/qwen/qwen3.8-27b",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "mimir",
-      "id": "mimir",
-      "name": "Mimir",
-      "label": "OpenCode MiniMax M3",
-      "description": "Coding and analysis across longer tasks.",
-      "kind": "opencode",
-      "model": "openrouter/minimax/minimax-m3"
-    },
-    {
-      "preset": "idun",
-      "id": "idun",
-      "name": "Idun",
-      "label": "OpenCode MiMo V2.6 Pro",
-      "description": "Everyday coding and agent tasks at a low price.",
-      "kind": "opencode",
-      "model": "openrouter/xiaomi/mimo-v2.6-pro"
-    },
-    {
-      "preset": "mani",
-      "id": "mani",
-      "name": "Mani",
-      "label": "OpenCode Kimi K3 MAX",
-      "description": "Coding and analysis across longer tasks.",
-      "kind": "opencode",
-      "model": "openrouter/moonshotai/kimi-k3",
-      "effort": "max"
-    },
-    {
-      "preset": "nott",
-      "id": "nott",
-      "name": "Nott",
-      "label": "OpenCode GLM 5.3 Flash MAX",
-      "description": "Routine coding and second opinions.",
-      "kind": "opencode",
-      "model": "openrouter/z-ai/glm-5.3-flash",
-      "effort": "max"
-    },
-    {
-      "preset": "ymir",
-      "id": "ymir",
-      "name": "Ymir",
-      "label": "OpenCode Nemotron 3 Ultra 550B FREE HIGH",
-      "description": "Coding and analysis across longer tasks.",
-      "kind": "opencode",
-      "model": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-      "effort": "high"
-    },
-    {
-      "preset": "aegir",
-      "id": "aegir",
-      "name": "Aegir",
-      "label": "OpenCode Laguna S 2.1 FREE",
-      "description": "Code changes and repository tasks.",
-      "kind": "opencode",
-      "model": "openrouter/poolside/laguna-s-2.1:free"
-    },
-    {
-      "preset": "logi",
-      "id": "logi",
-      "name": "Logi",
-      "label": "OpenCode Muse Spark 1.3 XHIGH",
-      "description": "Collaborative coding and task breakdown.",
-      "kind": "opencode",
-      "model": "openrouter/meta/muse-spark-1.3",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "audhumla",
-      "id": "audhumla",
-      "name": "Audhumla",
-      "label": "OpenCode Zen Nemotron 3 Ultra 550B FREE",
-      "description": "Coding and analysis across longer tasks.",
-      "kind": "opencode",
-      "model": "opencode/nemotron-3-ultra-free"
-    },
-    {
-      "preset": "buri",
-      "id": "buri",
-      "name": "Buri",
-      "label": "OpenCode Zen Nemotron 3.5 Super VL FREE XHIGH",
-      "description": "Coding and analysis across longer tasks.",
-      "kind": "opencode",
-      "model": "opencode/nemotron-3.5-super-vl-free",
-      "effort": "xhigh"
-    },
-    {
-      "preset": "gefjon",
-      "id": "gefjon",
-      "name": "Gefjon",
-      "label": "OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH",
-      "description": "Collaborative coding and task breakdown.",
-      "kind": "opencode",
-      "model": "opencode/muse-spark-1.3-contributor-free",
-      "effort": "xhigh"
-    },
-    {
       "preset": "pygmalion",
       "id": "pygmalion",
       "name": "Pygmalion",
@@ -2517,8 +2181,6 @@
     "glm-5.3-flash": "GLM 5.3 Flash",
     "kimi-k3": "Kimi K3",
     "nemotron-3-ultra-550b-a55b:free": "Nemotron 3 Ultra (free)",
-    "nemotron-3-ultra-free": "Nemotron 3 Ultra (Zen free)",
-    "nemotron-3.5-super-vl-free": "Nemotron 3.5 Super VL (Zen free)",
     "laguna-s-2.1:free": "Laguna S 2.1 (free)",
     "muse-spark-1.3": "Muse Spark 1.3",
     "mimo-v2.6-pro": "MiMo V2.6 Pro",

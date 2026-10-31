@@ -15,8 +15,9 @@ use sha2::{Digest, Sha256};
 use super::{files, Error, Result};
 use crate::process::{self, Invocation};
 
-/// The identity every bundle of ConsensFlow has.
-pub const IDENTITY: &str = "dev.ngvoicu.consensflow";
+/// The identity every bundle the smoke builds and runs has: its own, never the live
+/// app's, which a copy of the app started beside it would be taken for.
+pub const IDENTITY: &str = cf_base::bundle::SMOKE;
 
 /// What a bundle of the releases before the deletion keeps of Node's, relative
 /// to it: the sidecar, and the CLI's sources.
@@ -60,6 +61,32 @@ pub fn run(program: &str, args: &[OsString], env: &Env) -> Result<String> {
     Ok(ran.stdout)
 }
 
+/// Has the bundle a smoke built go by the smoke's name, with no icon of the product's (its
+/// window comes to the front as it starts, and must not read as the live app's), and seals
+/// it again as it was signed: ad hoc, keeping its entitlements, flags and runtime.
+pub fn name_as_the_smokes(app: &Path, env: &Env) -> Result {
+    let plist = under(app, &["Contents", "Info.plist"]);
+    let text = fs::read_to_string(&plist).map_err(files("read", &plist))?;
+    if let Some(icon) = cf_base::bundle::icon_of(app, &text) {
+        if icon.exists() {
+            fs::remove_file(&icon).map_err(files("take out", &icon))?;
+        }
+    }
+    for edit in cf_base::bundle::smoke_name_edits(&text) {
+        let mut words: Vec<OsString> = edit.iter().map(OsString::from).collect();
+        words.push(plist.clone().into_os_string());
+        run("/usr/bin/plutil", &words, env)?;
+    }
+    let mut seal: Vec<OsString> = ["--force", "--deep", "--sign", "-"]
+        .iter()
+        .map(OsString::from)
+        .collect();
+    seal.push("--preserve-metadata=entitlements,flags,runtime".into());
+    seal.push(app.as_os_str().to_os_string());
+    run("/usr/bin/codesign", &seal, env)?;
+    Ok(())
+}
+
 /// A field of the bundle's `Info.plist`.
 pub fn plist_value(app: &Path, field: &str) -> Result<String> {
     let file = under(app, &["Contents", "Info.plist"]);
@@ -89,7 +116,7 @@ pub struct BundleInfo {
     pub cli_version: Option<String>,
 }
 
-/// The app at `app` as the installed app's check takes it: this app's identity,
+/// The app at `app` as the installed app's check takes it: the smoke's identity,
 /// one version in both of the plist's fields, the app's executable, and `cf`, the
 /// command a window runs. Whatever Node's files it holds must be all of them: a
 /// bundle with a runtime and no `cf.mjs` runs neither implementation of the
@@ -102,6 +129,12 @@ pub fn inspect_bundle(app: &Path, label: &str) -> Result<BundleInfo> {
         app.display()
     );
     let identifier = plist_value(app, "CFBundleIdentifier")?;
+    ensure!(
+        identifier != cf_base::bundle::RELEASE,
+        "{label} is {identifier}, the live app's identity: the smoke runs only apps of its own \
+         ({IDENTITY}), and builds every app it runs with it (a build an older run kept has the \
+         live app's: build it again)"
+    );
     ensure!(
         identifier == IDENTITY,
         "{label} is {identifier}, not {IDENTITY}"

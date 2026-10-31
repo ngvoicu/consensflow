@@ -107,11 +107,11 @@ impl Owner {
             ".codex/config.toml",
             ".codex/history.jsonl",
             ".config/devin/config.json",
-            ".config/opencode/opencode.json",
+            ".config/other-tool/config.json",
             ".local/share/devin/credentials.toml",
             ".local/share/devin/cli/trusted_workspaces.json",
             ".local/share/devin/cli/sessions.db",
-            ".local/share/opencode/auth.json",
+            ".local/share/other-tool/auth.json",
             ".config/muse/auth.json",
             ".config/muse/settings.json",
             ".config/muse/trust.json",
@@ -450,16 +450,16 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
     assert_eq!(mode(&home.join("data/devin/credentials.toml")), 0o600);
     // What other programs keep there is reached through a link, as it was, and Devin's own
     // folders are not: Devin writes in the run's.
-    let link = home.join("data/opencode");
+    let link = home.join("data/other-tool");
     assert!(fs::symlink_metadata(&link)
         .unwrap()
         .file_type()
         .is_symlink());
     assert_eq!(
         fs::read_link(&link).unwrap(),
-        owner.path(".local/share/opencode")
+        owner.path(".local/share/other-tool")
     );
-    assert!(fs::symlink_metadata(home.join("config/opencode")).is_ok());
+    assert!(fs::symlink_metadata(home.join("config/other-tool")).is_ok());
     write(
         &home.join("data/devin/cli/sessions.db"),
         "the run's session",
@@ -478,7 +478,7 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
     );
     // Dropping the home takes the links away, and none of what they reach.
     drop(isolation);
-    assert!(owner.path(".local/share/opencode/auth.json").is_file());
+    assert!(owner.path(".local/share/other-tool/auth.json").is_file());
 }
 
 #[test]
@@ -733,12 +733,9 @@ fn a_home_a_killed_run_left_is_taken_away_by_the_next_that_is_made() {
 #[test]
 fn a_harness_with_no_home_of_its_own_to_make_has_none() {
     let home = Path::new("/home/me");
-    for harness in [Harness::Claude, Harness::OpenCode] {
-        assert!(
-            Isolation::of_machine(harness, home).unwrap().is_none(),
-            "{harness:?}"
-        );
-    }
+    assert!(Isolation::of_machine(Harness::Claude, home)
+        .unwrap()
+        .is_none());
     for harness in [Harness::Codex, Harness::Devin] {
         assert!(
             Isolation::of_machine(harness, home).unwrap().is_some(),
@@ -754,9 +751,8 @@ fn a_harness_with_no_home_of_its_own_to_make_has_none() {
 #[test]
 fn every_harness_the_kit_can_launch_has_a_home_of_the_runs_own_or_a_reason_it_has_none() {
     let home = Path::new("/home/me");
-    // Claude Code's config folder is the kit's copy of the login (`super::login`); OpenCode
-    // runs on the owner's folders, reached by Devin's home, until ConsensFlow takes it out.
-    let elsewhere = [Harness::Claude, Harness::OpenCode];
+    // Claude Code's config folder is the kit's copy of the login (`super::login`).
+    let elsewhere = [Harness::Claude];
     for harness in Harness::ALL {
         if harness == Harness::Pi {
             // Pi's home needs the run's model, which this test does not ask.

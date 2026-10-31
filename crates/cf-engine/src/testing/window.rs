@@ -18,7 +18,7 @@ use cf_harness::contract::{
     Admission, Held, InputBox, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts,
     Waiting, Window, Work, NOT_ADMITTED,
 };
-use cf_harness::records::{Item, Lines, Reading, Record, Role, Settlement};
+use cf_harness::records::{Item, Lines, Reading, Record, Settlement};
 use serde_json::{json, Value};
 
 use super::adapter::{FakeAdapter, FakeAgent, Taking};
@@ -45,9 +45,6 @@ pub(super) struct FakeWindow {
     fake: Rc<FakeAdapter>,
     /// What a yes to its question would trust, where its adapter asks one.
     trusts: Option<Trusts>,
-    /// The first message it takes once it is up, where its adapter's windows
-    /// seed it so (`FakeAdapter::seeds`), not with the launch.
-    first: Option<String>,
 }
 
 impl FakeWindow {
@@ -56,7 +53,6 @@ impl FakeWindow {
         launch: String,
         session: String,
         fake: Rc<FakeAdapter>,
-        first: Option<String>,
     ) -> Self {
         let trusts = fake.trusts.borrow().clone();
         Self {
@@ -66,7 +62,6 @@ impl FakeWindow {
             pid: Cell::new(None),
             fake,
             trusts,
-            first,
         }
     }
 
@@ -163,7 +158,7 @@ impl Window for FakeWindow {
         })
     }
 
-    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         let args = json!([{ "launch": self.bag() }]);
         let at = self.call("started", args.clone());
         let wrapped = self.fake.start_holds.wrap(&args);
@@ -178,21 +173,6 @@ impl Window for FakeWindow {
                     .recorder
                     .answered(at, json!({ "nativeSession": native }));
                 return Ok(Some(native));
-            }
-            // A first message that goes in once the window is up, as OpenCode's
-            // through its server, is handed over only if the host admits it then.
-            if let Some(first) = &self.first {
-                if !host.admits() {
-                    self.fake
-                        .recorder
-                        .answered(at, json!({ "$error": { "message": NOT_ADMITTED } }));
-                    return Err(NOT_ADMITTED.to_owned());
-                }
-                let item = self.fake.item(Role::User, first);
-                self.fake.of_launch(&self.launch, |agent| {
-                    agent.items.push(item);
-                    agent.settled = false;
-                });
             }
             let answer = early.unwrap_or_else(|| started.map_or(Ok(()), |started| started()));
             let answered = match answer {

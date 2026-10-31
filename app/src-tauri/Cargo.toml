@@ -9,7 +9,9 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3", features = [] }
+tauri-build = { version = "2.7.4", features = [] }
+# The identity a build is made with, read from Tauri's configuration as Tauri reads it.
+serde_json.workspace = true
 
 [dependencies]
 serde_json.workspace = true
@@ -24,9 +26,9 @@ cf-launcher.workspace = true
 cf-portable.workspace = true
 # The daemon is started as every program here is: holding nothing of the app's but its streams.
 cf-process.workspace = true
-tauri = { version = "2.11.3", features = [] }
-tauri-plugin-dialog = "2.7.3"
-tauri-plugin-updater = "~2.11.0"
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-updater = "2.14.1"
 semver = "1"
 url = "2"
 time = { version = "0.3", features = ["formatting"] }
@@ -49,14 +51,14 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage
 # Its version moves with Tauri's: it is the one tauri-runtime-wry and wry are built with
 # (Cargo.lock holds one copy), and a Tauri that takes another needs this one moved with it,
 # or Windows builds two and `platform.controller()` no longer has this crate's types.
-webview2-com = "0.38.2"
+webview2-com = "0.39.1"
 
 [dev-dependencies]
 cf-panes = { workspace = true, features = ["test-support"] }
 # Detection as the daemon the app starts runs it, in the tests of the daemon's PATH.
 cf-harness.workspace = true
 portable-pty.workspace = true
-tauri = { version = "2.11.3", features = ["test"] }
+tauri = { version = "2.12.5", features = ["test"] }
 
 [lints]
 workspace = true

@@ -24,7 +24,7 @@ use cf_base::env::Env;
 use cf_proto::agents::Harness;
 use jiff::tz::TimeZone;
 
-use crate::{claude, codex, devin, muse, opencode, pi};
+use crate::{claude, codex, devin, muse, pi};
 
 mod thread;
 
@@ -58,7 +58,6 @@ pub fn reader(
         Harness::Claude => claude::record::reader(session, env, local),
         Harness::Codex => codex::record::reader(session, env),
         Harness::Pi => pi::record::reader(session, env, local),
-        Harness::Opencode => opencode::record::reader(session, env, local),
         Harness::Devin => devin::record::reader(session, env),
         Harness::Muse => muse::record::reader(session, env),
     })
@@ -106,8 +105,8 @@ pub fn answers(
 
 /// Whether `harness` has kept a transcript of `session` at all
 /// (`hasTranscript`): a file of it where the harness keeps them, Codex's
-/// named as Codex names it, Muse's its session's log. OpenCode and Devin keep a
-/// store, not a transcript: never. A home the places are under, needed and missing, is the
+/// named as Codex names it, Muse's its session's log. Devin keeps a store, not a
+/// transcript: never. A home the places are under, needed and missing, is the
 /// failure.
 pub fn has_transcript(harness: Harness, session: &str, env: &Env) -> Result<bool, String> {
     match harness {
@@ -115,7 +114,7 @@ pub fn has_transcript(harness: Harness, session: &str, env: &Env) -> Result<bool
         Harness::Codex => codex::paths::rollout_kept(session, env),
         Harness::Pi => Ok(pi::paths::transcript(session, env)?.is_some()),
         Harness::Muse => Ok(muse::paths::transcript(session, env)?.is_some()),
-        Harness::Opencode | Harness::Devin => Ok(false),
+        Harness::Devin => Ok(false),
     }
 }
 
@@ -130,7 +129,7 @@ pub fn transcript_boundary(
 ) -> Result<Option<Boundary>, String> {
     let file = match harness {
         Harness::Claude => claude::paths::transcript(session, env)?,
-        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin | Harness::Muse => None,
+        Harness::Codex | Harness::Pi | Harness::Devin | Harness::Muse => None,
     };
     file.map(|file| Boundary::of(&file).map_err(|failed| format!("{}: {failed}", file.display())))
         .transpose()
@@ -161,7 +160,7 @@ pub fn transcript_left(
 pub fn took(harness: Harness, session: &str, pasted: &str, at_ms: i64, env: &Env) -> Option<bool> {
     match harness {
         Harness::Devin => devin::took(env, session, pasted, at_ms),
-        Harness::Claude | Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Muse => None,
+        Harness::Claude | Harness::Codex | Harness::Pi | Harness::Muse => None,
     }
 }
 

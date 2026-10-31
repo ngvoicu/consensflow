@@ -7,8 +7,7 @@
 //!
 //! Each harness whose member asks through a door opens as a member of a project
 //! on the native daemon, one after another: Claude Code through its hook (`cf hook
-//! claude`), Codex through the broker, OpenCode through its extension
-//! (`hosts/lib/question-door.js`), Devin through its hook (`cf hook devin`). Pi has
+//! claude`), Codex through the broker, Devin through its hook (`cf hook devin`). Pi has
 //! no question tool, so no door: it is left out, which is no failure. The member is
 //! given a task that has it ask which colour to use; the check, as the chief,
 //! answers it from the board with `cf answer`, and shows from what the daemon wrote
@@ -36,12 +35,12 @@
 //! writes, or it ends with the question, and the answer is refused (2026-10-12).
 //!
 //! ```text
-//! cargo xtask live door                         Claude, Codex, OpenCode, Devin, and Pi's line
-//! cargo xtask live door opencode --hold 10
+//! cargo xtask live door                         Claude, Codex, Devin, and Pi's line
+//! cargo xtask live door codex --hold 10
 //! cargo xtask live door claude --hold 90        Claude's status over a 90 s wait (npm run live:hook-status)
 //! cargo xtask live door claude --tidy true      another run's rig ends before the chief hears the question
 //! cargo xtask live door fake                    the rig's stand-in Claude: no model, which no quota pays for
-//! cargo xtask live door --model opencode=opencode/some-model
+//! cargo xtask live door --model pi=openrouter/some/model
 //! ```
 //!
 //! The run fails when a door did not receive its answer as it should have.
@@ -70,7 +69,7 @@ use check::Asked;
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The harnesses run when none is named, in the order they are run in.
-const DEFAULT: [&str; 5] = ["claude", "codex", "opencode", "devin", "pi"];
+const DEFAULT: [&str; 4] = ["claude", "codex", "devin", "pi"];
 
 /// The doors the words of the command line name, or all there are.
 fn doors(named: &[String]) -> Result<Vec<Who>> {
@@ -161,7 +160,7 @@ mod tests {
     #[test]
     fn with_no_harness_named_every_door_is_run_in_the_order_of_the_proof_and_pi_last() {
         let all: Vec<&str> = doors(&[]).unwrap().iter().map(|who| who.name()).collect();
-        assert_eq!(all, ["claude", "codex", "opencode", "devin", "pi"]);
+        assert_eq!(all, ["claude", "codex", "devin", "pi"]);
         let some = doors(&["fake".to_owned(), "devin".to_owned()]).unwrap();
         assert_eq!(
             some.iter().map(|who| who.name()).collect::<Vec<_>>(),
@@ -183,15 +182,15 @@ mod tests {
 
     #[test]
     fn a_model_is_given_for_a_harness_as_the_harness_an_equals_sign_and_the_model() {
-        let given = ["opencode=opencode/some-model", "pi=openrouter/x/y=z"].map(str::to_owned);
+        let given = ["codex=gpt-some-model", "pi=openrouter/x/y=z"].map(str::to_owned);
         let found = models(&given).unwrap();
-        assert_eq!(found["opencode"], "opencode/some-model");
+        assert_eq!(found["codex"], "gpt-some-model");
         assert_eq!(
             found["pi"], "openrouter/x/y=z",
             "the first equals sign divides"
         );
         assert!(models(&[]).unwrap().is_empty());
-        for wrong in ["opencode", "=model", "opencode="] {
+        for wrong in ["codex", "=model", "codex="] {
             let failed = models(&[wrong.to_owned()]).unwrap_err().to_string();
             assert_eq!(
                 failed,

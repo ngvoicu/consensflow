@@ -136,9 +136,20 @@ pub struct Run {
     limit: Option<Duration>,
     input: Input,
     own_group: bool,
+    /// The bundle the release ships, where the run has leave to start it ([`Run::shipped`]).
+    shipped: Option<PathBuf>,
 }
 
 impl Run {
+    /// With leave to start the bundle the release ships, which no case starts otherwise: a
+    /// [`Shipped`](crate::shipped::Shipped), made only on GitHub's runner where its workflow
+    /// asks and no live app runs.
+    #[must_use]
+    pub fn shipped(mut self, leave: &crate::shipped::Shipped) -> Self {
+        self.shipped = Some(leave.app().to_path_buf());
+        self
+    }
+
     /// `program`, with no words, none of the test's environment and the
     /// [`LIMIT`]. A path is started as it is; a bare name is left to the
     /// system to find, which the cases here do not rely on.
@@ -153,6 +164,7 @@ impl Run {
             limit: Some(LIMIT),
             input: Input::Default,
             own_group: false,
+            shipped: None,
         }
     }
 
@@ -273,6 +285,29 @@ impl Run {
         self
     }
 
+    /// Refuses a program that is an app a test may not start, or reaches one by its words,
+    /// before anything starts.
+    fn startable(&self) -> Result<()> {
+        let words: Vec<&OsStr> = self
+            .args
+            .iter()
+            .map(|arg| match arg {
+                Arg::Plain(word) => word.as_os_str(),
+                #[cfg(windows)]
+                Arg::Raw(word) => word.as_os_str(),
+            })
+            .collect();
+        let program = std::path::Path::new(&self.program);
+        let shipped = self.shipped.as_deref().is_some_and(|app| {
+            cf_base::bundle::bundle_of(program).is_some_and(|bundle| bundle == app)
+        });
+        if shipped {
+            return cf_base::bundle::words_startable_by_a_test(program, &words)
+                .map_err(Error::LiveApp);
+        }
+        cf_base::bundle::command_startable_by_a_test(program, &words).map_err(Error::LiveApp)
+    }
+
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
@@ -305,6 +340,7 @@ impl Run {
     /// Only a program that did not start is an error: a code other than 0 is an
     /// answer, for the case to read.
     pub fn run(self) -> Result<Ran> {
+        self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
         let mut command = self.command();
         command
@@ -354,6 +390,7 @@ impl Run {
     /// streams are pipes ([`Spawned`]), its input one too unless it was told to
     /// be closed. Ending it is the case's, or its owner's drop.
     pub fn spawn(self) -> Result<Spawned> {
+        self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
         let mut command = self.command();
         command

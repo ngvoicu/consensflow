@@ -43,11 +43,10 @@ pub fn stand_in_worker() -> Value {
 /// The work tier of the member of `harness`: its own, so that a task which names
 /// the tier lands on that harness. The daemon picks a member by tier alone, and a
 /// check that needs one harness's question tool must land on that harness. There are
-/// four tiers for six harnesses: Devin and Codex share one, and Pi and Muse another.
+/// four tiers for five harnesses: Devin and Codex share one, and Pi and Muse another.
 const fn tier(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "complex",
-        Harness::OpenCode => "light",
         Harness::Pi | Harness::Muse => "standard",
         Harness::Devin | Harness::Codex => "critical",
     }
@@ -266,7 +265,7 @@ mod tests {
         let tiers: Vec<&str> = Harness::ALL.into_iter().map(tier).collect();
         assert_eq!(
             tiers,
-            ["complex", "light", "standard", "critical", "critical", "standard"]
+            ["complex", "standard", "critical", "critical", "standard"]
         );
     }
 
@@ -312,12 +311,12 @@ mod tests {
         assert!(alone.harnesses().is_empty());
         assert_eq!(alone.chief, "chief");
 
-        let bench = Plan::new("bench", member_as(Harness::OpenCode, "bench-chief"))
-            .with(member(Harness::OpenCode))
+        let bench = Plan::new("bench", member_as(Harness::Claude, "bench-chief"))
+            .with(member(Harness::Claude))
             .with(member(Harness::Pi))
             .with(member_as(Harness::Pi, "bench-reviewer"))
             .with(stand_in_worker());
-        assert_eq!(bench.harnesses(), [Harness::OpenCode, Harness::Pi]);
+        assert_eq!(bench.harnesses(), [Harness::Claude, Harness::Pi]);
         assert_eq!(bench.chief, "bench-chief");
         assert_eq!(bench.roster[0]["id"], "bench-chief");
     }
@@ -359,7 +358,6 @@ mod tests {
         assert!(claude.contains("Do not pick one yourself: ask, and wait for the answer."));
         assert!(claude.ends_with("reply with exactly one line: COLOUR=<the answer>"));
         for (harness, tool) in [
-            (Harness::OpenCode, "question tool"),
             (Harness::Codex, "request_user_input tool"),
             (Harness::Devin, "ask_user_question tool"),
         ] {

@@ -1,7 +1,7 @@
 //! What a long run is asked to do.
 //!
 //! ```text
-//! cargo xtask eval long [--chief claude] [--staff claude,codex,pi,opencode,devin]
+//! cargo xtask eval long [--chief claude] [--staff claude,codex,pi,devin]
 //!                       [--models claude=a+b,...] [--model M] [--effort high]
 //!                       [--staff-effort medium] [--hours 2] [--every-min 8]
 //!                       [--look-sec 10] [--idle-min 20] [--dialog-min 5]
@@ -35,7 +35,7 @@ use crate::{Error, Result};
 /// The flags of `long`.
 const FLAGS: [Flag; 26] = [
     Flag::or("chief", "claude"),
-    Flag::or("staff", "claude,codex,pi,opencode,devin"),
+    Flag::or("staff", "claude,codex,pi,devin"),
     Flag::value("models"),
     Flag::value("model"),
     Flag::or("effort", "high"),

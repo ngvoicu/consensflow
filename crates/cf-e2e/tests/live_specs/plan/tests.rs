@@ -9,14 +9,14 @@ fn every_harness_is_the_chief_of_one_project_which_runs_every_step_in_order() {
     assert_eq!(chiefs, Harness::ALL);
     assert_eq!(
         all.iter().map(|project| project.number).collect::<Vec<_>>(),
-        [1, 2, 3, 4, 5, 6]
+        [1, 2, 3, 4, 5]
     );
     for project in &all {
         assert_eq!(project.steps, Step::ALL, "{}", project.name());
     }
     assert_eq!(all[0].name(), "p1 claude");
-    assert_eq!(all[4].name(), "p5 codex");
-    assert_eq!(all[5].name(), "p6 muse");
+    assert_eq!(all[3].name(), "p4 codex");
+    assert_eq!(all[4].name(), "p5 muse");
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn the_harnesses_named_are_the_only_chiefs_and_keep_their_place_in_the_rotation(
         .iter()
         .map(|project| (project.number, project.chief))
         .collect();
-    assert_eq!(seen, [(1, Harness::Claude), (3, Harness::Pi)]);
+    assert_eq!(seen, [(1, Harness::Claude), (2, Harness::Pi)]);
 }
 
 #[test]
@@ -90,8 +90,8 @@ fn by_default_a_run_plans_with_the_first_variant_the_harness_lacks() {
 #[test]
 fn lists_name_harnesses_steps_and_a_variant_by_commas_or_blanks_and_a_wrong_word_is_the_error() {
     assert_eq!(
-        harnesses_named("claude, pi opencode,,"),
-        Ok(vec![Harness::Claude, Harness::Pi, Harness::OpenCode])
+        harnesses_named("claude, pi codex,,"),
+        Ok(vec![Harness::Claude, Harness::Pi, Harness::Codex])
     );
     assert_eq!(harnesses_named(""), Ok(Vec::new()));
     assert_eq!(

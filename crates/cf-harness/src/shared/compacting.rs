@@ -14,10 +14,8 @@
 //!   "Auto-compacting... (escape to cancel)" by itself, and "Context overflow
 //!   detected, Auto-compacting... (escape to cancel)".
 //!
-//! Devin 3000.11 and OpenCode 1.19 draw none this reads: Devin compacts in the middle of
-//! a turn, its record and its wire at work all the while, and refuses `/compact` while
-//! busy; OpenCode writes its compaction's user message and streams its summary as a
-//! turn of its own, which its record reads at work.
+//! Devin 3000.11 draws none this reads: it compacts in the middle of a turn, its record
+//! and its wire at work all the while, and refuses `/compact` while busy.
 //!
 //! Only a status line counts: its words begin the line, past whitespace, the frame its
 //! harness draws it in (Pi draws it inside the rule above its input box: "── ⠧ Compacting

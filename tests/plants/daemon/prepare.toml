@@ -92,15 +92,21 @@ runs = ["harness-install"]
 file = "crates/cf-harness/src/prepare.rs"
 find = '''
         report.push(format!("The cf launcher could not be installed: {message}"));
-    }'''
+    }
+    Prepared {
+        report,
+        pi_extension: pi::prepare_extension(env),'''
 replace = '''
         report.push(format!("The cf launcher could not be installed: {message}"));
-        return Prepared {
-            report,
-            pi_extension: pi::Extension::NotInstalled,
-            opencode_extension: opencode::Extension::NotInstalled,
-        };
-    }'''
+    }
+    let stopped = !report.is_empty();
+    Prepared {
+        report,
+        pi_extension: if stopped {
+            pi::Extension::NotInstalled
+        } else {
+            pi::prepare_extension(env)
+        },'''
 
 [[plant]]
 name = "prepare: the launcher is not installed"

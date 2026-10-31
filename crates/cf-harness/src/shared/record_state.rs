@@ -21,8 +21,7 @@ use crate::records::{Quota, Reading, Record, Settlement};
 /// refusal's handled mark would let the engine paste into it. What the window says now stands
 /// over its record's refusal, which it may have left behind, and a window that says nothing
 /// keeps the record's own: Claude's adapter lost the move, Devin's replaced the record's quota
-/// with the wire's even where that was none, and OpenCode's let a retry outrank a move (T-841,
-/// T-853).
+/// with the wire's even where that was none (T-841, T-853).
 fn quota_of(record: &Record, live: Option<Arc<Quota>>) -> Option<Arc<Quota>> {
     record
         .model_moved

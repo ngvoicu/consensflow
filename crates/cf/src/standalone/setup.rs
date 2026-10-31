@@ -1,5 +1,5 @@
 //! `cf setup`: prepares what the app prepares when it opens, the terminal
-//! command and the extensions of Pi and OpenCode
+//! command and the extension of Pi
 //! (`cf_harness::prepare::prepare_app`), and says which harnesses it found and
 //! how many agents there are.
 //!

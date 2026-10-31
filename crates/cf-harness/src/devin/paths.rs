@@ -80,7 +80,6 @@ mod tests {
             &[
                 ".claude/skills",
                 ".codex/skills",
-                ".config/opencode/skills",
                 ".pi/agent/skills",
                 ".local/share/devin/skills",
                 ".config/devin/skill",

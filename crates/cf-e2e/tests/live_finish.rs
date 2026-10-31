@@ -79,7 +79,7 @@
 //! ```text
 //! cargo xtask live finish                          Claude, the default: both steps
 //! cargo xtask live finish devin                    one harness
-//! cargo xtask live finish claude codex opencode pi devin    each, one after the other
+//! cargo xtask live finish claude codex pi devin    each, one after the other
 //! cargo xtask live finish claude -- a_worker_that_leaves    only the step that leaves a command
 //! cargo xtask live finish fake                     the rig's stand-in worker: no model, no quota
 //! cargo xtask live finish devin --keep             leaves the run's home and project where they are

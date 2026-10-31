@@ -242,7 +242,7 @@ fn every_launch_has_an_id_of_its_own_in_the_shape_of_a_uuid() {
 fn a_launch_s_files_are_forgotten_from_every_harness_s_folder() {
     let home = tempfile::tempdir().unwrap();
     let launch = RandomLaunchIds.draw();
-    for harness in ["claude", "pi", "devin", "opencode"] {
+    for harness in ["claude", "pi", "devin"] {
         let folder = home
             .path()
             .join("integrations")
@@ -262,7 +262,7 @@ fn a_launch_s_files_are_forgotten_from_every_harness_s_folder() {
         Rc::new(Trace::new(home.path())),
     ));
     LaunchFolders::new(home.path().to_path_buf(), errors).forget(&launch);
-    for harness in ["claude", "pi", "devin", "opencode"] {
+    for harness in ["claude", "pi", "devin"] {
         let folder = home
             .path()
             .join("integrations")

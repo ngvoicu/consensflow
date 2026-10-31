@@ -81,13 +81,6 @@ fn every_state_of_a_version_and_an_update_is_written_as_its_word_with_its_fields
         r#"{"state":"update-required","reason":"r"}"#
     );
     assert_eq!(
-        serde_json::to_string(&Setup::NotSupportedYet {
-            reason: "r".to_owned()
-        })
-        .unwrap(),
-        r#"{"state":"not-supported-yet","reason":"r"}"#
-    );
-    assert_eq!(
         serde_json::to_string(&Setup::Ready).unwrap(),
         r#"{"state":"ready"}"#
     );
@@ -134,17 +127,7 @@ fn an_extension_is_its_state_and_its_path_and_the_reason_when_it_failed() {
         json!({"state": "installed-unverified", "path": "/p"})
     );
     assert_eq!(
-        said(Extension::of_opencode(
-            opencode::Extension::InstalledUnverified {
-                path: "/p".to_owned(),
-                config: "/tui.json".to_owned()
-            }
-        )),
-        json!({"state": "installed-unverified", "path": "/p"}),
-        "OpenCode's settings file is the launch's, not the row's"
-    );
-    assert_eq!(
-        serde_json::to_string(&Extension::of_opencode(opencode::Extension::Error {
+        serde_json::to_string(&Extension::of_pi(pi::Extension::Error {
             reason: "EACCES".to_owned()
         }))
         .unwrap(),

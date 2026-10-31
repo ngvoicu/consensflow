@@ -117,28 +117,3 @@ replace = '''
             .skip(1)
             .map(catalog_row)
             .collect();'''
-
-[[plant]]
-name = "agents, catalog: Nemotron 3.5 Super VL on Zen names max, a level Zen does not list for it"
-meant = "is_the_one_nemotron_3_5_of_the_catalog_with_its_label_its_route_and_its_effort"
-runs = ["catalog"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/data/presets.json"
-find = '''
-      "model": "opencode/nemotron-3.5-super-vl-free",
-      "effort": "xhigh"'''
-replace = '''
-      "model": "opencode/nemotron-3.5-super-vl-free",
-      "effort": "max"'''
-
-[[plant]]
-name = "agents, catalog: Nemotron 3.5 Super VL on Zen has no label of its model"
-meant = "is_the_one_nemotron_3_5_of_the_catalog_with_its_label_its_route_and_its_effort"
-runs = ["catalog"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/data/presets.json"
-find = '''
-    "nemotron-3.5-super-vl-free": "Nemotron 3.5 Super VL (Zen free)",'''
-replace = ""

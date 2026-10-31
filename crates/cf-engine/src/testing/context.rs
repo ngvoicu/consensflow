@@ -97,8 +97,8 @@ pub struct Made {
 impl Default for Made {
     fn default() -> Self {
         Self {
-            // The fake answers for any harness; OpenCode is here for a mixed staff.
-            harnesses: vec!["claude-code", "opencode"],
+            // The fake answers for any harness; Pi is here for a mixed staff.
+            harnesses: vec!["claude-code", "pi"],
             codex: false,
             settle_ms: 0,
         }

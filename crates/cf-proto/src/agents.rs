@@ -15,7 +15,6 @@ pub enum Harness {
     Claude,
     Codex,
     Pi,
-    Opencode,
     Devin,
     /// Meta's Muse Code (`muse`): detected and read since 3.0.6 (T-703); no
     /// window is opened on it yet.
@@ -24,11 +23,10 @@ pub enum Harness {
 
 impl Harness {
     /// Every harness, in the order the page and the roster list them.
-    pub const ALL: [Harness; 6] = [
+    pub const ALL: [Harness; 5] = [
         Harness::Claude,
         Harness::Codex,
         Harness::Pi,
-        Harness::Opencode,
         Harness::Devin,
         Harness::Muse,
     ];
@@ -39,7 +37,6 @@ impl Harness {
             Harness::Claude => "claude",
             Harness::Codex => "codex",
             Harness::Pi => "pi",
-            Harness::Opencode => "opencode",
             Harness::Devin => "devin",
             Harness::Muse => "muse",
         }
@@ -76,14 +73,12 @@ impl Harness {
     /// given `CLAUDE_CODE_CHILD_SESSION` saves no transcript, one given the parent's
     /// `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` is taken for it, and the messaging
     /// socket and token reach into the parent. Configuration is no part of it
-    /// (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`),
-    /// nor is OpenCode's `AGENT=1`, true of every window, and too common a name.
+    /// (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`).
     ///
     /// Read from the binaries (2026-10-29, T-971): Claude Code 2.1.312's own list of what
     /// it gives a child session; Codex 0.165's sandbox (`codex sandbox -- env`) and the
     /// names its shell's environment is made of; Pi 1.4's `process.env` and its bash
-    /// tool's; OpenCode 1.19's `process.env` and its terminal's; Devin 3000.11's terminal,
-    /// whose shell script names and unsets both; Muse 1.4.14's hooks' and tools' (its
+    /// tool's; Devin 3000.11's terminal, whose shell script names and unsets both; Muse 1.4.14's hooks' and tools' (its
     /// session and thread, its log, a Claude-shaped tool call id, its trace) and its
     /// launcher's `MUSE_RELEASE_INFO`. A harness's own switches a launch sets
     /// (`MUSE_NO_AUTO_UPDATE`) are its configuration, and none of this.
@@ -138,7 +133,6 @@ impl Harness {
                 "PI_REASONING_LEVEL",
                 "AI_AGENT",
             ],
-            Harness::Opencode => &["OPENCODE", "OPENCODE_PID", "OPENCODE_TERMINAL"],
             Harness::Devin => &[
                 "WINDSURF_CASCADE_TERMINAL",
                 "DEVIN_DISABLE_HISTEXPAND",
@@ -265,9 +259,6 @@ pub struct Profile {
     pub model_label: String,
     /// The road to the model (`Codex login`, `OpenRouter · API`).
     pub route_label: String,
-    /// What a person should know of the road's data use, said for Muse's contributor routes alone.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub route_note: Option<String>,
     pub work_tier: WorkTier,
 }
 
@@ -342,7 +333,7 @@ pub struct AgentView {
     #[serde(skip_serializing_if = "is_false")]
     pub unsupported: bool,
     /// Kept out of the list the human sees: a Claude or OpenAI model through
-    /// Pi or OpenCode, while they keep to their own harnesses. Said by
+    /// Pi or Devin, while they keep to their own harnesses. Said by
     /// `listAgents` alone, and last.
     #[serde(skip_serializing_if = "is_false")]
     pub hidden: bool,
@@ -355,7 +346,7 @@ pub struct AgentView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
-    /// Claude and OpenAI models reached through Pi or OpenCode are hidden.
+    /// Claude and OpenAI models reached through Pi or Devin are hidden.
     pub own_harness_only: bool,
 }
 
@@ -372,22 +363,21 @@ mod tests {
         Profile {
             model_key: "muse-spark-1.3".into(),
             model_label: "Muse Spark 1.3".into(),
-            route_label: "OpenCode Zen · Contributor · Free".into(),
-            route_note: Some("Prompts and replies may train Meta models.".into()),
+            route_label: "OpenRouter · API".into(),
             work_tier: WorkTier::Light,
         }
     }
 
     fn entry() -> CatalogEntry {
         CatalogEntry {
-            name: "gefjon".into(),
+            name: "eos".into(),
             designer: false,
-            model: "opencode/muse-spark-1.3-contributor-free".into(),
+            model: "openrouter/meta/muse-spark-1.3".into(),
             effort: Some("xhigh".into()),
-            description: "OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH".into(),
+            description: "Pi Muse Spark 1.3 XHIGH".into(),
             detail: "Collaborative coding and task breakdown.".into(),
             profile: muse(),
-            preset: "gefjon".into(),
+            preset: "eos".into(),
         }
     }
 
@@ -397,7 +387,6 @@ mod tests {
             (Harness::Claude, "claude", "claude-code"),
             (Harness::Codex, "codex", "codex"),
             (Harness::Pi, "pi", "pi"),
-            (Harness::Opencode, "opencode", "opencode"),
             (Harness::Devin, "devin", "devin"),
             (Harness::Muse, "muse", "muse"),
         ];
@@ -466,8 +455,6 @@ mod tests {
             "PI_CODING_AGENT_DIR",
             "MUSE_NO_AUTO_UPDATE",
             "MUSE_AUTH_PATH",
-            "OPENCODE_CONFIG",
-            "AGENT",
             "CONSENSFLOW_HOME",
             "PATH",
             "HOME",
@@ -518,10 +505,7 @@ mod tests {
     #[test]
     fn the_harnesses_are_listed_as_the_roster_lists_them() {
         let names: Vec<_> = Harness::ALL.into_iter().map(Harness::as_str).collect();
-        assert_eq!(
-            names,
-            ["claude", "codex", "pi", "opencode", "devin", "muse"]
-        );
+        assert_eq!(names, ["claude", "codex", "pi", "devin", "muse"]);
     }
 
     #[test]
@@ -565,20 +549,8 @@ mod tests {
     fn a_profile_writes_its_fields_in_the_order_the_catalog_builds_them() {
         assert_eq!(
             serde_json::to_string(&muse()).unwrap(),
-            r#"{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenCode Zen · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"}"#
+            r#"{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"}"#
         );
-    }
-
-    #[test]
-    fn a_profile_with_no_route_note_says_none() {
-        let plain = Profile {
-            route_note: None,
-            ..muse()
-        };
-        let written = serde_json::to_string(&plain).unwrap();
-        assert!(!written.contains("routeNote"), "{written}");
-        assert!(written
-            .ends_with(r#""routeLabel":"OpenCode Zen · Contributor · Free","workTier":"light"}"#));
     }
 
     #[test]
@@ -586,11 +558,11 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&entry()).unwrap(),
             concat!(
-                r#"{"name":"gefjon","model":"opencode/muse-spark-1.3-contributor-free","effort":"xhigh","#,
-                r#""description":"OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH","#,
+                r#"{"name":"eos","model":"openrouter/meta/muse-spark-1.3","effort":"xhigh","#,
+                r#""description":"Pi Muse Spark 1.3 XHIGH","#,
                 r#""detail":"Collaborative coding and task breakdown.","#,
-                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenCode Zen · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
-                r#""preset":"gefjon"}"#
+                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"},"#,
+                r#""preset":"eos"}"#
             )
         );
     }
@@ -604,7 +576,7 @@ mod tests {
         };
         let written = serde_json::to_string(&image).unwrap();
         assert!(
-            written.starts_with(r#"{"name":"gefjon","designer":true,"model":"#),
+            written.starts_with(r#"{"name":"eos","designer":true,"model":"#),
             "{written}"
         );
         assert!(!written.contains("\"effort\""), "{written}");
@@ -616,15 +588,15 @@ mod tests {
     fn a_lookup_answers_the_entry_with_its_harness_after_the_preset() {
         let found = FoundEntry {
             entry: entry(),
-            harness: Harness::Opencode,
+            harness: Harness::Pi,
         };
         let written = serde_json::to_string(&found).unwrap();
         assert!(
-            written.ends_with(r#""preset":"gefjon","harness":"opencode"}"#),
+            written.ends_with(r#""preset":"eos","harness":"pi"}"#),
             "{written}"
         );
         assert!(
-            written.starts_with(r#"{"name":"gefjon","model":"#),
+            written.starts_with(r#"{"name":"eos","model":"#),
             "{written}"
         );
     }
@@ -667,7 +639,7 @@ mod tests {
             concat!(
                 r#"{"name":"mine","harness":"kimi","designer":true,"model":"moonshot-ai/kimi-k3","#,
                 r#""workTier":"complex","effort":"high","description":"Mine","preset":"mine","custom":true,"#,
-                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenCode Zen · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
+                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"},"#,
                 r#""unsupported":true,"hidden":true}"#
             )
         );

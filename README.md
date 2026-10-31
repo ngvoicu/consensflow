@@ -8,7 +8,7 @@ terminal of its own, and every result comes back to the board. You see it
 all in one window: the board on the left, the agents' terminals on the right.
 
 ConsensFlow works through the coding agents you already use (Claude Code,
-Codex, OpenCode, Pi and Devin), with your own logins. It stores no passwords
+Codex, Pi and Devin), with your own logins. It stores no passwords
 and needs no API keys.
 
 ## What it does
@@ -51,11 +51,10 @@ Install the ones you want to use, and sign in to each once in a terminal:
 | ----------- | ------------------------------------------------ |
 | Claude Code | `npm install -g @anthropic-ai/claude-code`, or Anthropic's installer |
 | Codex       | `npm install -g @openai/codex`, or its own installer |
-| OpenCode    | `npm install -g opencode-ai@1`, or its own installer (version 1.x: OpenCode 2 is not supported yet) |
 | Pi          | `npm install -g @earendil-works/pi-coding-agent`, or its own installer |
 | Devin       | Devin's own CLI installer (version 3000.10.21 or later) |
 
-You don't need all five: one is enough to start. **Settings → Harnesses**
+You don't need all four: one is enough to start. **Settings → Harnesses**
 shows which are installed, their versions, and whether ConsensFlow is set up
 for each. ConsensFlow prepares what it needs for a harness by itself, the
 first time one of its windows opens.

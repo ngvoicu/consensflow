@@ -2232,9 +2232,9 @@ file = "crates/cf-process/src/hand_over.rs"
 find = "            if held == words || Instant::now() >= until {\n"
 replace = "            if mark.exists() || Instant::now() >= until {\n"
 
-# A shim that names a native program alone (opencode-ai 1.19.4's: its package ships a program
-# where it shipped a script) starts that program; one that names a program that is not there, or
-# is not one, is cmd.exe's (T-353, found by `live finish opencode` on zeewin: no window opened).
+# A shim that names a native program alone (a package that ships a program where it shipped a
+# script) starts that program; one that names a program that is not there, or is not one, is
+# cmd.exe's (T-353, found by a live finish on zeewin: no window opened).
 
 [[plant]]
 name = "tooling (cf-process): a shim that names a native program alone is not read"

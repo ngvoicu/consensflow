@@ -52,7 +52,7 @@ const LOOK: Duration = Duration::from_secs(1);
 /// What a variable that marks a session begins with: a harness's own word (Devin's store's
 /// `CHISEL_` among them), a terminal's (cmux's); and the marks harnesses set for their children
 /// by whole name.
-const PREFIXES: [&str; 9] = [
+const PREFIXES: [&str; 8] = [
     "CLAUDE",
     "CODEX_",
     "PI_",
@@ -60,7 +60,6 @@ const PREFIXES: [&str; 9] = [
     "DEVIN_",
     "WINDSURF_",
     "CHISEL_",
-    "OPENCODE",
     "CMUX_",
 ];
 const NAMES: [&str; 3] = ["AI_AGENT", "TRACEPARENT", "TRACESTATE"];

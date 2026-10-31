@@ -11,12 +11,12 @@ fn older_file() -> String {
         "schemaVersion": 1,
         "agents": [
             {
-                "id": "gefjon",
-                "name": "Gefjon",
-                "kind": "opencode",
-                "model": "opencode/muse-spark-1.3-contributor-free",
-                "effort": "xhigh",
-                "preset": "gefjon",
+                "id": "eos",
+                "name": "Eos",
+                "kind": "pi",
+                "model": "openrouter/meta/muse-spark-1.3",
+                "thinking": "xhigh",
+                "preset": "eos",
                 "profile": { "workTier": "light" },
             },
             {
@@ -57,7 +57,7 @@ fn a_copy_of_a_catalog_entry_edited_or_not_reads_as_the_catalog_has_it_without_w
     let agents = home.by_name(&catalog);
     assert_eq!(
         (
-            agents["gefjon"].custom,
+            agents["eos"].custom,
             agents["apollo"].effort.as_deref(),
             agents["mine"].custom
         ),

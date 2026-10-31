@@ -22,45 +22,39 @@ fn lists_every_catalog_agent_with_no_file_at_all_as_the_catalog_has_it() {
     let roster = Roster::new(&catalog, home.path());
     let agents = roster.list().unwrap();
     assert_eq!(agents.len(), catalog.presets().len());
-    let gefjon = agents
+    let clio = agents
         .iter()
-        .find(|agent| agent.name.as_deref() == Some("gefjon"))
+        .find(|agent| agent.name.as_deref() == Some("clio"))
         .unwrap();
     assert_eq!(
         (
-            gefjon.harness.as_deref(),
-            gefjon.model.as_deref(),
-            gefjon.effort.as_deref(),
-            gefjon.preset.as_deref(),
-            gefjon.custom,
+            clio.harness.as_deref(),
+            clio.model.as_deref(),
+            clio.effort.as_deref(),
+            clio.preset.as_deref(),
+            clio.custom,
         ),
         (
-            Some("opencode"),
-            Some("opencode/muse-spark-1.3-contributor-free"),
+            Some("claude"),
+            Some("claude-fable-5-1"),
             Some("xhigh"),
-            Some("gefjon"),
+            Some("clio"),
             false,
         )
     );
-    // `gefjon.edited` is `undefined`: no such field is written.
-    assert!(serde_json::to_value(gefjon)
-        .unwrap()
-        .get("edited")
-        .is_none());
-    assert_eq!(
-        gefjon.description,
-        Some("OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH".into())
-    );
-    assert!(WORK_TIERS.contains(&gefjon.profile.work_tier));
+    // `clio.edited` is `undefined`: no such field is written.
+    assert!(serde_json::to_value(clio).unwrap().get("edited").is_none());
+    assert_eq!(clio.description, Some("Claude Code Fable 5.1 XHIGH".into()));
+    assert!(WORK_TIERS.contains(&clio.profile.work_tier));
     assert!(!home.path().exists(), "listing writes nothing");
-    let row = roster.agent_row("gefjon").unwrap().unwrap();
+    let row = roster.agent_row("clio").unwrap().unwrap();
     assert_eq!(
         (row.kind(), row.model(), row.effort()),
-        (Some("opencode"), gefjon.model.as_deref(), Some("xhigh"))
+        (Some("claude-code"), clio.model.as_deref(), Some("xhigh"))
     );
     assert_eq!(
-        roster.agent_row("@gefjon").unwrap().unwrap().id(),
-        Some("gefjon")
+        roster.agent_row("@clio").unwrap().unwrap().id(),
+        Some("clio")
     );
 }
 
@@ -74,7 +68,6 @@ fn reads_v1_rows_as_agents_kind_to_harness_thinking_or_effort_to_effort() {
     assert_eq!(agents["endymion"].harness.as_deref(), Some("pi"));
     // The fixture's copy says xhigh; a catalog agent reads as the catalog has it.
     assert_eq!(agents["endymion"].effort.as_deref(), Some("max"));
-    assert_eq!(agents["mani"].harness.as_deref(), Some("opencode"));
 }
 
 #[test]

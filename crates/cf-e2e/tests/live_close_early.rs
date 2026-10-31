@@ -9,7 +9,7 @@
 //! to 2 s of a Claude Code worker's window starting failed its task. The brief's delivery
 //! had begun, the project was suspended, the window closed, and the delivery failed
 //! "window closed"; the task went from queued to failed, the chief and the human heard
-//! it failed, and Resume brought nothing back. Codex and OpenCode were fine at 0 ms.
+//! it failed, and Resume brought nothing back. Codex was fine at 0 ms.
 //!
 //! The native daemon and the real pane host run in a home of the run's own; the chief is
 //! the stand-in, and the check plays the chief with its token. Each harness is the one
@@ -20,7 +20,7 @@
 //! must be done, its result at the chief with the word, and the brief confirmed once.
 //!
 //! ```text
-//! cargo xtask live close-early                         Claude Code, Codex and OpenCode, at 0 and 500 ms
+//! cargo xtask live close-early                         Claude Code and Codex, at 0 and 500 ms
 //! cargo xtask live close-early claude                  one harness
 //! cargo xtask live close-early claude --at-ms 0,2000   the moments named
 //! cargo xtask live close-early claude --claude-config <folder>
@@ -58,10 +58,10 @@ const DELIVERS: Duration = Duration::from_secs(60);
 const QUICK: Duration = Duration::from_millis(50);
 const LOOK: Duration = Duration::from_secs(1);
 
-/// The harnesses the words of the command line name, or the three of T-534.
+/// The harnesses the words of the command line name, or the two of T-534 that stay.
 fn workers(named: &[String]) -> Result<Vec<Harness>> {
     if named.is_empty() {
-        return Ok(vec![Harness::Claude, Harness::Codex, Harness::OpenCode]);
+        return Ok(vec![Harness::Claude, Harness::Codex]);
     }
     named
         .iter()

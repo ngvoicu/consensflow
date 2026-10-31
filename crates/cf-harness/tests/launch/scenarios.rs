@@ -11,7 +11,6 @@
 //! step holds waits until a step releases it, and the work begun is run by
 //! hand until nothing moves.
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
@@ -34,12 +33,10 @@ use cf_harness::testing::{
     ScriptedHost, Sent, Served, FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
-use regex::Regex;
 use rusqlite::types::Value as Bound;
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
-use url::form_urlencoded::byte_serialize;
 
 /// A process id no process has (`DEAD` of the recorder).
 const DEAD: u32 = 999_999;
@@ -60,90 +57,12 @@ pub(crate) fn platform() -> &'static str {
 struct Names {
     root: String,
     other: Option<u32>,
-    forms: RootForms,
-    bundle: Regex,
-    /// OpenCode's bundle hashes, in the order each first appeared.
-    hashes: RefCell<Vec<String>>,
-}
-
-/// The ways the root reads in the text a step records, each written as a name
-/// of its own (`rootForms` of the recorder): itself, a file URL, as JSON writes
-/// it, and as a URL's query holds it.
-struct RootForms {
-    file_url: String,
-    /// Each form and its name, a form spelled as one before it left out.
-    plain: Vec<(String, &'static str)>,
-}
-
-/// `encodeURIComponent(text)`.
-pub(crate) fn component(text: &str) -> String {
-    text.bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => char::from(byte).to_string(),
-            b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => {
-                char::from(byte).to_string()
-            }
-            other => format!("%{other:02X}"),
-        })
-        .collect()
-}
-
-impl RootForms {
-    fn of(root: &str) -> Self {
-        let component = component(root);
-        let json = serde_json::to_string(root).unwrap();
-        let forms = [
-            (root.to_owned(), "$ROOT"),
-            (json[1..json.len() - 1].to_owned(), "$JSON_ROOT"),
-            (component.clone(), "$URI_ROOT"),
-            (component.replace('\'', "%27"), "$URI27_ROOT"),
-            (byte_serialize(root.as_bytes()).collect(), "$FORM_ROOT"),
-        ];
-        let mut plain: Vec<(String, &'static str)> = Vec::new();
-        for (form, name) in forms {
-            if !plain.iter().any(|(other, _)| *other == form) {
-                plain.push((form, name));
-            }
-        }
-        Self {
-            file_url: path::to_file_url(root, cfg!(windows)).unwrap(),
-            plain,
-        }
-    }
 }
 
 impl Names {
     /// The names of a run whose root is `root`, as the system names it.
     fn new(root: String, other: Option<u32>) -> Self {
-        Self {
-            forms: RootForms::of(&root),
-            // OpenCode's bundle is named by a hash of the folder it is
-            // published in, which the root is among the parents of: the hash
-            // is not the same in two runs, and is written `$HASH`.
-            bundle: Regex::new(r"(extensions[\\/]opencode[\\/])([0-9a-f]{64})").unwrap(),
-            hashes: RefCell::new(Vec::new()),
-            root,
-            other,
-        }
-    }
-
-    /// `text` with each OpenCode bundle hash named by the order it first
-    /// appeared in among the scenario's (`$HASH1`, `$HASH2`, …).
-    fn hashed(&self, text: &str) -> String {
-        let mut hashes = self.hashes.borrow_mut();
-        self.bundle
-            .replace_all(text, |found: &regex::Captures| {
-                let hash = &found[2];
-                let at = hashes
-                    .iter()
-                    .position(|seen| seen == hash)
-                    .unwrap_or_else(|| {
-                        hashes.push(hash.to_owned());
-                        hashes.len() - 1
-                    });
-                format!("{}$HASH{}", &found[1], at + 1)
-            })
-            .into_owned()
+        Self { root, other }
     }
 
     /// The process ids a scenario names, by their names.
@@ -226,17 +145,14 @@ impl Names {
                 live.map_or_else(|| value.clone(), |(name, _)| json!(name))
             }
             Value::String(text) => {
-                // The root in each way a record may spell it, and as a window
-                // names a program of the bundle's, with forward slashes.
-                let mut text = text.replace(&self.forms.file_url, "file://$ROOT");
-                for (form, name) in &self.forms.plain {
-                    text = text.replace(form, name);
-                }
+                // The root as the system spells it, and as a window names a
+                // program of the bundle's, with forward slashes.
+                let mut text = text.replace(&self.root, "$ROOT");
                 text = text.replace(&self.root.replace('\\', "/"), "$ROOT");
                 if text.starts_with("$ROOT") {
                     text = posix(text);
                 }
-                json!(self.hashed(&text))
+                json!(text)
             }
             other => other.clone(),
         }
@@ -659,7 +575,7 @@ fn begin_asking(played: &mut Played, id: usize, step: &Value) {
         });
     } else if step.get("started").is_some() {
         played.driver.begin(id, async move {
-            let started = window.started(&*host).await;
+            let started = window.started().await;
             (settled(started, |session| json!(session)), None)
         });
     } else {
@@ -754,48 +670,15 @@ fn a_number_is_named_a_live_process_only_under_pid() {
 
 #[cfg(unix)]
 #[test]
-fn the_root_is_named_by_how_a_record_spells_it_and_each_bundle_hash_by_its_order() {
+fn the_root_is_named_by_how_a_record_spells_it_and_a_bundle_hash_as_it_is() {
     let names = Names::new("/tmp/cf-launch-golden-X y's".to_owned(), None);
     let written = |text: &str| names.written(&json!(text), None);
     assert_eq!(
         written("/tmp/cf-launch-golden-X y's/home"),
         json!("$ROOT/home")
     );
-    assert_eq!(
-        written("file:///tmp/cf-launch-golden-X%20y's/a"),
-        json!("file://$ROOT/a")
-    );
-    // A query holds it as `encodeURIComponent` does, with the parser's `%27`
-    // for the quote, or as a form does, with `+` for the space: each its own
-    // name, so that one spelled the wrong way is seen.
-    assert_eq!(
-        written("http://127.0.0.1:41000/x?directory=%2Ftmp%2Fcf-launch-golden-X%20y's%2Fwork"),
-        json!("http://127.0.0.1:41000/x?directory=$URI_ROOT%2Fwork")
-    );
-    assert_eq!(
-        written("?directory=%2Ftmp%2Fcf-launch-golden-X%20y%27s"),
-        json!("?directory=$URI27_ROOT")
-    );
-    assert_eq!(
-        written("?directory=%2Ftmp%2Fcf-launch-golden-X+y%27s%2Fwork"),
-        json!("?directory=$FORM_ROOT%2Fwork")
-    );
-    let (hash, other) = ("0123456789abcdef".repeat(4), "fedcba9876543210".repeat(4));
-    let bundle = |hash: &str| format!("/x/extensions/opencode/{hash}/hosts");
-    assert_eq!(
-        written(&bundle(&hash)),
-        json!("/x/extensions/opencode/$HASH1/hosts")
-    );
-    assert_eq!(
-        written(&bundle(&other)),
-        json!("/x/extensions/opencode/$HASH2/hosts"),
-        "another bundle is another name"
-    );
-    assert_eq!(
-        written(&bundle(&hash)),
-        json!("/x/extensions/opencode/$HASH1/hosts")
-    );
-    // Pi's bundle is named by the same kind of hash, which does not change.
+    // A bundle's hash is written as it is: it does not change from run to run.
+    let hash = "0123456789abcdef".repeat(4);
     let pi = format!("/x/extensions/pi/{hash}/hosts");
     assert_eq!(written(&pi), json!(pi));
 }

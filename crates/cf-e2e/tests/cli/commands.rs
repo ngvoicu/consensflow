@@ -332,7 +332,6 @@ fn the_files_that_reach_a_reader_are_the_texts_of_the_product_and_not_its_tests(
         "hosts/pi/consensflow.js",
         "skill/chief.md",
         "app/ui/core/page.js",
-        "hosts/opencode-extension/consensflow-session.mjs",
     ] {
         assert!(readers.reach(file), "{file}");
     }

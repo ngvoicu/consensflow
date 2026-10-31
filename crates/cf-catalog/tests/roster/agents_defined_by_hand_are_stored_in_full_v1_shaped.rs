@@ -229,12 +229,12 @@ fn a_custom_row_that_took_a_catalog_name_on_another_harness_hides_that_entry() {
     let catalog = catalog();
     with_mine(&home, &catalog);
     let mut file = home.raw();
-    file["agents"].as_array_mut().unwrap().push(json!({ "id": "zeus", "name": "Zeus", "kind": "opencode", "model": "opencode/muse-spark-1.3" }));
+    file["agents"].as_array_mut().unwrap().push(json!({ "id": "zeus", "name": "Zeus", "kind": "pi", "model": "openrouter/meta/muse-spark-1.3" }));
     home.write(&serde_json::to_string_pretty(&file).unwrap());
     let zeus = home.by_name(&catalog)["zeus"].clone();
     assert_eq!(
         (zeus.harness.as_deref(), zeus.custom, zeus.preset.as_deref()),
-        (Some("opencode"), true, None)
+        (Some("pi"), true, None)
     );
     let listed = home.roster(&catalog).list().unwrap();
     assert_eq!(

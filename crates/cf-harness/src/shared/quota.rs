@@ -40,9 +40,8 @@ use patterns::{BILLING, CREDENTIALS, REFUSED, SPENT};
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Quota {
-    /// A request refused for quota (`exhaustedQuota`), or OpenCode waiting
-    /// out a spent one: when it happened, if the record says, and when the
-    /// quota comes back, if the refusal named it.
+    /// A request refused for quota (`exhaustedQuota`): when it happened, if the
+    /// record says, and when the quota comes back, if the refusal named it.
     Exhausted {
         at: Option<String>,
         resets_at: Option<String>,

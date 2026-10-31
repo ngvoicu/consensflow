@@ -4,11 +4,6 @@
 //! moved into place whole. A folder already there is another process's or an
 //! earlier run's, checked file by file against this build's and kept as it is.
 //!
-//! A generated file (OpenCode's `tui.json`) names the folder the bundle is
-//! published in, so it is hashed as it reads with the parent folder in that
-//! place: a build that writes it differently is a new bundle, never one that
-//! differs from what is installed and refuses every launch.
-//!
 //! Every call is synchronous, as Node's are, and a failure is said in Node's
 //! words.
 
@@ -27,27 +22,19 @@ use sha2::{Digest, Sha256};
 /// A file of a bundle, by its name in the repository and its bytes.
 type File<'a> = (&'a str, &'a [u8]);
 
-/// A file a bundle makes, by its name and its bytes.
-pub(crate) type Made = (String, Vec<u8>);
-
-/// Publishes the bundle `kind` made of `files`, and the files `generated`
-/// makes of the folder it is published in: the folder it is in, or why it
+/// Publishes the bundle `kind` made of `files`: the folder it is in, or why it
 /// could not be made.
 pub(crate) fn prepare_private_integration(
     env: &Env,
     kind: &str,
     files: &[File],
-    generated: &dyn Fn(&str) -> Vec<Made>,
 ) -> Result<String, String> {
     let config = config_root(env).ok_or_else(|| "missing home in env".to_owned())?;
     let root = path::join(&[&config.to_string_lossy(), "extensions", kind]);
-    let hashed = generated(&root);
-    let hash = hash_of(files.iter().copied().chain(borrowed(&hashed)));
+    let hash = hash_of(files.iter().copied());
     let destination = path::join(&[&root, &hash]);
-    let written = generated(&destination);
-    let files: Vec<File> = files.iter().copied().chain(borrowed(&written)).collect();
     let mut temporary = None;
-    let outcome = install(&root, &destination, kind, &files, &mut temporary);
+    let outcome = install(&root, &destination, kind, files, &mut temporary);
     // Whatever came of it, the folder it was made in goes; and a failure to
     // remove it is what is said, as it is thrown from a `finally`.
     if let Some(temporary) = temporary {
@@ -67,12 +54,6 @@ fn hash_of<'a>(files: impl Iterator<Item = File<'a>>) -> String {
         hash.update([0]);
     }
     format!("{:x}", hash.finalize())
-}
-
-/// The files made, as they are held beside the others.
-fn borrowed(made: &[Made]) -> impl Iterator<Item = File<'_>> {
-    made.iter()
-        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
 }
 
 /// The bundle made if it is not there, and every file of it checked. The

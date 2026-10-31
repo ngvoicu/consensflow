@@ -517,6 +517,10 @@ pub fn run_in_session(args: &[String]) -> ExitCode {
         let _ = writeln!(io::stderr(), "fake-agent: {SESSION} <program> [words…]");
         return ExitCode::FAILURE;
     };
+    if let Err(refused) = cf_base::bundle::program_startable_by_a_test(program.as_ref()) {
+        let _ = writeln!(io::stderr(), "fake-agent: {refused}");
+        return ExitCode::FAILURE;
+    }
     // Only a process group's leader cannot: this one was started to be none.
     let _ = nix::unistd::setsid();
     // The one place a program is run in place of this one, which no `Run` does.

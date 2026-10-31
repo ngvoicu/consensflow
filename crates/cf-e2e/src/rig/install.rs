@@ -104,16 +104,6 @@ pub(super) fn environment(
     if let Some(devin) = &config.devin {
         env.push(("CF_TEST_DEVIN".to_owned(), text(devin)));
     }
-    if let Some(opencode) = &config.opencode {
-        // The stand-in's own: what it runs, and where it writes down what it is asked.
-        env.extend([
-            ("CF_TEST_OPENCODE".to_owned(), text(opencode)),
-            (
-                "CF_TEST_OPENCODE_LOG".to_owned(),
-                text(&root.join("opencode.jsonl")),
-            ),
-        ]);
-    }
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
@@ -151,8 +141,8 @@ fn path(fake_bin: &Path, config: &Config) -> String {
 /// The system's own folders at the end of a rig's `PATH`: where `windows`, the ones every
 /// Windows install puts on it under its `system_root` (`System32`, the root itself,
 /// `Wbem`, and Windows PowerShell's folder, which no package manager adds and which an
-/// agent's shell finds `powershell` in: OpenCode's runs a command by cmd.exe, and a
-/// command that starts anything past cmd's own is "not recognized" without it, T-379);
+/// agent's shell finds `powershell` in: one that runs a command by cmd.exe starts
+/// anything past cmd's own as "not recognized" without it, T-379);
 /// as the Finder starts a program (`finder`) or not elsewhere.
 fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec<String> {
     if windows {
@@ -180,8 +170,7 @@ fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec
 /// names the stand-in as both program and script, and the stand-in knows its own
 /// file when it is given it first; a stand-in that is a `.cmd` of that shape already
 /// (a live run's wrapper) is the shim itself ([`stand_in::window_command`]). The stand-in `devin` beside it, where the rig
-/// has one, the stand-in `opencode` (of a 1.x, or of an OpenCode 2) likewise, and
-/// the stand-in `codex`. The folder they are in, which the `PATH` names.
+/// has one likewise, and the stand-in `codex`. The folder they are in, which the `PATH` names.
 /// As the Finder starts it, they are where each harness installs itself instead
 /// (see [`Config::as_the_finder_starts_it`]), and that folder holds none.
 pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf> {
@@ -200,9 +189,6 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     write_shim(&own, "claude", "CF_TEST_HARNESS", &config.stand_in)?;
     if let Some(devin) = &config.devin {
         write_shim(&own, "devin", "CF_TEST_DEVIN", devin)?;
-    }
-    if let Some(opencode) = &config.opencode {
-        write_shim(&own, "opencode", "CF_TEST_OPENCODE", opencode)?;
     }
     if let Some(codex) = &config.codex {
         write_shim(&system, "codex", "CF_TEST_CODEX", codex)?;
@@ -438,9 +424,9 @@ mod tests {
     #[test]
     fn the_system_folders_of_a_windows_rig_are_those_every_windows_install_has_powershell_among_them(
     ) {
-        // OpenCode 1.19.4 runs a command by `%ComSpec% /c` (cmd.exe), and an agent's command
-        // that starts anything past cmd's own (`powershell -Command Start-Process …`, the
-        // brief of the live suite's second step) is found on the `PATH` or "not recognized"
+        // An agent that runs a command by `%ComSpec% /c` (cmd.exe) has one that starts
+        // anything past cmd's own (`powershell -Command Start-Process …`, the
+        // brief of the live suite's second step) found on the `PATH` or "not recognized"
         // (T-379, zeewin, where the rig's `PATH` ended at `System32`).
         let expected = [
             r"C:\WINDOWS\System32",
@@ -455,7 +441,7 @@ mod tests {
     }
 
     /// The field shape (T-379, zeewin): a command interpreter started in the rig's
-    /// environment, as OpenCode's shell tool starts one, finds `powershell`.
+    /// environment, as an agent's shell tool starts one, finds `powershell`.
     #[cfg(windows)]
     #[test]
     fn a_command_interpreter_in_the_rigs_environment_finds_powershell() {
@@ -532,38 +518,6 @@ mod tests {
         assert_eq!(var(&env, "CF_TEST_HARNESS"), "/the/stand-in");
         let plain = environment(root.path(), &fake_bin, &config(), &[]);
         assert!(!plain.iter().any(|(name, _)| name == "CF_TEST_DEVIN"));
-    }
-
-    #[test]
-    fn a_rig_given_an_opencode_2_has_its_stand_in_found_as_opencode_and_named_in_the_environment() {
-        let root = tempfile::tempdir().unwrap();
-        let opencode = Path::new("/the/stand-in-opencode-2");
-        let given = Config::new("/the/stand-in").opencode_2(opencode);
-        let fake_bin = write_fake_install(root.path(), &given).unwrap();
-        let script =
-            files::read_string(&fake_bin.join(stand_in::program_name("opencode"))).unwrap();
-        if cfg!(windows) {
-            assert_eq!(
-                script,
-                "@echo off\r\n\"/the/stand-in-opencode-2\" \"/the/stand-in-opencode-2\" %*\r\n"
-            );
-        } else {
-            assert_eq!(script, "#!/bin/sh\nexec \"$CF_TEST_OPENCODE\" \"$@\"\n");
-        }
-        let env = environment(root.path(), &fake_bin, &given, &[]);
-        assert_eq!(var(&env, "CF_TEST_OPENCODE"), "/the/stand-in-opencode-2");
-        assert_eq!(
-            var(&env, "CF_TEST_OPENCODE_LOG"),
-            root.path().join("opencode.jsonl").to_string_lossy()
-        );
-        // And none of it where the rig is given none.
-        let bare = tempfile::tempdir().unwrap();
-        let fake_bin = write_fake_install(bare.path(), &config()).unwrap();
-        assert!(!fake_bin.join(stand_in::program_name("opencode")).exists());
-        let plain = environment(bare.path(), &fake_bin, &config(), &[]);
-        assert!(!plain
-            .iter()
-            .any(|(name, _)| name.starts_with("CF_TEST_OPENCODE")));
     }
 
     #[test]

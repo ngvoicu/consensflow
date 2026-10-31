@@ -9,7 +9,7 @@
 //! was found by the owner, not by a test. This is that test.
 //!
 //! ```text
-//! cargo xtask eval long [--chief claude] [--staff claude,codex,pi,opencode,devin]
+//! cargo xtask eval long [--chief claude] [--staff claude,codex,pi,devin]
 //!                       [--hours 2] [--quiet] [--restart] [--kill] …
 //! ```
 //!

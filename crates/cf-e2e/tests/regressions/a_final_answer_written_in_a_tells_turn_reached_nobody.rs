@@ -2,7 +2,7 @@
 //! nobody.
 //!
 //! Seen by the chief on 2026-10-24, on 3.0.5 (T-429), and by the tester on 2026-10-25, on
-//! 3.0.6-alpha.2 (T-534, on Claude Code, Codex and OpenCode): the chief ran `cf tell T-1 "…"`,
+//! 3.0.6-alpha.2 (T-534, on Claude Code and Codex): the chief ran `cf tell T-1 "…"`,
 //! which pauses the task and puts the words to its window as a question. The worker answered
 //! it with `cf answer`, went straight on in the same turn, and ended it with its full result.
 //! The task was paused, so that result was no result, and no message carried it either. The

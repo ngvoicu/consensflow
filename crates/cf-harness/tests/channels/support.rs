@@ -1,12 +1,9 @@
-//! What the cases share: the runtime they run on, a folder as the system names
-//! it, a pattern to match, and the wires a channel is given.
+//! What the cases share: the runtime they run on, a pattern to match, and a
+//! window's pane.
 
 use std::future::Future;
-use std::path::Path;
 
 use cf_harness::contract::Pane;
-use cf_harness::opencode::{real_path, Wires};
-use cf_harness::seams::{SystemLoopback, SystemProcesses, SystemTime};
 use regex::Regex;
 use tokio::task::LocalSet;
 
@@ -26,26 +23,10 @@ pub fn matches(text: &str, pattern: &str) -> bool {
     Regex::new(pattern).unwrap().is_match(text)
 }
 
-/// `folder` as the channel names it to a server, and a server names it back:
-/// with its links followed, as the system writes it.
-pub fn real_folder(folder: &Path) -> String {
-    real_path(&folder.to_string_lossy()).unwrap()
-}
-
 /// A window's pane, by the pane host's id and the generation it opened in.
 pub fn pane(id: &str, generation: u64) -> Pane {
     Pane {
         id: id.to_owned(),
         generation,
-    }
-}
-
-/// What OpenCode's channel is given to wait and ask with: the system's clock
-/// and loopback, and `processes`.
-pub fn wires(processes: &SystemProcesses) -> Wires<'_> {
-    Wires {
-        time: &SystemTime,
-        loopback: &SystemLoopback,
-        processes,
     }
 }

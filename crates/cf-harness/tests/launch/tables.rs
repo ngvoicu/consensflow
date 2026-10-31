@@ -5,7 +5,6 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use cf_base::path::to_file_url;
 use cf_base::text::{console_text, window_text};
 use serde_json::Value;
 
@@ -89,18 +88,4 @@ fn a_code_point_the_console_leaves_as_it_is_is_left_so() {
         differ.len(),
         differ.join(" ")
     );
-}
-
-#[test]
-fn every_path_is_the_file_url_node_wrote_for_it() {
-    let rows = TABLES["fileUrl"].as_array().unwrap();
-    for row in rows {
-        let path = row["path"].as_str().unwrap();
-        let windows = row["windows"].as_bool().unwrap();
-        assert_eq!(
-            to_file_url(path, windows).as_deref(),
-            row["url"].as_str(),
-            "{path:?}, windows {windows}"
-        );
-    }
 }

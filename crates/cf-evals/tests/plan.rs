@@ -111,7 +111,7 @@ fn an_effort_reaches_every_member_as_its_harness_names_it_and_devin_has_none() {
     assert_eq!(refused.to_string(), "no such eval harness: kimi");
     assert_eq!(
         HARNESSES.map(|harness| harness.name),
-        ["claude", "codex", "pi", "opencode", "devin"]
+        ["claude", "codex", "pi", "devin"]
     );
     assert_eq!(harness("devin").unwrap().kind, "devin");
 }
@@ -129,16 +129,6 @@ fn sets_the_chiefs_model_through_the_environment_where_the_harness_takes_it_ther
             "claude-opus-5".to_owned()
         )
     );
-    assert_eq!(
-        setup("opencode", Some("opencode/x")),
-        (
-            vec![(
-                "OPENCODE_CONFIG_CONTENT".to_owned(),
-                r#"{"model":"opencode/x"}"#.to_owned()
-            )],
-            "opencode/x".to_owned()
-        )
-    );
     assert_eq!(setup("codex", None), (vec![], "gpt-5.6-luna".to_owned()));
     assert_eq!(setup("codex", Some("gpt-x")), (vec![], "gpt-x".to_owned()));
     assert_eq!(
@@ -148,7 +138,6 @@ fn sets_the_chiefs_model_through_the_environment_where_the_harness_takes_it_ther
     assert_eq!(setup("pi", None).1, CHIEF_MODEL);
     assert_eq!(setup("claude", None).1, CLAUDE_CHIEF_MODEL);
     assert_eq!(setup("claude", None).1, "claude-opus-5");
-    assert_eq!(setup("opencode", None).1, CHIEF_MODEL);
     // A Devin chief runs its staff's model, whatever --model says.
     assert_eq!(
         setup("devin", Some("x")),

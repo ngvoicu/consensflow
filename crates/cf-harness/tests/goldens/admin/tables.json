@@ -16,20 +16,6 @@
       }
     },
     {
-      "id": "opencode",
-      "executable": "/opt/homebrew/Cellar/opencode/1/bin/opencode",
-      "source": {
-        "url": "https://formulae.brew.sh/api/formula/opencode.json",
-        "format": "formula",
-        "distribution": "Homebrew",
-        "update": [
-          "/opt/homebrew/bin/brew",
-          "upgrade",
-          "opencode"
-        ]
-      }
-    },
-    {
       "id": "claude",
       "executable": "/opt/homebrew/Caskroom/claude-code@latest/2/bin/claude",
       "source": {
@@ -391,21 +377,6 @@
       }
     },
     {
-      "id": "opencode",
-      "executable": "/usr/local/lib/node_modules/opencode-ai/bin/opencode",
-      "source": {
-        "url": "https://registry.npmjs.org/opencode-ai/latest",
-        "format": "npm",
-        "distribution": "npm",
-        "update": [
-          "/usr/local/bin/npm",
-          "install",
-          "-g",
-          "opencode-ai@latest"
-        ]
-      }
-    },
-    {
       "id": "devin",
       "executable": "/usr/lib/node_modules/devin/bin/devin",
       "source": {
@@ -488,32 +459,6 @@
         "update": [
           "C:/Users/me/.codex/bin/codex.exe",
           "update"
-        ]
-      }
-    },
-    {
-      "id": "opencode",
-      "executable": "/Users/me/.opencode/bin/opencode",
-      "source": {
-        "url": "https://registry.npmjs.org/opencode-ai/latest",
-        "format": "npm",
-        "distribution": "OpenCode's installer",
-        "update": [
-          "/Users/me/.opencode/bin/opencode",
-          "upgrade"
-        ]
-      }
-    },
-    {
-      "id": "opencode",
-      "executable": "C:\\Users\\me\\.opencode\\bin\\opencode.exe",
-      "source": {
-        "url": "https://registry.npmjs.org/opencode-ai/latest",
-        "format": "npm",
-        "distribution": "OpenCode's installer",
-        "update": [
-          "C:/Users/me/.opencode/bin/opencode.exe",
-          "upgrade"
         ]
       }
     },
@@ -616,16 +561,6 @@
       "executable": "/x/y",
       "source": {
         "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
-        "format": "npm",
-        "distribution": null,
-        "update": null
-      }
-    },
-    {
-      "id": "opencode",
-      "executable": "/x/y",
-      "source": {
-        "url": "https://registry.npmjs.org/opencode-ai/latest",
         "format": "npm",
         "distribution": null,
         "update": null

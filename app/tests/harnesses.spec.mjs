@@ -10,10 +10,7 @@ const member = (page, name) =>
     .locator('#agents .member')
     .filter({ has: page.locator('.callsign', { hasText: new RegExp(`^${name}$`) }) })
 
-for (const [harness, label] of [
-  ['pi', 'Pi'],
-  ['opencode', 'OpenCode'],
-]) {
+for (const [harness, label] of [['pi', 'Pi']]) {
   test(`real administration page checks ${label} setup and retries without global configuration`, async ({
     page,
   }) => {
@@ -50,9 +47,9 @@ for (const [harness, label] of [
         page.getByText('Role skills included in ConsensFlow', { exact: false }),
       ).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Update skills', exact: true })).toHaveCount(0)
-      // Every harness ConsensFlow runs, Muse Code the sixth (T-946: the page listed it, and
-      // the count said five).
-      await expect(page.locator('.host')).toHaveCount(6)
+      // Every harness ConsensFlow runs, Muse Code the fifth (T-946: the page listed it, and
+      // the count said four).
+      await expect(page.locator('.host')).toHaveCount(5)
       await expect(
         page.locator('.host').filter({ has: page.locator('strong', { hasText: /^muse$/ }) }),
       ).toHaveCount(1)
@@ -81,14 +78,14 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   page.on('request', (request) => requests.push(new URL(request.url()).pathname))
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
-    await expect(page.locator('#agents-count')).toHaveText('251 of 251 shown')
+    await expect(page.locator('#agents-count')).toHaveText('217 of 217 shown')
     await expect(page.locator('#lede')).toHaveText(
-      '251 agents, the catalog’s and your own; a project’s staff is picked from them.',
+      '217 agents, the catalog’s and your own; a project’s staff is picked from them.',
     )
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
-    const gefjon = member(page, 'gefjon')
-    await expect(gefjon.getByRole('button')).toHaveCount(0)
+    const eos = member(page, 'eos')
+    await expect(eos.getByRole('button')).toHaveCount(0)
     const form = page.locator('#add')
     await form.locator('[name="name"]').fill('custom')
     await form.locator('[name="harness"]').selectOption('claude')
@@ -118,9 +115,9 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     expect(listAgents(t.env).find((a) => a.name === 'custom').workTier).toBe('complex')
     await expect(form.getByLabel('Work tier')).toHaveValue('auto')
     await expect(page.locator('#lede')).toContainText('1 is yours')
-    await expect(page.locator('#agents-count')).toHaveText('252 of 252 shown')
+    await expect(page.locator('#agents-count')).toHaveText('218 of 218 shown')
     // A catalog name is not yours to define again.
-    await form.locator('[name="name"]').fill('gefjon')
+    await form.locator('[name="name"]').fill('eos')
     await form.locator('[name="harness"]').selectOption('claude')
     await form.locator('[name="model"]').fill('example-model')
     await form.getByRole('button', { name: 'Add agent' }).click()
@@ -159,7 +156,7 @@ test('a checkbox keeps Claude and OpenAI models to their own harnesses, for ever
     await expect(member(page, 'apollo')).toBeVisible()
     await expect(member(page, 'ares')).toBeVisible()
     await expect(page.locator('#lede')).toContainText(
-      'hidden on Pi, OpenCode and Devin: Claude and OpenAI models run on their own harnesses.',
+      'hidden on Pi and Devin: Claude and OpenAI models run on their own harnesses.',
     )
     expect(listAgents(fixture.t.env).find((p) => p.name === 'kronos').hidden).toBe(true)
     expect(listAgents(fixture.t.env).find((p) => p.name === 'osiris').hidden).toBe(true)
@@ -185,8 +182,8 @@ test('Agents keeps catalog agents as the catalog has them, and Show: mine lists 
     [
       {
         name: 'mine',
-        harness: 'opencode',
-        model: 'opencode/muse-spark-1.3-contributor-free',
+        harness: 'pi',
+        model: 'openrouter/meta/muse-spark-1.3',
         effort: 'low',
       },
     ],
@@ -194,9 +191,9 @@ test('Agents keeps catalog agents as the catalog has them, and Show: mine lists 
   )
   const { second } = fixture
   try {
-    const gefjon = member(page, 'gefjon')
-    await expect(gefjon.getByRole('button')).toHaveCount(0)
-    await expect(gefjon.locator('.tag--own')).toHaveCount(0)
+    const eos = member(page, 'eos')
+    await expect(eos.getByRole('button')).toHaveCount(0)
+    await expect(eos.locator('.tag--own')).toHaveCount(0)
     const mine = member(page, 'mine')
     await expect(mine.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
     await expect(mine.getByRole('button', { name: 'Remove', exact: true })).toBeVisible()
@@ -207,13 +204,13 @@ test('Agents keeps catalog agents as the catalog has them, and Show: mine lists 
     )
     await mine.locator('[name=effort]').fill('xhigh')
     await mine.getByRole('button', { name: 'Save', exact: true }).click()
-    // It sits in the card of the model and reasoning it runs now, beside the catalog's gefjon.
+    // It sits in the card of the model and reasoning it runs now, beside the catalog's eos.
     await expect(
       page
         .locator('.model-group')
         .filter({ has: page.locator('.callsign', { hasText: /^mine$/ }) })
         .locator('h3'),
-    ).toHaveText('Muse Spark 1.3 · Xhigh · 4')
+    ).toHaveText('Muse Spark 1.3 · Xhigh · 2')
     expect(listAgents(fixture.t.env).find((p) => p.name === 'mine').effort).toBe('xhigh')
     await expect(page.locator('#lede')).toContainText('1 is yours')
     await fixture.saved(second)
@@ -241,7 +238,7 @@ test('Harnesses reports a failed initial check and allows retry', async ({ page 
     await page.getByRole('button', { name: 'Check all harnesses' }).click()
     // The retry runs the real check, which probes every harness on this
     // machine: on a busy CI runner that took longer than the 5 s default.
-    await expect(page.locator('.host')).toHaveCount(6, { timeout: 30_000 })
+    await expect(page.locator('.host')).toHaveCount(5, { timeout: 30_000 })
     await expect(page.getByRole('status')).toBeEmpty()
   } finally {
     await server.close()
@@ -261,7 +258,7 @@ test('Harnesses says how each one was installed and updates it from a button', a
     distribution: 'Homebrew',
     update,
   })
-  const others = ['claude', 'opencode', 'pi', 'devin'].map((id) => ({
+  const others = ['claude', 'pi', 'devin'].map((id) => ({
     id,
     path: null,
     installed: false,
@@ -305,7 +302,7 @@ test('Harnesses says how each one was installed and updates it from a button', a
     await expect(codex).toContainText('Version 0.2.0, up to date')
     await expect(codex.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
     expect(asked).toEqual({ id: 'codex' })
-    await expect(page.locator('.host').nth(4)).not.toContainText('next prompt')
+    await expect(page.locator('.host').nth(3)).not.toContainText('next prompt')
   } finally {
     await server.close()
     t.cleanup()
@@ -327,7 +324,7 @@ test('Harnesses tells the human to update a harness the way it was installed whe
     distribution: null,
     update: { state: 'available', value: '1.2.4', command: null },
   }
-  const others = ['claude', 'codex', 'opencode', 'devin'].map((id) => ({
+  const others = ['claude', 'codex', 'devin'].map((id) => ({
     id,
     path: null,
     installed: false,
@@ -482,7 +479,6 @@ test('grouped by work tier, a tier lists its agents as the pickers offer them: b
     ['dune', 'claude', undefined],
     ['echo', 'codex', 'minimal'],
     ['flint', 'codex', 'ultra'],
-    ['gale', 'opencode', 'high'],
     ['heath', 'pi', 'off'],
     ['iris', 'pi', 'xhigh'],
   ]
@@ -499,14 +495,13 @@ test('grouped by work tier, a tier lists its agents as the pickers offer them: b
   try {
     for (const screen of [page, fixture.second]) {
       await fixture.saved(screen)
-      await expect(screen.locator('.agent-group > h3')).toHaveText(['Light work · 9'])
+      await expect(screen.locator('.agent-group > h3')).toHaveText(['Light work · 8'])
       await expect(screen.locator('.callsign')).toHaveText([
         'cedar',
         'birch',
         'dune',
         'flint',
         'echo',
-        'gale',
         'iris',
         'heath',
         'amber',
@@ -518,7 +513,6 @@ test('grouped by work tier, a tier lists its agents as the pickers offer them: b
       'flint',
       'cedar',
       'iris',
-      'gale',
       'amber',
       'birch',
       'echo',
@@ -623,7 +617,7 @@ test('every row shows its tier and route; an edit to your own agent moves its ti
     await expect(page.locator('.category-pill')).toHaveCount(0)
     await expect(member(page, 'custom').locator('.agent-route')).toHaveText('Codex login')
     await expect(member(page, 'draw').locator('.tier-pill')).toHaveText('T4 · Light work')
-    await expect(member(page, 'skirnir').locator('.agent-route')).toHaveText('OpenRouter · API')
+    await expect(member(page, 'kronos').locator('.agent-route')).toHaveText('OpenRouter · API')
     // The tier follows the agent's own model and reasoning, edits included.
     const custom = member(page, 'custom')
     await expect(custom.locator('.tier-pill')).toHaveText('T3 · Standard work')
@@ -716,13 +710,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
         'Work tier',
       ])
       await expect(screen.getByRole('heading', { level: 3 })).toHaveCount(0)
-      await expect(screen.locator('#agents-count')).toHaveText('259 of 259 shown')
+      await expect(screen.locator('#agents-count')).toHaveText('225 of 225 shown')
     }
     await fixture.saved(own)
     await expect(own.locator('#agents-count')).toHaveText('8 of 8 shown')
     await search.fill('Astra')
     await expect(own.locator('#agents-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#agents-count')).toHaveText('259 of 259 shown')
+    await expect(page.locator('#agents-count')).toHaveText('225 of 225 shown')
     await expect(own.locator('.callsign')).toHaveCount(5)
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveCount(4)
@@ -731,37 +725,35 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ).toBeVisible()
     await page.getByRole('searchbox').fill('Astra')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#agents-count')).toHaveText('25 of 259 shown')
+    await expect(page.locator('#agents-count')).toHaveText('20 of 225 shown')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
-      'GPT-6 Astra · Max · 4',
-      'GPT-6 Astra · Xhigh · 6',
-      'GPT-6 Astra · High · 4',
-      'GPT-6 Astra · Medium · 4',
-      'GPT-6 Astra · Low · 5',
+      'GPT-6 Astra · Max · 3',
+      'GPT-6 Astra · Xhigh · 5',
+      'GPT-6 Astra · High · 3',
+      'GPT-6 Astra · Medium · 3',
+      'GPT-6 Astra · Low · 4',
       'GPT-6 Astra · Minimal · 1',
       'GPT-6 Astra · Off · 1',
     ])
     const cardOf = (name) =>
       page.locator('.agent-group').filter({ has: page.getByRole('heading', { name, exact: true }) })
-    await expect(cardOf('GPT-6 Astra · Medium · 4').locator('.callsign')).toHaveText([
+    await expect(cardOf('GPT-6 Astra · Medium · 3').locator('.callsign')).toHaveText([
       'maia',
       'merope',
       'nut',
-      'skirnir',
     ])
     // An agent defined by hand sits with the catalog's agents of its model and reasoning.
-    await expect(cardOf('GPT-6 Astra · Xhigh · 6').locator('.callsign')).toHaveText([
+    await expect(cardOf('GPT-6 Astra · Xhigh · 5').locator('.callsign')).toHaveText([
       'asteria',
       'aten',
       'chief-one',
-      'delling',
       'hesperos',
       'peer-one',
     ])
     await expect(own.locator('.callsign')).toHaveCount(5)
     await search.fill('OpenRouter')
     await expect(own.locator('#agents')).toContainText('No agents match')
-    await expect(page.locator('#agents-count')).toHaveText('25 of 259 shown')
+    await expect(page.locator('#agents-count')).toHaveText('20 of 225 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(group).toHaveValue('model-reasoning')
@@ -779,14 +771,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await page.getByLabel('Group by').selectOption('harness')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
       'Codex · 8',
-      'OpenCode · 5',
       'Pi · 7',
       'Devin · 5',
     ])
     await page.getByRole('button', { name: 'Clear filters' }).click()
     await expect(page.getByRole('searchbox')).toHaveValue('')
     await expect(page.getByLabel('Group by')).toHaveValue('model-reasoning')
-    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(170)
+    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(168)
     await expect(group).toHaveValue('harness')
     await group.selectOption('model-reasoning')
     for (const name of [
@@ -800,7 +791,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ]) {
       await expect(own.getByRole('heading', { name, exact: true })).toBeVisible()
     }
-    await expect(page.locator('#agents-count')).toHaveText('259 of 259 shown')
+    await expect(page.locator('#agents-count')).toHaveText('225 of 225 shown')
     await expect(member(page, 'astraeus')).toBeVisible()
     // No description of a model anywhere: its tier and scores say it all.
     await expect(page.locator('#agents')).not.toContainText('Good for')
@@ -848,7 +839,7 @@ test('shared model cards default to every model and reasoning across all harness
     // Since 2026-10-25 Devin's rows of a model another harness carries share its card
     // (Haiku 5.5, Gemini 3.8 Flash, GLM 5.3, Grok 4.7, Kimi K3, GPT-5.6 Terra and Luna),
     // and Gemini 4 Argon is on Devin and Pi at each of its three levels.
-    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(44)
+    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(35)
     for (const screen of [page, fixture.second]) {
       await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
       const cards = screen.locator('.model-group')
@@ -865,11 +856,10 @@ test('shared model cards default to every model and reasoning across all harness
       // Every agent under a model card is a row with its route.
       for (const card of summaries) expect(card.routes).toBe(card.names.length)
       const luna = cards.filter({
-        has: screen.getByRole('heading', { name: 'GPT-5.6 Luna · Xhigh · 4', exact: true }),
+        has: screen.getByRole('heading', { name: 'GPT-5.6 Luna · Xhigh · 3', exact: true }),
       })
-      await expect(luna.locator('.callsign')).toHaveText(['bil', 'diana', 'phoebe', 'sahure'])
+      await expect(luna.locator('.callsign')).toHaveText(['diana', 'phoebe', 'sahure'])
       await expect(luna.locator('.agent-route')).toHaveText([
-        'OpenRouter · API',
         'Codex login',
         'Codex subscription',
         'Devin account',
@@ -877,39 +867,11 @@ test('shared model cards default to every model and reasoning across all harness
       await screen.getByRole('searchbox').fill('DeepSeek V4 Pro')
       // Devin's own V4 Pro is another snapshot than OpenRouter's 0813: a card of its own.
       await expect(screen.locator('.model-summary h3')).toHaveText([
-        'DeepSeek V4 Pro (0813) · Max · 2',
+        'DeepSeek V4 Pro (0813) · Max · 1',
         'DeepSeek V4 Pro · Max · 1',
         'DeepSeek V4 Pro · High · 1',
       ])
     }
-  } finally {
-    await fixture.close()
-  }
-})
-
-test('the Muse Spark card lists each provider choice with its route and its training note', async ({
-  page,
-}) => {
-  const fixture = await catalogPage(page, [], null)
-  try {
-    for (const screen of [page, fixture.second]) {
-      await screen.getByRole('searchbox').fill('Muse Spark')
-      await expect(screen.locator('.model-summary h3')).toHaveText('Muse Spark 1.3 · Xhigh · 3')
-      await expect(screen.locator('.agent-route')).toHaveText([
-        'OpenRouter · API',
-        'OpenCode Zen · Contributor · Free',
-        'OpenRouter · API',
-      ])
-      await expect(screen.locator('.agent-route-note')).toHaveText([
-        'Prompts and replies may train Meta models.',
-      ])
-    }
-    expect(listAgents(fixture.t.env).find((p) => p.name === 'gefjon').model).toBe(
-      'opencode/muse-spark-1.3-contributor-free',
-    )
-    await expect(member(page, 'gefjon').getByRole('button', { name: /Remove|Reset/ })).toHaveCount(
-      0,
-    )
   } finally {
     await fixture.close()
   }
@@ -920,7 +882,7 @@ test('shared model cards return after reload and Clear filters in both tabs', as
   try {
     for (const screen of [page, fixture.second]) {
       const card = screen.locator('.model-group').filter({
-        has: screen.getByRole('heading', { name: 'Claude Fable 5.1 · Xhigh · 4', exact: true }),
+        has: screen.getByRole('heading', { name: 'Claude Fable 5.1 · Xhigh · 3', exact: true }),
       })
       await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
       for (const alternate of ['none', 'harness']) {
@@ -931,7 +893,7 @@ test('shared model cards return after reload and Clear filters in both tabs', as
         await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
         await expect(screen.getByRole('searchbox')).toHaveValue('')
         await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
-        await expect(card.locator('.member')).toHaveCount(4)
+        await expect(card.locator('.member')).toHaveCount(3)
       }
       await screen.reload()
       await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
@@ -953,13 +915,12 @@ test('a model card keeps its shared tier while an agent of your own joins and le
     const card = page
       .locator('.model-group')
       .filter({ has: page.getByRole('heading', { name: /^Claude Fable 5.1 · Xhigh ·/ }) })
-    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 4')
+    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
     await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
-    // Four harnesses run this model at this effort; each row says which.
+    // Three harnesses run this model at this effort; each row says which.
     await expect(card.locator('.member__head > .tag:not(.tag--own)')).toHaveText([
       'Claude Code',
       'Pi',
-      'OpenCode',
       'Devin',
     ])
     await expect(card.getByRole('button')).toHaveCount(0)
@@ -971,12 +932,12 @@ test('a model card keeps its shared tier while an agent of your own joins and le
     await form.getByRole('button', { name: 'Add agent' }).click()
     await expect(member(second, 'my-fable')).toBeVisible()
     await refreshAgents(page)
-    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 5')
+    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 4')
     await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
     await expect(card.locator('.member .tier-pill')).toHaveCount(0)
     await expect(page.getByRole('searchbox')).toHaveValue('Fable')
     await member(page, 'my-fable').getByRole('button', { name: 'Remove', exact: true }).click()
-    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 4')
+    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
     expect(listAgents(fixture.t.env).some((p) => p.name === 'my-fable')).toBe(false)
   } finally {
     await fixture.close()
@@ -1102,7 +1063,6 @@ test('image agents keep the Codex route and offer only their tier for editing', 
       'claude',
       'codex',
       'pi',
-      'opencode',
       'devin',
     ])
     await expect(image).toBeHidden()
