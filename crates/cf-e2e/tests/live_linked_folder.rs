@@ -23,6 +23,10 @@
 //! cargo xtask live linked-folder                   Devin, then Claude Code
 //! cargo xtask live linked-folder devin             one harness
 //! ```
+//!
+//! A link of a folder is a Unix one here: on Windows ConsensFlow takes a folder as named.
+
+#![cfg(unix)]
 
 use std::path::Path;
 use std::time::Duration;
@@ -118,7 +122,6 @@ fn run(harness: Harness, log: &Log) -> Result<Account> {
     Ok(case)
 }
 
-#[cfg(unix)]
 #[test]
 #[ignore = "opt-in: spends the machine's quota on one short task of each harness named; cargo xtask live linked-folder"]
 fn a_project_reached_through_a_link_has_its_windows_opened_in_the_real_folder_and_answering_there(

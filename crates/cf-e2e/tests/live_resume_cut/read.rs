@@ -109,10 +109,7 @@ pub fn before_answer(reply: &Item) -> Option<String> {
 
 /// The last line of `text` that says something, trimmed.
 fn last_line(text: &str) -> Option<&str> {
-    text.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .last()
+    text.lines().map(str::trim).rfind(|line| !line.is_empty())
 }
 
 #[cfg(test)]

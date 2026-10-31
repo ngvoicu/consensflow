@@ -6,13 +6,15 @@
 //! harness writes back names the real folder, its program's own path to it. Held to no
 //! trace: Node opened a window in the folder as the project spelled it.
 
-use cf_engine::testing::{Context, Made};
-use cf_proto::agents::Harness;
+use cf_engine::testing::Context;
 use serde_json::json;
 
 #[cfg(unix)]
 #[test]
 fn a_window_of_a_project_reached_through_a_link_opens_in_the_real_folder_on_every_harness() {
+    use cf_engine::testing::Made;
+    use cf_proto::agents::Harness;
+
     let root = tempfile::tempdir().unwrap();
     let real = root.path().join("project");
     std::fs::create_dir(&real).unwrap();
