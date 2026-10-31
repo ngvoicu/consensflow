@@ -4,6 +4,12 @@
 //! its handle and role, which only the daemon the window belongs to knows: the handle the board
 //! gives the worker's participant (`live-devin-silver-island`), not its agent's id.
 
+/// What a decoy run says besides, for the harnesses whose shell reads the login profile
+/// (Codex and Devin, 2026-10-31): the gap is known and open, a product task's to close (the
+/// role texts naming the window's own `cf` by its whole path), and the suite stays red on it.
+pub const KNOWN_RED: &str =
+    "known red: the shell reads the login profile, so another `cf` on PATH comes first";
+
 /// What was seen of one worker.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Seen {
@@ -30,7 +36,7 @@ pub fn judge(seen: &Seen) -> Result<String, Vec<String>> {
     let mut problems = Vec::new();
     for (label, calls) in &seen.decoys {
         problems.push(format!(
-            "the worker's shell found the decoy cf in {label} first: it ran `cf {}` there",
+            "the worker's shell found the decoy cf in {label} first: it ran `cf {}` there; {KNOWN_RED}",
             calls.join("`, `cf ")
         ));
     }
@@ -117,7 +123,9 @@ mod tests {
         assert_eq!(
             failed,
             [
-                "the worker's shell found the decoy cf in ~/.local/bin first: it ran `cf whoami`, `cf --version` there"
+                "the worker's shell found the decoy cf in ~/.local/bin first: it ran `cf whoami`, \
+                 `cf --version` there; known red: the shell reads the login profile, so another \
+                 `cf` on PATH comes first"
             ]
         );
     }

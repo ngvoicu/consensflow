@@ -189,3 +189,23 @@ runs = ["live-paste-enter"]
 file = "crates/cf-e2e/tests/live_paste_enter.rs"
 find = "            let word = format!(\"PASTED{}\", cases.len());"
 replace = "            let word = format!(\"PASTED{}\", cases.len() / 3 * 3);"
+
+[[plant]]
+name = "live kit gaps: a decoy run is said without the known gap it is"
+meant = "a_decoy_that_was_run_fails_it_by_its_folder_whatever_the_result_says"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
+find = "there; {KNOWN_RED}\","
+replace = "there\","
+
+[[plant]]
+name = "live kit gaps: the run's home writes a .zshenv the owner's has none of"
+meant = "no_profile_is_one_the_owners_home_lacks_and_an_earlier_ones_zshenv_is_stale"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/home.rs"
+find = "    [\n        \".zprofile\",\n        \".zshrc\","
+replace = "    [\n        \".zshenv\",\n        \".zprofile\",\n        \".zshrc\","

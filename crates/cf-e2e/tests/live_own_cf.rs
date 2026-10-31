@@ -37,11 +37,20 @@
 //! ```text
 //! cargo xtask live own-cf                          Claude Code, Codex, Pi, Devin and Muse
 //! cargo xtask live own-cf devin
-//! cargo xtask windows --host zeewin2 -- cargo xtask live own-cf devin claude codex pi
+//! cargo xtask live --set windows                  on Windows: own-cf claude codex pi among the set
 //! ```
 //!
-//! OpenCode, which leaves ConsensFlow, runs only where it is named. The run fails when any
-//! worker's shell ran a decoy, or its `cf` could not be shown to be the window's own.
+//! OpenCode, which leaves ConsensFlow, runs only where it is named. Devin and Muse run on the
+//! owner's own folders on Windows (the kit has no home of the run's own for them there): name
+//! them on Windows only on purpose. The run fails when any worker's shell ran a decoy, or its
+//! `cf` could not be shown to be the window's own.
+//!
+//! **Known red (2026-10-31, T-972):** on the Mac, Codex 0.166.0 and Devin 3000.11.228 run
+//! their commands in a shell that reads the login profile, and run the decoy in `~/.local/bin`;
+//! their lines say so ([`verdict::KNOWN_RED`]). The suite stays red on them until the product
+//! makes the window's own `cf` win (a 3.0.7 task: the role texts naming it by its whole path).
+//! Claude Code, Pi and Muse find the window's own, and Codex on Windows (its PowerShell reads no
+//! profile of the run's home).
 
 // The parts are in `live_own_cf/`: cargo looks for the modules of a test's root file beside
 // it, where each would be a suite of its own.

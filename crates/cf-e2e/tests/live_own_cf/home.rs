@@ -11,13 +11,21 @@
 //! own, which the daemon put first on the window's `PATH`.
 //!
 //! The folder is made again by each run: the decoys and the profiles written over, the decoys'
-//! logs taken away (by their own paths), so a call is one of this run's.
+//! logs taken away (by their own paths), so a call is one of this run's, and a file an earlier
+//! version wrote ([`STALE`]) taken away too. It writes no `.zshenv`: every zsh reads that one,
+//! a plain `zsh -c` too, and the owner's home has none, so a harness that passes on the owner's
+//! setup would fail here.
 
 use std::path::{Path, PathBuf};
 
 use cf_e2e::live::calls;
 use cf_e2e::live::machine::live_folder;
 use cf_e2e::{files, Result};
+
+/// The files an earlier version of the home wrote and this one does not, taken away by their
+/// own paths when the home is made: `.zshenv`, which every zsh reads, a plain `zsh -c` too, and
+/// which the owner's home has none of (T-972).
+pub const STALE: [&str; 1] = [".zshenv"];
 
 /// The folder below the live folders the home is.
 pub const FOLDER: &str = "own-cf-home";
@@ -95,7 +103,6 @@ pub fn profiles(decoys: &[Decoy], windows: bool) -> Vec<(&'static str, String)> 
     }
     let text = lines.join("\n") + "\n";
     [
-        ".zshenv",
         ".zprofile",
         ".zshrc",
         ".bash_profile",
@@ -125,6 +132,16 @@ pub fn make(program: &Path) -> Result<Home> {
     }
     for (name, text) in profiles(&decoys, windows) {
         files::write(&root.join(name), text)?;
+    }
+    for name in STALE {
+        let stale = root.join(name);
+        if stale.exists() {
+            std::fs::remove_file(&stale).map_err(|source| cf_e2e::Error::File {
+                action: "remove",
+                path: stale.clone(),
+                source,
+            })?;
+        }
     }
     Ok(Home { root, decoys })
 }
@@ -162,6 +179,13 @@ mod tests {
     }
 
     #[test]
+    fn no_profile_is_one_the_owners_home_lacks_and_an_earlier_ones_zshenv_is_stale() {
+        let written = profiles(&decoys_in(Path::new("/h"), false), false);
+        assert!(written.iter().all(|(name, _)| *name != ".zshenv"));
+        assert_eq!(STALE, [".zshenv"]);
+    }
+
+    #[test]
     fn a_windows_path_is_written_as_git_bash_names_it_and_a_unix_one_as_it_is() {
         assert_eq!(
             shell_path(Path::new(r"C:\Users\me\.local\bin"), true),
@@ -175,13 +199,14 @@ mod tests {
 
     #[test]
     fn every_profile_puts_local_bin_first_then_the_package_managers_folder_by_whole_paths() {
-        let decoys = decoys_in(Path::new("/h"), false);
-        let written = profiles(&decoys, false);
+        // The paths as this platform spells them, and as a POSIX shell names them there.
+        let windows = cfg!(windows);
+        let decoys = decoys_in(Path::new("/h"), windows);
+        let written = profiles(&decoys, windows);
         let names: Vec<&str> = written.iter().map(|(name, _)| *name).collect();
         assert_eq!(
             names,
             [
-                ".zshenv",
                 ".zprofile",
                 ".zshrc",
                 ".bash_profile",
@@ -197,7 +222,7 @@ mod tests {
             // The last export is the first on the PATH: `.local/bin`, ahead of the package
             // manager's folder.
             assert_eq!(exports.len(), 2, "{text}");
-            assert!(exports[0].contains(&decoys[1].folder.to_string_lossy().into_owned()));
+            assert!(exports[0].contains(&shell_path(&decoys[1].folder, windows)));
             assert_eq!(exports[1], "export PATH=\"/h/.local/bin:$PATH\"");
             assert!(!text.contains("$HOME"), "whole paths: {text}");
         }
