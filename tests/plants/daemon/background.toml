@@ -1505,7 +1505,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/harness.rs"
-find = '        Servers::InGroup => member.group == Some(kept.group),'
+find = '        Servers::InGroup => kept.group.is_some() && member.group == kept.group,'
 replace = '        Servers::InGroup => false,'
 
 # 3.0.3 (T-42): the turn's work was what began after the mark and was not in the window's

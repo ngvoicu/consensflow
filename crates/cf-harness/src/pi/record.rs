@@ -36,7 +36,9 @@ use jiff::tz::TimeZone;
 use serde_json::Value;
 
 use super::paths::transcript;
-use crate::shared::quota::{exhausted_quota, refused_for_quota, Quota};
+use crate::shared::quota::{
+    account_refusal, exhausted_quota, refused_for_quota, unavailable_quota, Quota,
+};
 use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::followed::{Followed, Parser};
 use crate::shared::record::jsonl::Stop;
@@ -293,10 +295,16 @@ impl Session {
                 };
                 let said = !matches!(field("errorMessage"), None | Some(Value::Null));
                 self.failure = said.then(|| failure.clone());
-                if refused_for_quota(&failure) {
+                // An account refused for its billing or its login has no reset to wait for
+                // (MUS-23); a limit that resets is the quota.
+                let refusal = account_refusal(&failure, None);
+                if refusal.is_some() || refused_for_quota(&failure) {
                     let at_ms = js::to_number(field("timestamp")).map_err(Stop::Failed)?;
-                    let quota =
-                        exhausted_quota(&failure, at_ms, &self.local).map_err(Stop::Failed)?;
+                    let quota = match refusal {
+                        Some(refusal) => unavailable_quota(at_ms, refusal, &failure),
+                        None => exhausted_quota(&failure, at_ms, &self.local),
+                    }
+                    .map_err(Stop::Failed)?;
                     self.quota = Some(Arc::new(quota));
                 }
                 self.terminal = Some(Terminal {

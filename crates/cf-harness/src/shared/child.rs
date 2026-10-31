@@ -4,10 +4,6 @@
 //! program that holds the pipe open (one the child started, or one started
 //! beside it that was left a copy) holds up the stream's end, not the child's.
 
-// Nothing calls it until Muse's MSP child (`muse/msp.rs`, T-829) lands, which
-// stops its child with it and takes this allowance away.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use crate::seams::processes::{Child, Ending};
 use crate::seams::{arm, Time};
 

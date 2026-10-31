@@ -143,6 +143,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "candidate",
         "release alpha",
         "release promote",
+        "release verify",
     ] {
         let mut words: Vec<&str> = command.split(' ').collect();
         words.push("--help");

@@ -37,6 +37,23 @@ pub(super) static REFUSED: LazyLock<Regex> =
 /// usage is spent, which it sends as a 400 (Pi's sessions, 2026-10).
 pub(super) static SPENT: LazyLock<Regex> = LazyLock::new(|| compile(r"(?i-u:out of extra usage)"));
 
+/// An account's billing refused (nothing resets it): Muse's `billing_error`, OpenRouter's
+/// "requires more credits", Anthropic's "credit balance is too low", OpenAI's
+/// `insufficient_quota`.
+pub(super) static BILLING: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r"(?i-u:billing_error|requires more credits|credit balance is too low|insufficient_quota)",
+    )
+});
+
+/// An account's login refused (nothing resets it): Anthropic's `authentication_error`, a key
+/// that is not valid, a token whose refresh a 401 refused (Pi, 2026-10).
+pub(super) static CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r"(?i-u:authentication_error|invalid x-api-key|invalid[_ ]api[_ ]key|refresh failed \(401\))",
+    )
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -47,5 +64,7 @@ mod tests {
             assert!(pattern.captures_len() > 1, "{}", pattern.as_str());
         }
         assert!(SPENT.is_match("You're OUT of extra usage."));
+        assert!(BILLING.is_match("... (billing_error)"));
+        assert!(CREDENTIALS.is_match("Invalid API key"));
     }
 }

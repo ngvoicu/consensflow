@@ -239,6 +239,24 @@ replace = '''
         let next = self.next_in_line(record)?;
         let _ = next;'''
 
+# Chief-meeting's Phase 1 asks again after its fresh look before the paste (f86a072c2, T-794), which
+# holds the window alone and left the edit above an equivalent plant (integration D1's plants, T-946):
+# both asks are taken out.
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if !self.in_open_project(message.project_id)?
+            || self
+                .next_in_line(record)?
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().held = None;'''
+replace = '''        if !self.in_open_project(message.project_id)? {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().held = None;'''
+
 [[plant]]
 name = "pause: what the activity says gates the interrupt again"
 meant = "a_window_out_of_quota_and_still_at_work_is_interrupted_while_its_activity_says_it_is_out"

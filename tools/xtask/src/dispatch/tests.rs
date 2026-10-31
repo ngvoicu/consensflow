@@ -51,6 +51,7 @@ fn every_command_of_the_plan_is_there_once() {
             "eval",
             "watch",
             "scrub-transcript",
+            "scrub-muse-session",
             "specmint-sync",
             "departures",
             "bench records-memory",
@@ -60,6 +61,7 @@ fn every_command_of_the_plan_is_there_once() {
             "candidate",
             "release alpha",
             "release promote",
+            "release verify",
             "check",
             "ci-times",
         ]

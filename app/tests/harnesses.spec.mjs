@@ -47,7 +47,12 @@ for (const [harness, label] of [['pi', 'Pi']]) {
         page.getByText('Role skills included in ConsensFlow', { exact: false }),
       ).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Update skills', exact: true })).toHaveCount(0)
-      await expect(page.locator('.host')).toHaveCount(4)
+      // Every harness ConsensFlow runs, Muse Code the fifth (T-946: the page listed it, and
+      // the count said four).
+      await expect(page.locator('.host')).toHaveCount(5)
+      await expect(
+        page.locator('.host').filter({ has: page.locator('strong', { hasText: /^muse$/ }) }),
+      ).toHaveCount(1)
       await expect(page.locator('.host').filter({ hasText: 'claude' })).toContainText(
         'Not installed',
       )
@@ -233,7 +238,7 @@ test('Harnesses reports a failed initial check and allows retry', async ({ page 
     await page.getByRole('button', { name: 'Check all harnesses' }).click()
     // The retry runs the real check, which probes every harness on this
     // machine: on a busy CI runner that took longer than the 5 s default.
-    await expect(page.locator('.host')).toHaveCount(4, { timeout: 30_000 })
+    await expect(page.locator('.host')).toHaveCount(5, { timeout: 30_000 })
     await expect(page.getByRole('status')).toBeEmpty()
   } finally {
     await server.close()

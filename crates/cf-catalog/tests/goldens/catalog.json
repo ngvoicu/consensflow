@@ -6995,6 +6995,15 @@
       "high",
       "xhigh",
       "max"
+    ],
+    "muse": [
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
     ]
   },
   "workTiers": {
@@ -7019,7 +7028,8 @@
     "claude",
     "codex",
     "pi",
-    "devin"
+    "devin",
+    "muse"
   ],
   "harnessForKind": [
     {

@@ -114,6 +114,15 @@ impl Env {
         self
     }
 
+    /// This environment with the variable `name` set to `value`, whatever it held:
+    /// what a program is run with that it is not given otherwise. Its PATH as given
+    /// ([`Env::search_path`]) stays the one it was given.
+    #[must_use]
+    pub fn with_var(mut self, name: &str, value: &str) -> Self {
+        self.vars.insert(key(name.into()), value.into());
+        self
+    }
+
     /// The PATH a harness's CLI is looked for on first: the one this
     /// environment was given, before the system's folders were put after it.
     pub fn search_path(&self) -> Option<&OsStr> {
@@ -194,6 +203,16 @@ pub fn path_with_folders(path: &OsStr, folders: &[PathBuf]) -> OsString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_variable_set_on_an_environment_is_its_whatever_it_held_and_the_rest_stays() {
+        let given = Env::from_vars([("A", "1"), ("PATH", "/bin")]);
+        let set = given.with_var("A", "2").with_var("B", "3");
+        assert_eq!(set.text("A"), Some("2"));
+        assert_eq!(set.text("B"), Some("3"));
+        assert_eq!(set.text("PATH"), Some("/bin"));
+        assert_eq!(set.search_path(), Some(OsStr::new("/bin")));
+    }
 
     #[test]
     fn is_windows_when_built_for_it_or_when_the_environment_says_so() {

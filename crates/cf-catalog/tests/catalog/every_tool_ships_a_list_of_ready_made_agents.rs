@@ -12,8 +12,12 @@ fn covers_every_harness_each_with_a_real_list_the_image_agent_among_codex_s() {
         .map(|group| group.harness.as_str())
         .collect();
     offered.sort_unstable();
+    // Muse Code's agents are the models its own `model/list` names, once a window opens
+    // on it (MUS-15): no Muse model has been run here to name its levels by
+    // (`data/README.md`), so the catalog has none of it yet.
     let mut harnesses: Vec<&str> = Harness::ALL
         .iter()
+        .filter(|harness| **harness != Harness::Muse)
         .map(|harness| harness.as_str())
         .collect();
     harnesses.sort_unstable();

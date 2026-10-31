@@ -20,9 +20,13 @@ static INPUT: Keep = Keep::Members(&[
     ("ws", &Keep::Scalar),
 ]);
 
+/// The model a `fallback` block names on either side (`from`, `to`).
+static SIDE: Keep = Keep::Members(&[("model", &Keep::Scalar)]);
+
 /// A block of a message's content: its type, the text it says, the ids that
 /// open and close a call, the tool a call is of and what of its input is read, whether a
-/// result is an error, and what a result holds (all of it: it is the item's text).
+/// result is an error, what a result holds (all of it: it is the item's text), and the
+/// two models of a `fallback` block (T-816).
 static BLOCK: Keep = Keep::Members(&[
     ("type", &Keep::Scalar),
     ("text", &Keep::Scalar),
@@ -32,6 +36,8 @@ static BLOCK: Keep = Keep::Members(&[
     ("tool_use_id", &Keep::Scalar),
     ("is_error", &Keep::Scalar),
     ("content", &Keep::All),
+    ("from", &SIDE),
+    ("to", &SIDE),
 ]);
 
 static MESSAGE: Keep = Keep::Members(&[

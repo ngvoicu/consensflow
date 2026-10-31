@@ -77,7 +77,8 @@ pub fn run(
         .collect();
     if given.first().is_some_and(|first| first == "hook") {
         let harness = given.get(1).map(|arg| arg.to_string_lossy());
-        return hook::run(harness.as_deref(), env, input, out);
+        let rest = given.get(2..).unwrap_or_default();
+        return hook::run(harness.as_deref(), rest, env, input, out);
     }
     match Board::from_env(env) {
         Some(board) => board::run(&given, json, &board, input, out, err),

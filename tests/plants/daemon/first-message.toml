@@ -166,8 +166,8 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "                \"the window was never ready for its first message\""
-replace = "                \"the window never showed its first message\""
+find = "            (_, Some(why)) => format!(\"the window was never ready for its first message: {why}\"),"
+replace = "            (_, Some(why)) => format!(\"the window never showed its first message: {why}\"),"
 
 [[plant]]
 name = "first message: one turned away by a Close is not given back to its queue"

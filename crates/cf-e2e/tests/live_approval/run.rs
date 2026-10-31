@@ -53,7 +53,7 @@ fn since(started: Instant) -> u64 {
 /// machine's logins ([`live::rig`]), and Claude Code through the wrapper, where
 /// the project has it, in place of the stand-in.
 fn rig_for(planned: &Planned, machine: &Machine) -> cf_e2e::rig::Config {
-    let needs = planned.seats.harnesses();
+    let needs = planned.needs();
     let installs: Vec<Installed> = needs
         .iter()
         .filter_map(|harness| machine.of(*harness).cloned())
@@ -73,11 +73,11 @@ fn open<'a>(
     rig: &'a Rig,
     log: &Log,
 ) -> Result<(PathBuf, cf_e2e::rig::Project<'a>)> {
-    agents::write_roster(rig, &planned.seats.harnesses(), log)?;
+    agents::write_roster(rig, &planned.needs(), log)?;
     let folder = project::folder(rig, planned)?;
     if let Some(claude) = machine
         .of(Harness::Claude)
-        .filter(|_| planned.seats.harnesses().contains(&Harness::Claude))
+        .filter(|_| planned.needs().contains(&Harness::Claude))
     {
         // Through the wrapper the project's windows start through: this window,
         // unattended on the human's own setup, reaches none of its MCP servers either.

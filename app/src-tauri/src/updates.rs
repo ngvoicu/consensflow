@@ -3,7 +3,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_updater::{RemoteRelease, Update, UpdaterExt};
 
@@ -384,9 +384,11 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
     }
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
-        if event.id().as_ref() == "check-updates" {
-            let _ = app.emit("check-updates", ());
-        }
+        crate::panics::contained("the app's handler of its menu", || {
+            if event.id().as_ref() == "check-updates" {
+                let _ = app.emit("check-updates", ());
+            }
+        });
     });
     Ok(())
 }
@@ -448,12 +450,18 @@ impl UpdateManager {
         }
     }
 
+    /// The state, also after a panic while it was held: what it holds is whole at every
+    /// step, and a poisoned lock must not panic every command of the page after it.
+    fn state(&self) -> MutexGuard<'_, UpdateState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn snapshot(&self) -> UpdateSnapshot {
-        self.state.lock().unwrap().snapshot.clone()
+        self.state().snapshot.clone()
     }
 
     fn set_channel(&self, channel: Channel) -> Result<(), String> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state();
         if matches!(
             state.snapshot.phase,
             "checking" | "downloading" | "installing"
@@ -486,7 +494,7 @@ impl UpdateManager {
     }
 
     fn begin_check(&self) -> bool {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state();
         if matches!(
             state.snapshot.phase,
             "checking" | "downloading" | "ready" | "installing"
@@ -504,7 +512,7 @@ impl UpdateManager {
 
     /// What a check found becomes the state: available, or nothing newer.
     fn found(&self, found: Found) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state();
         state.snapshot.phase = if found.available.is_some() {
             "available"
         } else {
@@ -519,7 +527,7 @@ impl UpdateManager {
     }
 
     fn fail(&self, error: String) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state();
         state.snapshot.phase = "error";
         state.snapshot.error = Some(error);
     }
@@ -531,7 +539,7 @@ impl UpdateManager {
         action: impl FnOnce(&[u8], &str) -> Result<(), String>,
     ) -> Result<cf_panes::pty::UpdatePermit, String> {
         let (permit, bytes, version) = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state();
             if state.snapshot.phase != "ready" || state.bytes.is_none() {
                 return Err("Download and verify the update before installing".into());
             }
@@ -548,7 +556,7 @@ impl UpdateManager {
             (permit, state.bytes.take().unwrap(), version)
         };
         if let Err(error) = action(&bytes, &version) {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state();
             state.bytes = Some(bytes);
             state.snapshot.phase = "ready";
             state.snapshot.error = Some(error.clone());
@@ -559,7 +567,7 @@ impl UpdateManager {
 
     async fn download(&self, notify: impl Fn(&UpdateSnapshot)) -> Result<(), String> {
         let mut update = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state();
             if !matches!(state.snapshot.phase, "available" | "error") {
                 return Err("Choose an available update before downloading".into());
             }
@@ -580,7 +588,7 @@ impl UpdateManager {
             .download(
                 |length, total| {
                     let snapshot = {
-                        let mut state = self.state.lock().unwrap();
+                        let mut state = self.state();
                         state.snapshot.downloaded_bytes += length as u64;
                         state.snapshot.total_bytes = total;
                         state.snapshot.clone()
@@ -595,7 +603,7 @@ impl UpdateManager {
             .await;
         match downloaded {
             Ok(bytes) => {
-                let mut state = self.state.lock().unwrap();
+                let mut state = self.state();
                 state.bytes = Some(bytes);
                 state.snapshot.phase = "ready";
             }
@@ -679,6 +687,21 @@ mod tests {
         json!({"version":version,"notes":"A verified update","pub_date":"2026-09-09T12:00:00Z",
             "platforms":{"darwin-aarch64":{"url":format!("https://github.com/ngvoicu/consensflow/releases/download/v{version}/ConsensFlow_{version}_aarch64.app.tar.gz"),"signature":"test-signature"}},
             "consensflow":{"verified_harnesses":{"claude-code":["2.1.265"],"pi":["0.85.1"]}}})
+    }
+
+    /// A panic while the update state was held leaves it poisoned; the page's commands read it on
+    /// (on the main thread, where a panic of theirs is the event loop's), and do not panic in turn.
+    #[test]
+    fn the_update_state_is_read_after_a_panic_that_held_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = UpdateManager::new("3.0.6", dir.path().join("updates.json"));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = manager.state();
+            panic!("while the update state is held");
+        }));
+        assert!(manager.state.is_poisoned());
+        assert_eq!(manager.snapshot().current_version, "3.0.6");
+        assert!(manager.set_channel(Channel::Alpha).is_ok());
     }
 
     #[test]

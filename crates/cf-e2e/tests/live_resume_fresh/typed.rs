@@ -84,7 +84,10 @@ mod tests {
     #[test]
     fn every_harness_is_given_a_key_of_its_own_to_remember_that_the_question_never_says() {
         let keys: Vec<String> = Harness::ALL.into_iter().map(key_of).collect();
-        assert_eq!(keys, ["KEY_CLAUDE", "KEY_PI", "KEY_DEVIN", "KEY_CODEX"]);
+        assert_eq!(
+            keys,
+            ["KEY_CLAUDE", "KEY_PI", "KEY_DEVIN", "KEY_CODEX", "KEY_MUSE"]
+        );
         assert_eq!(
             the_key("KEY_PI"),
             "Remember this key and reply noted: KEY_PI"

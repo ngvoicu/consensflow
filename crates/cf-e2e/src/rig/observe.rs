@@ -163,6 +163,18 @@ impl Rig {
         events_of(&text.unwrap_or_default())
     }
 
+    /// Every command line the rig's Muse ([`Config::muse`](super::Config::muse)) was
+    /// started with so far, oldest first, as the daemon launched it (its model and
+    /// effort in it, which the rig's Muse takes out before it runs).
+    pub fn muse_launches(&self) -> Vec<Vec<String>> {
+        crate::muse::launches(&self.root.join("muse-argv.log"))
+    }
+
+    /// The sessions the rig's Muse keeps in the rig's home, oldest first, each with its log.
+    pub fn muse_sessions(&self) -> Vec<(String, std::path::PathBuf)> {
+        crate::muse::sessions(std::path::Path::new(self.var("HOME").unwrap_or_default()))
+    }
+
     /// When the daemon pressed the key `bytes` into the window `id`, in
     /// milliseconds since the epoch (the clock of the daemon's events and of a
     /// harness's status file), in order: the `pane.input` requests it made of the

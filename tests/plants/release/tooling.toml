@@ -1779,8 +1779,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "    let run = plants.len() - skipped;"
-replace = "    let run = plants.len();"
+find = "    let run = plants.len() - skipped - absent;"
+replace = "    let run = plants.len() - absent;"
 
 [[plant]]
 name = "tooling: a plant that names no system is for none"

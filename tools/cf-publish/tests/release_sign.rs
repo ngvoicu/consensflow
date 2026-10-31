@@ -110,11 +110,18 @@ mod its_text {
 mod what_it_signs_is_what_was_built {
     use super::*;
 
-    /// The one command every job lists its files with, by the line that runs it.
+    /// The one command every job lists its files with, by the line that runs it, its hasher
+    /// named one way: `sha256sum -b` writes the lines `shasum -b -a 256` writes, and GitHub's
+    /// Windows image has `sha256sum` alone (T-930: `shasum: command not found`, run
+    /// 40872733579).
     fn listings(text: &str) -> Vec<String> {
         text.lines()
             .filter(|line| line.contains("listing=$("))
-            .map(|line| line.trim().to_string())
+            .map(|line| {
+                line.trim()
+                    .replace("sha256sum -b ", "shasum -b -a 256 ")
+                    .replace("| sha256sum |", "| shasum -a 256 |")
+            })
             .collect()
     }
 
@@ -168,6 +175,10 @@ mod what_it_signs_is_what_was_built {
             text.contains("    outputs:\n      listing: ${{ steps.listing.outputs.listing }}\n")
         );
         let windows = read("windows-build.yml");
+        assert!(
+            !job(&windows, "windows").contains("shasum"),
+            "GitHub's Windows image has no shasum (T-930): the Windows job hashes with sha256sum"
+        );
         assert!(windows.contains("        value: ${{ jobs.windows.outputs.listing }}\n"));
         assert!(windows.contains("      listing: ${{ steps.listing.outputs.listing }}\n"));
         // One command lists the files in each of the three jobs.
@@ -282,7 +293,7 @@ mod the_installers_workflow {
 #[cfg(unix)]
 mod its_steps_as_written {
     use std::fs;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{symlink, PermissionsExt};
     use std::path::{Path, PathBuf};
 
     use cf_publish::digest::sha256_hex;
@@ -318,6 +329,24 @@ mod its_steps_as_written {
             .lines()
             .find_map(|line| line.strip_prefix(&format!("{name}=")).map(str::to_string))
             .unwrap_or_else(|| panic!("no output {name}"))
+    }
+
+    /// A folder holding a `sha256sum` where this machine has none (a Mac): the Windows job's
+    /// hasher (GitHub's Windows image has no other, T-930), run as `shasum -a 256`, which
+    /// writes the same lines, `-b`'s too. None where the machine has one, which the step then
+    /// runs itself.
+    fn sha256sum_where_missing() -> Option<TempDir> {
+        if ["/usr/bin/sha256sum", "/bin/sha256sum"]
+            .iter()
+            .any(|program| Path::new(program).is_file())
+        {
+            return None;
+        }
+        let folder = TempDir::new("sha256sum");
+        let program = folder.path().join("sha256sum");
+        fs::write(&program, "#!/bin/sh\nexec shasum -a 256 \"$@\"\n").unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        Some(folder)
     }
 
     /// A step of `workflow`'s job `name`, run as written in `dir`.
@@ -381,15 +410,16 @@ mod its_steps_as_written {
         }
         let windows_out = windows.path().join("outputs");
         fs::write(&windows_out, "").unwrap();
-        let ran = run_in(
-            "windows-build.yml",
-            "windows",
-            WINDOWS_LISTING,
+        let hasher = sha256sum_where_missing();
+        let first: Vec<&Path> = hasher.iter().map(TempDir::path).collect();
+        let ran = bash(
+            &step(&job(&read("windows-build.yml"), "windows"), WINDOWS_LISTING).script(),
             windows.path(),
             &[
                 ("RUNNER_TEMP", windows.path().to_str().unwrap()),
                 ("GITHUB_OUTPUT", windows_out.to_str().unwrap()),
             ],
+            &first,
         );
         assert_eq!(ran.status, 0, "{}", ran.said());
         let windows_listing = output(&windows_out, "listing");

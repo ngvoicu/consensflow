@@ -170,10 +170,10 @@ impl Step {
 const PICKER: &str = "/model";
 
 /// Whether ConsensFlow pastes into `harness`'s window, so that the count holds its
-/// deliveries: Claude Code and Devin. The others take theirs through their own
+/// deliveries: Claude Code, Devin and Muse. The others take theirs through their own
 /// channels.
 const fn pasted(harness: Harness) -> bool {
-    matches!(harness, Harness::Claude | Harness::Devin)
+    matches!(harness, Harness::Claude | Harness::Devin | Harness::Muse)
 }
 
 /// What one step left.

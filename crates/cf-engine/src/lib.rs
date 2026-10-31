@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 mod arrival;
+mod at_work;
 mod background;
 mod chief_switch;
 pub mod computer_use;
