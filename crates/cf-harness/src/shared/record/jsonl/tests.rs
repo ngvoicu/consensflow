@@ -1,5 +1,6 @@
 use super::*;
 use crate::testing::{EPOCH_MS, LONG_AFTER_MS};
+use std::cell::Cell;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -441,9 +442,11 @@ fn a_file_last_written_well_before_the_look_that_read_it_is_not_read_again_while
 
 /// Limit 1: a record rewritten at its length more than an edge before the end, the file's
 /// size and time kept and the look within a step of its time, was taken for the one read:
-/// only the last kilobyte and the tail were checked.
+/// only the last kilobyte and the tail were checked. Its bytes are read again at the look
+/// whose time settles the file (T-1024), not at each look before it: it is told then.
 #[test]
-fn a_record_rewritten_at_its_length_before_the_edge_within_a_step_is_not_the_one_read() {
+fn a_record_rewritten_at_its_length_before_the_edge_is_not_the_one_read_at_the_look_that_settles_it(
+) {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("t.jsonl");
     let written = EPOCH_MS;
@@ -456,16 +459,21 @@ fn a_record_rewritten_at_its_length_before_the_edge_within_a_step_is_not_the_one
     let rewritten = format!("b{}", &long[1..]);
     fs::write(&file, format!("{{\"x\":\"{rewritten}\"}}\n{{\"y\":1}}\n")).unwrap();
     stamp(&file, written as u64);
+    // Within the step its edge and tail are as they were: held, a look later at most.
+    let Ok(Looked::Held(seen)) = collect_at(&file, Some(&seen), written + 1_000, None).0 else {
+        panic!("a look within the step reads no more than the edge, the tail and the rest");
+    };
     assert!(matches!(
-        collect_at(&file, Some(&seen), written + 1_000, None).0,
+        collect_at(&file, Some(&seen), written + 2_500, None).0,
         Ok(Looked::NotTheFile)
     ));
 }
 
 /// What limit 1's fix must not lose: a file read in two looks, and as they left it since,
-/// is held by its bytes within a step of its time, not taken for another.
+/// is held by its bytes within a step of its time and at the look that settles it, which
+/// hashes it whole: what the looks hashed as they read is the same.
 #[test]
-fn a_file_read_in_two_looks_and_unchanged_since_is_held_within_a_step() {
+fn a_file_read_in_two_looks_and_unchanged_since_is_held_within_a_step_and_as_it_settles() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("t.jsonl");
     let written = EPOCH_MS;
@@ -474,9 +482,114 @@ fn a_file_read_in_two_looks_and_unchanged_since_is_held_within_a_step() {
     let seen = read(collect_at(&file, None, written + 100, None).0);
     append(&file, "{\"a\":2}\n{\"a\":", (written + 200) as u64);
     let seen = read(collect_at(&file, Some(&seen), written + 300, None).0);
+    let Ok(Looked::Held(seen)) = collect_at(&file, Some(&seen), written + 400, None).0 else {
+        panic!("not held within the step");
+    };
+    let Ok(Looked::Held(seen)) = collect_at(&file, Some(&seen), written + 2_500, None).0 else {
+        panic!("not held at the look that settles it");
+    };
     assert!(matches!(
-        collect_at(&file, Some(&seen), written + 400, None).0,
-        Ok(Looked::Held(_))
+        collect_at(&file, Some(&seen), written + 3_000, None).0,
+        Ok(Looked::Unchanged)
+    ));
+}
+
+/// What a look reads of the file: its tail, its edge, its rest and every byte it reads on
+/// from, as the test's own thread counts them.
+fn bytes_read<T>(look: impl FnOnce() -> T) -> (T, u64) {
+    let before = READ.with(Cell::get);
+    let looked = look();
+    (looked, READ.with(Cell::get) - before)
+}
+
+thread_local! {
+    /// The bytes the reader read of a file on this thread (`count_read`).
+    static READ: Cell<u64> = const { Cell::new(0) };
+}
+
+/// `read` more bytes read of a file, on this thread.
+pub(super) fn count_read(read: usize) {
+    READ.with(|count| count.set(count.get() + read as u64));
+}
+
+/// A file of many records and a last line not finished, bigger than a chunk many times
+/// over, written at `written`: its size.
+fn a_large_record(file: &Path, written: i64) -> u64 {
+    let line = format!("{{\"text\":\"{}\"}}\n", "x".repeat(1_000));
+    let text = format!("{}{{\"unfinished\":", line.repeat(400));
+    fs::write(file, &text).unwrap();
+    stamp(file, written as u64);
+    text.len() as u64
+}
+
+/// The cost of limit 1's fix (T-1024): a transcript of hundreds of megabytes read again
+/// whole at each look of the step after a write held up every other window's look. Its
+/// first read reads each byte once (the hash is made as the lines are parsed, not by a read
+/// of its own); a look within the step reads no more than the edge, the tail and the rest;
+/// the look that settles it reads it whole, once; and none after reads a byte.
+#[test]
+fn a_file_is_read_whole_once_at_its_first_look_and_once_at_the_look_that_settles_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    let size = a_large_record(&file, written);
+    let rest = "{\"unfinished\":".len() as u64;
+    let (looked, first) = bytes_read(|| collect_at(&file, None, written + 100, None).0);
+    let seen = read(looked);
+    assert!(
+        first <= size + EDGE_BYTES + rest,
+        "the first read read {first} bytes of {size}"
+    );
+    let (looked, within) = bytes_read(|| collect_at(&file, Some(&seen), written + 1_000, None).0);
+    let Ok(Looked::Held(seen)) = looked else {
+        panic!("not held within the step: {looked:?}");
+    };
+    assert!(
+        within <= EDGE_BYTES + rest,
+        "a look within the step read {within} bytes of {size}"
+    );
+    let (looked, settling) = bytes_read(|| collect_at(&file, Some(&seen), written + 2_500, None).0);
+    let Ok(Looked::Held(seen)) = looked else {
+        panic!("not held at the look that settles it: {looked:?}");
+    };
+    assert!(
+        (size - rest..=size + EDGE_BYTES + rest).contains(&settling),
+        "the look that settles it read {settling} bytes of {size}"
+    );
+    let (looked, after) = bytes_read(|| collect_at(&file, Some(&seen), written + 3_000, None).0);
+    assert!(matches!(looked, Ok(Looked::Unchanged)));
+    assert_eq!(after, 0);
+}
+
+/// What the hash made as a look parses must hold: a tail visited and finished by a later
+/// look, a torn line the look stops before, and lines another session's (`only`) passed
+/// over unparsed, each go into it as a read of the whole file from its start would, so the
+/// look that settles it holds it.
+#[test]
+fn the_hash_made_as_looks_read_is_the_whole_file_s_through_a_tail_a_torn_line_and_lines_passed_over(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    let only: &[u8] = b"\"mine\"";
+    fs::write(&file, "{\"s\":\"mine\",\"a\":1}\n{\"s\":\"mine\",\"a\":2}").unwrap();
+    stamp(&file, written as u64);
+    let seen = read(collect_at(&file, None, written + 100, Some(only)).0);
+    append(
+        &file,
+        "\n{\"s\":\"theirs\",\"a\":3}\n{\"s\":\"mine\",\"a\":4}\ntorn \"mine\"\n",
+        (written + 200) as u64,
+    );
+    let (looked, visited) = collect_at(&file, Some(&seen), written + 300, Some(only));
+    assert_eq!(visited.len(), 1, "the record after the tail: {visited:?}");
+    let seen = read(looked);
+    let Ok(Looked::Held(seen)) = collect_at(&file, Some(&seen), written + 2_500, Some(only)).0
+    else {
+        panic!("not held at the look that settles it");
+    };
+    assert!(matches!(
+        collect_at(&file, Some(&seen), written + 3_000, Some(only)).0,
+        Ok(Looked::Unchanged)
     ));
 }
 
