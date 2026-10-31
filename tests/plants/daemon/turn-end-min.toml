@@ -38,6 +38,10 @@ tem-e2e-monitor-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", 
 tem-panes-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::turn::tests::commands"]
 tem-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests"]
 tem-panes-background = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::"]
+tem-engine-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_answers::"]
+tem-panes-windows-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::turn::tests::windows::"]
+tem-harness-servers = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "servers::"]
+tem-rig-shell-ended = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_monitor_claude_ended_by_its_shell_held_its_task::"]
 tem-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 tem-opencode-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 tem-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading"]
@@ -904,7 +908,7 @@ runs = ["tem-panes-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/harness.rs"
-find = '        .filter(|member| member.group != Some(kept.group))'
+find = '        .filter(|member| member.group != Some(group))'
 replace = '        .filter(|member| member.group != Some(-1))'
 
 [[plant]]
@@ -914,8 +918,8 @@ runs = ["tem-panes-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/harness.rs"
-find = '            Some(parent) => i32::try_from(parent.pid) == Ok(kept.group),'
-replace = '            Some(parent) => i32::try_from(parent.pid) == Ok(kept.group) && member.group == i32::try_from(member.key.pid).ok(),'
+find = '            Some(parent) => i32::try_from(parent.pid) == Ok(group),'
+replace = '            Some(parent) => i32::try_from(parent.pid) == Ok(group) && member.group == i32::try_from(member.key.pid).ok(),'
 
 [[plant]]
 name = "turn-end-min host: the commands are told of a window whose harness keeps its servers otherwise"
@@ -924,8 +928,8 @@ runs = ["tem-panes-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background.rs"
-find = '        self.kept.filter(|kept| kept.servers == Servers::InGroup)'
-replace = '        self.kept.filter(|kept| kept.servers != Servers::Unknown)'
+find = '            .filter(|kept| kept.servers == Servers::InGroup)'
+replace = '            .filter(|kept| kept.servers != Servers::Unknown)'
 
 [[plant]]
 name = "turn-end-min reader: a monitor's notice with a status is kept as its end"
@@ -1921,3 +1925,143 @@ runs = ["tem-rig-monitor"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '                held.told.as_ref() == Some(&now)'
 replace = '                held.told.is_some()'
+
+# T-906 (T-858's live `tell` on zeewin2): a Windows job has no groups, its host told no command, and
+# a Claude turn's monitor whose command Claude Code had ended held its task, working or paused, until
+# Finish. A Windows job tells the commands by their chain (`crates/cf-panes/src/background.rs`
+# `chained`): a shell the harness started after the rest the look names, or the window's launch,
+# what runs down from it, and what began since with no parent; never a server, never blind. The
+# Windows ones are a Windows machine's (`cargo xtask plants daemon "<name>"` through the runner).
+
+[[plant]]
+name = "turn-end-min engine: a monitor that said it ended is taken for over where the host cannot tell"
+meant = "a_tells_turn_whose_host_cannot_tell_the_windows_commands_is_not_told_over_until_a_look_finds_none"
+runs = ["tem-engine-paused", "tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '    if watching == Watching::Seen(CommandsSeen::Running(0)) {'
+replace = '    if matches!(watching, Watching::Seen(CommandsSeen::Running(0) | CommandsSeen::Untold)) {'
+
+[[plant]]
+name = "turn-end-min host: a window with no groups has no way its servers are kept"
+meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/harness.rs"
+find = '        (!servers.is_unknown()).then_some(Self { group, servers })'
+replace = '        (!servers.is_unknown() && group.is_some()).then_some(Self { group, servers })'
+
+[[plant]]
+name = "turn-end-min host: where there are no groups every process is a server by where it is"
+meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/harness.rs"
+find = '        Servers::InGroup => kept.group.is_some() && member.group == kept.group,'
+replace = '        Servers::InGroup => member.group == kept.group,'
+
+[[plant]]
+name = "turn-end-min host: a shell the harness started is no command where there are no groups"
+meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            .filter(|member| shells.contains(&member.key))'
+replace = '            .filter(|member| member.parent.is_some() && !shells.contains(&member.key))'
+
+[[plant]]
+name = "turn-end-min host: what a shell left when it was ended is a command where there are no groups"
+meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            .filter(|member| shells.contains(&member.key))'
+replace = '            .filter(|member| shells.contains(&member.key) || member.parent.is_none())'
+
+[[plant]]
+name = "turn-end-min host: where there are no groups the launch is not left out"
+meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            .filter(|member| !left_out.contains(&member.key))'
+replace = '            .filter(|member| left_out.is_empty() || true)'
+
+[[plant]]
+name = "turn-end-min host: where there are no groups the rest a look names is not left out"
+meant = "where_the_platform_has_no_groups_what_ran_at_the_rest_a_look_names_is_no_command"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '        let rest = since.and_then(|number| self.rests.iter().find(|(kept, _)| *kept == number));'
+replace = '        let rest = since.and_then(|number| self.rests.iter().find(|(kept, _)| *kept == number.wrapping_add(1)));'
+
+[[plant]]
+name = "turn-end-min host (Windows): a job is read for its commands as a tree it cannot read"
+meant = "a_shell_the_program_started_after_the_rest_is_a_command_and_ends_with_it"
+platforms = ["windows"]
+runs = ["tem-panes-windows-commands"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '                Some(members) => Read::All(members),'
+replace = '                Some(_) => Read::Unreadable,'
+
+# The second half of T-906: Claude's adapter told the host `Unknown` on Windows, so the host's rule
+# above never engaged on a real window (two zeewin2 live `tell` runs held the task). Claude Code says
+# `ByShell` there, and the host tells by chain only a harness that says so; `InGroup` where there
+# are no groups claims what cannot be. The rig case runs the real adapter and host, with the
+# stand-in ending the monitor's shell alone as Claude Code 2.1.312 does on Windows.
+
+[[plant]]
+name = "turn-end-min harness: Claude says nothing of its servers on Windows"
+meant = "on_windows_claude_says_it_runs_each_command_in_a_shell_and_no_other_harness_says_anything"
+runs = ["tem-harness-servers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """        if self.env.on_windows() {
+            Servers::ByShell"""
+replace = """        if self.env.on_windows() {
+            Servers::Unknown"""
+
+[[plant]]
+name = "turn-end-min rig (Windows): Claude says nothing of its servers on Windows"
+meant = "a_monitor_whose_shell_claude_code_ended_lets_its_task_go_with_its_last_answer"
+platforms = ["windows"]
+runs = ["tem-rig-shell-ended"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """        if self.env.on_windows() {
+            Servers::ByShell"""
+replace = """        if self.env.on_windows() {
+            Servers::Unknown"""
+
+[[plant]]
+name = "turn-end-min host: a harness that runs its commands in shells has them told by no chain"
+meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            .or(self.kept.filter(|kept| kept.servers == Servers::ByShell))'
+replace = '            .or(None)'
+
+[[plant]]
+name = "turn-end-min host: a window in the window's group where there are no groups is told its commands"
+meant = "the_commands_are_not_told_of_a_window_whose_servers_are_not_in_its_group"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            .filter(|kept| kept.group.is_some())'
+replace = '            .filter(|kept| kept.group.is_some() || kept.group.is_none())'

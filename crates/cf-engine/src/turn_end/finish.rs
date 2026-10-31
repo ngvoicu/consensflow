@@ -18,7 +18,8 @@
 //! closed) is counted until what runs in its window says so: a monitor of a command is
 //! over once a look finds no command of the harness's running in the window
 //! (`super::Dispatcher::watch_monitors`); one of a socket or an MCP server, and every one
-//! where the host cannot tell the window's commands (a Windows job has no groups), by
+//! where the host cannot tell the window's commands (a harness that keeps its servers
+//! otherwise, a tree it cannot read), by
 //! Finish alone, for a real notice ends it in Claude Code, which says no status of it
 //! after and refuses its TaskStop (`cf_harness::claude::record::jobs`). So it is for
 //! **any working task**, held or not,

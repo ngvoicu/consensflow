@@ -34,6 +34,8 @@ pub const TRUST_PROMPT: &str = "Ready for work (a test's prompt)";
 /// names the question's choices without asking it: a conversation that quotes them.
 pub const TRUST_UNPLACED: &str = "Do you trust this folder? (a test's question, its choice lost)";
 pub const TRUST_QUOTED: &str = "Yes, I trust this folder / No, exit (a test's quote of them)";
+/// The line a test window's screen shows while its harness compacts its conversation.
+pub const COMPACTING: &str = "• Compacting the conversation (a test's compaction)";
 
 pub(super) struct FakeWindow {
     seam: String,
@@ -119,8 +121,21 @@ impl Window for FakeWindow {
         }
     }
 
+    /// A box is read empty where a line of the screen is its prompt mark alone, as
+    /// Claude Code and Muse Code draw an empty one.
+    fn box_read_empty(&self, snapshot: &Value) -> bool {
+        snapshot["bottom"].as_array().is_some_and(|lines| {
+            lines
+                .iter()
+                .any(|line| line.as_str().map(str::trim) == Some("❯"))
+        })
+    }
+
+    /// Its prompt is a line of the screen that holds [`TRUST_PROMPT`], the screen the engine
+    /// read: past the trust question, where its windows ask one.
     fn shows_prompt(&self, screen: &[String]) -> bool {
-        self.trusts.is_some() && holds(screen, TRUST_PROMPT) && self.toward_trust(screen).is_none()
+        holds(screen, TRUST_PROMPT)
+            && (self.trusts.is_none() || self.toward_trust(screen).is_none())
     }
 
     fn names_trust_choices(&self, screen: &[String]) -> bool {
@@ -130,8 +145,22 @@ impl Window for FakeWindow {
                 .any(|words| holds(screen, words))
     }
 
+    fn ready_sign(&self) -> Option<&str> {
+        self.trusts.is_some().then_some(TRUST_PROMPT)
+    }
+
+    fn compacting(&self, screen: &[String]) -> bool {
+        holds(screen, COMPACTING)
+    }
+
     fn follow(&self, session: &str) {
         *self.session.borrow_mut() = session.to_owned();
+    }
+
+    fn greeted(&self, session: &str) -> bool {
+        self.fake.of_launch(&self.launch, |agent| {
+            !agent.ungreeted.iter().any(|ungreeted| ungreeted == session)
+        })
     }
 
     fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
@@ -414,6 +443,9 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             asking: false,
             failed: false,
             failure: agent.failure.clone(),
+            took_back: false,
+            model_moved: None,
+            model_drift: agent.model_drift.clone(),
             quota: None,
             settlement: Settlement::Unknown,
             pending: agent.pending,

@@ -21,6 +21,7 @@ use cf_harness::contract::{Pane, PaneHost, Readiness};
 use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView};
 use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 
+use crate::at_work::OnWork;
 use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -177,6 +178,8 @@ impl Dispatcher {
             session: None,
             owed: None,
             late: false,
+            work: OnWork::default(),
+            not_ready: None,
         };
         if participant.role == "chief" {
             // A chief's window the host would not kill is looked at again.

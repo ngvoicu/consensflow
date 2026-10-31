@@ -26,7 +26,7 @@ use cf_harness::contract::{
     Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
     Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
 };
-use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
+use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::{json, Value};
@@ -56,6 +56,9 @@ pub struct FakeAgent {
     pub says_places: bool,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
+    /// The model its harness's records say changed with no word of the harness's own
+    /// for it (Claude Code's drift): said to the human, never held on.
+    pub model_drift: Option<Arc<ModelMoved>>,
     /// Whether a delivery is taken.
     pub admit: bool,
     /// Whether a delivery taken shows in the record.
@@ -72,6 +75,9 @@ pub struct FakeAgent {
     pub failure: Option<String>,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
+    /// The conversations the window was switched to that no hook of its harness greeted
+    /// with its role text (`Window::greeted`, Muse's `/clear`).
+    pub ungreeted: Vec<String>,
     /// Each conversation's record, once the window switched away from it.
     pub records: HashMap<String, Vec<Item>>,
     /// Whether each of those records, read with no window open, reads at rest: as the
@@ -301,6 +307,11 @@ pub struct FakeAdapter {
     /// What its windows' input box holds on their screen (`Window::input_box`): none,
     /// as a window whose box no reader reads, unless a test says.
     pub input_box: Cell<Option<InputBox>>,
+    /// A window opened again on a conversation reads what the one before it ended in, as a
+    /// harness's record keeps it: the failure of its last turn and the quota it said (a
+    /// refusal stays in the record a Resume reads, T-841). Nothing of either, as Node's
+    /// suite, where each window began clean.
+    pub rereads_failures: Cell<bool>,
 }
 
 impl FakeAdapter {
@@ -376,6 +387,7 @@ impl FakeAdapter {
             says_places: Cell::new(true),
             idle_word: Cell::new(true),
             input_box: Cell::new(None),
+            rereads_failures: Cell::new(false),
         })
     }
 
@@ -628,11 +640,27 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.quota = quota.map(Arc::new));
     }
 
+    /// The window's records say its model changed from `from` to `to` at `at`, with no word
+    /// of its harness's own for it.
+    pub fn drifts(&self, handle: &str, from: &str, to: &str, at: Option<&str>) {
+        let drift = ModelMoved {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            because: "its records name another model with no word of Claude Code's own for it"
+                .to_owned(),
+            at: at.map(str::to_owned),
+        };
+        self.with(handle, |agent| agent.model_drift = Some(Arc::new(drift)));
+    }
+
     /// The harness refuses the turn, as Claude Code writes its limit: the
     /// turn ends on the refusal, which the record reads as a failure.
     pub fn refuse(&self, handle: &str, quota: Quota) {
         let mut item = self.item(Role::Assistant, "You've hit your weekly limit");
-        if let Quota::Exhausted { at: Some(at), .. } = &quota {
+        if let Quota::Exhausted { at: Some(at), .. }
+        | Quota::Unavailable { at: Some(at), .. }
+        | Quota::Moved { at: Some(at), .. } = &quota
+        {
             item.at = Some(json!(at));
         }
         self.with(handle, |agent| {
@@ -782,6 +810,17 @@ impl FakeAdapter {
             .find(|agent| agent.native == session)
             .map(|agent| agent.lost.clone())
             .unwrap_or_default()
+    }
+
+    /// What the last window on `session` ended in: its failure, with its words, and the quota
+    /// it said.
+    fn failure_of(&self, session: &str) -> Option<(bool, Option<String>, Option<Arc<Quota>>)> {
+        self.agents
+            .borrow()
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .map(|agent| (agent.failed, agent.failure.clone(), agent.quota.clone()))
     }
 
     /// What the record of `session` holds (`adapter.record`): the latest
@@ -970,6 +1009,11 @@ impl Asked {
             .resume
             .map(|session| fake.lost_of(session))
             .unwrap_or_default();
+        let (failed, failure, quota) = launch
+            .resume
+            .filter(|_| fake.rereads_failures.get())
+            .and_then(|session| fake.failure_of(session))
+            .unwrap_or((false, None, None));
         let mut agent = FakeAgent {
             launch: id.clone(),
             handle: launch.handle.to_owned(),
@@ -981,15 +1025,17 @@ impl Asked {
             lost,
             says_places: fake.says_places.get(),
             waiting: None,
-            quota: None,
+            quota,
+            model_drift: None,
             admit: true,
             arrive: true,
             queued: false,
             took: false,
             held: false,
-            failed: false,
-            failure: None,
+            failed,
+            failure,
             shows: None,
+            ungreeted: Vec::new(),
             records: HashMap::new(),
             records_settled: HashMap::new(),
             stored: HashMap::new(),

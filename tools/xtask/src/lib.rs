@@ -25,8 +25,8 @@
 //! - the mutation tests: `plants`, with their data in `tests/plants`;
 //! - how long CI takes: `ci_times` (`ci-times`), which reads the jobs' and steps'
 //!   times of CI's runs against the limits `ci.yml` gives them;
-//! - the releases: `release` (`release alpha`, and `release promote` of a tested
-//!   alpha to its plain version);
+//! - the releases: `release` (`release alpha`, `release promote` of a tested
+//!   alpha to its plain version, and `release verify` of a published one);
 //! - what spends real quota and is no part of the gate: `live` (one command for
 //!   every live test of `crates/cf-e2e`, whatever its name) and `evals` (`eval`,
 //!   `eval summary`, `eval long` and `watch`, which hand their words to
@@ -34,7 +34,8 @@
 //! - the Windows machine: `windows` (`windows` and `windows-matrix`: a command,
 //!   and the matrix of the chief evals, run there over ssh), with `stops`, what
 //!   ends a run early, which it shares with `plants`;
-//! - `scrub_transcript`: the fixtures that are made of a Claude transcript;
+//! - `scrub_transcript` and `scrub_muse_session`: the fixtures that are made of a
+//!   Claude transcript and of a Muse session log;
 //! - `specmint`: the Specmint skills vendored in `skill/specmint`, refreshed from
 //!   checkouts of their repositories;
 //! - what every command shares: `dispatch` (the command line), `context` (where
@@ -58,6 +59,7 @@ mod portable;
 pub mod process;
 mod release;
 mod screen;
+mod scrub_muse_session;
 mod scrub_transcript;
 mod sidecar;
 mod smoke;

@@ -243,8 +243,8 @@ fn a_member_whose_window_never_shows_its_first_message_is_said_to_have_failed_as
     for words in [
         // The failure, in the daemon's words, from what the chief was told: the stand-in's
         // screen names an API key, so the daemon quotes none of it. Its window, delivered its
-        // first message once up (T-432), was never ready for it.
-        "FAIL the member did not write its numbers: its task is failed, and the chief was told: T-1 failed: the window was never ready for its first message; its last screen lines named a secret, so they are left out",
+        // first message once up (T-432), never showed the prompt it waits for (T-863).
+        "FAIL the member did not write its numbers: its task is failed, and the chief was told: T-1 failed: the window never showed the prompt its first message waits for, a screen line with \"bypass permissions on\"; its last screen lines named a secret, so they are left out",
         "     the task: T-1 is failed",
         "     what the daemon wrote:",
         "     the chief was told (",

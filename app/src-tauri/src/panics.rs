@@ -20,7 +20,7 @@ use std::cell::Cell;
 use std::io::Write;
 use std::panic::{self, AssertUnwindSafe, PanicHookInfo};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -30,9 +30,10 @@ pub(crate) mod appkit;
 /// What Rust says as it aborts an unwind that reached a function that cannot unwind.
 const CANNOT_UNWIND: &str = "panic in a function that cannot unwind";
 
-/// How soon after a panic of its thread such an abort is that panic's, in milliseconds: a
-/// second, and narrower in the tests that time it.
-static UNWOUND_WITHIN_MS: AtomicU64 = AtomicU64::new(1000);
+/// How soon after a panic of its thread was written such an abort is that panic's: the unwind
+/// from the panic to the function that cannot unwind, which a loaded machine stretches to more
+/// than tens of milliseconds (T-946).
+const UNWOUND_WITHIN: Duration = Duration::from_secs(1);
 
 thread_local! {
     /// When this thread's last panic was written.
@@ -123,8 +124,8 @@ fn describe(info: &PanicHookInfo<'_>) -> String {
     let thread = std::thread::current();
     let name = thread.name().unwrap_or("unnamed");
     let earlier = LAST_PANIC.with(Cell::get);
-    let foreign = message == CANNOT_UNWIND
-        && !earlier.is_some_and(|began| began.elapsed() < unwound_within());
+    let foreign =
+        message == CANNOT_UNWIND && !earlier.is_some_and(|began| began.elapsed() < UNWOUND_WITHIN);
     let note = if foreign {
         "No panic began on this thread before it: what unwound was no Rust panic but a foreign \
          exception, most likely an Objective-C one the system's code raised.\n"
@@ -136,10 +137,6 @@ fn describe(info: &PanicHookInfo<'_>) -> String {
         now(),
         Backtrace::force_capture()
     )
-}
-
-fn unwound_within() -> Duration {
-    Duration::from_millis(UNWOUND_WITHIN_MS.load(Ordering::Relaxed))
 }
 
 fn now() -> String {

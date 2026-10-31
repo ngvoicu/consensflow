@@ -189,6 +189,36 @@ fn a_plant_for_a_system_there_is_none_of_or_for_none_is_an_error_of_its_table() 
 }
 
 #[test]
+fn a_plant_that_needs_a_harness_the_runner_knows_none_of_is_an_error_of_its_table() {
+    let second = SECOND.replace(
+        "runs = [\"goldens\"]",
+        "runs = [\"goldens\"]\nharnesses = [\"muse\", \"gemini\"]",
+    );
+    let (_folder, context) = demo(KIT, FIRST, &second);
+    let error = error_of(load(&context));
+    assert!(
+        error.ends_with(
+            "the plant `second: one` needs `gemini`, which is no harness a plant may need: muse"
+        ),
+        "{error}"
+    );
+    let second = SECOND.replace(
+        "runs = [\"goldens\"]",
+        "runs = [\"goldens\"]\nharnesses = [\"muse\"]",
+    );
+    let (_folder, context) = demo(KIT, FIRST, &second);
+    let family = load(&context).unwrap();
+    for plant in &family.plants {
+        let needs: &[&str] = if plant.name == "second: one" {
+            &["muse"]
+        } else {
+            &[]
+        };
+        assert_eq!(plant.harnesses, needs, "{}", plant.name);
+    }
+}
+
+#[test]
 fn text_is_held_as_it_is_written_between_triple_quotes_and_between_double() {
     let first = r#"
 [[plant]]
@@ -354,6 +384,7 @@ fn plant(edits: &[(&str, &str, &str)]) -> Plant {
         prepare: Vec::new(),
         requires: Vec::new(),
         platforms: Vec::new(),
+        harnesses: Vec::new(),
         edits: edits
             .iter()
             .map(|(file, find, replace)| Edit {
@@ -453,4 +484,22 @@ fn a_file_that_is_not_there_or_is_not_text_is_not_one_a_plant_can_be_made_in() {
             .contains("is not text a plant can be made in"),
         "{binary}"
     );
+}
+
+/// T-829: the harnesses a plant's runs need, and how the runner finds Muse Code: its
+/// launcher's version file in `~/.local/bin` and the binary it names beside it.
+#[test]
+fn a_plant_names_the_harnesses_its_runs_need_and_muse_is_found_as_the_rig_finds_it() {
+    let home = tempfile::tempdir().unwrap();
+    assert_eq!(
+        lacks("muse", Some(home.path())).as_deref(),
+        Some("Muse isn't installed")
+    );
+    assert_eq!(lacks("muse", None).as_deref(), Some("Muse isn't installed"));
+    let bin = home.path().join(".local").join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    fs::write(bin.join(".muse-version"), "1.4.14-R7309.1\n").unwrap();
+    assert!(lacks("muse", Some(home.path())).is_some(), "no binary yet");
+    fs::write(bin.join("muse-bin-1.4.14-R7309.1"), "").unwrap();
+    assert_eq!(lacks("muse", Some(home.path())), None);
 }

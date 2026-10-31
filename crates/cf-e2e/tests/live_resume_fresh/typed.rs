@@ -91,7 +91,8 @@ mod tests {
                 "KEY_OPENCODE",
                 "KEY_PI",
                 "KEY_DEVIN",
-                "KEY_CODEX"
+                "KEY_CODEX",
+                "KEY_MUSE"
             ]
         );
         assert_eq!(

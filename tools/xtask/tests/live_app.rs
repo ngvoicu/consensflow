@@ -206,7 +206,15 @@ fn reads_its_identity_first(text: &str) -> bool {
 /// release's on a machine someone uses, and the lines that start what they start: held to
 /// those, so a start added to such a file is read again.
 #[allow(clippy::type_complexity)]
-const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 7] = [
+const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 8] = [
+    (
+        "tools/xtask/src/release/tests/fake.rs",
+        "the Windows installer's name among a fake release's files; it runs git on its fake remotes",
+        &[
+            r#"&Invocation::new("git", dir).args(args.iter().copied()),"#,
+            r#"&Invocation::new("git", dir).args(args.iter().copied()),"#,
+        ],
+    ),
     (
         ".github/workflows/windows-build.yml",
         "the shipped exe's first start, and its runtime's cf, on GitHub's runner, which holds no one's ConsensFlow",

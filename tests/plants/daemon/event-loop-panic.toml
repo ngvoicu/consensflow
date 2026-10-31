@@ -69,8 +69,8 @@ runs = ["app-panics"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/panics.rs"
-find = "        && !earlier.is_some_and(|began| began.elapsed() < unwound_within());"
-replace = "        || earlier.is_some_and(|began| began.elapsed() > unwound_within());"
+find = "        message == CANNOT_UNWIND && !earlier.is_some_and(|began| began.elapsed() < UNWOUND_WITHIN);"
+replace = "        message == CANNOT_UNWIND || earlier.is_some_and(|began| began.elapsed() > UNWOUND_WITHIN);"
 
 [[plant]]
 name = "event-loop-panic: a callback's panic is not stopped at its edge"

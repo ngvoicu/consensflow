@@ -643,6 +643,28 @@ file = ".github/workflows/windows-build.yml"
 find = '''        value: ${{ jobs.windows.outputs.listing }}'''
 replace = '''        value: ""'''
 
+# GitHub's windows-latest image has no shasum (T-930, run 40872733579): the Windows job hashes its
+# listing with sha256sum, whose -b lines are the Mac jobs' (T-946).
+[[plant]]
+name = "installers: the Windows job lists its files with shasum, which GitHub's Windows image lacks"
+meant = "holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''do sha256sum -b "$file"; done | sha256sum | cut -d' ' -f1)'''
+replace = '''do shasum -b -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)'''
+
+[[plant]]
+name = "installers: the Windows job lists its files in text mode, another way than the sign job"
+meant = "holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''do sha256sum -b "$file"; done | sha256sum | cut -d' ' -f1)'''
+replace = '''do sha256sum "$file"; done | sha256sum | cut -d' ' -f1)'''
+
 [[plant]]
 name = "installers: the Mac job lists its files in another way than the sign job"
 meant = "holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag"

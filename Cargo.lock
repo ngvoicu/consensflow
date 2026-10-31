@@ -5598,6 +5598,7 @@ dependencies = [
  "cf-release",
  "flate2",
  "memchr",
+ "minisign-verify",
  "nix 0.28.0",
  "plist",
  "quick-xml",

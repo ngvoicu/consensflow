@@ -27,6 +27,7 @@ failure-reason-ask = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", 
 failure-reason-live-suite = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
 # The kit's homes (`live/isolation.rs`), where the copy of a harness's login a live suite runs on is made.
 failure-reason-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation"]
+failure-reason-live-muse-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::tests::a_rig_that_seats_muse"]
 failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 failure-reason-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 failure-reason-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
@@ -1045,3 +1046,42 @@ runs = ["engine-future-sizes"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "            Box::pin(this.perform_switch(&found, &chief, &held, to)).await?;"
 replace = "            this.perform_switch(&found, &chief, &held, to).await?;"
+
+# T-946: the members kit ran a live Muse chief on the owner's `~/.config/muse` and `~/.local/share/muse`:
+# every harness the kit launches says its home, Muse runs through the rig's own launcher, and the owner's
+# Muse files are watched.
+[[plant]]
+name = "failure reason: Muse has no home of the run's own and says nothing of it"
+meant = "every_harness_the_kit_can_launch_has_a_home_of_the_runs_own_or_a_reason_it_has_none"
+runs = ["failure-reason-live-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            Harness::Muse => Some(Self::muse(
+                home,
+                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+            )),'''
+replace = '''            Harness::Muse => None.filter(|_: &Self| xdg(home, "", &[]).exists()),'''
+
+[[plant]]
+name = "failure reason: a rig that seats Muse runs it on the person's own folders"
+meant = "a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher"
+runs = ["failure-reason-live-muse-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''            config = config.muse_live(muse_of(install), &install.home);'''
+replace = '''            let _ = muse_of(install);'''
+
+[[plant]]
+name = "failure reason: the owner's Muse settings are not watched"
+meant = "a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_what_it_holds"
+runs = ["failure-reason-live-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                config.join("settings.json"),
+                config.join("trust.json"),'''
+replace = '''                config.join("trust.json"),'''
+

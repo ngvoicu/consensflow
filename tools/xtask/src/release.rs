@@ -35,30 +35,56 @@
 //!    hand, green with both platforms' summaries), waited for while a run goes
 //!    on: this is the release's gate, which the Release run checks again and
 //!    does not run;
-//! 6. the annotated tag, its message the notes, pushed to origin and upstream;
-//! 7. the Release run of the tag, watched to its end: its `gate` job finds CI's
+//! 6. a hand run of the Release workflow (`gh workflow run release.yml --ref
+//!    main`) on that commit, the trial, watched to its end: it builds, signs and
+//!    smoke-tests the packages as the tag's run will, and publishes nothing. One
+//!    that does not end green stops the run before any tag, saying the job and
+//!    the step that failed, the run's address and what to do next; so does a `gh`
+//!    that cannot be asked about it. The run watched is of the commit tagged: it is
+//!    looked for by that commit, and its own `headSha` must be it. A hand run is of
+//!    a branch's head, so main must still be the commit CI passed: it is asked
+//!    again before the dispatch, and a main that moves between that and the
+//!    dispatch is told from a run that is only late, and refused at once, with the
+//!    run of the new head;
+//! 7. the annotated tag, its message the notes, pushed to origin and upstream;
+//! 8. the Release run of the tag, watched to its end: its `gate` job finds CI's
 //!    green run of the commit, and its `mac` and `windows` jobs build, sign and
 //!    smoke-test the packages before `publish`;
-//! 8. `feed-alpha` read until it serves the version, and `feed-stable` checked
+//! 9. `feed-alpha` read until it serves the version, and `feed-stable` checked
 //!    to serve the release it served before. A feed is read again on a 404 or
-//!    a network error, within its reads.
+//!    a network error, within its reads;
+//! 10. the published release verified (`release verify X.Y.Z` is the same check on
+//!     any published version): every file against `SHA256SUMS`, the update
+//!     archive's `.sig` against the key pinned at the tag, and the feed's entry
+//!     against the release's. What it finds is said as a release that is published
+//!     (never as a reason to run again).
 //!
-//! `--dry-run` does 1 to 5 and says what it would tag.
+//! `--dry-run` does 1 to 5 and says what it would start and tag.
 //!
-//! There is no Release dry run before the tag. Of the 40 hand runs of the
-//! Release workflow to 3.0.6-alpha.2, the 10 that were not green failed in the
-//! gate, which CI runs, except three in the Mac job's signing and smoke between
-//! 2026-10-01 and 10-05, while those steps were being built; no tag's run ever
-//! failed in its `mac` or `windows` job. Those jobs run before `publish` in the
-//! tag's own run, so a failure there publishes nothing. A hand run of the Release
-//! workflow (`gh workflow run release.yml --ref main`) is still the trial of a
-//! change to the release's own build, signing or smoke.
+//! Why a trial before the tag. The Release run's `mac` job holds the one check
+//! of the app as built, signed under the Developer ID and run (the packaged
+//! smoke), and CI never runs it. A tag whose run fails is left behind, and a tag
+//! is never moved or pushed again, so its version is spent: the only place to
+//! find a red there out cheaply is before the tag. 3.0.6-alpha.3's smoke was red
+//! on main for days (T-863) and nothing said so but a hand run. It went without
+//! the trial for the 3.0.6 alphas because the dry run then was the whole gate
+//! again (70 to 75 minutes), and no tag's run had failed in its `mac` or
+//! `windows` job; the gate is CI's now, and the same hand run is only those jobs.
+//! The hand run notarizes as the tag's does: notarization is about a minute of
+//! the Mac job (1.2 of 12.2 in alpha.3's tag run), and Apple's acceptance is a
+//! thing the tag's run would otherwise be the first to find out.
 //!
-//! How long it takes: with CI already green on main's commit, about 15 minutes
-//! from the command to the feed (the Mac job 4 to 8 minutes and the
-//! notarization, usually under one; Windows 4 to 8; the gate's check about 3;
-//! then publish about 3); with CI still to run, its 75 minutes more. A
-//! promotion is CI on its branch (about 75 minutes), then the same 15.
+//! How long it takes: with CI already green on main's commit, the trial and the
+//! tag's run each take the Mac job's 12 minutes (the app's build 7.5, signing and
+//! both notarizations 1.2, the smoke 1.7; Windows' 8 run beside it), after the
+//! wait for a macOS runner, which was 12.6 minutes for alpha.3's tag run and is
+//! nothing when one is free; so 13 to 26 minutes for each, and about 30 to 55
+//! from the command to the feed. With CI still to run, its 75 minutes more. A
+//! promotion has no trial, for the `release` environment, which holds the signing
+//! keys, admits `main` and `v*` tags and not `release/X.Y.Z`: it is CI on its
+//! branch (about 75 minutes), then the tag's run, and its commit is the alpha's
+//! with the version alone changed (`promote::version_only`), the alpha having had
+//! its trial and its tag's run.
 //!
 //! `release promote` is [`promote`]'s. The programs are `git`, `gh` (logged in,
 //! for the runs and the dispatch), `curl` (the feeds, read where installed apps
@@ -71,6 +97,7 @@ mod promote;
 pub(crate) mod system;
 #[cfg(test)]
 mod tests;
+mod verify;
 
 use std::ffi::OsString;
 use std::fs;
@@ -86,7 +113,7 @@ use system::{Real, System};
 pub const COMMANDS: &[Command] = &[
     Command {
         words: &["release", "alpha"],
-        about: "Release the version the sources agree on, X.Y.Z-alpha.N, to feed-alpha: every check, the tag, the Release run and the feeds",
+        about: "Release the version the sources agree on, X.Y.Z-alpha.N, to feed-alpha: every check, a hand run of the Release workflow, the tag, its Release run and the feeds",
         usage: "--notes FILE [--dry-run]",
         run: Run::Native(alpha),
     },
@@ -95,6 +122,12 @@ pub const COMMANDS: &[Command] = &[
         about: "Release the plain X.Y.Z of a tested alpha from the alpha's commit, the version alone changed, to both feeds",
         usage: "X.Y.Z-alpha.N --notes FILE [--dry-run]",
         run: Run::Native(promote),
+    },
+    Command {
+        words: &["release", "verify"],
+        about: "Check a published release: its files against SHA256SUMS, its update archive's signature against the key pinned at its tag, and the feeds that serve it",
+        usage: "X.Y.Z[-alpha.N]",
+        run: Run::Native(verify),
     },
 ];
 
@@ -438,6 +471,19 @@ fn promote(context: &Context, args: &[OsString], console: &mut Console) -> Resul
         pace: Pace::REAL,
     };
     let outcome = promote::release(&mut release, &options);
+    finish(outcome, console.out, release.said)
+}
+
+fn verify(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+    let version = verify::version_of(args)?;
+    let mut system = Real::new(&context.env);
+    let mut release = Release {
+        root: context.root.clone(),
+        system: &mut system,
+        said: console.err,
+        pace: Pace::REAL,
+    };
+    let outcome = verify::release(&mut release, &version);
     finish(outcome, console.out, release.said)
 }
 

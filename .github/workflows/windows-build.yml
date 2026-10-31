@@ -140,7 +140,9 @@ jobs:
           mkdir -p "$out/nsis" "$out/portable"
           cp app/src-tauri/target/release/bundle/nsis/*-setup.exe "$out/nsis/"
           cp app/src-tauri/target/release/bundle/portable/*-portable.exe "$out/portable/"
-          listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do shasum -b -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)
+          # sha256sum: GitHub's Windows image dropped Perl's SHA tool (T-930). Its -b lines
+          # are the ones the Mac jobs write, so the listing is the one the sign job reads.
+          listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do sha256sum -b "$file"; done | sha256sum | cut -d' ' -f1)
           echo "listing=$listing" >> "$GITHUB_OUTPUT"
           echo "the Windows files hash to $listing"
       - uses: actions/upload-artifact@v7

@@ -79,8 +79,10 @@ export class SpecsViewer {
     dialog.querySelector('[name="specs-refresh"]').addEventListener('click', () => {
       void this.refresh()
     })
-    // Shut, it holds nothing, and what is still on its way is not shown.
+    // Shut, it holds nothing, and what is still on its way is not shown. The event comes a task
+    // after `close()`: a viewer opened again in that task is open by then, and keeps what it holds.
     dialog.addEventListener('close', () => {
+      if (dialog.open) return
       this.#reads += 1
       this.#stopDrawing()
       this.#project = null
