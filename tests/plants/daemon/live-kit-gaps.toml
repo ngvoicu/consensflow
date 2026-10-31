@@ -12,6 +12,8 @@
 #   (`live-resume-cut-codex-never-reaches-the-cut`);
 # - the kit: a window on a home of the run's own is given the person's home, never the folder
 #   its harness reads its login from (Codex's `~/.codex`, where project folders were made);
+# - the `conversation` eval's expectations: only the owner's changes count, the English task names
+#   the evaluation page, a chief's own edits are none (`chief-does-the-work-itself`);
 # - `live --set windows`: the regular Windows live run, the typed marks of `live parity` in it
 #   (`human-typing-loses-marks-in-devin-codex-on-windows`).
 #
@@ -24,6 +26,7 @@ live-paste-enter = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "liv
 evals-chiefs = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "chiefs::"]
 live-resume-cut = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_resume_cut"]
 e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
+evals-scenarios = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "scenarios"]
 xtask-live = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "live::"]
 
 [[plant]]
@@ -209,3 +212,63 @@ runs = ["live-own-cf"]
 file = "crates/cf-e2e/tests/live_own_cf/home.rs"
 find = "    [\n        \".zprofile\",\n        \".zshrc\","
 replace = "    [\n        \".zshenv\",\n        \".zprofile\",\n        \".zshrc\","
+
+[[plant]]
+name = "live kit gaps: the conversation eval's expectations as they were before the Haiku run"
+meant = "the_haiku_chief_that_did_every_change_itself_reads_as_the_bug_and_not_as_held"
+runs = ["evals-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                        .filter(|change| m.tasks.iter().any(|task| change.is_match(&task.title)))
+                        .count()
+                        >= 3'''
+replace = '''                        .count()
+                        .max(m.tasks.len())
+                        >= 3'''
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                        !matches!(task.pool.as_deref(), Some("advisor" | "reviewer"))
+                            && english.is_match(&task.title)'''
+replace = '''                        english.is_match(&task.title) || task.title.contains("English")'''
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                |m| m.chief_edits.unwrap_or(0) == 0,'''
+replace = '''                |m| m.chief_edits.is_some() || m.chief_edits.is_none(),'''
+
+[[plant]]
+name = "live kit gaps: any three tasks are the owner's changes on the board"
+meant = "the_conversation_wants_the_owners_changes_on_the_board_the_english_page_a_workers_the_work_done_and_no_edit_of_the_chiefs"
+runs = ["evals-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                        .filter(|change| m.tasks.iter().any(|task| change.is_match(&task.title)))
+                        .count()
+                        >= 3'''
+replace = '''                        .count()
+                        .max(m.tasks.len())
+                        >= 3'''
+
+[[plant]]
+name = "live kit gaps: a task with English in its title is the English evaluation page's"
+meant = "the_conversation_wants_the_owners_changes_on_the_board_the_english_page_a_workers_the_work_done_and_no_edit_of_the_chiefs"
+runs = ["evals-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                        !matches!(task.pool.as_deref(), Some("advisor" | "reviewer"))
+                            && english.is_match(&task.title)'''
+replace = '''                        english.is_match(&task.title) || task.title.contains("English")'''
+
+[[plant]]
+name = "live kit gaps: a chief's own edits are let pass"
+meant = "the_conversation_wants_the_owners_changes_on_the_board_the_english_page_a_workers_the_work_done_and_no_edit_of_the_chiefs"
+runs = ["evals-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                |m| m.chief_edits.unwrap_or(0) == 0,'''
+replace = '''                |m| m.chief_edits.is_some() || m.chief_edits.is_none(),'''
