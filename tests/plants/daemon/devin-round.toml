@@ -1,0 +1,156 @@
+# The Devin round of 3.0.7-alpha.1 (T-1000), five filings in one: each plant takes one rule
+# of it out, and the case named in `meant` fails.
+#
+# - T-609, a Devin model with a variant (`claude-opus-5-5-fast`, `swe-2-lightning`) at an
+#   effort: the id is the family, the level, then the variant's words, as Devin lists its
+#   ids, not the model and the effort joined (`crates/cf-harness/src/shared/window_args.rs`,
+#   its cases in `window_args/tests.rs`, one of them every id of the catalog's copy of
+#   `devin models list`).
+# - T-688, Calliope's P3s on T-683: what Devin's TUI answers itself to `/login`, `/mcp` or
+#   its workspace listing, flagged instant, is no work (`devin/record/wires.rs`); and the
+#   compacted, stamped turn is at work by Devin's word alone, red on the reader before T-660
+#   (`devin/record/tests/compaction.rs`).
+# - T-813, a message pasted into a Devin window resumed after an early cut: its one reply
+#   answered the cut turn too, the message's own answer last. The reply is the message's
+#   (its request is the last user's message's, `devin/record/chain.rs`), and the live
+#   `resume-cut` suite reads a reply as the answer by its last line
+#   (`crates/cf-e2e/tests/live_resume_cut/read.rs`).
+# - T-783, a project reached through a link (a Mac's `/var/folders/…` or `/tmp`): every
+#   window opens in the real folder and its launch is prepared for it
+#   (`crates/cf-engine/src/windows.rs`, `tests/dispatcher/canonical_folder.rs`), and a
+#   folder read back from a harness's store or Claude Code's configuration is compared as
+#   the system names it (`cf-harness/src/tooling/session.rs`, `claude/computer_use.rs`).
+#   A link is a Unix one, so those plants are the Mac's and Linux's.
+#
+# Every name holds `devin round`: `npm run plants:daemon -- "devin round"` runs them all.
+
+[run]
+devin-round-window-args = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::window_args::tests::"]
+devin-round-stamped = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::stamped::"]
+devin-round-compaction = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::compaction::"]
+devin-round-resume-cut-read = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_resume_cut", "read::"]
+devin-round-engine-folder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "canonical_folder::"]
+devin-round-session-folder = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::session::tests::"]
+devin-round-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use::tests::"]
+
+[[plant]]
+name = "devin round: a Devin model and its effort are joined, a variant's words before the level"
+meant = "every_id_devin_lists_with_a_level_is_what_a_window_on_its_family_and_variant_at_that_level_opens_on"
+runs = ["devin-round-window-args"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = '''                flag("--model", devin_model(model, effort));'''
+replace = '''                flag("--model", effort.map_or_else(|| model.to_owned(), |effort| format!("{model}-{effort}")));'''
+
+[[plant]]
+name = "devin round: a level the Devin model names stays beside the agent's effort"
+meant = "a_devin_window_names_the_family_then_the_level_then_the_variant_as_devin_writes_its_ids"
+runs = ["devin-round-window-args"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = '''    if words.last().is_some_and(|word| DEVIN_LEVELS.contains(word)) {'''
+replace = '''    if words.last().is_some_and(|word| DEVIN_LEVELS.contains(word) && false) {'''
+
+[[plant]]
+name = "devin round: what Devin's TUI answers itself at once is work"
+meant = "what_the_tui_answers_itself_to_a_command_of_its_own_is_no_work"
+runs = ["devin-round-stamped"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''        if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed && !instant {'''
+replace = '''        if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed && !(instant && false) {'''
+
+[[plant]]
+name = "devin round: the reader before T-660, a stamped compacted turn read by its stamps alone"
+meant = "a_compacted_turn_devin_stamps_is_at_work_by_its_wire_alone_until_its_end_and_settles_by_its_request"
+runs = ["devin-round-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''            && !(kind.is_some_and(|kind| STREAMED.contains(&kind))'''
+replace = '''            && !(kind.is_some_and(|kind| STREAMED.contains(&kind) && false)'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                Some("working") => self.busy = true,'''
+replace = '''                Some("working") => {}'''
+
+[[plant]]
+name = "devin round: a Devin reply answers the first user's message of the chain, not the last"
+meant = "the_reply_to_a_message_pasted_after_an_early_cut_is_the_messages_own_though_it_answers_the_cut_turn_too"
+runs = ["devin-round-stamped"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '''            if role == Role::User {
+                let client = metadata("extensions")'''
+replace = '''            if role == Role::User && request == Key::Null {
+                let client = metadata("extensions")'''
+
+[[plant]]
+name = "devin round: the live resume-cut suite takes only a reply that is the answer alone"
+meant = "a_message_is_answered_by_a_reply_after_it_that_ends_in_its_answer_whatever_it_said_before"
+runs = ["devin-round-resume-cut-read"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_resume_cut/read.rs"
+find = '''        .find(|item| item.role == "assistant" && last_line(&item.text) == Some(answer))'''
+replace = '''        .find(|item| item.role == "assistant" && item.text.trim() == answer && last_line(&item.text).is_some())'''
+
+[[plant]]
+name = "devin round: a window opens in its project's folder as the project spells it"
+meant = "a_window_of_a_project_reached_through_a_link_opens_in_the_real_folder_on_every_harness"
+runs = ["devin-round-engine-folder"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            cwd: workspace(project),'''
+replace = '''            cwd: project.directory.clone(),'''
+
+[[plant]]
+name = "devin round: a launch is prepared for its project's folder as the project spells it"
+meant = "a_window_of_a_project_reached_through_a_link_opens_in_the_real_folder_on_every_harness"
+runs = ["devin-round-engine-folder"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            directory: &directory,'''
+replace = '''            directory: &project.directory,'''
+
+[[plant]]
+name = "devin round: a folder a harness's store names is compared as spelled"
+meant = "a_folder_reached_through_a_link_is_the_same_folder_a_store_names_by_its_real_path"
+runs = ["devin-round-session-folder"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling/session.rs"
+find = '''                .is_some_and(|directory| real_path(Path::new(&*directory.text())) == folder)'''
+replace = '''                .is_some_and(|directory| Path::new(&*directory.text()) == Path::new(workspace) || folder.as_os_str().is_empty())'''
+
+[[plant]]
+name = "devin round: the folder a Codex rollout names is compared as spelled"
+meant = "a_folder_reached_through_a_link_is_the_same_folder_a_store_names_by_its_real_path"
+runs = ["devin-round-session-folder"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling/session.rs"
+find = '''    (meta["type"] == "session_meta" && real_path(Path::new(cwd)) == real_path(Path::new(workspace)))'''
+replace = '''    (meta["type"] == "session_meta" && Path::new(cwd) == Path::new(workspace))'''
+
+[[plant]]
+name = "devin round: a folder Claude Code's configuration names is compared as spelled"
+meant = "an_entry_kept_under_a_folder_spelled_through_a_link_is_the_real_folders"
+runs = ["devin-round-computer-use"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use.rs"
+find = '''                .map(|(folder, _)| real_path(folder).unwrap_or_else(|_| folder.clone()))'''
+replace = '''                .map(|(folder, _)| real_path(folder).map_or_else(|_| folder.clone(), |_| folder.clone()))'''

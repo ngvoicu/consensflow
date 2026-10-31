@@ -744,7 +744,7 @@ impl Dispatcher {
         // the host's answer.
         let opened = returning(self.seams.host.open(OpenPane {
             pane: pane.clone(),
-            cwd: project.directory.clone(),
+            cwd: workspace(project),
             argv: planned.argv.clone(),
             env,
             drop_env: planned.drop_env.clone(),
@@ -1117,12 +1117,13 @@ impl Dispatcher {
             Some(conversation) => self.seams.ledger.borrow().program_gone(conversation.id)?,
             None => false,
         };
+        let directory = workspace(project);
         let launch = Launch {
             id: launch_id,
             project: project.id,
             handle: &participant.handle,
             role: &participant.role,
-            directory: &project.directory,
+            directory: &directory,
             resume,
             previous_gone,
             message: text.as_deref().filter(|_| !delivered),
@@ -1790,6 +1791,21 @@ impl Dispatcher {
         }
         Ok(true)
     }
+}
+
+/// The folder a window of `project` works in: the project's, as the system names it, its
+/// links resolved. A harness is given the folder so, as its working folder and as the
+/// folder its launch is prepared for, and finds the same folder in what it writes back.
+/// Devin 3000.11's screen never showed an answer in a folder reached through a link (a
+/// Mac's `/var/folders/…`, whose real path is `/private/var/folders/…`, T-724; a project
+/// under `/tmp` is reached so too), and a program's own path to its folder is the real
+/// one, which is what the harnesses write in their records (T-783). On Windows a folder
+/// is as the project names it, its real path being a verbatim one programs do not take
+/// (`cf_base::file::real_path`).
+fn workspace(project: &ProjectView) -> String {
+    cf_base::file::real_path(std::path::Path::new(&project.directory))
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]

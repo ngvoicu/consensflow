@@ -126,6 +126,9 @@ pub struct Plan {
     /// harness that asks of one asks in the project's own windows, and ConsensFlow
     /// answers ([`Plan::in_a_new_repository`]).
     pub repository: bool,
+    /// Whether the project is opened in its folder as a link under `/tmp` names it
+    /// ([`Plan::through_a_link`]).
+    pub through_a_link: bool,
 }
 
 impl Plan {
@@ -142,6 +145,7 @@ impl Plan {
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
             repository: false,
+            through_a_link: false,
         }
     }
 
@@ -151,6 +155,16 @@ impl Plan {
     #[must_use]
     pub fn in_a_new_repository(mut self) -> Self {
         self.repository = true;
+        self
+    }
+
+    /// Opened in its folder as a link under `/tmp` names it, a link to the folder (and a
+    /// Mac's `/tmp` is itself a link, to `/private/tmp`): a project whose folder the human
+    /// reached through a link, which ConsensFlow opens its windows in by its real path
+    /// (T-783). Unix only.
+    #[must_use]
+    pub fn through_a_link(mut self) -> Self {
+        self.through_a_link = true;
         self
     }
 

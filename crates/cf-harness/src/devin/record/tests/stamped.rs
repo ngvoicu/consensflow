@@ -246,3 +246,95 @@ fn a_turn_devin_says_waits_for_its_user_is_no_work_until_devin_says_it_works_aga
     staged.wire("launch-1", &wire);
     assert_eq!(both(&staged, &mut reader, "at work again"), at_work());
 }
+
+/// What the TUI answers itself to a command of its own, at once: Devin's words with no
+/// stamp, no stream and no turn, flagged instant (Devin 3000.11.205's answers to `/login`,
+/// `/mcp` and its workspace listing, T-548's wire of 2026-10-26).
+fn instant(text: &str) -> Value {
+    record(json!({
+        "sessionUpdate": "agent_message_chunk",
+        "content": { "type": "text", "text": text },
+        "_meta": { "cognition.ai/instant": true },
+    }))
+}
+
+#[test]
+fn what_the_tui_answers_itself_to_a_command_of_its_own_is_no_work() {
+    // Calliope's P3-1 on T-683 (T-688): a human's `/mcp` in a member's window at rest made
+    // it read at work for good, nothing on the wire to end what never began.
+    let staged = Staged::new();
+    staged.chain(&[
+        user("u-1", Some(json!("request-1"))),
+        stopped("a-1", "Done."),
+    ]);
+    let mut reader = staged.reader();
+    let mut wire = vec![
+        status("working"),
+        stamped("agent_message_chunk", Some("Done."), Some("stream-1")),
+    ];
+    wire.extend(ended("complete"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "the turn ended"), settled());
+    for (command, answer) in [
+        ("/login", "Authenticated via ACP host.\n\nPlan  Pro"),
+        ("/mcp", "No MCP servers are configured."),
+        (
+            "/workspace",
+            "Workspace directories:\n  /work/project (cwd)",
+        ),
+    ] {
+        wire.push(instant(answer));
+        staged.wire("launch-1", &wire);
+        assert_eq!(both(&staged, &mut reader, command), settled());
+    }
+}
+
+#[test]
+fn the_reply_to_a_message_pasted_after_an_early_cut_is_the_messages_own_though_it_answers_the_cut_turn_too(
+) {
+    // T-813, from Devin's store of T-811's early case (Devin 3000.11.228, 2026-10-27): the
+    // window was cut with its user's message in and nothing of an answer, and opened again
+    // on the conversation. The message pasted then began a turn of its own, and its one reply
+    // answered both, the cut turn's count first and the message's word last. The reply is the
+    // message's: its request is the message's, and the wire ends the turn by it.
+    let both_said = "1\n2\n40\nCOUNTED\nAFTER";
+    let mut words = stamped("agent_message_chunk", Some(both_said), Some("stream-2"));
+    words["turnClientMessageId"] = json!("request-2");
+    let wire = [
+        status("working"),
+        words,
+        status("blocked"),
+        json!({ "sessionId": SESSION, "turnClientMessageId": "request-2", "turnRequestId": "model-2" }),
+        json!({ "sessionId": SESSION, "cause": "complete", "stats": { "requestId": "model-2" } }),
+    ];
+    // Devin 3000.11.205 stores the reply with no `finish_reason`, so the wire proves it whole;
+    // 3000.11.228 stores it as the turn's end.
+    for finish in [Value::Null, json!("stop")] {
+        let staged = Staged::new();
+        staged.chain(&[
+            user("u-1", Some(json!("request-1"))),
+            user("u-2", Some(json!("request-2"))),
+            json!({ "message_id": "a-1", "role": "assistant", "content": both_said,
+                "metadata": { "request_id": "model-2", "finish_reason": finish.clone() } }),
+        ]);
+        // The window opened again: the cut one's launch went with its close.
+        staged.wire("launch-2", &wire);
+        let mut reader = staged.reader();
+        assert_eq!(
+            both(&staged, &mut reader, "the reply after its end"),
+            settled()
+        );
+        let reading: Value = serde_json::from_str(&read_once(&staged)).unwrap();
+        let items: Vec<(&str, bool)> = reading["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| (item[0].as_str().unwrap(), item[3] == true))
+            .collect();
+        assert_eq!(
+            items,
+            [("u-1", true), ("u-2", true), ("a-1", true)],
+            "the cut message stays unanswered before the message, and the reply is whole ({finish})"
+        );
+    }
+}
