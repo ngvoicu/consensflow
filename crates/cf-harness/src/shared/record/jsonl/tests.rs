@@ -938,7 +938,9 @@ fn whole_records_run_together_in_one_line_are_each_read_in_their_place() {
 #[ignore = "a measurement: CF_MEASURE_JSONL names the large transcript to time the looks at"]
 fn measure_the_looks_at_a_large_transcript() {
     let file = std::path::PathBuf::from(
-        std::env::var_os("CF_MEASURE_JSONL").expect("CF_MEASURE_JSONL names the file to measure"),
+        cf_base::env::Env::from_process()
+            .os("CF_MEASURE_JSONL")
+            .expect("CF_MEASURE_JSONL names the file to measure"),
     );
     let metadata = fs::metadata(&file).unwrap();
     // A file's time in whole milliseconds, as a look's is.
