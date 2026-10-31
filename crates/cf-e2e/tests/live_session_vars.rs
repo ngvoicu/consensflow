@@ -49,15 +49,17 @@ const WHAT: &str = "every session variable its shell has is on the list";
 const WRITTEN: Duration = Duration::from_secs(300);
 const LOOK: Duration = Duration::from_secs(1);
 
-/// What a variable that marks a session begins with: a harness's own word, a terminal's
-/// (cmux's); and the marks harnesses set for their children by whole name.
-const PREFIXES: [&str; 8] = [
+/// What a variable that marks a session begins with: a harness's own word (Devin's store's
+/// `CHISEL_` among them), a terminal's (cmux's); and the marks harnesses set for their children
+/// by whole name.
+const PREFIXES: [&str; 9] = [
     "CLAUDE",
     "CODEX_",
     "PI_",
     "MUSE_",
     "DEVIN_",
     "WINDSURF_",
+    "CHISEL_",
     "OPENCODE",
     "CMUX_",
 ];
@@ -280,6 +282,7 @@ mod tests {
             "CF_TEST_HARNESS",
             "CONSENSFLOW_URL",
             "CODEX_SOMETHING_NEW",
+            "CHISEL_SOMETHING_NEW",
             "CMUX_SURFACE_ID",
             "CMUX_SOMETHING_NEW",
             "AGENT",
@@ -296,7 +299,11 @@ mod tests {
         );
         assert_eq!(
             found.lacking,
-            names(&["CODEX_SOMETHING_NEW", "CMUX_SOMETHING_NEW"])
+            names(&[
+                "CODEX_SOMETHING_NEW",
+                "CHISEL_SOMETHING_NEW",
+                "CMUX_SOMETHING_NEW"
+            ])
         );
     }
 

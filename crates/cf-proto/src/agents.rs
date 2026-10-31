@@ -93,7 +93,11 @@ impl Harness {
     /// `CODEX_VERSION` too, and sets `CODEX_NETWORK_PROXY_ACTIVE` (with its network proxy),
     /// `CODEX_PERMISSION_PROFILE` and `CODEX_PLUGIN_METRICS_OUTPUT` (a call's own metrics file)
     /// for the programs of its terminals and plugins, each beside `CODEX_TOOL_CALL_ID` and read
-    /// as no setting; Muse 1.4.14 gives its shell `MUSE_TOOL_USE_ID`, its tool call's.
+    /// as no setting; Muse 1.4.14 gives its shell `MUSE_TOOL_USE_ID`, its tool call's; Devin
+    /// 3000.11.228 gives its shell `DEVIN_TRACEPARENT` (its trace, beside `traceparent`),
+    /// `AI_AGENT`, and `CHISEL_SESSION_DB`, the path of its own session store, which a Devin
+    /// that finds it set takes for its store: a member's Devin would keep its sessions in the
+    /// parent's. Devin's terminal script unsets the two it reads, so no shell shows them.
     /// `CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS` is a setting Codex hands its patch tool, and
     /// stays.
     pub fn session_variables(self) -> &'static [&'static str] {
@@ -135,7 +139,13 @@ impl Harness {
                 "AI_AGENT",
             ],
             Harness::Opencode => &["OPENCODE", "OPENCODE_PID", "OPENCODE_TERMINAL"],
-            Harness::Devin => &["WINDSURF_CASCADE_TERMINAL", "DEVIN_DISABLE_HISTEXPAND"],
+            Harness::Devin => &[
+                "WINDSURF_CASCADE_TERMINAL",
+                "DEVIN_DISABLE_HISTEXPAND",
+                "DEVIN_TRACEPARENT",
+                "CHISEL_SESSION_DB",
+                "AI_AGENT",
+            ],
             Harness::Muse => &[
                 "MUSE_SESSION_ID",
                 "MUSE_THREAD_ID",
@@ -433,6 +443,9 @@ mod tests {
             (Harness::Codex, "CODEX_PERMISSION_PROFILE"),
             (Harness::Codex, "CODEX_PLUGIN_METRICS_OUTPUT"),
             (Harness::Muse, "MUSE_TOOL_USE_ID"),
+            (Harness::Devin, "DEVIN_TRACEPARENT"),
+            (Harness::Devin, "CHISEL_SESSION_DB"),
+            (Harness::Devin, "AI_AGENT"),
         ] {
             assert!(harness.session_variables().contains(&name), "{name}");
         }
