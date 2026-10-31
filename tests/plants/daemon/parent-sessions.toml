@@ -25,6 +25,8 @@ parent-sessions-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--li
 parent-sessions-app = ["cargo", "xtask", "app", "test", "harness_sessions_variable"]
 parent-sessions-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::tests::an_environment_without"]
 parent-sessions-live-monitor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "the_window_is_opened_without"]
+parent-sessions-kit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::window::tests::a_muse_window"]
+parent-sessions-live-check = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_session_vars"]
 parent-sessions-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_parent_agents_session_reached_every_window::"], builds = true }
 
 # --- the list ---
@@ -42,8 +44,35 @@ find = '''            Harness::Codex => &[
                 "CODEX_THREAD_ID",
                 "CODEX_SESSION_ID",
                 "CODEX_TOOL_CALL_ID",
+                "CODEX_CI",
+                "CODEX_VERSION",
+                "CODEX_NETWORK_PROXY_ACTIVE",
+                "CODEX_PERMISSION_PROFILE",
+                "CODEX_PLUGIN_METRICS_OUTPUT",
             ],'''
 replace = '''            Harness::Codex => &[],'''
+
+[[plant]]
+name = "parent-sessions: Codex's list lacks the marks its shell showed live"
+meant = "the_marks_a_harness_s_shell_showed_live_are_its_own"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''                "CODEX_CI",
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: Muse's list lacks its tool call's id"
+meant = "the_marks_a_harness_s_shell_showed_live_are_its_own"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''                "MUSE_TOOL_USE_ID",
+'''
+replace = ""
 
 [[plant]]
 name = "parent-sessions: the one list leaves out every harness's session"
@@ -227,3 +256,29 @@ file = "crates/cf-daemon/src/cli.rs"
 find = '''    let env = &outside_parent_sessions(env);
 '''
 replace = ""
+
+# --- the live check of the list, and the kit it runs in (T-1024) ---
+
+[[plant]]
+name = "parent-sessions: the live check takes a harness's setting for a mark the list lacks"
+meant = "a_window_s_names_are_its_harness_s_marks_its_settings_the_rig_s_and_what_the_list_lacks"
+runs = ["parent-sessions-live-check"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_session_vars.rs"
+find = '''            && !SETTINGS.iter().any(|(setting, _)| setting == name)
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: a live Muse window starts on the machine's Muse, which writes the person's ~/.config/muse"
+meant = "a_muse_window_starts_on_the_rigs_launcher_and_every_other_on_the_program_found"
+runs = ["parent-sessions-kit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window/open.rs"
+find = '''    if harness != Harness::Muse {
+'''
+replace = '''    if harness != Harness::Muse || launcher.is_some() {
+'''
+

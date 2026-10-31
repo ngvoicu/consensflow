@@ -87,6 +87,15 @@ impl Harness {
     /// session and thread, its log, a Claude-shaped tool call id, its trace) and its
     /// launcher's `MUSE_RELEASE_INFO`. A harness's own switches a launch sets
     /// (`MUSE_NO_AUTO_UPDATE`) are its configuration, and none of this.
+    ///
+    /// Held live since (`cargo xtask live session-vars`, T-1024, 2026-10-31), each window's
+    /// shell read for the names it has: Codex 0.166 gives its shell `CODEX_CI` and
+    /// `CODEX_VERSION` too, and sets `CODEX_NETWORK_PROXY_ACTIVE` (with its network proxy),
+    /// `CODEX_PERMISSION_PROFILE` and `CODEX_PLUGIN_METRICS_OUTPUT` (a call's own metrics file)
+    /// for the programs of its terminals and plugins, each beside `CODEX_TOOL_CALL_ID` and read
+    /// as no setting; Muse 1.4.14 gives its shell `MUSE_TOOL_USE_ID`, its tool call's.
+    /// `CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS` is a setting Codex hands its patch tool, and
+    /// stays.
     pub fn session_variables(self) -> &'static [&'static str] {
         match self {
             Harness::Claude => &[
@@ -110,6 +119,11 @@ impl Harness {
                 "CODEX_THREAD_ID",
                 "CODEX_SESSION_ID",
                 "CODEX_TOOL_CALL_ID",
+                "CODEX_CI",
+                "CODEX_VERSION",
+                "CODEX_NETWORK_PROXY_ACTIVE",
+                "CODEX_PERMISSION_PROFILE",
+                "CODEX_PLUGIN_METRICS_OUTPUT",
             ],
             Harness::Pi => &[
                 "PI_CODING_AGENT",
@@ -128,6 +142,7 @@ impl Harness {
                 "MUSE_CURRENT_SESSION_LOG",
                 "MUSE_HUMAN_CONFIRMATION",
                 "MUSE_RELEASE_INFO",
+                "MUSE_TOOL_USE_ID",
                 "CLAUDE_CODE_TOOL_USE_ID",
                 "TRACEPARENT",
                 "TRACESTATE",
@@ -407,11 +422,28 @@ mod tests {
         }
     }
 
+    /// What each harness's shell showed of its session, live (`cargo xtask live session-vars`,
+    /// T-1024), beyond what its binary had been read for: on the list.
+    #[test]
+    fn the_marks_a_harness_s_shell_showed_live_are_its_own() {
+        for (harness, name) in [
+            (Harness::Codex, "CODEX_CI"),
+            (Harness::Codex, "CODEX_VERSION"),
+            (Harness::Codex, "CODEX_NETWORK_PROXY_ACTIVE"),
+            (Harness::Codex, "CODEX_PERMISSION_PROFILE"),
+            (Harness::Codex, "CODEX_PLUGIN_METRICS_OUTPUT"),
+            (Harness::Muse, "MUSE_TOOL_USE_ID"),
+        ] {
+            assert!(harness.session_variables().contains(&name), "{name}");
+        }
+    }
+
     /// What a harness is configured by is the human's, and reaches every window: only
     /// what marks a session is a session's.
     #[test]
     fn a_harness_configuration_marks_no_session() {
         for name in [
+            "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
             "CLAUDE_CONFIG_DIR",
             "CLAUDE_CODE_USE_BEDROCK",
             "CLAUDE_CODE_SUBAGENT_MODEL",

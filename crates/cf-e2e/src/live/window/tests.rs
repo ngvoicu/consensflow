@@ -6,7 +6,7 @@ use std::cell::Cell;
 
 use super::open::{
     add_hooks, asked_for, claude_flags, consensflows_hooks_of, new_session, pasted_into,
-    session_for, trust_line, with_hooks, Member,
+    program_of, session_for, trust_line, with_hooks, Member,
 };
 use super::*;
 
@@ -377,4 +377,22 @@ fn a_window_is_marked_with_the_servers_its_adapter_says_on_each_platform() {
         assert_eq!(said(name, true), None, "{name} on Windows");
     }
     assert_eq!(said("devin", false), None);
+}
+
+/// A Muse window opened here starts on the rig's live launcher, which holds it to the rig's
+/// folders, and never on the machine's Muse itself, which writes the person's
+/// `~/.config/muse` (T-1024); every other harness on the program the kit found.
+#[test]
+fn a_muse_window_starts_on_the_rigs_launcher_and_every_other_on_the_program_found() {
+    let found = Path::new("/opt/bin/muse");
+    let launcher = Path::new("/rig/fake-bin/muse");
+    assert_eq!(
+        program_of(Harness::Muse, found, Some(launcher)).unwrap(),
+        "/rig/fake-bin/muse"
+    );
+    assert!(program_of(Harness::Muse, found, None).is_err());
+    assert_eq!(
+        program_of(Harness::Codex, Path::new("/opt/bin/codex"), Some(launcher)).unwrap(),
+        "/opt/bin/codex"
+    );
 }

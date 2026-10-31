@@ -189,12 +189,13 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     let home = root.join("home");
     let projects = home.join(".claude").join("projects").join("integration");
     files::make_dir(&projects)?;
-    let (own, system) = if config.finder {
+    let own = own_commands(root, config);
+    let system = if config.finder {
         // There, as Homebrew's is on a Mac, for what a case puts in it.
         files::make_dir(&tool_folder(root))?;
-        (home.join(".local").join("bin"), tool_folder(root))
+        tool_folder(root)
     } else {
-        (fake_bin.clone(), fake_bin.clone())
+        fake_bin.clone()
     };
     write_shim(&own, "claude", "CF_TEST_HARNESS", &config.stand_in)?;
     if let Some(devin) = &config.devin {
@@ -225,6 +226,17 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
         None => {}
     }
     Ok(fake_bin)
+}
+
+/// The folder of the rig's own commands under `root`: its stand-ins, and the launcher of a
+/// live Muse ([`Config::muse_live`]). The windows find it first on their `PATH`; as the
+/// Finder starts it, it is where each harness installs itself, in the rig's home.
+pub(super) fn own_commands(root: &Path, config: &Config) -> PathBuf {
+    if config.finder {
+        root.join("home").join(".local").join("bin")
+    } else {
+        root.join("fake-bin")
+    }
 }
 
 /// The command `name` in `dir`, which starts `program`: a script that runs the
@@ -657,6 +669,37 @@ mod tests {
                 root.join("system-bin").to_string_lossy()
             );
         }
+    }
+
+    /// The launcher of a live Muse is in the rig's own commands, where the rig says it is
+    /// ([`own_commands`], which a Muse window opened by a live case starts on, T-1024), and the
+    /// person's own Muse folder is read for its login's metadata and never written.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_muse_s_launcher_is_in_the_rigs_own_commands_and_the_persons_folder_is_only_read() {
+        let person = tempfile::tempdir().unwrap();
+        let theirs = person.path().join(".config").join("muse");
+        files::make_dir(&theirs).unwrap();
+        files::write(&theirs.join("auth.json"), "{\"login\":\"metadata\"}\n").unwrap();
+        let install = crate::muse::Installed {
+            binary: PathBuf::from("/the/muse-binary"),
+            version: "Muse Code 1.4.14".to_owned(),
+        };
+        for given in [
+            config().muse_live(install.clone(), person.path()),
+            config()
+                .muse_live(install.clone(), person.path())
+                .as_the_finder_starts_it(),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            write_fake_install(root.path(), &given).unwrap();
+            let launcher = own_commands(root.path(), &given).join("muse");
+            assert!(launcher.is_file(), "{}", launcher.display());
+        }
+        assert_eq!(
+            files::read_string(&theirs.join("auth.json")).unwrap(),
+            "{\"login\":\"metadata\"}\n"
+        );
     }
 
     #[cfg(unix)]

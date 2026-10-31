@@ -364,7 +364,7 @@ impl<'a> Open<'a> {
                 }
             ))
         })?;
-        let program = self.install.command().to_string_lossy().into_owned();
+        let program = program_of(harness, self.install.command(), self.rig.muse_launcher())?;
         Ok((start, program))
     }
 
@@ -577,6 +577,30 @@ fn keep_only_consensflows_hooks(args: &[String], cf: &Path) -> Result<()> {
         .map_err(|failed| Error::Daemon(format!("the launch's config is no JSON: {failed}")))?;
     consensflows_hooks_of(&mut config, &ask::devin_hooks(cf, true)?);
     files::write(path, config.to_string())
+}
+
+/// The program a window of `harness` opened here starts on: the one the kit found (`found`),
+/// but Muse's, which runs through the rig's live launcher (`launcher`, [`Rig::muse_launcher`])
+/// as every Muse window of a rig does. The machine's Muse started on its own reads and writes
+/// the person's `~/.config/muse`: a live run of `session-vars` rewrote their `auth.json` so
+/// (T-1024, 2026-10-31).
+pub(crate) fn program_of(
+    harness: Harness,
+    found: &Path,
+    launcher: Option<&Path>,
+) -> Result<String> {
+    if harness != Harness::Muse {
+        return Ok(found.to_string_lossy().into_owned());
+    }
+    launcher
+        .map(|launcher| launcher.to_string_lossy().into_owned())
+        .ok_or_else(|| {
+            Error::Daemon(
+                "a Muse window runs through the rig's live launcher, and this rig seats no live \
+                 Muse (live::rig seats one for every Muse install)"
+                    .to_owned(),
+            )
+        })
 }
 
 /// Why a window opened here, without the daemon, cannot run `agent`: an OpenCode
