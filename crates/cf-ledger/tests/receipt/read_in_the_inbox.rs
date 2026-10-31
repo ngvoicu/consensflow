@@ -8,6 +8,11 @@
 //!   not the head of its queue after: a question, a result or a note alike, but
 //!   never a task's words or a note that says a conversation its role, which
 //!   only their paste proves;
+//! - a note that says a conversation its role and was delivered (its paste cut
+//!   to its opening and `cf inbox read`, T-1021) and is then read in the inbox is
+//!   `read`, and its role recorded as what the conversation was told, in one
+//!   write: unless a later note says it a role, or its conversation began after
+//!   it was delivered;
 //! - a question already answered is never typed in, however it was read: still
 //!   queued when it is answered, or put back in the queue by a paste that was not
 //!   proved, it is `read`, its receipt naming the answer; one the asker's own
@@ -175,6 +180,115 @@ fn a_tasks_words_or_a_role_read_in_the_inbox_wait_for_their_paste() {
     read_in_the_inbox(&mut w, &[role.id]);
     assert_eq!(w.states(&[role.id]), ["queued"]);
     assert_eq!(w.next("chief"), Some(role.id));
+}
+
+/// The chief's conversation, and a note that says it `role`, delivered: its paste
+/// was cut, so it is not recorded as told.
+fn role_delivered(w: &mut World, role: &str) -> (i64, MessageView) {
+    let chief = w.id("chief");
+    let conversation = match w.ledger.current_conversation(chief).expect("read") {
+        Some(conversation) => conversation,
+        None => w
+            .ledger
+            .start_conversation(chief, "codex")
+            .expect("a conversation"),
+    };
+    let note = w
+        .ledger
+        .note_role(w.project, "chief", "Read it all with cf inbox read.", role)
+        .expect("a role");
+    w.deliver(note.id);
+    (conversation.id, note)
+}
+
+fn told(w: &World, conversation: i64) -> Option<String> {
+    w.ledger.conversation_role_text(conversation).expect("read")
+}
+
+#[test]
+fn a_role_delivered_and_then_read_in_the_inbox_is_read_and_recorded_as_told_in_one_write() {
+    let mut w = world();
+    let (conversation, note) = role_delivered(&mut w, "the long role");
+    assert_eq!(told(&w, conversation), None);
+    let delivered = w.message(note.id);
+
+    read_in_the_inbox(&mut w, &[note.id]);
+    assert_eq!(w.states(&[note.id]), ["read"]);
+    assert_eq!(told(&w, conversation).as_deref(), Some("the long role"));
+    let read = w.message(note.id);
+    assert_eq!(
+        (read.delivered_at, read.receipt),
+        (delivered.delivered_at, delivered.receipt),
+        "when its paste went in, and the proof of it, are kept"
+    );
+    // A second read changes nothing.
+    w.ledger
+        .set_conversation_role_text(conversation, "since")
+        .expect("written");
+    read_in_the_inbox(&mut w, &[note.id]);
+    assert_eq!(told(&w, conversation).as_deref(), Some("since"));
+}
+
+#[test]
+fn a_role_read_in_the_inbox_is_recorded_only_from_its_recipient_and_only_once_delivered() {
+    let mut w = world();
+    let chief = w.id("chief");
+    let conversation = w
+        .ledger
+        .start_conversation(chief, "codex")
+        .expect("a conversation");
+    let note = w
+        .ledger
+        .note_role(w.project, "chief", "Read it all.", "the role")
+        .expect("a role");
+    w.begin(note.id);
+    read_in_the_inbox(&mut w, &[note.id]);
+    assert_eq!(
+        w.states(&[note.id]),
+        ["delivering"],
+        "its paste is still on its way"
+    );
+    w.confirm(note.id);
+    let zeus = w.id("zeus");
+    w.ledger
+        .receive_read(zeus, &[note.id], Read::Inbox)
+        .expect("read by another");
+    w.ledger
+        .receive_read(chief, &[note.id], Read::Task)
+        .expect("read in a thread");
+    assert_eq!(w.states(&[note.id]), ["delivered"]);
+    assert_eq!(told(&w, conversation.id), None);
+}
+
+#[test]
+fn a_role_read_in_the_inbox_after_a_later_one_was_written_is_read_and_records_nothing() {
+    let mut w = world();
+    let (conversation, first) = role_delivered(&mut w, "the first role");
+    let (_, later) = role_delivered(&mut w, "the later role");
+    read_in_the_inbox(&mut w, &[first.id]);
+    assert_eq!(w.states(&[first.id]), ["read"]);
+    assert_eq!(
+        told(&w, conversation),
+        None,
+        "the later one is the role now"
+    );
+    read_in_the_inbox(&mut w, &[later.id]);
+    assert_eq!(told(&w, conversation).as_deref(), Some("the later role"));
+}
+
+#[test]
+fn a_role_read_in_the_inbox_by_a_conversation_that_began_after_it_was_delivered_records_nothing() {
+    let mut w = world();
+    let (conversation, note) = role_delivered(&mut w, "the role");
+    w.ledger.end_conversation(conversation).expect("ended");
+    let chief = w.id("chief");
+    let now = w
+        .ledger
+        .start_conversation(chief, "codex")
+        .expect("another conversation");
+    read_in_the_inbox(&mut w, &[note.id]);
+    assert_eq!(w.states(&[note.id]), ["read"]);
+    assert_eq!(told(&w, now.id), None, "the note went into the other one");
 }
 
 #[test]

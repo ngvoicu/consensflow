@@ -203,12 +203,34 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
         skill.display()
     );
     assert!(skill.with_file_name("references").is_dir());
-    // The daemon has seen it arrive, and what it was told is recorded: the
-    // Resume after has nothing to say.
+    // The daemon has seen it arrive. The role with specs on is longer than one
+    // message even with one member on the staff (T-1009), so the note went in cut
+    // to its opening and `cf inbox read m-N`; the window reads it, as its opening
+    // says to, and the role is then recorded as told: the Resume after has nothing
+    // to say.
+    let mut delivered = None;
     rig.wait_for("the note to be delivered", secs(60), || {
-        Ok(project.inbox("chief")?.iter().any(|note| {
+        delivered = project.inbox("chief")?.into_iter().find(|note| {
             note["state"] == "delivered" && note["body"].to_string().contains(REPLACES)
-        }))
+        });
+        Ok(delivered.is_some())
+    })?;
+    let note = delivered.expect("the note")["id"].as_i64().expect("its id");
+    assert!(
+        message.contains(&format!("cf inbox read m-{note}")),
+        "told in part, with the command that prints the rest"
+    );
+    let read = rig.cf_in_window(&next, ["inbox", "read", &format!("m-{note}")])?;
+    assert_eq!(read.code, Some(0), "{read}");
+    assert!(
+        read.stdout.contains("## Reviews"),
+        "the rest of the role: {read}"
+    );
+    rig.wait_for("the note to be read", secs(60), || {
+        Ok(project
+            .inbox("chief")?
+            .iter()
+            .any(|said| said["id"] == note && said["state"] == "read"))
     })?;
 
     // The next Resume has nothing to tell: the role is what it was told, and names

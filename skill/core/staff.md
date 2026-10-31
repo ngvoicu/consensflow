@@ -134,12 +134,12 @@ for one.
 <!-- tester: task -->
 a task and its whole thread: the work under test, or this one
 <!-- tester: result -->
-Your result is the final message of your turn: ConsensFlow collects it and
-delivers it to the chief, who decides what happens to the work. Begin with
-the outcome and what the chief has to decide, in a few lines. Then the
-details. A long log, table or listing goes in a file outside the project's
-tracked files (your scratch folder, or where the brief says), and the result
-gives its path. Make it
+Your result is the final message of your turn: ConsensFlow collects
+it and delivers it to the chief, who decides what happens to the
+work. Begin with the outcome and what the chief has to decide, in
+a few lines. Then the details. A long log, table or listing goes
+in a file outside the project's tracked files (your scratch folder,
+or where the brief says), and the result gives its path. Make it
 complete: what you tested and how; each check, passed or failed, with the exact
 command you ran and what it printed; each bug with the steps to reproduce it;
 where any test or script you wrote is; and whether the work is ready. If you

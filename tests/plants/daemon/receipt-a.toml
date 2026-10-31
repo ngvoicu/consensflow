@@ -60,15 +60,13 @@ runs = [
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/message.rs"
-find = '        Some(message) => Ok(Answer::ok(json!({ "message": value(&message)? }))),'
+find = '            let mut answer = json!({ "message": value(&message)? });'
 replace = '''
-        Some(message) => {
             if message.kind == "answer" && message.recipient_id == caller.participant.id {
                 let mut ledger = context.ledger.borrow_mut();
                 ledger.receive_read(caller.participant.id, &[message.id], cf_ledger::Read::Inbox)?;
             }
-            Ok(Answer::ok(json!({ "message": value(&message)? })))
-        }'''
+            let mut answer = json!({ "message": value(&message)? });'''
 
 [[plant]]
 name = "read: the board takes the word of anyone for any answer"
@@ -77,8 +75,8 @@ runs = ["daemon-lib-routes-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = 'message.recipient_id == recipient && message.state == "queued"'
-replace = 'message.state == "queued"'
+find = '.filter(|message| message.recipient_id == recipient)'
+replace = '.filter(|_| true)'
 
 [[plant]]
 name = "read: cf says what it wrote before it has written it"

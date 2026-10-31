@@ -86,7 +86,13 @@ fn words_of<'a>(message: &'a MessageView, carried: &[MessageView]) -> (Cow<'a, s
 /// longer than a paste is given, and are not cut to their opening and the command
 /// that reads the rest.
 pub fn goes_whole(message: &MessageView, carried: &[MessageView]) -> bool {
-    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT
+    fits_whole(&words_of(message, carried).0)
+}
+
+/// Whether `words`, a message's own, go into a pane whole: no longer than a
+/// paste is given.
+pub fn fits_whole(words: &str) -> bool {
+    utf16_len(words) <= INLINE_LIMIT
 }
 
 /// Who a message is from: its sender's handle, or ConsensFlow itself.

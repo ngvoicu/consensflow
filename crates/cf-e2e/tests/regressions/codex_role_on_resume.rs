@@ -164,6 +164,49 @@ impl<'a> Chief<'a> {
             .count())
     }
 
+    /// The chief's window, `frame`, reads the newest note that told it its role, once
+    /// the daemon has seen it arrive: the role with specs on is longer than one
+    /// message (T-1009), so the note went in cut to its opening and `cf inbox read
+    /// m-N`, which its opening says to run now. The board then has it read, and the
+    /// role is what the conversation was told.
+    fn reads_its_role(&self, frame: &Value) -> Result<(), Box<dyn std::error::Error>> {
+        let mut delivered = None;
+        self.rig
+            .wait_for("the note of the role to be delivered", secs(60), || {
+                delivered = self
+                    .project
+                    .inbox("chief")?
+                    .into_iter()
+                    .filter(|note| note["body"].to_string().contains(REPLACES))
+                    .max_by_key(|note| note["id"].as_i64())
+                    .filter(|note| note["state"] == "delivered");
+                Ok(delivered.is_some())
+            })?;
+        let note = delivered.ok_or("no note")?["id"].as_i64().ok_or("no id")?;
+        assert!(
+            self.told_of_specs()?
+                .last()
+                .is_some_and(|told| told.contains(&format!("cf inbox read m-{note}"))),
+            "told in part, with the command that prints the rest"
+        );
+        let read = self
+            .rig
+            .cf_in_window(frame, ["inbox", "read", &format!("m-{note}")])?;
+        assert_eq!(read.code, Some(0), "{read}");
+        assert!(
+            read.stdout.contains("## Reviews"),
+            "the rest of the role: {read}"
+        );
+        self.rig.wait_for("the note to be read", secs(60), || {
+            Ok(self
+                .project
+                .inbox("chief")?
+                .iter()
+                .any(|said| said["id"] == note && said["state"] == "read"))
+        })?;
+        Ok(())
+    }
+
     /// The user messages of the chief's thread that hold the section of specs.
     fn told_of_specs(&self) -> Result<Vec<String>, cf_e2e::Error> {
         Ok(rollout::said_by(&self.record()?, "user")
@@ -248,6 +291,7 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
         rollout::said_by(&chief.record()?, "developer"),
         rollout::said_by(&before, "developer")
     );
+    chief.reads_its_role(&resumed)?;
 
     // Resumed again with nothing changed in the setting, it is told nothing: the
     // role names the skill where it was told it is, the copy of it outlasting the
@@ -271,12 +315,13 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
     // The human chooses another variant: that is a change, said again, once, and the
     // role names the copy of that variant, kept beside the first.
     chief.is_given_specs("core")?;
-    chief.is_resumed(4)?;
+    let fourth = chief.is_resumed(4)?;
     rig.wait_for(
         "the chief to be told of the other variant",
         secs(60),
         || Ok(chief.told_of_specs()?.len() == 2),
     )?;
+    chief.reads_its_role(&fourth)?;
     let again = chief.told_of_specs()?;
     let now = skill_named_in(&again[1]).ok_or("the second message names no SKILL.md")?;
     assert_ne!(now, skill);

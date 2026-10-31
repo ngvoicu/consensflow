@@ -101,14 +101,15 @@ yours. The one exception: the human tells you to do a change yourself.
    what you ran or read, and when. If you have not checked it, say so and ask
    the member to check it first and tell you if it does not hold.
 4. A result arrives headed `[ConsensFlow m-… · T-… · result from @worker]`.
-   Decide it: accept it, reopen it with what to change (back to the same
-   window), or cancel it. Deciding is yours alone: the human never accepts work on the board, so a result left
-   undecided stays Done, and any task that needs it stays blocked. Keep your
-   own checks targeted (the diff stat, a grep, one test, the lines that
-   changed); a deep check (the whole change, the suites) goes to a reviewer
-   or tester. A result already in your conversation needs no `cf task get`.
-   Look at an image yourself only when the decision needs your eyes;
-   otherwise ask the member what it shows.
+   Decide it: accept it, reopen it with what to change (back
+   to the same window), or cancel it. Deciding is yours alone:
+   the human never accepts work on the board, so a result left undecided
+   stays Done, and any task that needs it stays blocked. Keep your own checks
+   targeted (the diff stat, a grep, one test, the lines that changed); a deep
+   check (the whole change, the suites) goes to a reviewer or tester. A result
+   already in your conversation needs no `cf task get`. Look at an image
+   yourself only when the decision needs your eyes; otherwise ask the member
+   what it shows.
 5. A worker's question arrives headed `[… question from @worker]`; answer it
    with `cf answer m-12 "…"` and it goes back to that window, which waits for
    it. A window lost to a crash pauses its task and tells you; resume it.
@@ -192,11 +193,11 @@ Critical work needs `--purpose critical-review|architecture|hard-problem|importa
 ## Reviews
 
 Nothing is reviewed unless you ask. When a result needs a second look before
-you accept it, put a review on the board like any task (`--review`), saying what to
-review and where it is (the task, the files, the commit) and what to check;
-the reviewer can read the task with `cf task get T-3`. Its findings come back as the review's result.
-Don't ask a reviewer for a pass-or-fail first line: its own "ready", "ready
-with notes" or "not ready" stands.
+you accept it, put a review on the board like any task (`--review`), saying
+what to review and where it is (the task, the files, the commit) and what to
+check; the reviewer can read the task with `cf task get T-3`. Its findings come
+back as the review's result. Don't ask a reviewer for a pass-or-fail first
+line: its own "ready", "ready with notes" or "not ready" stands.
 
 A finding blocks the work only when it would make it fail (a wrong result,
 lost data, a break in normal use, a failure in a case that will really

@@ -16,7 +16,8 @@ use cf_proto::ledger::{Claim, MessageView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
-use super::{known_message, message_task};
+use super::{known_message, message_task, role_of_note};
+use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::LedgerError;
 use crate::store::Store;
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
@@ -37,13 +38,14 @@ impl Read {
         }
     }
 
-    /// Whether a message served whole this way is received by it:
+    /// Whether a message still queued and served whole this way is received by it:
     /// - by `cf inbox read`, any message but a task's words and a note that
     ///   says a conversation its role. A question, a result, a note or an
     ///   answer read there is the reader's, and is never typed in after it
     ///   (T-260). A task's words send its window on, and only their paste
     ///   proves them; a role is ConsensFlow's word to the conversation, which
-    ///   records it told only when it is pasted (`confirm_delivery_telling`);
+    ///   is told it by its paste (`confirm_delivery_telling`), or, where the
+    ///   paste was cut, once it is delivered and then read ([`read_role`]);
     /// - in the thread `cf task get` printed, an answer only: the thread is
     ///   the task's, and the rest of it is not the reader's to receive one by one.
     fn receives(self, message: &MessageView, says_a_role: bool) -> bool {
@@ -321,8 +323,10 @@ pub(crate) fn settle_claim(
 /// those among `ids` that are still `queued` for `recipient`, a carried or
 /// claimed one included (its claim is given up), and that the way they were
 /// served receives ([`Read::receives`]), are `read`, each with its receipt,
-/// and their tasks reconciled, once each. The rest are left as they are. How
-/// many were received.
+/// and their tasks reconciled, once each. A note that says `recipient` a role
+/// and was delivered (its paste cut, the role told in part) is read in the
+/// inbox as [`read_role`] says. The rest are left as they are. How many were
+/// received.
 pub(crate) fn receive_read(
     store: &mut Store,
     recipient: i64,
@@ -335,11 +339,17 @@ pub(crate) fn receive_read(
         for id in ids {
             let Some(message) = store
                 .message(*id)?
-                .filter(|message| message.recipient_id == recipient && message.state == "queued")
+                .filter(|message| message.recipient_id == recipient)
             else {
                 continue;
             };
-            if !via.receives(&message, says_a_role(store, message.id)?) {
+            let role = says_a_role(store, message.id)?;
+            if via == Read::Inbox && role && message.state == "delivered" {
+                read_role(store, &message)?;
+                received += 1;
+                continue;
+            }
+            if message.state != "queued" || !via.receives(&message, role) {
                 continue;
             }
             received_as(store, &message, &json!({ "read": via.word() }))?;
@@ -355,6 +365,43 @@ pub(crate) fn receive_read(
         }
         Ok(received)
     })
+}
+
+/// A note that says its recipient a role, delivered (its paste was cut to its
+/// opening and the command that prints the rest), and now printed whole to its
+/// recipient by `cf inbox read`: the window has the whole role. The note is
+/// `read` (its delivery's time and proof kept), and the recipient's current
+/// conversation recorded as told that role, in one write. Not where a later note
+/// says it a role, which is what it was told last, nor where its conversation
+/// began after the note was delivered: the note went into another.
+fn read_role(store: &mut Store, message: &MessageView) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET state = 'read' WHERE id = ?",
+        [message.id],
+    )?;
+    store.log(
+        message.project_id,
+        "message.read",
+        json!({ "message": message.id, "receipt": { "read": Read::Inbox.word() } }),
+    )?;
+    let last = store.db.query_row(
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND role_text IS NOT NULL",
+        [message.recipient_id],
+        |row| row.get::<_, Option<i64>>(0),
+    )?;
+    let Some(conversation) = current_conversation(store, message.recipient_id)? else {
+        return Ok(());
+    };
+    let since = message
+        .delivered_at
+        .as_deref()
+        .is_some_and(|at| at >= conversation.started_at.as_str());
+    if let Some(role) =
+        role_of_note(store, message.id)?.filter(|_| last == Some(message.id) && since)
+    {
+        set_conversation_role_text(store, conversation.id, &role)?;
+    }
+    Ok(())
 }
 
 /// Whether a message says its recipient's conversation a role: a note the

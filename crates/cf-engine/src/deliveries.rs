@@ -526,16 +526,13 @@ impl Dispatcher {
                     Some(found) => self.tells_a_role(found)?,
                     None => None,
                 };
-                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand(
+                self.seams.ledger.borrow_mut().confirm_sent_by_hand(
                     stale.message,
                     &stale.carried,
                     &receipt,
                     tells == Some(true),
                 )?;
                 record.delivery.borrow_mut().uncleared = None;
-                if let Some(confirmed) = confirmed.filter(|_| tells == Some(false)) {
-                    self.told_in_part(&confirmed)?;
-                }
                 self.changed();
                 return Ok(());
             }

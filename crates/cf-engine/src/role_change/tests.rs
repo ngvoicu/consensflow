@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use cf_base::env::Env;
+use cf_base::role_read::role_read_whole;
 use cf_catalog::WorkTier;
 use cf_proto::specs::Variant;
 use serde_json::Value;
@@ -140,41 +141,80 @@ fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
     .unwrap()
 }
 
-/// The real text of a chief with specs on and a staff of two who each hold two
-/// roles is still under what a message goes in whole at: it is the role itself the
-/// replacement says, not its opening and a command to read the rest of it. (It was
-/// a staff of twenty-five until the chief's rules for smaller contexts, T-1009, took
-/// the room; a role too long for one message is the task after it.)
+/// What `cf inbox read` prints of `note` once it was delivered: its line and
+/// its words.
+fn printed_by_cf(note: &MessageView) -> String {
+    format!(
+        "m-{} [delivered] note from ConsensFlow\n\n{}\n",
+        note.id, note.body
+    )
+}
+
+/// The real text of a chief with specs on and a staff of twenty-five who each hold
+/// two roles is told: it is longer than a message goes in whole at since the
+/// chief's rules for smaller contexts (T-1009), so its window is given the
+/// opening, which says to read the rest now, and the command that prints it, and
+/// what that command prints is read whole by its window, so the role is told once
+/// it is read.
 #[test]
-fn the_real_text_of_a_chief_with_specs_and_a_large_staff_goes_in_whole_as_a_replacement() {
-    let text = a_chiefs_role(2, true);
+fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
+    let text = a_chiefs_role(25, true);
     let replacement = note(None, "note", body_of(&text));
-    assert!(goes_whole(&replacement, &[]));
     let said = delivery_text(&replacement, &[]);
-    assert!(said.contains(&text), "the role is cut");
+    if goes_whole(&replacement, &[]) {
+        assert!(said.contains(&text), "the role is cut");
+        return;
+    }
     assert!(
-        !said.contains("read all of it with"),
-        "a command stands in for its end"
+        said.contains(OPENING_IN_PART),
+        "it says to read the rest now"
+    );
+    assert!(
+        said.ends_with("read all of it with: cf inbox read m-4242)"),
+        "the command that prints the rest: {}",
+        &said[said.len() - 200..]
+    );
+    assert!(replacement.body.ends_with(&text));
+    assert!(
+        role_read_whole(&printed_by_cf(&replacement)),
+        "what cf prints of it is read whole: {} bytes",
+        printed_by_cf(&replacement).len()
     );
 }
 
-/// The staff a role holds whole in a replacement, which the docs of this module
-/// say: more rows are a role told in part.
+/// The staff a role holds whole in a replacement, and the staff it holds told in
+/// part and read whole, which the docs of this module say: more rows are a role
+/// told in part, and past the second, one `cf` does not say it read.
 #[test]
-fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
-    let rows_whole = |specs_on| {
+fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
+    let rows_while = |specs_on, holds: &dyn Fn(&MessageView) -> bool| {
         (1..)
-            .take_while(|&rows| {
-                goes_whole(
-                    &note(None, "note", body_of(&a_chiefs_role(rows, specs_on))),
-                    &[],
-                )
-            })
+            .take_while(|&rows| holds(&note(None, "note", body_of(&a_chiefs_role(rows, specs_on)))))
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 2, "docs: whole to 2 rows with specs on");
-    assert_eq!(rows_whole(false), 30, "docs: whole to 30 rows without");
+    let whole = |note: &MessageView| goes_whole(note, &[]);
+    let read = |note: &MessageView| role_read_whole(&printed_by_cf(note));
+    assert_eq!(
+        rows_while(true, &whole),
+        2,
+        "docs: whole to 2 rows with specs on"
+    );
+    assert_eq!(
+        rows_while(false, &whole),
+        30,
+        "docs: whole to 30 rows without"
+    );
+    assert_eq!(
+        rows_while(true, &read),
+        244,
+        "docs: read to 244 rows with specs on"
+    );
+    assert_eq!(
+        rows_while(false, &read),
+        254,
+        "docs: read to 254 rows without"
+    );
 }
 
 /// An item of a conversation's record, from `role`, saying `text`.

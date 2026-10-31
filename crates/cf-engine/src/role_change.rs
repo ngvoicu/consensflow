@@ -79,11 +79,20 @@
 //! A role too long for one message (more than 16,000 units: a staff of more than
 //! 2 rows with specs on, 30 without, two roles to a row, on the real text; it was
 //! 37 and 65 before the chief's rules for smaller contexts, T-1009) is
-//! delivered cut to its opening, with the way to read the rest (`cf inbox read`).
-//! That is a role told in part: it is not recorded as told, and the human has a
-//! line on the board that says so. The role is said again at every Resume, and
-//! the line written again, until the staff is smaller. The role is not given in
-//! several messages.
+//! delivered cut to its opening, with the way to read the rest (`cf inbox read`),
+//! and its opening says to read the rest now ([`OPENING_IN_PART`]). It is not given
+//! in several messages. Delivered so, it is a role told in part, and not recorded
+//! as told; it is told once the window has read it: `cf inbox read` printed the
+//! note whole and said so, and the ledger then records the role told, in the
+//! write that marks the note read (`receive_read`). `cf` says so of a role up to a
+//! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 244
+//! rows with specs on, 254 without, on the same text (its lines are the bound).
+//! A role read so is said nothing of at the next Resume, unless it changed again.
+//! One the window has not read by its next Resume is said again then, and the
+//! human has a line on the board that says so ([`Dispatcher::not_read`]).
+//! Nothing is said to the human of a role told in part before then: the window
+//! may read it at once.
 //!
 //! It is the text as the window would be given it that is compared. For a chief
 //! given specs that text names the Specmint skill by its path, and the path is
@@ -122,11 +131,17 @@
 //!   thread holds another. A replacement whose delivery was given up is not
 //!   looked for at all: it failed, and nothing reconciles it with what the
 //!   thread may hold. Unreadable evidence is not told from none.
-//! - A role told in part (cut at 16,000 units) is not recorded, so the role the
-//!   conversation was told before stays recorded: where the human goes back to
-//!   that one, the launch says nothing, though the thread holds the cut words
-//!   after it. A staff that shrinks, or a role that changes again, tells the
-//!   thread a whole one.
+//! - A role told in part (cut at 16,000 units) and not read is not recorded, so
+//!   the role the conversation was told before stays recorded: where the human
+//!   goes back to that one, the launch says nothing, though the thread holds the
+//!   cut words after it. A staff that shrinks, or a role that changes again, tells
+//!   the thread a whole one.
+//! - A role told in part is told once `cf inbox read` printed its note after the
+//!   note was confirmed: one the window read while its delivery was still being
+//!   confirmed (it ran the command before the daemon saw the paste arrive) is
+//!   not recorded by that read, and is said again at the next Resume, with the
+//!   line, as one never read. A note printed past `cf`'s bound for a role is not
+//!   said read either: a role that long is said again at every Resume.
 //! - A resumed Codex window that is given no first message has the turn its
 //!   record ended in read as the old process's, not as its own, until it begins
 //!   one (`LeftOpen`), whether or not a replacement is due. That is a different
@@ -163,7 +178,7 @@ use cf_harness::records::{Item, Role};
 use cf_ledger::{ConversationView, MessageView, NewNote, ParticipantView, ProjectView};
 use serde_json::{json, Value};
 
-use crate::delivery_text::{goes_whole, header_id};
+use crate::delivery_text::{fits_whole, goes_whole, header_id};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::EngineError;
@@ -174,9 +189,17 @@ pub(crate) use prelude::Prelude;
 /// What a replacement says before the role text.
 pub(crate) const OPENING: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. This is context, not a task: say in one short line that you have them, and wait for the next message.";
 
+/// What a replacement says before the role text where the two together are too
+/// long for one message: the window is given only their opening and the command
+/// that prints the rest, and is told to read the rest now.
+pub(crate) const OPENING_IN_PART: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints. This is context, not a task: once you have read them, say in one short line that you have them, and wait for the next message.";
+
 /// What a note that gives the role to a session no hook greeted says before the role
 /// text ([`Dispatcher::greet_switched`]).
 pub(crate) const BEGAN_WITHOUT: &str = "This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. They follow in full: follow them from now on. This is context, not a task: say in one short line that you have them, and wait for the next message.";
+
+/// [`BEGAN_WITHOUT`] where the note is too long for one message.
+pub(crate) const BEGAN_WITHOUT_IN_PART: &str = "This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints: follow them from now on. This is context, not a task: once you have read them, say in one short line that you have them, and wait for the next message.";
 
 /// Why a greeting that waited is withdrawn: the session was given its role since.
 const GREETED_SINCE: &str = "a hook of the harness gave the session its role since";
@@ -276,7 +299,11 @@ impl Dispatcher {
                 role: Some(role),
             });
         }
+        let unread = self.unread_role(participant, &role.instructions)?;
         let replacement = self.replace_role(project, participant, &role)?;
+        if let Some(unread) = unread {
+            self.not_read(&unread, replacement.id)?;
+        }
         let prelude = Prelude {
             replacement: replacement.id,
             displaced: first.as_ref().map(|message| message.id),
@@ -342,7 +369,7 @@ impl Dispatcher {
         let note = self.seams.ledger.borrow_mut().note_role(
             project.id,
             &participant.handle,
-            &format!("{BEGAN_WITHOUT}\n\n{}", role.instructions),
+            &note_of(BEGAN_WITHOUT, BEGAN_WITHOUT_IN_PART, &role.instructions),
             &role.instructions,
         )?;
         record.delivery.borrow_mut().greeting = Some(note.id);
@@ -461,33 +488,29 @@ impl Dispatcher {
     /// The harness's own record proves `message` arrived: it is confirmed. A
     /// replacement of a role that went in whole also records the conversation as
     /// told it, in the same write. One that was cut (more than a message goes in
-    /// whole at) tells the conversation its role in part: it is not recorded, and
-    /// the human is told so on the board. One whose recipient has no current
-    /// conversation any more (it ended while the note was on its way) is
-    /// confirmed and records nothing: there is no conversation to have told.
+    /// whole at) tells the conversation its role in part: it is not recorded until
+    /// the window reads it whole (`cf inbox read`, which the ledger records). One
+    /// whose recipient has no current conversation any more (it ended while the
+    /// note was on its way) is confirmed and records nothing: there is no
+    /// conversation to have told.
     pub(crate) fn confirm_delivered(
         &self,
         message: &MessageView,
         receipt: &Value,
     ) -> Result<(), EngineError> {
         let tells = self.tells_a_role(message)?;
-        {
-            let mut ledger = self.seams.ledger.borrow_mut();
-            if tells == Some(true) {
-                ledger.confirm_delivery_telling(message.id, Some(receipt))?;
-            } else {
-                ledger.confirm_delivery(message.id, Some(receipt))?;
-            }
-        }
-        if tells == Some(false) {
-            self.told_in_part(message)?;
+        let mut ledger = self.seams.ledger.borrow_mut();
+        if tells == Some(true) {
+            ledger.confirm_delivery_telling(message.id, Some(receipt))?;
+        } else {
+            ledger.confirm_delivery(message.id, Some(receipt))?;
         }
         Ok(())
     }
 
     /// Whether `message` says its recipient's conversation a role: whole (`true`),
-    /// which its confirmation records as told, or cut (`false`), which it does not.
-    /// None for a message that says no role.
+    /// which its confirmation records as told, or cut (`false`), which its read
+    /// records. None for a message that says no role.
     pub(crate) fn tells_a_role(&self, message: &MessageView) -> Result<Option<bool>, EngineError> {
         let says_a_role = self
             .seams
@@ -498,18 +521,45 @@ impl Dispatcher {
         Ok(says_a_role.then(|| goes_whole(message, &[])))
     }
 
-    /// The human is told on the board that `message`, a role cut to fit in one
-    /// message, told its recipient's conversation its role in part.
-    pub(crate) fn told_in_part(&self, message: &MessageView) -> Result<(), EngineError> {
+    /// The last note that told `participant` the role `instructions` and that
+    /// its window has and has not read: a note that reached the window (the last
+    /// of those that did), cut to fit in one message, delivered and not read since.
+    /// None where the last one to reach it went in whole, was read, or said
+    /// another role.
+    fn unread_role(
+        &self,
+        participant: &ParticipantView,
+        instructions: &str,
+    ) -> Result<Option<MessageView>, EngineError> {
+        let ledger = self.seams.ledger.borrow();
+        for id in ledger.role_notes_to(participant.id)?.into_iter().rev() {
+            let Some(note) = ledger.message(id)? else {
+                continue;
+            };
+            if !matches!(note.state.as_str(), "delivered" | "read") {
+                continue;
+            }
+            let unread = note.state == "delivered"
+                && !goes_whole(&note, &[])
+                && ledger.role_of_note(id)?.as_deref() == Some(instructions);
+            return Ok(unread.then_some(note));
+        }
+        Ok(None)
+    }
+
+    /// The human is told on the board that `unread`, a role cut to fit in one
+    /// message, was not read by its window before this Resume, which tells it the
+    /// role again in the note `again`.
+    pub(crate) fn not_read(&self, unread: &MessageView, again: i64) -> Result<(), EngineError> {
         self.seams.ledger.borrow_mut().note(
-            message.project_id,
+            unread.project_id,
             &NewNote {
                 from: None,
                 to: "human".to_owned(),
-                task: message.task_number,
+                task: unread.task_number,
                 body: format!(
-                    "@{} was told its new role in part: the staff is too large for one message (m-{} was cut at 16,000 characters). It is told again at every Resume until the staff is smaller.",
-                    message.recipient, message.id
+                    "@{} did not read its new role before this Resume: it is too long for one message, and m-{} went in cut at 16,000 characters with `cf inbox read m-{}` for the rest. It is told again now, in m-{again}.",
+                    unread.recipient, unread.id, unread.id
                 ),
             },
         )?;
@@ -520,7 +570,18 @@ impl Dispatcher {
 /// What a note that replaces the role with `instructions` says: the words that
 /// say so, and the text in full.
 fn body_of(instructions: &str) -> String {
-    format!("{OPENING}\n\n{instructions}")
+    note_of(OPENING, OPENING_IN_PART, instructions)
+}
+
+/// A note that says `instructions` after `whole`, where the two go into a window in
+/// one message, else after `in_part`, which tells the window to read the rest now.
+fn note_of(whole: &str, in_part: &str, instructions: &str) -> String {
+    let note = format!("{whole}\n\n{instructions}");
+    if fits_whole(&note) {
+        note
+    } else {
+        format!("{in_part}\n\n{instructions}")
+    }
 }
 
 /// What a member wrote in answer to its task: where its answer ends, and its final

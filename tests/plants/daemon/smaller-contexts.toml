@@ -194,8 +194,8 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
-Don't ask a reviewer for a pass-or-fail first line: its own "ready", "ready
-with notes" or "not ready" stands.'''
+Don't ask a reviewer for a pass-or-fail first
+line: its own "ready", "ready with notes" or "not ready" stands.'''
 replace = '''Say what to check.'''
 
 [[plant]]
@@ -206,8 +206,8 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
-Don't ask a reviewer for a pass-or-fail first line: its own "ready", "ready
-with notes" or "not ready" stands.'''
+Don't ask a reviewer for a pass-or-fail first
+line: its own "ready", "ready with notes" or "not ready" stands.'''
 replace = '''Ask a reviewer for a first line: PUSH AS WRITTEN or FIX FIRST.'''
 
 [[plant]]
@@ -287,9 +287,8 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
- Keep your
-   own checks targeted (the diff stat, a grep, one test, the lines that
-   changed)'''
+ Keep your own checks
+   targeted (the diff stat, a grep, one test, the lines that changed)'''
 replace = ""
 
 [[plant]]
@@ -300,8 +299,8 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
-; a deep check (the whole change, the suites) goes to a reviewer
-   or tester'''
+; a deep
+   check (the whole change, the suites) goes to a reviewer or tester'''
 replace = ""
 
 [[plant]]
@@ -311,7 +310,9 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = ''' A result already in your conversation needs no `cf task get`.'''
+find = '''
+ A result
+   already in your conversation needs no `cf task get`.'''
 replace = ""
 
 [[plant]]
@@ -322,8 +323,9 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
- Look at an image yourself only when the decision needs your eyes;
-   otherwise ask the member what it shows.'''
+ Look at an image
+   yourself only when the decision needs your eyes; otherwise ask the member
+   what it shows.'''
 replace = ""
 
 [[plant]]
@@ -398,10 +400,11 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/staff.md"
 find = '''
-who decides what happens to the work. Begin with
-the outcome and what the chief has to decide, in a few lines. Then the
-details. A long log'''
-replace = '''who decides what happens to the work. A long log'''
+who decides what happens to the
+work. Begin with the outcome and what the chief has to decide, in
+a few lines. Then the details. A long log'''
+replace = '''who decides what happens to the
+work. A long log'''
 
 [[plant]]
 name = "smaller contexts: the reviewer's findings do not begin with whether the work is ready"
@@ -464,9 +467,9 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/staff.md"
 find = '''
-A long log, table or listing goes in a file outside the project's
-tracked files (your scratch folder, or where the brief says), and the result
-gives its path. Make it
+A long log, table or listing goes
+in a file outside the project's tracked files (your scratch folder,
+or where the brief says), and the result gives its path. Make it
 complete: what you tested'''
 replace = '''Make it complete: what you tested'''
 

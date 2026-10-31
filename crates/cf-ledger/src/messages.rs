@@ -73,7 +73,7 @@ pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
     settle_claim,
 };
-pub(crate) use roles::{note_role, role_notes_to};
+pub(crate) use roles::{note_role, role_notes_to, role_of_note};
 pub(crate) use taken_back::take_back;
 pub(crate) use told::{
     drop_queued_but_told, kept_through_leaving, launch_called_off, notes_waiting, tell_queued,

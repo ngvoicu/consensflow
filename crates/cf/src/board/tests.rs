@@ -581,6 +581,69 @@ fn an_answer_cf_inbox_read_printed_past_what_a_harness_shows_is_not_acknowledged
     }
 }
 
+/// A role too long for one message went into its window in part, and `cf inbox
+/// read` printed its note whole once it was delivered: it says so to the board,
+/// up to the bound a role is read whole at by the windows a role goes to by a note
+/// (`role_read_whole`), past the one every harness shows. A note the board does not
+/// say tells a role, or one not delivered, is as any message.
+#[test]
+fn a_role_cf_inbox_read_printed_whole_once_delivered_is_acknowledged_up_to_the_bound_of_a_role() {
+    let role = |state: &str, body: String, said: bool| {
+        let mut answer = message("note", state);
+        answer["message"]["body"] = json!(body);
+        answer["message"]["taskNumber"] = Value::Null;
+        if said {
+            answer["role"] = json!(true);
+        }
+        answer
+    };
+    for json in [false, true] {
+        // The lines of a JSON output are one: its newlines are escapes.
+        for (body, taken) in [
+            ("x".repeat(20_000), true),
+            (format!("{}\n", "x".repeat(40)).repeat(400), true),
+            ("x".repeat(30_000), false),
+            ("\n".repeat(600), json),
+        ] {
+            let ran = cf_with(
+                &["inbox", "read", "m-12"],
+                json,
+                vec![
+                    reply(200, role("delivered", body.clone(), true)),
+                    reply(200, json!({})),
+                ],
+                None,
+            );
+            assert_eq!(ran.code.unwrap(), 0);
+            if taken {
+                assert_eq!(
+                    asked(&ran),
+                    [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")]
+                );
+                assert_eq!(ran.asked[1].2, acknowledged(&[12], "inbox"));
+            } else {
+                assert_eq!(
+                    asked(&ran),
+                    [("GET", "/api/inbox/12")],
+                    "{} bytes",
+                    body.len()
+                );
+            }
+        }
+    }
+    for (state, said) in [("delivered", false), ("read", true), ("delivering", true)] {
+        let ran = cf(
+            &["inbox", "read", "m-12"],
+            vec![
+                reply(200, role(state, "x".repeat(20_000), said)),
+                reply(200, json!({})),
+            ],
+        );
+        assert_eq!(ran.code.unwrap(), 0);
+        assert_eq!(asked(&ran), [("GET", "/api/inbox/12")], "{state} {said}");
+    }
+}
+
 #[test]
 fn a_list_of_the_inbox_prints_first_lines_and_says_nothing_of_the_answers_in_it() {
     let list = json!({ "messages": [
