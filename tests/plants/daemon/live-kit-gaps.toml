@@ -133,3 +133,13 @@ file = "tools/xtask/src/live.rs"
 find = """        "parity codex devin",
 """
 replace = ""
+
+[[plant]]
+name = "live kit gaps: live own-cf runs OpenCode, which leaves, unasked"
+meant = "with_no_harness_named_every_one_but_opencode_is_run"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf.rs"
+find = "        .filter(|harness| *harness != LEAVING)"
+replace = "        .filter(|_| true)"

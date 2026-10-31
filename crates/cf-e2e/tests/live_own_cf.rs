@@ -67,14 +67,17 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 /// The decoy: the stand-in `cf`, which writes down each call beside itself.
 const FAKE_CF: &str = env!("CARGO_BIN_EXE_fake-cf");
 
-/// The harnesses run where none is named: every one but OpenCode, which leaves ConsensFlow.
-const DEFAULT: [Harness; 5] = [
-    Harness::Claude,
-    Harness::Codex,
-    Harness::Pi,
-    Harness::Devin,
-    Harness::Muse,
-];
+/// The harness that runs only where it is named: it leaves ConsensFlow.
+const LEAVING: Harness = Harness::OpenCode;
+
+/// The harnesses run where none is named: every one of [`Harness::ALL`] but [`LEAVING`], so a
+/// harness added later is run too.
+fn every_harness() -> Vec<Harness> {
+    Harness::ALL
+        .into_iter()
+        .filter(|harness| *harness != LEAVING)
+        .collect()
+}
 
 /// What the worker is asked.
 pub const TASK: &str = "Run these three commands with your shell tool, one after another, \
@@ -190,7 +193,7 @@ fn a_members_shell_finds_its_windows_own_cf_ahead_of_a_decoy_its_profile_puts_fi
         &Harness::ALL,
         Harness::name,
         "harness",
-        &DEFAULT,
+        &every_harness(),
     )?;
     let mut checks = Vec::new();
     for harness in harnesses {
@@ -237,7 +240,14 @@ mod tests {
 
     #[test]
     fn with_no_harness_named_every_one_but_opencode_is_run() {
-        let all = named(&[], &Harness::ALL, Harness::name, "harness", &DEFAULT).unwrap();
+        let all = named(
+            &[],
+            &Harness::ALL,
+            Harness::name,
+            "harness",
+            &every_harness(),
+        )
+        .unwrap();
         assert_eq!(all.len(), Harness::ALL.len() - 1);
         assert!(!all.contains(&Harness::OpenCode));
         let named_opencode = named(
@@ -245,7 +255,7 @@ mod tests {
             &Harness::ALL,
             Harness::name,
             "harness",
-            &DEFAULT,
+            &every_harness(),
         )
         .unwrap();
         assert_eq!(named_opencode, [Harness::OpenCode]);
@@ -293,7 +303,7 @@ mod tests {
     #[test]
     fn only_muses_line_says_its_home_is_the_persons() {
         assert!(caveat(Harness::Muse).contains("ZDOTDIR"));
-        for harness in DEFAULT
+        for harness in every_harness()
             .into_iter()
             .filter(|harness| *harness != Harness::Muse)
         {
