@@ -694,12 +694,12 @@ fn a_harness_default_that_is_the_gone_model_holds_the_chief_with_the_holds_note(
     );
 }
 
-/// The chief's first message quotes a gone model's words beside its model (a handoff about
-/// this very rule would), pasted into its window at rest, which ends with a failure code
+/// A message to the chief quotes a gone model's words beside its model (a handoff about this
+/// very rule would), pasted into its window reopened at rest and handed nothing else, which ends with a failure code
 /// before its record shows the paste: what ConsensFlow pasted is no word of the harness's, so the chief keeps its
 /// model and the project closes as for any window that went (Calliope's P2c, T-994).
 #[test]
-fn a_first_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window() {
+fn a_pasted_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window() {
     let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
     let project = context.with_staff(&["zeus"]);
     context.pass().unwrap();

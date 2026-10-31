@@ -1267,7 +1267,7 @@ replace = "            Ok(Some(model)) if model == gone && model.is_empty() => {
 
 [[plant]]
 name = "gone: the exit's screen is read with ConsensFlow's own pastes on it"
-meant = "a_first_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window"
+meant = "a_pasted_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window"
 runs = ["chm-dispatcher"]
 
 [[plant.edit]]
@@ -1277,7 +1277,7 @@ replace = "                let said = shown.clone().without_pastes(&pasted[..0])
 
 [[plant]]
 name = "gone: the exit's pastes are read after a delivery it did not take went back"
-meant = "a_first_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window"
+meant = "a_pasted_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window"
 runs = ["chm-dispatcher"]
 
 [[plant.edit]]
