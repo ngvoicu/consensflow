@@ -120,3 +120,13 @@ runs = ["removed-harness"]
 file = "package.json"
 find = "    \"codex\",\n    \"pi\",\n"
 replace = "    \"codex\",\n    \"\u006fpencode\",\n    \"pi\",\n"
+
+[[plant]]
+name = "a removed harness: the rule reads files git does not track"
+meant = "reads_what_git_tracks_and_not_what_lies_untracked_beside_it"
+runs = ["removed-harness"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/off_node.rs"
+find = "    listed(root, false)\n"
+replace = "    listed(root, true)\n"

@@ -10,12 +10,13 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
+use cf_e2e::process::Run;
 use cf_e2e::{checkout, files};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
-use super::off_node::{tree, under, Found};
+use super::off_node::{tracked, tree, under, Found};
 use crate::Outcome;
 
 /// The removed harness's name, written in halves so that this file does not name it.
@@ -75,7 +76,7 @@ fn named(root: &Path, listed: &[String]) -> Found<Vec<String>> {
 fn names_it_nowhere_in_the_repository_but_in_the_two_places_that_keep_it() -> Outcome {
     let root = checkout::root();
     assert_eq!(
-        named(&root, &tree(&root)?)?,
+        named(&root, &tracked(&root)?)?,
         Vec::<String>::new(),
         "the harness is gone: say what a file did in words that do not name it"
     );
@@ -149,6 +150,59 @@ mod what_the_check_is_for_planted_in_a_tree_of_its_own {
                 "c/trace.json.gz".to_owned(),
                 format!("d/{lower}.md"),
             ]
+        );
+        Ok(())
+    }
+
+    /// A git repository of its own, holding `tracked` files (added to its index) and `lying`
+    /// ones beside them, which git does not track.
+    fn repository(tracked: &[(&str, &[u8])], lying: &[(&str, &[u8])]) -> Found<tempfile::TempDir> {
+        let root = tempfile::tempdir()?;
+        for (file, contents) in tracked.iter().chain(lying) {
+            files::write(&under(root.path(), file), contents)?;
+        }
+        for args in [vec!["init", "-q"], {
+            let mut add = vec!["add", "--"];
+            add.extend(tracked.iter().map(|(file, _)| *file));
+            add
+        }] {
+            let ran = Run::new("git")
+                .args(args)
+                .cwd(root.path())
+                .inheriting_env()
+                .run()?;
+            assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+        }
+        Ok(root)
+    }
+
+    // The main checkout holds a spec folder that is tracked by nothing and names the word: the
+    // rule is about the repository, which is what a commit holds (T-989's P2-1).
+    #[test]
+    fn reads_what_git_tracks_and_not_what_lies_untracked_beside_it() -> Outcome {
+        let said = format!("{} is gone\n", word());
+        let root = repository(
+            &[("README.md", b"Claude Code, Codex, Pi and Devin\n")],
+            &[
+                (".specs/removal/SPEC.md", said.as_bytes()),
+                (&format!(".specs/{}.md", word()), b"".as_slice()),
+            ],
+        )?;
+        assert_eq!(
+            named(root.path(), &tracked(root.path())?)?,
+            Vec::<String>::new()
+        );
+        // Untracked, they are in the tree git would take, so the plain listing sees them.
+        let listed = tree(root.path())?;
+        assert!(
+            listed.iter().any(|file| file == ".specs/removal/SPEC.md"),
+            "{listed:?}"
+        );
+        // Tracked, they are the repository's, and found.
+        let root = repository(&[("docs/note.md", said.as_bytes())], &[])?;
+        assert_eq!(
+            named(root.path(), &tracked(root.path())?)?,
+            ["docs/note.md".to_owned()]
         );
         Ok(())
     }
