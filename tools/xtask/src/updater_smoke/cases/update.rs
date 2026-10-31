@@ -14,8 +14,25 @@ use crate::updater_smoke::descriptors::{compare, held_by, Left, NOT_MARKED};
 use crate::updater_smoke::evidence::{app_log, assert_started_daemon, Kind};
 use crate::updater_smoke::launchers::{assert_repaired, plant_commands, Repaired};
 use crate::updater_smoke::ledger::{assert_projects, assert_sound, assert_traced, traced_events};
-use crate::updater_smoke::processes::{alive, gone};
+use crate::updater_smoke::processes::{alive, gone, Watch};
 use crate::updater_smoke::{files, Result};
+
+/// How long after the installed app has exited a second start of the update is looked for.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The folders whose programs are the installed app's at `bundle`, as the process table names
+/// them: its `Contents/MacOS/`, by its path and by the path the system resolves it to (a
+/// temporary folder's `/var` is `/private/var`).
+fn programs_of(bundle: &std::path::Path) -> Vec<String> {
+    let mut folders = vec![format!("{}/Contents/MacOS/", bundle.display())];
+    if let Ok(real) = fs::canonicalize(bundle) {
+        let real = format!("{}/Contents/MacOS/", real.display());
+        if !folders.contains(&real) {
+            folders.push(real);
+        }
+    }
+    folders
+}
 
 /// The update from the installed app, install and restart, and what it leaves:
 /// the update's app on the bundle's `cf`, the ledger whole, and the terminal
@@ -80,6 +97,9 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         "the daemon traced no ledger event before the update"
     );
 
+    // Every program started from the installed bundle from here on: the update's app is started
+    // once, by the installed app, and by nothing else (T-941).
+    let watch = Watch::start(programs_of(&kase.sandbox.copy));
     // Both windows close, the install goes through, and the app starts again as the update.
     release_panes(kase, &app, &chiefs)?;
     let second = boot_evidence(kase, &app, &inputs.to.version, Some(first.app))?;
@@ -114,6 +134,20 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         .until("the first daemon exits and lets go of the ledger", || {
             Ok(gone(first.daemon.pid).then_some(()))
         })?;
+    // A second start of the update (Tauri's restart, after the app's own) would be launchd's
+    // child with no input, which quits at once and says nothing: it is counted, not heard.
+    std::thread::sleep(SETTLE);
+    let started: Vec<u32> = watch
+        .stop()?
+        .into_iter()
+        .filter(|pid| *pid != first.app)
+        .collect();
+    ensure!(
+        started == [second.app],
+        "the update's app was started {} times, pids {started:?}, and the one that booted is {}",
+        started.len(),
+        second.app
+    );
     // The new app holds nothing of the old one's but its streams.
     #[cfg(unix)]
     {

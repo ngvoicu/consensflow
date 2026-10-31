@@ -1,6 +1,7 @@
 //! What the process table says, which is the evidence the smoke has of the app,
 //! of its daemon and of what outlives either. Only `ps` is asked, and only of
 //! processes the smoke started: the app's, its daemon's and the windows' stand-ins.
+//! What it ends it ends as a process seen (`Started`: its number and when it began).
 
 use std::path::Path;
 use std::process::ExitStatus;
@@ -8,7 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
-use cf_process::Ending;
+use cf_process::{Ending, Started};
 
 use super::{Error, Result};
 use crate::process::{self, Invocation};
@@ -91,38 +92,59 @@ pub fn descendants(table: &[Row], root: u32) -> Vec<u32> {
     found
 }
 
-/// Ends the process `pid`, at once: one that is already gone is no failure.
-pub fn kill(pid: u32) {
-    cf_process::terminate(pid, Ending::Forced);
+/// Ends the process `started`, at once, where it is still that process: one that is
+/// gone, or whose number another has taken since, is sent nothing. Nothing is ended by
+/// its number alone: a number the smoke read (a report's, a stand-in's file) may be any
+/// process's, the live app's among them.
+pub fn kill(started: &Started) {
+    started.end(Ending::Forced);
 }
 
-/// Ends the process group that `pid` leads, at once: one that is already gone is
-/// no failure. A pid that names more than a group (0 is this program's own, 1 is
-/// none, -1 is every process) ends nothing.
-pub fn kill_group(pid: u32) {
+/// Ends the process group `group`, at once, where `member` is still the process seen and
+/// in it: a group no process the smoke saw is in is sent nothing, nor one that names more
+/// than a group (0 is this program's own, 1 is none).
+pub fn kill_group(member: &Started, group: u32) {
+    member.end_group(group, Ending::Forced);
+}
+
+/// Ends the process group `child` leads, at once: a child this program started and holds
+/// un-reaped, whose number, and its group's, are no other's while it is held, whether it runs
+/// or has ended and waits to be reaped (a zombie, which the system says nothing else of).
+pub fn kill_held_group(child: &std::process::Child) {
     #[cfg(unix)]
-    if let Some(leader) = i32::try_from(pid).ok().filter(|leader| *leader > 1) {
+    if let Some(leader) = i32::try_from(child.id()).ok().filter(|leader| *leader > 1) {
         let group = nix::unistd::Pid::from_raw(-leader);
         let _ = nix::sys::signal::kill(group, nix::sys::signal::Signal::SIGKILL);
     }
     #[cfg(not(unix))]
-    let _ = pid;
+    let _ = child;
 }
 
 /// Ends `root` and everything under it, round after round until nothing is left.
 /// A process group is not enough where a chain of processes keeps making the next
 /// (two programs handing a command to each other for ever did, once): what is
-/// under the app is found by the table, and ended before it makes another.
-pub fn kill_tree(root: u32) {
+/// under the app is found by the table, and ended before it makes another. What is
+/// under it is looked for under what of it still runs, and only what began since
+/// `root` did is taken for it: a number that is now another's is under nothing of it.
+pub fn kill_tree(root: &Started) {
+    let mut known = vec![*root];
     for _ in 0..ROUNDS {
-        let under = process_table()
-            .map(|table| descendants(&table, root))
-            .unwrap_or_default();
-        if under.is_empty() && !alive(root) {
+        let table = process_table().unwrap_or_default();
+        let running: Vec<Started> = known.iter().copied().filter(Started::is_running).collect();
+        for member in &running {
+            for pid in descendants(&table, member.pid()) {
+                let found = Started::of(pid).filter(|found| found.began_since(root));
+                if let Some(found) = found.filter(|found| !known.contains(found)) {
+                    known.push(found);
+                }
+            }
+        }
+        let running: Vec<Started> = known.iter().copied().filter(Started::is_running).collect();
+        if running.is_empty() {
             return;
         }
-        for pid in std::iter::once(root).chain(under) {
-            kill(pid);
+        for member in &running {
+            kill(member);
         }
     }
 }
@@ -138,6 +160,55 @@ pub fn alive(pid: u32) -> bool {
     };
     let state = shown.stdout.trim();
     shown.code == 0 && !state.is_empty() && !state.starts_with('Z')
+}
+
+/// The pids in `table` whose command is a program of one of `folders` (each a folder's path
+/// ending in `/`): what the process table shows started from there.
+pub fn started_from(table: &[Row], folders: &[String]) -> Vec<u32> {
+    table
+        .iter()
+        .filter(|row| folders.iter().any(|folder| row.command.starts_with(folder)))
+        .map(|row| row.pid)
+        .collect()
+}
+
+/// How often a [`Watch`] reads the process table: often enough to see an app that starts and
+/// quits at once, which one with no input does.
+const WATCH_EVERY: Duration = Duration::from_millis(50);
+
+/// Every process started from some folders while it runs, read from the process table on a
+/// thread of its own: the smoke's count of the apps an update starts (T-941).
+pub struct Watch {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    seen: thread::JoinHandle<Result<std::collections::BTreeSet<u32>>>,
+}
+
+impl Watch {
+    /// Starts watching for programs of `folders` (see [`started_from`]).
+    pub fn start(folders: Vec<String>) -> Self {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = std::sync::Arc::clone(&stop);
+        let seen = thread::spawn(move || {
+            let mut seen = std::collections::BTreeSet::new();
+            loop {
+                let last = stopped.load(std::sync::atomic::Ordering::Acquire);
+                seen.extend(started_from(&process_table()?, &folders));
+                if last {
+                    return Ok(seen);
+                }
+                thread::sleep(WATCH_EVERY);
+            }
+        });
+        Self { stop, seen }
+    }
+
+    /// Stops watching, after one more look, and answers every pid it saw.
+    pub fn stop(self) -> Result<std::collections::BTreeSet<u32>> {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        self.seen
+            .join()
+            .map_err(|_| Error::new("the watch of the process table panicked".to_string()))?
+    }
 }
 
 /// Says a process is gone, which is what the ledger's lock needs of the daemon that held it.

@@ -120,6 +120,7 @@ pub mod rig;
 pub mod rollout;
 pub mod scratch_home;
 pub mod serial;
+pub mod shipped;
 pub mod smoke_harness;
 mod stand_in;
 pub mod terminal;

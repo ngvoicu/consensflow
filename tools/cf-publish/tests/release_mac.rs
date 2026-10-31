@@ -9,6 +9,36 @@
 use cf_publish::testing::workflow::release::{DOWNLOADS, NOTES, PREREQUISITES};
 use cf_publish::testing::workflow::{job, read, step};
 
+/// The release run smokes the bundle it ships, not a copy: the one place the app signed under
+/// the Developer ID with its hardened runtime is run (the smoke starts it on GitHub's runner
+/// alone, where no live app runs), and the bundle's seal is checked again once it ran.
+#[test]
+fn the_release_run_smokes_the_bundle_it_ships_and_checks_its_seal_after() {
+    let workflow = read("release.yml");
+    let smoke = step(&workflow, "The signed app passes the packaged smoke");
+    let env = smoke.env();
+    let set = |name: &str| {
+        env.iter()
+            .find(|(it, _)| it == name)
+            .map(|(_, v)| v.clone())
+    };
+    assert_eq!(
+        set("CONSENSFLOW_SMOKE_SHIPPED").as_deref(),
+        Some("\"1\""),
+        "{env:?}"
+    );
+    assert!(
+        set("CONSENSFLOW_SMOKE_APP")
+            .is_some_and(|app| app.ends_with("/bundle/macos/ConsensFlow.app")),
+        "{env:?}"
+    );
+    let sealed = step(&workflow, "Sign the update bundle").script();
+    assert!(
+        sealed.contains("codesign --verify --deep --strict ConsensFlow.app"),
+        "{sealed}"
+    );
+}
+
 mod the_mac_job_as_a_hand_run_and_as_a_tag_run {
     use std::fs;
     use std::path::Path;
