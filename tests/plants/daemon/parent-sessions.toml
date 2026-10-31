@@ -219,10 +219,18 @@ name = "parent-sessions rig: the daemon gives every window the session a termina
 meant = "no_window_is_given_the_session_of_an_agent_the_app_was_started_from"
 runs = ["parent-sessions-rig"]
 builds = true
+# Both of the daemon's: since T-1024 `cf ui` runs it with no session's values, so what it takes
+# of a terminal finds none to give even where `terminal_of` keeps one (its own test holds it).
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/seams.rs"
 find = '''        .filter(|name| !is_parent_session_variable(name))
+'''
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''    let env = &outside_parent_sessions(env);
 '''
 replace = ""
 
