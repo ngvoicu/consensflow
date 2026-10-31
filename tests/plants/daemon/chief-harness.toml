@@ -15,6 +15,11 @@
 # crates/cf-engine/src/handoff/viewer.rs, app/ui/core/history-viewer.js), a conversation that shows
 # no item is passed, charged, and gone on past, and migration 0027 drops the indexes the headings
 # read. The heading plants of session-viewer.toml went with the headings.
+#
+# T-995's (Calliope's re-check T-994) hold `gone:`: the adapter hears a refusal of the model
+# asked for (Pi by the id after its provider), a held chief costs a pass nothing, a default
+# that is the gone model holds the chief, and the exit's screen is read without
+# ConsensFlow's pastes, at its launch alone, never for the human's Ctrl+C.
 
 [run]
 ch-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "models::"]
@@ -45,6 +50,12 @@ chm-muse-models = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "m
 chm-muse-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::a_turn_on_a_model"]
 chm-page-muse = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the chief is picked as a harness"]
 chm-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "chief_model::"]
+gn-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::models::"]
+gn-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::models::"]
+gn-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::models::"]
+gn-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::models::"]
+gn-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::models::"]
+gn-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
 tl-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history"]
 tl-ledger-plan = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "conversations::history::"]
 tl-ledger-schema = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "schema::"]
@@ -532,8 +543,8 @@ runs = ["ch-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/models.rs"
-find = '    words.contains("unrecognized_model") || words.contains("issue with the selected model")'
-replace = '    words.is_empty()'
+find = '    (words.contains("unrecognized_model") || words.contains("issue with the selected model"))'
+replace = '    (words.is_empty())'
 
 [[plant]]
 name = "chief: codex's words for a gone model are not heard"
@@ -542,8 +553,8 @@ runs = ["ch-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/models.rs"
-find = '    words.contains("model is not supported") || words.contains("model_not_found")'
-replace = '    words.is_empty()'
+find = '    (words.contains("model is not supported") || words.contains("model_not_found"))'
+replace = '    (words.is_empty())'
 
 [[plant]]
 name = "chief: pi's words for a gone model are not heard"
@@ -552,10 +563,10 @@ runs = ["ch-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = '''    words.contains("model_not_found")
-}'''
-replace = '''    words.is_empty()
-}'''
+find = '''    (words.contains("model_not_found")
+        || words.contains("not_found_error")
+        || words.contains("model is not supported"))'''
+replace = '''    (words.is_empty())'''
 
 [[plant]]
 name = "chief: devin's words for a gone model are not heard"
@@ -639,8 +650,8 @@ runs = ["chm-dispatcher", "chm-rig"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))? {'
-replace = '                if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))?.filter(|_| false) {'
+find = '                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))? {'
+replace = '                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))?.filter(|_| false) {'
 
 [[plant]]
 name = 'chief: what waited for a held chief is not given back'
@@ -788,8 +799,8 @@ runs = ["chm-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '            if project.state == "open" && !own && !up && shown.ended_failing() {'
-replace = '            if project.state == "open" && !own && shown.ended_failing() {'
+find = '            if project.state == "open" && !own && !up && at_its_launch && shown.ended_failing() {'
+replace = '            if project.state == "open" && !own && at_its_launch && shown.ended_failing() {'
 
 [[plant]]
 name = "chief: a code-0 exit is taken for a launch's refusal"
@@ -798,8 +809,8 @@ runs = ["chm-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
-find = '        self.signal.is_none() && self.code.is_some_and(|code| code != 0)'
-replace = '        self.signal.is_none() && self.code.is_some()'
+find = '                .is_some_and(|code| code != 0 && code != CONSOLE_CTRL_C)'
+replace = '                .is_some_and(|code| code != CONSOLE_CTRL_C)'
 
 [[plant]]
 name = "chief: a launch given up on is read for a gone model"
@@ -834,8 +845,8 @@ runs = ["chm-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_model.rs"
-find = '        Ok((words.contains(asked.as_str()) && adapter.model_gone(words)).then_some(asked))'
-replace = '        Ok(adapter.model_gone(words).then_some(asked))'
+find = '        Ok(adapter.model_gone(words, &asked).then_some(asked))'
+replace = '        Ok(adapter.model_gone(words, "").then_some(asked))'
 
 [[plant]]
 name = "chief: Pi's catalog warning is taken for a gone model"
@@ -844,10 +855,9 @@ runs = ["chm-pi-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = '''    words.contains("model_not_found")
-}'''
-replace = '''    words.contains("model_not_found") || words.contains("not found for provider")
-}'''
+find = '''        || words.contains("model is not supported"))'''
+replace = '''        || words.contains("model is not supported")
+        || words.contains("not found for provider"))'''
 
 [[plant]]
 name = "chief: the hold for no default lives in memory only"
@@ -906,8 +916,8 @@ runs = ["chm-claude-used"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/last_used.rs"
-find = '        if newest.is_some() && line.contains(MODEL_COMMAND) {'
-replace = '        if newest.is_some() && line.contains(MODEL_COMMAND) && false {'
+find = '        if newest.is_some() && line.contains(MODEL_SET) {'
+replace = '        if newest.is_some() && line.contains(MODEL_SET) && false {'
 
 [[plant]]
 name = "chief: Muse's turn model is not read"
@@ -1142,3 +1152,175 @@ file = "app/ui/index.html"
 find = """<h2 class="history-title" id="history-title">History</h2>"""
 replace = """<h2 class="history-title" id="history-title">History of the chief</h2>"""
 
+[[plant]]
+name = "gone: Pi's refusal must name the whole provider/id, which its provider never says"
+meant = "a_pi_refusal_names_the_id_after_its_provider_split_once_at_the_first_slash"
+runs = ["gn-pi", "chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "        && words.contains(id_of(asked))"
+replace = "        && words.contains(asked)"
+
+[[plant]]
+name = "gone: a Pi id is split at its last slash, so an OpenRouter id loses its own"
+meant = "a_pi_refusal_names_the_id_after_its_provider_split_once_at_the_first_slash"
+runs = ["gn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "    model.split_once('/').map_or(model, |(_, id)| id)"
+replace = "    model.rsplit_once('/').map_or(model, |(_, id)| id)"
+
+[[plant]]
+name = "gone: Pi does not hear Anthropic's not_found_error"
+meant = "a_pi_refusal_names_the_id_after_its_provider_split_once_at_the_first_slash"
+runs = ["gn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = """        || words.contains("not_found_error")
+"""
+replace = ""
+
+[[plant]]
+name = "gone: Pi does not hear its openai-codex provider's refusal"
+meant = "a_pi_window_on_a_model_its_provider_lacks_fails_in_that_providers_words"
+runs = ["gn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = """        || words.contains("model is not supported"))"""
+replace = ")"
+
+[[plant]]
+name = "gone: Claude Code's refusal of another model is taken for the chief's"
+meant = "a_model_claude_code_does_not_have_is_said_in_its_words"
+runs = ["gn-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = """        && words.contains(asked)
+}
+
+/// The model Claude Code starts on"""
+replace = """        && !asked.is_empty()
+}
+
+/// The model Claude Code starts on"""
+
+[[plant]]
+name = "gone: Codex's refusal of another model is taken for the chief's"
+meant = "a_model_codex_does_not_have_is_said_in_its_words"
+runs = ["gn-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = """        && words.contains(asked)
+}
+
+/// The model Codex starts on"""
+replace = """        && !asked.is_empty()
+}
+
+/// The model Codex starts on"""
+
+[[plant]]
+name = "gone: Devin's refusal of another model is taken for the chief's"
+meant = "a_model_devin_does_not_have_is_said_in_its_words"
+runs = ["gn-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = """    words.contains("Unknown model:") && words.contains(asked)"""
+replace = """    words.contains("Unknown model:") && !asked.is_empty()"""
+
+[[plant]]
+name = "gone: Muse's refusal of another model is taken for the chief's"
+meant = "a_model_muse_does_not_have_is_said_in_its_providers_404"
+runs = ["gn-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = """    words.contains("does not exist or you lack access") && words.contains(asked)"""
+replace = """    words.contains("does not exist or you lack access") && !asked.is_empty()"""
+
+[[plant]]
+name = "gone: a held chief is stepped, beginning a delivery to give back every pass"
+meant = "a_held_chief_with_a_queued_message_costs_a_pass_nothing"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """        if participant.role == "chief" && held_for_no_default(participant) {"""
+replace = """        if participant.role == "chief" && held_for_no_default(participant) && project.id < 0 {"""
+
+[[plant]]
+name = "gone: a held chief keeps the relaunch that would reopen it"
+meant = "a_held_chief_with_a_queued_message_costs_a_pass_nothing"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = "            record.window.borrow_mut().relaunch = None;"
+replace = ""
+
+[[plant]]
+name = "gone: a harness default that is the gone model is started on, and the chief told it starts"
+meant = "a_harness_default_that_is_the_gone_model_holds_the_chief_with_the_holds_note"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = "            Ok(Some(model)) if model == gone => {"
+replace = "            Ok(Some(model)) if model == gone && model.is_empty() => {"
+
+[[plant]]
+name = "gone: the exit's screen is read with ConsensFlow's own pastes on it"
+meant = "a_first_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let said = shown.clone().without_pastes(&pasted);"
+replace = "                let said = shown.clone().without_pastes(&pasted[..0]);"
+
+[[plant]]
+name = "gone: the exit's pastes are read after a delivery it did not take went back"
+meant = "a_first_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let said = shown.clone().without_pastes(&pasted);"
+replace = "                let said = shown.clone().without_pastes(&self.pastes_on_screen(record.id)?);"
+
+[[plant]]
+name = "gone: the exit's screen is read however long the window lived"
+meant = "a_chief_at_rest_that_ends_failing_past_its_launch_budget_keeps_its_model"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                opened.is_some_and(|opened| self.now() - opened <= self.seams.limits.launch_ms);"
+replace = "                opened.is_some_and(|opened| opened <= self.now());"
+
+[[plant]]
+name = "gone: the human's Ctrl+C on Windows is a code of failure"
+meant = "the_human_s_ctrl_c_on_windows_is_no_code_of_failure"
+runs = ["gn-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "                .is_some_and(|code| code != 0 && code != CONSOLE_CTRL_C)"
+replace = "                .is_some_and(|code| code != 0 && code != CONSOLE_CTRL_C + 1)"
+
+[[plant]]
+name = "gone: Claude's walk back stops at a /model the human cancelled"
+meant = "a_cancelled_model_command_is_no_choice_and_the_walk_back_finds_the_fallback_before_it"
+runs = ["chm-claude-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '''const MODEL_SET: &str = "<local-command-stdout>Set model to";'''
+replace = '''const MODEL_SET: &str = "<command-name>/model</command-name>";'''

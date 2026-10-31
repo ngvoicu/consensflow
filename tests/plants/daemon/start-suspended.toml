@@ -211,8 +211,8 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if project.state != "open" {
             return Ok(());
         }
-        // A chief whose window keeps failing to start is tried again ever more slowly.'''
-replace = '''        // A chief whose window keeps failing to start is tried again ever more slowly.'''
+        // A chief held for want of a model to start on, as the ledger keeps it, is stepped'''
+replace = '''        // A chief held for want of a model to start on, as the ledger keeps it, is stepped'''
 
 # --- the engine: the human's Resume ---
 
