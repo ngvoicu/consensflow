@@ -335,6 +335,22 @@ fn an_install_on_a_home_of_the_runs_own_is_given_the_persons_home_and_none_of_th
 }
 
 #[test]
+fn a_codex_on_a_home_of_the_runs_own_is_given_the_persons_home_not_its_codex_folder() {
+    let codex = Installed::at(Harness::Codex, "/codex/bin/codex", "/home/me/.codex")
+        .with_isolation(Arc::new(Isolation::codex(
+            Path::new("/home/me"),
+            Path::new("/home/me/.codex"),
+        )));
+    let debug = format!("{:?}", rig(&[codex], "/the/stand-in"));
+    // The project folders are below the windows' home: never in the owner's Codex folder.
+    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
+    assert!(
+        !debug.contains("(\"HOME\", \"/home/me/.codex\")"),
+        "{debug}"
+    );
+}
+
+#[test]
 fn a_rig_for_several_harnesses_has_each_ones_folders_once_and_claude_without_its_config_dir() {
     let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine");
     let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/machine").with_node("/node/bin");

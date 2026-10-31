@@ -24,7 +24,9 @@
 //!   once the command runs: the record ends in the tool's call
 //! - `early`    the window is killed as soon as its turn is at work and has said
 //!   nothing (Claude's status reads busy, or the record holds the message and no more):
-//!   the record ends in the user's message
+//!   the record ends in the user's message. The count goes to 1000, so that a fast model
+//!   is still at it: Codex on GPT-5.6-Luna counted to 40 in two seconds, and the cut found
+//!   its turn over (2026-10-14, and again 2026-10-31)
 //!
 //! ```text
 //! cargo xtask live resume-cut                              Claude, both cases
@@ -43,7 +45,8 @@
 //! Claude transcript there, as the cut left it and as it ended. Claude has no MCP
 //! server and no browser. The run fails only when a case could not be run (a window
 //! that did not open, or a turn that was never at work): what a harness does is the
-//! result, and it is said.
+//! result, and it is said. A cut that found the turn already over (its answer, with the
+//! closing word, in the record) cut nothing, and the case was not run either.
 
 // The parts are in `live_resume_cut/`: cargo looks for the modules of a test's root
 // file beside it, where each would be a suite of its own.
@@ -104,10 +107,23 @@ impl Case {
     pub fn message(self) -> String {
         match self {
             Case::Command => format!(
-                "Run this exact command with your shell tool, wait for it to finish, and then reply with exactly one line: FINISHED\n{}",
+                "Run this exact command with your shell tool, wait for it to finish, and then reply with exactly one line: {}\n{}",
+                self.last(),
                 LONG.text()
             ),
-            Case::Early => "Count from 1 to 40, one number to a line, and then reply with exactly one line: COUNTED".to_owned(),
+            Case::Early => format!(
+                "Count from 1 to 1000, one number to a line, and then reply with exactly one line: {}",
+                self.last()
+            ),
+        }
+    }
+
+    /// The word the answer to the message ends in: a record that holds it holds the turn
+    /// ended, which a cut then cannot have cut.
+    pub const fn last(self) -> &'static str {
+        match self {
+            Case::Command => "FINISHED",
+            Case::Early => "COUNTED",
         }
     }
 }
@@ -340,9 +356,14 @@ mod tests {
         let command = Case::Command.message();
         assert!(command.starts_with("Run this exact command with your shell tool, wait for it to finish, and then reply with exactly one line: FINISHED\n"));
         assert!(command.ends_with("cf-resume-cut-long-command"));
+        // Long enough that a fast model is still at it when the window is cut.
         assert_eq!(
             Case::Early.message(),
-            "Count from 1 to 40, one number to a line, and then reply with exactly one line: COUNTED"
+            "Count from 1 to 1000, one number to a line, and then reply with exactly one line: COUNTED"
+        );
+        assert_eq!(
+            (Case::Command.last(), Case::Early.last()),
+            ("FINISHED", "COUNTED")
         );
         assert_eq!(SECOND, "Reply with exactly one line: AFTER");
     }

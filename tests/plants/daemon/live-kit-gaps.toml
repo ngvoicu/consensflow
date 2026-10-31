@@ -8,6 +8,10 @@
 # - `live paste-enter`: a paste the human sends with Enter goes on that Enter
 #   (`codex-windows-ignores-enter-after-paste`): the two shapes of typing, and the verdict;
 # - `eval chiefs`: the `conversation` eval for each chief harness (`chief-does-the-work-itself`);
+# - `live resume-cut`: a cut that found the turn over cut nothing, and the case was not run
+#   (`live-resume-cut-codex-never-reaches-the-cut`);
+# - the kit: a window on a home of the run's own is given the person's home, never the folder
+#   its harness reads its login from (Codex's `~/.codex`, where project folders were made);
 # - `live --set windows`: the regular Windows live run, the typed marks of `live parity` in it
 #   (`human-typing-loses-marks-in-devin-codex-on-windows`).
 #
@@ -18,6 +22,8 @@
 live-own-cf = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_own_cf"]
 live-paste-enter = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter"]
 evals-chiefs = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "chiefs::"]
+live-resume-cut = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_resume_cut"]
+e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
 xtask-live = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "live::"]
 
 [[plant]]
@@ -153,3 +159,23 @@ runs = ["live-own-cf"]
 file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
 find = "    let answered = !handle.is_empty()\n        && seen"
 replace = "    let answered = true\n        && seen"
+
+[[plant]]
+name = "live kit gaps: a resume-cut whose turn had answered is taken for a cut turn"
+meant = "a_turn_ended_where_an_answer_after_the_message_ends_in_its_closing_word"
+runs = ["live-resume-cut"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_resume_cut/read.rs"
+find = "        .any(|item| item.role == \"assistant\" && item.text.trim_end().ends_with(last))"
+replace = "        .any(|item| item.role == \"assistant\")"
+
+[[plant]]
+name = "live kit gaps: a Codex window on a home of the run's own has the owner's Codex folder for its HOME"
+meant = "a_codex_on_a_home_of_the_runs_own_is_given_the_persons_home_not_its_codex_folder"
+runs = ["e2e-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = "            let person = isolation.owner_home().to_string_lossy().into_owned();"
+replace = "            let person = { let _ = isolation; home.clone() };"
