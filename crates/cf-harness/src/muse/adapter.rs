@@ -75,8 +75,8 @@ impl Adapter for MuseAdapter {
         Some("To change only the model, type /model in the chief's window: Muse Code has no switch for one conversation, and Enter there makes it your Muse Code default.")
     }
 
-    fn model_gone(&self, words: &str) -> bool {
-        super::models::gone(words)
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
     }
 
     fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {

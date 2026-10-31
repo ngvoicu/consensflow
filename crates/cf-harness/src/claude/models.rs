@@ -157,11 +157,12 @@ pub(crate) async fn listed(
     .await
 }
 
-/// Whether `words` are Claude Code refusing a model it does not have: a launch on one
-/// exits with `[claude-code:unrecognized_model]` (2.1.312, CHF-02), and its window says
-/// there is an issue with the selected model.
-pub(crate) fn gone(words: &str) -> bool {
-    words.contains("unrecognized_model") || words.contains("issue with the selected model")
+/// Whether `words` are Claude Code refusing `asked` as a model it does not have: a launch
+/// on one exits with `[claude-code:unrecognized_model]` (2.1.312, CHF-02), and its window
+/// says there is an issue with the selected model, the whole id named in both.
+pub(crate) fn gone(words: &str, asked: &str) -> bool {
+    (words.contains("unrecognized_model") || words.contains("issue with the selected model"))
+        && words.contains(asked)
 }
 
 /// The model Claude Code starts on where none is named: the one its list marks, never a

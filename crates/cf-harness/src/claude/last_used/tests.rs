@@ -185,3 +185,36 @@ fn the_walk_back_ends_at_the_humans_own_switch_whatever_came_before_it() {
         "the human chose it, after Claude Code's own move"
     );
 }
+
+/// A command's echo and its output as Claude Code 2.1.316 writes those of a `/model` the
+/// human cancelled: `system` entries of subtype `local_command` (model_cancel.py).
+fn local_command(content: &str) -> Value {
+    json!({ "type": "system", "subtype": "local_command", "isSidechain": false, "content": content })
+}
+
+/// A `/model` the human opened and cancelled chose nothing: the walk back goes on past it
+/// to Claude Code's own fallback, which is never taken for the human's choice (Calliope's
+/// P3, T-994). It stops at the line that says a model was set, as 2.1.316 writes one.
+#[test]
+fn a_cancelled_model_command_is_no_choice_and_the_walk_back_finds_the_fallback_before_it() {
+    let mut fell_back = assistant("claude-sonnet-5-5", None);
+    fell_back["message"]["content"] = json!([{
+        "type": "fallback",
+        "from": { "model": "claude-opus-5-5" },
+        "to": { "model": "claude-sonnet-5-5" },
+    }]);
+    let entries = [
+        user("Hi"),
+        assistant("claude-opus-5-5", None),
+        fell_back,
+        local_command("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>"),
+        local_command("<local-command-stdout>Kept model as `Sonnet 5.5`</local-command-stdout>"),
+        user("More"),
+        assistant("claude-sonnet-5-5", Some("low")),
+    ];
+    assert_eq!(
+        read(&entries, Some("claude-opus-5-5")),
+        used("claude-sonnet-5-5", Some("low"), true),
+        "Claude Code's own move, the human's cancel no choice"
+    );
+}

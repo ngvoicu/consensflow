@@ -93,8 +93,8 @@ impl Adapter for PiAdapter {
         Some("To change only the model, type /model in the chief's window: Enter there keeps it to that conversation, and Ctrl+S makes it your Pi default.")
     }
 
-    fn model_gone(&self, words: &str) -> bool {
-        super::models::gone(words)
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
     }
 
     fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {

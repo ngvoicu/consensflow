@@ -37,6 +37,7 @@ use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
 use crate::background::leaving;
+use crate::chief_model::held_for_no_default;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
 use crate::pacing;
@@ -752,6 +753,9 @@ impl Dispatcher {
             self.keep_proof(record.id, conversation, gone, Some(&record))?;
         }
         let delivering = record.delivery.borrow_mut().delivering.take();
+        // What was pasted into the window, read before a delivery it did not take goes back
+        // to its queue: its screen may show it (Calliope's P2c, T-994).
+        let pasted = self.pastes_on_screen(record.id)?;
         // What a launch that was to say the role first still owed the window
         // that exited: the role it was never told.
         let owed = self.owed(&record)?;
@@ -888,10 +892,20 @@ impl Dispatcher {
             // (Calliope's P1, T-955). A window came up where its record showed a message it
             // was handed (`confirm_delivered`), its launch's first one among them: not where its
             // program started (Claude Code's `started` answers at once), nor where its record
-            // shows anything (a resumed conversation's shows its history at once).
-            let up = record.window.borrow().took;
-            if project.state == "open" && !own && !up && shown.ended_failing() {
-                if let Some(gone) = self.gone_model(&participant, &shown.after(&closed))? {
+            // shows anything (a resumed conversation's shows its history at once). The
+            // screen is read only at the launch, an exit within its budget of the window's
+            // open (a refusal ends a launch within a second; a window handed nothing that
+            // lived on was no launch refused), and without what ConsensFlow pasted into it,
+            // which may quote the words (Calliope's P2c, T-994).
+            let (up, opened) = {
+                let window = record.window.borrow();
+                (window.took, window.opened_at)
+            };
+            let at_its_launch =
+                opened.is_some_and(|opened| self.now() - opened <= self.seams.limits.launch_ms);
+            if project.state == "open" && !own && !up && at_its_launch && shown.ended_failing() {
+                let said = shown.clone().without_pastes(&pasted);
+                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))? {
                     self.reopen_without(&record, gone);
                     return Ok(());
                 }
@@ -1087,6 +1101,13 @@ impl Dispatcher {
             return Ok(());
         }
         if project.state != "open" {
+            return Ok(());
+        }
+        // A chief held for want of a model to start on, as the ledger keeps it, is stepped
+        // to nothing: what waits for it stays queued for the chief the human switches in,
+        // and no delivery is begun to be given back, nor its harness read, pass after pass
+        // (Calliope's P2a, T-994). The launch's own hold stays behind it.
+        if participant.role == "chief" && held_for_no_default(participant) {
             return Ok(());
         }
         // A chief whose window keeps failing to start is tried again ever more slowly.

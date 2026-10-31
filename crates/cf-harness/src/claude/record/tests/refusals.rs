@@ -379,5 +379,5 @@ fn a_turn_on_a_model_the_account_lacks_fails_in_claude_codes_words_naming_it() {
     refusal["message"]["model"] = json!("<synthetic>");
     let failure = failure_of(&[hello(), refusal]);
     assert_eq!(failure.as_deref(), Some(GONE));
-    assert!(crate::claude::models::gone(GONE) && GONE.contains("claude-gone-9-9"));
+    assert!(crate::claude::models::gone(GONE, "claude-gone-9-9"));
 }

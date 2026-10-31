@@ -180,10 +180,11 @@ pub(crate) async fn listed(
     read(processes, program(PathBuf::from(executable), env), at).await
 }
 
-/// Whether `words` are Devin refusing a model it does not have: a launch on one is refused
-/// before any turn with "Error: Unknown model: 'X'" (3000.11.228, CHF-02).
-pub(crate) fn gone(words: &str) -> bool {
-    words.contains("Unknown model:")
+/// Whether `words` are Devin refusing `asked` as a model it does not have: a launch on one
+/// is refused before any turn with "Error: Unknown model: 'X'" (3000.11.228, CHF-02), the
+/// whole id named.
+pub(crate) fn gone(words: &str, asked: &str) -> bool {
+    words.contains("Unknown model:") && words.contains(asked)
 }
 
 /// The model Devin starts on where none is named: its config's `agent.model`, what its own

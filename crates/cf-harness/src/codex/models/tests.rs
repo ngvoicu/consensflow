@@ -165,10 +165,18 @@ fn a_refusal_is_a_failure_with_codex_s_words() {
 fn a_model_codex_does_not_have_is_said_in_its_words() {
     // As Codex 0.165.0 said it on CHF-02's probe.
     assert!(gone(
-        "The 'gpt-gone-9' model is not supported when using Codex with a ChatGPT account."
+        "The 'gpt-gone-9' model is not supported when using Codex with a ChatGPT account.",
+        "gpt-gone-9"
     ));
-    assert!(gone(r#"{"error":{"code":"model_not_found"}}"#));
-    assert!(!gone("stream disconnected before completion"));
+    assert!(gone(
+        r#"{"error":{"code":"model_not_found","message":"The model `gpt-gone-9` does not exist"}}"#,
+        "gpt-gone-9"
+    ));
+    assert!(!gone("stream disconnected before completion", "gpt-gone-9"));
+    assert!(!gone(
+        "The 'gpt-gone-9' model is not supported when using Codex with a ChatGPT account.",
+        "gpt-6-luna"
+    ));
 }
 
 #[test]

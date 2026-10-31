@@ -1435,17 +1435,7 @@ impl Dispatcher {
                 });
             }
         }
-        let pastes: Vec<Paste> = self
-            .seams
-            .ledger
-            .borrow()
-            .last_pastes(participant.id, PASTES_ON_SCREEN)?
-            .into_iter()
-            .map(|begun| Paste {
-                id: begun.message.id,
-                text: delivery_text(&begun.message, &begun.carried),
-            })
-            .collect();
+        let pastes = self.pastes_on_screen(participant.id)?;
         let pane = record.window.borrow().pane.clone();
         let shown = match pane {
             Some(pane) => self.look_at(&pane).await,
@@ -1464,6 +1454,23 @@ impl Dispatcher {
             said: shown.after(&failed),
             key: shown.outage_key(),
         })
+    }
+
+    /// What ConsensFlow last pasted into participant `participant_id`'s window, as many as
+    /// a screen shows: lines of a screen that are these are no words of the window's own
+    /// ([`Shown::without_pastes`]).
+    pub(crate) fn pastes_on_screen(&self, participant_id: i64) -> Result<Vec<Paste>, EngineError> {
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .last_pastes(participant_id, PASTES_ON_SCREEN)?
+            .into_iter()
+            .map(|begun| Paste {
+                id: begun.message.id,
+                text: delivery_text(&begun.message, &begun.carried),
+            })
+            .collect())
     }
 
     /// What a window was to receive goes back to its queue with its attempt:

@@ -13,7 +13,8 @@ real home>` (Devin stalls in a workspace under the Mac's `/var` symlink).
 | `claude_alias_tail.py [alias\|tail]` | Claude's alias pinning in the record; the cost of a tail read of a 120 MB transcript | 3 one-line turns (alias) |
 | `muse_model.py` (a Python with `pyte`; Mac) | Muse's `/model` in its window, and what its record says before and after a resume | 4 one-line turns on Muse Spark at minimal |
 | `native_switch.py <harness> --ask <harness-ask>` (a Python with `pyte`; Mac; Muse with `--muse-after-d1`, once the live kit's Muse row is on the base) | CHF-10: the human's `/model` in the window with the key that keeps it to the conversation (Claude `s`, Codex `s`, Pi Enter, Devin `opt+↵`), then what ConsensFlow's own reader (`harness-ask` `last_used`) says, a headless reopen on it, and whether the switch wrote a model to the throwaway's settings | 4 one-line turns on the cheap models (the fourth is the reopen's) |
-| `gone_launch.py` (a Python with `pyte`; Mac) | CHF-06 after T-955's P1: whether Claude Code's window on a model its account lacks ends at launch or writes a record first | no model turn (the model is refused) |
+| `gone_launch.py [claude\|codex\|pi]` (a Python with `pyte`; Mac) | CHF-06 after T-955's P1 and T-994: whether each harness's window on a model its account lacks ends at launch with the words on its screen, or stays up and fails its first turn in its record (Pi on its `openai-codex` and `anthropic` providers) | no model turn (the model is refused) |
+| `model_cancel.py` (a Python with `pyte`; Mac) | T-994's P3: what Claude Code's record keeps of a `/model` the human cancels, beside one they confirm for the conversation | 2 one-line turns on Haiku and Sonnet |
 | `tuidrive.py` | T-445's pty driver (pyte), which `muse_model.py` and `native_switch.py` drive the windows with | |
 | `moved_lines.py <repo> <file.md> <old> <new>` | CHF-01: each `file:line` a research or spec names, at the base it was read against and on another; which moved, by how much, and which changed | none |
 
@@ -93,3 +94,32 @@ issue with the selected model (claude-gone-9-9). It may not exist or you may not
 access to it. Run /model to pick a different model." Claude's reader takes it as the
 turn's failure, which is where a chief's gone model is heard; the rig's stand-in does the
 same since.
+
+### Codex's and Pi's windows on a gone model (CHF-06, T-994, 2026-10-31, the Mac)
+
+`gone_launch.py codex` (Codex 0.165.0) and `gone_launch.py pi` (Pi 1.4.0): neither window
+ends at launch, and neither is read in its screen's words.
+- **Codex** opens on `gpt-gone-9` and its first turn ends with `task_complete` whose
+  `error` is `{"message": "The 'gpt-gone-9' model is not supported when using Codex with a
+  ChatGPT account.", "codex_error_info": "model_not_found"}`; the screen says the same
+  after "■". Codex's reader takes the message as the turn's failure, so a Codex chief is
+  heard in its record (`codex::record::tests::refusals`). The copy's login was not
+  refreshed, and the owner's `auth.json` was unchanged.
+- **Pi** warns "Model … not found for provider … Using custom model id" and stays up; its
+  first turn ends with an assistant message `stopReason: error` whose `errorMessage` is the
+  provider's: on `openai-codex`, "Codex error: The 'gpt-gone-9' model is not supported when
+  using Codex with a ChatGPT account." (no `model_not_found` anywhere, which Pi's check
+  missed until T-995); on `anthropic`, `404 {"type":"error","error":{"type":"not_found_error",
+  "message":"model: claude-gone-9"}}`, the id without its provider. Pi asks to trust the
+  folder first, which the probe answers.
+
+### A cancelled `/model` in Claude Code (T-994's P3, 2026-10-31, the Mac, 2.1.316)
+
+`model_cancel.py`: a `/model` opened and left with Escape writes two `system` entries of
+subtype `local_command`, the command's echo `<command-name>/model</command-name>` and
+`<local-command-stdout>Kept model as `Haiku 5.5`</local-command-stdout>`. One confirmed with
+`s` writes, as `user` entries before the next turn, a `<local-command-caveat>`, the same echo
+and `<local-command-stdout>Set model to `Sonnet 5.5` for this session only</local-command-stdout>`.
+So Claude's `last_used` stops its walk back at "Set model to", never at the echo, which a
+cancel writes too. Neither touched the throwaway's `settings.json` or the owner's.
+

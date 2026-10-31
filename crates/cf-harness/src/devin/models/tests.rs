@@ -135,8 +135,15 @@ fn a_read_runs_the_list_and_a_signed_out_devin_s_words_are_the_reason() {
 #[test]
 fn a_model_devin_does_not_have_is_said_in_its_words() {
     // As Devin 3000.11.228 said it on CHF-02's probe.
-    assert!(gone("Error: Unknown model: 'swe-gone-9-medium'"));
-    assert!(!gone("Error: not logged in"));
+    assert!(gone(
+        "Error: Unknown model: 'swe-gone-9-medium'",
+        "swe-gone-9-medium"
+    ));
+    assert!(!gone("Error: not logged in", "swe-gone-9-medium"));
+    assert!(!gone(
+        "Error: Unknown model: 'swe-gone-9-medium'",
+        "swe-2-high"
+    ));
 }
 
 #[test]

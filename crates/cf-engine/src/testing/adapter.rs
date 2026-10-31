@@ -193,6 +193,8 @@ pub struct FakeAdapter {
     /// Each `last_used` asked of it, kept apart for the same reason: its session and the
     /// model the conversation's last launch asked for.
     asked_used: RefCell<Vec<(String, Option<String>)>>,
+    /// How many times a launch asked the harness's default model.
+    defaults_asked: Cell<usize>,
     /// The words its harness says a model it does not have in (`Adapter::model_gone`): none,
     /// as a harness ConsensFlow has not heard say it, unless a test says them.
     pub gone_words: RefCell<Option<String>>,
@@ -362,6 +364,7 @@ impl FakeAdapter {
             previous_gone: RefCell::new(Vec::new()),
             starts_given_up: RefCell::new(Vec::new()),
             asked_used: RefCell::new(Vec::new()),
+            defaults_asked: Cell::new(0),
             gone_words: RefCell::new(None),
             default: RefCell::new(Ok(None)),
             items,
@@ -835,6 +838,11 @@ impl FakeAdapter {
         self.asked_used.borrow().clone()
     }
 
+    /// How many times the harness's default model was asked for.
+    pub fn defaults_asked(&self) -> usize {
+        self.defaults_asked.get()
+    }
+
     /// The lines the record of `session` lost, as its last window's reading had them.
     fn lost_of(&self, session: &str) -> Vec<usize> {
         let agents = self.agents.borrow();
@@ -1200,18 +1208,23 @@ impl Adapter for Asked {
     }
 
     /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
-    /// in a trace.
-    fn model_gone(&self, words: &str) -> bool {
+    /// in a trace. Its words name the model as Pi's provider would: the id after a provider's slash,
+    /// which is the whole of an id with none.
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        let id = asked.split_once('/').map_or(asked, |(_, id)| id);
         self.fake
             .gone_words
             .borrow()
             .as_deref()
-            .is_some_and(|gone| words.contains(gone))
+            .is_some_and(|gone| words.contains(gone) && words.contains(id))
     }
 
     /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
     /// in a trace.
     fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        self.fake
+            .defaults_asked
+            .set(self.fake.defaults_asked.get() + 1);
         let default = self.fake.default.borrow().clone();
         Box::pin(async move { default })
     }

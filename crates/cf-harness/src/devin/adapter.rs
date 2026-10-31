@@ -285,8 +285,8 @@ impl Adapter for DevinAdapter {
         Some("To change only the model, type /model in the chief's window and press opt+↵ to keep it to that conversation: ↵ alone makes it your Devin default.")
     }
 
-    fn model_gone(&self, words: &str) -> bool {
-        super::models::gone(words)
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
     }
 
     fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {

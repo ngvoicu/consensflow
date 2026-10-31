@@ -146,10 +146,16 @@ fn a_refused_initialize_is_a_failure_with_claude_s_words() {
 fn a_model_claude_code_does_not_have_is_said_in_its_words() {
     // As Claude Code 2.1.312 said it on CHF-02's probe, and as its window says it.
     assert!(gone(
-        r#"[claude-code:unrecognized_model] {"model":"claude-gone-9-9"}"#
+        r#"[claude-code:unrecognized_model] {"model":"claude-gone-9-9"}"#,
+        "claude-gone-9-9"
     ));
-    assert!(gone("There's an issue with the selected model (claude-gone-9-9). It may not exist or you may not have access to it."));
-    assert!(!gone("API Error: 529 overloaded"));
+    assert!(gone("There's an issue with the selected model (claude-gone-9-9). It may not exist or you may not have access to it.", "claude-gone-9-9"));
+    assert!(!gone("API Error: 529 overloaded", "claude-gone-9-9"));
+    // Another model's refusal is none of this one's.
+    assert!(!gone(
+        r#"[claude-code:unrecognized_model] {"model":"claude-gone-9-9"}"#,
+        "claude-opus-5-5"
+    ));
 }
 
 #[test]

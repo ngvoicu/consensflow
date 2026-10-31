@@ -158,12 +158,28 @@ pub(crate) async fn listed(
     })
 }
 
-/// Whether `words` are Pi's provider refusing a model it does not have: Pi sends an id it
-/// does not know, and the provider answers 400 `model_not_found` (1.4.0, CHF-02). Pi's own
-/// "Model … not found for provider …, using custom model id" is a warning of its offline
-/// catalog, which runs the id all the same: never a refusal (Calliope's P1, T-955).
-pub(crate) fn gone(words: &str) -> bool {
-    words.contains("model_not_found")
+/// Whether `words` are Pi's provider refusing `asked`, a model it does not have: Pi sends
+/// an id it does not know, and the provider answers OpenAI's 400 `model_not_found` (1.4.0,
+/// CHF-02), Anthropic's 404 `not_found_error`, or, on the `openai-codex` provider, Codex's
+/// own "Codex error: The 'X' model is not supported when using Codex with a ChatGPT
+/// account" (1.4.0, `gone_launch.py pi`). Pi's own "Model … not found for provider
+/// …, using custom model id" is a warning of its offline catalog, which runs the id all
+/// the same: never a refusal (Calliope's P1, T-955). A Pi chief's model is `provider/id`
+/// and the provider names the id alone, so the id is what the words must name: `asked`
+/// split once at its first slash, so that an OpenRouter id keeps its own (Calliope's P1,
+/// T-994).
+pub(crate) fn gone(words: &str, asked: &str) -> bool {
+    (words.contains("model_not_found")
+        || words.contains("not_found_error")
+        || words.contains("model is not supported"))
+        && words.contains(id_of(asked))
+}
+
+/// The id of a Pi model `provider/id` as its provider names it: what follows the first
+/// slash (`openrouter/anthropic/claude-fable-5` is `anthropic/claude-fable-5`), or the whole
+/// of a model named with no provider.
+fn id_of(model: &str) -> &str {
+    model.split_once('/').map_or(model, |(_, id)| id)
 }
 
 /// The model Pi starts on where none is named: its settings' default

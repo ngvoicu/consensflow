@@ -147,8 +147,8 @@ impl Adapter for CodexAdapter {
         Some("To change only the model, type /model in the chief's window and press s to keep it to that conversation: Enter there makes it your Codex default.")
     }
 
-    fn model_gone(&self, words: &str) -> bool {
-        super::models::gone(words)
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
     }
 
     fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {

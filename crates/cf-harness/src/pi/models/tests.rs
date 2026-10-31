@@ -232,11 +232,55 @@ fn a_model_pi_does_not_have_is_said_in_its_providers_words_and_its_catalogs_warn
     // Pi's own warning of an id its offline catalog does not know: it runs it all the same,
     // and a model the catalog has not caught up with yet works (Calliope's P1, T-955).
     assert!(!gone(
-        "Model 'gpt-gone-9' not found for provider 'openai'. Using custom model id."
+        "Model 'gpt-gone-9' not found for provider 'openai'. Using custom model id.",
+        "openai/gpt-gone-9"
     ));
     // The provider's refusal, as OpenAI said it on CHF-02's probe.
     assert!(gone(
-        r#"400 {"error":{"code":"model_not_found","message":"The model `gpt-gone-9` does not exist"}}"#
+        r#"400 {"error":{"code":"model_not_found","message":"The model `gpt-gone-9` does not exist"}}"#,
+        "openai/gpt-gone-9"
     ));
-    assert!(!gone("429 rate limited: try again later"));
+    assert!(!gone(
+        "429 rate limited: try again later",
+        "openai/gpt-gone-9"
+    ));
+}
+
+/// A Pi chief's model is `provider/id`, and the provider names the id alone: the words are
+/// held to the id after the first slash, so an OpenRouter id keeps its own slash, and
+/// Anthropic's `not_found_error` is a refusal as OpenAI's `model_not_found` is (Calliope's
+/// P1, T-994).
+#[test]
+fn a_pi_refusal_names_the_id_after_its_provider_split_once_at_the_first_slash() {
+    let anthropic = r#"404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-fable-5"}}"#;
+    assert!(gone(anthropic, "anthropic/claude-fable-5"));
+    assert!(
+        !gone(anthropic, "anthropic/claude-opus-5-5"),
+        "another model"
+    );
+    // OpenRouter's id holds a slash of its own, which its refusal names whole.
+    let openrouter = r#"404 {"error":{"code":"model_not_found","message":"No endpoints found for anthropic/claude-fable-5"}}"#;
+    assert!(gone(openrouter, "openrouter/anthropic/claude-fable-5"));
+    assert!(
+        !gone(
+            r#"404 {"error":{"code":"model_not_found","message":"No endpoints found for claude-fable-5"}}"#,
+            "openrouter/anthropic/claude-fable-5"
+        ),
+        "split once: OpenRouter's id is not its last segment"
+    );
+    // A model with no provider is its own id.
+    assert!(gone(anthropic, "claude-fable-5"));
+}
+
+/// Pi 1.4.0's windows on a model their provider lacks stay up, and the first turn fails in
+/// the record's `errorMessage` (`gone_launch.py pi`, 2026-10-31): the `openai-codex`
+/// provider in Codex's own words, with no `model_not_found`, and Anthropic's 404
+/// `not_found_error`. Both refuse the model asked for, by its id alone.
+#[test]
+fn a_pi_window_on_a_model_its_provider_lacks_fails_in_that_providers_words() {
+    let codex = "Codex error: The 'gpt-gone-9' model is not supported when using Codex with a ChatGPT account.";
+    assert!(gone(codex, "openai-codex/gpt-gone-9"));
+    assert!(!gone(codex, "openai-codex/gpt-6-luna"));
+    let anthropic = r#"404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-gone-9"},"request_id":"req_0"}"#;
+    assert!(gone(anthropic, "anthropic/claude-gone-9"));
 }

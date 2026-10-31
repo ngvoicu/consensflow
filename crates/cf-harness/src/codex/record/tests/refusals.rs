@@ -316,3 +316,32 @@ fn a_turn_that_begins_after_a_reroute_ends_it_and_one_inside_the_turn_does_not()
 fn read_ok(records: &[Value]) -> Record {
     read(records).unwrap()
 }
+
+/// Codex 0.165.0's window on a model its account lacks stays up, and its first turn ends
+/// with the refusal in `task_complete.error`, as `gone_launch.py codex` saw it on
+/// 2026-10-31: the turn failed, in words that refuse the model the launch asked for, so the
+/// chief is heard there (CHF-06, T-994), and the refusal is no quota's.
+#[test]
+fn a_turn_on_a_model_the_account_lacks_fails_in_words_that_refuse_that_model() {
+    let refused = json!({
+        "timestamp": AT,
+        "type": "event_msg",
+        "payload": {
+            "type": "task_complete",
+            "turn_id": "t1",
+            "last_agent_message": null,
+            "error": {
+                "message": "The 'gpt-gone-9' model is not supported when using Codex with a ChatGPT account.",
+                "codex_error_info": "model_not_found",
+            },
+        },
+    });
+    let read = read(&[started(json!("t1")), refused]).unwrap();
+    assert!(read.failed && read.quota.is_none());
+    let failure = read.failure.as_deref().unwrap_or_default();
+    assert!(
+        crate::codex::models::gone(failure, "gpt-gone-9"),
+        "{failure}"
+    );
+    assert!(!crate::codex::models::gone(failure, "gpt-6-luna"));
+}

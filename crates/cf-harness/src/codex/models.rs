@@ -174,11 +174,12 @@ pub(crate) async fn listed(
     parse(&pages, fetched, at)
 }
 
-/// Whether `words` are Codex refusing a model it does not have: a launch on one exits with
-/// "The 'X' model is not supported when using Codex with a ChatGPT account" (0.165.0,
-/// CHF-02), and an API's account is told `model_not_found`.
-pub(crate) fn gone(words: &str) -> bool {
-    words.contains("model is not supported") || words.contains("model_not_found")
+/// Whether `words` are Codex refusing `asked` as a model it does not have: a launch on one
+/// exits with "The 'X' model is not supported when using Codex with a ChatGPT account"
+/// (0.165.0, CHF-02), and an API's account is told `model_not_found`, the whole id named.
+pub(crate) fn gone(words: &str, asked: &str) -> bool {
+    (words.contains("model is not supported") || words.contains("model_not_found"))
+        && words.contains(asked)
 }
 
 /// The model Codex starts on where none is named: the one its list marks, never a

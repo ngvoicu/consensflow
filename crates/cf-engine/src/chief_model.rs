@@ -133,7 +133,7 @@ impl Dispatcher {
         let Some(adapter) = self.seams.adapters.adapter(harness) else {
             return Ok(None);
         };
-        Ok((words.contains(asked.as_str()) && adapter.model_gone(words)).then_some(asked))
+        Ok(adapter.model_gone(words, &asked).then_some(asked))
     }
 
     /// The chief opens again at once, its model `gone`: its next launch starts on its
@@ -178,7 +178,14 @@ impl Dispatcher {
             return Ok(Some(chief.clone()));
         };
         let harness = name_of(chief.harness.as_deref().unwrap_or_default());
-        let started = adapter.default_model().await;
+        // A default that is the very model found gone is no other to start on: the chief is
+        // held, and told so (Calliope's P2b, T-994).
+        let started = match adapter.default_model().await {
+            Ok(Some(model)) if model == gone => {
+                Err("its default is the model that is gone".to_owned())
+            }
+            started => started,
+        };
         let body = match &started {
             Ok(Some(model)) => format!(
                 "The chief's model, {gone}, is no longer available in {harness}: the chief starts on {model}, {harness}'s default model, instead. Switch the chief to pick another."
@@ -207,6 +214,8 @@ impl Dispatcher {
                 .ledger
                 .borrow_mut()
                 .chief_gone(chief.id, &gone, Some(&gone))?;
+            // Nothing opens it again but the human's switch.
+            record.window.borrow_mut().relaunch = None;
             if let Some(delivering) = delivering {
                 self.give_back(
                     delivering.message,

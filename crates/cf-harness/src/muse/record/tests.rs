@@ -782,5 +782,5 @@ fn a_turn_on_a_model_the_account_lacks_fails_in_the_providers_words() {
     let record = known(&fresh_reading(&session_of(log), &text)).clone();
     assert!(record.failed && !record.in_flight);
     assert_eq!(record.failure.as_deref(), Some(gone));
-    assert!(crate::muse::models::gone(gone));
+    assert!(crate::muse::models::gone(gone, "muse-gone-9"));
 }

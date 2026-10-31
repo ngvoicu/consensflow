@@ -562,3 +562,206 @@ fn a_resumed_chief_whose_relaunch_is_refused_starts_on_the_default() {
         (Some("claude-haiku-5-5"), Some("claude-opus-5"))
     );
 }
+
+/// A Pi chief's model is `provider/id`, and its provider refuses the bare id: Anthropic's
+/// `not_found_error` names `claude-fable-5`, never `anthropic/claude-fable-5`. The harness
+/// says whether its words refuse the model asked for, so the chief is heard and opens on
+/// the default, with one note (Calliope's P1, T-994).
+#[test]
+fn a_pi_chiefs_gone_model_named_by_its_provider_without_the_provider_starts_it_on_the_default() {
+    let context = harness_without_the_model(Ok(Some("anthropic/claude-haiku-5-5".to_owned())));
+    *context.adapter.gone_words.borrow_mut() = Some("not_found_error".to_owned());
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "pi", "model": "anthropic/claude-fable-5" },
+            "staff": [],
+        }))
+        .unwrap()
+        .expect("the project");
+    context.pass().unwrap();
+    context.adapter.with("chief", |chief| {
+        chief.failed = true;
+        chief.failure = Some(
+            r#"404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-fable-5"}}"#
+                .to_owned(),
+        );
+    });
+    context.adapter.answer("chief", "…");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let launches = context.adapter.prepared();
+    assert_eq!(
+        launches.last().unwrap()["agent"],
+        agent("anthropic/claude-haiku-5-5", None),
+        "{launches:?}"
+    );
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (
+            Some("anthropic/claude-haiku-5-5"),
+            Some("anthropic/claude-fable-5")
+        )
+    );
+    let told = to_human(&context, project.id)
+        .into_iter()
+        .filter(|body| body.contains("no longer available"))
+        .count();
+    assert_eq!(told, 1);
+    assert!(to_human(&context, project.id)
+        .iter()
+        .all(|body| !body.contains("The chief's turn failed")));
+}
+
+/// Everything a pass of a held chief could cost: the ledger's events, what the fake host
+/// was asked to open, and each of the adapter's calls and reads.
+fn costs(context: &Context) -> (i64, usize, usize, usize, usize) {
+    let mut events = 0;
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        events = db
+            .query_row("SELECT COUNT(*) FROM event", [], |row| row.get::<_, i64>(0))
+            .unwrap();
+    });
+    let adapter = context
+        .recorder
+        .events()
+        .iter()
+        .filter(|event| event["seam"] == "adapter")
+        .count();
+    (
+        events,
+        context.host.opened().len(),
+        adapter,
+        context.adapter.asked_used().len(),
+        context.adapter.defaults_asked(),
+    )
+}
+
+/// A chief held for want of a model, with a message queued for it and no Resume since:
+/// a pass steps it to nothing, so no delivery is begun and given back pass after pass, and
+/// no launch reads its harness (Calliope's P2a, T-994).
+#[test]
+fn a_held_chief_with_a_queued_message_costs_a_pass_nothing() {
+    let context = harness_without_the_model(Err("no model to start on".to_owned()));
+    let project = opened_on_a_gone_model(&context);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let note = context.note_from_consensflow(project, "chief", "Look at T-1");
+    context.pass().unwrap();
+    let before = costs(&context);
+    for _ in 0..50 {
+        context.pass().unwrap();
+    }
+    assert_eq!(costs(&context), before);
+    let message = context.message(note.id);
+    assert_eq!(message.state, "queued", "held, not lost");
+}
+
+/// A harness whose default is the very model that is gone (Pi's settings, Devin's config,
+/// where the human picked their default): the chief is held, with the hold's note, never
+/// told it starts on the default and launched on the gone model again (Calliope's P2b,
+/// T-994).
+#[test]
+fn a_harness_default_that_is_the_gone_model_holds_the_chief_with_the_holds_note() {
+    let context = harness_without_the_model(Ok(Some("claude-opus-5".to_owned())));
+    let project = opened_on_a_gone_model(&context);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let launches = context.adapter.prepared();
+    assert_eq!(
+        launches.len(),
+        1,
+        "no launch after the refusal: {launches:?}"
+    );
+    let told: Vec<String> = to_human(&context, project)
+        .into_iter()
+        .filter(|body| body.contains("no longer available"))
+        .collect();
+    assert_eq!(
+        told,
+        ["The chief's model, claude-opus-5, is no longer available in Claude Code, and ConsensFlow found no other to start it on (its default is the model that is gone): switch the chief to another model."]
+    );
+    let chief = chief_of(&context, project);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), Some("claude-opus-5")),
+        "held"
+    );
+}
+
+/// The chief's first message quotes a gone model's words beside its model (a handoff about
+/// this very rule would), pasted into its window at rest, which ends with a failure code
+/// before its record shows the paste: what ConsensFlow pasted is no word of the harness's, so the chief keeps its
+/// model and the project closes as for any window that went (Calliope's P2c, T-994).
+#[test]
+fn a_first_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window() {
+    let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Hello");
+    context.pass().unwrap();
+    context.close_project(project.id).unwrap();
+    // Handed over, and gone before its record shows it.
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(|_| {
+        Box::pin(async { Ok(cf_harness::contract::Admission::Admitted { queued: false }) })
+    }));
+    let body = "Pi said: Error: Unknown model: 'claude-opus-5'. Why?";
+    let note = context.note_from_consensflow(project.id, "chief", body);
+    context.resume_project(project.id).unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).state, "delivering", "pasted");
+    let header = format!("[ConsensFlow m-{} · note from ConsensFlow]", note.id);
+    context
+        .host
+        .exits_showing(Some(1), None, Some(&[header.as_str(), body]));
+    context.exit("chief");
+    context.pass().unwrap();
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), None)
+    );
+    assert_eq!(context.project(project.id).state, "suspended");
+}
+
+/// A chief reopened at rest, handed nothing, lives past its launch's budget and ends with a
+/// failure code (on Windows the human's Ctrl+C is one, `0xC000013A`), a gone model's words
+/// on its screen: no refusal at launch, so its screen is read in no such words, and it keeps
+/// its model (Calliope's P2c, T-994).
+#[test]
+fn a_chief_at_rest_that_ends_failing_past_its_launch_budget_keeps_its_model() {
+    for code in [1, 0xC000_013A] {
+        let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));
+        let project = context.with_staff(&["zeus"]);
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Hello");
+        context.pass().unwrap();
+        context.close_project(project.id).unwrap();
+        context.resume_project(project.id).unwrap();
+        context.pass().unwrap();
+        context.advance(10 * 60 * 1000);
+        context.host.exits_showing(
+            Some(code),
+            None,
+            Some(&["Error: Unknown model: 'claude-opus-5'"]),
+        );
+        context.exit("chief");
+        context.pass().unwrap();
+        let chief = chief_of(&context, project.id);
+        assert_eq!(
+            (chief.model.as_deref(), chief.gone_model.as_deref()),
+            (Some("claude-opus-5"), None),
+            "exit code {code:#X}"
+        );
+        assert_eq!(
+            context.project(project.id).state,
+            "suspended",
+            "exit code {code:#X}"
+        );
+    }
+}

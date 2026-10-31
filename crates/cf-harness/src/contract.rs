@@ -86,10 +86,20 @@ pub trait Adapter {
     }
 
     /// Whether `words`, what a window showed as it went or what its harness's record said
-    /// of a failed turn, are the harness refusing the model it was launched on as one it no
-    /// longer has (CHF-06): each harness says so in its own words (CHF-02's probes). No for a
-    /// harness ConsensFlow has not heard say it.
-    fn model_gone(&self, _words: &str) -> bool {
+    /// of a failed turn, are the harness refusing `asked`, the model its launch asked for, as
+    /// one it no longer has (CHF-06): each harness says so in its own words (CHF-02's
+    /// probes), and names the model it refused as it names it, which may be no part of
+    /// `asked` but its own id (Pi's provider names the id after `provider/`, Calliope's P1,
+    /// T-994), so words of a gone model that name another, or none, are no refusal of
+    /// `asked`. No for a harness ConsensFlow has not heard say it.
+    ///
+    /// The engine reads a window's screen in these words only where its launch ended with a
+    /// code of failure within the launch's budget (`launch_ms`) of its open, before it took
+    /// a message. A refusal that comes later is a launch that did not come up: the engine
+    /// gives the window up itself, so its exit is the engine's own, and the launch fails as
+    /// any does, the words in its note to the human, tried again ever more slowly; the
+    /// model is kept (Calliope's P3, T-994).
+    fn model_gone(&self, _words: &str, _asked: &str) -> bool {
         false
     }
 

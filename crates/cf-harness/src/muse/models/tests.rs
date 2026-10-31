@@ -270,10 +270,15 @@ fn a_host_that_says_nothing_is_given_up_on_at_the_bound_and_ended() {
 fn a_model_muse_does_not_have_is_said_in_its_providers_404() {
     // As Muse 1.4.14's first turn on `muse-gone-9` failed on T-727's probe.
     assert!(gone(
-        "API error 404: model `muse-gone-9` does not exist or you lack access"
+        "API error 404: model `muse-gone-9` does not exist or you lack access",
+        "muse-gone-9"
     ));
-    assert!(!gone("API error 429: rate limited"));
-    assert!(!gone("Billing verification failed"));
+    assert!(!gone("API error 429: rate limited", "muse-gone-9"));
+    assert!(!gone("Billing verification failed", "muse-gone-9"));
+    assert!(!gone(
+        "API error 404: model `muse-gone-9` does not exist or you lack access",
+        "muse-spark-1.3"
+    ));
 }
 
 /// The model a chief whose model is gone starts on: the account's default, never a

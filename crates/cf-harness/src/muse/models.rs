@@ -136,12 +136,12 @@ pub(crate) async fn listed(
     read(processes, time, program(PathBuf::from(executable), env)).await
 }
 
-/// Whether `words` are Muse's provider refusing a model the account does not have: the
-/// window opens on any id, and its first turn fails with the provider's 404, "model `X`
-/// does not exist or you lack access" (1.4.14, CHF-02), which the turn's record keeps as its
-/// failure.
-pub(crate) fn gone(words: &str) -> bool {
-    words.contains("does not exist or you lack access")
+/// Whether `words` are Muse's provider refusing `asked` as a model the account does not
+/// have: the window opens on any id, and its first turn fails with the provider's 404,
+/// "model `X` does not exist or you lack access" (1.4.14, CHF-02), the whole id named,
+/// which the turn's record keeps as its failure.
+pub(crate) fn gone(words: &str, asked: &str) -> bool {
+    words.contains("does not exist or you lack access") && words.contains(asked)
 }
 
 /// The model Muse starts a chief on where its model is gone: the account's default, never a
