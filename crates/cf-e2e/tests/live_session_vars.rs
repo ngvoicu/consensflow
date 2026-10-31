@@ -66,38 +66,52 @@ const NAMES: [&str; 3] = ["AI_AGENT", "TRACEPARENT", "TRACESTATE"];
 
 /// Variables with a session's word in their name that are a harness's settings, not marks
 /// of a session: a member keeps every feature of its harness, so they stay, each for why.
-const SETTINGS: [(&str, &str); 9] = [
-    (
-        "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
-        "how Codex's patch tool writes line ends, a setting Codex hands it",
-    ),
-    (
-        "CLAUDE_CONFIG_DIR",
-        "Claude Code's config folder, which the kit sets",
-    ),
-    ("CODEX_HOME", "Codex's home, which the kit sets"),
-    ("PI_CODING_AGENT_DIR", "Pi's folder, which the kit sets"),
-    (
-        "MUSE_NO_AUTO_UPDATE",
-        "Muse's switch against updating itself, which the launch sets",
-    ),
-    (
-        "CLAUDE_CODE_SUBAGENT_MODEL",
-        "the model of Claude Code's sub-agents, a setting of the owner's",
-    ),
-    (
-        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
-        "Claude Code's agent teams, a setting of the owner's",
-    ),
-    (
-        "CLAUDE_CODE_USE_BEDROCK",
-        "Claude Code's provider, a setting of the owner's",
-    ),
-    (
-        "CLAUDE_CODE_EFFORT_LEVEL",
-        "Claude Code's effort, a setting (CLAUDE_EFFORT is the mark)",
-    ),
+const SETTINGS: [Setting; 9] = [
+    Setting {
+        name: "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+        why: "how Codex's patch tool writes line ends, a setting Codex hands it",
+    },
+    Setting {
+        name: "CLAUDE_CONFIG_DIR",
+        why: "Claude Code's config folder, which the kit sets",
+    },
+    Setting {
+        name: "CODEX_HOME",
+        why: "Codex's home, which the kit sets",
+    },
+    Setting {
+        name: "PI_CODING_AGENT_DIR",
+        why: "Pi's folder, which the kit sets",
+    },
+    Setting {
+        name: "MUSE_NO_AUTO_UPDATE",
+        why: "Muse's switch against updating itself, which the launch sets",
+    },
+    Setting {
+        name: "CLAUDE_CODE_SUBAGENT_MODEL",
+        why: "the model of Claude Code's sub-agents, a setting of the owner's",
+    },
+    Setting {
+        name: "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
+        why: "Claude Code's agent teams, a setting of the owner's",
+    },
+    Setting {
+        name: "CLAUDE_CODE_USE_BEDROCK",
+        why: "Claude Code's provider, a setting of the owner's",
+    },
+    Setting {
+        name: "CLAUDE_CODE_EFFORT_LEVEL",
+        why: "Claude Code's effort, a setting (CLAUDE_EFFORT is the mark)",
+    },
 ];
+
+/// A variable with a session's word in its name that a harness reads as its setting: data
+/// the check reads, never a variable it sets.
+struct Setting {
+    name: &'static str,
+    /// Why it is a setting, and no mark of a session.
+    why: &'static str,
+}
 
 /// What a window's names came to.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -119,7 +133,7 @@ fn findings(names: &[String]) -> Findings {
             found.listed.push(name.clone());
         } else if (PREFIXES.iter().any(|prefix| name.starts_with(prefix))
             || NAMES.contains(&name.as_str()))
-            && !SETTINGS.iter().any(|(setting, _)| setting == name)
+            && !SETTINGS.iter().any(|setting| setting.name == name)
         {
             found.lacking.push(name.clone());
         }
@@ -308,7 +322,8 @@ mod tests {
 
     #[test]
     fn no_setting_the_check_knows_is_on_the_list() {
-        for (setting, _) in SETTINGS {
+        for Setting { name: setting, why } in SETTINGS {
+            assert!(!why.is_empty(), "{setting}");
             assert!(
                 !cf_proto::agents::is_parent_session_variable(setting),
                 "{setting}"

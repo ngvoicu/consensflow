@@ -479,7 +479,7 @@ mod tests {
                 assert!(is_parent_session_variable(name), "{name}");
             }
         }
-        // cmux's, which the OpenCode server's own scrub alone took out before (T-1024).
+        // cmux's, which only a removed harness's throwaway server took out before (T-1024).
         for name in [
             "CMUX_SOCKET",
             "CMUX_SOCKET_PATH",
