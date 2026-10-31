@@ -176,12 +176,18 @@ fn case(members: &Members, shape: Shape, text: &str, log: &Log) -> Result<(Went,
         }
         members.press(&pane, write)?;
     }
+    // What the window showed when the human first pressed Enter again: the paste still in its
+    // box, or a turn that was only slow to start.
+    let mut kept = String::new();
     for more in 0..=AGAIN {
         sleep(TAKES);
         if Trace::read(members.rig()).worked_after(members.chief(), mark) {
-            return Ok((Went::After(more), String::new()));
+            return Ok((Went::After(more), kept));
         }
         if more < AGAIN {
+            if kept.is_empty() {
+                kept = members.tail(pane["id"].as_str().unwrap_or_default());
+            }
             log.say("the chief has not gone to work: the human presses Enter again");
             members.press(&pane, ENTER)?;
         }
@@ -237,7 +243,10 @@ fn a_prompt_the_human_pastes_and_sends_with_enter_goes_on_that_enter() -> Result
                         Ok((went, screen)) if screen.is_empty() => (went.held(), went.line()),
                         Ok((went, screen)) => (
                             went.held(),
-                            format!("{}; its screen: {screen}", went.line()),
+                            format!(
+                                "{}; its screen when Enter was pressed again: {screen}",
+                                went.line()
+                            ),
                         ),
                         Err(failed) => (false, failed.to_string()),
                     };
