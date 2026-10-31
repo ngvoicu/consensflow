@@ -181,7 +181,7 @@ impl Models {
 /// what follows it, where that is an effort some harness takes, and it must be
 /// one the piece's harness takes: what follows a `:` that names no effort is the
 /// model's (OpenRouter's free models end in `:free`). Refused: a piece with no
-/// `=`, a harness that is none of the four, one named twice, and a model that is
+/// `=`, a harness that is none of the five, one named twice, and a model that is
 /// empty. `--claude-model` is the model of a piece `claude=…`, read the same way;
 /// where `--models` names Claude as well, `--models` wins.
 pub fn parse(

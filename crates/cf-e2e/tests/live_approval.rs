@@ -1,10 +1,10 @@
 //! Real harnesses behind the human's gate: the proof that a project with
 //! "human approval required" checked sends its messages, which the fake agents of
 //! the rig cannot give. It is opt-in (`cargo xtask live approval`, `npm run
-//! live:approval`): it spends the machine's quota on four harnesses (Claude
-//! Code, Pi, Devin and Codex, each on its cheap model) and needs each
-//! one installed and logged in, so it is ignored unless asked for and is no part
-//! of `check` or of CI.
+//! live:approval`): it spends the machine's quota on five harnesses (Claude
+//! Code, Pi, Devin, Codex and Muse Code, each on its cheap model) and needs each
+//! one installed and logged in (one the machine lacks is left out of every seat, and
+//! said), so it is ignored unless asked for and is no part of `check` or of CI.
 //!
 //! The native daemon and the real pane host run in a home of the run's own
 //! (never `~/.consensflow`), one rig for each project, one project after
@@ -129,7 +129,7 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
 }
 
 #[test]
-#[ignore = "opt-in: spends the machine's quota on four harnesses; cargo xtask live approval (npm run live:approval)"]
+#[ignore = "opt-in: spends the machine's quota on five harnesses; cargo xtask live approval (npm run live:approval)"]
 fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat() -> Result {
     let log = Log::begin("live approval")?;
     let (chiefs, steps) = limits()?;

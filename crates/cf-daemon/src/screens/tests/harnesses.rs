@@ -1,5 +1,5 @@
 //! The harness diagnostics' routes, over scripted feeds and programs: a harness
-//! that is none of the four is refused before the machine is asked anything, a
+//! that is none of the five is refused before the machine is asked anything, a
 //! check is kept five minutes, and an update says what became of it.
 
 use cf_harness::testing::EPOCH_MS;

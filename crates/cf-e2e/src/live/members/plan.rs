@@ -43,7 +43,7 @@ pub fn stand_in_worker() -> Value {
 /// The work tier of the member of `harness`: its own, so that a task which names
 /// the tier lands on that harness. The daemon picks a member by tier alone, and a
 /// check that needs one harness's question tool must land on that harness. There are
-/// four tiers for six harnesses: Devin and Codex share one, and Pi and Muse another.
+/// four tiers for five harnesses: Devin and Codex share one, and Pi and Muse another.
 const fn tier(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "complex",

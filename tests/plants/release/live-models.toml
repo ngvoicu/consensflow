@@ -49,7 +49,7 @@ find = "        if named.contains(&harness) {"
 replace = "        if false && named.contains(&harness) {"
 
 [[plant]]
-name = "live models: a harness that is none of the four is taken as Claude"
+name = "live models: a harness that is none of the five is taken as Claude"
 meant = "a_flag_no_window_could_be_asked_for_is_refused_in_words_naming_the_harness_and_the_model"
 runs = ["e2e-live"]
 
