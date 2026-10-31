@@ -224,7 +224,7 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
     assert!(rows
         .iter()
         .all(|row| matches!(row.update, Update::Available(_))));
-    let Update::Available(release) = &rows[5].update else {
+    let Update::Available(release) = &rows[4].update else {
         unreachable!()
     };
     assert_eq!(release.command, None, "Muse's own launcher updates it");
