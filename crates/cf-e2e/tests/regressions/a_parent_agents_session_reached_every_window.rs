@@ -115,6 +115,13 @@ fn no_window_is_given_the_session_of_an_agent_the_app_was_started_from() -> Outc
                 .inheriting_env()
                 .run()?
                 .stdout;
+            // What every window is given shows, so that a `ps` that shows no environment
+            // (Darwin 27 shows none for the system's own programs) fails here, not passes.
+            assert!(
+                shown.contains("CONSENSFLOW_URL="),
+                "ps shows no environment of the window's process (pid {}): {shown}",
+                started.pid
+            );
             let held: Vec<&str> = marked
                 .iter()
                 .copied()
