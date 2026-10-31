@@ -17,6 +17,7 @@
 //! resources out of its lint of the app the same way, by [`without_resources`].
 
 use std::ffi::OsString;
+use std::fs;
 
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
@@ -56,11 +57,28 @@ fn run_clippy(
     Ok(process::run(&clippy(context, args), &context.env)?)
 }
 
-/// The app's tests: `cargo test --offline -- <args>`, in the app's folder.
+/// The app's tests: `cargo test --offline -- <args>`, in the app's folder. Built into the
+/// folder a linked `target` leads to ([`on_the_real_target`]).
 pub(crate) fn test(context: &Context, args: &[OsString]) -> Invocation {
-    in_the_app(context)
+    on_the_real_target(context, in_the_app(context))
         .args(["test", "--offline", "--"])
         .args(args.iter().cloned())
+}
+
+/// `invocation`, told to build into the folder the app's `target` leads to where that is a
+/// link (a tree whose build folder is on the builds disk, `builds-disk.sh place`), unless the
+/// environment names a folder of its own. A test binary run through the link has a symlink
+/// in its `current_exe()`, which Tauri's updater refuses (`StartingBinary`): the app's two
+/// `real_updater` tests failed so in every such tree (T-968).
+fn on_the_real_target(context: &Context, invocation: Invocation) -> Invocation {
+    let target = context.path(APP).join("target");
+    let linked = fs::symlink_metadata(&target).is_ok_and(|found| found.file_type().is_symlink());
+    match fs::canonicalize(&target) {
+        Ok(real) if linked && context.env.text("CARGO_TARGET_DIR").is_none() => {
+            invocation.var("CARGO_TARGET_DIR", real)
+        }
+        _ => invocation,
+    }
 }
 
 /// The app's lint: `cargo clippy --offline --all-targets -- -D warnings <args>`,
@@ -176,6 +194,56 @@ mod tests {
                 resources_left_out().remove(0)
             ]
         );
+    }
+
+    /// A checkout whose app has `target` as `kind` says (a link to a folder elsewhere, or a
+    /// folder of its own), and that folder's real path where it is a link.
+    #[cfg(unix)]
+    fn checkout_with_target(link: bool, env: Env) -> (tempfile::TempDir, Context, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let app = root.path().join("app").join("src-tauri");
+        let elsewhere = root.path().join("elsewhere").join("targets").join("tree");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        if link {
+            std::os::unix::fs::symlink(&elsewhere, app.join("target")).unwrap();
+        } else {
+            std::fs::create_dir_all(app.join("target")).unwrap();
+        }
+        let real = std::fs::canonicalize(&elsewhere).unwrap();
+        let context = Context {
+            root: root.path().to_path_buf(),
+            env,
+        };
+        (root, context, real)
+    }
+
+    /// The app's tests are built into the folder a linked `target` leads to, not through the
+    /// link (T-968): Tauri's updater refuses a `current_exe()` that has a symlink in it, so the
+    /// app's two `real_updater` tests failed in every tree whose build folder is on the builds
+    /// disk (`builds-disk.sh place`), and so did the gate's step for them.
+    #[cfg(unix)]
+    #[test]
+    fn the_app_tests_are_built_where_a_linked_target_leads_so_no_test_binary_runs_through_a_link() {
+        let (_root, context, real) = checkout_with_target(true, Env::default());
+        let mut expected = resources_left_out();
+        expected.push((
+            OsString::from("CARGO_TARGET_DIR"),
+            Some(real.into_os_string()),
+        ));
+        assert_eq!(test(&context, &[]).vars, expected);
+        // The lint runs no test binary, and the link serves it as it is.
+        assert_eq!(clippy(&context, &[]).vars, resources_left_out());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_target_that_is_a_folder_or_that_the_environment_names_is_left_as_it_is() {
+        let (_root, context, _) = checkout_with_target(false, Env::default());
+        assert_eq!(test(&context, &[]).vars, resources_left_out());
+        let named = Env::from_vars([("CARGO_TARGET_DIR", "/somewhere/else")]);
+        let (_root, context, _) = checkout_with_target(true, named);
+        assert_eq!(test(&context, &[]).vars, resources_left_out());
     }
 
     #[test]
