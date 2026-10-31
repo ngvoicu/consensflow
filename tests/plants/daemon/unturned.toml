@@ -22,7 +22,7 @@
 #   forgiven;
 # - each harness's own answer: where Claude's and Codex's file is kept, and that Codex's is named as
 #   Codex names it (a timestamp and the thread, no copy of it), that their record unread tells
-#   nothing, that OpenCode and Pi have their session before any turn, and that Devin's store has a
+#   nothing, that Pi has its session before any turn, and that Devin's store has a
 #   turn only where it holds a message of the user's.
 #
 # Every name holds `resume unturned`, so `npm run plants:daemon -- "resume unturned"` runs them all.
@@ -231,16 +231,6 @@ find = '''        .and_then(|rest| rest.strip_suffix(".jsonl"))
         .and_then(|rest| rest.strip_suffix(session))'''
 replace = '''        .and_then(|rest| rest.split(".jsonl").next())
         .and_then(|rest| rest.strip_suffix(session))'''
-
-[[plant]]
-name = "resume unturned harness: OpenCode has no conversation before its first turn"
-meant = "can_go_on_with_any_conversation_of_its_own_though_nothing_was_said_in_it"
-runs = ["harness-resumable"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/adapter.rs"
-find = '''        Box::pin(async { Some(true) })'''
-replace = '''        Box::pin(async { Some(false) })'''
 
 [[plant]]
 name = "resume unturned harness: Pi holds nothing of a session it kept no file of where a look would find one"

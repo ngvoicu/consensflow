@@ -62,13 +62,7 @@ fn changed(says: Says, change: impl FnOnce(&mut Record)) -> Says {
     Says(Reading::Known(record))
 }
 
-const HARNESSES: [Harness; 5] = [
-    Harness::Claude,
-    Harness::Codex,
-    Harness::Pi,
-    Harness::Opencode,
-    Harness::Devin,
-];
+const HARNESSES: [Harness; 4] = [Harness::Claude, Harness::Codex, Harness::Pi, Harness::Devin];
 
 #[tokio::test]
 async fn a_turn_was_cut_when_the_record_ends_in_one_with_no_end_not_when_at_rest_and_unknown_when_it_cannot_tell(

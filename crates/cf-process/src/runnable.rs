@@ -282,7 +282,7 @@ fn needs_node(shim: &Path, bare: bool) -> String {
 /// quotes and the script's: a word there or after the script is run by cmd.exe, and
 /// dropped by running the script alone. None when the shim is not of that shape, or
 /// names a script that is not there. A shim that quotes one program alone before its `%*`
-/// (opencode-ai 1.19.4's, whose package ships a native program in place of a script) is read
+/// (a package that ships a native program in place of a script) is read
 /// when that program is an `.exe` that is there.
 fn shim_target(shim: &Path) -> Option<(Program, Option<PathBuf>)> {
     let text = String::from_utf8_lossy(&fs::read(shim).ok()?).into_owned();
@@ -1037,15 +1037,15 @@ mod tests {
             assert!(runnable(&opaque, &[], &Env::default()).unwrap().verbatim);
         }
 
-        /// The shim npm 11 writes for opencode-ai 1.19.4 (read on zeewin, 2026-10-23, T-353),
-        /// whose package ships a native program where it shipped a script: the shim names that
-        /// program, and nothing else, and passes the arguments on.
-        const PROGRAM_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\n\"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe\"   %*\r\n";
+        /// The shim npm 11 writes for a package that ships a native program where it shipped a
+        /// script (read on zeewin, 2026-10-23, T-353): the shim names that program, and
+        /// nothing else, and passes the arguments on.
+        const PROGRAM_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\n\"%dp0%\\node_modules\\native-tool\\bin\\native-tool.exe\"   %*\r\n";
 
         /// A folder with that shim; the program it names is there where `program` is true.
         fn with_program(root: &Path, program: bool) -> (PathBuf, PathBuf) {
             let bin = root.join("bin");
-            let exe = ["node_modules", "opencode-ai", "bin", "opencode.exe"]
+            let exe = ["node_modules", "native-tool", "bin", "native-tool.exe"]
                 .iter()
                 .fold(bin.clone(), |path, part| path.join(part));
             fs::create_dir_all(exe.parent().unwrap()).unwrap();
@@ -1053,15 +1053,15 @@ mod tests {
                 fs::write(&exe, "").unwrap();
                 startable(&exe);
             }
-            let shim = bin.join("opencode.cmd");
+            let shim = bin.join("native-tool.cmd");
             fs::write(&shim, PROGRAM_SHIM).unwrap();
             (shim, exe)
         }
 
         #[test]
         fn an_npm_shim_that_names_a_native_program_alone_runs_that_program() {
-            // OpenCode 1.19.4 on Windows: no window opened, for the shim was taken for a script
-            // only cmd.exe could run (T-353, found by `live finish opencode` on zeewin).
+            // A package that ships a native program, on Windows: no window opened, for the shim
+            // was taken for a script only cmd.exe could run (T-353, found by a live finish on zeewin).
             let root = tempfile::tempdir().unwrap();
             let (shim, exe) = with_program(root.path(), true);
             assert_eq!(
@@ -1095,14 +1095,14 @@ mod tests {
             let (script, _) = with_program(other.path(), true);
             fs::write(
                 &script,
-                PROGRAM_SHIM.replace("opencode.exe", "opencode.cmd"),
+                PROGRAM_SHIM.replace("native-tool.exe", "native-tool.cmd"),
             )
             .unwrap();
             fs::write(
                 script
                     .parent()
                     .unwrap()
-                    .join("node_modules/opencode-ai/bin/opencode.cmd"),
+                    .join("node_modules/native-tool/bin/native-tool.cmd"),
                 "",
             )
             .unwrap();

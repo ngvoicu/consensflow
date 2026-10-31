@@ -131,11 +131,10 @@ function renderHarness(row) {
       }
     }
     if (row.extension?.state === 'error' || row.extension?.state === 'not-installed') {
-      const label = row.id === 'pi' ? 'Pi' : 'OpenCode';
-      const status = el('div', null, label + ' setup failed: ' + (row.extension.reason || 'Setup is missing.'));
+      const status = el('div', null, 'Pi setup failed: ' + (row.extension.reason || 'Setup is missing.'));
       status.style.color = '#f47769';
       line.append(status);
-      const retry = el('button', null, 'Retry ' + label + ' setup');
+      const retry = el('button', null, 'Retry Pi setup');
       retry.onclick = () => checkHarnesses(row.id, retry);
       line.append(retry);
     }

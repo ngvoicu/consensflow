@@ -1,10 +1,9 @@
 //! Which harness keeps the instructions a resumed conversation began with
 //! (`Adapter::keeps_first_instructions`, which the engine reads to say a changed
 //! role itself, as a message): Codex does, a thread keeping the developer message
-//! of its first turn and not using the one it is resumed with. The other four take
-//! their role again at every launch (Claude through its role folder, OpenCode
-//! through its configuration, Pi through `--skill`, Devin through its
-//! SessionStart hook) and say no, on every platform.
+//! of its first turn and not using the one it is resumed with. The other three take
+//! their role again at every launch (Claude through its role folder, Pi through
+//! `--skill`, Devin through its SessionStart hook) and say no, on every platform.
 
 use cf_base::env::Env;
 use cf_harness::launch;

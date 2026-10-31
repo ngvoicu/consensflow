@@ -21,7 +21,7 @@ fn unifies_reviewed_provider_aliases_while_keeping_model_snapshots_distinct() {
     let key = |name: &str| found(&catalog, name).entry.profile.model_key;
     assert_eq!(key("astraeus"), "gpt-6-astra");
     assert_eq!(key("phosphoros"), "gpt-6-astra");
-    assert_eq!(key("aurvandil"), "gpt-6-astra");
-    assert_eq!(key("logi"), key("gefjon"));
-    assert_ne!(key("freya"), key("hades"));
+    assert_eq!(key("taygete"), "gpt-6-astra");
+    assert_eq!(key("eos"), "muse-spark-1.3");
+    assert_ne!(key("zephyros"), key("hades"));
 }

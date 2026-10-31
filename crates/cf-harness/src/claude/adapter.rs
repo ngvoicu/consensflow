@@ -494,7 +494,7 @@ impl Window for ClaudeWindow {
         self.shared.set(false);
     }
 
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async { Ok(None) })
     }
 

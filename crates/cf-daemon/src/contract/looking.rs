@@ -138,8 +138,8 @@ impl Window for LookingWindow {
         self.window.greeted(session)
     }
 
-    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
-        self.window.started(host)
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
+        self.window.started()
     }
 
     fn ready<'a>(

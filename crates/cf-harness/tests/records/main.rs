@@ -24,9 +24,6 @@ use scenario::{a_reason_it_may_have, check, looks, our_reasons, scenarios, Reade
 /// The goldens' groups of scenarios.
 const GROUPS: [&str; 3] = ["sequences", "suite", "sweep"];
 
-/// How many looks read an account's billing as unavailable where Node read a quota (`play::BILLING`).
-const BILLING_LOOKS: usize = 1;
-
 #[test]
 fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
     let ours = our_reasons();
@@ -87,8 +84,8 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
     assert_eq!(
         counted,
         [
-            ("sequences", 46, 1131),
-            ("suite", 173, 199),
+            ("sequences", 39, 1059),
+            ("suite", 153, 173),
             ("sweep", 180, 180)
         ]
     );
@@ -98,7 +95,6 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
             ("claude-code".to_owned(), 650),
             ("codex".to_owned(), 262),
             ("devin".to_owned(), 273),
-            ("opencode".to_owned(), 98),
             ("pi".to_owned(), 227),
         ]
     );
@@ -110,17 +106,15 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
     let mut answered = 0;
     let mut played = 0;
     let mut departed = Vec::new();
-    let mut billing = Vec::new();
     for group in GROUPS {
         for scenario in scenarios(group) {
             let play = play::play(&scenario, &ours);
             answered += play.answered;
             departed.extend(play.departed);
-            billing.extend(play.billing);
             played += 1;
         }
     }
-    assert_eq!((played, answered), (399, 1510));
+    assert_eq!((played, answered), (372, 1412));
     // Node failed these looks at a torn line, which this build passes over
     // (T-223): each reads the records around it. A record of nothing but a
     // torn line reads as one with no records, and fails all the same.
@@ -155,7 +149,4 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
         "unreadable: empty codex rollout for corrupt".to_owned(),
     ));
     assert_eq!(departed, expected);
-    // Node read OpenRouter's spent credit (a 402) as a quota that resets; no reset can come of
-    // it, and this build says the account is unavailable instead (MUS-23).
-    assert_eq!(billing.len(), BILLING_LOOKS, "{billing:?}");
 }

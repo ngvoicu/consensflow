@@ -14,7 +14,7 @@
 //! Each harness is the one worker of a project on the native daemon, whose chief is
 //! the stand-in; the check, as the chief, gives it a brief of forty numbered lines
 //! that ends asking for a sum, through the real path a message takes to it (pasted
-//! into Claude Code and Devin, put to Codex, Pi and OpenCode through their own
+//! into Claude Code and Devin, put to Codex and Pi through their own
 //! queues). The worker's window is kept open as the human keeps one (`session.open`):
 //! it closes with its task otherwise. Through the turn, twice a second, and once at
 //! rest after it, the check asks the pane host for the window's screen as the
@@ -44,7 +44,7 @@
 //! home goes with the run.
 //!
 //! ```text
-//! cargo xtask live paste-screen                         all five, one after another
+//! cargo xtask live paste-screen                         every harness, one after another
 //! cargo xtask live paste-screen claude devin            those named
 //! cargo xtask live paste-screen pi --keep               leaves the run's home and project
 //! ```
@@ -198,7 +198,8 @@ fn tail(members: &Members, pane: &Value, lines: usize) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The harnesses the words of the command line name, or all five where they name none.
+/// The harnesses the words of the command line name, or every one where they name
+/// none.
 fn harnesses(named: &[String]) -> Result<Vec<Harness>> {
     if named.is_empty() {
         return Ok(Harness::ALL.to_vec());
@@ -505,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn with_no_harness_named_all_five_run_and_those_named_run_in_their_order() {
+    fn with_no_harness_named_all_run_and_those_named_run_in_their_order() {
         assert_eq!(harnesses(&[]).unwrap(), Harness::ALL.to_vec());
         assert_eq!(
             harnesses(&["pi".to_owned(), "claude".to_owned()]).unwrap(),

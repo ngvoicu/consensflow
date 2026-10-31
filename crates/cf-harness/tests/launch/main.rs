@@ -15,7 +15,6 @@ mod devin;
 mod first_instructions;
 mod first_message;
 mod kept;
-mod opencode;
 mod pi;
 mod scenarios;
 mod secrets;

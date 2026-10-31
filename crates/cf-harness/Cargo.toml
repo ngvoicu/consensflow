@@ -7,9 +7,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-# The tokens of Codex's broker and of OpenCode's server and plugin, as
-# `randomBytes(24).toString('base64url')` makes them, and OpenCode's
-# basic-auth header.
+# The tokens of Codex's broker, as `randomBytes(24).toString('base64url')`
+# makes them.
 base64.workspace = true
 cf-base.workspace = true
 # The terminal command, which what opening the app prepares (`prepare`) makes
@@ -44,7 +43,7 @@ uuid.workspace = true
 [features]
 # The fakes of `testing`, for tests of other crates and of this one's
 # `tests/`, which turn it on through the dev-dependency below, and the
-# binaries `pi-send`, `fake-opencode` and `harness-ask`.
+# binaries `pi-send` and `harness-ask`.
 test-support = ["tokio/rt"]
 
 # Pi's channel on the system's clock, for the tests of the Pi extension
@@ -54,14 +53,6 @@ test-support = ["tokio/rt"]
 [[bin]]
 name = "pi-send"
 path = "src/bin/pi_send.rs"
-required-features = ["test-support"]
-
-# The `opencode` program that OpenCode's channel starts to make a window's
-# first conversation (`opencode serve`), standing in for it in
-# `tests/channels/create.rs`.
-[[bin]]
-name = "fake-opencode"
-path = "src/bin/fake_opencode.rs"
 required-features = ["test-support"]
 
 # What the evals and the live tools ask of the harness code: a harness's own
@@ -82,8 +73,8 @@ tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
 
 # The mask the goldens' scenarios make their files under, which std cannot set,
 # the most memory a process held, which the memory measurement reports, and
-# whether a process is gone (`kill` with no signal), which a throwaway server's
-# end is checked by.
+# the kill of the program the processes seam's test of a child's end leaves in
+# the background (`seams::processes`).
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["fs", "resource", "signal"] }
 

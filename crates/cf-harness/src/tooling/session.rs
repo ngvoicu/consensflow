@@ -1,5 +1,5 @@
 //! The newest conversation a harness opened in a folder, found in the harness's
-//! own store: a window of OpenCode, Devin or Codex names its conversation only
+//! own store: a window of Devin or Codex names its conversation only
 //! there (Claude Code and Pi open on an id they are given). The folder is the
 //! run's own, and a window of a run with no staff is its chief's, so the newest
 //! conversation opened there since the window was is the window's.
@@ -21,7 +21,7 @@ use rusqlite::{params, Params};
 use serde_json::Value;
 
 use crate::shared::record::sqlite::Store;
-use crate::{codex, devin, opencode};
+use crate::{codex, devin};
 
 /// How deep under Codex's `sessions` its rollouts are: `YYYY/MM/DD/rollout-….jsonl`.
 const DAYS: usize = 3;
@@ -37,7 +37,6 @@ pub(super) fn newest(
     env: &Env,
 ) -> Result<Option<String>, String> {
     match harness {
-        Harness::Opencode => opencode_session(workspace, since_ms, env),
         Harness::Devin => devin_session(workspace, since_ms, env),
         Harness::Codex => codex_session(workspace, since_ms, env),
         Harness::Claude | Harness::Pi => Err(format!(
@@ -62,24 +61,6 @@ fn first_id(file: &Path, sql: &str, params: impl Params, workspace: &str) -> Opt
         })?
         .get("id")
         .map(|id| id.text().into_owned())
-}
-
-/// OpenCode keeps a `session` row for each conversation, a sub-agent's with a
-/// parent, in the first store of its places that has one.
-fn opencode_session(workspace: &str, since_ms: i64, env: &Env) -> Result<Option<String>, String> {
-    for store in opencode::paths::stores(env)? {
-        let found = first_id(
-            Path::new(&store),
-            "SELECT id, directory FROM session WHERE parent_id IS NULL \
-             AND time_created >= ?1 ORDER BY time_created DESC",
-            params![since_ms],
-            workspace,
-        );
-        if found.is_some() {
-            return Ok(found);
-        }
-    }
-    Ok(None)
 }
 
 /// Devin keeps a `sessions` row for each, and keeps seconds.

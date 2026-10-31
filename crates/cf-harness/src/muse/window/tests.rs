@@ -133,8 +133,8 @@ fn a_fresh_window_names_the_session_its_own_process_opened_before_any_hook_says_
         Ok(Readiness::Held(Held::Because(HOLD.to_owned())))
     );
     let mut driver = Driver::default();
-    let (starting, asking) = (Rc::clone(&window), Rc::clone(&host));
-    driver.begin(0, async move { starting.started(&*asking).await });
+    let starting = Rc::clone(&window);
+    driver.begin(0, async move { starting.started().await });
     assert!(driver.run().is_empty(), "nothing says a session yet");
     // Another process's session, and then the window's own, a second in.
     home.log(&v7(500), 40_086, "");
@@ -156,10 +156,9 @@ fn a_fresh_window_names_the_session_its_own_process_opened_before_any_hook_says_
 fn a_fresh_window_whose_process_says_nothing_is_given_up_with_why_and_a_hook_s_word_will_do() {
     let home = Home::new();
     let window = Rc::new(home.window(None));
-    let host = Rc::new(ScriptedHost::default());
     let mut driver = Driver::default();
-    let (starting, asking) = (Rc::clone(&window), Rc::clone(&host));
-    driver.begin(0, async move { starting.started(&*asking).await });
+    let starting = Rc::clone(&window);
+    driver.begin(0, async move { starting.started().await });
     let mut settled = driver.run();
     while home.fakes.time.fire_next(EPOCH_MS + 31_000) {
         settled.extend(driver.run());
@@ -193,8 +192,8 @@ fn a_resume_muse_will_not_make_for_another_window_is_unfit_in_muse_s_words_and_t
     let session = "01a17bc9-e758-77f3-ac8d-a725edf373ae";
     let window = home.window(Some(session));
     window.opened(Some(40_085));
+    assert_eq!(finished(window.started()), Ok(None));
     let host = ScriptedHost::default();
-    assert_eq!(finished(window.started(&host)), Ok(None));
     assert!(
         asked(&host).is_empty(),
         "a resumed window knows its session"

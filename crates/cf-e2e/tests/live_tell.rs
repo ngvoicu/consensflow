@@ -4,13 +4,13 @@
 //! installed and logged in, so it is ignored unless asked for and is no part of `check` or
 //! of CI.
 //!
-//! The shape of T-442 (T-429 on 3.0.5; T-534's live runs on 3.0.6-alpha.2 on Claude Code,
-//! Codex and OpenCode): a worker runs a long command, and the chief tells its window
+//! The shape of T-442 (T-429 on 3.0.5; T-534's live runs on 3.0.6-alpha.2 on Claude Code and
+//! Codex): a worker runs a long command, and the chief tells its window
 //! `cf tell T-1 "…"`, which pauses the task, stops the command and puts the words to the
 //! window as a question. The words ask the window to write one word as its answer, run a
 //! short command, and end its reply with another. A window answered the question with `cf
 //! answer` and went on to that final word in the same turn, and the final word reached
-//! nobody: the task was paused, so it was no result, and no message carried it. OpenCode
+//! nobody: the task was paused, so it was no result, and no message carried it. A window
 //! answered in plain text, with both words in one reply and no `cf answer`, and lost the
 //! answer to the question as well. The chief's `cf task resume` then began a turn whose
 //! short follow-up became the result.
@@ -33,7 +33,7 @@
 //!
 //! ```text
 //! cargo xtask live tell                    Claude, the default: both cases
-//! cargo xtask live tell codex opencode     the ones named, one after the other
+//! cargo xtask live tell codex pi           the ones named, one after the other
 //! cargo xtask live tell --case monitor     Claude's turn with a Monitor
 //! cargo xtask live tell -- --list          the check, listed
 //! ```

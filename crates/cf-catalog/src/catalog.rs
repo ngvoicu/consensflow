@@ -19,8 +19,6 @@ pub fn efforts(harness: Harness) -> &'static [&'static str] {
         Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
         // pi --help: "Set thinking level: off, minimal, low, medium, high, xhigh, max"
         Harness::Pi => &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-        // opencode --help: "provider-specific reasoning effort, e.g., high, max, minimal"
-        Harness::Opencode => &["minimal", "low", "medium", "high", "xhigh", "max"],
         // Devin writes the level into its model id (claude-opus-5-5-max): an agent
         // names the family and one of these, and the launch joins them.
         Harness::Devin => &["low", "medium", "high", "xhigh", "max"],
@@ -141,12 +139,7 @@ mod tests {
             assert!(!efforts(harness).is_empty(), "{}", harness.as_str());
         }
         assert!(efforts(Harness::Codex).contains(&"ultra"));
-        for harness in [
-            Harness::Claude,
-            Harness::Pi,
-            Harness::Opencode,
-            Harness::Devin,
-        ] {
+        for harness in [Harness::Claude, Harness::Pi, Harness::Devin] {
             assert!(!efforts(harness).contains(&"ultra"), "{}", harness.as_str());
         }
         assert!(efforts(Harness::Pi).contains(&"off"));

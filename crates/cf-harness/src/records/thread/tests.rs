@@ -361,7 +361,6 @@ fn a_transcript_is_had_as_the_switch_says_and_a_failure_travels_too() {
         &[".pi", "agent", "sessions", "--work--"],
         "2026-10-05T01-00-00-000Z_s.jsonl",
     );
-    keep(&[".local", "share", "opencode"], "opencode.db");
     let time: Rc<dyn Time> = Rc::new(ManualTime::new(0));
     let thread = Thread::new(
         env.clone(),

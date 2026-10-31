@@ -9,11 +9,10 @@ publish = false
 [features]
 # The programs the suites run in place of what ConsensFlow runs: the stand-in
 # for a harness's terminal program (`fake-agent`), a Codex (`fake-codex`), a
-# Devin (`fake-devin`), an OpenCode 1.x (`fake-opencode-1`), an OpenCode that has
-# updated itself to 2 (`fake-opencode-2`), the `cf` of a window (`fake-cf`), a
-# daemon that is not the native one (`liar-daemon`) and the reader of a large
-# paste that the packaged smoke's harness runs (`smoke-paste-reader`). The
-# crate's own tests turn it on through the dev-dependency below.
+# Devin (`fake-devin`), the `cf` of a window (`fake-cf`), a daemon that is not
+# the native one (`liar-daemon`) and the reader of a large paste that the
+# packaged smoke's harness runs (`smoke-paste-reader`). The crate's own tests
+# turn it on through the dev-dependency below.
 test-support = []
 
 # The stand-in for the `claude` a window runs: it speaks Claude's launch
@@ -41,24 +40,6 @@ name = "fake-devin"
 path = "src/bin/fake_devin.rs"
 required-features = ["test-support"]
 
-# The stand-in for the `opencode` 1.x a window runs: as much of OpenCode's
-# server as the daemon's launch of a window asks of it, writing down what it is
-# asked and the requests it is sent, so that a case sees what the daemon
-# launched the window on. Not `fake-opencode`: cf-harness has a binary of that
-# name, and two of one name are one file in the workspace's target.
-[[bin]]
-name = "fake-opencode-1"
-path = "src/bin/fake_opencode_1.rs"
-required-features = ["test-support"]
-
-# The stand-in for the `opencode` of a machine whose OpenCode has updated
-# itself to 2: it says its version, writes down what it is asked, and answers
-# nothing else, as the windows of the owner's did.
-[[bin]]
-name = "fake-opencode-2"
-path = "src/bin/fake_opencode_2.rs"
-required-features = ["test-support"]
-
 # The stand-in for the `cf` a member's window runs where the real one has no
 # daemon to reach: it writes down the calls it is given, for the check that asks
 # a window to run `cf ask` and reads what came of it (`live::calls`).
@@ -83,6 +64,8 @@ path = "src/bin/smoke_paste_reader.rs"
 required-features = ["test-support"]
 
 [dependencies]
+# The app bundles a case may start: none of the live app's identity.
+cf-base.workspace = true
 # What a program the rig starts is left of its descriptors: its streams alone.
 cf-process.workspace = true
 # The time the stand-in agent writes in its records.
@@ -108,6 +91,9 @@ uuid.workspace = true
 
 [dev-dependencies]
 cf-e2e = { path = ".", features = ["test-support"] }
+# The recordings (`*.json.gz`) the repository holds, read unzipped by the rule that names no
+# removed harness (`tests/cli/a_removed_harness_is_named_nowhere.rs`).
+flate2.workspace = true
 # Node's `--import` takes a module as a file URL, on Windows as anywhere.
 url.workspace = true
 # The live parity case opens Claude Code in a terminal of ConsensFlow's own (a ConPTY on

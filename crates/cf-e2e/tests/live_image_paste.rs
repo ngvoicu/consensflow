@@ -12,7 +12,7 @@
 //! And since T-763 (2026-10-26) the other way a TUI rewrites a paste into a shape the proof must
 //! know: Claude Code, given a long paste in pieces when the machine is loaded, wraps each piece
 //! and leaves the last bare after the last closing tag. The same runs are made on Devin, to find
-//! out whether its TUI converts an image path or splits a long paste; Codex, Pi and OpenCode take
+//! out whether its TUI converts an image path or splits a long paste; Codex and Pi take
 //! their messages through a channel and are never pasted into.
 //!
 //! Five tests:

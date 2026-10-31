@@ -2,7 +2,7 @@
 //! and effort as the other arms, the owner answering in its terminal. With nothing
 //! of ConsensFlow in the window, its session is found in the harness's own store
 //! ([`cf_e2e::live::ask::newest_session`], which asks the harness code of the
-//! product): Claude and Pi open on an id given to them; Codex, Devin and OpenCode
+//! product): Claude and Pi open on an id given to them; Codex and Devin
 //! name theirs only in their stores, by folder.
 //!
 //! The numbers of a bare run are taken from the chief's own record, shaped as the
@@ -21,7 +21,7 @@ use crate::measure::{count_questions, owner_questions, owner_questions_value, Me
 const LAST_WORDS: usize = 1500;
 
 /// A message ended a turn when its record says so, or when the window sat idle
-/// after it: without ConsensFlow, Devin's and OpenCode's records never mark the
+/// after it: without ConsensFlow, Devin's records never mark the
 /// message that ends a turn, so the runner keeps the ids it saw at rest.
 fn ends_turn(item: &Item, ends: &HashSet<String>) -> bool {
     item.complete || ends.contains(&item.id)

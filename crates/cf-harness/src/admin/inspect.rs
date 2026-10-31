@@ -11,7 +11,7 @@ use super::row::{Distribution, Extension, Release, Row, Setup, Update, Version};
 use super::source::release_source;
 use super::version::{newer, version_of};
 use super::{program, Inner, PROBE};
-use crate::{devin, muse, opencode, pi};
+use crate::{devin, muse, pi};
 
 /// The row of the harness `harness`, whose CLI is at `path` (none when it is
 /// installed nowhere), the look begun at `checked_at`.
@@ -52,14 +52,13 @@ pub(super) async fn inspect(
                 Harness::Muse => muse::version::newer(row.version.value(), &value),
                 _ => newer(row.version.value(), &value),
             };
-            let offered = offers(harness, row.setup.as_ref(), &value);
             let release = Release {
                 value,
                 source: source.url,
                 command,
             };
             match comparison {
-                Some(true) if offered => Update::Available(release),
+                Some(true) => Update::Available(release),
                 Some(false) => Update::Current(release),
                 _ => Update::Unknown(release),
             }
@@ -68,9 +67,6 @@ pub(super) async fn inspect(
     };
     row.extension = match harness {
         Harness::Pi => Some(Extension::of_pi(pi::prepare_extension(&inner.env))),
-        Harness::Opencode => Some(Extension::of_opencode(opencode::prepare_extension(
-            &inner.env,
-        ))),
         _ => None,
     };
     row
@@ -116,30 +112,13 @@ async fn ask_version(inner: &Inner, path: &str, env: &Env) -> Version {
 }
 
 /// What the CLI's `version` says of whether a window can be opened on it:
-/// Devin's and Muse's always do, and OpenCode's only where it is one ConsensFlow
-/// does not support yet. No other CLI has a setup.
+/// Devin's and Muse's always do. No other CLI has a setup.
 fn setup(harness: Harness, version: Option<&str>) -> Option<Setup> {
     match harness {
         Harness::Devin => Some(devin_setup(version)),
         Harness::Muse => Some(muse_setup(version)),
-        Harness::Opencode if version.is_some_and(opencode::unsupported_version) => {
-            Some(Setup::NotSupportedYet {
-                reason: format!("{}.", opencode::not_supported()),
-            })
-        }
         _ => None,
     }
-}
-
-/// Whether the release `release` of `harness` is offered as an update to its
-/// CLI, whose setup is `setup`. None is to a CLI no window is opened on, and
-/// none is of a release no window would be opened on either: OpenCode's feed
-/// says its latest is a 2 since 2.0, and the human who went back to the last
-/// 1.x is not offered the way to the 2 again.
-fn offers(harness: Harness, setup: Option<&Setup>, release: &str) -> bool {
-    let held_back = matches!(setup, Some(Setup::NotSupportedYet { .. }))
-        || (harness == Harness::Opencode && opencode::unsupported_version(release));
-    !held_back
 }
 
 /// What the Muse of `version` is to the page: one older than the minimum is to be

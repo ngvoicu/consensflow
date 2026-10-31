@@ -60,8 +60,8 @@ pub(super) fn run(words: &[String], out: &mut dyn Write) -> Done {
     }
     for (harness, entries) in listed {
         writeln!(out, "{harness}:")?;
-        // Width from the rows, not a guess: the models of OpenCode's Go and
-        // Zen run to 40 characters and ran straight into the effort column.
+        // Width from the rows, not a guess: a model of 40 characters ran
+        // straight into the effort column.
         let model_width = entries
             .iter()
             .map(|entry| utf16_len(&entry.model) + 2)

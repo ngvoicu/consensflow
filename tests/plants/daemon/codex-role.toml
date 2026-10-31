@@ -377,8 +377,12 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/launch_files.rs"
-find = '''const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "muse"];'''
-replace = '''const FOLDERS: [&str; 7] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "muse", "specmint"];'''
+find = '''
+    for harness in FOLDERS {
+        let parent = path::join(&[home, "integrations", harness]);'''
+replace = '''
+    for harness in FOLDERS.into_iter().chain(["specmint"]) {
+        let parent = path::join(&[home, "integrations", harness]);'''
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/launch_files.rs"
@@ -404,16 +408,6 @@ runs = ["harness-launch-specs"]
 file = "crates/cf-harness/src/claude/install.rs"
 find = '''        args.extend(["--add-dir".to_owned(), copy.root]);'''
 replace = '''        let _ = copy;'''
-
-[[plant]]
-name = "codex role: OpenCode is not told the skills folder of the copy"
-meant = "a_chief_given_specs_has_the_skill_kept_for_every_launch_which_opencode_is_told_to_read_besides_the_role_s_and_its_configuration_is_as_it_was"
-runs = ["harness-launch-specs"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/role.rs"
-find = '''    folders.extend(specmint.as_deref());'''
-replace = '''    let _ = specmint;'''
 
 [[plant]]
 name = "codex role: Pi is given the role's skill twice and not the copy"
@@ -859,7 +853,6 @@ replace = '''
                 }
                 // A message to the member'''
 
-
 [[plant]]
 name = "codex role: a member's words after the role are no answer to its task however many messages come after it"
 meant = "the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task"
@@ -875,7 +868,6 @@ replace = '''
                 of_the_role = of_the_role
                     || header_id(&item.text).is_some_and(|message| replacements.contains(&message));
                 // A message to the member'''
-
 
 # A note whose window closed before it was seen: the conversation's own record says whether it
 # was told.
@@ -1121,7 +1113,6 @@ replace = '''
                 of_the_role = item.text.contains(OPENING);
                 // A message to the member'''
 
-
 [[plant]]
 name = "codex role: a turn of a member's record answers a replacement by any header it quotes"
 meant = "a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words_it_quotes"
@@ -1138,7 +1129,6 @@ replace = '''
                     .iter()
                     .any(|message| item.text.contains(&crate::delivery_text::marker_of(*message)));
                 // A message to the member'''
-
 
 [[plant]]
 name = "codex role: the message an item of a record is, is the one whose header comes last in it"

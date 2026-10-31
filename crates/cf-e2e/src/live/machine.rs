@@ -1,5 +1,5 @@
-//! This machine, as a live run meets it: the harnesses it has (Claude Code,
-//! OpenCode, Pi, Devin, Codex and Muse Code), found as a shell finds them with the home
+//! This machine, as a live run meets it: the harnesses it has (Claude Code, Pi,
+//! Devin, Codex and Muse Code), found as a shell finds them with the home
 //! each reads its login from, and the rig whose windows run them.
 //!
 //! A window never reads its login where the person keeps it, or writes its sessions
@@ -9,8 +9,7 @@
 //! Pi's and Devin's are made by [`isolation`], and the rig sets their variables last,
 //! over its own and the case's. A run given a Claude config folder of its own
 //! (`--claude-config`) has its windows keep their config there instead: its caller made
-//! it and copied the login into it. (OpenCode, which a later change takes out of
-//! ConsensFlow, still reads the person's.) What a window is given of the machine is what
+//! it and copied the login into it. What a window is given of the machine is what
 //! [`rig`] says: the person's home, for the project folders below it, and the variables
 //! the harness reads its login by where it has no home of its own, the folders it and
 //! Node are in, a locale that draws its screen, and the user's name, which a harness
@@ -51,11 +50,10 @@ pub use wrapper::{
 /// as both.
 pub use crate::stand_in::window_shim;
 
-/// A harness the live tests run: the six of ConsensFlow's.
+/// A harness the live tests run: the five of ConsensFlow's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Harness {
     Claude,
-    OpenCode,
     Pi,
     Devin,
     Codex,
@@ -63,12 +61,12 @@ pub enum Harness {
 }
 
 impl Harness {
-    /// Every harness, in the order the live approval test rotates them through
-    /// its positions: each is the chief of one project and the one after it
-    /// is that project's worker.
-    pub const ALL: [Harness; 6] = [
+    /// Every harness a run can name, and the ones a suite runs where its run
+    /// names none. In the order the live approval test rotates them through its
+    /// positions: each is the chief of one project and the one after it is that
+    /// project's worker.
+    pub const ALL: [Harness; 5] = [
         Harness::Claude,
-        Harness::OpenCode,
         Harness::Pi,
         Harness::Devin,
         Harness::Codex,
@@ -79,7 +77,6 @@ impl Harness {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
-            Self::OpenCode => "opencode",
             Self::Pi => "pi",
             Self::Devin => "devin",
             Self::Codex => "codex",
@@ -107,7 +104,6 @@ impl Harness {
     const fn login_marks(self) -> &'static [&'static str] {
         match self {
             Self::Claude => &[".claude.json", ".claude"],
-            Self::OpenCode => &[".local/share/opencode", ".config/opencode"],
             Self::Pi => &[".pi"],
             Self::Devin => &[".config/devin", ".local/share/devin"],
             Self::Codex => &[""],
@@ -121,7 +117,6 @@ impl Harness {
     pub(super) const fn log_in(self) -> &'static str {
         match self {
             Self::Claude => "log in by running `claude` once",
-            Self::OpenCode => "log in by running `opencode` once",
             Self::Pi => "log in by running `pi` once",
             Self::Devin => "log in with `devin auth login`",
             Self::Codex => "log in with `codex login`, or name its home in CODEX_HOME",

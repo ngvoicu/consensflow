@@ -24,6 +24,9 @@ pub fn checkout() -> PathBuf {
 /// tests run side by side, and a program one starts (an xtask that runs on, a fake `ssh` that
 /// sleeps) would hold what another closed.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
+    // No app of the live app's identity is started: a test starts xtask and stand-ins.
+    let program = program.as_ref();
+    cf_base::bundle::program_startable_by_a_test(std::path::Path::new(program)).unwrap();
     let mut command = Command::new(program);
     cf_process::hold_only_the_streams(&mut command);
     command

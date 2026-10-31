@@ -266,9 +266,9 @@ mod tests {
     #[test]
     fn the_human_has_the_chief_run_the_command_that_gives_the_workers_tier_a_task_and_wait() {
         assert_eq!(
-            dispatch_brief("light", "BENCH_OK_OPENCODE"),
+            dispatch_brief("light", "BENCH_OK_PI"),
             "Run exactly this command in your shell, then reply with one line:\n\
-             cf task add --tier light \"Reply with exactly: BENCH_OK_OPENCODE\"\n\
+             cf task add --tier light \"Reply with exactly: BENCH_OK_PI\"\n\
              When its result arrives, do not accept it yet: reply with one line and wait for my next message."
         );
         // Critical work names a purpose, and the flag carries it.

@@ -880,12 +880,12 @@ fn tell_left_paused(
         .find(|(requester, _)| *requester == task.requester_id)
         .map(|(_, note)| *note);
     if let Some(note) = earlier {
-        if join_pause_note(store, note, task.number, because)?.is_some() {
+        if join_pause_note(store, note, task.number, because, false)?.is_some() {
             return Ok(());
         }
     }
     let to = store.participant_row(task.requester_id)?.handle;
-    let note = note_pause(store, task.project_id, &to, task.number, because)?;
+    let note = note_pause(store, task.project_id, &to, task.number, because, false)?;
     told.push((task.requester_id, note.id));
     Ok(())
 }

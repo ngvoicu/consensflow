@@ -1,9 +1,8 @@
-//! Ending a child process as OpenCode's throwaway server is ended: asked to
-//! end, forced once it has had long enough, and given up on, in a sentence of
-//! its own, when it will not end at all. What is waited for is the process: its
-//! error stream is read by no one here, and a program that holds the pipe open
-//! (one the server started, or one started beside it that was left a copy) holds
-//! up the stream's end, not the server's, nor the port it freed.
+//! Ending a child process: asked to end, forced once it has had long enough,
+//! and given up on, in a sentence of its own, when it will not end at all. What
+//! is waited for is the process: its error stream is read by no one here, and a
+//! program that holds the pipe open (one the child started, or one started
+//! beside it that was left a copy) holds up the stream's end, not the child's.
 
 use crate::seams::processes::{Child, Ending};
 use crate::seams::{arm, Time};
@@ -31,7 +30,7 @@ pub(crate) async fn stop(time: &dyn Time, child: &dyn Child) -> Result<(), Strin
     giving_up
         .bound(child.ended())
         .await
-        .ok_or_else(|| "opencode session failed to stop the server".to_owned())
+        .ok_or_else(|| "the child process failed to stop".to_owned())
 }
 
 #[cfg(test)]
@@ -52,14 +51,14 @@ mod tests {
     fn scripted(ends: Ends) -> Rc<dyn Child> {
         let processes = ScriptedProcesses::default();
         processes.child(
-            "opencode",
+            "server",
             ChildScript {
                 lines: Vec::new(),
                 ends,
             },
         );
         let program = Program {
-            executable: PathBuf::from("opencode"),
+            executable: PathBuf::from("server"),
             args: Vec::new(),
             cwd: None,
             env: Env::default(),
@@ -176,10 +175,7 @@ mod tests {
         assert!(time.fire_next(4000));
         assert_eq!(
             driver.run(),
-            [(
-                0,
-                Err("opencode session failed to stop the server".to_owned())
-            )]
+            [(0, Err("the child process failed to stop".to_owned()))]
         );
     }
 

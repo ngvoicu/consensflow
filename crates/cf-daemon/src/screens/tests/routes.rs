@@ -31,10 +31,7 @@ async fn the_agents_are_the_catalog_s_as_the_pickers_offer_them() {
     assert_eq!(body["preferences"], json!({ "ownHarnessOnly": false }));
     let efforts = body["efforts"].as_object().unwrap();
     let harnesses: Vec<&str> = efforts.keys().map(String::as_str).collect();
-    assert_eq!(
-        harnesses,
-        ["claude", "codex", "pi", "opencode", "devin", "muse"]
-    );
+    assert_eq!(harnesses, ["claude", "codex", "pi", "devin", "muse"]);
     assert_eq!(
         efforts["claude"],
         json!(["low", "medium", "high", "xhigh", "max"])
@@ -80,7 +77,6 @@ fn view(name: &str, harness: Option<&str>) -> AgentView {
             model_key: "m".to_owned(),
             model_label: "M".to_owned(),
             route_label: "R".to_owned(),
-            route_note: None,
             work_tier: WorkTier::Light,
         },
         unsupported: false,

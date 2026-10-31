@@ -20,8 +20,8 @@ fn lists_ready_made_agents_per_tool() -> Outcome {
 #[test]
 fn narrows_to_one_tool_on_request_and_answers_json_for_scripts() -> Outcome {
     let home = ScratchHome::new()?;
-    let ran = home.cf(["catalog", "--harness", "opencode"])?;
-    assert!(ran.stdout.contains("mani"), "{ran}");
+    let ran = home.cf(["catalog", "--harness", "pi"])?;
+    assert!(ran.stdout.contains("endymion"), "{ran}");
     assert!(!ran.stdout.contains("hyperion"), "{ran}");
 
     let json = home.cf(["catalog", "--json"])?.json()?;

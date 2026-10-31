@@ -83,7 +83,6 @@ fn each_kind_the_build_runs_is_a_harness_named_as_the_cli_is() {
         ("claude-code", "claude"),
         ("codex", "codex"),
         ("pi", "pi"),
-        ("opencode", "opencode"),
         ("devin", "devin"),
     ] {
         let view = view_of(&custom(kind, "m", ""));

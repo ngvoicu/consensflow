@@ -52,7 +52,10 @@ fn a_help_and_a_refusal_start_nothing() {
     for (args, said) in [
         (vec![], "xtask: a command is required\n"),
         (vec!["deploy"], "xtask: unknown command: deploy\n"),
-        (vec!["app"], "xtask: app takes a command: test, clippy\n"),
+        (
+            vec!["app"],
+            "xtask: app takes a command: test, clippy, fresh\n",
+        ),
     ] {
         let ran = xtask(&checkout(), no_programs.path(), &[], &args);
         assert_eq!(ran.status.code(), Some(2), "{args:?}");
@@ -133,6 +136,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "portable inspect",
         "app test",
         "app clippy",
+        "app fresh",
         "clippy-windows",
         "--as-archiver",
         "departures",
@@ -199,6 +203,7 @@ fn check_steps() -> Vec<String> {
         "cargo test --package cf-engine --test dispatcher".to_string(),
         own_tests,
         "cargo test --offline --".to_string(),
+        "cargo xtask app fresh".to_string(),
     ]);
     steps.extend(
         families

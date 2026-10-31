@@ -1,5 +1,5 @@
 //! A server on loopback that a test stands up where a harness's own would be
-//! (Codex's broker, OpenCode's server and plugin): real sockets, which the
+//! (Codex's broker): real sockets, which the
 //! channels' `SystemLoopback` is held against, where `ScriptedLoopback`
 //! (`peer`) answers on none. It reads each request whole, writes it down, and
 //! does what the test's handler says of it: answers, takes it and never

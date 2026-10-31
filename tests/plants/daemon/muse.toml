@@ -50,20 +50,17 @@ muse-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared
 muse-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
-muse-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
 muse-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_teammates_turn"]
 muse-page-held = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "held for an account"]
 muse-page-why = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says a member whose harness moved|lost its words after a restart"]
 muse-scheduler = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "scheduler::"]
-muse-records-play = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]
 muse-chief-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_billing_refusal_that_reaches"]
 muse-moved = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "moved_models"]
 muse-wake = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_task_held_for_no_time"]
 muse-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::guard"]
 muse-claude-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::moves"]
 muse-devin-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::windows"]
-muse-opencode-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "opencode::looks"]
 muse-codex-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::windows"]
 muse-quota-wait = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_paste_that_landed"]
 muse-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::tests::a_question_for_no_op"]
@@ -1123,7 +1120,7 @@ replace = '''            observed.took_back = took_back && false;'''
 # The adapter: every window's first message is delivered once it is up.
 [[plant]]
 name = "muse: a window's first message is taken for one it reads as it opens"
-meant = "devin_reads_its_first_message_as_it_opens_opencode_posts_it_and_the_others_are_delivered_it"
+meant = "devin_reads_its_first_message_as_it_opens_and_the_others_are_delivered_it"
 runs = ["muse-first-message"]
 
 [[plant.edit]]
@@ -1478,21 +1475,6 @@ replace = '''
 '''
 
 [[plant]]
-name = "muse: opencode reads billing as a quota"
-meant = "a_refusal_for_quota_is_read_as_node_read_it"
-runs = ["muse-opencode"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = '''
-            let refusal = account_refusal(&failure, status.is_finite().then_some(status));
-'''
-replace = '''
-            let refusal = account_refusal(&failure, status.is_finite().then_some(status))
-                .filter(|_| false);
-'''
-
-[[plant]]
 name = "muse: claude reads billing as no refusal"
 meant = "claude_code_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota"
 runs = ["muse-claude"]
@@ -1745,21 +1727,6 @@ replace = '''
                     if later_limit(&until, returned) {
 '''
 
-[[plant]]
-name = "muse: node's billing quota is held to no departure"
-meant = "every_look_node_took_reads_through_the_switch_what_node_read"
-runs = ["muse-records-play"]
-
-[[plant.edit]]
-file = "crates/cf-harness/tests/records/play.rs"
-find = '''
-const BILLING: [&str; 1] = ["opencode: OpenRouter's spent credit is quota too"];
-'''
-replace = '''
-const BILLING: [&str; 0] = [];
-'''
-
-# T-816 P1-1: only Claude Code's own `fallback` block holds a window; a model that drifts is told.
 [[plant]]
 name = "muse: a fallback block is no word of Claude Code's"
 meant = "a_fallback_block_is_claude_codes_own_word_for_a_move_and_the_only_one_that_holds"
@@ -2696,22 +2663,6 @@ find = '''
 replace = '''
             let mut observed = observed_from(Arc::clone(&reading), None);
             observed.quota = wire.quota;
-'''
-
-
-[[plant]]
-name = "muse: opencode's retry outranks a move"
-meant = "a_move_the_record_holds_outranks_the_quota_the_window_waits_out"
-runs = ["muse-opencode-launch"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/adapter.rs"
-find = '''
-            let mut observed = observed_from(reading, retry.map(Arc::new));
-'''
-replace = '''
-            let mut observed = observed_from(reading, None);
-            observed.quota = retry.map(Arc::new).or(observed.quota);
 '''
 
 

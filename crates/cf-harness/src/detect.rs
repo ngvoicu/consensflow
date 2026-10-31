@@ -26,11 +26,10 @@ use crate::shared::paths::{home, set};
 /// Every harness, in the order Node's harness list had them: the order
 /// detection answers in and the Harnesses page lists its rows in. It is not
 /// [`Harness::ALL`]'s, the roster's.
-const DETECTION_ORDER: [Harness; 6] = [
+const DETECTION_ORDER: [Harness; 5] = [
     Harness::Devin,
     Harness::Claude,
     Harness::Codex,
-    Harness::Opencode,
     Harness::Pi,
     Harness::Muse,
 ];
@@ -52,7 +51,6 @@ fn locations(harness: Harness) -> &'static [&'static [&'static str]] {
         // there, but nothing installs there fresh (it installs to `.local/bin`).
         Harness::Claude => &[&[".local", "bin"], &[".claude", "local"]],
         Harness::Codex => &[&[".codex", "bin"], &[".local", "bin"]],
-        Harness::Opencode => &[&[".opencode", "bin"], &[".local", "bin"]],
         Harness::Pi => &[&[".pi", "bin"], &[".local", "bin"]],
         // Muse's installer (`install.sh`): its launcher and the binaries it runs, in
         // `.local/bin` on macOS and Linux. On Windows it is elsewhere ([`windows_programs`]).
@@ -173,7 +171,7 @@ pub fn harness_path(harness: Harness, env: &Env) -> Option<PathBuf> {
 }
 
 /// All supported harnesses, whether installed or not (`knownHarnesses`).
-pub fn known_harnesses() -> [Harness; 6] {
+pub fn known_harnesses() -> [Harness; 5] {
     DETECTION_ORDER
 }
 

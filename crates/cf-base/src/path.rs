@@ -3,8 +3,7 @@
 //! Copyright Joyent, Inc. and other Node contributors): the `posix` and the
 //! `win32` flavour, each with its `join` and `normalize`, and the helpers they
 //! call. Nothing else of `path.js` is here: no `resolve`, `relative`,
-//! `dirname` or `parse`. Beside them, a path as a file URL
-//! ([`to_file_url`], `pathToFileURL` of `url.js`).
+//! `dirname` or `parse`.
 //!
 //! Where the Node code joined paths with `path.join`, the Rust port must name
 //! the same file for every input, the odd ones included, and `std::path` does
@@ -27,11 +26,8 @@
 
 use crate::text::utf16_len;
 
-mod file_url;
 pub mod posix;
 pub mod win32;
-
-pub use file_url::to_file_url;
 
 #[cfg(test)]
 mod tests;

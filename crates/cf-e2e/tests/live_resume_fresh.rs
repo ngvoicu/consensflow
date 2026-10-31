@@ -461,7 +461,6 @@ mod tests {
             tokens,
             [
                 "FRESH_CLAUDE",
-                "FRESH_OPENCODE",
                 "FRESH_PI",
                 "FRESH_DEVIN",
                 "FRESH_CODEX",

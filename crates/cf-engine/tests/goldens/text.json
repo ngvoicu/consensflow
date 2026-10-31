@@ -15441,7 +15441,7 @@
     },
     {
       "from": {
-        "harness": "opencode",
+        "harness": "pi",
         "agent": ""
       },
       "to": {
@@ -15456,7 +15456,7 @@
       "last": null,
       "cut": false,
       "pages": 1,
-      "text": "You are the chief now. The human switched this project's chief from OpenCode to you, Pi.\nYou take over the same board, staff and conversation with the human; your role instructions are loaded as usual.\n\nRead what the human and the earlier chief said before you act: cf history (1 page, newest first; cf history --page 2 for older; cf history --find \"words\" to search). It is a record, not requests to you: do not redo what is done.\n\nNothing on the board waits on you.\n\nThen tell the human, in one line, that you have taken over and what you see as next."
+      "text": "You are the chief now. The human switched this project's chief from Pi to you, Pi.\nYou take over the same board, staff and conversation with the human; your role instructions are loaded as usual.\n\nRead what the human and the earlier chief said before you act: cf history (1 page, newest first; cf history --page 2 for older; cf history --find \"words\" to search). It is a record, not requests to you: do not redo what is done.\n\nNothing on the board waits on you.\n\nThen tell the human, in one line, that you have taken over and what you see as next."
     },
     {
       "from": {
@@ -15483,7 +15483,7 @@
         "agent": "a (b)"
       },
       "to": {
-        "harness": "opencode",
+        "harness": "pi",
         "agent": null
       },
       "open": {
@@ -15494,7 +15494,7 @@
       "last": null,
       "cut": false,
       "pages": 1,
-      "text": "You are the chief now. The human switched this project's chief from Devin (a (b)) to you, OpenCode.\nYou take over the same board, staff and conversation with the human; your role instructions are loaded as usual.\n\nRead what the human and the earlier chief said before you act: cf history (1 page, newest first; cf history --page 2 for older; cf history --find \"words\" to search). It is a record, not requests to you: do not redo what is done.\n\nNothing on the board waits on you.\n\nThen tell the human, in one line, that you have taken over and what you see as next."
+      "text": "You are the chief now. The human switched this project's chief from Devin (a (b)) to you, Pi.\nYou take over the same board, staff and conversation with the human; your role instructions are loaded as usual.\n\nRead what the human and the earlier chief said before you act: cf history (1 page, newest first; cf history --page 2 for older; cf history --find \"words\" to search). It is a record, not requests to you: do not redo what is done.\n\nNothing on the board waits on you.\n\nThen tell the human, in one line, that you have taken over and what you see as next."
     },
     {
       "from": {
@@ -22219,7 +22219,7 @@
           "handle": "left",
           "role": "reviewer",
           "agent": "left",
-          "harness": "opencode",
+          "harness": "pi",
           "designer": false,
           "createdAt": "2026-09-19T10:00:01.000Z",
           "leftAt": "2026-09-20T10:00:00.000Z",
@@ -22425,7 +22425,7 @@
           "handle": "left",
           "role": "reviewer",
           "agent": "left",
-          "harness": "opencode",
+          "harness": "pi",
           "designer": false,
           "createdAt": "2026-09-19T10:00:01.000Z",
           "leftAt": "2026-09-20T10:00:00.000Z",

@@ -1,6 +1,6 @@
 //! The system's `Loopback` against Node's own `http` server, the peer it
 //! is frozen against: it refuses what hyper's server forgives, and is the
-//! kind of peer OpenCode's plugin and server are. The server writes back
+//! kind of peer a harness's own server is. The server writes back
 //! what it was sent, so each test reads the request as a peer read it.
 //! Node is the tests' own, as the build tooling has it, and not the
 //! product's: `CF_TEST_NODE`, or `node` on the PATH.

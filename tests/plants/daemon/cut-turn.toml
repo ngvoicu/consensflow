@@ -5,13 +5,12 @@
 # close of a turn it found cut (`No response requested.`, model `<synthetic>`), written when a
 # reopened window's next message comes, was such an item, so a member, or the chief out on its
 # account, came back before any turn got through. Pi writes a step of its own when a run fails or
-# is aborted before the model's first token, and OpenCode makes the assistant's message before the
-# reply: each the same. And OpenCode dates its messages in milliseconds, which the check never
-# read, so an OpenCode member came back only at its reset.
+# is aborted before the model's first token: the same. And a harness that dates its messages in
+# milliseconds, which the check never read, had its member back only at its reset.
 #
 # The readers mark an assistant's item with nothing of the model's in it `synthetic`
 # (`crates/cf-harness/src/shared/record/reading.rs`; Claude's in `claude/record/items.rs`, Pi's in
-# `pi/record.rs`, OpenCode's in `opencode/record/answer.rs`), and the check passes over it and
+# `pi/record.rs`), and the check passes over it and
 # reads a time in milliseconds. Codex's progress notes, the model's own, still count. The engine's
 # tests are in `crates/cf-engine/tests/dispatcher/out_of_quota.rs` and `quota_accounts.rs`; the
 # readers' beside each reader.
@@ -23,7 +22,6 @@ cut-turn-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "d
 cut-turn-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota_accounts::"]
 cut-turn-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::restart"]
 cut-turn-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::steps"]
-cut-turn-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record::tests::answers"]
 
 [[plant]]
 name = "cut-turn: Claude's close of a cut turn brings its member back"
@@ -93,24 +91,4 @@ runs = ["cut-turn-pi"]
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
 find = "            Some(\"thinking\") => said(\"thinking\"),\n"
-replace = "\n"
-
-[[plant]]
-name = "cut-turn: OpenCode's reader takes a message the model has not begun for the model's"
-meant = "a_reply_with_nothing_of_the_models_in_it_is_synthetic_and_one_the_model_began_is_not"
-runs = ["cut-turn-opencode"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = "                synthetic: !the_model_wrote(parts),\n"
-replace = "\n"
-
-[[plant]]
-name = "cut-turn: OpenCode's reader takes a tool call for none of the model's"
-meant = "a_reply_with_nothing_of_the_models_in_it_is_synthetic_and_one_the_model_began_is_not"
-runs = ["cut-turn-opencode"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = "            Some(\"tool\") => true,\n"
 replace = "\n"

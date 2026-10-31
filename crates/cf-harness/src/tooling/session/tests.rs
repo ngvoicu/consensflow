@@ -19,55 +19,24 @@ fn text(path: &Path) -> String {
 }
 
 #[test]
-fn opencodes_newest_top_level_session_of_a_folder_since_a_time_is_the_windows() {
-    let root = tempfile::tempdir().unwrap();
-    let file = root.path().join("opencode.db");
-    let db = Connection::open(&file).unwrap();
-    db.execute_batch(
-        "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, parent_id TEXT, time_created INTEGER);
-         INSERT INTO session VALUES ('old', '/work/a', NULL, 100);
-         INSERT INTO session VALUES ('first', '/work/a', NULL, 1000);
-         INSERT INTO session VALUES ('second', '/work/a', NULL, 5000);
-         INSERT INTO session VALUES ('sub-agent', '/work/a', 'second', 9000);
-         INSERT INTO session VALUES ('elsewhere', '/work/b', NULL, 7000);",
-    )
-    .unwrap();
-    drop(db);
-    let store = text(&file);
-    let env = env(&[("OPENCODE_DB", &store)]);
-    let newest = |workspace: &str, since: i64| {
-        newest(Harness::Opencode, "opencode", workspace, since, &env).unwrap()
-    };
-    // The newest top-level one: not a sub-agent's, not another folder's, not one before the window.
-    assert_eq!(newest("/work/a", 900).as_deref(), Some("second"));
-    assert_eq!(newest("/work/b", 900).as_deref(), Some("elsewhere"));
-    assert_eq!(newest("/work/a", 5000).as_deref(), Some("second"));
-    assert_eq!(newest("/work/a", 5001), None);
-    assert_eq!(newest("/work/c", 0), None);
-}
-
-#[test]
 fn a_store_that_is_not_there_has_no_session_and_is_no_failure() {
     let root = tempfile::tempdir().unwrap();
-    let missing = text(&root.path().join("none.db"));
-    let found = newest(
-        Harness::Opencode,
-        "opencode",
-        "/work/a",
-        0,
-        &env(&[("OPENCODE_DB", &missing)]),
-    );
+    // Devin's store is in its data folder: `%APPDATA%` on Windows, `XDG_DATA_HOME` elsewhere.
+    let data = |folder: &Path| {
+        let folder = text(folder);
+        env(&[
+            ("XDG_DATA_HOME", &folder),
+            ("APPDATA", &folder),
+            ("HOME", "/nowhere"),
+        ])
+    };
+    let found = newest(Harness::Devin, "devin", "/work/a", 0, &data(root.path()));
     assert_eq!(found, Ok(None));
     // A file that is no store either.
-    let not_a_store = root.path().join("text.db");
+    let not_a_store = root.path().join("devin").join("cli").join("sessions.db");
+    fs::create_dir_all(not_a_store.parent().unwrap()).unwrap();
     fs::write(&not_a_store, "this is no database").unwrap();
-    let found = newest(
-        Harness::Opencode,
-        "opencode",
-        "/work/a",
-        0,
-        &env(&[("OPENCODE_DB", &text(&not_a_store))]),
-    );
+    let found = newest(Harness::Devin, "devin", "/work/a", 0, &data(root.path()));
     assert_eq!(found, Ok(None));
 }
 
@@ -271,27 +240,5 @@ fn a_folder_reached_through_a_link_is_the_same_folder_a_store_names_by_its_real_
             .as_deref(),
         Some("codex-real"),
         "Codex, its rollout naming the real folder, asked by the link"
-    );
-
-    let file = data.path().join("opencode.db");
-    let db = Connection::open(&file).unwrap();
-    db.execute_batch(
-        "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, parent_id TEXT, time_created INTEGER)",
-    )
-    .unwrap();
-    db.execute(
-        "INSERT INTO session VALUES ('opencode-real', ?1, NULL, 100)",
-        [&real],
-    )
-    .unwrap();
-    drop(db);
-    let opencode_store = text(&file);
-    let opencode_env = env(&[("OPENCODE_DB", &opencode_store)]);
-    assert_eq!(
-        newest(Harness::Opencode, "opencode", &linked, 0, &opencode_env)
-            .unwrap()
-            .as_deref(),
-        Some("opencode-real"),
-        "OpenCode, asked by the link"
     );
 }
