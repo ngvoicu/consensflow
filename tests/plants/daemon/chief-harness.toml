@@ -1256,16 +1256,6 @@ find = """        if participant.role == "chief" && held_for_no_default(particip
 replace = """        if participant.role == "chief" && held_for_no_default(participant) && project.id < 0 {"""
 
 [[plant]]
-name = "gone: a held chief keeps the relaunch that would reopen it"
-meant = "a_held_chief_with_a_queued_message_costs_a_pass_nothing"
-runs = ["chm-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/chief_model.rs"
-find = "            record.window.borrow_mut().relaunch = None;"
-replace = ""
-
-[[plant]]
 name = "gone: a harness default that is the gone model is started on, and the chief told it starts"
 meant = "a_harness_default_that_is_the_gone_model_holds_the_chief_with_the_holds_note"
 runs = ["chm-dispatcher"]

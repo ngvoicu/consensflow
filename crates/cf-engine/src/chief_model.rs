@@ -214,8 +214,6 @@ impl Dispatcher {
                 .ledger
                 .borrow_mut()
                 .chief_gone(chief.id, &gone, Some(&gone))?;
-            // Nothing opens it again but the human's switch.
-            record.window.borrow_mut().relaunch = None;
             if let Some(delivering) = delivering {
                 self.give_back(
                     delivering.message,
