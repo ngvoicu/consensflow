@@ -269,6 +269,7 @@ fn a_file_or_a_tree_is_taken_away_where_it_is_and_nothing_is_done_where_it_is_no
 /// each app it runs with its own identity, and refuses a built one that has the live
 /// app's (one a run of the smoke kept from before it had one, say).
 #[test]
+#[cfg_attr(not(target_os = "macos"), ignore = "the bundles are macOS apps")]
 fn a_bundle_of_the_live_apps_identity_is_refused() {
     let folder = tempfile::tempdir().unwrap();
     let release = fake_bundle(
