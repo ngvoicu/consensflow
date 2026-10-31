@@ -55,7 +55,7 @@ use std::time::Duration;
 
 use cf_e2e::live::members::{self, delivered_result, find, is_over, named, Members, Plan};
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, agents, between, cut, text, Harness, Log, Who};
+use cf_e2e::live::{self, agents, between, cut, last_lines, text, Harness, Log, Who};
 use cf_e2e::Result;
 
 use home::Home;
@@ -172,6 +172,25 @@ fn observe(members: &mut Members, harness: Harness, home: &Home, log: &Log) -> R
     } else {
         None
     };
+    if state != "done" {
+        // Why the task is not done: what the board says of the worker, and what its window
+        // last drew.
+        let lane = members.lane(&agent)?;
+        let screen = members
+            .window_of(&agent)
+            .ok()
+            .flatten()
+            .map(|window| last_lines(&members.rig().screen(window.id())))
+            .unwrap_or_default();
+        log.block(
+            &format!("T-{number} is {state}"),
+            &format!(
+                "the worker's lane: {}\nits task: {}\nwhat its window last drew: {screen}",
+                live::pretty(Ok(lane)),
+                live::pretty(members.task(number)),
+            ),
+        );
+    }
     let found = result.as_deref().and_then(found_line).map(str::to_owned);
     Ok(Ran {
         seen: Seen {
