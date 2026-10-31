@@ -145,19 +145,46 @@ pub fn is_session_variable(name: &str) -> bool {
         .any(|marked| same_name(marked, name))
 }
 
+/// The variables a terminal sets in the shell of each of its panes to mark that pane as its
+/// own, which a program started there hands every program it starts: cmux's (0.65.1, read
+/// from its binaries and its harness wrappers, T-1024). Its socket's (`CMUX_SOCKET*`, its
+/// password among them) and its hook's program reach into the cmux the app was started
+/// from, and its pane's ids make a window that pane: cmux's own `claude` wrapper reports a
+/// session's hooks to the pane `CMUX_SURFACE_ID` names, by its socket or the default one.
+/// An app started from a cmux terminal gave them to every window.
+pub const TERMINAL_SESSION_VARIABLES: [&str; 12] = [
+    "CMUX_SOCKET",
+    "CMUX_SOCKET_PATH",
+    "CMUX_SOCKET_PASSWORD",
+    "CMUX_SOCKET_PASSWORD_FILE",
+    "CMUX_SOCKET_MODE",
+    "CMUX_SOCKET_ENABLE",
+    "CMUX_SOCKET_CAPABILITY",
+    "CMUX_CLAUDE_HOOK_CMUX_BIN",
+    "CMUX_SURFACE_ID",
+    "CMUX_WORKSPACE_ID",
+    "CMUX_PANEL_ID",
+    "CMUX_TAB_ID",
+];
+
 /// What no program ConsensFlow starts inherits from the session that started ConsensFlow,
 /// unless it is given it itself: a board's window's, which make a program that holds them
-/// that board's client ([`cf_base::env::WINDOW_VARIABLES`], T-868), and every harness's own
-/// ([`Harness::session_variables`], T-971). One list, which the app takes out of its own
-/// environment and of what it takes of a terminal's, the daemon out of what it gives a window
-/// of a terminal's, and the pane host out of what a pane inherits.
+/// that board's client ([`cf_base::env::WINDOW_VARIABLES`], T-868), every harness's own
+/// ([`Harness::session_variables`], T-971), and a terminal's
+/// ([`TERMINAL_SESSION_VARIABLES`], T-1024). One list, which the app takes out of its own
+/// environment and of what it takes of a terminal's, the daemon out of its own environment
+/// (`cf ui`) and of what it gives a window of a terminal's, and the pane host out of what a
+/// pane inherits.
 pub fn parent_session_variables() -> impl Iterator<Item = &'static str> {
-    cf_base::env::WINDOW_VARIABLES.into_iter().chain(
-        Harness::ALL
-            .into_iter()
-            .flat_map(Harness::session_variables)
-            .copied(),
-    )
+    cf_base::env::WINDOW_VARIABLES
+        .into_iter()
+        .chain(
+            Harness::ALL
+                .into_iter()
+                .flat_map(Harness::session_variables)
+                .copied(),
+        )
+        .chain(TERMINAL_SESSION_VARIABLES)
 }
 
 /// Whether `name` is one of the [`parent_session_variables`], as the system compares names.
@@ -407,10 +434,11 @@ mod tests {
         assert_eq!(is_session_variable("claudecode"), cfg!(windows));
     }
 
-    /// One list of what a program ConsensFlow starts never inherits: a board's window's and
-    /// every harness's session's, and nothing of a harness's or ConsensFlow's configuration.
+    /// One list of what a program ConsensFlow starts never inherits: a board's window's, every
+    /// harness's session's and a terminal's pane's, and nothing of a harness's or
+    /// ConsensFlow's configuration.
     #[test]
-    fn a_parent_session_is_a_boards_window_and_every_harness_session() {
+    fn a_parent_session_is_a_boards_window_every_harness_session_and_a_terminals_pane() {
         for name in cf_base::env::WINDOW_VARIABLES {
             assert!(is_parent_session_variable(name), "{name}");
         }
@@ -419,11 +447,24 @@ mod tests {
                 assert!(is_parent_session_variable(name), "{name}");
             }
         }
+        // cmux's, which the OpenCode server's own scrub alone took out before (T-1024).
+        for name in [
+            "CMUX_SOCKET",
+            "CMUX_SOCKET_PATH",
+            "CMUX_SOCKET_PASSWORD",
+            "CMUX_CLAUDE_HOOK_CMUX_BIN",
+            "CMUX_SURFACE_ID",
+            "CMUX_WORKSPACE_ID",
+        ] {
+            assert!(is_parent_session_variable(name), "{name}");
+        }
         for name in [
             "CONSENSFLOW_HOME",
             "CONSENSFLOW_TERMINAL_ENV",
             "CLAUDE_CONFIG_DIR",
             "PATH",
+            "CMUX_OTHER",
+            "CMUX_",
         ] {
             assert!(!is_parent_session_variable(name), "{name}");
         }

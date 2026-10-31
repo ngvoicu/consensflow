@@ -147,6 +147,16 @@ impl Env {
         self
     }
 
+    /// This environment without each variable `dropped` says of its name (in upper case on
+    /// Windows), and as it was otherwise: on the same machine, its folders of programs and
+    /// the PATH it was given kept.
+    #[must_use]
+    pub fn without_vars(mut self, dropped: impl Fn(&str) -> bool) -> Self {
+        self.vars
+            .retain(|name, _| !dropped(&name.to_string_lossy()));
+        self
+    }
+
     /// The PATH a harness's CLI is looked for on first: the one this
     /// environment was given, before the system's folders were put after it.
     pub fn search_path(&self) -> Option<&OsStr> {
@@ -236,6 +246,22 @@ mod tests {
         assert_eq!(set.text("B"), Some("3"));
         assert_eq!(set.text("PATH"), Some("/bin"));
         assert_eq!(set.search_path(), Some(OsStr::new("/bin")));
+    }
+
+    #[test]
+    fn an_environment_without_some_variables_keeps_the_rest_its_folders_and_its_path() {
+        let given = Env::from_vars([
+            ("A", "1"),
+            ("B", "2"),
+            ("PATH", "/bin"),
+            (TOOL_FOLDERS, "/tools"),
+        ]);
+        let kept = given.without_vars(|name| name == "B" || name == "PATH");
+        assert_eq!(kept.text("A"), Some("1"));
+        assert_eq!(kept.text("B"), None);
+        assert_eq!(kept.text("PATH"), None);
+        assert_eq!(kept.search_path(), Some(OsStr::new("/bin")));
+        assert_eq!(kept.tool_folders(), [PathBuf::from("/tools")]);
     }
 
     #[test]

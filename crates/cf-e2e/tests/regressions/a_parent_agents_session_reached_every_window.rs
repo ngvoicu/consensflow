@@ -5,9 +5,9 @@
 //! An agent's CLI marks its session in its own environment, which every program it
 //! starts inherits: Claude Code's `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`,
 //! `CLAUDE_CODE_CHILD_SESSION` and its messaging socket and token, Codex's
-//! `CODEX_THREAD_ID`, Pi's `PI_SESSION_ID`, and the rest of each harness's
-//! ([`Harness::session_variables`]). The app, a `tauri dev` or a test run started from an
-//! agent's shell has them; the pane host starts each window from that environment, and
+//! `CODEX_THREAD_ID`, Pi's `PI_SESSION_ID`, and the rest of each harness's; a terminal
+//! marks its pane, as cmux does (`cf_proto::agents::parent_session_variables`). The app, a
+//! `tauri dev` or a test run started from an agent's shell has them; the pane host starts each window from that environment, and
 //! the login shell the app asks for a terminal's environment has them too, so they came
 //! back named in `CONSENSFLOW_TERMINAL_ENV`, which the daemon gives every window. A
 //! Claude window given `CLAUDE_CODE_CHILD_SESSION` saves no transcript, so no result can
@@ -22,7 +22,7 @@
 
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::Error;
-use cf_proto::agents::Harness;
+use cf_proto::agents::parent_session_variables;
 use serde_json::{json, Value};
 
 use crate::a_workers_still_going_was_given_as_its_result::tier;
@@ -34,12 +34,12 @@ const TERMINAL_ENV: &str = "CONSENSFLOW_TERMINAL_ENV";
 /// What the parent session's variables hold, which no window may.
 const VALUE: &str = "the-parent-session-T971";
 
-/// Every harness's session variables, as the build lists them.
+/// Every harness's session variables and a terminal's, as the build lists them: the one
+/// list but for a board's window's, which make `cf ui` refuse to start, and which the
+/// daemon gives each window of its own.
 fn marked() -> Vec<&'static str> {
-    Harness::ALL
-        .into_iter()
-        .flat_map(Harness::session_variables)
-        .copied()
+    parent_session_variables()
+        .filter(|name| !name.starts_with("CONSENSFLOW_"))
         .collect()
 }
 
@@ -133,6 +133,74 @@ fn no_window_is_given_the_session_of_an_agent_the_app_was_started_from() -> Outc
                 started.pid
             );
         }
+    }
+    rig.close()?;
+    Ok(())
+}
+
+/// The daemon's own programs, which it starts on its own environment and in no pane: the
+/// probes it asks a Codex before it opens a window on it (`codex queue --help`, and its
+/// `app-server`'s configuration), git, a harness's throwaway server. A `cf ui` started in an
+/// agent's shell or a terminal's pane gave every one of them that session, as the app did
+/// before it took them out of its own (T-1024; Zeus's note 4 on T-971). The rig plays such
+/// a `cf ui`, a Codex chief its project's, and the stand-in Codex writes down the names of
+/// every run's variables: none may be a session's.
+#[cfg(unix)]
+#[test]
+fn no_program_the_daemon_starts_of_its_own_is_given_the_session_cf_ui_was_started_in() -> Outcome {
+    let marked = marked();
+    let folder = tempfile::tempdir()?;
+    let names_log = folder.path().join("codex-names.jsonl");
+    let mut config = crate::config_with_codex();
+    for name in &marked {
+        config = config.var(name, VALUE);
+    }
+    let rig = Rig::start(config.var("CF_TEST_CODEX_ENV_LOG", names_log.to_string_lossy()))?;
+    let roster = json!({
+        "schemaVersion": 1,
+        "agents": [{ "id": "codex-chief", "kind": "codex", "model": "fake" }],
+    });
+    cf_e2e::files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    let project = Project::open(&rig, "codex-chief", json!({}))?;
+    let chief = format!("p{}-chief", project.id());
+    rig.wait_for("the chief's window to be opened", secs(60), || {
+        Ok(rig
+            .open_frames()
+            .iter()
+            .any(|frame| frame["id"] == chief.as_str()))
+    })?;
+    let runs: Vec<Value> = std::fs::read_to_string(&names_log)?
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    let probe = |run: &Value| {
+        let args: Vec<&str> = run["args"]
+            .as_array()
+            .map(|args| args.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        args.first() == Some(&"queue")
+            || (args.contains(&"app-server") && !args.contains(&"--listen"))
+    };
+    assert!(
+        runs.iter().any(probe),
+        "the daemon asked the stand-in Codex nothing before it opened the window: {runs:?}"
+    );
+    for run in &runs {
+        let given: Vec<&str> = run["names"]
+            .as_array()
+            .map(|names| names.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        let held: Vec<&str> = marked
+            .iter()
+            .copied()
+            .filter(|name| given.contains(name))
+            .collect();
+        assert!(
+            held.is_empty(),
+            "the stand-in Codex run {} (probe: {}) was given the session's {held:?}",
+            run["args"],
+            probe(run)
+        );
     }
     rig.close()?;
     Ok(())

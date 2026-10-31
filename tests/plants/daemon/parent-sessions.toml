@@ -10,7 +10,9 @@
 # `parent_session_variables`. The pane host takes every one out of what a
 # pane inherits unless the pane's frame sets it; the daemon gives a window none it took of a
 # terminal; the app takes them out of its own environment as it starts, and out of what it
-# takes of a terminal's. One plant takes one rule out; a test of it fails. The `rig:` plants
+# takes of a terminal's; and `cf ui` takes them out of the daemon's own environment, which its
+# own programs (a harness's probes, git) run on (T-1024). A terminal marks its pane too, as cmux
+# does (`TERMINAL_SESSION_VARIABLES`), and the one list has it. One plant takes one rule out; a test of it fails. The `rig:` plants
 # hold it end to end through the real daemon and pane host
 # (`crates/cf-e2e/tests/regressions/a_parent_agents_session_reached_every_window.rs`) and say
 # `builds`. Every name holds `parent-sessions`, so `npm run plants:daemon -- parent-sessions`
@@ -21,6 +23,8 @@ parent-sessions-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib"
 parent-sessions-host = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_pane_inherits_nothing_of_a_session"]
 parent-sessions-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::tests::no_window_is_given_a_harness_session"]
 parent-sessions-app = ["cargo", "xtask", "app", "test", "harness_sessions_variable"]
+parent-sessions-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::tests::an_environment_without"]
+parent-sessions-live-monitor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "the_window_is_opened_without"]
 parent-sessions-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_parent_agents_session_reached_every_window::"], builds = true }
 
 # --- the list ---
@@ -43,18 +47,55 @@ replace = '''            Harness::Codex => &[],'''
 
 [[plant]]
 name = "parent-sessions: the one list leaves out every harness's session"
-meant = "a_parent_session_is_a_boards_window_and_every_harness_session"
+meant = "a_parent_session_is_a_boards_window_every_harness_session_and_a_terminals_pane"
 runs = ["parent-sessions-proto"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/agents.rs"
-find = '''    cf_base::env::WINDOW_VARIABLES.into_iter().chain(
-        Harness::ALL
-            .into_iter()
-            .flat_map(Harness::session_variables)
-            .copied(),
-    )'''
-replace = '''    cf_base::env::WINDOW_VARIABLES.into_iter()'''
+find = '''        .chain(
+            Harness::ALL
+                .into_iter()
+                .flat_map(Harness::session_variables)
+                .copied(),
+        )
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: the one list leaves out a terminal's pane (cmux's)"
+meant = "a_parent_session_is_a_boards_window_every_harness_session_and_a_terminals_pane"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''        .chain(TERMINAL_SESSION_VARIABLES)
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: a live window is opened without a copy of Claude's names of its own"
+meant = "the_window_is_opened_without_every_variable_of_claudes_session_the_build_knows"
+runs = ["parent-sessions-live-monitor"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''    cf_proto::agents::parent_session_variables()
+}'''
+replace = '''    [
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_EXECPATH",
+        "CLAUDE_PID",
+        "CLAUDE_EFFORT",
+    ]
+    .into_iter()
+}'''
 
 [[plant]]
 name = "parent-sessions: a harness's home is taken for a mark of its session"
@@ -156,5 +197,33 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
 find = '''        forget_parent_sessions(&mut command, env);
+'''
+replace = ""
+
+# --- cf ui (T-1024) ---
+
+[[plant]]
+name = "parent-sessions: an environment without some variables keeps them"
+meant = "an_environment_without_some_variables_keeps_the_rest_its_folders_and_its_path"
+runs = ["parent-sessions-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '''        self.vars.retain(|name, _| !dropped(&name.to_string_lossy()));
+'''
+replace = '''        let _ = dropped;
+'''
+
+[[plant]]
+name = "parent-sessions rig: cf ui runs the daemon on the session it was started in"
+meant = "no_program_the_daemon_starts_of_its_own_is_given_the_session_cf_ui_was_started_in"
+runs = ["parent-sessions-rig"]
+builds = true
+# The stand-in Codex the case asks is a script: there is no such shim on Windows.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''    let env = &outside_parent_sessions(env);
 '''
 replace = ""
