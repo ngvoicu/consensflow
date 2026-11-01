@@ -179,3 +179,66 @@ fn claude_and_pi_open_on_an_id_they_are_given_so_there_is_none_to_find() {
         );
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_folder_reached_through_a_link_is_the_same_folder_a_store_names_by_its_real_path() {
+    // T-783: a Mac's temporary folders are reached through `/var`, a link to `/private/var`,
+    // and a window opens in the folder as the system names it. A store that names either
+    // spelling is of the folder asked for by the other.
+    let root = tempfile::tempdir().unwrap();
+    let real = root.path().join("real");
+    fs::create_dir(&real).unwrap();
+    let linked = root.path().join("linked");
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+    let (real, linked) = (text(&fs::canonicalize(&real).unwrap()), text(&linked));
+    let elsewhere = text(&fs::canonicalize(root.path()).unwrap());
+
+    let data = tempfile::tempdir().unwrap();
+    let store = data.path().join("devin").join("cli").join("sessions.db");
+    fs::create_dir_all(store.parent().unwrap()).unwrap();
+    let db = Connection::open(&store).unwrap();
+    db.execute(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, working_directory TEXT, created_at INTEGER)",
+        [],
+    )
+    .unwrap();
+    for (id, folder, at) in [
+        ("real", &real, 10),
+        ("linked", &linked, 20),
+        ("other", &elsewhere, 30),
+    ] {
+        db.execute("INSERT INTO sessions VALUES (?1, ?2, ?3)", (id, folder, at))
+            .unwrap();
+    }
+    drop(db);
+    let devin_data = text(data.path());
+    let devin_env = env(&[("XDG_DATA_HOME", &devin_data), ("APPDATA", &devin_data)]);
+    for asked in [&real, &linked] {
+        assert_eq!(
+            newest(Harness::Devin, "devin", asked, 0, &devin_env)
+                .unwrap()
+                .as_deref(),
+            Some("linked"),
+            "Devin, asked by {asked}"
+        );
+    }
+
+    let home = tempfile::tempdir().unwrap();
+    let day = home
+        .path()
+        .join("sessions")
+        .join("2026")
+        .join("10")
+        .join("31");
+    rollout(&day, "rollout-1-real.jsonl", "codex-real", &real, 10);
+    let codex_home = text(home.path());
+    let codex_env = env(&[("CODEX_HOME", &codex_home)]);
+    assert_eq!(
+        newest(Harness::Codex, "codex", &linked, ago(100), &codex_env)
+            .unwrap()
+            .as_deref(),
+        Some("codex-real"),
+        "Codex, its rollout naming the real folder, asked by the link"
+    );
+}

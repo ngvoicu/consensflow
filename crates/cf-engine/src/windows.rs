@@ -744,7 +744,7 @@ impl Dispatcher {
         // the host's answer.
         let opened = returning(self.seams.host.open(OpenPane {
             pane: pane.clone(),
-            cwd: project.directory.clone(),
+            cwd: workspace(project),
             argv: planned.argv.clone(),
             env,
             drop_env: planned.drop_env.clone(),
@@ -1088,6 +1088,8 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
+        // The folder the window works in, as the system names it.
+        let directory = workspace(project);
         // The program of the last window on its conversation was proven gone: nothing
         // of it writes on.
         let previous_gone = match &conversation {
@@ -1099,7 +1101,7 @@ impl Dispatcher {
             project: project.id,
             handle: &participant.handle,
             role: &participant.role,
-            directory: &project.directory,
+            directory: &directory,
             resume,
             previous_gone,
             message: text.as_deref().filter(|_| !delivered),
@@ -1767,6 +1769,21 @@ impl Dispatcher {
         }
         Ok(true)
     }
+}
+
+/// The folder a window of `project` works in: the project's, as the system names it, its
+/// links resolved (a Mac's `/var/folders/…` is `/private/var/folders/…`, and `/tmp` is
+/// `/private/tmp`). ConsensFlow's folder for a window is so the folder its harness has:
+/// a window's program is given its folder only as its working folder, which the system
+/// resolves (no `PWD` reaches it), so every harness already saw, and wrote in its records,
+/// the real path (T-783, T-1036). The launch is prepared for that folder too. It changes
+/// nothing a harness sees, and fixes no screen of Devin's (T-724's finding 1, T-1038). On
+/// Windows a folder is as the project names it, its real path being a verbatim one
+/// programs do not take (`cf_base::file::real_path`).
+fn workspace(project: &ProjectView) -> String {
+    cf_base::file::real_path(std::path::Path::new(&project.directory))
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]

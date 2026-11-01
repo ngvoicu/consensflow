@@ -11,7 +11,7 @@
 //! companions. A resumed window opens on the agent's model and effort with
 //! the flags a start uses: one without them ran on the harness's default.
 
-use cf_proto::agents::Harness;
+use cf_proto::agents::{DevinModel, Harness};
 
 use crate::contract::Agent;
 
@@ -188,6 +188,24 @@ fn window(
 /// model sees: `muse-spark-1.3-contributor`.
 const CONTRIBUTOR: &str = "-contributor";
 
+/// The id Devin names `model` by at `effort`: the family, then the level, then the
+/// variant's words, as every id Devin lists is written (`claude-opus-5-5-fast` at
+/// `medium` is `claude-opus-5-5-medium-fast`, where joining the two made an id Devin
+/// has not: T-609). A level the model already names gives way to the effort, which is
+/// said once, as the agent's; a model with no effort is run as it is named (the roster
+/// gives none to a model the catalog runs bare and never at the agent's level).
+fn devin_model(model: &str, effort: Option<&str>) -> String {
+    let Some(effort) = effort else {
+        return model.to_owned();
+    };
+    let parts = DevinModel::of(model);
+    [parts.family, effort, parts.variant]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 /// The flags that put a window on its agent's model and effort.
 fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
     let model = given(agent.model);
@@ -223,13 +241,11 @@ fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
             }
         }
         // Devin writes the level into the id (claude-opus-5-5-max): an agent
-        // names the family and its effort, joined here. No model is Devin's
-        // own setting.
+        // names the family and its effort, put together here. No model is
+        // Devin's own setting.
         Harness::Devin => {
             if let Some(model) = model {
-                let id =
-                    effort.map_or_else(|| model.to_owned(), |effort| format!("{model}-{effort}"));
-                flag("--model", id);
+                flag("--model", devin_model(model, effort));
             }
         }
         Harness::Muse => {

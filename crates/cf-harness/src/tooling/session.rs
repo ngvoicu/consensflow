@@ -3,6 +3,11 @@
 //! there (Claude Code and Pi open on an id they are given). The folder is the
 //! run's own, and a window of a run with no staff is its chief's, so the newest
 //! conversation opened there since the window was is the window's.
+//!
+//! A folder is compared as the system names it, links resolved: the one a store
+//! says and the one asked for are the same folder however each is spelled (a Mac's
+//! `/var/folders/…` is `/private/var/folders/…`, and a window opens in the folder as
+//! the system names it, T-783).
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -10,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use cf_base::env::Env;
+use cf_base::file::real_path;
 use cf_proto::agents::Harness;
 use rusqlite::{params, Params};
 use serde_json::Value;
@@ -40,22 +46,31 @@ pub(super) fn newest(
     }
 }
 
-/// The `id` the first row of `sql` holds in the store `file`, none where the
-/// store cannot be opened or read (it is not there yet, or it is the harness's
-/// to write now) or the query selects no row.
-fn first_id(file: &Path, sql: &str, params: impl Params) -> Option<String> {
+/// The `id` of the first row `sql` selects in the store `file` whose `directory` is
+/// the folder `workspace`, both as the system names them; none where the store cannot
+/// be opened or read (it is not there yet, or it is the harness's to write now) or no
+/// row is of the folder.
+fn first_id(file: &Path, sql: &str, params: impl Params, workspace: &str) -> Option<String> {
     let store = Store::open(file).ok()?;
-    let row = store.read(|reads| reads.get(sql, params)).ok()??;
-    row.get("id").map(|id| id.text().into_owned())
+    let rows = store.read(|reads| reads.all(sql, params)).ok()?;
+    let folder = real_path(Path::new(workspace));
+    rows.iter()
+        .find(|row| {
+            row.get("directory")
+                .is_some_and(|directory| real_path(Path::new(&*directory.text())) == folder)
+        })?
+        .get("id")
+        .map(|id| id.text().into_owned())
 }
 
 /// Devin keeps a `sessions` row for each, and keeps seconds.
 fn devin_session(workspace: &str, since_ms: i64, env: &Env) -> Result<Option<String>, String> {
     Ok(first_id(
         Path::new(&devin::paths::store(env)?),
-        "SELECT id FROM sessions WHERE working_directory = ?1 AND created_at >= ?2 \
-         ORDER BY created_at DESC LIMIT 1",
-        params![workspace, since_ms.div_euclid(1000)],
+        "SELECT id, working_directory AS directory FROM sessions WHERE created_at >= ?1 \
+         ORDER BY created_at DESC",
+        params![since_ms.div_euclid(1000)],
+        workspace,
     ))
 }
 
@@ -108,7 +123,8 @@ fn session_of(rollout: &Path, workspace: &str) -> Option<String> {
         .read_line(&mut first)
         .ok()?;
     let meta: Value = serde_json::from_str(&first).ok()?;
-    (meta["type"] == "session_meta" && meta["payload"]["cwd"] == workspace)
+    let cwd = meta["payload"]["cwd"].as_str()?;
+    (meta["type"] == "session_meta" && real_path(Path::new(cwd)) == real_path(Path::new(workspace)))
         .then(|| meta["payload"]["id"].as_str().map(str::to_owned))?
 }
 
