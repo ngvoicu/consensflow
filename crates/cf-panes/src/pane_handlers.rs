@@ -798,8 +798,7 @@ mod tests {
 
     /// The terminal's answer over the bridge (`pane.reply`) goes past the human's keys held
     /// after their paste (`pane.typed`), in a window whose harness reads a paste silently
-    /// (T-1048): the reply is answered while the human's paste and Enter still wait, and the
-    /// program reads it before the Enter.
+    /// (T-1048): the reply is answered at once, while the human's paste and Enter still wait.
     #[cfg(unix)]
     #[test]
     fn a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste() {
@@ -875,15 +874,47 @@ mod tests {
             body["bytes"] = json!(bytes);
             body
         };
+        // The reply goes once the paste is written: each request is handled on a thread of its
+        // own, and a reply sent sooner could be queued ahead of the human's keys under load.
+        let idle_ms = || {
+            panes
+                .list()
+                .expect("list the panes")
+                .into_iter()
+                .find(|pane| pane.id == key.id)
+                .map_or(u64::MAX, |pane| pane.idle_ms)
+        };
+        while idle_ms() < 150 {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         send("n-typed", "pane.typed", with(b"\x1b[200~ab\x1b[201~\r"));
-        std::thread::sleep(Duration::from_millis(200));
+        while idle_ms() >= 150 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the paste was never written"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         send("n-reply", "pane.reply", with(b"R"));
-        assert_eq!(
-            answered(&mut reader),
-            "n-reply",
-            "the reply waited behind the human's held Enter"
+        // How long the reply took to be answered: held, it waits for the human's Enter, which
+        // waits 1.5 s for a draw that never comes. (Which of the two is answered first says
+        // nothing: a reply queued behind the Enter is answered a moment after it.)
+        let replied = std::time::Instant::now();
+        let mut answers = vec![answered(&mut reader)];
+        let reply_took = loop {
+            if answers.last().is_some_and(|id| id == "n-reply") {
+                break replied.elapsed();
+            }
+            answers.push(answered(&mut reader));
+        };
+        assert!(
+            reply_took < Duration::from_millis(1_000),
+            "{reply_took:?}: the reply waited behind the human's held Enter"
         );
-        assert_eq!(answered(&mut reader), "n-typed");
+        if !answers.iter().any(|id| id == "n-typed") {
+            answers.push(answered(&mut reader));
+        }
+        assert!(answers.iter().any(|id| id == "n-typed"), "{answers:?}");
 
         panes.kill(&key).expect("kill the pane");
         inputs.close_and_drain();
