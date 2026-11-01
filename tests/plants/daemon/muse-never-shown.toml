@@ -1,0 +1,69 @@
+# A Muse window answered its brief, and its task failed with "the window never showed its
+# first message" (T-1047; T-1000's live paste-screen, twice on Muse Code 1.4.14): each plant
+# takes one rule of the fix out, and the case named in `meant` fails.
+#
+# - The Muse reader takes a user's words from what the model was given (`model_messages`),
+#   not from what Muse's box showed (`refill_blocks`), which for a long paste is
+#   `[Pasted Content 2184 chars]` and no word of the brief's header
+#   (`crates/cf-harness/src/muse/record.rs`, its case on the recorded log in
+#   `muse/record/tests/pasted.rs`).
+# - The engine never fails a launch's first message as never shown where the window's
+#   record holds an item of the user's written since the window opened and an answer after
+#   it: the message is taken for arrived unproven, whatever the harness kept of its words
+#   (`crates/cf-engine/src/arrival.rs`, `answered_unproven`, its cases in
+#   `tests/dispatcher/unstarted.rs`). Words never answered, or written before the window
+#   opened, take nothing.
+#
+# Every name holds `muse never shown`: `npm run plants:daemon -- "muse never shown"` runs
+# them all.
+
+[run]
+muse-never-shown-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::pasted::"]
+muse-never-shown-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unstarted::"]
+
+[[plant]]
+name = "muse never shown: the Muse reader takes the user's words from its box"
+meant = "a_long_paste_muse_folds_in_its_box_is_the_users_whole_words_and_its_answer_follows"
+runs = ["muse-never-shown-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''        let text = if role == Role::User && !given.trim().is_empty() {'''
+replace = '''        let text = if role == Role::User && !given.trim().is_empty() && false {'''
+
+[[plant]]
+name = "muse never shown: a launch whose window took words and answered them is failed as never shown"
+meant = "a_window_that_took_words_and_answered_them_since_it_opened_took_its_first_message"
+runs = ["muse-never-shown-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''            if self.answered_unproven(record, observed, delivering.message)? {'''
+replace = '''            if false && self.answered_unproven(record, observed, delivering.message)? {'''
+
+[[plant]]
+name = "muse never shown: words written before the window opened take its first message"
+meant = "words_never_answered_or_older_than_the_window_take_no_first_message"
+runs = ["muse-never-shown-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''        let since_open = |item: &Item| item_ms(item).is_some_and(|at| at >= opened);'''
+replace = '''        let since_open = |item: &Item| item_ms(item).is_some_and(|at| at >= opened || at < opened);'''
+
+[[plant]]
+name = "muse never shown: words never answered take the window's first message"
+meant = "words_never_answered_or_older_than_the_window_take_no_first_message"
+runs = ["muse-never-shown-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''        if !items[given + 1..]
+            .iter()
+            .any(|item| item.role == Role::Assistant && !item.synthetic)
+        {'''
+replace = '''        if false
+            && !items[given + 1..]
+                .iter()
+                .any(|item| item.role == Role::Assistant && !item.synthetic)
+        {'''

@@ -86,9 +86,9 @@
 
 use std::rc::Rc;
 
-use cf_base::js;
+use cf_base::{js, time};
 use cf_harness::contract::{Input, InputBox, Observed, Pane};
-use cf_harness::records::{Reading, Role, Settlement};
+use cf_harness::records::{Item, Reading, Role, Settlement};
 use cf_ledger::NewNote;
 use cf_proto::ledger::MessageView;
 use cf_proto::panes::TAIL_LINES;
@@ -281,6 +281,11 @@ impl Dispatcher {
             let compacting = self.compacting(record, delivering.message, &shown);
             if compacting || at_work {
                 return self.wait_on_work(record, delivering.message);
+            }
+            // A window whose record shows it took words and answered them since it opened
+            // took its first message, whatever its harness kept of its words (T-1047).
+            if self.answered_unproven(record, observed, delivering.message)? {
+                return Ok(());
             }
             // Said of the window before it is closed.
             let because = self.never_ready(record, &delivering, trust);
@@ -567,6 +572,59 @@ impl Dispatcher {
             return Ok(false);
         }
         record.delivery.borrow_mut().delivering = None;
+        Ok(true)
+    }
+
+    /// Whether a launch's first message, at the end of its time, arrived unproven by what
+    /// its window did (T-1047): the window's record holds an item of the user's written
+    /// since the window opened, none of the harness's own, and an answer of its agent's
+    /// after it. Muse Code 1.4.14 keeps a long paste as its box's placeholder
+    /// (`[Pasted Content 2184 chars]`, its reader takes the words the model was given now),
+    /// and the window that answered its brief was closed as one that never showed it, its
+    /// answer lost to the chief: a window that took words and answered them is never
+    /// failed so, whatever its harness's record keeps of them. It is taken for arrived
+    /// unproven as CMT-23's are ([`Dispatcher::take_unproven`]): the item's shape goes to
+    /// `delivery.unproven` for filing, whoever can act is told once, and the window, which
+    /// may have been given another's words (the human typing in it), is told to read the
+    /// message in its inbox. An item whose time does not read, or reads before the window
+    /// opened (the conversation a window opened again on), proves nothing. Only a launch's
+    /// first message is taken so: a later one the record never showed is pasted again.
+    fn answered_unproven(
+        &self,
+        record: &Record,
+        observed: &Observed,
+        message: i64,
+    ) -> Result<bool, EngineError> {
+        let Some(opened) = record.window.borrow().opened_at else {
+            return Ok(false);
+        };
+        let items = observed.items();
+        let since_open = |item: &Item| item_ms(item).is_some_and(|at| at >= opened);
+        let Some(given) = items.iter().position(|item| {
+            item.role == Role::User && !item.synthetic && !item.compaction && since_open(item)
+        }) else {
+            return Ok(false);
+        };
+        if !items[given + 1..]
+            .iter()
+            .any(|item| item.role == Role::Assistant && !item.synthetic)
+        {
+            return Ok(false);
+        }
+        let on_its_way = self.seams.ledger.borrow().message(message)?;
+        let Some(on_its_way) = on_its_way.filter(|found| found.state == "delivering") else {
+            return Ok(false);
+        };
+        let tell = self.unproven_notes(&on_its_way)?;
+        let item = &items[given];
+        self.seams.ledger.borrow_mut().confirm_unproven(
+            message,
+            &item.id,
+            &header_shape(&item.text, message),
+            &tell,
+        )?;
+        record.delivery.borrow_mut().delivering = None;
+        self.changed();
         Ok(true)
     }
 
@@ -1124,5 +1182,15 @@ impl Dispatcher {
         {
             delivering.entered_again = pressed;
         }
+    }
+}
+
+/// When an item was written, on the engine's clock, as its harness's record says: its time
+/// as ISO text, or as milliseconds. None where it names none that reads.
+fn item_ms(item: &Item) -> Option<i64> {
+    match item.at.as_ref()? {
+        Value::String(at) => time::parse(at),
+        Value::Number(ms) => ms.as_i64(),
+        _ => None,
     }
 }

@@ -76,3 +76,18 @@ are physical lines, as `src/muse/record/tests/shapes.rs` reads them.
 - `escape-before-a-word.jsonl`: Escape right after the run started: `terminal
   cancelled` (46) and `run_retracted` `no_output_interrupt_restore` (47), no word of
   the model's.
+
+`pasted-brief.jsonl` is the worker's session log of T-1000's live run of
+`cargo xtask live paste-screen muse` (2026-10-31, kept in
+`consensflow-trees/.runs/T-1000-muse-paste-screen/sessions/`): Muse Code 1.4.14 on
+`muse-spark-1.3` at `minimal`, contributor mode off, `--yolo`, in the live kit's
+throwaway home. The engine pasted a task brief of 41 lines (2,184 characters); Muse's
+box folded it, and the log says so: the user's intent (line 15, sequence 16) holds
+`[Pasted Content 2184 chars]` in `refill_blocks` and the brief whole in
+`model_messages`, the run's `started` (line 18) has it whole as its prompt, and its
+`user_prompt_display` (line 20) the placeholder. The model answered `3470` (line 62) and
+the turn completed (line 95). T-1047 scrubbed it by a Python port of
+`cargo xtask scrub-muse-session` (Muse's own long words become `[scrubbed: <n> bytes]`,
+the temporary folder `/tmp/`, the runtime socket `/tmp/muse-runtime/ms.sock`), with the
+kit's home (`…/T/consensflow-integration-<x>/home`) as `/muse-home` and the project's
+folder as `/project`. Read by `src/muse/record/tests/pasted.rs`.
