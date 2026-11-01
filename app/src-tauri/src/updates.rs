@@ -106,22 +106,25 @@ struct Found {
 
 #[tauri::command]
 pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Value {
-    let manager = app.state::<UpdateManager>();
-    if !manager.begin_check() {
-        return update_status(app.clone());
-    }
-    publish(&app);
-    let snapshot = manager.snapshot();
-    let checked = if INSTALLS_IN_APP {
-        check_in_app(&app, &snapshot).await
-    } else {
-        check_by_page(&snapshot).await
-    };
-    match checked {
-        Ok(found) => manager.found(found),
-        Err(error) => manager.fail(format!("Could not check for updates: {error}")),
-    }
-    publish(&app)
+    crate::panics::settled("update_check", async move {
+        let manager = app.state::<UpdateManager>();
+        if !manager.begin_check() {
+            return update_status(app.clone());
+        }
+        publish(&app);
+        let snapshot = manager.snapshot();
+        let checked = if INSTALLS_IN_APP {
+            check_in_app(&app, &snapshot).await
+        } else {
+            check_by_page(&snapshot).await
+        };
+        match checked {
+            Ok(found) => manager.found(found),
+            Err(error) => manager.fail(format!("Could not check for updates: {error}")),
+        }
+        publish(&app)
+    })
+    .await
 }
 
 /// The signed update the feed offers this platform, checked, for the app to
@@ -267,20 +270,29 @@ fn test_update_url(enabled: bool, address: Option<&str>) -> Result<Option<url::U
 
 #[tauri::command]
 pub async fn update_download<R: Runtime>(app: AppHandle<R>) -> Value {
-    let result = app
-        .state::<UpdateManager>()
-        .download(|_| {
-            publish(&app);
-        })
-        .await;
-    match result {
-        Ok(()) => publish(&app),
-        Err(error) => command_error(&app, error),
-    }
+    crate::panics::settled("update_download", async move {
+        let result = app
+            .state::<UpdateManager>()
+            .download(|_| {
+                publish(&app);
+            })
+            .await;
+        match result {
+            Ok(()) => publish(&app),
+            Err(error) => command_error(&app, error),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
+    crate::panics::settled("update_install", install(app)).await
+}
+
+/// `update_install`'s work: the update downloaded, installed in the app's place, and the app
+/// started again.
+async fn install<R: Runtime>(app: AppHandle<R>) -> Value {
     #[cfg(not(target_os = "macos"))]
     return command_error(
         &app,

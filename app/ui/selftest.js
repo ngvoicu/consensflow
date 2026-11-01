@@ -49,6 +49,27 @@ function toHex(text) {
     .join('')
 }
 
+/**
+ * The packaged smoke's case of a command's panic (T-1050): the page asks the
+ * app's commands that panic, a synchronous one and an asynchronous one, says
+ * what it was answered of each, and asks a command after them, which an app
+ * that ran on answers as ever. An app built without them (a release) refuses
+ * each as a command it does not have.
+ */
+export async function runPanicProbe({ invoke }) {
+  const report = (event, data) => invoke('selftest_report', { event, data })
+  const asked = async (command) => {
+    try {
+      return await invoke(command)
+    } catch (cause) {
+      return { rejected: String(cause) }
+    }
+  }
+  await report('panic-answered', await asked('selftest_panic'))
+  await report('async-panic-answered', await asked('selftest_panic_async'))
+  await report('after-panic', await asked('update_status'))
+}
+
 export async function runSelftest({
   config,
   invoke,
@@ -59,6 +80,10 @@ export async function runSelftest({
   onAck,
   onOutput,
 }) {
+  if (config?.panicProbe === true) {
+    await runPanicProbe({ invoke })
+    return
+  }
   if (
     typeof config?.updaterExpectedVersion === 'string' &&
     config.updaterExpectedVersion.length > 0

@@ -8,6 +8,11 @@ rust-version.workspace = true
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# A command that panics, for the packaged smoke's case of a command's panic (T-1050): built into
+# an app for the smoke alone (`--features test-support`), never into a release.
+test-support = []
+
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
 # The identity a build is made with, read from Tauri's configuration as Tauri reads it.

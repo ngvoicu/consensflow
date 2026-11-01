@@ -83,6 +83,10 @@ mod selftest {
         /// (`CONSENSFLOW_SELFTEST_STEP_MS`): the smoke tells it, from the patience it was
         /// given. None: the page waits its own 45 s (app/ui/core/selftest-wait.js).
         pub step_ms: Option<u64>,
+        /// Whether the page asks the app's command that panics, and nothing else
+        /// (`CONSENSFLOW_SELFTEST_PANIC=1`): the packaged smoke's case of a command's panic
+        /// (T-1050).
+        pub panic_probe: bool,
     }
 
     /// Read at every call, not cached: the guard is the environment the app
@@ -102,6 +106,10 @@ mod selftest {
             step_ms: std::env::var("CONSENSFLOW_SELFTEST_STEP_MS")
                 .ok()
                 .and_then(|value| value.parse().ok()),
+            panic_probe: matches!(
+                std::env::var("CONSENSFLOW_SELFTEST_PANIC").as_deref(),
+                Ok("1")
+            ),
         })
     }
 
@@ -126,7 +134,7 @@ mod selftest {
     pub fn initialization_script(config: &Config) -> String {
         format!(
             "window.__CONSENSFLOW_SELFTEST__ = {};\n{}",
-            json!({"dir": config.dir, "tag": config.tag, "updaterExpectedVersion":config.updater_expected_version, "stepMs": config.step_ms}),
+            json!({"dir": config.dir, "tag": config.tag, "updaterExpectedVersion":config.updater_expected_version, "stepMs": config.step_ms, "panicProbe": config.panic_probe}),
             PAGE_CHANNEL,
         )
     }
@@ -231,6 +239,31 @@ fn selftest_report(event: String, data: Value) -> Value {
     }
     json!({"ok":true})
 }
+
+/// A command that panics, which the packaged smoke's page asks of an app built for it: a panic
+/// in a command the page asks ends in an answer to the page, and the app runs on (T-1050). Only
+/// in the tests and in an app built with the feature `test-support`, never in a release.
+#[cfg(any(test, feature = "test-support"))]
+#[tauri::command]
+fn selftest_panic() -> Value {
+    deliberate_panic()
+}
+
+/// The same of an asynchronous command, whose task panics.
+#[cfg(any(test, feature = "test-support"))]
+#[tauri::command]
+async fn selftest_panic_async() -> Value {
+    panics::settled("selftest_panic_async", async { deliberate_panic() }).await
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn deliberate_panic() -> Value {
+    panic!("{SELFTEST_PANIC}")
+}
+
+/// What `selftest_panic` panics with.
+#[cfg(any(test, feature = "test-support"))]
+const SELFTEST_PANIC: &str = "the deliberate panic of a command the page asked (T-1050)";
 
 /// The identity this build was made with, kept in the app's own file in these
 /// words, where a test reads it without starting the app
@@ -422,18 +455,26 @@ pub(crate) fn page_commands<R: Runtime>(
         updates::update_install,
         updates::update_open_page,
         selftest_report,
+        #[cfg(any(test, feature = "test-support"))]
+        selftest_panic,
+        #[cfg(any(test, feature = "test-support"))]
+        selftest_panic_async,
     ];
+    // Every command run with its panic stopped at the app's edge (T-1050): a synchronous one
+    // runs in the webview's own frame, which cannot unwind.
     move |invoke| {
-        if !commands::window_command_allowed(
-            invoke.message.webview_ref().label(),
-            invoke.message.command(),
-        ) {
-            invoke
-                .resolver
-                .reject("This command is unavailable in this window");
-            return true;
-        }
-        handler(invoke)
+        panics::answered(invoke, |invoke| {
+            if !commands::window_command_allowed(
+                invoke.message.webview_ref().label(),
+                invoke.message.command(),
+            ) {
+                invoke
+                    .resolver
+                    .reject("This command is unavailable in this window");
+                return true;
+            }
+            handler(invoke)
+        })
     }
 }
 
@@ -536,12 +577,17 @@ pub fn run() {
             // loop, which shows it after the dispatch that stopped the error has ended.
             let _ = teller.run_on_main_thread(move || {
                 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                let told = panics::told(error_log().as_deref());
                 shown
                     .dialog()
-                    .message(panics::told(error_log().as_deref()))
+                    .message(told.clone())
                     .title("ConsensFlow kept running")
                     .kind(MessageDialogKind::Warning)
                     .show(|_| {});
+                // The packaged smoke reads that the person was told (T-1050).
+                if selftest::enabled() {
+                    selftest::report("told", &json!({ "message": told }));
+                }
             });
         });
         app.manage(AppRuntime::start(app.handle()));
@@ -943,7 +989,21 @@ mod tests {
             tag: "tag".into(),
             updater_expected_version: None,
             step_ms,
+            panic_probe: false,
         }
+    }
+
+    /// The page asks the command that panics only of an app started for the smoke's case of it
+    /// (T-1050).
+    #[test]
+    fn the_selftest_tells_the_page_whether_it_asks_the_command_that_panics() {
+        let asked = selftest::initialization_script(&selftest::Config {
+            panic_probe: true,
+            ..selftest_config(None)
+        });
+        assert!(asked.contains(r#""panicProbe":true"#), "{asked}");
+        let not = selftest::initialization_script(&selftest_config(None));
+        assert!(not.contains(r#""panicProbe":false"#), "{not}");
     }
 
     #[test]
