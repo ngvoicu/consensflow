@@ -445,9 +445,8 @@ fn watch(members: &Members, number: i64, log: &Log) -> Result<Seen> {
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter(|message| message["kind"] == "result")
+                .rfind(|message| message["kind"] == "result")
                 .map(|message| live::cut(&live::text(&message["body"]), 160))
-                .last()
                 .unwrap_or_default();
             Ok((is_over(&thread) || !seen.asked.is_empty()).then_some(()))
         },
