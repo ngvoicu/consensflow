@@ -28,6 +28,11 @@
 #   `launch_effort`, read by the daemon's roster, `cf-daemon/src/roster.rs`); its family is
 #   found by the parts of a Devin id (`cf-proto/src/agents.rs`, `DevinModel`).
 #
+# - T-724's finding 1 as an A/B (T-1038, Zeus's note 2): `live linked-folder` makes the
+#   harness's home of the run's own in the Mac's temporary folder spelled through its link
+#   `/var`, then as `/private/var`; the kit keeps a home made in a folder as the folder
+#   spells it (`crates/cf-e2e/src/live/isolation.rs`, `made_in`).
+#
 # - T-784, `live paste-screen devin` red 2 of 3 on Devin 3000.11.228: Devin draws a title of
 #   the conversation, made from the brief's words, in the line above its input, and the
 #   suite took any line naming a brief's mark for the brief
@@ -45,6 +50,7 @@ devin-round-session-folder = ["cargo", "test", "--offline", "-p", "cf-harness", 
 devin-round-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use::tests::"]
 devin-round-paste-screen = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
 devin-round-roster = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "roster::tests::"]
+devin-round-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::tests::"]
 devin-round-catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--test", "catalog", "every_model_devin_lists_is_a_preset::"]
 
 [[plant]]
@@ -211,3 +217,14 @@ file = "crates/cf-catalog/src/catalog.rs"
 find = '''        let family = DevinModel::of(model).family;'''
 replace = '''        let family = DevinModel::of(model).family.len().min(0) + model.len();
         let family = &model[..family];'''
+
+[[plant]]
+name = "devin round: a home made in a folder reached through a link is named by its real path"
+meant = "a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link"
+runs = ["devin-round-isolation"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        self.parent = folder.to_path_buf();'''
+replace = '''        self.parent = files::real_path(folder);'''

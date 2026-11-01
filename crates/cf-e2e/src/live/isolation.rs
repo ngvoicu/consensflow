@@ -400,6 +400,15 @@ impl Isolation {
         }
     }
 
+    /// This home, made in `folder` as `folder` spells it, in place of the temporary folder:
+    /// `live linked-folder`'s two spellings of a Mac's temporary folder, through its link
+    /// `/var` and as `/private/var` (T-1038), each a folder the windows' variables name.
+    #[must_use]
+    pub fn made_in(mut self, folder: &Path) -> Self {
+        self.parent = folder.to_path_buf();
+        self
+    }
+
     /// The home, made as the clock says `now` is (milliseconds since the epoch): its path.
     fn made_at(&self, now: i64) -> Result<PathBuf> {
         let mut made = self.made.lock().unwrap_or_else(PoisonError::into_inner);

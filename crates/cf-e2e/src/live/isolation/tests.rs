@@ -421,6 +421,34 @@ fn a_codex_run_is_given_the_login_alone_and_what_it_configures_goes_in_its_own_h
     assert!(isolation.finish().is_ok());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {
+    // `live linked-folder`'s leg A (T-1038): the folders a Devin window is given are spelled
+    // as the folder the home is made in spells them, a Mac's `/var/folders/…` kept so, not
+    // resolved to `/private/var/folders/…`.
+    let owner = Owner::new();
+    let linked = owner.home.path().join("linked-temp");
+    std::os::unix::fs::symlink(owner.parent.path(), &linked).unwrap();
+    let isolation = owner.devin().made_in(&linked);
+    let home = isolation.made_at(at(NOW)).unwrap();
+    assert!(home.starts_with(&linked), "{}", home.display());
+    for (name, value) in isolation.vars_in(&home) {
+        assert!(Path::new(&value).starts_with(&linked), "{name}: {value}");
+        assert_eq!(
+            fs::canonicalize(&value)
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap(),
+            fs::canonicalize(owner.parent.path()).unwrap(),
+            "{name}: the same folder as the one it links to"
+        );
+    }
+    assert_eq!(owner.made(), 1);
+}
+
 #[test]
 fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_other_programs_ones() {
     let owner = Owner::new();

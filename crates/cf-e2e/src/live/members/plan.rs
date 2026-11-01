@@ -4,6 +4,8 @@
 //! stand-in agent's ([`stand_in_chief`], [`stand_in_worker`]), which is no model
 //! and only notes what it is sent.
 
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
 
 use super::super::agents;
@@ -125,9 +127,9 @@ pub struct Plan {
     /// harness that asks of one asks in the project's own windows, and ConsensFlow
     /// answers ([`Plan::in_a_new_repository`]).
     pub repository: bool,
-    /// Whether the project is opened in its folder as a link under `/tmp` names it
-    /// ([`Plan::through_a_link`]).
-    pub through_a_link: bool,
+    /// The folder the harnesses' homes of the run's own are made in, as it spells it,
+    /// where not the temporary folder ([`Plan::homes_made_in`]).
+    pub homes_in: Option<PathBuf>,
 }
 
 impl Plan {
@@ -144,7 +146,7 @@ impl Plan {
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
             repository: false,
-            through_a_link: false,
+            homes_in: None,
         }
     }
 
@@ -157,13 +159,12 @@ impl Plan {
         self
     }
 
-    /// Opened in its folder as a link under `/tmp` names it, a link to the folder (and a
-    /// Mac's `/tmp` is itself a link, to `/private/tmp`): a project whose folder the human
-    /// reached through a link, which ConsensFlow opens its windows in by its real path
-    /// (T-783). Unix only.
+    /// With the harnesses' homes of the run's own (Devin's XDG folders, Codex's and Pi's
+    /// own) made in `folder`, as `folder` spells it: a Mac's temporary folder through its
+    /// link `/var`, or as `/private/var` (`live linked-folder`, T-1038).
     #[must_use]
-    pub fn through_a_link(mut self) -> Self {
-        self.through_a_link = true;
+    pub fn homes_made_in(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.homes_in = Some(folder.into());
         self
     }
 

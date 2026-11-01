@@ -106,45 +106,6 @@ pub struct Members {
     tiers: BTreeMap<String, String>,
     /// Where the shim that starts Claude Code is, which the windows run through.
     _shims: TempDir,
-    /// The link the project was opened through, where the plan says so
-    /// ([`Plan::through_a_link`]): removed when the check is.
-    link: Option<Link>,
-}
-
-/// A link to a project's folder, made for a check under `/tmp` and removed with it: the
-/// link, never what it leads to.
-struct Link(PathBuf);
-
-impl Link {
-    /// A link to `folder` under `/tmp`, named for the folder and this process.
-    #[cfg(unix)]
-    fn to(folder: &Path) -> Result<Self> {
-        let name = folder
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        let link = Path::new("/tmp").join(format!("cf-live-{name}-{}", std::process::id()));
-        std::os::unix::fs::symlink(folder, &link).map_err(|source| Error::File {
-            action: "make a link at",
-            path: link.clone(),
-            source,
-        })?;
-        Ok(Self(link))
-    }
-
-    /// No link is made on Windows, whose links ConsensFlow takes as named.
-    #[cfg(not(unix))]
-    fn to(folder: &Path) -> Result<Self> {
-        Err(Error::Daemon(format!(
-            "a project opened through a link is a Unix check: {}",
-            folder.display()
-        )))
-    }
-}
-
-impl Drop for Link {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
 }
 
 impl Members {
@@ -170,7 +131,13 @@ impl Members {
         let harnesses = plan.harnesses();
         let installs = harnesses
             .iter()
-            .map(|harness| log.found(*harness))
+            .map(|harness| {
+                let found = log.found(*harness)?;
+                match &plan.homes_in {
+                    Some(folder) => found.with_homes_in(folder),
+                    None => Ok(found),
+                }
+            })
             .collect::<Result<Vec<_>>>()?;
         for file in &plan.home_files {
             let isolation = installs
@@ -219,15 +186,7 @@ impl Members {
             Some(claude) => Some(trusted(&rig, claude, &folder, log)?),
             None => None,
         };
-        let link = if plan.through_a_link {
-            Some(Link::to(&folder)?)
-        } else {
-            None
-        };
-        let directory = link
-            .as_ref()
-            .map_or(folder.as_path(), |link| link.0.as_path());
-        let project = Project::open(&rig, &plan.chief, json!({ "directory": directory }))?.id();
+        let project = Project::open(&rig, &plan.chief, json!({ "directory": folder }))?.id();
         Ok(Self {
             rig,
             config,
@@ -237,7 +196,6 @@ impl Members {
             trust,
             tiers: BTreeMap::new(),
             _shims: shims,
-            link,
         })
     }
 
@@ -273,12 +231,6 @@ impl Members {
     /// The project's folder.
     pub fn folder(&self) -> &Path {
         &self.folder
-    }
-
-    /// The link the project was opened through, where the plan says so
-    /// ([`Plan::through_a_link`]).
-    pub fn link(&self) -> Option<&Path> {
-        self.link.as_ref().map(|link| link.0.as_path())
     }
 
     /// What came of asking Claude to trust the folder: none where no real
@@ -533,7 +485,6 @@ impl Members {
             trust,
             tiers,
             _shims,
-            link,
         } = self;
         rig.kill_daemon();
         rig.wait_for_daemon_exit(GONE)?;
@@ -553,7 +504,6 @@ impl Members {
             trust,
             tiers,
             _shims,
-            link,
         })
     }
 
