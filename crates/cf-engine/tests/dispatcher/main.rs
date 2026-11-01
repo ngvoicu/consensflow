@@ -22,7 +22,8 @@
 //! rest, so that a record that is late while its window is in a turn is waited
 //! for, as a message its harness says its own queue holds is (`slow_records`),
 //! and the paste a window went with, which its harness's record may show it took
-//! (`window_went_with_a_paste`), and a header quoted in a window's words, which is
+//! (`window_went_with_a_paste`), and the close of a window whose task is done, which
+//! waits for its screen to be drawn (`close_when_drawn`), and a header quoted in a window's words, which is
 //! no paste (`quoted_headers`), and the shapes a harness's record keeps a paste in
 //! (`paste_shapes`), the quota wait that keeps a member's task with its
 //! window whoever else is free (`quota_waits`), and an account's quota as every
@@ -44,6 +45,7 @@ mod canonical_folder;
 mod carriers;
 mod chief_not_up;
 mod chiefs;
+mod close_when_drawn;
 mod closed_given_nothing;
 mod closing;
 mod compacting;

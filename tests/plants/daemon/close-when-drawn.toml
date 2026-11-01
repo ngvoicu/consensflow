@@ -1,0 +1,169 @@
+# A window the engine closes because its task is done stays open until its screen has been
+# drawn (T-1051, from T-1038's decision 2). Devin 3000.11.228's agent ends its turn some
+# seconds before its screen has typed the answer out; the engine closed the window as it took
+# the result, and whoever watched saw it go mid-typing, frozen on "Typing". Now the result is
+# taken and delivered at once as ever, and only the close waits: until the pane has printed
+# nothing for `DRAWN_QUIET_MS` (1.5 s, the rest that draws a fresh window), or for
+# `STILL_BOUND_MS` (10 s) from the look that found the window free. The engine's tests are
+# `crates/cf-engine/tests/dispatcher/close_when_drawn.rs`; the look at the pane is
+# `EngineHost::quiet`, whose daemon end is tested in `crates/cf-daemon/src/host/tests.rs`.
+#
+# - a screen being drawn holds the window, and the one that has been still for the whole rest
+#   (1_500 ms, not a millisecond less) lets it go in that step;
+# - the bound ends the wait of a screen that never rests, counted from the first look, however
+#   often a task queued behind keeps the window from closing for itself;
+# - a screen already still, a host that cannot say and a pane that printed nothing close the
+#   window at once;
+# - a task the chief accepts while its window waits is finished all the same, and the wait goes on;
+# - a task that is not finished (a cancel here; a pause, a failure and a hold for quota are the
+#   same by the same rule) closes its window at once, and makes no look at the screen;
+# - the next task of the session waits for the same screen, its requester told nothing;
+# - a task in hand again, and a window that closed, end the wait: the next one is its own;
+# - the daemon's host reads `outputQuietMs` from the snapshot, none for a pane that printed
+#   nothing or an answer that does not say.
+#
+# Every name holds `close when drawn`, so `cargo xtask plants daemon "close when drawn"` runs
+# them all.
+
+[run]
+cwd-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "close_when_drawn::"]
+cwd-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::"]
+
+[[plant]]
+name = "close when drawn: a window whose task is done closes while its screen is being drawn"
+meant = "a_window_whose_task_is_done_stays_open_while_its_screen_is_being_drawn_and_closes_once_it_has_been_still"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        Ok(quiet
+            .ok()
+            .flatten()
+            .is_some_and(|quiet| quiet < DRAWN_QUIET_MS))'''
+replace = '''        let _ = quiet;
+        Ok(false)'''
+
+[[plant]]
+name = "close when drawn: the screen must have been still for the whole rest"
+meant = "a_window_whose_task_is_done_stays_open_while_its_screen_is_being_drawn_and_closes_once_it_has_been_still"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "const DRAWN_QUIET_MS: f64 = 1_500.0;"
+replace = "const DRAWN_QUIET_MS: f64 = 1_000.0;"
+
+[[plant]]
+name = "close when drawn: a screen that never rests holds the window for ever"
+meant = "a_screen_that_never_rests_holds_the_window_for_the_bound_from_the_look_that_found_it_free_and_no_longer"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        if now - since >= STILL_BOUND_MS {"
+replace = "        if false {"
+
+[[plant]]
+name = "close when drawn: the bound is ten seconds"
+meant = "a_screen_that_never_rests_holds_the_window_for_the_bound_from_the_look_that_found_it_free_and_no_longer"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "const STILL_BOUND_MS: i64 = 10_000;"
+replace = "const STILL_BOUND_MS: i64 = 3_000;"
+
+[[plant]]
+name = "close when drawn: a window whose screen is already still waits"
+meant = "a_window_whose_screen_is_already_still_or_whose_host_cannot_tell_closes_as_soon_as_its_task_is_done"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            .is_some_and(|quiet| quiet < DRAWN_QUIET_MS))"
+replace = "            .is_some_and(|quiet| quiet >= DRAWN_QUIET_MS))"
+
+[[plant]]
+name = "close when drawn: a window whose host cannot tell waits"
+meant = "a_window_whose_screen_is_already_still_or_whose_host_cannot_tell_closes_as_soon_as_its_task_is_done"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            .is_some_and(|quiet| quiet < DRAWN_QUIET_MS))"
+replace = "            .map_or(true, |quiet| quiet < DRAWN_QUIET_MS))"
+
+[[plant]]
+name = "close when drawn: a task the chief accepted ends the wait"
+meant = "a_task_the_chief_accepts_while_its_window_waits_does_not_end_the_wait"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''matches!(thread.task.state.as_str(), "done" | "accepted")'''
+replace = '''matches!(thread.task.state.as_str(), "done")'''
+
+[[plant]]
+name = "close when drawn: a cancelled task's window waits for its screen too"
+meant = "a_cancelled_task_closes_its_window_at_once_whatever_its_screen_shows"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        if !self.given_task_finished(record)? {
+            return Ok(false);
+        }
+        let now = self.now();'''
+replace = "        let now = self.now();"
+
+[[plant]]
+name = "close when drawn: the next task of the session does not wait for the screen"
+meant = "the_next_task_of_the_session_waits_for_the_same_screen_and_its_requester_is_told_nothing_of_it"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = "        } else if self.still_drawing(record).await? {"
+replace = "        } else if false {"
+
+[[plant]]
+name = "close when drawn: a task queued behind keeps the bound from running out"
+meant = "the_next_task_of_the_session_waits_no_longer_than_the_bound_for_a_screen_that_never_rests"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            if !self.given_task_finished(record)? {
+                record.window.borrow_mut().free_since = None;
+            }'''
+replace = "            record.window.borrow_mut().free_since = None;"
+
+[[plant]]
+name = "close when drawn: a task in hand again leaves the wait running"
+meant = "a_task_in_hand_again_ends_the_wait_and_the_next_time_it_is_done_the_window_waits_its_own_time"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                record.window.borrow_mut().free_since = None;"
+replace = "                let _ = &record;"
+
+[[plant]]
+name = "close when drawn: a window that closed leaves its wait to the next one"
+meant = "a_window_opened_since_waits_its_own_time_not_the_bound_of_the_one_that_closed"
+runs = ["cwd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            window.free_since = None;"
+replace = "            let _ = &window;"
+
+[[plant]]
+name = "close when drawn: the daemon's host reads another field for the quiet"
+meant = "how_long_a_pane_has_printed_nothing_is_what_its_snapshot_says_and_none_where_it_says_nothing"
+runs = ["cwd-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '    answer.get("outputQuietMs").and_then(Value::as_f64)'
+replace = '    answer.get("outputQuiet").and_then(Value::as_f64)'

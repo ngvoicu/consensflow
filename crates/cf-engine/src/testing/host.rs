@@ -55,6 +55,9 @@ pub struct FakeHost {
     pub hold_exits: Cell<bool>,
     /// What `pane.snapshot` answers besides `ok` ([`FakeHost::set_snapshot`]).
     snapshot: RefCell<Map<String, Value>>,
+    /// The panes the engine looked at for how long they had printed nothing
+    /// ([`EngineHost::quiet`]), in order.
+    quiet_looks: RefCell<Vec<Pane>>,
     /// What every exit says besides which pane ended
     /// ([`FakeHost::exits_showing`]): the program's code and signal, and the
     /// lines its screen ended with.
@@ -204,6 +207,14 @@ impl FakeHost {
             .iter()
             .filter(|(op, _)| op == "pane.snapshot")
             .count()
+    }
+
+    /// The panes the engine looked at for how long they had printed nothing, in order: the
+    /// looks before it closes the window of a task that is done. The look is no call of
+    /// Node's host, so it is not among the requests ([`FakeHost::snapshots`]) nor in the
+    /// trace.
+    pub fn quiet_looks(&self) -> Vec<Pane> {
+        self.quiet_looks.borrow().clone()
     }
 
     /// The last pane opened for `handle`'s window: its own, or one of its sessions'.
@@ -442,6 +453,20 @@ impl EngineHost for FakeHost {
             self.recorder.answered(at, json!({ "ok": true }));
             Ok(Killed::Killed)
         })
+    }
+
+    /// The `outputQuietMs` the test set ([`FakeHost::set_snapshot`]), none where it set
+    /// none or null, which is a host that does not say. Answered at once, in no turn of its
+    /// own, and written down nowhere: Node's host had no such look, and the traces hold
+    /// every call the engine makes of it.
+    fn quiet<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Option<f64>, HostError>> {
+        self.quiet_looks.borrow_mut().push(pane.clone());
+        let quiet = self
+            .snapshot
+            .borrow()
+            .get("outputQuietMs")
+            .and_then(Value::as_f64);
+        Box::pin(async move { Ok(quiet) })
     }
 }
 
