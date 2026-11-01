@@ -27,6 +27,13 @@
 //! - **Nothing a login holds is ever said.** The run says which file the renewal changed, by name
 //!   and by the time its login ends, before and after ([`Renewed`]).
 //!
+//! **The copy cannot renew.** What the run is given is the access token and no refresh token
+//! ([`super::login`], [`super::isolation`]): a copy that cannot renew cannot use up the owner's refresh
+//! token, whatever the run's length. So the margin a login must last beyond the run
+//! ([`super::isolation::MARGIN`]) is no longer the owner's safety (it was 30 minutes of it) but the
+//! harness's own look at the end of the access token, five minutes in both, and a few minutes for
+//! the end of the run. A run that outlasts its token fails loudly where the token ends.
+//!
 //! **What a harness renews.** Claude Code refreshes a token when five minutes of it are left, and
 //! Pi once the entry has ended: a token that lasts an hour and is wanted for two is not renewed by
 //! using it. Then the renewal ran and failed, and the run is refused, with those words and the
@@ -106,6 +113,9 @@ pub struct Renewed {
     pub after: Option<i64>,
     /// How long the harness took.
     pub took: Duration,
+    /// How the harness ended where it ended badly all the same (its model refused the owner's
+    /// session, say): the renewal is judged by the login, which moved.
+    pub ended: Option<String>,
 }
 
 impl Renewed {
@@ -129,7 +139,10 @@ impl Renewed {
                 format!("{}: it did not move", time(self.after))
             },
             self.took.as_secs()
-        )
+        ) + &self
+            .ended
+            .as_ref()
+            .map_or_else(String::new, |how| format!("; the harness ended badly after renewing it: {how}"))
     }
 }
 
@@ -150,8 +163,10 @@ pub struct Renewal {
     /// When the harness renews a token, in words: what a login that is refused after a renewal
     /// that ran is told.
     only: &'static str,
-    /// Runs the harness once, as the owner; why it could not renew, if it could not.
-    shot: Box<dyn Fn() -> Result<()> + Send + Sync>,
+    /// Runs the harness once, as the owner: none where it ended well, how it ended where it ran
+    /// and ended badly (a status, its limit), and an error where it could not be run, or changed
+    /// what it must not.
+    shot: Box<dyn Fn() -> Result<Option<String>> + Send + Sync>,
 }
 
 impl Renewal {
@@ -159,7 +174,7 @@ impl Renewal {
         machine: TestMachine,
         harness: &'static str,
         only: &'static str,
-        shot: impl Fn() -> Result<()> + Send + Sync + 'static,
+        shot: impl Fn() -> Result<Option<String>> + Send + Sync + 'static,
     ) -> Self {
         Self {
             machine,
@@ -178,7 +193,7 @@ impl Renewal {
     pub fn renew(&self, kept: &Kept, text: &str) -> std::result::Result<(String, Renewed), String> {
         let before = (kept.expiry)(text);
         let started = Instant::now();
-        (self.shot)().map_err(|failed| self.failed(&failed.to_string()))?;
+        let ended = (self.shot)().map_err(|failed| self.failed(&failed.to_string()))?;
         let took = started.elapsed();
         let fresh = (kept.read)().map_err(|failed| {
             self.failed(&format!("{} could not be read again ({failed})", kept.file))
@@ -190,7 +205,13 @@ impl Renewal {
             before,
             after,
             took,
+            ended,
         };
+        // The renewal is the login's, not the model call's: a harness that ended badly after it
+        // renewed its login (an API error of the owner's own session) has renewed it.
+        if let (Some(how), false) = (&renewed.ended, renewed.moved()) {
+            return Err(self.failed(how));
+        }
         Ok((fresh, renewed))
     }
 
@@ -238,13 +259,15 @@ impl Renewal {
 
 /// Runs `program` once with `words`, as the owner (the environment this run has), in a folder of
 /// its own that is named as a folder of a run ([`FOLDER`]), with nothing to read, ended after
-/// [`LIMIT`]. An error says how it failed, in what it said and never what it printed.
-pub fn one_shot(program: &Path, words: &[String]) -> Result<()> {
+/// [`LIMIT`]. None where it ended well; how it ended where it did not, in what it said and never
+/// what it printed (the renewal is judged by the login it left, [`Renewal::renew`]); an error where
+/// it could not be run at all.
+pub fn one_shot(program: &Path, words: &[String]) -> Result<Option<String>> {
     one_shot_within(program, words, LIMIT)
 }
 
 /// [`one_shot`], ended after `limit`.
-fn one_shot_within(program: &Path, words: &[String], limit: Duration) -> Result<()> {
+fn one_shot_within(program: &Path, words: &[String], limit: Duration) -> Result<Option<String>> {
     let folder = tempfile::Builder::new()
         .prefix(FOLDER)
         .tempdir()
@@ -262,17 +285,14 @@ fn one_shot_within(program: &Path, words: &[String], limit: Duration) -> Result<
         .limit(limit)
         .run()?;
     if ran.timed_out {
-        return Err(Error::Daemon(format!(
-            "it was ended after {} s",
-            limit.as_secs()
-        )));
+        return Ok(Some(format!("it was ended after {} s", limit.as_secs())));
     }
     if ran.code == Some(0) {
-        return Ok(());
+        return Ok(None);
     }
     let said: String = ran.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
     let said: String = said.chars().take(SAID).collect();
-    Err(Error::Daemon(format!(
+    Ok(Some(format!(
         "it ended {} ({})",
         ran.code
             .map_or_else(|| "by a signal".to_owned(), |code| code.to_string()),

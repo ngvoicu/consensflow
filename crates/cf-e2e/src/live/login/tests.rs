@@ -572,7 +572,9 @@ fn a_copy_that_was_refreshed_or_lost_fails_with_a_warning_that_the_machines_logi
         said.contains("THE RUN'S CLAUDE CODE REFRESHED ITS COPY OF THE LOGIN"),
         "{said}"
     );
-    assert!(said.contains("may now be stale"), "{said}");
+    // The copy holds no refresh token, so it cannot have used up the machine's.
+    assert!(said.contains("The copy holds no refresh token"), "{said}");
+    assert!(!said.contains("may now be stale"), "{said}");
     assert!(!said.contains("CHANGED THE OWNER'S"), "{said}");
     for secret in SECRETS.iter().copied().chain(["NEW-ACCESS", "NEW-REFRESH"]) {
         assert!(!said.contains(secret), "{said}");
@@ -1043,7 +1045,7 @@ fn a_claude_login_with_forty_two_minutes_left_runs_a_case_of_ten_minutes_and_not
         .to_string();
     // The refusal says how long is left, and that Claude Code renews a token itself, once it has ended.
     assert!(said.contains("expires in 42 min"), "{said}");
-    assert!(said.contains("at least 1 h 30 min more"), "{said}");
+    assert!(said.contains("at least 1 h 10 min more"), "{said}");
     assert!(
         said.contains(
             "Claude Code renews a token itself, but only when five minutes of it are left"
@@ -1052,4 +1054,87 @@ fn a_claude_login_with_forty_two_minutes_left_runs_a_case_of_ten_minutes_and_not
     );
     assert!(said.contains("run again once it has ended"), "{said}");
     assert!(!said_anywhere(&said), "{said}");
+}
+
+// ---------------------------------------------------------------------- a copy that cannot renew (T-1067)
+
+/// Every file below `folder`, with what it holds.
+fn everything_in(folder: &Path) -> String {
+    files_below(folder)
+        .iter()
+        .map(|name| std::fs::read_to_string(folder.join(name)).unwrap_or_default())
+        .collect()
+}
+
+#[test]
+fn a_run_is_given_the_access_token_and_nothing_that_renews_it_and_the_machines_login_is_held_to_all_of_it(
+) {
+    // Measured on zeewin2 (Claude Code 2.1.316): a copy with no refresh token runs, is never
+    // refreshed, and fails with a 401 where the server refuses its access token.
+    let person = Person::new();
+    let parent = tempfile::tempdir().unwrap();
+    let text = json!({
+        "claudeAiOauth": {
+            "accessToken": ACCESS, "refreshToken": REFRESH, "refreshTokenExpiresAt": at(NOW + 90 * 86_400),
+            "expiresAt": at(NOW + 5 * 3600), "scopes": ["user:inference"], "subscriptionType": "max",
+        },
+    })
+    .to_string();
+    let login = login(&text, person.home.path(), parent.path());
+    let folder = login.folder_at(at(NOW)).unwrap();
+    let held: Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join(".credentials.json")).unwrap())
+            .unwrap();
+    let oauth = held["claudeAiOauth"].as_object().unwrap();
+    assert_eq!(oauth["accessToken"], ACCESS);
+    assert_eq!(oauth["expiresAt"], at(NOW + 5 * 3600));
+    assert_eq!(oauth["subscriptionType"], "max");
+    for renewing in ["refreshToken", "refreshTokenExpiresAt"] {
+        assert!(!oauth.contains_key(renewing), "{renewing} is in the copy");
+    }
+    assert!(!everything_in(&folder).contains(REFRESH));
+    // The machine's login still has its refresh token, and the run ends well: held to the login it
+    // read, not to the copy.
+    login.finish().unwrap();
+    // The machine's file changed (its refresh token used by another): the run says so.
+    let machine = person.home.path().join("machine-login.json");
+    std::fs::write(&machine, text.replace(REFRESH, "sk-ant-ort01-USED")).unwrap();
+    let said = login.finish().unwrap_err().to_string();
+    assert!(said.contains("CHANGED THE OWNER'S CLAUDE SETUP"), "{said}");
+    assert!(!said.contains("USED"), "{said}");
+}
+
+#[test]
+fn a_claude_code_that_ended_badly_after_it_renewed_its_login_has_renewed_it_and_the_run_goes_on() {
+    let run = Renewing::new();
+    // Its model refused the owner's own session, as Sonnet 5.5 did on zeewin2 (exit 1, 2026-11-01).
+    let body = format!("{}\necho 'API Error: refused' >&2", run.renews());
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    let login = run.login(&ended, Some(zeewin2()), &body, 1);
+    let folder = login.folder_at(at(NOW)).unwrap();
+    let held: Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join(".credentials.json")).unwrap())
+            .unwrap();
+    assert_eq!(held["claudeAiOauth"]["accessToken"], RENEWED);
+    let made = login.made.lock().unwrap();
+    let renewed = made.as_ref().unwrap().renewed.as_ref().unwrap();
+    assert_eq!(
+        renewed.ended.as_deref(),
+        Some("it ended 1 (API Error: refused)")
+    );
+    assert!(renewed.moved());
+}
+
+#[test]
+fn a_login_runs_a_case_with_its_plan_and_ten_minutes_left_and_is_refused_with_less() {
+    // The margin is Pi's five minutes of a token it will not use, and five minutes more.
+    let plan = Duration::from_secs(10 * 60);
+    let need = lasting(plan);
+    assert_eq!(need, Duration::from_secs(20 * 60));
+    assert!(oauth(&machine_text(Duration::from_secs(25 * 60)), at(NOW), need).is_ok());
+    let said = oauth(&machine_text(Duration::from_secs(15 * 60)), at(NOW), need)
+        .unwrap_err()
+        .to_string();
+    assert!(said.contains("expires in 15 min"), "{said}");
+    assert!(said.contains("at least 20 min more"), "{said}");
 }

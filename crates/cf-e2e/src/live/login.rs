@@ -30,14 +30,15 @@
 //!
 //! **The refresh hazard.** A refresh token is used once: if the copy refreshes the
 //! access token, the person's Keychain item holds a refresh token that no longer
-//! works, and they are logged out the next time theirs needs it. Claude Code
-//! refreshes a token when five minutes of it are left (`now + 300000 >= expiresAt`,
-//! 2.1.309), so a run that is not longer than the token has left never does. A run
-//! starts only on a login whose access token lasts at least as long as the run is
-//! to take, with a margin: the length the case plans for itself and the margin
-//! ([`Login::of_machine_lasting`]: a live case states its own, minutes long, and an
-//! eval its own, hours long). It says it if the copy changed all the same: the folder's
-//! `.credentials.json` is compared with what was copied, and the Keychain with the
+//! works, and they are logged out the next time theirs needs it. So the folder's
+//! `.credentials.json` holds the access token and **no refresh token** ([`RENEWING`]): a
+//! Claude Code that cannot renew cannot use up the person's (measured on zeewin2, 2.1.316: it
+//! runs on such a copy, does not look at the copy's expiry, and where the server refuses the
+//! token it fails loudly with a 401, the person's login untouched). A run starts only on a login
+//! whose access token lasts at least as long as the run is to take, with a margin: the length the
+//! case plans for itself and the margin ([`Login::of_machine_lasting`]: a live case states its own,
+//! minutes long, and an eval its own, hours long). It says it if the copy changed all the same:
+//! the folder's `.credentials.json` is compared with what was copied, and the Keychain with the
 //! items it had. Nothing refreshes it by hand, here or anywhere. (On a test machine, the
 //! one exception: a login that has run short is renewed by Claude Code itself, run once as
 //! the owner, before the copy is made; see [`super::renew`], T-1067.)
@@ -442,14 +443,34 @@ fn changes(before: &Seen, after: &Seen, typed: &str) -> Vec<String> {
 struct Made {
     /// The folder, removed when this is dropped: with the run, however it ends.
     folder: TempDir,
-    /// The login as it was copied.
+    /// The login as it was copied: the machine's, without what renews it ([`RENEWING`]).
     oauth: Value,
+    /// The machine's login as it was read, refresh token and all: what the machine's file is
+    /// compared with when the run ends.
+    login: Value,
     /// The person's setup when it was made.
     owner: Seen,
     /// The Keychain items of Claude Code then; none where they cannot be listed.
     services: Option<BTreeSet<String>>,
     /// What the renewal of the login came to, where the login had run short on a test machine.
     renewed: Option<Renewed>,
+}
+
+/// What lets a login renew itself, and is never given to a run's copy: the refresh token and when it
+/// ends. A copy that holds only the access token cannot renew it, so it cannot use up the refresh
+/// token the machine keeps (T-1067, measured on zeewin2: Claude Code 2.1.316 runs on such a copy,
+/// does not look at its expiry, and fails with a 401 where the server refuses the token).
+const RENEWING: [&str; 2] = ["refreshToken", "refreshTokenExpiresAt"];
+
+/// The part of `oauth`, the machine's login, that a run's folder is given: all but what renews it.
+fn without_renewal(oauth: &Value) -> Value {
+    let mut copy = oauth.clone();
+    if let Some(fields) = copy.as_object_mut() {
+        for field in RENEWING {
+            fields.remove(field);
+        }
+    }
+    copy
 }
 
 /// The fields of a login that a refresh changes: the tokens, and when the access token ends. A
@@ -654,7 +675,8 @@ impl Login {
                 source,
             })?;
         private_folder(folder.path())?;
-        let credentials = json!({ "claudeAiOauth": oauth }).to_string();
+        let copy = without_renewal(&oauth);
+        let credentials = json!({ "claudeAiOauth": copy }).to_string();
         write_private(&folder.path().join(".credentials.json"), &credentials)?;
         write_private(&folder.path().join(".claude.json"), CLAUDE_JSON)?;
         // The live folders trusted as the owner's own config trusts them (T-629).
@@ -662,7 +684,8 @@ impl Login {
         let path = folder.path().to_path_buf();
         *made = Some(Made {
             folder,
-            oauth,
+            oauth: copy,
+            login: oauth,
             owner: self.owner.look(),
             services: keychain_services(),
             renewed,
@@ -689,10 +712,10 @@ fn claude_renewal(
             let program = program()?;
             let owner = Owner { home: home.clone() };
             let before = owner.look();
-            renew::one_shot(&program, &renew::claude_words(&model))?;
+            let ended = renew::one_shot(&program, &renew::claude_words(&model))?;
             let changed = owner.changes_since(&before);
             if changed.is_empty() {
-                return Ok(());
+                return Ok(ended);
             }
             Err(Error::Daemon(format!(
                 "it changed the owner's setup beside its login: {}",
@@ -858,7 +881,7 @@ impl ClaudeConfig for Login {
             let _ = writeln!(io::stderr(), "{}", renewed.said(renewal.machine()));
         }
         let mut touched = self.owner.changes_since(&made.owner);
-        touched.extend(self.owner_login_changed(&made.oauth));
+        touched.extend(self.owner_login_changed(&made.login));
         if let Some(note) = made.rewritten() {
             let _ = writeln!(io::stderr(), "note: {note}");
         }
@@ -873,7 +896,7 @@ impl ClaudeConfig for Login {
                 io::stderr(),
                 "the owner's Claude setup is as it was: login in {} {}, ~/.claude/settings.json {}; the copy of the login in the run's folder is as it was copied",
                 self.source.described(),
-                hash(&made.oauth.to_string()),
+                hash(&made.login.to_string()),
                 made.owner.settings.as_deref().map_or("none".to_owned(), |hash| hash[..12].to_owned())
             );
             return Ok(());
@@ -901,9 +924,9 @@ fn said(touched: &[String], refreshed: &[String]) -> String {
     }
     if !refreshed.is_empty() {
         said.push_str(
-            "THE RUN'S CLAUDE CODE REFRESHED ITS COPY OF THE LOGIN. A refresh token is used once, so the login \
-             this machine keeps (the Keychain's) may now be stale, and Claude Code may ask the owner to log in \
-             again:\n",
+            "THE RUN'S CLAUDE CODE REFRESHED ITS COPY OF THE LOGIN. The copy holds no refresh token, so it \
+             cannot have used up the one this machine keeps (that file is checked above), but it was given a \
+             login and wrote another:\n",
         );
         for change in refreshed {
             said.push_str(&format!("  - {change}\n"));

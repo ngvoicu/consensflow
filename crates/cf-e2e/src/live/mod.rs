@@ -64,8 +64,9 @@
 //! came to. A suite never sets or unsets `CLAUDE_CONFIG_DIR` (a test holds it to that),
 //! and ends its rigs by closing them, so that what the run did to the person's setup
 //! fails it. The rest is in [`login`]: the run refuses to start on a login that expires
-//! within the case's planned length and 30 minutes (a refresh by the copy would log the person out of the Keychain's),
-//! says it loudly if the copy was refreshed all the same, and fails if the person's
+//! within the case's planned length and ten minutes, and copies the login without its refresh
+//! token (a copy that cannot renew its access token cannot use up the Keychain's refresh token, and
+//! fails loudly where the access token ends), says it loudly if the copy was changed all the same, and fails if the person's
 //! `settings.json` changed, or `~/.claude.json`, `history.jsonl` or `projects` gained
 //! anything of the run's folders. A run with no home to look for the login in has none to
 //! copy, and is as it was. On Windows each Claude window starts through a `.cmd` and a Node

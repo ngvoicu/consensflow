@@ -13,9 +13,9 @@
 //!
 //! | Harness | Variables | Copied from the owner's | Watched in the owner's |
 //! |---|---|---|---|
-//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, with the case's planned length and 30 min of token | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
+//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
 //! | Codex | `CODEX_HOME` | `auth.json` | `auth.json`, `config.toml` |
-//! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
+//! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
 //!
 //! **Muse Code** sets none of these: its windows run through the rig's own launcher
@@ -30,13 +30,15 @@
 //! no arm for "any other": one added later is a decision, not a silence.
 //!
 //! **A login that refreshes.** A refresh token is used once, so a copy that refreshes leaves
-//! the owner's file with a token that no longer works. Pi refreshes an OAuth entry that has
-//! ended, so the run is given an entry only if it lasts the run's length and [`MARGIN`]
-//! ([`pi::login`]); one that does not is a refusal, in words, before anything is spent, except on
-//! a test machine, where Pi is first run once as the owner to renew an entry that has run short
-//! ([`super::renew`], T-1067). Codex and Devin keep a login that a run does not outlast (Devin's
-//! is a key); what Codex rewrote is said when the run ends. At the end the copies are compared with what was copied, and
-//! the owner's files with their hashes: a difference fails the run, naming the file, and
+//! the owner's file with a token that no longer works. So Pi's copy holds the access token and no
+//! refresh token ([`pi::login`]): it cannot renew, so it cannot use up the owner's, and where the
+//! access token is about to end (less than five minutes left) Pi tries to, is refused, and the run
+//! fails loudly. The run is given an entry only if it lasts the run's length and [`MARGIN`]; one
+//! that does not is a refusal, in words, before anything is spent, except on a test machine, where
+//! Pi is first run once as the owner to renew an entry that has run short ([`super::renew`],
+//! T-1067). Codex and Devin keep a login that a run does not outlast (Devin's is a key); what
+//! Codex rewrote is said when the run ends. At the end the copies are compared with what was
+//! copied, and the owner's files with their hashes: a difference fails the run, naming the file, and
 //! nothing a login holds is said anywhere.
 //!
 //! **`HOME` stays the person's.** The windows are given the person's home all the same, and none
@@ -78,9 +80,13 @@ use crate::{files, Error, Result};
 use watch::{shown, Seen};
 
 /// What a login must last beyond the run, which a case plans the length of
-/// ([`super::Log::lasting`]): the end of the run (the last look, the app's close) and the
-/// time the owner's own use of the harness needs to refresh it first.
-pub const MARGIN: Duration = Duration::from_secs(30 * 60);
+/// ([`super::Log::lasting`]). A run's copy holds no refresh token, so it can never use up the
+/// owner's ([`super::login`], [`pi`]); what is left to cover is the harness's own look at the end of
+/// the access token: Pi tries to renew an entry with less than five minutes of it left, is refused
+/// and fails the run loudly (measured on zeewin2, T-1067), and Claude Code's look is five minutes too.
+/// So a run is to end five minutes before that, with five minutes more for the end of the run (the
+/// last look, the app's close) and a case that overruns its plan a little.
+pub const MARGIN: Duration = Duration::from_secs(10 * 60);
 
 /// How long a login must last for a run that is planned to take `planned`, whatever the harness:
 /// the run and [`MARGIN`]. The case states `planned` ([`super::Log::lasting`]); a login that
@@ -787,9 +793,19 @@ fn said(harness: Harness, touched: &[String], refreshed: &[String]) -> String {
         }
     }
     if !refreshed.is_empty() {
+        // Pi is given its login without the refresh token: it cannot have used up the owner's.
+        let hazard = if harness == Harness::Pi {
+            "The copy holds no refresh token, so it cannot have used up the one the owner's file keeps \
+             (that file is checked above), but it was given a login and wrote another"
+                .to_owned()
+        } else {
+            format!(
+                "A refresh token is used once, so the login this machine keeps may now be stale, and {name} \
+                 may ask the owner to log in again"
+            )
+        };
         said.push_str(&format!(
-            "THE RUN'S {} WROTE ITS COPY OF THE LOGIN AGAIN. A refresh token is used once, so the login \
-             this machine keeps may now be stale, and {name} may ask the owner to log in again:\n",
+            "THE RUN'S {} WROTE ITS COPY OF THE LOGIN AGAIN. {hazard}:\n",
             name.to_uppercase()
         ));
         for change in refreshed {

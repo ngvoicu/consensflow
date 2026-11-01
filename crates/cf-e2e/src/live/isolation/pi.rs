@@ -22,6 +22,19 @@ use super::super::renew::{self, Renewal, TestMachine};
 use super::watch::Seen;
 use crate::{Error, Result};
 
+/// The entry `entry`, the owner's, as a run is given it: all but its refresh token. A copy that
+/// holds only the access token cannot renew it, so it cannot use up the refresh token the owner's
+/// file keeps (T-1067, measured on zeewin2: Pi 1.4.0 runs on such a copy, and where less than five
+/// minutes of the access token are left it tries to renew, is refused (`invalid_grant`) and fails
+/// the run loudly, the owner's file untouched).
+fn without_renewal(entry: &Value) -> Value {
+    let mut copy = entry.clone();
+    if let Some(fields) = copy.as_object_mut() {
+        fields.remove("refresh");
+    }
+    copy
+}
+
 /// The provider a Pi model name is on: what comes before the first `/`
 /// (`openrouter/meta/muse-spark-1.3` is on `openrouter`). A name with no `/` leaves it to
 /// Pi to find the provider, which is none.
@@ -141,7 +154,7 @@ pub fn login(
     for provider in wanted {
         match fit(held.get(provider), now, left) {
             Ok(()) => {
-                copied.insert(provider.to_owned(), held[provider].clone());
+                copied.insert(provider.to_owned(), without_renewal(&held[provider]));
             }
             Err(why) => unfit.push(format!("`{provider}` {}", why.said())),
         }
@@ -190,10 +203,10 @@ pub fn renewal(
             .into();
         let records = [agent.join("sessions")];
         let before = Seen::look(&files, &records);
-        renew::one_shot(&program, &renew::pi_words(&model))?;
+        let ended = renew::one_shot(&program, &renew::pi_words(&model))?;
         let changed = before.changes_to(&Seen::look(&files, &records), &home);
         if changed.is_empty() {
-            return Ok(());
+            return Ok(ended);
         }
         Err(Error::Daemon(format!(
             "it changed the owner's Pi files beside its login: {}",

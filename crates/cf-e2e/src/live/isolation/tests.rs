@@ -367,14 +367,14 @@ fn a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothing_els
 fn a_login_that_is_too_short_is_refused_before_anything_is_made_and_one_that_fits_the_run_is_not() {
     let owner = Owner::new();
     write(&owner.path(".pi/agent/auth.json"), &auth(hours(2)));
-    // An hour's run needs an hour and a half of the `openai` login's two.
+    // An hour's run needs an hour and ten minutes of the `openai` login's two.
     let fits = owner.pi("openai/gpt-6-luna", hours(1));
     assert!(fits.made_at(at(NOW)).is_ok());
     // Two hours' run, and the margin, does not fit it.
     let longer = owner.pi("openai/gpt-6-luna", hours(2));
     let said = longer.made_at(at(NOW)).unwrap_err().to_string();
     assert!(said.contains("`openai` expires in 2 h"), "{said}");
-    assert!(said.contains("at least 2 h 30 min more"), "{said}");
+    assert!(said.contains("at least 2 h 10 min more"), "{said}");
     assert!(!said_anywhere(&said), "{said}");
     // Only the home that fit is on disk.
     assert_eq!(owner.made(), 1);
@@ -1012,9 +1012,12 @@ use super::super::PLANNED;
 
 #[test]
 fn a_login_must_last_the_cases_planned_length_and_the_margin_whatever_the_harness() {
-    assert_eq!(lasting(PLANNED), Duration::from_secs(40 * 60));
-    assert_eq!(lasting(hours(1)), Duration::from_secs(90 * 60));
-    assert_eq!(lasting(Duration::from_secs(90 * 60)), hours(2));
+    assert_eq!(lasting(PLANNED), Duration::from_secs(20 * 60));
+    assert_eq!(lasting(hours(1)), Duration::from_secs(70 * 60));
+    assert_eq!(
+        lasting(Duration::from_secs(90 * 60)),
+        Duration::from_secs(100 * 60)
+    );
 }
 
 #[test]
@@ -1031,11 +1034,89 @@ fn a_pi_login_with_forty_two_minutes_left_runs_a_case_of_ten_minutes_and_not_one
     let longer = owner.pi("openai/gpt-6-luna", hours(1));
     let said = longer.made_at(at(NOW)).unwrap_err().to_string();
     assert!(said.contains("`openai` expires in 42 min"), "{said}");
-    assert!(said.contains("at least 1 h 30 min more"), "{said}");
+    assert!(said.contains("at least 1 h 10 min more"), "{said}");
     // The refusal says the harness renews an entry itself once it has ended.
     assert!(
         said.contains("Pi renews an entry itself once it has ended"),
         "{said}"
     );
     assert!(!said_anywhere(&said), "{said}");
+}
+
+// ---------------------------------------------------------------------- a copy that cannot renew (T-1067)
+
+#[test]
+fn a_pi_run_is_given_the_access_token_and_no_refresh_token_and_the_owners_file_is_held_to_all_of_it(
+) {
+    // Measured on zeewin2 (Pi 1.4.0): a copy with no refresh token runs; where less than five
+    // minutes of its access token are left, Pi tries to renew it, is refused (`invalid_grant`) and
+    // the run fails loudly, the owner's file untouched.
+    let owner = Owner::new();
+    let isolation = owner.pi("openai/gpt-6-luna", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let held: Value =
+        serde_json::from_str(&fs::read_to_string(home.join("pi/agent/auth.json")).unwrap())
+            .unwrap();
+    assert_eq!(held["openai"]["access"], ACCESS);
+    assert_eq!(held["openai"]["type"], "oauth");
+    assert!(held["openai"].get("refresh").is_none(), "{held}");
+    assert!(!held.to_string().contains(REFRESH));
+    // The owner's file is as it was, refresh token and all.
+    isolation.finish().unwrap();
+    assert!(fs::read_to_string(owner.path(".pi/agent/auth.json"))
+        .unwrap()
+        .contains(REFRESH));
+    // A Pi that failed to renew what it could not, and wrote its copy: said, without the old fear.
+    fs::write(
+        home.join("pi/agent/auth.json"),
+        json!({ "openai": { "type": "oauth", "access": ACCESS, "expires": 1 } }).to_string(),
+    )
+    .unwrap();
+    let said = isolation.finish().unwrap_err().to_string();
+    assert!(said.contains("WROTE ITS COPY OF THE LOGIN AGAIN"), "{said}");
+    assert!(said.contains("The copy holds no refresh token"), "{said}");
+    assert!(!said.contains("may now be stale"), "{said}");
+    assert!(!said_anywhere(&said), "{said}");
+}
+
+#[test]
+fn a_codex_copy_keeps_the_warning_that_it_may_have_used_up_the_machines_refresh_token() {
+    let said = said(
+        Harness::Codex,
+        &[],
+        &["the run's Codex wrote a different login".to_owned()],
+    );
+    assert!(said.contains("may now be stale"), "{said}");
+    assert!(!said.contains("holds no refresh token"), "{said}");
+}
+
+#[test]
+fn a_pi_entry_with_twenty_five_minutes_left_runs_a_case_of_ten_minutes_and_one_with_fifteen_does_not(
+) {
+    let owner = Owner::new();
+    for (left, runs) in [(25, true), (15, false)] {
+        write(
+            &owner.path(".pi/agent/auth.json"),
+            &auth_ending(ends(Duration::from_secs(left * 60)), ACCESS),
+        );
+        let made = owner.pi("openai/gpt-6-luna", PLANNED).made_at(at(NOW));
+        assert_eq!(made.is_ok(), runs, "{left} min left: {made:?}");
+    }
+}
+
+#[test]
+fn a_pi_harness_that_ended_badly_after_it_renewed_its_entry_has_renewed_it_and_the_run_goes_on() {
+    let run = Renewing::new();
+    let body = format!("{}\necho 'Error: model refused' >&2", run.renews());
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &body, 1);
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let held: Value =
+        serde_json::from_str(&fs::read_to_string(home.join("pi/agent/auth.json")).unwrap())
+            .unwrap();
+    assert_eq!(held["openai"]["access"], RENEWED);
+    let renewed = isolation.renewed.lock().unwrap();
+    assert_eq!(
+        renewed[0].ended.as_deref(),
+        Some("it ended 1 (Error: model refused)")
+    );
 }

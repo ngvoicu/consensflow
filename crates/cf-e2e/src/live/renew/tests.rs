@@ -38,6 +38,7 @@ fn renewed(before: Option<i64>, after: Option<i64>) -> Renewed {
         before,
         after,
         took: Duration::from_secs(12),
+        ended: None,
     }
 }
 
@@ -69,7 +70,7 @@ fn a_renewal_that_ran_and_failed_says_so_and_how() {
         machine(),
         "Claude Code",
         "only when five minutes of it are left",
-        || Ok(()),
+        || Ok(None),
     );
     let said = renewal.failed("it ended 1 (saying nothing)");
     assert_eq!(
@@ -132,7 +133,7 @@ fn a_renewal_runs_the_harness_once_and_reads_the_login_again() {
         move || {
             counted.fetch_add(1, Ordering::SeqCst);
             *written.lock().unwrap() = format!("ends 900 {SECRET}");
-            Ok(())
+            Ok(None)
         },
     );
     let ends = |text: &str| text.split(' ').nth(1).and_then(|ms| ms.parse::<i64>().ok());
@@ -276,12 +277,17 @@ mod running {
         let log = scratch.path().join("log");
         let printing = format!("echo {SECRET}; echo 'Not   logged in' >&2");
         let program = stand_in(scratch.path(), &log, &printing, 3);
-        let said = one_shot(&program, &[]).unwrap_err().to_string();
+        // It ran and ended badly: how, not an error (the renewal is judged by the login it left).
+        let said = one_shot(&program, &[]).unwrap().unwrap();
         assert!(said.contains("it ended 3 (Not logged in)"), "{said}");
         assert!(!said.contains(SECRET), "{said}");
         let silent = stand_in(scratch.path(), &log, "", 1);
-        let said = one_shot(&silent, &[]).unwrap_err().to_string();
+        let said = one_shot(&silent, &[]).unwrap().unwrap();
         assert!(said.contains("it ended 1 (saying nothing)"), "{said}");
+        // One that ended well says nothing; one that is no program is the error.
+        let well = stand_in(scratch.path(), &log, "", 0);
+        assert_eq!(one_shot(&well, &[]).unwrap(), None);
+        assert!(one_shot(&scratch.path().join("none"), &[]).is_err());
     }
 
     #[test]
@@ -291,8 +297,8 @@ mod running {
         let program = stand_in(scratch.path(), &log, "sleep 30", 0);
         let started = Instant::now();
         let said = one_shot_within(&program, &[], Duration::from_secs(1))
-            .unwrap_err()
-            .to_string();
+            .unwrap()
+            .unwrap();
         assert!(said.contains("it was ended after 1 s"), "{said}");
         assert!(
             started.elapsed() < Duration::from_secs(20),
@@ -305,3 +311,59 @@ mod running {
 
 #[cfg(unix)]
 pub(in crate::live) use running::stand_in;
+
+#[test]
+fn a_harness_that_ended_badly_after_it_renewed_its_login_has_renewed_it_and_one_that_did_not_has_not(
+) {
+    use std::sync::{Arc, Mutex};
+
+    // Claude Code on the owner's own session, on zeewin2 (2026-11-01): the login was renewed as the
+    // harness started, and its model then refused the session (an API error, status 1).
+    let keeps = Arc::new(Mutex::new(format!("ends 100 {SECRET}")));
+    let written = keeps.clone();
+    let renewal = Renewal::new(
+        machine(),
+        "Claude Code",
+        "when five minutes are left",
+        move || {
+            *written.lock().unwrap() = format!("ends 900 {SECRET}");
+            Ok(Some("it ended 1 (API Error)".to_owned()))
+        },
+    );
+    let ends = |text: &str| text.split(' ').nth(1).and_then(|ms| ms.parse::<i64>().ok());
+    let read = || Ok(keeps.lock().unwrap().clone());
+    let kept = Kept {
+        file: "~/.claude/.credentials.json".to_owned(),
+        login: "Claude Code's login".to_owned(),
+        read: &read,
+        expiry: &ends,
+    };
+    let (_, renewed) = renewal.renew(&kept, &format!("ends 100 {SECRET}")).unwrap();
+    assert!(renewed.moved());
+    assert_eq!(renewed.ended.as_deref(), Some("it ended 1 (API Error)"));
+    let said = renewed.said(&machine());
+    assert!(
+        said.contains("the harness ended badly after renewing it: it ended 1 (API Error)"),
+        "{said}"
+    );
+    assert!(!said.contains(SECRET), "{said}");
+    // The same ending with the login where it was: the renewal failed, as the harness said.
+    let still = Renewal::new(
+        machine(),
+        "Claude Code",
+        "when five minutes are left",
+        || Ok(Some("it ended 1 (API Error)".to_owned())),
+    );
+    let fixed = || Ok(format!("ends 100 {SECRET}"));
+    let kept = Kept {
+        read: &fixed,
+        ..kept
+    };
+    let said = still
+        .renew(&kept, &format!("ends 100 {SECRET}"))
+        .unwrap_err();
+    assert!(
+        said.contains("the renewal ran and failed: it ended 1 (API Error)"),
+        "{said}"
+    );
+}
