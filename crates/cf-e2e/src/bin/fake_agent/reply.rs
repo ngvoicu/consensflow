@@ -83,6 +83,9 @@
 //!   PreToolUse hook of the settings file this window was launched with runs on
 //!   a synthetic AskUserQuestion event, and the turn answers with what the hook
 //!   handed back.
+//! - A window started with `CF_TEST_SCRIPTED_RESULTS` set (a folder of an eval run's, the
+//!   evals' stand-in reviewer) answers each task brief with the next result of the folder, and
+//!   nothing else of what is written here (`scripted`).
 //! - A question whose text says `REPLY <words>` is answered with `cf answer`.
 //! - `REPLY <words> THEN <line>` answers it so and goes on, in the same turn, with `line`
 //!   as the line it was given, and ends with what that answers: a window that answers
@@ -102,6 +105,7 @@ use serde_json::{json, Value};
 
 use crate::agents::Agents;
 use crate::background::{until_up, Jobs, Server, THINKING};
+use crate::scripted;
 use crate::steps::Tasks;
 use crate::stop::Stop;
 
@@ -293,6 +297,11 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
 
     if spent(window) {
         return Ok(Reply::Refused);
+    }
+    if let Some(folder) = own_var(scripted::FOLDER) {
+        if let Some(result) = scripted::answer(Path::new(&folder), text)? {
+            return Ok(Reply::Text(result));
+        }
     }
     let accepts = accepting(
         own_var("CF_TEST_ACCEPT_RESULTS").as_deref(),

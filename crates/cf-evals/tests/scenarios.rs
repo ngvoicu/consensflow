@@ -76,7 +76,7 @@ pub fn scenario(id: &str) -> Scenario {
 
 /// The scenarios written after the JavaScript was gone, which no golden holds: their
 /// expectations are held by `tests/scenarios/verdicts.rs` alone.
-const AFTER_NODE: [&str; 1] = ["uncommitted-work"];
+const AFTER_NODE: [&str; 3] = ["review-blockers", "review-loop", "uncommitted-work"];
 
 #[test]
 fn every_scenario_says_what_the_javascript_one_said_word_for_word() {
@@ -115,8 +115,8 @@ fn each_scenario_judges_each_recorded_ledger_as_the_javascript_one_did() {
 }
 
 #[test]
-fn the_thirteen_scenarios_are_found_by_their_ids_and_no_other() {
-    assert_eq!(scenarios::IDS.len(), 13);
+fn the_fifteen_scenarios_are_found_by_their_ids_and_no_other() {
+    assert_eq!(scenarios::IDS.len(), 15);
     for id in scenarios::IDS {
         assert_eq!(scenarios::by_id(id).unwrap().id, id);
     }
@@ -125,7 +125,7 @@ fn the_thirteen_scenarios_are_found_by_their_ids_and_no_other() {
     let mut ids = scenarios::IDS.to_vec();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(ids.len(), 13, "one each");
+    assert_eq!(ids.len(), 15, "one each");
 }
 
 #[test]
@@ -184,4 +184,142 @@ fn only_the_chief_switch_scenario_switches_the_chief_and_its_codeword_is_a_bird_
         .map(|_| scenarios::by_id("chief-switch").unwrap().prompt)
         .collect();
     assert!(all.len() > 1);
+}
+
+/// The first words of a result a reviewer begins with, by `skill/core/staff.md`: whether the
+/// work is ready.
+const READINESS: [&str; 3] = ["Not ready.", "Ready with notes.", "Ready."];
+
+#[test]
+fn only_the_review_scenarios_script_a_reviewer_and_each_review_has_the_form_the_role_text_asks_of_one(
+) {
+    for id in scenarios::IDS {
+        let scenario = scenarios::by_id(id).unwrap();
+        if id != "review-loop" && id != "review-blockers" {
+            assert!(scenario.stand_in_reviews.is_empty(), "{id}");
+            continue;
+        }
+        assert_eq!(
+            scenario.stand_in_reviews.len(),
+            3,
+            "{id}: three reviews, the last again for any more"
+        );
+        for (at, review) in scenario.stand_in_reviews.iter().enumerate() {
+            // Whether the work is ready, first; and what the chief has to decide.
+            assert!(
+                READINESS.iter().any(|ready| review.starts_with(ready)),
+                "{id} review {at}: {review}"
+            );
+            let first_line = review.lines().next().unwrap();
+            assert!(
+                first_line.contains("Decide"),
+                "{id} review {at}: {first_line}"
+            );
+            // Each finding numbered so that a later review can name it, with whether it blocks.
+            let findings: Vec<&str> = review
+                .lines()
+                .filter(|line| {
+                    line.split_once(' ').is_some_and(|(word, _)| {
+                        word.strip_prefix('F')
+                            .is_some_and(|n| n.parse::<u8>().is_ok())
+                    })
+                })
+                .collect();
+            assert!(!findings.is_empty(), "{id} review {at}");
+            for finding in &findings {
+                assert!(
+                    finding.contains("[blocks]")
+                        || finding.contains("does not block")
+                        || finding.contains("fixed")
+                        || finding.contains("[blocks"),
+                    "{id} review {at}: {finding}"
+                );
+            }
+            // A blocker names its requirement, its case, its failure and its evidence.
+            if review.contains("[blocks") {
+                for part in [
+                    "Requirement:",
+                    "Case:",
+                    "Failure:",
+                    "Evidence:",
+                    "Location:",
+                ] {
+                    assert!(review.contains(part), "{id} review {at} lacks {part}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_review_loop_holds_one_blocker_and_notes_then_notes_only_then_notes_only_again() {
+    let scenario = scenarios::by_id("review-loop").unwrap();
+    let [first, second, third] = scenario.stand_in_reviews.as_slice() else {
+        panic!("three reviews");
+    };
+    assert!(first.starts_with("Not ready."));
+    assert_eq!(first.matches("[blocks]").count(), 1, "one bug");
+    assert!(first.matches("[note").count() >= 3, "several notes");
+    for later in [second, third] {
+        assert!(later.starts_with("Ready with notes."), "{later}");
+        assert!(!later.contains("[blocks"), "notes only: {later}");
+    }
+    // The second says of the bug that it is fixed; the third has nothing of it left to say.
+    assert!(second.contains("F1 fixed."));
+    assert!(!third.contains("F1"));
+}
+
+#[test]
+fn review_blockers_holds_a_blocker_and_then_a_different_one_that_the_fix_left() {
+    let scenario = scenarios::by_id("review-blockers").unwrap();
+    let [first, second, third] = scenario.stand_in_reviews.as_slice() else {
+        panic!("three reviews");
+    };
+    assert!(first.starts_with("Not ready.") && first.contains("F1 [blocks]"));
+    assert!(
+        second.starts_with("Not ready.")
+            && second.contains("F6 new [blocks, caused by the fix to F1]")
+    );
+    assert!(second.contains("F1 fixed."));
+    assert!(
+        !second.contains("F1 [blocks]"),
+        "a different blocker, not the first again"
+    );
+    assert!(third.starts_with("Ready with notes.") && !third.contains("[blocks"));
+    // The owner knows which scale is the product's, and says so to a question about it.
+    let asked = scenario.answers.iter().any(|answer| {
+        answer
+            .matches
+            .is_match("Care e scala corectă, de la 1 la 5 sau de la 0 la 100?")
+            && answer.text.contains("1 la 5")
+    });
+    assert!(asked);
+}
+
+#[test]
+fn the_review_prompts_say_what_the_work_is_and_that_it_is_reviewed_and_nothing_of_what_to_do_with_a_finding(
+) {
+    for id in ["review-loop", "review-blockers"] {
+        let prompt = scenarios::by_id(id).unwrap().prompt;
+        assert!(
+            prompt.contains("site/en/assessment.html") && prompt.contains("reviewer"),
+            "{id}"
+        );
+        // What the chief does with a finding is what the eval measures: the owner says none of it.
+        for word in ["F1", "reopen", "redeschid", "înapoi", "blocant", "ghidul"] {
+            assert!(
+                !prompt.to_lowercase().contains(&word.to_lowercase()),
+                "{id}: {word}"
+            );
+        }
+    }
+    // One asks the chief to leave the owner out of it, the other lets it ask.
+    assert!(scenarios::by_id("review-loop")
+        .unwrap()
+        .prompt
+        .contains("Nu mă întreba"));
+    assert!(scenarios::by_id("review-blockers")
+        .unwrap()
+        .prompt
+        .contains("întreabă-mă"));
 }

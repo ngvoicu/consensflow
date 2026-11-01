@@ -34,6 +34,7 @@ use serde_json::{json, Value};
 
 use super::machine::Machine;
 use super::options::Crew;
+use super::stand_in::{self, Reviews};
 use crate::plan::{harness, ChiefSetup};
 use crate::{Error, Result};
 
@@ -128,6 +129,43 @@ fn pi_script(real: &str, model: &str, thinking: &str) -> String {
     .join("\n")
 }
 
+/// The shell script of the `claude` wrapper of a run that has a stand-in reviewer: a window on the
+/// model [`stand_in::MODEL`] is the stand-in agent, started with the folder of this run's results,
+/// and only if the run's marker is in that folder and the agent is there. Where it is not (a wrapper
+/// left on disk after its run, which removed the folder) the window is refused with a word that says
+/// why, and neither the stand-in nor the real Claude runs. Any other window is started as [`script`]
+/// starts it.
+fn script_with_stand_in(real: &str, flags: &[String], reviews: &Reviews) -> String {
+    let word = |path: &Path| shell_word(&path.to_string_lossy());
+    let (agent, folder) = (word(reviews.agent()), word(reviews.folder()));
+    let marker = word(&reviews.folder().join(stand_in::MARKER));
+    let (model, variable) = (stand_in::MODEL, stand_in::FOLDER);
+    let refused = format!(
+        "cf-evals: {model} is the stand-in reviewer of an eval run, and this is none: refused"
+    );
+    let words: Vec<String> = std::iter::once(real)
+        .chain(flags.iter().map(String::as_str))
+        .map(shell_word)
+        .collect();
+    [
+        "#!/bin/sh".to_owned(),
+        format!("# {WHY}"),
+        format!("# A window on the model {model} is the stand-in reviewer of this run, and answers in a run and nowhere else."),
+        "case \" $* \" in".to_owned(),
+        format!("  *\" --model {model} \"*)"),
+        format!("    if [ -f {marker} ] && [ -x {agent} ]; then"),
+        format!("      {variable}={folder}; export {variable}"),
+        format!("      exec {agent} \"$@\""),
+        "    fi".to_owned(),
+        format!("    echo {} >&2", shell_word(&refused)),
+        "    exit 1 ;;".to_owned(),
+        "esac".to_owned(),
+        format!("exec {} \"$@\"", words.join(" ")),
+        String::new(),
+    ]
+    .join("\n")
+}
+
 /// The wrapper `name` that starts `real` with `flags`, in `bin`: where a window
 /// finds it.
 fn emit(machine: &Machine, name: &str, real: &Path, flags: &[String]) -> Result<PathBuf> {
@@ -155,6 +193,30 @@ fn emit(machine: &Machine, name: &str, real: &Path, flags: &[String]) -> Result<
 /// Writes the wrappers a run needs, in a folder of its own, fresh: a wrapper
 /// written for another chief must not outlive its run.
 pub fn write(machine: &Machine, crew: &Crew, chief: &ChiefSetup) -> Result<Wrappers> {
+    write_with(machine, crew, chief, None)
+}
+
+/// [`write`], for a run that may have a stand-in reviewer (`reviews`): its `claude` wrapper
+/// starts the stand-in for a window on the stand-in's model. That wrapper is a shell script, the
+/// Mac's alone, and the run must have a Claude Code in it.
+pub fn write_with(
+    machine: &Machine,
+    crew: &Crew,
+    chief: &ChiefSetup,
+    reviews: Option<&Reviews>,
+) -> Result<Wrappers> {
+    if reviews.is_some() && !crew.in_run("claude") {
+        return Err(Error::Refused(
+            "the stand-in reviewer is a Claude Code window: claude must be the chief or on the staff"
+                .to_owned(),
+        ));
+    }
+    if reviews.is_some() && cfg!(windows) {
+        return Err(Error::Refused(
+            "the stand-in reviewer's wrapper is a shell script: run the review scenarios on the Mac"
+                .to_owned(),
+        ));
+    }
     let bin = machine.bin();
     // A folder that is not there is already fresh.
     let _ = fs::remove_dir_all(&bin);
@@ -162,7 +224,18 @@ pub fn write(machine: &Machine, crew: &Crew, chief: &ChiefSetup) -> Result<Wrapp
     let mut wrappers = Wrappers::default();
     if crew.in_run("claude") {
         let real = machine.install("claude")?.command();
-        wrappers.claude = Some(emit(machine, "claude", real, &claude_flags(crew))?);
+        let flags = claude_flags(crew);
+        wrappers.claude = Some(match reviews {
+            Some(reviews) => {
+                let program = bin.join("claude");
+                files::write_executable(
+                    &program,
+                    script_with_stand_in(&real.to_string_lossy(), &flags, reviews),
+                )?;
+                program
+            }
+            None => emit(machine, "claude", real, &flags)?,
+        });
     }
     if crew.chief == "pi" {
         if cfg!(windows) {

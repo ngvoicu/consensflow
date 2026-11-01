@@ -58,6 +58,10 @@ struct Scene {
 pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
     let (options, scenario) = (plan.options, &plan.options.scenario);
     let mut floor = Floor::new(out);
+    // The stand-in reviewer answers each play from its first review.
+    if let Some(reviews) = &plan.reviews {
+        reviews.restart()?;
+    }
     let workspace = workspace::fresh(plan.machine, scenario)?;
     let rig = start(plan, &mut floor, &workspace)?;
     let mut scene = Scene {
@@ -85,6 +89,7 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
             pickers: scene.said.dialogs,
             read: Some(&scene.read),
             gone: scenario.counts_gone_files(),
+            rounds: scenario.reads_the_rounds(),
         },
     )?;
     let checks = scenario.verdict(&metrics);

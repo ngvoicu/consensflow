@@ -31,6 +31,7 @@ pub(super) fn scenario() -> Scenario {
         // daemon's own Escape on a pause counts as typing, so a tell to those
         // windows waits out the grace before it is pasted (a known bug).
         quiet: Duration::from_secs(240),
+        stand_in_reviews: Vec::new(),
         expectations: vec![
             expect("the chief stops the task with cf tell", |m| {
                 m.plumbing.tells >= 1

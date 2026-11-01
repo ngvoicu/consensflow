@@ -275,3 +275,180 @@ fn a_harness_that_is_not_in_the_run_is_an_error_that_names_it() {
         "{failed}"
     );
 }
+
+/// The stand-in reviewer of a run of `review-loop` on `machine`, played by `agent`.
+#[cfg(unix)]
+fn stand_in_reviews(machine: &Machine, agent: &Path) -> Reviews {
+    let scenario = crate::scenarios::by_id("review-loop").unwrap();
+    Reviews::of(machine, &scenario, agent).unwrap()
+}
+
+/// What the wrapper at `wrapper` does with `words`: the code it exits with, and what it prints.
+#[cfg(unix)]
+fn ran(wrapper: &Path, words: &[&str]) -> (Option<i32>, String, String) {
+    let ran = cf_e2e::process::Run::new("/bin/sh")
+        .arg(wrapper)
+        .args(words)
+        .run()
+        .unwrap();
+    (ran.code, ran.stdout, ran.stderr)
+}
+
+/// A run's machine with a real Claude that echoes its words, a stand-in agent that writes the folder
+/// it was given and its words to `played`, and the claude wrapper written for a stand-in reviewer.
+#[cfg(unix)]
+fn with_a_stand_in(home: &Path) -> (Machine, Reviews, PathBuf, PathBuf) {
+    let machine = machine(home, &[(Harness::Claude, Path::new("/bin/echo"))]);
+    let played = home.join("played");
+    let agent = home.join("fake-agent");
+    cf_e2e::files::write_executable(
+        &agent,
+        format!(
+            "#!/bin/sh\nprintf '%s|%s\\n' \"$CF_TEST_SCRIPTED_RESULTS\" \"$*\" > '{}'\n",
+            played.display()
+        ),
+    )
+    .unwrap();
+    let reviews = stand_in_reviews(&machine, &agent);
+    let run_options = options("--chief claude --staff claude");
+    let chief = chief_environment("claude", None).unwrap();
+    let wrappers = write_with(&machine, &run_options, &chief, Some(&reviews)).unwrap();
+    (machine, reviews, wrappers.claude.unwrap(), played)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_window_on_the_stand_in_model_is_the_stand_in_agent_with_this_runs_folder_and_its_words() {
+    let home = tempfile::tempdir().unwrap();
+    let (_machine, reviews, wrapper, played) = with_a_stand_in(home.path());
+    reviews.restart().unwrap();
+    let (code, stdout, stderr) = ran(
+        &wrapper,
+        &[
+            "--session-id",
+            "s-1",
+            "--model",
+            "scripted-reviewer",
+            "--effort",
+            "medium",
+            "the brief",
+        ],
+    );
+    assert_eq!((code, stdout.as_str(), stderr.as_str()), (Some(0), "", ""));
+    assert_eq!(
+        cf_e2e::files::read_string(&played).unwrap(),
+        format!(
+            "{}|--session-id s-1 --model scripted-reviewer --effort medium the brief\n",
+            reviews.folder().display()
+        ),
+        "the stand-in, with the folder and the words as the daemon gave them: none of the wrapper's flags"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_window_on_any_other_model_is_the_real_claude_with_the_flags_as_always() {
+    let home = tempfile::tempdir().unwrap();
+    let (_machine, reviews, wrapper, played) = with_a_stand_in(home.path());
+    reviews.restart().unwrap();
+    for model in [
+        "claude-haiku-4-5-20251001",
+        "scripted-reviewer-2",
+        "xscripted-reviewer",
+    ] {
+        let (code, stdout, _) = ran(&wrapper, &["--session-id", "s-1", "--model", model]);
+        assert_eq!(code, Some(0));
+        assert_eq!(
+            stdout,
+            format!(
+                "--strict-mcp-config --no-chrome --effort high --session-id s-1 --model {model}\n"
+            )
+        );
+    }
+    assert!(!played.exists(), "the stand-in never ran");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_wrapper_refuses_the_stand_in_model_outside_an_eval_run_and_runs_neither_program() {
+    let home = tempfile::tempdir().unwrap();
+    let (_machine, reviews, wrapper, played) = with_a_stand_in(home.path());
+    let words = [
+        "--session-id",
+        "s-1",
+        "--model",
+        "scripted-reviewer",
+        "the brief",
+    ];
+    // Before the run made its folder, and once it has made it: the run's marker is what lets it in.
+    let refused = |when: &str| {
+        let (code, stdout, stderr) = ran(&wrapper, &words);
+        assert_eq!(code, Some(1), "{when}");
+        assert_eq!(stdout, "", "{when}: the real Claude did not run");
+        assert!(
+            stderr.contains("scripted-reviewer is the stand-in reviewer of an eval run, and this is none: refused"),
+            "{when}: {stderr}"
+        );
+        assert!(!played.exists(), "{when}: the stand-in did not run");
+    };
+    refused("before the run's folder");
+    reviews.restart().unwrap();
+    let marker = reviews.folder().join(".eval-run");
+    std::fs::remove_file(&marker).unwrap();
+    refused("a folder with no marker");
+    // The run is over: its folder is gone, and the wrapper it left is refused the same way.
+    drop(reviews);
+    refused("after the run");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_wrapper_refuses_the_stand_in_model_when_the_agent_is_not_there() {
+    let home = tempfile::tempdir().unwrap();
+    let (_machine, reviews, wrapper, played) = with_a_stand_in(home.path());
+    reviews.restart().unwrap();
+    std::fs::remove_file(home.path().join("fake-agent")).unwrap();
+    let (code, stdout, stderr) = ran(
+        &wrapper,
+        &["--session-id", "s-1", "--model", "scripted-reviewer"],
+    );
+    assert_eq!((code, stdout.as_str()), (Some(1), ""));
+    assert!(stderr.contains("this is none: refused"), "{stderr}");
+    assert!(!played.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_with_no_stand_in_has_a_wrapper_that_knows_no_such_model() {
+    let home = tempfile::tempdir().unwrap();
+    let machine = machine(home.path(), &[(Harness::Claude, Path::new("/bin/echo"))]);
+    let chief = chief_environment("claude", None).unwrap();
+    let wrappers = write(&machine, &options("--chief claude"), &chief).unwrap();
+    let text = cf_e2e::files::read_string(wrappers.claude.as_deref().unwrap()).unwrap();
+    assert!(
+        !text.contains("scripted-reviewer") && !text.contains("fake-agent"),
+        "{text}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stand_in_needs_a_claude_in_the_run_and_a_machine_that_is_not_windows() {
+    let home = tempfile::tempdir().unwrap();
+    let machine = machine(home.path(), &[(Harness::Pi, Path::new("/bin/echo"))]);
+    let reviews = stand_in_reviews(&machine, Path::new("/bin/fake-agent"));
+    let chief = chief_environment("pi", None).unwrap();
+    let failed = write_with(
+        &machine,
+        &options("--chief pi --staff pi"),
+        &chief,
+        Some(&reviews),
+    )
+    .unwrap_err();
+    assert!(
+        failed
+            .to_string()
+            .contains("claude must be the chief or on the staff"),
+        "{failed}"
+    );
+}

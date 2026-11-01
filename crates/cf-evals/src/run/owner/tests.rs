@@ -16,6 +16,7 @@ fn scenario(nudge: Option<&'static str>, follow_ups: Vec<FollowUp>) -> Scenario 
         fallback: String::new(),
         nudge,
         quiet: Duration::from_secs(90),
+        stand_in_reviews: Vec::new(),
         expectations: Vec::new(),
     }
 }

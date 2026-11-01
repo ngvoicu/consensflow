@@ -43,6 +43,58 @@ impl FileRead {
     }
 }
 
+/// A time a task was sent back to its window: when, and the chief's words.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Reopen {
+    pub at: String,
+    pub body: String,
+}
+
+/// The rounds of one task the chief asked for: when it was asked for and with what
+/// brief, when each result came in, each time the chief sent it back and with what
+/// words, and when it was accepted. The times are the ledger's own, which sort as
+/// text; a scenario that holds the chief to what it did after a result compares them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Rounds {
+    pub number: i64,
+    pub pool: Option<String>,
+    pub state: String,
+    pub created_at: String,
+    /// The brief the chief wrote.
+    pub brief: String,
+    /// When each result that stood came in, in order (one withdrawn is none).
+    pub results: Vec<String>,
+    pub reopens: Vec<Reopen>,
+    /// When the task was accepted last, if it is accepted.
+    pub accepted_at: Option<String>,
+}
+
+impl Rounds {
+    /// Whether the task went to a reviewer.
+    pub fn is_review(&self) -> bool {
+        self.pool.as_deref() == Some("reviewer")
+    }
+
+    /// Whether the task is work for a worker (a task given to a window by name has no
+    /// pool): not a review, advice, a test or an image.
+    pub fn is_work(&self) -> bool {
+        matches!(self.pool.as_deref(), None | Some("worker"))
+    }
+
+    /// When the first result that stood came in.
+    pub fn first_result(&self) -> Option<&str> {
+        self.results.first().map(String::as_str)
+    }
+
+    /// The times the chief sent it back after `time`.
+    pub fn reopens_after(&self, time: &str) -> Vec<&Reopen> {
+        self.reopens
+            .iter()
+            .filter(|reopen| reopen.at.as_str() > time)
+            .collect()
+    }
+}
+
 /// A note the chief sent the human: the start of its words.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Note {
@@ -151,6 +203,10 @@ pub struct Metrics {
     /// The files the scenario reads whole ([`crate::scenarios::Scenario::reads`]), by
     /// their paths.
     pub files_read: BTreeMap<String, FileRead>,
+    /// The rounds of each task the chief asked for, by number, for a scenario that
+    /// holds the chief to what it did with a result ([`crate::scenarios::Scenario::reads_the_rounds`]);
+    /// none for any other.
+    pub rounds: Option<Vec<Rounds>>,
 }
 
 impl Metrics {
@@ -161,7 +217,7 @@ impl Metrics {
     }
 
     /// `value`, a report's numbers, with what JavaScript had none of at its end, for a
-    /// scenario that looks at it only: `filesGone`, then `filesRead`.
+    /// scenario that looks at it only: `filesGone`, then `filesRead`, then `rounds`.
     pub fn with_files(&self, mut value: Value) -> Value {
         if let Some(gone) = &self.files_gone {
             value["filesGone"] = json!(gone);
@@ -173,6 +229,9 @@ impl Metrics {
                 .map(|(file, read)| (file.clone(), read.to_value()))
                 .collect::<serde_json::Map<_, _>>()
                 .into();
+        }
+        if let Some(rounds) = &self.rounds {
+            value["rounds"] = rounds.iter().map(rounds_value).collect::<Vec<_>>().into();
         }
         value
     }
@@ -218,6 +277,21 @@ impl Metrics {
             "filesChanged": self.files_changed,
         }))
     }
+}
+
+fn rounds_value(rounds: &Rounds) -> Value {
+    json!({
+        "number": rounds.number,
+        "pool": rounds.pool,
+        "state": rounds.state,
+        "createdAt": rounds.created_at,
+        "brief": rounds.brief,
+        "results": rounds.results,
+        "reopens": rounds.reopens.iter()
+            .map(|reopen| json!({ "at": reopen.at, "body": reopen.body }))
+            .collect::<Vec<_>>(),
+        "acceptedAt": rounds.accepted_at,
+    })
 }
 
 fn task_value(task: &Task) -> Value {

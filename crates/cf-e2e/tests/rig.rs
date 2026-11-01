@@ -129,6 +129,8 @@ mod pending_agents;
 mod printed_output;
 #[path = "rig/reports.rs"]
 mod reports;
+#[path = "rig/scripted_reviewer.rs"]
+mod scripted_reviewer;
 #[path = "rig/specs.rs"]
 mod specs;
 // The packaged smoke's stand-in is a shell script.

@@ -137,6 +137,17 @@ fn a_bare_chief_has_no_card_to_be_switched_from_so_the_scenario_that_switches_is
 }
 
 #[test]
+fn a_bare_chief_has_no_board_to_review_on_so_the_review_scenarios_are_refused_for_it() {
+    for id in ["review-loop", "review-blockers"] {
+        assert_eq!(
+            of(&format!("--scenario {id} --arm bare")).unwrap_err().to_string(),
+            format!("{id} holds the chief to what it does with a review on the board, which a bare chief has none of")
+        );
+        assert!(of(&format!("--scenario {id}")).is_ok());
+    }
+}
+
+#[test]
 fn a_number_of_runs_or_minutes_that_is_no_number_is_the_humans_mistake() {
     assert_eq!(of("--repeat 3").unwrap().repeat, 3);
     // The login a command's plays run on must last every repeat at its limit.
@@ -174,4 +185,24 @@ fn a_gate_and_a_model_are_taken_as_given() {
         "the last of a flag given twice is the one"
     );
     assert_eq!(Arm::NoCard.name(), "nocard");
+}
+
+#[test]
+fn a_review_scenario_needs_a_claude_code_in_the_run_for_its_stand_in_reviewer() {
+    for id in ["review-loop", "review-blockers"] {
+        let refused = format!(
+            "{id} has a stand-in reviewer, a Claude Code window: claude must be the chief or on --staff"
+        );
+        assert_eq!(
+            of(&format!("--scenario {id} --chief codex --staff pi"))
+                .unwrap_err()
+                .to_string(),
+            refused
+        );
+        assert!(of(&format!("--scenario {id} --chief codex --staff pi,claude")).is_ok());
+        assert!(of(&format!("--scenario {id} --chief claude --staff codex")).is_ok());
+        assert!(of(&format!("--scenario {id}")).is_ok());
+    }
+    // Any other scenario runs without one.
+    assert!(of("--scenario round-trip --chief codex --staff pi").is_ok());
 }

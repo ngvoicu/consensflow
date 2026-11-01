@@ -139,6 +139,12 @@ impl Machine {
         self.below("workspace")
     }
 
+    /// The folder of the stand-in reviewer's results, which only a run that has one makes
+    /// ([`super::stand_in`]).
+    pub fn scripted_reviews(&self) -> PathBuf {
+        self.below("scripted-reviews")
+    }
+
     /// The wrappers every Claude and Codex window of a run starts through, first on
     /// the `PATH` of the daemon.
     pub fn bin(&self) -> PathBuf {

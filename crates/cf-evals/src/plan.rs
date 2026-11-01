@@ -69,6 +69,14 @@ pub fn harness(name: &str) -> Result<Harness> {
         .ok_or_else(|| Error::Refused(format!("no such eval harness: {name}")))
 }
 
+/// The model of the stand-in reviewer of a scenario that scripts one
+/// ([`crate::scenarios::Scenario::stand_in_reviews`]): the eval's `claude` wrapper starts a window
+/// on it as the stand-in agent, and refuses it outside an eval run.
+pub const STAND_IN_MODEL: &str = "scripted-reviewer";
+
+/// The roster id of the stand-in reviewer.
+pub const STAND_IN_AGENT: &str = "eval-scripted-reviewer";
+
 /// The roles a staff harness fills: two workers, so parallel work has somewhere to run.
 const ROLES: [(&str, &str); 4] = [
     ("worker", "worker"),
@@ -190,6 +198,31 @@ pub fn staff_for<S: AsRef<str>>(
             staff.agents.push(Agent::new(id, harness, model, effort));
         }
     }
+    Ok(staff)
+}
+
+/// `staff` with its reviewers taken out and one stand-in reviewer (a Claude Code agent on
+/// [`STAND_IN_MODEL`], standard tier) in their place: the workers and the advisors stay what
+/// they were, and a review can only go to the stand-in.
+pub fn with_stand_in_reviewer(mut staff: Staff, effort: Option<&str>) -> Result<Staff> {
+    let reviewers: Vec<String> = staff
+        .members
+        .iter()
+        .filter(|member| member.role == "reviewer")
+        .map(|member| member.agent.clone())
+        .collect();
+    staff.members.retain(|member| member.role != "reviewer");
+    staff.agents.retain(|agent| !reviewers.contains(&agent.id));
+    staff.members.push(Member {
+        agent: STAND_IN_AGENT.to_owned(),
+        role: "reviewer",
+    });
+    staff.agents.push(Agent::new(
+        STAND_IN_AGENT.to_owned(),
+        harness("claude")?,
+        STAND_IN_MODEL,
+        effort,
+    ));
     Ok(staff)
 }
 

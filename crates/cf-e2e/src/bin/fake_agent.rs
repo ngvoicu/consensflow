@@ -112,6 +112,8 @@ mod noise;
 mod records;
 #[path = "fake_agent/reply.rs"]
 mod reply;
+#[path = "fake_agent/scripted.rs"]
+mod scripted;
 #[path = "fake_agent/signals.rs"]
 mod signals;
 #[path = "fake_agent/status_line.rs"]

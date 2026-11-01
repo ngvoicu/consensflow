@@ -208,6 +208,65 @@ a score).
   that staged the owner's page before adding its line, and then checked the
   file out, passes on the page it left.
 
+- `review-loop` and `review-blockers` (spec `smaller-contexts`, SCX-17, T-1010): what a
+  chief does with the findings of a review, held to the rule of `skill/core/chief.md`,
+  "Reviews" (T-1009; the evidence is T-1008: on poker-lab's board 211 of 224 reviews said FIX
+  FIRST, and one runbook was reviewed from round 31 to round 45). The reviewer is a **stand-in**,
+  a scripted member (`Scenario::stand_in_reviews`): the findings are the same whoever the chief
+  is, and what is measured is its judgment of them. The task is the same in both: a worker
+  makes `site/en/assessment.html`, the English translation of `site/evaluare.html`, and a
+  faithful translation keeps "un scor între 0 și 100", which the manager's guide
+  (`docs/ghidul-managerului.md`, line 5: a scale from 1 to 5) contradicts, the fixture's planted
+  discrepancy; so the bug the stand-in reports is true of the first result whoever writes it.
+  The stand-in's reviews are in the form `skill/core/staff.md` asks of a reviewer: ready or not
+  first, each finding numbered (`F1`…) and saying whether it blocks, a blocker with its
+  requirement, case, failure and evidence, and on a later review each earlier finding fixed,
+  still open or new. The measure reads the rounds of each task from the ledger
+  (`Metrics::rounds`: the brief, when each result came, each send-back and its words, when it
+  was accepted), for these two scenarios only.
+  - `review-loop`: the first review finds F1 (the bug, a blocker) and four notes; the second,
+    after the fix, notes only; the third (only a chief that sends the work back for notes asks
+    for it) notes only again. Expected: the page made and no other file changed, the work
+    reviewed again after the fix, **reopened once, for the bug**, never sent back after the
+    review that found notes only, **accepted once only notes are left**, the notes in one later
+    task or a note (not in many tasks), the **second review's brief naming the earlier
+    findings by number and the change since**, the owner asked nothing.
+  - `review-blockers`: the first review finds F1; the second, after the fix, a different
+    blocker, F6, that the fix left (the Romanian page still says 0 to 100); the third says
+    nothing blocks. The owner is asked the scale, and answers it (1 to 5). Expected: the work
+    reviewed twice, and after the second review the chief **changes the work or asks the
+    owner** (a new task for the work, a reopen whose words name a change, or a question in the
+    terminal), **does not send the work back as it is**, and **does not accept it with the
+    blocker open unless the owner said yes**. "As it is" is a reopen after the second review
+    whose words name none of: simplify, drop the, turn off, disable, split, its own or a separate
+    task, leave out, out of scope, a fresh window with a handoff, another or a simpler approach
+    (in English or Romanian); a new task for the work counts as a change too, and so does
+    cancelling the work and adding a smaller or different task (cancelling it and adding
+    nothing is none). That check of words is its limit: "fix F6", "remove the 100" and
+    "instead of 0 to 100" are the same work again, and a fix worded with a change word passes;
+    the report keeps the reopen's words whole, for a person to read. Both run on the card arm
+    only, on the Mac, with a Claude Code in the run (the chief or `--staff`).
+  **The stand-in reviewer** (`src/run/stand_in.rs`): for these scenarios the run's staff has one
+  reviewer, a Claude Code roster agent on the model `scripted-reviewer`, in place of the cheap
+  harnesses' reviewers (`plan::with_stand_in_reviewer`; the workers and the advisor stay live
+  and cheap). The eval's `claude` wrapper (`run/wrappers.rs`) starts a window on that model as the
+  stand-in agent, `fake-agent` of `crates/cf-e2e` (built before the run spends anything), with
+  `CF_TEST_SCRIPTED_RESULTS` naming the run's folder of reviews
+  (`~/.consensflow-candidate/evals/scripted-reviews`): a marker `.eval-run` and the reviews as
+  `1.md`, `2.md`, `3.md`. The stand-in answers each task brief with the next one, counted in the
+  folder (each review is a fresh window), and the last again for any more; anything else it is told
+  it acknowledges. The folder is made again as each play begins and removed when the run is over.
+  **Guard:** the wrapper starts the stand-in only if the run's marker is in the folder and the
+  agent is there, else it prints that `scripted-reviewer` is the stand-in of an eval run and this is
+  none, and exits 1 (neither the stand-in nor the real Claude runs); the stand-in itself refuses a
+  folder with no marker; and a run with no stand-in has a wrapper that knows no such model. A real
+  launch never goes through these wrappers, and none can reach the stand-in.
+  The offline proof (`cargo test -p cf-evals --test review_loops`, no token spent): a scripted
+  chief plays each scenario on a ledger written by hand, and the scenario judges what the
+  measure reads of it. A chief that behaves holds every expectation; each that loops, sends the
+  work back for notes, accepts with a blocker open, or asks for the second review without the
+  earlier findings fails exactly the expectations that name what it did.
+
 `--arm` compares a chief with its card (`card`, the default), with a
 one-line card that names no board (`nocard`), and as its harness alone
 without ConsensFlow (`bare`, which finds the chief's session in the
