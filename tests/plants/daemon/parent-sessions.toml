@@ -27,6 +27,8 @@ parent-sessions-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", 
 parent-sessions-live-monitor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "the_window_is_opened_without"]
 parent-sessions-kit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::window::tests::a_muse_window"]
 parent-sessions-live-check = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_session_vars"]
+parent-sessions-kit-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::tests::a_program_started_outside_a_rig"]
+parent-sessions-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes::"]
 parent-sessions-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_parent_agents_session_reached_every_window::"], builds = true }
 
 # --- the list ---
@@ -301,5 +303,29 @@ file = "crates/cf-e2e/src/live/window/open.rs"
 find = '''    if harness != Harness::Muse {
 '''
 replace = '''    if harness != Harness::Muse || launcher.is_some() {
+'''
+
+[[plant]]
+name = "parent-sessions: a harness program a case starts outside a rig is given no home of the run's own"
+meant = "a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_persons"
+runs = ["parent-sessions-kit-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''            Some(isolation) => isolation.vars(),
+'''
+replace = '''            Some(_) => Ok(Vec::new()),
+'''
+
+[[plant]]
+name = "parent-sessions: the Codex interrupt case starts Codex's server on the person's home"
+meant = "a_harness_server_a_live_case_starts_itself_runs_on_the_runs_own_home"
+runs = ["parent-sessions-live-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_codex_interrupt.rs"
+find = '''    let home = install.home_outside_a_rig()?;
+'''
+replace = '''    let home: Vec<(String, String)> = Vec::new();
 '''
 

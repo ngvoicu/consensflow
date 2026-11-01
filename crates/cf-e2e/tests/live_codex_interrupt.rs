@@ -34,6 +34,7 @@ use cf_e2e::live::members::Account;
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{agents, ask, Harness, Log};
 use cf_e2e::process::{own_var, Run};
+use cf_e2e::rig::HarnessHome;
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
@@ -184,10 +185,12 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
     let asked = agents::model(Harness::Codex);
     let model = asked.name.as_str();
     log.say(format!(
-        "codex is {} ({version}); its login is read from {}",
+        "codex is {} ({version}); its login is copied from {} into a home of the run's own",
         install.command().display(),
         install.home().display()
     ));
+    // The server is started here and not in a rig's window: it is given the kit's home itself.
+    let home = install.home_outside_a_rig()?;
     let flags = isolation(&codex::mcp_servers(install.command())?)?;
     // The folder is the check's own, and removed with it; Codex knows it by the path it resolves to.
     let scratch = tempfile::tempdir().map_err(|source| Error::File {
@@ -212,7 +215,13 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| Error::Daemon("Codex's app-server has no command line".to_owned()))?;
-    let server = AppServer::start(Run::new(program).args(args).cwd(&folder).inheriting_env())?;
+    let server = AppServer::start(
+        Run::new(program)
+            .args(args)
+            .cwd(&folder)
+            .inheriting_env()
+            .vars(home),
+    )?;
     log.launched(&agents::agent_on(&asked));
 
     server.request(
@@ -279,6 +288,11 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
         ),
         &case.text(),
     );
+    // What the server did in the home and in the owner's Codex is said once it has ended.
+    drop(server);
+    if let Some(isolation) = install.isolation() {
+        isolation.finish()?;
+    }
     let checks = vec![Check::new(
         "codex",
         "an interrupted question ends the turn or idles the thread",

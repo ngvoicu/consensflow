@@ -194,6 +194,22 @@ impl Installed {
         self.isolation.as_ref()
     }
 
+    /// The variables a program of this harness that a case starts itself, outside a rig, is
+    /// given (a server it speaks to), so that it runs on the run's own home as the rig's windows
+    /// do ([`Isolation`], which a rig gives its windows itself) and never on the person's:
+    /// started on the case's own environment, Codex's app-server ran on `~/.codex` (T-1039).
+    /// One with no home of the run's own is refused: a case that is its own home gives its
+    /// program that home itself.
+    pub fn home_outside_a_rig(&self) -> Result<Vec<(String, String)>> {
+        match &self.isolation {
+            Some(isolation) => isolation.vars(),
+            None => Err(Error::Daemon(format!(
+                "{} has no home of the run's own to start a program of it on outside a rig",
+                self.harness.name()
+            ))),
+        }
+    }
+
     /// This harness, whose windows are given no home of the run's own: for a case that is
     /// its own home, whose rig is given a `HOME` with the harness's folder in it, made for the
     /// case, and none of the person's is read or written. The case says why it is its own.

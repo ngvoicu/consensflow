@@ -716,3 +716,28 @@ fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
     let codex = Installed::at(Harness::Codex, "/bin/echo", "/home/me");
     assert_eq!(rig(&[codex], "/the/stand-in").muse_live_home(), None);
 }
+
+/// A program a case starts itself, outside a rig (Codex's app-server), is given the run's own
+/// home, a copy of the login in it, and never the person's (T-1039); a harness with no such
+/// home is refused it.
+#[test]
+fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_persons() {
+    let person = tempfile::tempdir().unwrap();
+    let theirs = person.path().join(".codex");
+    fs::create_dir_all(&theirs).unwrap();
+    fs::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
+    let codex = Installed::at(Harness::Codex, "codex", &theirs).with_isolation(Arc::new(
+        super::super::isolation::Isolation::codex(person.path(), &theirs),
+    ));
+    let vars = codex.home_outside_a_rig().unwrap();
+    let home = vars
+        .iter()
+        .find(|(name, _)| name == "CODEX_HOME")
+        .map(|(_, value)| PathBuf::from(value))
+        .unwrap_or_else(|| panic!("no CODEX_HOME in {vars:?}"));
+    assert_ne!(home, theirs);
+    assert!(!home.starts_with(&theirs), "{}", home.display());
+    assert!(home.join("auth.json").is_file(), "{}", home.display());
+    let bare = Installed::at(Harness::Codex, "codex", &theirs);
+    assert!(bare.home_outside_a_rig().is_err());
+}
