@@ -52,6 +52,16 @@ use crate::windows::pane_body;
 pub(crate) const FALLBACK: &str =
     "at rest by its record and a quiet screen: its harness says nothing of its own";
 
+/// How the gate's settle wait begins: a window that has just come to rest, which passes by
+/// itself in seconds.
+const NOT_RESTED: &str = "it has not rested ";
+
+/// Whether `reason`, why a message is held, passes by itself in seconds: the settle of a
+/// window that has just come to rest, which a hold is not told in (`tell_if_held_long`).
+pub(crate) fn passing(reason: &str) -> bool {
+    reason.starts_with(NOT_RESTED)
+}
+
 /// What the gate says of the message at the head of a window's queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Pace {
@@ -308,7 +318,7 @@ impl Dispatcher {
         let seconds = settle as f64 / 1000.0;
         if rest_ms < settle && !self.seams.limits.settle_from_first_look {
             return Ok(Pace::Wait(format!(
-                "it has not rested {seconds} s since its last turn"
+                "{NOT_RESTED}{seconds} s since its last turn"
             )));
         }
         let (window, pane) = {
