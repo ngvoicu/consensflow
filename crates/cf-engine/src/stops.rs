@@ -166,6 +166,19 @@ fn pause_key(stop: &Stop) -> StopKey {
     }
 }
 
+/// The turn the first round of `stop` was pressed into, by the message of the user's that
+/// began it: none where no key was pressed for it.
+fn pressed_turn(record: &Record, stop: &Stop) -> Option<Arc<str>> {
+    let key = pause_key(stop);
+    record
+        .window
+        .borrow()
+        .interrupted
+        .as_ref()
+        .filter(|done| done.key == key)
+        .and_then(|done| done.turn.clone())
+}
+
 /// The message of the user's the look's record shows last, by its id: what began the
 /// turn at work, or what came after it. A compaction's summary, which the harness writes
 /// in the user's place within a turn, is none.
@@ -187,15 +200,8 @@ fn last_message(observed: &Observed) -> Option<Arc<str>> {
 /// was asked of, and a key pressed into them, or a close, ends what the window does on
 /// its own (T-604's agents).
 fn past_its_turn(record: &Record, stop: &Stop, observed: &Observed) -> bool {
-    let key = pause_key(stop);
-    let pressed = record
-        .window
-        .borrow()
-        .interrupted
-        .as_ref()
-        .filter(|done| done.key == key)
-        .and_then(|done| done.turn.clone());
-    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed))
+    pressed_turn(record, stop)
+        .is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed))
 }
 
 impl Dispatcher {
@@ -251,6 +257,11 @@ impl Dispatcher {
                 .borrow_mut()
                 .release_claims(participant.id, because)?;
         }
+        // A take-back the record writes a moment after the turn's end, read once the stop
+        // was paid between the two, is a take-back still (T-1056).
+        if look == Look::Rest && observed.took_back {
+            self.taken_back_since_paid(participant, record, observed)?;
+        }
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
         if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {
             let look = if look == Look::Work && past_its_turn(record, &stop, observed) {
@@ -265,7 +276,12 @@ impl Dispatcher {
                     if observed.took_back {
                         self.take_back(participant, &stop, observed)?;
                     }
+                    let pressed = pressed_turn(record, &stop);
                     self.pay(record, &stop);
+                    // Not taken back yet: the record may say so at the next look.
+                    if !observed.took_back {
+                        record.window.borrow_mut().paid_turn = pressed.map(|turn| (stop, turn));
+                    }
                     // The window stays: what its turn left runs on, named and never ended.
                     self.tell_paused_left_running(project, record, stop.number)
                         .await
@@ -280,6 +296,29 @@ impl Dispatcher {
         if look == Look::Work {
             self.interrupt_cancelled(participant, record, observed)
                 .await?;
+        }
+        Ok(())
+    }
+
+    /// The look at rest reads the window's turn taken back (`Observed::took_back`) after a
+    /// look paid the stop it was pressed for with the turn not yet taken back: Muse writes
+    /// `run_retracted` 5 to 11 ms after the `terminal cancelled` of a turn stopped before a
+    /// word, a line of its own, and a look between the two read the turn over and nothing
+    /// taken back (T-995's A/B: `muse_window`'s tell case red 2 runs in 5 on main). Its
+    /// brief stayed delivered while Muse put it back in its box, which the next paste
+    /// empties: the resume never gave it again. So it is taken back now, where the record's
+    /// last message of the user's is still the one the stopped turn began with; once only,
+    /// and never after anything else went in.
+    fn taken_back_since_paid(
+        &self,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        let paid = record.window.borrow_mut().paid_turn.take();
+        let now = last_message(observed);
+        if let Some((stop, _)) = paid.filter(|(_, turn)| now.as_ref() == Some(turn)) {
+            self.take_back(participant, &stop, observed)?;
         }
         Ok(())
     }
