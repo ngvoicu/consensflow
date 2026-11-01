@@ -38,6 +38,47 @@ fn devins_session_hook_answers_without_a_token_and_with_no_line_break() {
     );
 }
 
+/// Devin runs a session's hook as `session/new` returns, and its window writes the record that
+/// names the conversation to the wire log a few milliseconds either side of it (T-1065: in 2 of 7
+/// full live runs the hook looked first and found the log holding only its leading `{}` lines,
+/// and the log named the session 11 ms later). The hook waits for the log, so the role text
+/// reaches the session whichever came first.
+#[test]
+fn devins_session_hook_started_before_the_log_names_its_conversation_waits_for_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    let role = dir.path().join("SKILL.md");
+    fs::write(&wire, "{}\n{}\n{}\n").unwrap();
+    fs::write(&role, "# ConsensFlow worker\n").unwrap();
+    // Long beside what a `cf` takes to start on a loaded machine, so the hook looks first.
+    let window = {
+        let wire = wire.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let mut log = fs::OpenOptions::new().append(true).open(wire).unwrap();
+            io::Write::write_all(
+                &mut log,
+                b"{\"sessionId\":\"native-a\",\"update\":{\"sessionUpdate\":\"config_option_update\",\"configOptions\":[{\"id\":\"mode\"}]}}\n",
+            )
+            .unwrap();
+        })
+    };
+    let ran = cf(
+        &["hook", "devin-session"],
+        &[
+            ("CF_DEVIN_ROLE_FILE", role.to_str().unwrap()),
+            ("CHISEL_PURE_ACP_WIRE_LOG", wire.to_str().unwrap()),
+        ],
+        r#"{"hook_event_name":"SessionStart","session_id":"native-a","source":"startup"}"#,
+    );
+    window.join().unwrap();
+    assert_eq!(ran.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stdout),
+        r##"{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"# ConsensFlow worker\n"}}"##
+    );
+}
+
 #[test]
 fn muses_session_hook_reads_its_files_from_its_command_line_and_writes_the_session_down() {
     // Muse runs a hook with an environment of its own: nothing of the window's reaches it.

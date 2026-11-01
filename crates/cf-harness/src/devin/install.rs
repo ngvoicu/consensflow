@@ -38,6 +38,10 @@ use crate::shared::window_args::Invocation;
 /// How long Devin lets the question hook wait for the board's answer.
 const QUESTION_HOOK_SECONDS: u32 = 3600;
 
+/// How long Devin lets the session hook run: the wait it makes for its window's log
+/// (`session_hook`) is inside it.
+pub(super) const SESSION_HOOK_SECONDS: u32 = 5;
+
 /// What Devin's window is given of its launch's own folder.
 pub(super) struct Integration {
     /// `--config` and the config written for the launch.
@@ -111,7 +115,7 @@ pub(crate) fn added_hooks(
         "hooks": [{
             "type": "command",
             "command": cf_hook(pane_cf, "devin-session", &[]),
-            "timeout": 5,
+            "timeout": SESSION_HOOK_SECONDS,
         }],
     });
     let question = json!({
