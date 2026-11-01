@@ -495,6 +495,14 @@ fn the_app_records_its_panics_and_contains_its_callbacks_from_its_start() {
     assert!(updates.contains(r#"crate::panics::contained("the app's handler of its menu""#));
 }
 
+/// The page's origin, as the app's webview has it on this system: Tauri refuses a page of any
+/// other the app's commands, as a remote one's.
+const PAGE_ORIGIN: &str = if cfg!(windows) {
+    "http://tauri.localhost"
+} else {
+    "tauri://localhost"
+};
+
 /// A command the page asks through the app's own commands (`crate::page_commands`), on Tauri's
 /// stand-in runtime, and what the page was answered: the response, or the panic that left the
 /// app's edge, which in the app is an abort.
@@ -510,7 +518,7 @@ fn asked_of_the_page(command: &str, args: serde_json::Value) -> Result<serde_jso
         cmd: command.into(),
         callback: tauri::ipc::CallbackFn(0),
         error: tauri::ipc::CallbackFn(1),
-        url: "tauri://localhost".parse().expect("invoke URL"),
+        url: PAGE_ORIGIN.parse().expect("invoke URL"),
         body: tauri::ipc::InvokeBody::Json(args),
         headers: Default::default(),
         invoke_key: INVOKE_KEY.to_string(),
