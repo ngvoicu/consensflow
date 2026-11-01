@@ -22,8 +22,10 @@ runs = ["app-board-env"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/agents.rs"
-find = '''    cf_base::env::WINDOW_VARIABLES.into_iter().chain('''
-replace = '''    [""; 0].into_iter().chain('''
+find = '''    cf_base::env::WINDOW_VARIABLES
+        .into_iter()'''
+replace = '''    [""; 0]
+        .into_iter()'''
 
 [[plant]]
 name = "board env: an app started from a window takes nothing out of its environment"
