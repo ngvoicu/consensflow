@@ -1,7 +1,8 @@
 //! Which harnesses read a human's paste without drawing it until they have read it all
 //! (`Adapter::silent_paste`, which the pane host holds the human's keys after a paste by):
 //! Codex on Windows, measured on Codex 0.166.0 (T-1048). Every other harness, and Codex
-//! elsewhere, declares nothing, and the human's keys go as they come.
+//! elsewhere, declares nothing, and the human's keys go as they come: Claude Code on Windows
+//! was measured taking a paste and its Enter as they came.
 
 use cf_base::env::Env;
 use cf_harness::launch;

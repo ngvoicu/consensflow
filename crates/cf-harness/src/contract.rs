@@ -121,9 +121,10 @@ pub trait Adapter {
     /// until they have read them all ([`SilentPaste`], told to the pane host as the window
     /// opens): the human's keys after their paste then wait until the window has drawn it. A
     /// harness that declares nothing has the human's keys written as they come. Only what was
-    /// measured is declared: Codex on Windows (T-1048). The others are unmeasured on Windows:
-    /// Claude Code's and Pi's logins on zeewin2 had expired when it was run, and Devin and Muse
-    /// are not run there.
+    /// measured is declared: Codex on Windows (T-1048). Claude Code 2.1.316 on Windows took a
+    /// paste and its Enter as they came, in one write too (zeewin2, 2026-11-01). Pi is
+    /// unmeasured there (its login was too short for the run), and Devin and Muse are not run
+    /// there.
     fn silent_paste(&self) -> Option<SilentPaste> {
         None
     }
