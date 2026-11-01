@@ -1107,7 +1107,9 @@ fn a_run_is_given_the_access_token_and_nothing_that_renews_it_and_the_machines_l
 #[test]
 fn a_claude_code_that_ended_badly_after_it_renewed_its_login_has_renewed_it_and_the_run_goes_on() {
     let run = Renewing::new();
-    // Its model refused the owner's own session, as Sonnet 5.5 did on zeewin2 (exit 1, 2026-11-01).
+    // Its model refused the owner's own session after the login moved: what Claude Code on the
+    // owner's config on zeewin2 did with Sonnet 5.5 (exit 1, 2026-11-01), on a login that needed no
+    // renewal, so the renewal and the refusal were not seen together.
     let body = format!("{}\necho 'API Error: refused' >&2", run.renews());
     let ended = login_ending(at(NOW - 3600), ACCESS);
     let login = run.login(&ended, Some(zeewin2()), &body, 1);

@@ -114,7 +114,8 @@ pub struct Renewed {
     /// How long the harness took.
     pub took: Duration,
     /// How the harness ended where it ended badly all the same (its model refused the owner's
-    /// session, say): the renewal is judged by the login, which moved.
+    /// session, as Sonnet 5.5's safeguards did on zeewin2 with Claude Code in the owner's config):
+    /// the renewal is judged by the login, which moved.
     pub ended: Option<String>,
 }
 

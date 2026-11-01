@@ -317,8 +317,11 @@ fn a_harness_that_ended_badly_after_it_renewed_its_login_has_renewed_it_and_one_
 ) {
     use std::sync::{Arc, Mutex};
 
-    // Claude Code on the owner's own session, on zeewin2 (2026-11-01): the login was renewed as the
-    // harness started, and its model then refused the session (an API error, status 1).
+    // Claude Code on the owner's own config, on zeewin2 (2026-11-01), ended 1 on an API error of
+    // Sonnet 5.5's safeguards, twice in two runs, on a login that needed no renewal, so it was not
+    // seen to renew and then fail. If it renews before such a call, the login moved and the
+    // renewal is the login's; if it left the login where it was, it has not renewed, whatever it
+    // said.
     let keeps = Arc::new(Mutex::new(format!("ends 100 {SECRET}")));
     let written = keeps.clone();
     let renewal = Renewal::new(
