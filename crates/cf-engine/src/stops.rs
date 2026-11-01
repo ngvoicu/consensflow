@@ -276,12 +276,12 @@ impl Dispatcher {
                     if observed.took_back {
                         self.take_back(participant, &stop, observed)?;
                     }
-                    let pressed = pressed_turn(record, &stop);
+                    // Keys pressed into a turn not taken back yet: the record may say so at
+                    // the next look.
+                    let untaken = (!observed.took_back && pressed_turn(record, &stop).is_some())
+                        .then_some(stop);
                     self.pay(record, &stop);
-                    // Not taken back yet: the record may say so at the next look.
-                    if !observed.took_back {
-                        record.window.borrow_mut().paid_turn = pressed.map(|turn| (stop, turn));
-                    }
+                    record.window.borrow_mut().paid_untaken = untaken;
                     // The window stays: what its turn left runs on, named and never ended.
                     self.tell_paused_left_running(project, record, stop.number)
                         .await
@@ -306,21 +306,21 @@ impl Dispatcher {
     /// word, a line of its own, and a look between the two read the turn over and nothing
     /// taken back (T-995's A/B: `muse_window`'s tell case red 2 runs in 5 on main). Its
     /// brief stayed delivered while Muse put it back in its box, which the next paste
-    /// empties: the resume never gave it again. So it is taken back now, where the record's
-    /// last message of the user's is still the one the stopped turn began with; once only,
-    /// and never after anything else went in.
+    /// empties: the resume never gave it again. So it is taken back now, by the rule the
+    /// paying look's is ([`Dispatcher::take_back`]): the record's last message of the
+    /// user's is the task's message still delivered, so one taken back already, or a turn
+    /// some other message began, takes nothing back.
     fn taken_back_since_paid(
         &self,
         participant: &ParticipantView,
         record: &Record,
         observed: &Observed,
     ) -> Result<(), EngineError> {
-        let paid = record.window.borrow_mut().paid_turn.take();
-        let now = last_message(observed);
-        if let Some((stop, _)) = paid.filter(|(_, turn)| now.as_ref() == Some(turn)) {
-            self.take_back(participant, &stop, observed)?;
+        let paid = record.window.borrow_mut().paid_untaken.take();
+        match paid {
+            Some(stop) => self.take_back(participant, &stop, observed),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// Whether the window owes the stop: it has not paid one of this task

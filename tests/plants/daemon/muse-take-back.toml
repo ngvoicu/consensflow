@@ -4,9 +4,9 @@
 # a turn stopped before a word, on a line of its own; a look between the two paid the stop
 # with nothing taken back, and the brief Muse put back in its box was emptied by the next
 # paste while the ledger kept it delivered. A later look at rest that reads the turn taken
-# back, the record's last message of the user's still the stopped turn's, takes it back
-# then, once (`crates/cf-engine/src/stops.rs`, `taken_back_since_paid`; its cases in
-# `tests/dispatcher/taken_back.rs`). Each plant takes one rule out.
+# back takes it back then, by the paying look's rule (`crates/cf-engine/src/stops.rs`,
+# `taken_back_since_paid`; its cases in `tests/dispatcher/taken_back.rs`). The plant takes
+# that out.
 #
 # Every name holds `muse take back`: `npm run plants:daemon -- "muse take back"` runs them.
 
@@ -24,23 +24,3 @@ find = '''        if look == Look::Rest && observed.took_back {
             self.taken_back_since_paid(participant, record, observed)?;'''
 replace = '''        if look == Look::Rest && observed.took_back && false {
             self.taken_back_since_paid(participant, record, observed)?;'''
-
-[[plant]]
-name = "muse take back: a take-back read after another message went in takes the brief back"
-meant = "a_take_back_read_after_another_message_went_in_takes_nothing_back"
-runs = ["muse-take-back"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = '''        if let Some((stop, _)) = paid.filter(|(_, turn)| now.as_ref() == Some(turn)) {'''
-replace = '''        if let Some((stop, _)) = paid.filter(|(_, turn)| now.as_ref() == Some(turn) || now.is_some()) {'''
-
-[[plant]]
-name = "muse take back: the stop paid before the take-back is remembered past it"
-meant = "a_take_back_the_record_writes_after_the_stop_was_paid_keeps_the_brief_for_the_resume"
-runs = ["muse-take-back"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = '''        let paid = record.window.borrow_mut().paid_turn.take();'''
-replace = '''        let paid = record.window.borrow().paid_turn.clone();'''
