@@ -432,3 +432,96 @@ fn another_hold_during_a_meeting_is_still_told_at_ten_minutes() {
     let notes = told_held(&tiers, &worker);
     assert_eq!(notes.len(), 1, "{:?}", tiers.notes("human"));
 }
+
+/// A meeting's hold and a chief's at-work hold meet one message (D2b, T-996, as Calliope's
+/// T-987 keeps them apart): a result held at a chief whose window reads at work (T-958)
+/// lends the meeting none of its time, and the meeting none of its own to the hold after
+/// it. The result left the head when the meeting began, so its hold went with it; at the
+/// Stop it is the head again, held at work on a clock of its own, and told once, ten
+/// minutes after the Stop: never at ten minutes from its arrival, which fell in the
+/// meeting, nor from the time before the meeting and after the Stop together.
+#[test]
+fn a_result_held_at_work_and_then_by_a_meeting_is_told_once_ten_minutes_after_the_stop() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = tiers.id("chief");
+    context.adapter.with("chief", |agent| agent.settled = false);
+    context.adapter.answer("zeus", "Parser done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let result = context
+        .inbox(chief)
+        .into_iter()
+        .find(|message| message.kind == "result")
+        .unwrap()
+        .id;
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.message),
+        Some(result),
+        "held at work from the first look"
+    );
+    for _ in 0..6 {
+        context.advance(MINUTE);
+        context.pass().unwrap();
+    }
+    meeting(&context, tiers.project.id, true);
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.held_back(chief),
+        None,
+        "the meeting holds it, and its at-work hold went with it"
+    );
+    for _ in 0..30 {
+        context.advance(MINUTE);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        told_held(&tiers, "chief"),
+        Vec::<String>::new(),
+        "not in the meeting"
+    );
+    meeting(&context, tiers.project.id, false);
+    context.pass().unwrap();
+    let stopped = context.dispatcher.held_back(chief).unwrap();
+    assert_eq!(stopped.message, result, "held at work again at the Stop");
+    for _ in 0..9 {
+        context.advance(MINUTE);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        told_held(&tiers, "chief"),
+        Vec::<String>::new(),
+        "six minutes before the meeting and nine after it are not ten on one clock"
+    );
+    context.advance(MINUTE);
+    context.pass().unwrap();
+    let notes = told_held(&tiers, "chief");
+    assert_eq!(notes.len(), 1, "{:?}", tiers.notes("human"));
+    assert!(
+        notes[0].starts_with(&format!("m-{result}, ")),
+        "{}",
+        notes[0]
+    );
+    assert!(
+        notes[0].contains("has waited 10 minutes for @chief's window"),
+        "{}",
+        notes[0]
+    );
+    assert!(notes[0].contains("reads at work"), "{}", notes[0]);
+    for _ in 0..30 {
+        context.advance(MINUTE);
+        context.pass().unwrap();
+    }
+    assert_eq!(told_held(&tiers, "chief").len(), 1, "told once");
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        headed(&context, "chief", result),
+        1,
+        "it goes in at the rest"
+    );
+}

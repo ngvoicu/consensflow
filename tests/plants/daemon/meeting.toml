@@ -583,3 +583,21 @@ builds = true
 file = "crates/cf-daemon/src/api/waits.rs"
 find = '''            Some(until) => Some(Self::in_words_of(until, message)),'''
 replace = '''            Some(_) => None,'''
+
+# D2b (T-996): a meeting's hold and a chief's at-work hold (T-958) meet one message. The meeting
+# takes the result from the head, and its at-work hold goes with it, so neither lends the other
+# time: told once, ten minutes after the Stop.
+[[plant]]
+name = "meeting: a result's at-work hold keeps its clock through the meeting that took it from the head"
+meant = "a_result_held_at_work_and_then_by_a_meeting_is_told_once_ten_minutes_after_the_stop"
+runs = ["meeting-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        let Some(next) = self.next_in_line(record)? else {
+            let mut part = record.delivery.borrow_mut();
+            part.held = None;
+            part.head_items = None;'''
+replace = '''        let Some(next) = self.next_in_line(record)? else {
+            let mut part = record.delivery.borrow_mut();
+            part.head_items = None;'''
