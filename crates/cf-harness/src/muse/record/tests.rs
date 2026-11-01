@@ -7,6 +7,7 @@
 
 mod background;
 mod live;
+mod pasted;
 mod provisional;
 mod shapes;
 
