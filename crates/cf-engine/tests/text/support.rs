@@ -220,6 +220,7 @@ pub fn project_of(participants: Vec<ParticipantView>) -> ProjectView {
         specs: None,
         description: None,
         staff_rules: None,
+        claude_compaction: None,
     }
 }
 

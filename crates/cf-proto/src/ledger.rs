@@ -57,6 +57,12 @@ pub struct ProjectView {
     /// always did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub staff_rules: Option<String>,
+    /// The size, in tokens, at which the human has the project's Claude member
+    /// windows compact: the window each member's launch gives Claude Code. Said
+    /// only when the human chose one, so a project on Claude's own point reads as
+    /// it always did. The chief's window is never given it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_compaction: Option<u32>,
 }
 
 impl ProjectView {

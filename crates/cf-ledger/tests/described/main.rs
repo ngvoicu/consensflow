@@ -4,12 +4,14 @@
 //! project is opened, the line itself (set, changed, taken away; one line of at
 //! most 200 characters), the event each change logs and tells the trace, and that
 //! a project that is not there is refused before anything is written. And the
-//! rules the human writes for the project's staff, kept and logged as the line is.
+//! rules the human writes for the project's staff, kept and logged as the line is,
+//! and the size the Claude members' windows compact at, the same way.
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used)]
 
 mod both;
+mod claude_compaction;
 mod line;
 mod migration;
 mod name;

@@ -123,7 +123,12 @@ impl Adapter for ClaudeAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Claude, &self.env)?;
-            let settings = install::settings(&self.env, launch.id, launch.role != "chief")?;
+            let settings = install::settings(
+                &self.env,
+                launch.id,
+                launch.role != "chief",
+                launch.compaction,
+            )?;
             let role = install::role(&self.env, launch)?;
             // Claude keeps a conversation only once something was said in
             // it, and what it kept can be gone since: the engine asks

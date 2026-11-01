@@ -189,7 +189,9 @@ fn a_ledger_at_the_version_before_gains_no_rules_in_every_project_and_keeps_ever
         after[0],
         before[0]
             .iter()
-            .map(|row| format!("{row}|Null"))
+            // The staff's rules, then the Claude members' compaction: both columns of
+            // this migration.
+            .map(|row| format!("{row}|Null|Null"))
             .collect::<Vec<_>>(),
         "each project's row, and no rules at its end"
     );

@@ -244,6 +244,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "computer_use.get",
     "computer_use.open",
     "project.rules",
+    "project.compaction",
 ];
 
 #[tauri::command]

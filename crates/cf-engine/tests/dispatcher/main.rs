@@ -46,6 +46,7 @@ mod chiefs;
 mod closed_given_nothing;
 mod closing;
 mod compacting;
+mod compaction_window;
 mod computer_use;
 mod decided_results;
 mod deleted_sessions;

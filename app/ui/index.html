@@ -310,6 +310,17 @@
         <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
         <div class="dialog-actions"><button class="primary-button" type="button" name="staff-rules-save">Save rules</button></div>
       </fieldset>
+      <!-- Compaction for Claude members (core/claude-compaction.js): the size at which the
+           project's Claude member windows compact, or Claude's own point; the chief never; chosen here only. -->
+      <fieldset class="project-section claude-compaction">
+        <legend>Compaction for Claude members</legend>
+        <p class="dialog-help">A member's Claude window compacts at about this size from its next start, whatever your own Claude setting says; the chief is not affected.</p>
+        <label class="claude-compaction-choice"><input type="radio" name="claude-compaction-choice" value="own" checked> Claude's own point</label>
+        <label class="claude-compaction-choice"><input type="radio" name="claude-compaction-choice" value="size"> A size</label>
+        <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="claude-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
+        <p class="staff-hint claude-compaction-hint" role="alert" hidden></p>
+        <div class="dialog-actions"><button class="primary-button" type="button" name="claude-compaction-save">Save compaction</button></div>
+      </fieldset>
       <div data-project-sections></div>
       <!-- Computer use (core/computer-use.js): a part for each harness of the project's with a
            computer use of its own, shown only while one of its members runs on it, and

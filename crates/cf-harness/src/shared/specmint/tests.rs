@@ -218,6 +218,7 @@ fn launch<'a>(id: &'a LaunchId, specs: Option<Specs<'a>>) -> Launch<'a> {
         agent: None,
         instructions: "role text",
         specs,
+        compaction: None,
         first_message_ms: 1,
         starts_given_up: 0,
     }

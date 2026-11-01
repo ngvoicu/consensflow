@@ -437,6 +437,24 @@ async function open(page, data = model()) {
         }
         return answer({ project: shownProject(project)[0] })
       },
+      // The size the Claude members' windows compact at, as the daemon keeps it: a whole number
+      // of tokens from 100,000 to 1,000,000, or none (null or left out) for Claude's own point,
+      // refused in its words otherwise.
+      'project.compaction': ({ project, compaction }) => {
+        const size = compaction ?? null
+        if (size !== null && !(Number.isInteger(size) && size >= 100000 && size <= 1000000)) {
+          return {
+            ok: false,
+            error:
+              "the compaction window for Claude members is a whole number of tokens from 100000 to 1000000, or none for Claude's own point",
+          }
+        }
+        for (const shown of shownProject(project)) {
+          if (size === null) delete shown.claudeCompaction
+          else shown.claudeCompaction = size
+        }
+        return answer({ project: shownProject(project)[0] })
+      },
       'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
       'wakeup.set': ({ project, on, every, unit, text }) => {
         if (!(unit in UNIT_MS) || !Number.isInteger(every) || every < 1) {
@@ -3704,10 +3722,11 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   const markup = (id) =>
     page.evaluate(
       (id) =>
-        // The shared sections only: Computer use and the rules for the staff are Project settings' own.
+        // The shared sections only: Computer use, the rules for the staff and the Claude members'
+        // compaction are Project settings' own.
         [
           ...document.querySelectorAll(
-            `#${id} .project-section:not(.computer-use):not(.staff-rules)`,
+            `#${id} .project-section:not(.computer-use):not(.staff-rules):not(.claude-compaction)`,
           ),
         ]
           .slice(1)
@@ -4101,7 +4120,7 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
-test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction for Claude members, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
   await open(page)
@@ -4116,12 +4135,20 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
     'Rules for the staff',
+    'Compaction for Claude members',
     'Human approval',
     'Wake-up calls',
     'Specs',
     'Computer use',
   ])
-  for (const name of ['Staff', 'Rules for the staff', 'Human approval', 'Wake-up calls', 'Specs']) {
+  for (const name of [
+    'Staff',
+    'Rules for the staff',
+    'Compaction for Claude members',
+    'Human approval',
+    'Wake-up calls',
+    'Specs',
+  ]) {
     await expect(dialog.getByRole('group', { name, exact: true })).toBeVisible()
   }
   // The old title is nowhere in the page, hidden or not.
@@ -4564,6 +4591,154 @@ test("says a refusal of the rules for the staff in their section, in the daemon'
   )
   await expect(section.hint).toBeVisible()
   await expect(section.rules).toHaveValue('a\u0007b')
+})
+
+/** Project settings open on project 1, and its section of the Claude members' compaction. */
+async function compactionGroup(page) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const group = dialog.getByRole('group', { name: 'Compaction for Claude members' })
+  return {
+    dialog,
+    group,
+    own: group.getByRole('radio', { name: "Claude's own point" }),
+    size: group.getByRole('radio', { name: 'A size' }),
+    amount: group.getByLabel('Size in tokens, 100,000 to 1,000,000'),
+    hint: group.locator('.claude-compaction-hint'),
+    save: group.getByRole('button', { name: 'Save compaction' }),
+  }
+}
+
+test("Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await compactionGroup(page)
+  await expect(section.own).toBeChecked()
+  await expect(section.size).not.toBeChecked()
+  await expect(section.amount).toBeDisabled()
+  await expect(section.amount).toHaveValue('')
+  await expect(section.save).toBeEnabled()
+  await expect(section.hint).toBeHidden()
+  // One line, in the section: what it does and who it leaves alone.
+  await expect(section.group).toContainText(
+    "A member's Claude window compacts at about this size from its next start, whatever your own Claude setting says; the chief is not affected.",
+  )
+  // Opening sends nothing.
+  expect(await calls(page, 'project.compaction')).toEqual([])
+})
+
+test("Project settings shows the size the board has for the Claude members' compaction", async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.claudeCompaction = 400000
+  await open(page, data)
+  const section = await compactionGroup(page)
+  await expect(section.size).toBeChecked()
+  await expect(section.own).not.toBeChecked()
+  await expect(section.amount).toBeEnabled()
+  await expect(section.amount).toHaveValue('400000')
+  await expect(section.save).toBeEnabled()
+  expect(await calls(page, 'project.compaction')).toEqual([])
+})
+
+test("saves the choice of a size by its own Save, shows what the daemon kept, and saves Claude's own point again as none", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await compactionGroup(page)
+  // A first size starts from the one the proposal measured.
+  await section.size.check()
+  await expect(section.amount).toBeEnabled()
+  await expect(section.amount).toHaveValue('400000')
+  await section.amount.fill('250000')
+  expect(await calls(page, 'project.compaction')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.compaction'))
+    .toEqual([{ project: 1, compaction: 250000 }])
+  await expect(section.amount).toHaveValue('250000')
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude members compact at about 250,000 tokens: each window is given it when it next starts.",
+  )
+  // No other section saved with it.
+  for (const operation of ['project.rules', 'wakeup.set', 'project.specs', 'project.gate']) {
+    expect(await calls(page, operation)).toEqual([])
+  }
+  await section.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await compactionGroup(page)
+  await expect(again.size).toBeChecked()
+  await expect(again.amount).toHaveValue('250000')
+  // Claude's own point again: none is saved, and the size is not kept in the field.
+  await again.own.check()
+  await expect(again.amount).toBeDisabled()
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.compaction')).toHaveLength(2)
+  expect((await calls(page, 'project.compaction'))[1]).toEqual({ project: 1, compaction: null })
+  await expect(again.own).toBeChecked()
+  await expect(again.amount).toHaveValue('')
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude members use Claude's own point again: windows that start from now on are given no size.",
+  )
+})
+
+test('holds the size to the range Claude takes, and Save back while it is not a whole number in it', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await compactionGroup(page)
+  await section.size.check()
+  for (const [text, fine] of [
+    ['100000', true],
+    ['1000000', true],
+    ['400000', true],
+    ['  400000 ', true],
+    ['99999', false],
+    ['1000001', false],
+    ['0', false],
+    ['', false],
+    ['400k', false],
+    ['4e5', false],
+    ['-400000', false],
+    ['400000.5', false],
+  ]) {
+    await section.amount.fill(text)
+    if (fine) {
+      await expect(section.save, text).toBeEnabled()
+      await expect(section.hint, text).toBeHidden()
+      await expect(section.amount, text).toHaveAttribute('aria-invalid', 'false')
+    } else {
+      await expect(section.save, text).toBeDisabled()
+      await expect(section.hint, text).toHaveText(
+        'A size is a whole number from 100,000 to 1,000,000.',
+      )
+      await expect(section.amount, text).toHaveAttribute('aria-invalid', 'true')
+    }
+  }
+  // Claude's own point is saved whatever the field holds.
+  await section.amount.fill('99999')
+  await section.own.check()
+  await expect(section.save).toBeEnabled()
+  await expect(section.hint).toBeHidden()
+  expect(await calls(page, 'project.compaction')).toEqual([])
+})
+
+test("says a refusal of the Claude members' compaction in its section and keeps what was chosen", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await compactionGroup(page)
+  await section.size.check()
+  await section.amount.fill('300000')
+  await page.evaluate(() => {
+    window.__down = 'the daemon stopped'
+  })
+  await section.save.click()
+  await expect(section.hint).toBeVisible()
+  await expect(section.hint).toContainText('the daemon stopped')
+  await expect(section.amount).toHaveValue('300000')
+  await expect(section.size).toBeChecked()
 })
 
 const DEFAULT_WAKE_UP_WORDS =
@@ -6327,6 +6502,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
     'Rules for the staff',
+    'Compaction for Claude members',
     'Human approval',
     'Wake-up calls',
     'Specs',

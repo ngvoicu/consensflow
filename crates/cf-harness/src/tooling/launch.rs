@@ -140,6 +140,7 @@ fn prepared(harness: Harness, question: &Value, services: &Services) -> Result<V
         }),
         instructions: text(question, "instructions")?,
         specs: None,
+        compaction: None,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };
