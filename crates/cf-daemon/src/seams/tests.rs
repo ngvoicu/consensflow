@@ -133,12 +133,19 @@ fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
         chief.contains("| zeus | worker | Standard work |"),
         "{chief}"
     );
-    assert!(chief.contains("Here `cf` is /bundle/bin/cf."), "{chief}");
+    assert!(
+        chief.contains("\n    /bundle/bin/cf task add --tier "),
+        "{chief}"
+    );
+    assert!(!chief.contains("This window's cf"), "{chief}");
     assert!(!chief.contains("specs"), "specs off: told nothing of them");
     let worker = texts
         .instructions(participant(&scene.project, "zeus"), &scene.project, None)
         .unwrap();
-    assert!(worker.contains("Here `cf` is /bundle/bin/cf."), "{worker}");
+    assert!(
+        worker.contains("\n    /bundle/bin/cf ask \"…\" "),
+        "{worker}"
+    );
 }
 
 #[test]

@@ -1,0 +1,188 @@
+# Every command a window is taught names the window's own `cf` by its full path (T-1049; T-972's
+# live kit found it on 2026-10-31: Devin 3000.11.228 on the Mac runs its commands through a login
+# zsh whose PATH puts the user's `~/.local/bin` before the window's folder, and Claude Code 2.1.312
+# on Windows through a login Git Bash that puts `~/bin` first; another program is also called `cf`,
+# the Cloud Foundry CLI). No order of a PATH can matter to a full path, so:
+#
+# - the role texts (`skill/core/chief.md`, `skill/core/staff.md`) write `{{cf}}` where a command
+#   starts, and `role_instructions` puts the window's path there (quoted as one word where a shell
+#   would read it otherwise), where a section at the end asked a window to run it by its path
+#   when its own `cf` answered as another program;
+# - the hooks a launch writes (`cf hook claude`, `cf hook devin`, `cf hook devin-session`, `cf hook
+#   muse-session`) are run by that path too (`shared::shell::cf_hook`).
+#
+# The texts are held by `crates/cf-engine/tests/text/roles.rs` (every role, with and without specs,
+# with a path and with a path a shell reads: no bare `cf` anywhere), `roles/member.rs`'s tests (the
+# part of a role gets it too) and the goldens of the texts; the hooks by the harness tests of each
+# (`claude`'s launch, `devin::install`, `muse::launch`, `tooling::launch`) and `shared::shell`.
+# `cargo xtask live own-cf` shows it on the real harnesses.
+#
+# Every name holds `own cf path`, so `npm run plants:daemon -- "own cf path"` runs them all.
+
+[run]
+engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::", "--", "--skip", "goldens_roles"]
+engine-text-goldens-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "goldens_roles"]
+engine-lib-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "roles::"]
+harness-lib-shell = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::shell::"]
+harness-lib-devin-install = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::install::"]
+harness-lib-muse-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::launch::"]
+harness-launch-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::launches_a_fresh_worker"]
+harness-lib-tooling-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::launch::"]
+
+# The texts.
+
+[[plant]]
+name = "own cf path: a member's command table says the word cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '    {{cf}} ask "…"                    a question to the chief; then end your turn'
+replace = '    cf ask "…"                    a question to the chief; then end your turn'
+
+[[plant]]
+name = "own cf path: a worker's closing line asks with the word cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''
+the evidence, and anything left open. If you cannot go on without an answer,
+ask with `{{cf}} ask "…"` and end your turn;'''
+replace = '''
+the evidence, and anything left open. If you cannot go on without an answer,
+ask with `cf ask "…"` and end your turn;'''
+
+[[plant]]
+name = "own cf path: the chief's command table says the word cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '    {{cf}} task done T-3 "…"          finish your own task with its result'
+replace = '    cf task done T-3 "…"          finish your own task with its result'
+
+[[plant]]
+name = "own cf path: the chief is told to record its own task with the word cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "Record what you did with `{{cf}} task done T-3"
+replace = "Record what you did with `cf task done T-3"
+
+[[plant]]
+name = "own cf path: a chief's text is given the word cf in place of the path"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles", "engine-text-goldens-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '.replace("{{cf}}", &cf);'
+replace = '.replace("{{cf}}", "cf");'
+
+[[plant]]
+name = "own cf path: a member's text is given the word cf in place of the path"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles", "engine-text-goldens-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = "return member::text(role, &cf);"
+replace = 'return member::text(role, "cf");'
+
+[[plant]]
+name = "own cf path: the parts of a member's text are not given the cf"
+meant = "the_cf_is_put_in_the_shared_text_and_in_each_part_and_a_path_is_no_slot"
+runs = ["engine-lib-roles", "engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/member.rs"
+find = '''own.insert(slot, text.trim_end_matches('\n').replace("{{cf}}", cf));'''
+replace = '''own.insert(slot, text.trim_end_matches('\n').to_owned());'''
+
+[[plant]]
+name = "own cf path: a path a shell would read is not quoted"
+meant = "a_cf_a_shell_would_read_is_one_quoted_word_in_every_command"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '.all(|byte| byte.is_ascii_alphanumeric() || b"/._-:+~".contains(&byte));'
+replace = ".all(|_| true);"
+
+[[plant]]
+name = "own cf path: an empty path is a path"
+meant = "with_no_path_the_commands_say_cf_and_a_path_that_is_empty_is_none"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = "let Some(cf) = cf.filter(|cf| !cf.is_empty()) else {"
+replace = "let Some(cf) = cf else {"
+
+# The hooks.
+
+[[plant]]
+name = "own cf path: a hook is run by the word cf"
+meant = "a_hook_is_run_by_the_whole_path_of_the_cf_and_each_argument_is_one_word"
+runs = ["harness-lib-shell"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/shell.rs"
+find = 'let mut command = format!("{} hook {hook}", quote(pane_cf));'
+replace = 'let mut command = format!("{} hook {hook}", quote("cf"));'
+
+[[plant]]
+name = "own cf path: Claude's question hook says the word cf"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["harness-launch-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '"command": cf_hook(pane_cf, "claude", &[])'
+replace = '"command": cf_hook("cf", "claude", &[])'
+
+[[plant]]
+name = "own cf path: Claude's adapter is given the word cf for its hooks"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["harness-launch-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "pane_cf: services.bundle.pane_cf.clone(),"
+replace = 'pane_cf: "cf".to_owned(),'
+
+[[plant]]
+name = "own cf path: Devin's question hook says the word cf"
+meant = "every_hook_is_run_by_the_bundles_own_cf_named_in_full_and_quoted"
+runs = ["harness-lib-devin-install", "harness-lib-tooling-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/install.rs"
+find = '"command": cf_hook(pane_cf, "devin", &[])'
+replace = '"command": cf_hook("cf", "devin", &[])'
+
+[[plant]]
+name = "own cf path: Devin's session hook says the word cf"
+meant = "every_hook_is_run_by_the_bundles_own_cf_named_in_full_and_quoted"
+runs = ["harness-lib-devin-install", "harness-lib-tooling-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/install.rs"
+find = '"command": cf_hook(pane_cf, "devin-session", &[]),'
+replace = '"command": cf_hook("cf", "devin-session", &[]),'
+
+[[plant]]
+name = "own cf path: Muse's session hook says the word cf"
+meant = "the_hook_names_its_files_on_its_command_line_quoted_for_the_hook_s_shell"
+runs = ["harness-lib-muse-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '"command": cf_hook(pane_cf, "muse-session", &[role_file, said]),'
+replace = '"command": cf_hook("cf", "muse-session", &[role_file, said]),'

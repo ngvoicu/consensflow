@@ -329,11 +329,19 @@ fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_tas
         written["hooks"]["Stop"],
         json!([{ "hooks": [{ "type": "command", "command": "exit 0" }] }])
     );
+    // The bundle's own `cf` by its whole path, quoted: Claude Code's Git Bash on Windows is
+    // a login shell, whose PATH puts the user's `~/bin` before the window's folder
+    // (2.1.312, 2026-10-31), so the word `cf` there can be another program.
+    let cf = format!(
+        "{}/bundle/bin/cf{}",
+        home.root.replace('\\', "/"),
+        if cfg!(windows) { ".exe" } else { "" }
+    );
     assert_eq!(
         written["hooks"]["PreToolUse"],
         json!([{
             "matcher": "AskUserQuestion",
-            "hooks": [{ "type": "command", "command": "cf hook claude", "timeout": 3600 }],
+            "hooks": [{ "type": "command", "command": format!("'{cf}' hook claude"), "timeout": 3600 }],
         }]),
         "Claude's question tool is answered from the board, for an hour, then in the window"
     );

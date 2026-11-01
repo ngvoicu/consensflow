@@ -546,7 +546,10 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
             let role = std::fs::read_to_string(argv[at + 1]).unwrap();
             // As the daemon names it: `cf.exe`, spelled with `/`, on Windows.
             let cf = machine::bundle_of(&bin.join("cf")).pane_cf;
-            assert!(role.contains(&format!("Here `cf` is {cf}")), "{role}");
+            assert!(
+                role.contains(&format!("\n    {cf} task add --tier ")),
+                "{role}"
+            );
 
             // The page is told the board changed, once for what came together.
             wait_for(root.path(), || !events.borrow().is_empty()).await;

@@ -231,7 +231,7 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '    cf task add --test --tier <tier> "…"     a test for a tester: what to run and what to check; results with evidence back, no product code changed'
+find = '    {{cf}} task add --test --tier <tier> "…"     a test for a tester: what to run and what to check; results with evidence back, no product code changed'
 replace = ""
 
 [[plant]]

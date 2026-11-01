@@ -100,6 +100,8 @@ pub struct ClaudeAdapter {
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     entropy: Rc<dyn Entropy>,
+    /// The bundle's `cf` as a window names it: what the launch's hooks run.
+    pane_cf: String,
     /// Where Claude keeps its own status of each of its processes, made
     /// whole once, as Node resolved it when it made the adapter; or why
     /// there is none.
@@ -114,6 +116,7 @@ impl ClaudeAdapter {
             records: Rc::clone(&services.records),
             time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
+            pane_cf: services.bundle.pane_cf.clone(),
             statuses: status::folder(&services.env),
         }
     }
@@ -123,7 +126,8 @@ impl Adapter for ClaudeAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Claude, &self.env)?;
-            let settings = install::settings(&self.env, launch.id, launch.role != "chief")?;
+            let settings =
+                install::settings(&self.env, launch.id, launch.role != "chief", &self.pane_cf)?;
             let role = install::role(&self.env, launch)?;
             // Claude keeps a conversation only once something was said in
             // it, and what it kept can be gone since: the engine asks

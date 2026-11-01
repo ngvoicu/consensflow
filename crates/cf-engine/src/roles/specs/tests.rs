@@ -35,23 +35,18 @@ fn with_specs_off_a_chief_s_text_holds_no_word_of_them_and_is_the_text_it_was() 
             "{word:?} in a chief's text with specs off"
         );
     }
-    // The text is chief.md, the staff, and the note of this window's cf, in that order.
-    assert!(chief.ends_with(&format!(
-        "\n## This window's cf\n\nHere `cf` is {CF}. If `cf` says a command is unknown, or answers as another program, another `cf` comes first on this shell's PATH: run {CF} instead.\n"
-    )));
+    // The text is chief.md with the staff, each command starting with this window's cf.
+    assert!(!chief.contains("This window's cf"));
+    assert!(chief.contains(&format!("\n    {CF} task get T-3 ")));
     assert!(chief.contains("| zeus | worker | "));
 }
 
 #[test]
-fn a_chief_s_text_with_specs_on_has_one_section_more_before_its_cf_and_the_rest_is_the_same() {
+fn a_chief_s_text_with_specs_on_has_one_section_more_after_the_rest_and_the_rest_is_the_same() {
     let base = text("chief", None);
     let specs = given(Variant::Tdd);
     let with = text("chief", Some(&specs));
-    let (before_cf, cf) = base.split_once("\n## This window's cf").unwrap();
-    assert_eq!(
-        with,
-        format!("{before_cf}{}\n## This window's cf{cf}", specs.section())
-    );
+    assert_eq!(with, format!("{base}{}", specs.section()));
     assert_eq!(with.matches("## This project's specs").count(), 1);
 }
 

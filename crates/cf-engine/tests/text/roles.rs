@@ -9,7 +9,8 @@ use std::path::Path;
 
 use cf_base::env::Env;
 use cf_catalog::WorkTier;
-use cf_engine::roles::{role_instructions, StaffRow};
+use cf_engine::roles::{role_instructions, ProjectSpecs, StaffRow};
+use cf_proto::specs::Variant;
 use regex::Regex;
 
 use super::support::staff_row;
@@ -365,31 +366,93 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
     ));
 }
 
-#[test]
-fn names_this_window_s_cf_by_its_full_path_for_a_shell_that_finds_another_cf_first() {
+/// Every role's text, with the staff and the specs a chief can be given, for the `cf` a
+/// window is told: the roles a window can have, so a role added later is read too.
+fn every_text_for(cf: &str) -> Vec<(String, String, usize)> {
+    let specs = ProjectSpecs {
+        variant: Variant::Tdd,
+        folder: "docs/specs",
+        skill: "/home/me/.consensflow/skills/specmint-tdd/SKILL.md",
+    };
+    let mut texts = Vec::new();
     for role in [
         "chief", "worker", "advisor", "reviewer", "tester", "designer",
     ] {
-        let text = role_instructions(
-            &Env::default(),
-            role,
-            &[],
-            Some("/opt/consensflow/bin/cf"),
-            None,
-        )
-        .unwrap();
-        assert!(
-            found(
-                r"## This window's cf\n\nHere `cf` is /opt/consensflow/bin/cf\. If `cf` says a command is unknown, or answers as another program, another `cf` comes first on this shell's PATH: run /opt/consensflow/bin/cf instead\.\n$",
-                &text
-            ),
-            "{role}"
-        );
+        for specs in [None, Some(&specs)] {
+            let text =
+                role_instructions(&Env::default(), role, &[zeus()], Some(cf), specs).unwrap();
+            // The commands each starts with: the chief's table and prose, a member's table and
+            // the line of its result.
+            let least = if role == "chief" { 40 } else { 7 };
+            texts.push((
+                format!("the {role}'s, specs {}", specs.is_some()),
+                text,
+                least,
+            ));
+        }
     }
-    assert!(
-        !instructions("worker", &[]).contains("This window's cf"),
-        "only when the daemon says"
-    );
+    texts
+}
+
+/// The line of `text` that says the word `cf` on its own, once `word`, which every command
+/// of a window starts with, is taken out of it.
+fn a_bare_cf(text: &str, word: &str) -> Option<String> {
+    let without = text.replace(word, "");
+    let bare = Regex::new(r"(?-u:\b)cf(?-u:\b)").unwrap().find(&without)?;
+    let from = without[..bare.start()].rfind('\n').map_or(0, |at| at + 1);
+    let to = without[bare.end()..]
+        .find('\n')
+        .map_or(without.len(), |at| bare.end() + at);
+    Some(without[from..to].to_owned())
+}
+
+/// A window's shell can find another `cf` first on its PATH (a Devin member's login zsh puts
+/// the user's `~/.local/bin` first, a Claude Code member's login Git Bash `~/bin`, 2026-10-31;
+/// the Cloud Foundry CLI is a `cf` too), so every command a text teaches names this window's
+/// own `cf` by its full path, and no text says the word `cf` of a shell's own finding.
+#[test]
+fn every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path() {
+    let cf = "/opt/consensflow/bin/cf";
+    for (which, text, least) in every_text_for(cf) {
+        assert!(
+            !text.contains("This window's cf"),
+            "{which}: the section that asked a window to run it by its path is gone"
+        );
+        assert!(!text.contains("{{"), "{which}: every placeholder is filled");
+        let commands = text.matches(&format!("{cf} ")).count();
+        assert!(
+            commands >= least,
+            "{which}: {commands} commands name the path"
+        );
+        assert_eq!(a_bare_cf(&text, cf), None, "{which}: a bare cf");
+    }
+}
+
+#[test]
+fn a_cf_a_shell_would_read_is_one_quoted_word_in_every_command() {
+    let cf = "/Users/me/My Apps/cf `x` $HOME 'q'";
+    let word = r"'/Users/me/My Apps/cf `x` $HOME '\''q'\'''";
+    for (which, text, least) in every_text_for(cf) {
+        let commands = text.matches(&format!("{word} ")).count();
+        assert!(
+            commands >= least,
+            "{which}: {commands} commands name the word"
+        );
+        assert_eq!(a_bare_cf(&text, word), None, "{which}: a bare cf");
+    }
+}
+
+#[test]
+fn with_no_path_the_commands_say_cf_and_a_path_that_is_empty_is_none() {
+    for text in [
+        instructions("worker", &[]),
+        instructions("chief", &[zeus()]),
+        role_instructions(&Env::default(), "worker", &[], Some(""), None).unwrap(),
+    ] {
+        assert!(text.contains("\n    cf "), "the commands start with cf");
+        assert!(!text.contains("This window's cf"));
+        assert!(!text.contains("''"), "no quoted nothing");
+    }
 }
 
 #[test]

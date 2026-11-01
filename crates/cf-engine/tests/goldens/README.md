@@ -50,3 +50,19 @@ hand. Say a file is restored only once you have checked it: its diff, or what it
 2026-10-15, when a worker on the owner's Windows machine overwrote a file that held
 uncommitted work with `git checkout`, and other workers said they had restored files they
 had not.
+
+The same 39 rows, the 27 members' and the twelve of the chief's that hold the role's own text
+(the other chief rows read an eval's card, and hold the card), name `cf` in a different way
+(`skill/core/chief.md` and `skill/core/staff.md`, T-1049, 2026-11-01). A window's shell can
+find another `cf` first on its PATH (Devin's login zsh on the Mac, Claude Code's login Git
+Bash on Windows, the Cloud Foundry CLI: T-972's live kit, 2026-10-31), so each command a text
+teaches starts with the window's own `cf` by its full path, where Node's said `cf`: the
+`cf` of the row's input, quoted as one word where a shell would read it otherwise (the rows
+whose path has a space, quotes, a backtick or a `$`), and `cf` where the row gives none (the
+undefined `cf` and the empty one). Two more changes follow from it. The sentence "`cf` is on
+this window's PATH and its output says what happened" is now "Its output says what
+happened", for it is no longer the PATH that finds the `cf`. And the section at the end,
+"## This window's cf" ("Here `cf` is …; if `cf` says a command is unknown, or answers as
+another program, … run … instead"), is gone from the rows that had it (those with a `cf`):
+the commands say it. Changed by hand, in those words alone, as a regular edit of each text
+(a command's `cf` put through the row's path, the sentence and the section), on 2026-11-01.

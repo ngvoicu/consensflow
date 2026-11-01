@@ -456,7 +456,12 @@ fn a_member_launch_without_the_owners_hooks_keeps_the_ones_consensflow_adds_and_
         Member::new("worker", "# worker\n").without_the_owners_hooks(),
     )?;
     assert_eq!(events(&alone), ["PreToolUse", "SessionStart"]);
-    assert_eq!(commands(&alone, "PreToolUse"), ["cf hook devin"]);
+    // The question hook runs the rig's own `cf` by its whole path, as the session's does.
+    let real_cf = rig.cf().to_string_lossy().replace('\\', "/");
+    assert_eq!(
+        commands(&alone, "PreToolUse"),
+        [format!("'{real_cf}' hook devin")]
+    );
     let started = commands(&alone, "SessionStart");
     assert_eq!(started.len(), 1, "{started:?}");
     assert!(started[0].ends_with(" hook devin-session"), "{started:?}");

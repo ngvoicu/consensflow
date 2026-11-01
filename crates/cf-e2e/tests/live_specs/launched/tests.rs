@@ -6,7 +6,7 @@ const SECTION_TEXT: &str = "\n## This project's specs\n\nSpecs are on in this pr
 
 #[test]
 fn a_text_with_specs_off_says_nothing_of_them_and_one_that_says_a_word_of_them_is_refused() {
-    assert!(told_nothing_of_specs("You run this project.\n## This window's cf\n").is_ok());
+    assert!(told_nothing_of_specs("You run this project.\n## Your commands\n").is_ok());
     assert!(!has_the_section("You run this project.\n"));
     let failed = told_nothing_of_specs(SECTION_TEXT).unwrap_err();
     assert!(failed.contains("This project's specs"), "{failed}");

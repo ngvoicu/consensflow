@@ -78,14 +78,16 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
 }
 
 /// The instructions a window of `role` starts with. `cf` is where this
-/// window's `cf` is: a shell that re-reads the user's profile can find
-/// another `cf` first (another ConsensFlow's, or the Cloud Foundry CLI: a
-/// Devin worker's `cf` was the live app's older one, 2026-09-26), and the full
-/// path always works. Without it the text says nothing of the kind.
+/// window's `cf` is, and every command the text teaches (`{{cf}}` in
+/// `chief.md` and `staff.md`) names it by that full path: a shell that
+/// re-reads the user's profile can find another `cf` first (another
+/// ConsensFlow's, or the Cloud Foundry CLI: a Devin worker's `cf` was the live
+/// app's older one, 2026-09-26), and no order of a `PATH` matters to a full
+/// path. Without it the commands say `cf`, as a shell finds it.
 ///
 /// A chief whose project has specs on is given `specs`, and its text has the
-/// section of them before the one of its `cf`; a member's never does, whatever
-/// is given, and a chief given none reads what it always did.
+/// section of them after the rest; a member's never does, whatever is given,
+/// and a chief given none reads what it always did.
 ///
 /// Kept from Node: the chief's text is `chief.md` with the staff table put in
 /// where JavaScript's `replace` would also read `$&` and the like in it. A
@@ -100,26 +102,40 @@ pub fn role_instructions(
     if role != "chief" && !MEMBERS.contains(&role) {
         return Err(RoleError::Unknown(role.to_owned()));
     }
-    let here = cf.map_or_else(String::new, |cf| {
-        format!(
-            "\n## This window's cf\n\nHere `cf` is {cf}. If `cf` says a command is unknown, or answers as another program, another `cf` comes first on this shell's PATH: run {cf} instead.\n"
-        )
-    });
+    let cf = command_word(cf);
     if role != "chief" {
-        return Ok(member::text(role)? + &here);
+        return member::text(role, &cf);
     }
     if let Some(card) = env.path(CARD) {
         // Node read its environment as UTF-8: a byte that is none was U+FFFD.
         let card = PathBuf::from(card.to_string_lossy().into_owned());
         return Ok(String::from_utf8_lossy(&read_file_sync(&card)?).into_owned());
     }
-    let chief = CHIEF.replacen("{{tiers}}", &work_tier_list(), 1).replacen(
-        "{{staff}}",
-        &team_table(staff)?,
-        1,
-    );
+    // The `cf` goes in last, so nothing in a path is read as a slot.
+    let chief = CHIEF
+        .replacen("{{tiers}}", &work_tier_list(), 1)
+        .replacen("{{staff}}", &team_table(staff)?, 1)
+        .replace("{{cf}}", &cf);
     let specs = specs.map_or_else(String::new, ProjectSpecs::section);
-    Ok(chief + &specs + &here)
+    Ok(chief + &specs)
+}
+
+/// `cf` as the first word of a command a shell runs: the path itself where a shell
+/// takes it as one word, single-quoted where it holds a space or a character a
+/// shell reads (a bundle in `C:/Program Files`, a home with a space in its name),
+/// and `cf` where there is no path.
+fn command_word(cf: Option<&str>) -> String {
+    let Some(cf) = cf.filter(|cf| !cf.is_empty()) else {
+        return "cf".to_owned();
+    };
+    let plain = cf
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || b"/._-:+~".contains(&byte));
+    if plain {
+        cf.to_owned()
+    } else {
+        format!("'{}'", cf.replace('\'', r"'\''"))
+    }
 }
 
 /// The work tier a ledger's word names.

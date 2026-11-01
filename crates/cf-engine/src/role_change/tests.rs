@@ -140,19 +140,20 @@ fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
     .unwrap()
 }
 
-/// The real text of a chief with specs on and a staff of twenty-five who each hold
-/// two roles is still under what a message goes in whole at: it is the role itself
-/// the replacement says, not its opening and a command to read the rest of it.
+/// The real text of a chief with specs on is longer than a message goes in whole at, with
+/// no staff at all: every command in it names this window's `cf` by its whole path
+/// (T-1049), and a path of a Mac's app is 55 characters. It is told in part, its opening
+/// and the way to read the rest, as the docs of this module say.
 #[test]
-fn the_real_text_of_a_chief_with_specs_and_a_large_staff_goes_in_whole_as_a_replacement() {
+fn the_real_text_of_a_chief_with_specs_is_told_in_part_with_the_way_to_read_the_rest() {
     let text = a_chiefs_role(25, true);
     let replacement = note(None, "note", body_of(&text));
-    assert!(goes_whole(&replacement, &[]));
+    assert!(!goes_whole(&replacement, &[]));
     let said = delivery_text(&replacement, &[]);
-    assert!(said.contains(&text), "the role is cut");
+    assert!(!said.contains(&text), "the role is not cut");
     assert!(
-        !said.contains("read all of it with"),
-        "a command stands in for its end"
+        said.contains("read all of it with: cf inbox read m-4242"),
+        "no command stands in for its end"
     );
 }
 
@@ -171,8 +172,8 @@ fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
-    assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
+    assert_eq!(rows_whole(true), 0, "docs: whole to no row with specs on");
+    assert_eq!(rows_whole(false), 24, "docs: whole to 24 rows without");
 }
 
 /// An item of a conversation's record, from `role`, saying `text`.
