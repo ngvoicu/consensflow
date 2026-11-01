@@ -35,9 +35,9 @@ const LIBRARY: &str = "cf_harness";
 /// of the audit's, `InputBox`, is exported by `contract` since main's chief-meeting phase 1,
 /// so it is no site; the 32nd was `codex::channel::Channel::shown_refreshed`, which main's
 /// T-842 added as the test kit exports its siblings). Measured again on 2026-11-01 on
-/// integration D2b's merge (main `527e9e0b5`, after the OpenCode removal, with chief-meeting,
-/// field-delivery and this rule): 17, in `codex::channel`, `pi::channel` and three of
-/// `shared`. **Lower it when a site is closed; never raise it.**
+/// integration D2b's merge (main `527e9e0b5`, after a harness's removal, T-990, with
+/// chief-meeting, field-delivery and this rule): 17, in `codex::channel`, `pi::channel` and
+/// three of `shared`. **Lower it when a site is closed; never raise it.**
 const CEILING: usize = 17;
 
 pub const COMMANDS: &[Command] = &[Command {
