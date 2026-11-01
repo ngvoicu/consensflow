@@ -8,7 +8,7 @@ use cf_board::Board;
 use serde_json::{json, Map, Value};
 
 use super::lines::{
-    a_pool, body_of, message_line, numbers, task_head, task_line, tasks, waiting_answers,
+    a_pool, message_line, numbers, printed_body, task_head, task_line, tasks, waiting_answers,
 };
 use super::usage::{task_usage, ADD_USAGE};
 use super::words::{quoted, require_text, split, task_number, task_numbers, Shape};
@@ -383,7 +383,7 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
                 format!(
                     "{}\n{}",
                     message_line(message),
-                    body_of(message, board.cf())
+                    printed_body(message, board.cf())
                 )
             })
             .collect::<Vec<_>>()
@@ -825,7 +825,9 @@ and 2 idle sessions (`cf task list --all`)";
                 "message": null, "gated": false,
             }),
         )]);
-        let words: Vec<String> = ["--self", "Later"].map(str::to_owned).to_vec();
+        let words: Vec<String> = ["--self", "--needs", "T-3", "Later"]
+            .map(str::to_owned)
+            .to_vec();
         let given: Vec<OsString> = words.iter().map(OsString::from).collect();
         let said = add(&words, &given, &board, &mut std::io::empty()).unwrap();
         assert!(

@@ -36,7 +36,11 @@ fn what_consensflow_wrote_of_a_note_reaches_a_window_with_the_commands_started_b
         "chief",
         "T-1 is paused: @zeus's window is gone. Resume it with: cf task resume T-1 \"…\"",
     );
+    context.pass().unwrap();
+    // One message goes into a window at a time: the next once the turn it began is over.
+    context.adapter.answer("chief", "Understood");
     let theirs = context.note(project.id, "zeus", "chief", "Run cf task get T-1 yourself");
+    context.pass().unwrap();
     context.pass().unwrap();
     assert!(
         given(&context, "chief", own.id)

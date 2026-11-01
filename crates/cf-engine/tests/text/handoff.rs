@@ -451,6 +451,7 @@ fn the_first_message_of_a_switched_in_chief_starts_each_command_with_the_cf_of_i
         pages: 3,
     });
     let note = message(1, "note", None, None, &text);
+    let bare = Regex::new(r"(?-u:\b)cf (task|ask|inbox|answer|note|tell|staff|history)").unwrap();
     for cf in [
         CfWord::new("/opt/consensflow/bin/cf", Shell::Posix),
         CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
@@ -464,12 +465,7 @@ fn the_first_message_of_a_switched_in_chief_starts_each_command_with_the_cf_of_i
         assert!(said.contains(&format!("({word} inbox read m-6, then {word} answer m-6")));
         assert!(said.contains(&format!("({word} task get T-2)")));
         let left = said.replace(word, "");
-        assert!(
-            !Regex::new(r"(?-u:\b)cf (task|ask|inbox|answer|note|tell|staff|history)")
-                .unwrap()
-                .is_match(&left),
-            "{said}"
-        );
+        assert!(!bare.is_match(&left), "{said}");
     }
 }
 

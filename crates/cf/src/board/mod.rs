@@ -22,7 +22,7 @@ use cf_proto::cf_word::CfWord;
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
-use lines::{body_of, list, message_line};
+use lines::{list, message_line, printed_body};
 use usage::usage;
 use words::{message_id, quoted, require_text, split, task_number, Shape};
 
@@ -248,7 +248,7 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
         let text = format!(
             "{}\n\n{}",
             message_line(&message),
-            body_of(&message, board.cf())
+            printed_body(&message, board.cf())
         );
         let waiting = lines::waiting_message(&message);
         return Ok(Said::new(message, text).having_written("inbox", waiting));

@@ -78,7 +78,7 @@ pub fn task_head(task: &Value) -> String {
 /// wrote itself (it names no sender: a note of the engine's or the ledger's) has each command it
 /// names started by the window's `cf`, as it was when it was pasted there; what a participant
 /// wrote is as they wrote it.
-pub fn body_of(message: &Value, cf: &CfWord) -> String {
+pub fn printed_body(message: &Value, cf: &CfWord) -> String {
     let body = js::text(message.get("body"));
     match message.get("sender") {
         None | Some(Value::Null) => cf.in_text(&body).into_owned(),
