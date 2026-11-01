@@ -83,7 +83,9 @@ enum Outcome {
 /// work moved: Node refuses it; and the one that names
 /// `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks waiting
 /// for a member moved; and the 4 that name `ANSWERED_AS_IT_WAITED`, which
-/// the settling of a question answered as it waited moved (T-260).
+/// the settling of a question answered as it waited moved (T-260); and the one
+/// that names `CRITICAL_WORDS`, which the rewording of a critical task's lead
+/// moved (T-1060).
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -177,6 +179,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-025", 12, RESULT_ACCEPTED),
     ("ledger-tasks-026", 29, STOP_IN_EVENT),
     ("ledger-tasks-027", 6, WAITED_FOR),
+    ("ledger-tiered-012", 9, CRITICAL_WORDS),
     ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
     ("ledger-tiered-014", 22, WINDOW_ENDED),
 ];
@@ -251,6 +254,10 @@ const ANSWERED_AS_IT_WAITED: &str =
     "the chief answers a question still queued for it: the question is `read`, its receipt naming the answer and its time the answer's, so it is never typed in after, where Node leaves it `queued` to be pasted";
 const WINDOW_ENDED: &str =
     "a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none";
+/// A critical task's lead was reworded in the role texts' own terms (T-1060):
+/// it changes no file and answers to the chief.
+const CRITICAL_WORDS: &str =
+    "a critical task's lead says the work changes no file and its findings go to the chief, where Node's forbade specifications and sent them to `your coordinator`";
 
 /// What Node's ledger drew in each call (the clock's readings, session
 /// names), answered here in the same order; drawing past them is noted.

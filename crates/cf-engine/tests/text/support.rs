@@ -13,7 +13,29 @@ use cf_proto::ledger::{
     ChiefConversation, ConversationView, HistoryItem, MessageView, ParticipantView, ProjectView,
     TaskView,
 };
+use regex::Regex;
 use serde_json::Value;
+
+/// Whether `pattern` (a JavaScript pattern written as a Rust one) matches `text`.
+pub fn found(pattern: &str, text: &str) -> bool {
+    Regex::new(pattern).unwrap().is_match(text)
+}
+
+/// The commands of the transport before the board's: no text may teach them.
+pub const OLD_COMMANDS: &str =
+    r"(?-u:\b)cf (run|say|attach|read|results|projects|chief (send|read))(?-u:\b)";
+
+/// What no member's text may carry, each pattern with the rule it breaks. The
+/// role texts are held to them in `roles`; `task_words` holds to them every
+/// word ConsensFlow sets in and before a task's own, so a banned word cannot
+/// come back in a lead the role tests never read (T-1060).
+pub const MEMBER_BANS: &[(&str, &str)] = &[
+    (OLD_COMMANDS, "teaches the board's commands, not the old transport's"),
+    ("the human", "is asked and answers only through the chief"),
+    ("cf task add", "hands out no tasks"),
+    (r"PM(?-u:\b)|coordinator", "answers to the chief"),
+    (r"VERDICT|Review round", "knows no verdict line: a review is a task"),
+];
 
 /// `tests/goldens/text.json`, recorded from Node and fixed since.
 pub static GOLDEN: LazyLock<Value> = LazyLock::new(|| {
