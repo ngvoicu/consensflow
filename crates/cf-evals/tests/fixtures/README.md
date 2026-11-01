@@ -17,3 +17,13 @@ they hold the Rust to.
   recording's own numbers (its `measure`): for each ledger and each scenario a string
   with a `1` for each expectation that held and a `0` for each that did not, in the
   scenario's order. Held by `tests/scenarios.rs`.
+
+**One change since, on purpose (T-972, 2026-10-31):** the `conversation` scenario's
+expectations were tightened after a live run (Haiku 4.5 chief, `eval chiefs`) did every
+change itself and held all three: its entry in `scenarios.json` names the four it has now,
+and its strings in `verdicts.json` are what they say of the eleven recordings. Three
+recordings that held "at least three changes go to the board" on tasks of other scenarios
+(`chief-turns`, `parallel-unrun`, `placed`: "Write it", "Translate it", "Parser", …) now do
+not, for none of those tasks carries a change the owner asked for; `chief-turns`'s chief made
+two edits of its own, which the fourth expectation does not let pass. The run itself is the
+recording `eval-conversation-haiku` (`tests/fixtures/ledgers`), which reads as the bug it is.

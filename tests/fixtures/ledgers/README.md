@@ -27,10 +27,11 @@ in the order the keys are written).
 | `placed` | tasks waiting, paused, called off, failed, on a lane, of a member who left, deleted |
 | `eval-round-trip` | the ledger of a real run, taken as it was left: `npm run eval -- --scenario round-trip --chief claude --staff claude` on the native daemon (2026-10-08, a Sonnet chief and Haiku staff), one task out, a question back, an answer, a result, a review, both accepted |
 | `candidate-home` | a home of the Candidate's shape: open and closed projects with the history that went with them; `@WORK@` stands for the folder the projects live in |
+| `eval-conversation-haiku` | the ledger of a real run, taken as it was left: `cargo xtask eval chiefs --chiefs claude` (T-972, 2026-10-31, Claude Code 2.1.316, a Haiku 4.5 chief at effort medium and Haiku staff, 910 s): three tasks of the chief's own plan, all seven of the owner's changes made by the chief itself (19 edits); the owner's email is `owner@example.com` in it. No `.json`: what holds it is the `conversation` scenario's verdict on its measure (`crates/cf-evals/tests/scenarios/verdicts.rs`), which reads it as the bug |
 | `field-t14-mutation-run` | the long run's: batch A's T-14 of the field reports of 2026-10-15, a Claude Code worker's result taken while its `run_in_background` mutation run still ran (m-131, A2), and the notice that the run was ended after it (m-132, A3) |
 | `field-b5-delivered-twice` | the long run's: batch B's m-246 and m-248, a Devin chief given a result twice, the second copy glued in front of the next result (B5), with the daemon's retry in the log |
 
-The two `field-*` recordings have no `.json`: what holds them is not the measure but
+The two `field-*` recordings have no `.json` (nor has `eval-conversation-haiku`, held by its verdict, above): what holds them is not the measure but
 the long run's watch (`crates/cf-evals/tests/long_run/field.rs`), whose checks must
 each catch its shape. They are written from the field reports and the code (no logs
 of those machines exist), in the ledger's own columns, and loaded the same way.
