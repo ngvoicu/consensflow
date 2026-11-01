@@ -6,7 +6,9 @@
 # alone); the engine opens the window with it, the daemon says it in `pane.open`'s
 # `silentPaste`, and the pane host holds the human's keys after their paste in that window
 # until it has drawn it: never sooner than its pace, by a print 50 ms or more after the paste,
-# then 120 ms of quiet, at the most a second and a millisecond a character. A window whose
+# then 120 ms of quiet, at the most a second and a millisecond a character; and the terminal's
+# replies go past that hold on a worker of their own (Codex asks where the cursor is as a paste
+# comes, and read nothing of it while the answer waited behind the held Enter). A window whose
 # harness declares nothing has the human's keys as they come. The live suite types as the page
 # does (`pane.typed`, line breaks as carriage returns), judges a paste by the trace or the
 # chief's answer drawn, and says when each Enter was written.
@@ -22,6 +24,7 @@ paste-enter-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test",
 paste-enter-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests::an_open_of_a_harness_that_reads_a_paste_silently_says_how"]
 paste-enter-open = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::the_daemons_own_keys_hold_no_paste_and_no_claim"]
 paste-enter-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::"]
+paste-enter-replies = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_terminals_reply_goes_past_the_humans_keys_held_after_their_paste"]
 paste-enter-console = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::windows::"]
 paste-enter-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter", "tests::"]
 
@@ -218,6 +221,19 @@ runs = ["paste-enter-console"]
 file = "crates/cf-panes/src/arbiter.rs"
 find = "            for part in pasted_parts(bytes) {"
 replace = "            for part in [bytes] {"
+
+# --- the terminal's replies ---
+
+[[plant]]
+name = "paste enter: the terminal's replies wait behind the human's held keys"
+meant = "a_terminals_reply_goes_past_the_humans_keys_held_after_their_paste"
+platforms = ["macos"]
+runs = ["paste-enter-replies"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "            InputWork::Reply(_) => &route.replies,"
+replace = "            InputWork::Reply(_) => &route.sender,"
 
 # --- the live suite ---
 

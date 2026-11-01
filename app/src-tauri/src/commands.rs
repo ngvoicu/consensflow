@@ -108,7 +108,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
         id,
         generation,
         sequence,
-        InputWork::Write(bytes),
+        InputWork::Reply(bytes),
         false,
     )
 }

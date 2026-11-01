@@ -175,18 +175,22 @@ pub fn register_pane_handlers(
         Ok(opened)
     });
 
-    // Keys typed into a pane and an emulator's replies (a page-less peer
-    // answers a cursor query itself) are written alike.
-    for operation in ["pane.input", "pane.reply"] {
+    // Keys typed into a pane, in their order; and an emulator's replies (a page-less peer
+    // answers a cursor query itself), past whatever the pane's keys wait on
+    // (`InputWork::Reply`).
+    for (operation, reply) in [("pane.input", false), ("pane.reply", true)] {
         let input_queue = Arc::clone(&inputs);
         builder.on(operation, move |_bridge, body| {
             let request: BytesRequest = parse_body(body)?;
             validate_input(&request.bytes)?;
             let key = pane_key(&request.id, request.generation)?;
-            input_queue
-                .write(key, request.bytes)
-                .and_then(wait_for_input_blocking)
-                .map_err(|error| error.to_string())?;
+            if reply {
+                input_queue.reply(key, request.bytes)
+            } else {
+                input_queue.write(key, request.bytes)
+            }
+            .and_then(wait_for_input_blocking)
+            .map_err(|error| error.to_string())?;
             Ok(json!({"ok":true}))
         });
     }
