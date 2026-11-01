@@ -2,6 +2,7 @@
 //! first message, the human's last words, `cf history`'s pages and what is a
 //! handoff, and `toLowerCase`, which a search reads by.
 
+use cf_proto::cf_word::CfWord;
 use std::collections::HashSet;
 
 use cf_engine::handoff::{
@@ -175,7 +176,7 @@ fn every_handoff_reads_as_node_wrote_it() {
 fn every_history_has_as_many_pages_as_node_counted() {
     let rows = table("historyPages");
     for row in rows {
-        let pages = history_pages(&conversations_of(row), &known).unwrap();
+        let pages = history_pages(&conversations_of(row), &known, &CfWord::bare()).unwrap();
         assert_eq!(
             pages as u64,
             row["pages"].as_u64().unwrap(),
@@ -218,6 +219,7 @@ fn every_page_of_cf_history_reads_as_node_wrote_it_and_a_page_that_is_none_is_re
             page_of(&row["page"]),
             row["find"].as_str(),
             row["tools"].as_bool().unwrap(),
+            &CfWord::bare(),
         );
         match (shown, row.get("answer"), row.get("rangeError")) {
             (Ok(shown), Some(answer), None) => {

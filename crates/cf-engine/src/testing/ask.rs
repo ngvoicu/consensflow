@@ -11,10 +11,12 @@
 //! | `ours` | `lines` (a screen's last lines), `recipient` (the window's handle), `messages` (messages as the board gives them, each its `id`, `kind`, `sender`, `recipient`, `taskNumber` and `body`: those to `recipient` are what was pasted into the window) | for each line, whether it is ConsensFlow's, by the rule a failed turn's note reads the screen by (`shown::ours`) |
 //! | `is_paste_of` | `text` (an item of a harness's record), `message` (an id) | whether the engine takes the item for the paste of that message, which proves it arrived (`delivery_text::is_paste_of`) |
 //!
-//! Each of `cut_note` and `ours` may name `cf` (the path of the window's own `cf`) and `shell`
-//! (`powershell`, or else bash-like): the word the commands of a text start with, as the daemon
-//! gives the window's (`Roles::cf`); a question that names none is for a window whose commands say `cf`.
+//! Each of `cut_note` and `ours` may name `cf` (the path of the window's own `cf`) and `harness`
+//! (its name, `devin`): the word the commands of a text start with, as the daemon makes it for the
+//! window's harness and the platform (`Roles::cf`); a question that names no `cf` is for a window
+//! whose commands say `cf`.
 
+use cf_proto::agents::Harness;
 use cf_proto::cf_word::{CfWord, Shell};
 use cf_proto::ledger::MessageView;
 use serde_json::{json, Value};
@@ -104,10 +106,11 @@ fn cut_note(question: &Value) -> Result<Value, String> {
 /// How a command starts in the window the question is for: its `cf`, as its `shell` takes
 /// it, or the word `cf` where it names none.
 fn cf_of(question: &Value) -> CfWord {
-    let shell = match question.get("shell").and_then(Value::as_str) {
-        Some("powershell") => Shell::PowerShell,
-        _ => Shell::Posix,
-    };
+    let shell = question
+        .get("harness")
+        .and_then(Value::as_str)
+        .and_then(Harness::from_name)
+        .map_or(Shell::Posix, |harness| harness.shell(cfg!(windows)));
     question
         .get("cf")
         .and_then(Value::as_str)

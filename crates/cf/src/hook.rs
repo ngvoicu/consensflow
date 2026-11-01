@@ -19,18 +19,14 @@ use cf_base::js;
 use cf_board::door::{self, DOOR_WAIT};
 use cf_board::Board;
 use cf_harness::{claude, devin, muse};
-use cf_proto::cf_word::CfWord;
 use cf_proto::questions::{Answer, Question, Reply};
 
-/// Runs the hook of `harness`; `cf` is how a command starts in the window it runs for (a
-/// refusal of a question says to ask with it).
 pub fn run(
     harness: Option<&str>,
     args: &[OsString],
     env: &Env,
     input: &mut dyn Read,
     out: &mut dyn Write,
-    cf: &CfWord,
 ) -> io::Result<u8> {
     let mut handed: Option<(Board, Answer)> = None;
     let said = match harness {
@@ -42,7 +38,7 @@ pub fn run(
             let wait = question_wait(env);
             let given = RefCell::new(None);
             let ask = |questions: &[Question]| {
-                let reply = door::ask(&board, questions, wait, &AtomicBool::new(false), cf);
+                let reply = door::ask(&board, questions, wait, &AtomicBool::new(false));
                 if let Reply::Answered(answer) = &reply {
                     *given.borrow_mut() = Some(answer.clone());
                 }

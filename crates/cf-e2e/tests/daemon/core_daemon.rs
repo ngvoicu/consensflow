@@ -268,6 +268,7 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
     } else {
         bundle.join("cf").display().to_string()
     };
+    assert_eq!(env["CONSENSFLOW_CF"], cf_path.as_str(), "{env}");
     assert!(
         role.contains(&format!("\n    {cf_path} task add --tier ")),
         "{}",

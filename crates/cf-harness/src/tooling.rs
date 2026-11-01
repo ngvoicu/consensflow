@@ -14,7 +14,7 @@
 //! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation, or with `resume` true on the one `session` names | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
 //! | `window_text` | `text`: as a window can take it | the text |
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
-//! | `claude_settings` | `env`, `launch`, `boardQuestions`: the settings file of a Claude window | `["--settings", file]`, the file written |
+//! | `claude_settings` | `env`, `launch`, `boardQuestions`, `cf`: the settings file of a Claude window, its hooks run by the `cf` at that path | `["--settings", file]`, the file written |
 //! | `interrupt` | `kind`: the keys that interrupt a turn in the harness's window | `{presses, closeAfterMs}`: Escape that many times in a row and, where `closeAfterMs` is not null, once more that long after |
 //! | `input` | `kind`: how the harness's windows take what they are handed | `{pasted, clear}`: whether it is pasted into the window's input box, and the keys that empty the box (null for a harness whose windows take it over a channel) |
 //! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
@@ -281,7 +281,8 @@ fn start(question: &Value) -> Result<Value, String> {
     Ok(invocation.map_or(Value::Null, |invocation| invocation.written()))
 }
 
-/// The settings file of a Claude window, written under the home `env` names.
+/// The settings file of a Claude window, written under the home `env` names, its hooks run by
+/// the bundle's `cf` the question names (`cf`, a path).
 fn claude_settings(question: &Value) -> Result<Value, String> {
     let launch = LaunchId::new(text(question, "launch")?)
         .ok_or("the question's launch is not a launch id (a lowercase uuid)")?;
@@ -289,10 +290,12 @@ fn claude_settings(question: &Value) -> Result<Value, String> {
         .get("boardQuestions")
         .and_then(Value::as_bool)
         .unwrap_or(true);
+    let cf = launch::bundle_of(Path::new(text(question, "cf")?)).pane_cf;
     Ok(json!(install::settings(
         &env(question)?,
         &launch,
-        board_questions
+        board_questions,
+        &cf
     )?))
 }
 

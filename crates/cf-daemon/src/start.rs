@@ -370,11 +370,10 @@ async fn run(
         time: Rc::clone(&time) as _,
         launch_ids: Rc::new(RandomLaunchIds),
         credentials: Rc::clone(&credentials) as _,
-        pane_env: Rc::new(WindowEnv::new(
-            &env,
-            api.url(),
-            &options.bundle.bin.to_string_lossy(),
-        )),
+        pane_env: Rc::new(
+            WindowEnv::new(&env, api.url(), &options.bundle.bin.to_string_lossy())
+                .with_cf(&options.bundle.pane_cf, cfg!(windows)),
+        ),
         roster: Rc::clone(&agents) as _,
         roles: Rc::new(RoleTexts::new(env.clone(), options.bundle.pane_cf.clone())),
         trace: Rc::clone(&trace) as _,

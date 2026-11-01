@@ -266,7 +266,7 @@ fn a_door_the_board_shut_is_refused_in_the_boards_own_words_and_any_other_refusa
     ]);
     let board = Board::new(Some(&api.url), "tok");
     let stop = AtomicBool::new(false);
-    let asked = |board: &Board| ask(board, &one_question(), DOOR_WAIT, &stop, &CfWord::bare());
+    let asked = |board: &Board| ask(board, &one_question(), DOOR_WAIT, &stop);
     assert_eq!(asked(&board), Reply::Refused(closed.to_owned()));
     assert_eq!(
         asked(&board),
@@ -431,39 +431,59 @@ fn a_window_has_a_board_when_it_has_a_url_and_a_token_even_an_empty_one() {
 }
 
 #[test]
-fn a_refusal_says_to_ask_with_the_cf_of_the_window_as_its_shell_takes_it() {
+fn a_refusal_says_to_ask_with_the_cf_the_window_was_given_as_its_shell_takes_it() {
     // The shell of the window can find another `cf` first on its PATH (T-972), and a path with
-    // a space is one word to bash and a string to PowerShell until `&`.
-    let api = scripted(vec![reply(409, json!({ "message": "T-3 was cancelled" }))]);
-    let board = Board::new(Some(&api.url), "tok");
-    let refused = ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
-        .unwrap_err();
-    for (cf, said) in [
+    // a space is one word to bash and a string to PowerShell until `&`: the daemon gives each
+    // window the word for its harness and platform, which the board it asks through carries.
+    let api = scripted(vec![
+        reply(409, json!({ "message": "T-3 was cancelled" })),
+        reply(409, json!({ "message": "T-3 was cancelled" })),
+        reply(409, json!({ "message": "T-3 was cancelled" })),
+    ]);
+    let env = |word: &str| {
+        Env::from_vars([
+            ("CONSENSFLOW_URL", api.url.as_str()),
+            ("CONSENSFLOW_TOKEN", "tok"),
+            ("CONSENSFLOW_CF", word),
+        ])
+    };
+    for (word, said) in [
         (
-            CfWord::new("/opt/consensflow/bin/cf", Shell::Posix),
+            "/opt/consensflow/bin/cf",
             "Ask with /opt/consensflow/bin/cf ask",
         ),
         (
-            CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::Posix),
+            "'C:/Program Files/ConsensFlow/bin/cf.exe'",
             "Ask with 'C:/Program Files/ConsensFlow/bin/cf.exe' ask",
         ),
         (
-            CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
+            "& 'C:/Program Files/ConsensFlow/bin/cf.exe'",
             "Ask with & 'C:/Program Files/ConsensFlow/bin/cf.exe' ask",
         ),
     ] {
-        let reason = refusal_reason(&refused, &cf);
+        let board = board_of(&env(word)).unwrap();
+        assert_eq!(board.cf().as_str(), word);
+        let Reply::Refused(reason) =
+            ask(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
+        else {
+            panic!("not refused");
+        };
         assert!(reason.contains(said), "{reason}");
-        assert!(!reason.contains("with cf ask"), "{reason}");
     }
 }
 
 #[test]
-fn the_program_that_runs_is_the_cf_of_its_window_by_its_own_path() {
-    let own = own_cf(Shell::Posix);
-    let exe = std::env::current_exe().unwrap();
-    assert_eq!(
-        own.as_str().trim_matches('\''),
-        exe.to_str().unwrap().replace('\\', "/")
-    );
+fn a_window_that_was_given_no_word_says_cf() {
+    let api = scripted(vec![]);
+    let env = Env::from_vars([
+        ("CONSENSFLOW_URL", api.url.as_str()),
+        ("CONSENSFLOW_TOKEN", "tok"),
+    ]);
+    assert_eq!(board_of(&env).unwrap().cf().as_str(), "cf");
+    let bad = Env::from_vars([
+        ("CONSENSFLOW_URL", api.url.as_str()),
+        ("CONSENSFLOW_TOKEN", "tok"),
+        ("CONSENSFLOW_CF", "a\nb"),
+    ]);
+    assert_eq!(board_of(&bad).unwrap().cf().as_str(), "cf");
 }

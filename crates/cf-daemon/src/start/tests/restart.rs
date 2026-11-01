@@ -555,6 +555,8 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
                 role.contains(&format!("\n    {cf} task add --tier ")),
                 "{role}"
             );
+            // Every `cf` the window runs is told it, to say its hints with.
+            assert_eq!(env["CONSENSFLOW_CF"], cf.as_str(), "{env}");
 
             // The page is told the board changed, once for what came together.
             wait_for(root.path(), || !events.borrow().is_empty()).await;

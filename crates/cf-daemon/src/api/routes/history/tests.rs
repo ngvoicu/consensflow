@@ -391,3 +391,68 @@ fn a_page_is_written_as_a_whole_number_a_double_holds_exactly_or_as_0() {
         assert_eq!(written_page(page), written, "{page}");
     }
 }
+
+/// A page names the commands that read a delivery (`cf inbox read m-N`), and the chief that
+/// reads it runs them in a shell that can find another `cf` first (T-1049): `cf history` says
+/// the `cf` of its window, and the page is made with it; a caller that says none reads the word
+/// `cf`, as the board shows it.
+#[tokio::test]
+async fn a_page_names_its_commands_with_the_cf_of_the_window_that_reads_it() {
+    let scene = scene();
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let chief = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == "chief")
+            .unwrap();
+        let old = ledger.start_conversation(chief.id, "claude-code").unwrap();
+        let named = format!(
+            "[ConsensFlow m-{} · question from @zeus]",
+            scene.question.id
+        );
+        ledger
+            .copy_transcript(
+                old.id,
+                &[json!({ "id": "u1", "role": "user", "text": named, "complete": true })],
+                0,
+            )
+            .unwrap();
+        ledger
+            .switch_chief(
+                scene.project.id,
+                &ChiefSwitch {
+                    harness: "claude-code".to_owned(),
+                    agent: "other".to_owned(),
+                    cut: false,
+                },
+            )
+            .unwrap();
+    }
+    let id = scene.question.id;
+    let (_, bare) = history(&scene, &scene.chief, "").await;
+    let bare = bare["text"].as_str().unwrap();
+    assert!(bare.contains(&format!("(cf inbox read m-{id})")), "{bare}");
+    for (query, word) in [
+        ("?cf=%2Fx%2Fbin%2Fcf", "/x/bin/cf"),
+        (
+            "?cf=%26%20%27C%3A%2FProgram%20Files%2Fcf.exe%27",
+            "& 'C:/Program Files/cf.exe'",
+        ),
+    ] {
+        let (status, said) = history(&scene, &scene.chief, query).await;
+        assert_eq!(status, 200);
+        let text = said["text"].as_str().unwrap();
+        assert!(
+            text.contains(&format!("({word} inbox read m-{id})")),
+            "{text}"
+        );
+        assert!(!text.contains("(cf inbox read"), "{text}");
+    }
+    // A word no shell could take is none.
+    let (_, odd) = history(&scene, &scene.chief, "?cf=a%0Ab").await;
+    assert!(odd["text"].as_str().unwrap().contains("(cf inbox read"));
+}

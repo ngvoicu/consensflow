@@ -292,7 +292,8 @@ fn look(members: &mut Members, harness: Harness, log: &Log) -> Result<(bool, See
             .unwrap_or_default();
         // The thread holds the worker's result to the chief too: the engine reads what
         // went into the window by its recipient.
-        seen.wrong = misread(&lines, &ask::ours(&lines, &handle, &pasted)?);
+        let window = ask::For::new(members.rig().cf(), harness.name());
+        seen.wrong = misread(&lines, &ask::ours(&lines, &handle, &pasted, window)?);
     }
     let state = ended.unwrap_or_else(|| "not over".to_owned());
     log.say(format!("T-{number} is {state}; {}", seen.line()));

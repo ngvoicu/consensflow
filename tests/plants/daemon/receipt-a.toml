@@ -88,10 +88,14 @@ runs = ["cf-lib-board"]
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
 find = '''
-        Ok(Said { data, text, wrote }) => {
+        Ok(Said {
+            data, text, wrote, ..
+        }) => {
             let printed = if json {'''
 replace = '''
-        Ok(Said { data, text, wrote }) => {
+        Ok(Said {
+            data, text, wrote, ..
+        }) => {
             if let Some(wrote) = &wrote {
                 wrote.acknowledge(board);
             }

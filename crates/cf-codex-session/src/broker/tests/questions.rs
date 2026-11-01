@@ -229,14 +229,12 @@ fn codexs_question_the_board_refuses_is_answered_with_the_reason_never_left_to_a
         let (f, tui) = window(&api.url, Duration::from_secs(5)).await;
         f.codex.send_json(1, &request_user_input());
         wait(|| asked_of(&f, "ask-1").is_some()).await;
-        // The window's own `cf` is this program, as the shell of Codex's window takes it.
-        let cf = cf_board::door::own_cf(cf_proto::agents::Harness::Codex.shell(cfg!(windows)));
         assert_eq!(
             asked_of(&f, "ask-1").unwrap(),
             json!({
                 "id": "ask-1",
                 "result": { "answers": { "colour": { "answers": [
-                    format!("ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with {cf} ask \"…\" instead.")
+                    "ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with cf ask \"…\" instead."
                 ] } } },
             })
         );

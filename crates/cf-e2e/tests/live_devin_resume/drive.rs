@@ -226,7 +226,7 @@ fn drive(run: &Run, case: Case, folder: &str, workspace: &Path, done: &mut Done)
     // The daemon that starts again: the window on the conversation, as it opens it,
     // with the note the engine writes for it.
     let (message, task) = Case::note_of();
-    let note = ask::cut_note(message, &[task])?;
+    let note = ask::cut_note(message, &[task], ask::For::new(run.rig.cf(), "devin"))?;
     let again = run.window(
         folder,
         &format!("{folder}-again"),

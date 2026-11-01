@@ -437,6 +437,7 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
                 "env": { "CONSENSFLOW_HOME": home.path().to_str().unwrap() },
                 "launch": LAUNCH,
                 "boardQuestions": board_questions,
+                "cf": "/bundle/bin/cf",
             }),
         );
         let args = answer(&question).unwrap();
@@ -454,6 +455,11 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
         members["hooks"]["PreToolUse"][0]["matcher"],
         json!("AskUserQuestion")
     );
+    // The hook is run by the bundle's own `cf` by its whole path, not the word.
+    assert_eq!(
+        members["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        json!("'/bundle/bin/cf' hook claude")
+    );
     // A question that is not put to the board is Claude's own: the hook is not there.
     assert_eq!(settings(false)["hooks"]["PreToolUse"], json!([]));
     assert!(home
@@ -466,7 +472,7 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
     // The id of a launch is a uuid, and the file is written nowhere else.
     let refused = answer(&ask(
         "claude_settings",
-        json!({ "env": { "CONSENSFLOW_HOME": "/nowhere" }, "launch": "../live" }),
+        json!({ "env": { "CONSENSFLOW_HOME": "/nowhere" }, "launch": "../live", "cf": "/b/cf" }),
     ));
     assert!(refused.unwrap_err().contains("not a launch id"));
 }

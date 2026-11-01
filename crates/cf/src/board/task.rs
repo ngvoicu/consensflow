@@ -7,7 +7,9 @@ use cf_base::js;
 use cf_board::Board;
 use serde_json::{json, Map, Value};
 
-use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks, waiting_answers};
+use super::lines::{
+    a_pool, body_of, message_line, numbers, task_head, task_line, tasks, waiting_answers,
+};
 use super::usage::{task_usage, ADD_USAGE};
 use super::words::{quoted, require_text, split, task_number, task_numbers, Shape};
 use super::{brief, transcript};
@@ -59,8 +61,7 @@ pub fn command(
     };
     match action {
         Some("help" | "--help" | "-h") => {
-            let usage = task_usage();
-            return Ok(Said::new(json!({ "usage": usage }), usage));
+            return Ok(Said::usage(task_usage()));
         }
         Some("add") => return add(rest, given, board, input),
         Some("list") | None => return board_list(rest, board),
@@ -192,7 +193,8 @@ fn add(
     };
     let text = if mine {
         format!(
-            "T-{number} is yours; finish it with: cf task done T-{number} \"what you did\".{waits}"
+            "T-{number} is yours; finish it with: {} task done T-{number} \"what you did\".{waits}",
+            board.cf()
         )
     } else if let Some(after) = after {
         format!(
@@ -313,9 +315,10 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
     }
     if !idle.is_empty() {
         lines.push(format!(
-            "and {} idle session{} (`cf task list --all`)",
+            "and {} idle session{} (`{} task list --all`)",
             idle.len(),
-            if idle.len() == 1 { "" } else { "s" }
+            if idle.len() == 1 { "" } else { "s" },
+            board.cf()
         ));
     }
     let text = if lines.is_empty() {
@@ -380,7 +383,7 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
                 format!(
                     "{}\n{}",
                     message_line(message),
-                    js::text(message.get("body"))
+                    body_of(message, board.cf())
                 )
             })
             .collect::<Vec<_>>()
@@ -444,7 +447,8 @@ fn moved(
     let task = answer.take("task")?;
     let said = match action {
         "pause" => format!(
-            "T-{number} is paused: its window stops and its work waits. Resume it with: cf task resume T-{number} \"what to do now\""
+            "T-{number} is paused: its window stops and its work waits. Resume it with: {} task resume T-{number} \"what to do now\"",
+            board.cf()
         ),
         "resume" if task.get("state").and_then(Value::as_str) == Some("open") => format!(
             "T-{number} is back on the board for {}: the window that had it has ended.",
@@ -563,7 +567,7 @@ fn went_with_it(ids: &[Value]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use cf_board::scripted::{reply, scripted};
+    use cf_board::scripted::{reply, scripted, Reply, ScriptedApi};
 
     use super::*;
 
@@ -789,6 +793,47 @@ and 2 idle sessions (`cf task list --all`)";
             "and 2 idle sessions (`cf task list --all`)"
         );
         assert_eq!(listed(&[], &json!([])), "No tasks yet.");
+    }
+
+    /// A board for the window whose `cf` is at `/x/bin/cf`, answering with `replies`.
+    fn board_of_the_window(replies: Vec<Reply>) -> (Board, ScriptedApi) {
+        let api = scripted(replies);
+        let board = Board::new(Some(&api.url), "tok")
+            .with_cf(cf_proto::cf_word::CfWord::of_word("/x/bin/cf").unwrap());
+        (board, api)
+    }
+
+    /// The commands `cf` names in what it prints start with the `cf` of the window (T-1049): a
+    /// shell can find another `cf` first, and a chief that reads a hint runs it.
+    #[test]
+    fn the_hints_cf_prints_start_their_commands_with_the_cf_of_the_window() {
+        // The list's hint of the sessions it left out.
+        let (board, _api) = board_of_the_window(vec![reply(
+            200,
+            json!({ "open": [], "lanes": [lane("hera", "reviewer", &[card(3, "accepted", Some("hera"))])] }),
+        )]);
+        assert_eq!(
+            board_list(&[], &board).unwrap().text,
+            "and 1 idle session (`/x/bin/cf task list --all`)"
+        );
+        // The line that says how to finish a step of one's own.
+        let (board, _api) = board_of_the_window(vec![reply(
+            201,
+            json!({
+                "task": { "number": 4, "state": "open", "assignee": null, "requester": "chief",
+                    "title": "Later", "blockedBy": [], "pool": "chief", "tier": null },
+                "message": null, "gated": false,
+            }),
+        )]);
+        let words: Vec<String> = ["--self", "Later"].map(str::to_owned).to_vec();
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = add(&words, &given, &board, &mut std::io::empty()).unwrap();
+        assert!(
+            said.text
+                .contains("finish it with: /x/bin/cf task done T-4 \"what you did\""),
+            "{}",
+            said.text
+        );
     }
 
     /// What `cf task add words…` posted and printed, the board answering with `answer`.

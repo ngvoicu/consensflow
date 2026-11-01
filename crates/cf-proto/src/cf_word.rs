@@ -11,6 +11,11 @@
 use std::borrow::Cow;
 use std::fmt;
 
+/// The variable a window's environment carries its [`CfWord`] in, as the daemon made it for
+/// the window's harness and platform: every `cf` the window runs (a command, a hook, the
+/// broker of Codex's questions) says its own hints with it ([`CfWord::of_word`]).
+pub const ENV: &str = "CONSENSFLOW_CF";
+
 /// How the shell a window's commands are typed in runs a program by its path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shell {
@@ -55,6 +60,14 @@ impl CfWord {
             Shell::Posix => format!("'{}'", path.replace('\'', r"'\''")),
             Shell::PowerShell => format!("& '{}'", path.replace('\'', "''")),
         })
+    }
+
+    /// A word a window was given as it starts a command (the value of [`ENV`]), taken as it is:
+    /// none for an empty one, one over a line or one with a control character, which no shell
+    /// takes as the start of a command.
+    pub fn of_word(word: &str) -> Option<Self> {
+        let fits = !word.is_empty() && word.len() <= 1_024 && !word.chars().any(char::is_control);
+        fits.then(|| Self(word.to_owned()))
     }
 
     /// The word, as it starts a command.
@@ -196,6 +209,17 @@ mod tests {
         // The command at the very end, and the word after it ends in a mark.
         assert_eq!(said("run cf task"), format!("run {MAC} task"));
         assert_eq!(said("cf tell."), format!("{MAC} tell."));
+    }
+
+    #[test]
+    fn a_word_a_window_was_given_is_taken_as_it_is_unless_no_shell_could_take_it() {
+        for word in [MAC, "& 'C:/Program Files/c/cf.exe'", "'/a b/cf'", "cf"] {
+            assert_eq!(CfWord::of_word(word).unwrap().as_str(), word);
+        }
+        let long = "x".repeat(1_025);
+        for none in ["", "a\nb", "a\u{7}b", long.as_str()] {
+            assert_eq!(CfWord::of_word(none), None, "{none:?}");
+        }
     }
 
     #[test]

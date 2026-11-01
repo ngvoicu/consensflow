@@ -159,15 +159,7 @@ fn a_ui_that_reaches_the_library_is_an_unknown_command_and_starts_nothing() {
     for words in [&["ui"][..], &["ui", "--json", "--no-open"]] {
         let args: Vec<OsString> = words.iter().map(OsString::from).collect();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let code = cf::run(
-            &env,
-            &args,
-            &mut io::empty(),
-            &mut out,
-            &mut err,
-            &cf_proto::cf_word::CfWord::bare(),
-        )
-        .unwrap();
+        let code = cf::run(&env, &args, &mut io::empty(), &mut out, &mut err).unwrap();
         assert_eq!(code, 1, "{words:?}");
         assert!(out.is_empty(), "{words:?}");
         assert_eq!(

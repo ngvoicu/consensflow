@@ -461,3 +461,41 @@ async fn work_woken_from_outside_a_drain_is_run_by_the_driver() {
         })
         .await;
 }
+
+#[test]
+fn a_window_is_told_how_a_command_starts_in_it_for_its_harness_and_the_platform() {
+    // The default install of Windows has a space in its path: the word of a Git Bash harness
+    // is one quoted word, and of Codex's PowerShell an `&` call (T-1049).
+    let scene = scene();
+    let spaced = "C:/Program Files/ConsensFlow/bin/cf.exe";
+    let member_of = |harness: Harness| {
+        let mut member = participant(&scene.project, "zeus").clone();
+        member.harness = Some(harness.kind().to_owned());
+        member
+    };
+    let told = |windows: bool, harness: Harness| {
+        let window = WindowEnv::new(&Env::default(), "http://127.0.0.1:1", "/bundle/bin")
+            .with_cf(spaced, windows);
+        window
+            .env(&member_of(harness), &scene.project)
+            .into_iter()
+            .filter(|(name, _)| name == "CONSENSFLOW_CF")
+            .map(|(_, word)| word)
+            .collect::<Vec<_>>()
+    };
+    for harness in Harness::ALL {
+        assert_eq!(told(false, harness), [format!("'{spaced}'")]);
+        let on_windows = if harness == Harness::Codex {
+            format!("& '{spaced}'")
+        } else {
+            format!("'{spaced}'")
+        };
+        assert_eq!(told(true, harness), [on_windows], "{harness:?}");
+    }
+    // A daemon that was given no `cf` tells no window of one.
+    let silent = WindowEnv::new(&Env::default(), "http://127.0.0.1:1", "/bundle/bin");
+    assert!(silent
+        .env(participant(&scene.project, "zeus"), &scene.project)
+        .iter()
+        .all(|(name, _)| name != "CONSENSFLOW_CF"));
+}

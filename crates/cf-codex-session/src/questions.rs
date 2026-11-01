@@ -11,9 +11,8 @@ use std::time::Duration;
 
 use cf_base::js;
 use cf_base::json::js_order;
-use cf_board::door::{ask, own_cf};
+use cf_board::door::ask;
 use cf_board::Board;
-use cf_proto::agents::Harness;
 use cf_proto::questions::{Answer, Question, Reply};
 use serde_json::{json, Map, Value};
 
@@ -73,10 +72,7 @@ impl Asked {
     /// or until `stop` is raised. Blocks: the caller runs it where blocking is
     /// fine, and everything else goes on meanwhile.
     pub(crate) fn ask(&self, board: &Board, wait: Duration, stop: &AtomicBool) -> Reply {
-        // A refusal tells the model to ask with the window's own `cf`, which is this
-        // program, as the shell of Codex's window takes it.
-        let cf = own_cf(Harness::Codex.shell(cfg!(windows)));
-        ask(board, &self.questions, wait, stop, &cf)
+        ask(board, &self.questions, wait, stop)
     }
 }
 
@@ -233,13 +229,12 @@ mod tests {
         let board = Board::new(Some(&api.url), "window-token");
         let outcome =
             asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
-        // The window's own `cf` is this program, as the shell of Codex's window takes it.
-        let cf = own_cf(Harness::Codex.shell(cfg!(windows)));
         assert_eq!(
             outcome,
-            Reply::Refused(format!(
-                "ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with {cf} ask \"…\" instead."
-            ))
+            Reply::Refused(
+                "ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with cf ask \"…\" instead."
+                    .into()
+            )
         );
     }
 

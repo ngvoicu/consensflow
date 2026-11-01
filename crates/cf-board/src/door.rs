@@ -22,7 +22,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
-use cf_proto::cf_word::{CfWord, Shell};
+use cf_proto::cf_word::CfWord;
 use cf_proto::questions::{Answer, Question, Reply};
 use serde_json::{json, Value};
 
@@ -37,36 +37,19 @@ use crate::{Board, BoardError};
 pub fn board_of(env: &Env) -> Option<Board> {
     let url = env.text("CONSENSFLOW_URL")?;
     let token = env.os("CONSENSFLOW_TOKEN")?;
-    Some(Board::new(Some(url), &token.to_string_lossy()))
-}
-
-/// How a command starts in the window of the program that is running: its own path (the
-/// `cf` a hook or a Codex window's supervisor was started by, which is the window's own),
-/// as the window's `shell` takes it, or the word `cf` where the system names none.
-pub fn own_cf(shell: Shell) -> CfWord {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.to_str().map(|exe| exe.replace('\\', "/")))
-        .map_or_else(CfWord::bare, |exe| CfWord::new(&exe, shell))
+    Some(Board::new(Some(url), &token.to_string_lossy()).with_cf(crate::cf_in(env)))
 }
 
 /// Puts `questions` on the board and waits up to `wait` for the chief's
 /// answer, or until `stop` is raised: what came of it. A door the board
 /// shut (the task was stopped) is told so in the board's own words, which
 /// the window hands to its model as they are; any other refusal is wrapped in
-/// what points the model to `ask`, started by `cf`, the window's own, as its
-/// shell takes it.
-pub fn ask(
-    board: &Board,
-    questions: &[Question],
-    wait: Duration,
-    stop: &AtomicBool,
-    cf: &CfWord,
-) -> Reply {
+/// what points the model to `ask`, started by the window's own `cf` ([`Board::cf`]).
+pub fn ask(board: &Board, questions: &[Question], wait: Duration, stop: &AtomicBool) -> Reply {
     match ask_the_board_until(board, questions, wait, stop) {
         Ok(Some(answer)) => Reply::Answered(answer),
         Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(cause.to_string()),
-        Err(cause) if cause.is_refusal() => Reply::Refused(refusal_reason(&cause, cf)),
+        Err(cause) if cause.is_refusal() => Reply::Refused(refusal_reason(&cause, board.cf())),
         Ok(None) | Err(_) => Reply::Unanswered,
     }
 }
