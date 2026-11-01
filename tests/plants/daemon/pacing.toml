@@ -15,6 +15,8 @@ pacing-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib
 pacing-kit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::", "unproven::", "still_there::", "quoted_headers::"]
 # The box an interrupt of the engine's would go into, read empty or not (`withheld_enter.rs`).
 pacing-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "withheld_enter::"]
+# A launch's first message handed over once its window is up (`tests/dispatcher/first_delivered.rs`).
+pacing-first-delivered = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "first_delivered::"]
 # The ledger's order of a queue.
 pacing-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "questions_first"]
 # Codex's broker, and what its window makes of it.
@@ -687,3 +689,41 @@ file = "crates/cf-engine/src/deliveries.rs"
 find = '''                .request("pane.snapshot", pane_body_drawn(pane)),'''
 replace = '''                .request("pane.snapshot", json!({ "id": pane.id, "generation": pane.generation })),'''
 
+# --- Calliope's P3s on T-919: a window that answers Busy (Pi's extension, D9) ---
+
+[[plant]]
+name = "pacing busy: a busy refusal starts the hold's clock again"
+meant = "a_window_that_refuses_every_attempt_for_being_busy_is_told_at_ten_minutes"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
+replace = '''
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().held = None;
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
+
+[[plant]]
+name = "pacing busy: a first message refused for being busy is taken as handed over"
+meant = "a_first_message_refused_for_being_busy_is_pasted_later_once"
+runs = ["pacing-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if let Admission::Busy { reason } = &outcome {
+            let reason =
+                format!("its harness refused its first message for being at work: {reason}");'''
+replace = '''
+        if let (Admission::Busy { reason }, true) = (&outcome, false) {
+            let reason =
+                format!("its harness refused its first message for being at work: {reason}");'''

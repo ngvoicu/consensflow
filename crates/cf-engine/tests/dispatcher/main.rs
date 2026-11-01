@@ -65,6 +65,7 @@ mod launch_wait;
 mod looks;
 mod looks_finished;
 mod lost_lines;
+mod meeting;
 mod meeting_main;
 mod moved_models;
 mod no_adapter;

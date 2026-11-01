@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
 
+use crate::meeting::{end_every_meeting, end_meeting, Ended};
 use crate::model::{self, LedgerError, COORDINATOR_HANDLES};
 use crate::specs::{keep_specs, SpecsChange};
 use crate::staff::{add_participant, NewParticipant};
@@ -53,6 +54,8 @@ pub(crate) struct ProjectRow {
     pub(crate) specs_variant: Option<String>,
     /// The line the human wrote under the name; null where there is none.
     pub(crate) description: Option<String>,
+    /// When the human began a meeting with the chief; null while none is on.
+    pub(crate) meeting_at: Option<String>,
 }
 
 impl ProjectRow {
@@ -69,6 +72,7 @@ impl ProjectRow {
             specs_folder: row.get("specs_folder")?,
             specs_variant: row.get("specs_variant")?,
             description: row.get("description")?,
+            meeting_at: row.get("meeting_at")?,
         })
     }
 
@@ -323,6 +327,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         participants,
         specs,
         description: row.description,
+        meeting: row.meeting_at,
     }))
 }
 
@@ -376,6 +381,9 @@ pub(crate) fn set_project_state(
             withdraw_queued(store, id, why)?;
             if state == "open" {
                 resume_with_project(store, id)?;
+            } else {
+                // A Close ends a meeting: what it held goes in at the Resume.
+                end_meeting(store, id, Ended::Closed)?;
             }
         }
         known_project(store, id)
@@ -454,6 +462,8 @@ pub(crate) fn suspend_for_restart(store: &mut Store) -> Result<Vec<ProjectView>,
             )?;
             withdraw_queued(store, *id, "ConsensFlow stopped")?;
         }
+        // The app's quit ended every meeting: what each held goes in at the Resume.
+        end_every_meeting(store)?;
         open.into_iter()
             .map(|id| known_project(store, id))
             .collect()

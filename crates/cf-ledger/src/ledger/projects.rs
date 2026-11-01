@@ -2,7 +2,8 @@
 
 use super::Ledger;
 use crate::{
-    projects, specs, DeletedProject, EventView, LedgerError, NewProject, ProjectView, SpecsChange,
+    meeting, projects, specs, DeletedProject, EventView, LedgerError, MessageView, NewProject,
+    ProjectView, SpecsChange,
 };
 
 impl Ledger {
@@ -31,6 +32,18 @@ impl Ledger {
     /// Deletes a closed project and everything in it.
     pub fn delete_project(&mut self, id: i64) -> Result<DeletedProject, LedgerError> {
         projects::delete_project(&mut self.store, id)
+    }
+
+    /// The human starts (`on`) or stops a meeting with the project's chief: while
+    /// one is on, what is queued for the chief is held (3.0.7 chief-meeting).
+    pub fn set_meeting(&mut self, id: i64, on: bool) -> Result<ProjectView, LedgerError> {
+        meeting::set_meeting(&mut self.store, id, on)
+    }
+
+    /// The messages the project's meeting holds, in the order they will go; none
+    /// while no meeting is on.
+    pub fn held_by_meeting(&self, id: i64) -> Result<Vec<MessageView>, LedgerError> {
+        meeting::held(&self.store, id)
     }
 
     /// Whether the human approves each message between two agents.
