@@ -269,11 +269,11 @@ pub(crate) struct WindowPart {
     /// forget the first's, and be interrupted for it again on going back to
     /// it: only a member's own lane, given tasks by name, can.
     pub(crate) stopped: Option<(i64, i64)>,
-    /// The stop it paid at rest, keys pressed for it, with its turn's message not yet
-    /// taken back: a harness that takes the message back writes so a moment after the
-    /// turn's end (Muse's `run_retracted`, 5–11 ms after its `terminal cancelled`), and a
-    /// look between the two pays the stop (`stops`). A later look that reads the message
-    /// taken back takes it back then.
+    /// The stop it paid at rest with its turn's message not yet taken back: a harness that
+    /// takes the message back writes so a moment after the turn's end (Muse's
+    /// `run_retracted`, 5–11 ms after its `terminal cancelled`), and a look between the two
+    /// pays the stop (`stops`). A later look that reads the message taken back takes it
+    /// back then.
     pub(crate) paid_untaken: Option<Stop>,
     /// The rounds the stop it owes has had.
     pub(crate) interrupted: Option<Interrupted>,

@@ -276,12 +276,9 @@ impl Dispatcher {
                     if observed.took_back {
                         self.take_back(participant, &stop, observed)?;
                     }
-                    // Keys pressed into a turn not taken back yet: the record may say so at
-                    // the next look.
-                    let untaken = (!observed.took_back && pressed_turn(record, &stop).is_some())
-                        .then_some(stop);
                     self.pay(record, &stop);
-                    record.window.borrow_mut().paid_untaken = untaken;
+                    // Not taken back yet: the record may say so at the next look.
+                    record.window.borrow_mut().paid_untaken = (!observed.took_back).then_some(stop);
                     // The window stays: what its turn left runs on, named and never ended.
                     self.tell_paused_left_running(project, record, stop.number)
                         .await
