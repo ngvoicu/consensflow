@@ -11,7 +11,7 @@ resolver = "2"
 members = ["app/src-tauri", "crates/*", "tools/*"]
 
 [workspace.package]
-version = "3.0.6-alpha.3"
+version = "3.0.7-alpha.1"
 edition = "2021"
 rust-version = "1.95"
 
@@ -103,6 +103,10 @@ sha2 = "0.10"
 # release verify`'s check of a published update's signature.
 minisign-verify = "0.3.0"
 subtle = "2"
+# The sources read as Rust syntax, by the rule tests that hold the code to its shape
+# (cf-harness's `tests/dispatch`). The macro crates build it already, without `full` and
+# `visit-mut`: test builds make a second one.
+syn = { version = "2", features = ["full", "visit-mut"] }
 # Archives, read and written by the tools (an update's tar.gz, the portable exe's
 # runtime). Already in the build, through the app.
 tar = "0.4"

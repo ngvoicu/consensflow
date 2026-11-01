@@ -84,8 +84,9 @@ file = "crates/cf-ledger/src/projects.rs"
 find = '''
             if state == "open" {
                 resume_with_project(store, id)?;
-            }'''
-replace = ""
+            } else {'''
+replace = '''
+            if state != "open" {'''
 
 [[plant]]
 name = "resume tasks: the human's Resume leaves the work the Close paused paused, as 3.0.4 did"
@@ -97,8 +98,9 @@ file = "crates/cf-ledger/src/projects.rs"
 find = '''
             if state == "open" {
                 resume_with_project(store, id)?;
-            }'''
-replace = ""
+            } else {'''
+replace = '''
+            if state != "open" {'''
 
 # --- the mark ---
 
@@ -487,7 +489,7 @@ find = '''
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 replace = '''
         if self
             .next_in_line(record)?
@@ -495,7 +497,7 @@ replace = '''
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 
 [[plant]]
 name = "resume tasks: a delivery whose project closes during the look before the paste goes into it"
@@ -512,7 +514,7 @@ find = '''
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 replace = '''
         if self
             .next_in_line(record)?
@@ -520,7 +522,7 @@ replace = '''
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 
 # Round 5 hands the check before the paste to the hand-over itself (the host that
 # admits it); main's own deliver hands the adapter a host that admits everything.
@@ -1776,8 +1778,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/message.rs"
-find = "        Some(message) if Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse("
-replace = "        Some(message) if false && Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse("
+find = "        Some(message) => Waits::now(context, caller)?.until(message),"
+replace = "        Some(message) => Waits::now(context, caller)?.until(message).filter(|_| false),"
 
 [[plant]]
 name = "resume tasks: an inbox lists the text of what no window was handed while the project is closed"
@@ -1796,8 +1798,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "            .retain(|message| message.state != \"gated\" && !waits.holds(message));"
-replace = "            .retain(|message| message.state != \"gated\");"
+find = "            .filter_map(|message| waits.in_thread(message))"
+replace = "            .filter_map(Some)"
 
 [[plant]]
 name = "resume tasks: a brief no window was handed is read while the project is closed"
@@ -1837,10 +1839,10 @@ runs = ["daemon-routes"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/waits.rs"
 find = '''
-        self.closed
+        if self.closed
             && matches!'''
 replace = '''
-        true
+        if true
             && matches!'''
 
 [[plant]]
@@ -1850,9 +1852,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/waits.rs"
-find = '''
-            && message.sender.as_deref() != Some(self.reader)'''
-replace = ""
+find = "        if message.sender.as_deref() == Some(self.reader) {"
+replace = "        if message.sender.as_deref() == Some(self.reader) && false {"
 
 # --- round 11: the Enter pressed once more never sends words twice (both reviews of 2026-10-20) ---
 

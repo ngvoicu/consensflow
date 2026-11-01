@@ -2,12 +2,9 @@
 # first message" (T-1047; T-1000's live paste-screen, twice on Muse Code 1.4.14): each plant
 # takes one rule of the fix out, and the case named in `meant` fails.
 #
-# - The Muse reader takes a user's words from what the model was given (`model_messages`),
-#   not from what Muse's box showed (`refill_blocks`), which for a long paste is
-#   `[Pasted Content 2184 chars]` and no word of the brief's header
-#   (`crates/cf-harness/src/muse/record.rs`, its case on the recorded log in
-#   `muse/record/tests/pasted.rs`).
-# - The engine never fails a launch's first message as never shown where the window's
+# - The Muse reader's own fix (it takes a user's words from `model_messages`) landed for
+#   alpha.1 with its plant, `muse-reader.toml`. This is the class over every harness:
+#   the engine never fails a launch's first message as never shown where the window's
 #   record holds an item of the user's written since the window opened and an answer after
 #   it: the message is taken for arrived unproven, whatever the harness kept of its words
 #   (`crates/cf-engine/src/arrival.rs`, `answered_unproven`, its cases in
@@ -18,18 +15,7 @@
 # them all.
 
 [run]
-muse-never-shown-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::pasted::"]
 muse-never-shown-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unstarted::"]
-
-[[plant]]
-name = "muse never shown: the Muse reader takes the user's words from its box"
-meant = "a_long_paste_muse_folds_in_its_box_is_the_users_whole_words_and_its_answer_follows"
-runs = ["muse-never-shown-reader"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/record.rs"
-find = '''        let text = if role == Role::User && !given.trim().is_empty() {'''
-replace = '''        let text = if role == Role::User && !given.trim().is_empty() && false {'''
 
 [[plant]]
 name = "muse never shown: a launch whose window took words and answered them is failed as never shown"
