@@ -219,6 +219,7 @@ pub fn project_of(participants: Vec<ParticipantView>) -> ProjectView {
         participants,
         specs: None,
         description: None,
+        meeting: None,
     }
 }
 

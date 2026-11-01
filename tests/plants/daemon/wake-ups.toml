@@ -173,8 +173,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    if project.state != "open" || !wake_up.on {'
-replace = '    if project.state != "open" {'
+find = '    if project.state != "open" || !wake_up.on || project.meeting_at.is_some() {'
+replace = '    if project.state != "open" || project.meeting_at.is_some() {'
 
 [[plant]]
 name = "wake-up: a closed project is sent wake-ups"
@@ -183,8 +183,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    if project.state != "open" || !wake_up.on {'
-replace = '    if !wake_up.on {'
+find = '    if project.state != "open" || !wake_up.on || project.meeting_at.is_some() {'
+replace = '    if !wake_up.on || project.meeting_at.is_some() {'
 
 [[plant]]
 name = "wake-up: a quiet board is asked again"
@@ -541,10 +541,9 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '''                OR (kind = 'project.state' AND json_extract(data, '$.to') = 'open'))",
-        [project_id],'''
-replace = '''                )",
-        [project_id],'''
+find = '''                OR (kind = 'project.state' AND json_extract(data, '$.to') = 'open')
+                OR (kind = 'project.meeting' AND json_extract(data, '$.on') = 0))",'''
+replace = '''                OR (kind = 'project.meeting' AND json_extract(data, '$.on') = 0))",'''
 
 [[plant]]
 name = "wake-up: the interval counts from when a wake-up was queued, not from when it was delivered"

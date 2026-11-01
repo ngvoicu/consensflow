@@ -2,7 +2,7 @@
 //! described.
 
 use cf_base::js;
-use cf_ledger::model::parse_gate;
+use cf_ledger::model::{parse_gate, parse_meeting};
 use cf_ledger::{
     parse_description, parse_name, NewChief, NewMember, NewProject, NewWakeUp, SpecsChange,
 };
@@ -96,6 +96,19 @@ pub(super) async fn gate(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         .ledger
         .borrow_mut()
         .set_gate(body.whole("project")?, gate)?;
+    one("project", project)
+}
+
+/// `project.meeting`: the human starts (`on`) or stops a meeting with the project's
+/// chief, the flag checked before the project is looked for. While one is on, what
+/// is queued for the chief waits; a closed project's is refused. The dispatcher is
+/// woken, so what a Stop lets go goes at once, paced.
+pub(super) async fn meeting(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let on = parse_meeting(body.get("on"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_meeting(body.whole("project")?, on)?;
     one("project", project)
 }
 

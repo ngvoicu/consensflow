@@ -49,11 +49,13 @@ enum Next {
     Human,
 }
 
-/// Whether a note's task is still paused, or has moved on.
+/// Whether a note's task is still paused, or has moved on: in the words written now, or
+/// in those of a build before T-958 (`MOVED_ON_BEFORE`), which a note keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Then {
     Paused(Next),
     Moved,
+    MovedBefore,
 }
 
 /// What a note says: the task, the window's handle, the tell whose words the turn was on,
@@ -71,7 +73,11 @@ const IS_PAUSED: &str = " is paused, and @";
 const WAS_PAUSED: &str = ", paused when @";
 const TURN_ON: &str = "'s turn on the words put to its window (m-";
 const IS_OVER: &str = ") is over. What it said last:\n\n";
-const MOVED_ON: &str = ") began, has moved on since (resumed, or back on the board): its result will be its next complete answer, not this. What that turn ended with:\n\n";
+const MOVED_ON: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. What the turn on those words ended with:\n\n";
+/// What a note of a task that moved on said before T-958, which a ledger may still hold
+/// queued: read, never written. Such a note keeps these words: `keep_moved` rewrites only a
+/// note of a task still paused.
+const MOVED_ON_BEFORE: &str = ") began, has moved on since (resumed, or back on the board): its result will be its next complete answer, not this. What that turn ended with:\n\n";
 
 /// The words after the answer's, while the task is paused: what to do next.
 fn tail(number: i64, next: Next) -> String {
@@ -98,6 +104,9 @@ fn render(answered: &Answered) -> String {
             tail(*number, *next)
         ),
         Then::Moved => format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON}{words}"),
+        Then::MovedBefore => {
+            format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_BEFORE}{words}")
+        }
     }
 }
 
@@ -122,8 +131,10 @@ fn read(body: &str) -> Option<Answered> {
         [Next::Chief, Next::Human]
             .into_iter()
             .find_map(|next| Some((rest.strip_suffix(&tail(number, next))?, Then::Paused(next))))?
+    } else if let Some(words) = rest.strip_prefix(MOVED_ON) {
+        (words, Then::Moved)
     } else {
-        (rest.strip_prefix(MOVED_ON)?, Then::Moved)
+        (rest.strip_prefix(MOVED_ON_BEFORE)?, Then::MovedBefore)
     };
     let answered = Answered {
         number,
@@ -221,6 +232,37 @@ fn notes_of(
         .collect())
 }
 
+/// The newest note that gave T-`number`'s requester the answer of its window's turn on a
+/// tell, or is to give it (queued, being pasted, given, read), since the task's last result
+/// to that requester before `result`: what `result`'s paste names (T-958: the chief was given
+/// the turn's report in the note and again in the result, and could not tell which to
+/// decide). None where there is none, where Finish took its words as the result and withdrew
+/// it, or where an earlier result came after it: that note was the earlier result's to name,
+/// and a result after a reopen names none of it (Calliope's T-987).
+pub(crate) fn given(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+    result: i64,
+) -> Result<Option<i64>, LedgerError> {
+    let task = store.task_row(project_id, number)?;
+    let earlier: Option<i64> = store.db.query_row(
+        "SELECT MAX(id) FROM message
+         WHERE task_id = ?1 AND recipient_id = ?2 AND kind = 'result' AND id < ?3",
+        params![task.id, task.requester_id, result],
+        |row| row.get(0),
+    )?;
+    let mut given = None;
+    for state in ["queued", "delivering", "delivered", "read"] {
+        for (id, _) in notes_of(store, &task, Some(state))? {
+            if id < result && earlier.is_none_or(|earlier| id > earlier) {
+                given = given.max(Some(id));
+            }
+        }
+    }
+    Ok(given)
+}
+
 /// Whether the chief's tell to `participant`'s window about `task` is still on its way to it:
 /// queued behind the turn the pause stopped, held for the human, or being pasted. Until it is
 /// in, the window's record holds the turn from before the tell, and what it says last is not
@@ -310,6 +352,7 @@ mod tests {
             Then::Paused(Next::Chief),
             Then::Paused(Next::Human),
             Then::Moved,
+            Then::MovedBefore,
         ] {
             let answered = said(then);
             assert_eq!(read(&render(&answered)), Some(answered));
@@ -320,7 +363,7 @@ mod tests {
     fn the_words_of_a_note_that_moved_on_say_so_and_name_what_the_window_said() {
         assert_eq!(
             render(&said(Then::Moved)),
-            "T-7, paused when @zeus-amber-pine's turn on the words put to its window (m-12) began, has moved on since (resumed, or back on the board): its result will be its next complete answer, not this. What that turn ended with:\n\nDone.\n\nThe parser is on grammar v2."
+            "T-7, paused when @zeus-amber-pine's turn on the words put to its window (m-12) began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. What the turn on those words ended with:\n\nDone.\n\nThe parser is on grammar v2."
         );
         let [paused, moved] = prefixes(7);
         assert!(render(&said(Then::Moved)).starts_with(&moved));

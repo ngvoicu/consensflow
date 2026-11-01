@@ -34,7 +34,7 @@ use cf_proto::agents::Harness;
 use serde_json::json;
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::{delivery_text, delivery_text_sent_again, is_paste_of, marker_of};
+use crate::delivery_text::{delivery_text_beside, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{caught, returning};
@@ -47,11 +47,12 @@ pub(crate) const TOOK_BEFORE_A_RESTART: &str =
 
 impl Dispatcher {
     /// How `message` reads in its window, with the rows it `carried`: as it always does
-    /// ([`delivery_text`]), but for one a start gave back though its window took it
-    /// ([`TOOK_BEFORE_A_RESTART`]), which says it is sent again
-    /// ([`delivery_text_sent_again`]), whatever gave it back since (Resume after Close
-    /// turns a paste away at its hand-over, its project closed): that first copy may be
-    /// there still.
+    /// ([`crate::delivery_text::delivery_text`]), but for one a start gave back though its
+    /// window took it ([`TOOK_BEFORE_A_RESTART`]), which says it is sent again, whatever
+    /// gave it back since (Resume after Close turns a paste away at its hand-over, its
+    /// project closed): that first copy may be there still. A result whose task's turn on
+    /// a tell was told in a note names it, and says that it is the one to decide
+    /// ([`delivery_text_beside`], T-958).
     pub(crate) fn delivery_text_of(
         &self,
         message: &MessageView,
@@ -62,11 +63,16 @@ impl Dispatcher {
             .ledger
             .borrow()
             .given_back_because(message.id, TOOK_BEFORE_A_RESTART)?;
-        Ok(if again {
-            delivery_text_sent_again(message, carried)
-        } else {
-            delivery_text(message, carried)
-        })
+        // A result whose task's turn on a tell was told in a note says which to decide.
+        let told_in = match (message.kind.as_str(), message.task_number) {
+            ("result", Some(number)) => self.seams.ledger.borrow().paused_answer_given(
+                message.project_id,
+                number,
+                message.id,
+            )?,
+            _ => None,
+        };
+        Ok(delivery_text_beside(message, carried, again, told_in))
     }
 
     /// Once, at start: what was on its way to a window when the previous process
