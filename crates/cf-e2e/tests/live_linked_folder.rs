@@ -40,6 +40,9 @@
 //! cargo xtask live linked-folder --legs b,a        B first in each round
 //! cargo xtask live linked-folder --window closing  the worker's window let close with its task
 //! cargo xtask live linked-folder codex pi          those named (their homes are their own folders)
+//! cargo xtask live linked-folder claude muse --window closing --legs b --rounds 3
+//!                                                  how long a window lives after its result,
+//!                                                  Claude Code and Muse having no home to spell
 //! ```
 //!
 //! A Mac's only: elsewhere the temporary folder is not reached through a link.
@@ -237,21 +240,30 @@ fn observe(
         .iter()
         .map(|name| (*name, members.rig().var(name)))
         .collect();
-    case.check(
-        &format!(
-            "every folder of the run's home the windows were given is spelled {}",
+    // A harness whose home no variable of the run names (Claude Code's config folder is the
+    // kit's, Muse's is its launcher's) has no folder to spell: its legs measure the window.
+    if given.is_empty() {
+        case.say(format!(
+            "{} has no home folder named by a variable of the run, so none is spelled {}",
+            harness.name(),
             leg.name
-        ),
-        !given.is_empty()
-            && given.iter().all(|(_, value)| {
+        ));
+    } else {
+        case.check(
+            &format!(
+                "every folder of the run's home the windows were given is spelled {}",
+                leg.name
+            ),
+            given.iter().all(|(_, value)| {
                 value.is_some_and(|value| Path::new(value).starts_with(&leg.folder))
             }),
-        given
-            .iter()
-            .map(|(name, value)| format!("{name}={}", value.unwrap_or("(none)")))
-            .collect::<Vec<_>>()
-            .join(" "),
-    );
+            given
+                .iter()
+                .map(|(name, value)| format!("{name}={}", value.unwrap_or("(none)")))
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
     let number = members.give(agent, BRIEF)?;
     // Kept open as a person keeps a window they watch, or let close with its task: a free
     // worker's window closes once its result is taken and its screen has been drawn (T-1051).
