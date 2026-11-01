@@ -28,7 +28,9 @@
 //! window closes once its result is taken, and Devin's agent ends its turn some seconds
 //! before its screen has typed the answer out, so a window closed then keeps "Typing" and
 //! the first letters for good (T-1038's third run, on either leg).
-//! A that fails where B holds is the finding, reproduced.
+//! A that fails where B holds is the finding, reproduced. On Devin 3000.11.228 (2026-11-01)
+//! neither leg failed with the window kept open, 16 of 16; let close, one of four failed on
+//! each (T-1038).
 //!
 //! ```text
 //! cargo xtask live linked-folder                   Devin, A then B, once

@@ -1772,14 +1772,14 @@ impl Dispatcher {
 }
 
 /// The folder a window of `project` works in: the project's, as the system names it, its
-/// links resolved. A harness is given the folder so, as its working folder and as the
-/// folder its launch is prepared for, and finds the same folder in what it writes back.
-/// Devin 3000.11's screen never showed an answer in a folder reached through a link (a
-/// Mac's `/var/folders/…`, whose real path is `/private/var/folders/…`, T-724; a project
-/// under `/tmp` is reached so too), and a program's own path to its folder is the real
-/// one, which is what the harnesses write in their records (T-783). On Windows a folder
-/// is as the project names it, its real path being a verbatim one programs do not take
-/// (`cf_base::file::real_path`).
+/// links resolved (a Mac's `/var/folders/…` is `/private/var/folders/…`, and `/tmp` is
+/// `/private/tmp`). ConsensFlow's folder for a window is so the folder its harness has:
+/// a window's program is given its folder only as its working folder, which the system
+/// resolves (no `PWD` reaches it), so every harness already saw, and wrote in its records,
+/// the real path (T-783, T-1036). The launch is prepared for that folder too. It changes
+/// nothing a harness sees, and fixes no screen of Devin's (T-724's finding 1, T-1038). On
+/// Windows a folder is as the project names it, its real path being a verbatim one
+/// programs do not take (`cf_base::file::real_path`).
 fn workspace(project: &ProjectView) -> String {
     cf_base::file::real_path(std::path::Path::new(&project.directory))
         .to_string_lossy()

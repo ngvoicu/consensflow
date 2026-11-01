@@ -1,10 +1,10 @@
 //! The folder a window works in, as the system names it (T-783): a project whose folder is
 //! reached through a link (a Mac's `/var/folders/…`, whose real path is
 //! `/private/var/folders/…`, or a project under `/tmp`) has its windows opened in the real
-//! folder, and their launches prepared for it, on every harness. Devin 3000.11's screen
-//! never showed an answer in a folder spelled through the link (T-724's D3), and what each
-//! harness writes back names the real folder, its program's own path to it. Held to no
-//! trace: Node opened a window in the folder as the project spelled it.
+//! folder, and their launches prepared for it, on every harness. ConsensFlow's folder for a
+//! window is so the one its harness has: a program is given its folder as its working
+//! folder, which the system resolves, so each harness already saw and wrote the real path
+//! (T-1036). Held to no trace: Node opened a window in the folder as the project spelled it.
 
 use cf_engine::testing::Context;
 use serde_json::json;

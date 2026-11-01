@@ -42,10 +42,14 @@
 //! of the variables above is derived from it: their project folders are below it
 //! (`~/.consensflow-candidate/live/…`, where a harness's question about trusting a folder is asked
 //! once and kept), and a rig's own home would put them under the temporary folder, which macOS
-//! spells through the link `/var` (`/private/var`). Devin's window opened in such a folder shows no
-//! answer (its TUI and its agent disagree about the folder, 2026-10-27, Devin 3000.11.92 and
-//! 3000.11.205): `live paste devin` failed on it three times and passed on the same directory
-//! spelled `/private/var/…`. A harness that wrote in `HOME` anyway is found by the hashes.
+//! spells through the link `/var` (`/private/var`). T-724 (2026-10-27, Devin 3000.11.92 and
+//! 3000.11.205) saw `live paste devin` fail three times on such a home and its folders, its
+//! screen on "Typing", and pass once both were the person's. The spelling of the run's own
+//! folders is not that cause on Devin 3000.11.228: `live linked-folder` makes Devin's home in
+//! the temporary folder through `/var` and as `/private/var`, and both drew every answer while
+//! the window was kept open (16 of 16, T-1038); a window closed once its result is taken keeps
+//! "Typing" on either. A `HOME` spelled through `/var` is the one variable it does not try. A
+//! harness that wrote in `HOME` anyway is found by the hashes.
 //!
 //! **A case that is its own home.** A case that gives its windows a `HOME` of its own, with
 //! the harness's folder in it ([`Installed::on_own_home`]), is none of this kit's: it reads
