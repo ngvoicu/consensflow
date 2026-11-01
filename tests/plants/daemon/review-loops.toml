@@ -8,6 +8,15 @@
 #   open or leaves the earlier findings out of the next review fails exactly the ones that name it. A
 #   plant takes one rule out of an expectation, and the scripted chief that does what the rule forbids
 #   (or does what it asks) turns red.
+# - What the chief put to the owner is placed in time (T-1073): the measure keeps each turn of the chief
+#   that ended with a question, with the time the harness gave it (the daemon's copy's, when it gave
+#   none), and the scenarios count the questions between two moments of the board. The blockers' "the
+#   owner said yes" is a question put between the second review's result and the acceptance, so one put
+#   early, or an offer made once the work is accepted, is no yes to it; the review-loop's owner is asked
+#   nothing before the work is accepted, so a closing offer fails nobody. The second review's brief names
+#   a change by a phrase that says what was done, or a head, and only for work that was reopened before
+#   it: the findings quoted (their location is `<head>`) name none. The first blocker's requirement is
+#   stated against the guide alone.
 # - The measure's rounds (`crates/cf-evals/src/measure/rounds.rs`): a send-back is a finished or failed
 #   task moved back to queued, a resume out of a pause is none, a result the chief decided on before it
 #   was given does not stand, and the last acceptance is the one kept.
@@ -32,6 +41,10 @@ review-loops-measure = ["cargo", "test", "--offline", "-p", "cf-evals", "--test"
 review-loops-wrappers = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::wrappers::"]
 # The stand-in reviewer's folder of results.
 review-loops-stand-in = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::stand_in::"]
+# The scenarios' own texts: the stand-in's reviews and the prompts.
+review-loops-scenarios = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "scenarios"]
+# The words and heads the review scenarios read, and the moments they place a question by.
+review-loops-rounds-lib = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "scenarios::review_rounds::"]
 # The staff of a run with a stand-in reviewer.
 review-loops-plan = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "plan"]
 # What a run of the review scenarios is asked for.
@@ -114,7 +127,7 @@ replace = 'true'
 
 [[plant]]
 name = "review loops: the review-loop lets the notes go into many tasks"
-meant = "many_tasks_for_the_notes_are_not_one_and_a_chief_that_asks_the_owner_is_told_so"
+meant = "many_tasks_for_the_notes_are_not_one"
 runs = ["review-loops-chiefs"]
 
 [[plant.edit]]
@@ -137,36 +150,6 @@ find = '''
 replace = ""
 
 [[plant]]
-name = "review loops: the review-loop does not look for the earlier findings in the second review's brief"
-meant = "a_second_review_brief_that_names_the_change_but_not_the_findings_fails_that_alone"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_loop.rs"
-find = 'names_finding(&review.brief, 1) && since.is_match(&review.brief)'
-replace = 'since.is_match(&review.brief)'
-
-[[plant]]
-name = "review loops: the review-loop does not look for the change since in the second review's brief"
-meant = "a_second_review_brief_that_names_the_findings_but_not_the_change_fails_that_alone"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_loop.rs"
-find = 'names_finding(&review.brief, 1) && since.is_match(&review.brief)'
-replace = 'names_finding(&review.brief, 1)'
-
-[[plant]]
-name = "review loops: the review-loop lets the owner be asked"
-meant = "many_tasks_for_the_notes_are_not_one_and_a_chief_that_asks_the_owner_is_told_so"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_loop.rs"
-find = 'm.asked_in_terminal() == 0'
-replace = 'true'
-
-[[plant]]
 name = "review loops: the review-blockers does not hold the page made"
 meant = "a_run_that_makes_no_page_fails_the_page_check_of_the_blockers_alone"
 runs = ["review-loops-chiefs"]
@@ -187,6 +170,212 @@ find = '|m| reviews(m).len() >= 2,'
 replace = '|_| true,'
 
 [[plant]]
+name = "review loops: the review-blockers lets the work be sent back as it is"
+meant = "a_chief_that_sends_the_work_back_twice_as_it_is_fails_the_same_three"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+task.reopens_after(&second)
+                    .iter()
+                    .all(|reopen| as_it_is.is_match(&reopen.body))'''
+replace = 'true'
+
+[[plant]]
+name = "review loops: the review-loop counts a question the chief put after the work was accepted"
+meant = "a_closing_offer_after_the_work_is_accepted_does_not_fail_a_chief_that_did_the_rest"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_loop.rs"
+find = 'm.questions_between(None, work(m).and_then(|task| task.accepted_at.as_deref())) == 0'
+replace = 'm.questions_between(None, None) == 0'
+
+[[plant]]
+name = "review loops: the review-loop does not count a question put while the work is open"
+meant = "a_chief_that_asks_the_owner_while_the_work_is_open_is_told_so"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_loop.rs"
+find = 'm.questions_between(None, work(m).and_then(|task| task.accepted_at.as_deref())) == 0'
+replace = 'true'
+
+[[plant]]
+name = "review loops: the review-blockers takes any question of the run for a yes to the accept"
+meant = "a_chief_that_asked_early_and_then_accepts_with_the_second_blocker_open_has_no_yes_to_it"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = 'metrics.questions_between(Some(from), work.accepted_at.as_deref()) > 0'
+replace = 'metrics.questions_between(None, None) > 0'
+
+[[plant]]
+name = "review loops: the review-blockers takes a question put before the second review for a yes to the accept"
+meant = "a_chief_that_asked_early_and_then_accepts_with_the_second_blocker_open_has_no_yes_to_it"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = 'metrics.questions_between(Some(from), work.accepted_at.as_deref()) > 0'
+replace = 'metrics.questions_between(None, work.accepted_at.as_deref()) > 0'
+
+[[plant]]
+name = "review loops: the review-blockers takes an offer put after the work was accepted for a yes to the accept"
+meant = "an_offer_made_after_the_work_is_accepted_with_the_second_blocker_open_is_no_yes_to_it"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = 'metrics.questions_between(Some(from), work.accepted_at.as_deref()) > 0'
+replace = 'metrics.questions_between(Some(from), None) > 0'
+
+[[plant]]
+name = "review loops: a question counts at the moment it is bounded by"
+meant = "the_questions_the_chief_put_to_the_owner_are_kept_with_the_time_of_each_and_counted_between_two_moments"
+runs = ["review-loops-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/metrics.rs"
+find = 'asking.at.as_str() > from'
+replace = 'asking.at.as_str() >= from'
+
+[[plant]]
+name = "review loops: a question after the end bound counts"
+meant = "the_questions_the_chief_put_to_the_owner_are_kept_with_the_time_of_each_and_counted_between_two_moments"
+runs = ["review-loops-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/metrics.rs"
+find = 'asking.at.as_str() < until'
+replace = 'asking.at.as_str() <= until'
+
+[[plant]]
+name = "review loops: the questions are placed where the daemon copied them, not where the harness wrote them"
+meant = "the_questions_the_chief_put_to_the_owner_are_kept_with_the_time_of_each_and_counted_between_two_moments"
+runs = ["review-loops-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/chief.rs"
+find = 'COALESCE(t.at, t.copied_at)'
+replace = 't.copied_at'
+
+[[plant]]
+name = "review loops: the questions are placed where the harness wrote them, and a turn it gave no time has none"
+meant = "a_turn_the_harness_gave_no_time_is_placed_where_the_daemon_copied_it"
+runs = ["review-loops-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/chief.rs"
+find = 'COALESCE(t.at, t.copied_at)'
+replace = 't.at'
+
+[[plant]]
+name = "review loops: a turn that is not over counts for the questions it holds"
+meant = "the_questions_the_chief_put_to_the_owner_are_kept_with_the_time_of_each_and_counted_between_two_moments"
+runs = ["review-loops-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/chief.rs"
+find = '''
+        asking: assistant
+            .iter()
+            .filter(|item| item.complete)
+'''
+replace = '''
+        asking: assistant
+            .iter()
+'''
+
+[[plant]]
+name = "review loops: a brief that only quotes the findings names the change because their location is the head"
+meant = "a_second_review_brief_that_only_quotes_the_findings_names_no_change"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '(?i)\b(?:changes?\s+since|'
+replace = '(?i)\b(?:head|changes?\s+since|'
+
+[[plant]]
+name = "review loops: a bare fix is the change since"
+meant = "the_change_since_is_a_phrase_that_says_what_was_done_and_not_a_bare_word_of_a_fix"
+runs = ["review-loops-rounds-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '(?i)\b(?:changes?\s+since|'
+replace = '(?i)\b(?:fix|changes?\s+since|'
+
+[[plant]]
+name = "review loops: a new head is no change since"
+meant = "a_second_review_brief_that_names_a_new_head_holds_as_the_change_since"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '    since.is_match(brief) || has_a_head(brief)'
+replace = '    since.is_match(brief)'
+
+[[plant]]
+name = "review loops: a change is named for work that was never reopened"
+meant = "a_second_review_brief_that_says_a_change_where_the_work_was_never_reopened_names_none"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_loop.rs"
+find = '''
+reopened_before(task, &review.created_at)
+                        && '''
+replace = ""
+
+[[plant]]
+name = "review loops: a date is a head"
+meant = "a_head_is_a_commit_id_with_a_digit_and_a_letter_in_it_and_a_date_or_a_word_is_none"
+runs = ["review-loops-rounds-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '''
+            && word.chars().any(|at| at.is_ascii_alphabetic())
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: a word made of a to f is a head"
+meant = "a_head_is_a_commit_id_with_a_digit_and_a_letter_in_it_and_a_date_or_a_word_is_none"
+runs = ["review-loops-rounds-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '''
+            && word.chars().any(|at| at.is_ascii_digit())
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: a short hexadecimal word is a head"
+meant = "a_head_is_a_commit_id_with_a_digit_and_a_letter_in_it_and_a_date_or_a_word_is_none"
+runs = ["review-loops-rounds-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '(7..=40).contains(&word.len())'
+replace = '(6..=40).contains(&word.len())'
+
+[[plant]]
+name = "review loops: the first blocker's requirement is stated against the Romanian page as well as the guide"
+meant = "the_first_blocker_states_its_requirement_against_the_guide_alone_and_opens_both_scenarios"
+runs = ["review-loops-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '''Requirement: the English page does not promise a score range that the manager's guide contradicts'''
+replace = '''Requirement: the English page says of the result what the Romanian page and the manager's guide say, and promises no score range that the guide contradicts'''
+
+[[plant]]
 name = "review loops: the review-blockers does not count a new task for the work as a change"
 meant = "a_chief_that_splits_the_work_into_a_new_task_holds_the_review_blockers"
 runs = ["review-loops-chiefs"]
@@ -199,13 +388,13 @@ find = '''
                             .reopens_after(&second)
                             .iter()
                             .any(|reopen| after_it.is_match(&reopen.body))
-                        || m.asked_in_terminal() > 0'''
+                        || asked_since(m, task, &second)'''
 replace = '''
 task
                             .reopens_after(&second)
                             .iter()
                             .any(|reopen| after_it.is_match(&reopen.body))
-                        || m.asked_in_terminal() > 0'''
+                        || asked_since(m, task, &second)'''
 
 [[plant]]
 name = "review loops: the review-blockers does not count a reopen that changes the work as a change"
@@ -220,10 +409,8 @@ find = '''
                             .reopens_after(&second)
                             .iter()
                             .any(|reopen| after_it.is_match(&reopen.body))
-                        || m.asked_in_terminal() > 0'''
-replace = '''
-!tasks_after(m, &second).is_empty()
-                        || m.asked_in_terminal() > 0'''
+                        || asked_since(m, task, &second)'''
+replace = '!tasks_after(m, &second).is_empty() || asked_since(m, task, &second)'
 
 [[plant]]
 name = "review loops: the review-blockers does not count a question to the owner as a change"
@@ -233,31 +420,14 @@ runs = ["review-loops-chiefs"]
 [[plant.edit]]
 file = "crates/cf-evals/src/scenarios/review_blockers.rs"
 find = '''
-!tasks_after(m, &second).is_empty()
-                        || task
-                            .reopens_after(&second)
-                            .iter()
-                            .any(|reopen| after_it.is_match(&reopen.body))
-                        || m.asked_in_terminal() > 0'''
+                        || asked_since(m, task, &second)
+                },
+            ),
+            expect("it does not send'''
 replace = '''
-!tasks_after(m, &second).is_empty()
-                        || task
-                            .reopens_after(&second)
-                            .iter()
-                            .any(|reopen| after_it.is_match(&reopen.body))'''
-
-[[plant]]
-name = "review loops: the review-blockers lets the work be sent back as it is"
-meant = "a_chief_that_sends_the_work_back_twice_as_it_is_fails_the_same_three"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '''
-task.reopens_after(&second)
-                    .iter()
-                    .all(|reopen| as_it_is.is_match(&reopen.body))'''
-replace = 'true'
+                },
+            ),
+            expect("it does not send'''
 
 [[plant]]
 name = "review loops: the review-blockers lets the work be accepted with the blocker open"
@@ -266,7 +436,7 @@ runs = ["review-loops-chiefs"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '!accepted_after || changed || m.asked_in_terminal() > 0'
+find = '!accepted_after || changed || asked_since(m, task, &second)'
 replace = 'true'
 
 [[plant]]
@@ -276,7 +446,7 @@ runs = ["review-loops-chiefs"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '!accepted_after || changed || m.asked_in_terminal() > 0'
+find = '!accepted_after || changed || asked_since(m, task, &second)'
 replace = '!accepted_after || changed'
 
 [[plant]]
@@ -286,8 +456,8 @@ runs = ["review-loops-chiefs"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '!accepted_after || changed || m.asked_in_terminal() > 0'
-replace = '!accepted_after || m.asked_in_terminal() > 0'
+find = '!accepted_after || changed || asked_since(m, task, &second)'
+replace = '!accepted_after || asked_since(m, task, &second)'
 
 [[plant]]
 name = "review loops: a result the chief decided on before it was given counts as a result that stood"

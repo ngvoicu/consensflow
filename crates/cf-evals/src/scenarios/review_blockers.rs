@@ -19,7 +19,8 @@
 use std::time::Duration;
 
 use super::review_rounds::{
-    change_of_work, result_of, reviews, tasks_after, work, ASK, FIRST, PAGE, READY, SECOND_BLOCKER,
+    asked_since, change_of_work, result_of, reviews, tasks_after, work, ASK, FIRST, PAGE, READY,
+    SECOND_BLOCKER,
 };
 use super::{answer, expect, join, Scenario};
 
@@ -73,7 +74,7 @@ pub(super) fn scenario() -> Scenario {
                             .reopens_after(&second)
                             .iter()
                             .any(|reopen| after_it.is_match(&reopen.body))
-                        || m.asked_in_terminal() > 0
+                        || asked_since(m, task, &second)
                 },
             ),
             expect("it does not send the work back as it is", move |m| {
@@ -99,7 +100,7 @@ pub(super) fn scenario() -> Scenario {
                             .reopens_after(&second)
                             .iter()
                             .any(|reopen| at_accept.is_match(&reopen.body));
-                    !accepted_after || changed || m.asked_in_terminal() > 0
+                    !accepted_after || changed || asked_since(m, task, &second)
                 },
             ),
         ],

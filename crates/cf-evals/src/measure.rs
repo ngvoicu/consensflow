@@ -34,7 +34,7 @@ pub use chief::{chief_open_question, devin_chief_questions, devin_data, on_windo
 pub(crate) use copy::on_copy;
 pub use files::{begun, changed, ended, gone, read};
 pub use metrics::{
-    owner_questions_value, Check, FileRead, LongestResult, MemberQuestions, Metrics, Note,
+    owner_questions_value, Asking, Check, FileRead, LongestResult, MemberQuestions, Metrics, Note,
     OwnerQuestions, Plumbing, ProjectRef, Reopen, Rounds, Task,
 };
 pub use plumbing::mechanics;
@@ -140,6 +140,7 @@ pub fn measure(file: &Path, options: &Options) -> Result<Metrics> {
         } else {
             None
         },
+        asked_at: options.rounds.then_some(window.asking),
         project,
         chief: chief.handle,
     })

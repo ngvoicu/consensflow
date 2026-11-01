@@ -43,10 +43,10 @@ pub(super) const FIRST: &str = "\
 Not ready. One finding blocks: F1, the new page gives a score range that the manager's guide contradicts. F2 to F5 are notes and block nothing. Decide: send F1 back; F2 to F5 can wait for a later task.
 
 F1 [blocks] The page states a score range the product does not give.
-Requirement: the English page says of the result what the Romanian page and the manager's guide say.
+Requirement: the English page does not promise a score range that the manager's guide contradicts (docs/ghidul-managerului.md line 5: a scale from 1 to 5).
 Case: a visitor who reads the page and then the manager's guide, which every team lead is given. It will happen to each of them.
 Failure: the sentence about the score in site/en/assessment.html says \"a score between 0 and 100\"; docs/ghidul-managerului.md line 5 says the manager sees \"an overall risk indicator, on a scale from 1 to 5\". A manager is promised a range the report never shows.
-Evidence: grep -n 100 site/en/assessment.html finds the sentence; grep -n scară docs/ghidul-managerului.md finds line 5; site/evaluare.html line 11 has the same 0 to 100, which is where it was copied from.
+Evidence: grep -n 100 site/en/assessment.html finds the sentence; grep -n scară docs/ghidul-managerului.md finds line 5; site/evaluare.html line 11, which the page was translated from, has the same 0 to 100: the guide and that page disagree, and this finding is against the guide.
 Location: site/en/assessment.html, the paragraph in <main>.
 
 F2 [note, does not block] The <title> carries the page name and not the site name; \"Assessment — Burnout at Work\" would match the other pages. Location: site/en/assessment.html, <head>.
@@ -147,6 +147,14 @@ pub(super) fn tasks_after<'a>(metrics: &'a Metrics, time: &str) -> Vec<&'a Round
         .collect()
 }
 
+/// Whether the chief put a question to the owner in its terminal after the moment `from` of the
+/// board (the second review's result) and before it accepted `work`, or at all after, where it
+/// never did: a question asked earlier is another blocker's, and an offer made once the work is
+/// accepted decides nothing.
+pub(super) fn asked_since(metrics: &Metrics, work: &Rounds, from: &str) -> bool {
+    metrics.questions_between(Some(from), work.accepted_at.as_deref()) > 0
+}
+
 /// A finding of the stand-in's first review named by its number: `F1`, `finding 1`,
 /// `#1`.
 pub(super) fn names_finding(text: &str, number: u8) -> bool {
@@ -156,12 +164,40 @@ pub(super) fn names_finding(text: &str, number: u8) -> bool {
     .is_match(text)
 }
 
-/// Words that say a brief gives the change since the first review: a fix, a diff, a
-/// commit, what the worker did. English and Romanian, the owner's.
+/// Phrases that say a brief gives the change since the first review: that the work was changed
+/// or reopened since, what the worker did, a diff, a commit (see also [`has_a_head`]). English and
+/// Romanian, the owner's. A bare "fix", "changed", "reopen" or "head" is none: the earlier
+/// findings, quoted, are full of them (a finding to fix, a location in `<head>`), and a brief that
+/// only quotes them names no change.
 pub(super) fn change_since() -> Regex {
     pattern(
-        r"(?i)\b(?:since|changed?|changes|diff|fix(?:ed|es)?|commit|head|reopen(?:ed)?|rework(?:ed)?|updated|schimb\w*|modific\w*|corect\w*|repar\w*|după|dupa)\b",
+        r"(?i)\b(?:changes?\s+since|since\s+(?:the\s+)?(?:first|last|previous|earlier|prior)\s+review|what\s+(?:has\s+)?changed|(?:has|have)\s+changed|the\s+worker\s+(?:changed|fixed|made|rewrote|replaced|removed|updated|corrected|edited|reworded|dropped|added)\b|(?:was|were|been|got)\s+(?:reopened|sent\s+back|fixed|changed|corrected|reworked|rewritten)\b|after\s+the\s+(?:fix|reopen|reopening|change|rework)\b|diff\b|commit\s+[0-9a-f]{7,40}\b|ce\s+s-a\s+schimbat|schimbarea\s+de\s+la|de\s+la\s+prima\s+(?:revizuire|verificare|trecere)|workerul\s+a\s+(?:schimbat|corectat|modificat|rescris|înlocuit|scos|adăugat)|a\s+fost\s+(?:redeschis|corectat|modificat|trimis\s+înapoi)|după\s+(?:corectur|corecți|fix|redeschidere))",
     )
+}
+
+/// Whether `text` names a head: a commit id of 7 to 40 hexadecimal digits that has a digit and a
+/// letter in it (a date, or a word that happens to be made of `a` to `f`, is none).
+pub(super) fn has_a_head(text: &str) -> bool {
+    text.split(|at: char| !at.is_ascii_alphanumeric())
+        .any(|word| {
+            (7..=40).contains(&word.len())
+                && word.chars().all(|at| at.is_ascii_hexdigit())
+                && word.chars().any(|at| at.is_ascii_digit())
+                && word.chars().any(|at| at.is_ascii_alphabetic())
+        })
+}
+
+/// Whether the brief of a second review names a real change since the first: the chief's words say
+/// one ([`change_since`], `since`) or a new head. Whether there was a change to name is the
+/// ledger's to say ([`reopened_before`]).
+pub(super) fn names_the_change(since: &Regex, brief: &str) -> bool {
+    since.is_match(brief) || has_a_head(brief)
+}
+
+/// Whether the chief sent `work` back before `time`: a change since the first review exists only if
+/// it did.
+pub(super) fn reopened_before(work: &Rounds, time: &str) -> bool {
+    work.reopens.iter().any(|reopen| reopen.at.as_str() < time)
 }
 
 /// Words that say the chief changes the work, and does not send it back as it is: it
@@ -186,6 +222,7 @@ pub(super) fn notes() -> Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::measure::Reopen;
 
     #[test]
     fn a_finding_is_named_by_its_number_in_the_forms_a_chief_writes_it_and_not_by_a_longer_number()
@@ -214,20 +251,80 @@ mod tests {
     }
 
     #[test]
-    fn the_change_since_is_a_word_of_a_fix_a_diff_or_a_commit_in_english_or_romanian() {
+    fn the_change_since_is_a_phrase_that_says_what_was_done_and_not_a_bare_word_of_a_fix() {
         let since = change_since();
         for text in [
             "The change since the first review: the sentence",
+            "Changes since review T-2: none to the notes",
+            "since the first review the worker has been at it",
             "the worker fixed it",
+            "The sentence was reopened for F1 and corrected",
+            "Review it again after the fix",
             "diff attached",
-            "commit 3fa9c1",
-            "Modificarea de la prima revizuire",
+            "commit 3fa9c1d4",
             "Ce s-a schimbat de atunci",
+            "Schimbarea de la prima revizuire",
+            "Workerul a corectat propoziția",
             "după corectură",
         ] {
             assert!(since.is_match(text), "{text}");
         }
-        assert!(!since.is_match("Review the page again, please."));
+        // What the earlier findings, quoted, are full of is no change: `<head>` is F2's location,
+        // F1 is a finding to fix, and a finding says what the page does.
+        for text in [
+            "Review the page again, please.",
+            "F2 [note] The <title> carries the page name. Location: site/en/assessment.html, <head>.",
+            "F1 [blocks] The page states a score range. It changes nothing for a visitor to fix it.",
+            "Fix F1 and the notes; the head of the page is fine",
+            "A difference of opinion",
+            "Earlier findings of T-2, quoted, for you to check whether each is fixed, still open or new",
+        ] {
+            assert!(!since.is_match(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_head_is_a_commit_id_with_a_digit_and_a_letter_in_it_and_a_date_or_a_word_is_none() {
+        for text in [
+            "The head is now 3fa9c1d4",
+            "it was 91b07e2c at the first review",
+            "commit 3fa9c1de7a0b4c5d6e7f80910a1b2c3d4e5f6071",
+        ] {
+            assert!(has_a_head(text), "{text}");
+        }
+        for text in [
+            "20261101 was the day",
+            "a defaced decade",
+            "3fa9c1",
+            "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef1",
+            "assessment.html",
+            "",
+        ] {
+            assert!(!has_a_head(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_brief_names_the_change_by_a_phrase_or_a_head_and_the_work_must_have_been_reopened_before_it(
+    ) {
+        let since = change_since();
+        assert!(names_the_change(&since, "the worker changed the sentence"));
+        assert!(names_the_change(&since, "head 3fa9c1d4"));
+        assert!(!names_the_change(&since, "F2 Location: <head>"));
+        let reopened = Rounds {
+            reopens: vec![Reopen {
+                at: "2026-10-31T10:01:00.000Z".to_owned(),
+                body: "F1".to_owned(),
+            }],
+            ..Rounds::default()
+        };
+        assert!(reopened_before(&reopened, "2026-10-31T10:02:00.000Z"));
+        assert!(!reopened_before(&reopened, "2026-10-31T10:01:00.000Z"));
+        assert!(!reopened_before(&reopened, "2026-10-31T10:00:30.000Z"));
+        assert!(!reopened_before(
+            &Rounds::default(),
+            "2026-10-31T10:02:00.000Z"
+        ));
     }
 
     #[test]

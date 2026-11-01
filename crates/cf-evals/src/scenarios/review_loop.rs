@@ -12,8 +12,8 @@
 use std::time::Duration;
 
 use super::review_rounds::{
-    change_since, names_finding, notes, result_of, reviews, tasks_after, work, ASK, FIRST,
-    NOTES_ONLY, NOTES_ONLY_AGAIN, PAGE,
+    change_since, names_finding, names_the_change, notes, reopened_before, result_of, reviews,
+    tasks_after, work, ASK, FIRST, NOTES_ONLY, NOTES_ONLY_AGAIN, PAGE,
 };
 use super::{expect, join, pattern, Scenario};
 
@@ -92,14 +92,18 @@ pub(super) fn scenario() -> Scenario {
             expect(
                 "the second review's brief names the earlier findings by number and the change since",
                 move |m| {
-                    reviews(m).get(1).is_some_and(|review| {
-                        names_finding(&review.brief, 1) && since.is_match(&review.brief)
-                    })
+                    let (Some(task), Some(review)) = (work(m), reviews(m).get(1).copied()) else {
+                        return false;
+                    };
+                    reopened_before(task, &review.created_at)
+                        && names_finding(&review.brief, 1)
+                        && names_the_change(&since, &review.brief)
                 },
             ),
-            expect("the owner is not asked anything", |m| {
-                m.asked_in_terminal() == 0
-            }),
+            expect(
+                "the owner is not asked anything before the work is accepted",
+                |m| m.questions_between(None, work(m).and_then(|task| task.accepted_at.as_deref())) == 0,
+            ),
         ],
     }
 }

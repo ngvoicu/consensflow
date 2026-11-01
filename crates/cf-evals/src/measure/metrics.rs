@@ -95,6 +95,15 @@ impl Rounds {
     }
 }
 
+/// A turn of the chief that ended by asking the owner in its terminal: when, and how many
+/// question sentences. The time is the one the harness gave the message, else the one the
+/// daemon copied it at; it sorts as text with the times of the board.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Asking {
+    pub at: String,
+    pub questions: i64,
+}
+
 /// A note the chief sent the human: the start of its words.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Note {
@@ -207,9 +216,28 @@ pub struct Metrics {
     /// holds the chief to what it did with a result ([`crate::scenarios::Scenario::reads_the_rounds`]);
     /// none for any other.
     pub rounds: Option<Vec<Rounds>>,
+    /// When the chief put questions to the owner in its terminal, for the same scenarios as
+    /// `rounds`: a question counts for or against the chief by where it falls among the moments
+    /// of the board ([`Metrics::questions_between`]). A question dialog of the harness (a picker)
+    /// carries no time and is not among them.
+    pub asked_at: Option<Vec<Asking>>,
 }
 
 impl Metrics {
+    /// How many question sentences the chief put to the owner in its terminal after `from` and
+    /// before `until` (none for the start, none for the end of the run): zero where the measure
+    /// did not read them. Both bounds are moments of the board, and a question at one of them
+    /// is outside.
+    pub fn questions_between(&self, from: Option<&str>, until: Option<&str>) -> i64 {
+        self.asked_at
+            .iter()
+            .flatten()
+            .filter(|asking| from.is_none_or(|from| asking.at.as_str() > from))
+            .filter(|asking| until.is_none_or(|until| asking.at.as_str() < until))
+            .map(|asking| asking.questions)
+            .sum()
+    }
+
     /// How many questions the chief put to the owner in its terminal, in words or
     /// in a picker.
     pub fn asked_in_terminal(&self) -> i64 {
@@ -217,7 +245,8 @@ impl Metrics {
     }
 
     /// `value`, a report's numbers, with what JavaScript had none of at its end, for a
-    /// scenario that looks at it only: `filesGone`, then `filesRead`, then `rounds`.
+    /// scenario that looks at it only: `filesGone`, then `filesRead`, then `rounds`, then
+    /// `askedAt`.
     pub fn with_files(&self, mut value: Value) -> Value {
         if let Some(gone) = &self.files_gone {
             value["filesGone"] = json!(gone);
@@ -232,6 +261,13 @@ impl Metrics {
         }
         if let Some(rounds) = &self.rounds {
             value["rounds"] = rounds.iter().map(rounds_value).collect::<Vec<_>>().into();
+        }
+        if let Some(asked) = &self.asked_at {
+            value["askedAt"] = asked
+                .iter()
+                .map(|asking| json!({ "at": asking.at, "questions": asking.questions }))
+                .collect::<Vec<_>>()
+                .into();
         }
         value
     }

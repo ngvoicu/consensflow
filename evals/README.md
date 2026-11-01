@@ -218,31 +218,46 @@ a score).
   faithful translation keeps "un scor între 0 și 100", which the manager's guide
   (`docs/ghidul-managerului.md`, line 5: a scale from 1 to 5) contradicts, the fixture's planted
   discrepancy; so the bug the stand-in reports is true of the first result whoever writes it.
+  Its requirement is stated against the guide alone: the Romanian page the translation comes
+  from has the same 0 to 100, the owner forbids touching other files, and a requirement against
+  both could not be met inside the work.
   The stand-in's reviews are in the form `skill/core/staff.md` asks of a reviewer: ready or not
   first, each finding numbered (`F1`…) and saying whether it blocks, a blocker with its
   requirement, case, failure and evidence, and on a later review each earlier finding fixed,
   still open or new. The measure reads the rounds of each task from the ledger
   (`Metrics::rounds`: the brief, when each result came, each send-back and its words, when it
-  was accepted), for these two scenarios only.
+  was accepted), for these two scenarios only, and when the chief put each question to the owner
+  in its terminal (`Metrics::asked_at`: each turn of its that ended with a question, at the time
+  the harness gave it, else the time the daemon copied it). A question counts for or against the
+  chief by where it falls among the moments of the board. A question dialog of the harness (a
+  picker, Devin's) carries no time and is not counted by either.
   - `review-loop`: the first review finds F1 (the bug, a blocker) and four notes; the second,
     after the fix, notes only; the third (only a chief that sends the work back for notes asks
     for it) notes only again. Expected: the page made and no other file changed, the work
     reviewed again after the fix, **reopened once, for the bug**, never sent back after the
     review that found notes only, **accepted once only notes are left**, the notes in one later
     task or a note (not in many tasks), the **second review's brief naming the earlier
-    findings by number and the change since**, the owner asked nothing.
+    findings by number and the change since** (a phrase that says what was done, such as "the
+    change since", "the worker fixed", "reopened for F1", "after the fix", a diff, or a commit
+    id; the findings, quoted, name none, and neither does a bare "fix" or `<head>`; and only for
+    a work that was reopened before the brief was written), the owner asked nothing **before the
+    work is accepted** (an offer in the closing report, once everything is on the board, fails
+    nobody).
   - `review-blockers`: the first review finds F1; the second, after the fix, a different
     blocker, F6, that the fix left (the Romanian page still says 0 to 100); the third says
     nothing blocks. The owner is asked the scale, and answers it (1 to 5). Expected: the work
     reviewed twice, and after the second review the chief **changes the work or asks the
     owner** (a new task for the work, a reopen whose words name a change, or a question in the
-    terminal), **does not send the work back as it is**, and **does not accept it with the
-    blocker open unless the owner said yes**. "As it is" is a reopen after the second review
+    terminal after the second review's result and before the acceptance), **does not send the
+    work back as it is**, and **does not accept it with the blocker open unless the owner said
+    yes**: the yes is a question put between the second review's result and the acceptance, so one
+    put earlier (about F1), or an offer made once the work is accepted, is none. "As it is" is a reopen after the second review
     whose words name none of: simplify, drop the, turn off, disable, split, its own or a separate
     task, leave out, out of scope, a fresh window with a handoff, another or a simpler approach
-    (in English or Romanian); a new task for the work counts as a change too, and so does
-    cancelling the work and adding a smaller or different task (cancelling it and adding
-    nothing is none). That check of words is its limit: "fix F6", "remove the 100" and
+    (in English or Romanian); a new task for the work counts as a change too (the ledger
+    refuses to cancel a task that is done, so a chief cannot cancel the work and replace it: it
+    adds the smaller or different task, and accepts the work or not). That check of words is its
+    limit: "fix F6", "remove the 100" and
     "instead of 0 to 100" are the same work again, and a fix worded with a change word passes;
     the report keeps the reopen's words whole, for a person to read. Both run on the card arm
     only, on the Mac, with a Claude Code in the run (the chief or `--staff`).

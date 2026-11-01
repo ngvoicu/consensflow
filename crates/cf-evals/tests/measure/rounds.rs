@@ -3,7 +3,7 @@
 //! when it was accepted. Read only for a scenario that holds the chief to what it did with
 //! a result; any other report keeps its shape.
 
-use cf_evals::measure::{measure, Options, Reopen};
+use cf_evals::measure::{measure, Asking, Options, Reopen};
 use serde_json::json;
 
 use crate::support::{measured, message, project_with, task, Folder};
@@ -253,7 +253,7 @@ fn a_scenario_that_does_not_ask_gets_no_rounds_and_no_key_for_them_in_its_report
     .unwrap();
     let report = asked.to_value();
     let keys: Vec<&String> = report.as_object().unwrap().keys().collect();
-    assert_eq!(keys.last().map(|key| key.as_str()), Some("rounds"));
+    assert_eq!(keys[keys.len() - 2..], ["rounds", "askedAt"]);
     assert_eq!(report["rounds"][0]["brief"], "the first brief");
     assert_eq!(
         report["rounds"][0]["reopens"][0]["body"],
@@ -267,4 +267,139 @@ fn a_scenario_that_does_not_ask_gets_no_rounds_and_no_key_for_them_in_its_report
     // Nothing else in the numbers moved because the rounds were read.
     assert_eq!(asked.tasks, plain.tasks);
     assert_eq!(asked.plumbing, plain.plumbing);
+}
+
+/// A ledger in which the chief (2) has a conversation whose turns end as `ends` say: for each, the
+/// words, whether it is complete, the time the harness gave it and the time it was copied.
+fn talking(ends: &[(&str, bool, Option<&str>, &str)]) -> Folder {
+    let folder = Folder::new();
+    let (db, project) = project_with(&folder, &["zeus"]);
+    let _ = project;
+    db.execute(
+        "INSERT INTO conversation (participant_id, harness, native_session, started_at)
+         VALUES (2, 'claude-code', NULL, '2026-10-31T10:00:00.000Z')",
+        [],
+    )
+    .unwrap();
+    for (at, (words, complete, given, copied)) in ends.iter().enumerate() {
+        db.execute(
+            "INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at)
+             VALUES (1, ?1, ?2, 'assistant', ?3, ?4, ?5, ?6)",
+            rusqlite::params![format!("item-{at}"), i64::try_from(at).unwrap(), words, i64::from(*complete), given, copied],
+        )
+        .unwrap();
+    }
+    folder
+}
+
+#[test]
+fn the_questions_the_chief_put_to_the_owner_are_kept_with_the_time_of_each_and_counted_between_two_moments(
+) {
+    let folder = talking(&[
+        (
+            "Which scale is right?",
+            true,
+            Some("2026-10-31T10:01:00.000Z"),
+            "2026-10-31T10:09:00.000Z",
+        ),
+        (
+            "Working on it.",
+            true,
+            Some("2026-10-31T10:02:00.000Z"),
+            "2026-10-31T10:09:00.000Z",
+        ),
+        (
+            "May I accept it? Or shall I wait? Which?",
+            true,
+            Some("2026-10-31T10:03:00.000Z"),
+            "2026-10-31T10:09:00.000Z",
+        ),
+        // Not a turn's end yet: the words so far, with a question in them.
+        (
+            "Shall I go on?",
+            false,
+            Some("2026-10-31T10:04:00.000Z"),
+            "2026-10-31T10:09:00.000Z",
+        ),
+    ]);
+    let metrics = measure(
+        &folder.ledger(),
+        &Options {
+            rounds: true,
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    let asked = metrics.asked_at.clone().unwrap();
+    assert_eq!(
+        asked,
+        [
+            Asking {
+                at: "2026-10-31T10:01:00.000Z".to_owned(),
+                questions: 1
+            },
+            Asking {
+                at: "2026-10-31T10:03:00.000Z".to_owned(),
+                questions: 3
+            },
+        ]
+    );
+    // The same turns, counted as the run always counted them.
+    assert_eq!(metrics.owner_questions.questions, 4);
+    // Between two moments: a question at a moment itself is outside, and none for a bound is open.
+    let at = |time: &str| Some(format!("2026-10-31T{time}.000Z"));
+    let between = |from: Option<String>, until: Option<String>| {
+        metrics.questions_between(from.as_deref(), until.as_deref())
+    };
+    assert_eq!(between(None, None), 4);
+    assert_eq!(between(at("10:01:00"), None), 3);
+    assert_eq!(between(at("10:00:59"), at("10:03:00")), 1);
+    assert_eq!(between(at("10:01:00"), at("10:03:01")), 3);
+    assert_eq!(between(at("10:03:00"), None), 0);
+    assert_eq!(between(None, at("10:01:00")), 0);
+    assert_eq!(between(at("10:05:00"), None), 0);
+    // A scenario that does not ask for them gets none, and counts none.
+    let plain = measure(&folder.ledger(), &Options::default()).unwrap();
+    assert_eq!(plain.asked_at, None);
+    assert_eq!(plain.questions_between(None, None), 0);
+    assert!(plain.to_value().get("askedAt").is_none());
+    // Asked, they are the report's last key, after the rounds.
+    let report = metrics.to_value();
+    let keys: Vec<&String> = report.as_object().unwrap().keys().collect();
+    assert_eq!(keys[keys.len() - 2..], ["rounds", "askedAt"]);
+    assert_eq!(
+        report["askedAt"][1],
+        json!({ "at": "2026-10-31T10:03:00.000Z", "questions": 3 })
+    );
+}
+
+#[test]
+fn a_turn_the_harness_gave_no_time_is_placed_where_the_daemon_copied_it() {
+    let folder = talking(&[
+        ("Which one?", true, None, "2026-10-31T10:05:00.000Z"),
+        (
+            "And which other?",
+            true,
+            Some("2026-10-31T10:06:00.000Z"),
+            "2026-10-31T10:30:00.000Z",
+        ),
+    ]);
+    let metrics = measure(
+        &folder.ledger(),
+        &Options {
+            rounds: true,
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    let times: Vec<String> = metrics
+        .asked_at
+        .unwrap()
+        .into_iter()
+        .map(|asking| asking.at)
+        .collect();
+    assert_eq!(
+        times,
+        ["2026-10-31T10:05:00.000Z", "2026-10-31T10:06:00.000Z"]
+    );
 }

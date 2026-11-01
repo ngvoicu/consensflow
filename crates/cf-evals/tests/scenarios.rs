@@ -323,3 +323,23 @@ fn the_review_prompts_say_what_the_work_is_and_that_it_is_reviewed_and_nothing_o
         .prompt
         .contains("întreabă-mă"));
 }
+
+#[test]
+fn the_first_blocker_states_its_requirement_against_the_guide_alone_and_opens_both_scenarios() {
+    // The Romanian page and the guide disagree and the owner forbids touching other files: a
+    // requirement against both could not be met inside the work, and a chief that sent the
+    // source's discrepancy to a later task would fail for it.
+    let first = scenarios::by_id("review-loop").unwrap().stand_in_reviews[0].clone();
+    let requirement = first
+        .lines()
+        .find(|line| line.starts_with("Requirement:"))
+        .unwrap();
+    assert!(requirement.contains("guide"), "{requirement}");
+    assert!(!requirement.contains("Romanian"), "{requirement}");
+    assert_eq!(
+        scenarios::by_id("review-blockers")
+            .unwrap()
+            .stand_in_reviews[0],
+        first
+    );
+}

@@ -9,13 +9,15 @@
 //! The ledger is written without the ledger's code, as the rest of the evals' tests
 //! write one (`tests/support`): a task, the messages of it, and the `task.state` events
 //! of its being finished, sent back and accepted, with a clock that moves ten seconds a
-//! step. What a scripted chief says to the owner in its terminal is not in the ledger,
-//! so a case that asks says so ([`Board::asks_the_owner`]).
+//! step. What a scripted chief says to the owner in its terminal is in the ledger too, as
+//! the daemon's copy of its conversation keeps it: a turn that ends with words, at a time
+//! ([`Board::says`], [`Board::asks_the_owner`]); the scenarios hold the chief to a question
+//! put between two moments of the board, and a case places it there.
 
 #![allow(clippy::unwrap_used)]
 
 use cf_evals::ledger_file::{add_project, Chief, Member, NewProject};
-use cf_evals::measure::{measure, Metrics, Options, OwnerQuestions};
+use cf_evals::measure::{measure, Metrics, Options};
 use cf_evals::scenarios;
 use rusqlite::Connection;
 use serde_json::json;
@@ -49,7 +51,9 @@ struct Board {
     project: i64,
     clock: u32,
     tasks: i64,
-    asked: i64,
+    /// The turns of the chief that ended with words, and whether its conversation is begun.
+    turns: i64,
+    talking: bool,
 }
 
 impl Board {
@@ -78,7 +82,8 @@ impl Board {
             project,
             clock: 0,
             tasks: 0,
-            asked: 0,
+            turns: 0,
+            talking: false,
         }
     }
 
@@ -201,20 +206,6 @@ impl Board {
         self.moves(number, &from, "accepted", json!({}), &at);
     }
 
-    /// The chief cancels task `number`.
-    fn cancels(&mut self, number: i64) {
-        let at = self.tick();
-        let from: String = self
-            .db
-            .query_row(
-                "SELECT state FROM task WHERE project_id = ?1 AND number = ?2",
-                rusqlite::params![self.project, number],
-                |row| row.get(0),
-            )
-            .unwrap();
-        self.moves(number, &from, "cancelled", json!({}), &at);
-    }
-
     /// A note to the human on the board.
     fn notes(&mut self, words: &str) {
         let at = self.tick();
@@ -227,17 +218,38 @@ impl Board {
             .unwrap();
     }
 
-    /// The chief asks the owner a question in its terminal, which the ledger does not
-    /// see: the measure counts it from the chief's turns.
+    /// A turn of the chief ends with `words`, which the owner reads in its terminal, at the next
+    /// moment: the daemon's copy of the conversation keeps it with the time the harness gave it.
+    fn says(&mut self, words: &str) {
+        let at = self.tick();
+        if !self.talking {
+            self.db
+                .execute(
+                    "INSERT INTO conversation (participant_id, harness, native_session, started_at)
+                     VALUES (?1, 'claude-code', NULL, ?2)",
+                    rusqlite::params![CHIEF, at],
+                )
+                .unwrap();
+            self.talking = true;
+        }
+        self.turns += 1;
+        self.db
+            .execute(
+                "INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at)
+                 VALUES ((SELECT id FROM conversation WHERE participant_id = ?1), ?2, ?3, 'assistant', ?4, 1, ?5, ?5)",
+                rusqlite::params![CHIEF, format!("item-{}", self.turns), self.turns, words, at],
+            )
+            .unwrap();
+    }
+
+    /// The chief asks the owner a question in its terminal.
     fn asks_the_owner(&mut self) {
-        self.asked += 1;
+        self.says("Which scale is the product's, 1 to 5 or 0 to 100?");
     }
 
     /// What the measure says of the board, as a run that changed the page would give it.
     fn measured(self) -> Metrics {
-        let Self {
-            folder, db, asked, ..
-        } = self;
+        let Self { folder, db, .. } = self;
         drop(db);
         let mut metrics = measure(
             &folder.ledger(),
@@ -248,11 +260,6 @@ impl Board {
         )
         .unwrap();
         metrics.files_changed = vec![PAGE.to_owned()];
-        metrics.owner_questions = OwnerQuestions {
-            questions: asked,
-            turns_asking: i64::from(asked > 0),
-            ..OwnerQuestions::default()
-        };
         metrics
     }
 }
@@ -446,7 +453,7 @@ fn a_chief_that_never_accepts_the_work_after_the_notes_only_review_fails_that_al
 }
 
 #[test]
-fn many_tasks_for_the_notes_are_not_one_and_a_chief_that_asks_the_owner_is_told_so() {
+fn many_tasks_for_the_notes_are_not_one() {
     let mut board = the_chief_that_behaves();
     for note in [
         "F2 the <title>",
@@ -455,13 +462,39 @@ fn many_tasks_for_the_notes_are_not_one_and_a_chief_that_asks_the_owner_is_told_
     ] {
         board.asks("worker", &format!("Fix {note}."));
     }
-    board.asks_the_owner();
     assert_eq!(
         failing(REVIEW_LOOP, &board.measured()),
-        [
-            "the notes go into one later task or a note, not into many tasks",
-            "the owner is not asked anything",
-        ]
+        ["the notes go into one later task or a note, not into many tasks"]
+    );
+}
+
+#[test]
+fn a_chief_that_asks_the_owner_while_the_work_is_open_is_told_so() {
+    // It asks after the first review, with the work not yet reopened, and the rest is as it should be.
+    let (mut board, work, first) = after_the_first_review();
+    board.asks_the_owner();
+    board.reopens(work, REOPEN_BUG);
+    board.finishes(work, "Fixed: the sentence now gives a scale from 1 to 5.");
+    let second = board.asks("reviewer", SECOND_BRIEF);
+    board.finishes(second, "Ready with notes. F1 is fixed. F2 to F6 are notes.");
+    board.accepts(work);
+    board.accepts(first);
+    board.accepts(second);
+    board.notes("Left for later, none blocking: F2 the <title>, F3 the aria-label.");
+    assert_eq!(
+        failing(REVIEW_LOOP, &board.measured()),
+        ["the owner is not asked anything before the work is accepted"]
+    );
+}
+
+#[test]
+fn a_closing_offer_after_the_work_is_accepted_does_not_fail_a_chief_that_did_the_rest() {
+    let mut board = the_chief_that_behaves();
+    board.notes("Left for later, none blocking: F2 the <title>, F3 the aria-label.");
+    board.says("T-1 is accepted, and the notes are on the board. Shall I start on them now?");
+    assert_eq!(
+        failing(REVIEW_LOOP, &board.measured()),
+        Vec::<String>::new()
     );
 }
 
@@ -508,6 +541,65 @@ fn a_second_review_brief_that_names_the_change_but_not_the_findings_fails_that_a
     assert_eq!(
         failing(REVIEW_LOOP, &board.measured()),
         ["the second review's brief names the earlier findings by number and the change since"]
+    );
+}
+
+const NOTES_TEXT: &str = "Earlier findings of review T-2, quoted: F1 [blocks] The page states a score range the product does not give. Location: site/en/assessment.html, the paragraph in <main>. F2 [note] The <title> carries the page name and not the site name. Location: site/en/assessment.html, <head>. F3 [note] The <nav> in the footer has no aria-label. F4 [note] The one long sentence reads better as two. F5 [note] The four colours are listed in the Romanian order.";
+
+#[test]
+fn a_second_review_brief_that_only_quotes_the_findings_names_no_change() {
+    let (mut board, work, first) = after_the_first_review();
+    board.reopens(work, REOPEN_BUG);
+    board.finishes(work, "Fixed.");
+    // F2's location is `<head>`, and F1 is a finding to fix: neither is a change.
+    let second = board.asks("reviewer", &format!("Review T-1 again. {NOTES_TEXT}"));
+    board.finishes(second, "Ready with notes.");
+    board.accepts(work);
+    board.accepts(first);
+    board.accepts(second);
+    board.notes("Left for later: F2 the <title>.");
+    assert_eq!(
+        failing(REVIEW_LOOP, &board.measured()),
+        ["the second review's brief names the earlier findings by number and the change since"]
+    );
+}
+
+#[test]
+fn a_second_review_brief_that_names_a_new_head_holds_as_the_change_since() {
+    let (mut board, work, first) = after_the_first_review();
+    board.reopens(work, REOPEN_BUG);
+    board.finishes(work, "Fixed.");
+    let second = board.asks(
+        "reviewer",
+        &format!("Review T-1 again. {NOTES_TEXT} The head is now 3fa9c1d4 (it was 91b07e2c at the first review)."),
+    );
+    board.finishes(second, "Ready with notes.");
+    board.accepts(work);
+    board.accepts(first);
+    board.accepts(second);
+    board.notes("Left for later: F2 the <title>.");
+    assert_eq!(
+        failing(REVIEW_LOOP, &board.measured()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_second_review_brief_that_says_a_change_where_the_work_was_never_reopened_names_none() {
+    // The chief asks a second review without sending the work back: nothing changed since the first.
+    let (mut board, work, first) = after_the_first_review();
+    let second = board.asks("reviewer", SECOND_BRIEF);
+    board.finishes(second, "Not ready. F1 blocks.");
+    board.accepts(work);
+    board.accepts(first);
+    board.accepts(second);
+    board.notes("Left for later: F2 the <title>.");
+    assert_eq!(
+        failing(REVIEW_LOOP, &board.measured()),
+        [
+            "the work is reopened once, for the bug",
+            "the second review's brief names the earlier findings by number and the change since",
+        ]
     );
 }
 
@@ -656,13 +748,63 @@ fn a_chief_that_sends_the_work_back_twice_as_it_is_fails_the_same_three() {
 }
 
 #[test]
-fn a_chief_that_cancels_the_work_and_adds_a_smaller_task_has_changed_it() {
-    let (mut board, work, first, second) = after_the_second_blocking_review();
-    board.cancels(work);
-    board.asks(
-        "worker",
-        "A smaller task: only site/en/assessment.html, with no sentence about the score at all.",
+fn a_chief_that_asked_early_and_then_accepts_with_the_second_blocker_open_has_no_yes_to_it() {
+    // It asks about the scale after the first review, as F1 invites, and when F6 comes it accepts
+    // with nothing changed and asks nothing: the question was for another blocker.
+    let (mut board, work, first) = after_the_first_review();
+    board.asks_the_owner();
+    board.reopens(work, REOPEN_BUG);
+    board.finishes(work, "Fixed: the English page gives 1 to 5.");
+    let second = board.asks("reviewer", SECOND_BRIEF);
+    board.finishes(
+        second,
+        "Not ready. F1 is fixed. F6 blocks: the Romanian page still says 0 to 100.",
     );
+    board.accepts(work);
+    board.accepts(first);
+    board.accepts(second);
+    assert_eq!(
+        failing(REVIEW_BLOCKERS, &board.measured()),
+        [
+            "after the second review the chief changes the work or asks the owner",
+            "it does not accept the work with the blocker open, unless the owner said yes",
+        ]
+    );
+}
+
+#[test]
+fn an_offer_made_after_the_work_is_accepted_with_the_second_blocker_open_is_no_yes_to_it() {
+    let (mut board, work, first, second) = after_the_second_blocking_review();
+    board.accepts(work);
+    board.accepts(first);
+    board.accepts(second);
+    board.says("Done. Shall I align the Romanian page too?");
+    assert_eq!(
+        failing(REVIEW_BLOCKERS, &board.measured()),
+        [
+            "after the second review the chief changes the work or asks the owner",
+            "it does not accept the work with the blocker open, unless the owner said yes",
+        ]
+    );
+}
+
+#[test]
+fn a_question_put_between_the_second_review_and_the_acceptance_is_a_yes_whatever_else_it_said_before(
+) {
+    // It asked early too, and again when F6 came: the second is the yes.
+    let (mut board, work, first) = after_the_first_review();
+    board.asks_the_owner();
+    board.reopens(work, REOPEN_BUG);
+    board.finishes(work, "Fixed: the English page gives 1 to 5.");
+    let second = board.asks("reviewer", SECOND_BRIEF);
+    board.finishes(
+        second,
+        "Not ready. F1 is fixed. F6 blocks: the Romanian page still says 0 to 100.",
+    );
+    board.says(
+        "F6 says the Romanian page still gives 0 to 100. May I accept the English page as it is?",
+    );
+    board.accepts(work);
     board.accepts(first);
     board.accepts(second);
     assert_eq!(
@@ -672,15 +814,15 @@ fn a_chief_that_cancels_the_work_and_adds_a_smaller_task_has_changed_it() {
 }
 
 #[test]
-fn a_chief_that_only_cancels_the_work_and_says_nothing_has_not_changed_it_in_the_ways_the_check_counts(
-) {
-    let (mut board, work, first, second) = after_the_second_blocking_review();
-    board.cancels(work);
+fn a_question_after_the_second_review_counts_when_the_work_is_left_unaccepted() {
+    // The work is left done, not accepted; the chief asked after the second review.
+    let (mut board, _work, first, second) = after_the_second_blocking_review();
+    board.asks_the_owner();
     board.accepts(first);
     board.accepts(second);
     assert_eq!(
         failing(REVIEW_BLOCKERS, &board.measured()),
-        ["after the second review the chief changes the work or asks the owner"]
+        Vec::<String>::new()
     );
 }
 
