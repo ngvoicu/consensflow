@@ -1,0 +1,24 @@
+# A Muse window answered its brief, and its task failed with "the window never showed its
+# first message" (T-1047; T-1000's live paste-screen, twice on Muse Code 1.4.14): the plant
+# takes the fix out, and the case named in `meant` fails.
+#
+# - The Muse reader takes a user's words from what the model was given (`model_messages`),
+#   not from what Muse's box showed (`refill_blocks`), which for a long paste is
+#   `[Pasted Content 2184 chars]` and no word of the brief's header
+#   (`crates/cf-harness/src/muse/record.rs`, its case on the recorded log in
+#   `muse/record/tests/pasted.rs`).
+#
+# Every name holds `muse reader`: `npm run plants:daemon -- "muse reader"` runs them all.
+
+[run]
+muse-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::pasted::"]
+
+[[plant]]
+name = "muse reader: the Muse reader takes the user's words from its box"
+meant = "a_long_paste_muse_folds_in_its_box_is_the_users_whole_words_and_its_answer_follows"
+runs = ["muse-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''        let text = if role == Role::User && !given.trim().is_empty() {'''
+replace = '''        let text = if role == Role::User && !given.trim().is_empty() && false {'''
