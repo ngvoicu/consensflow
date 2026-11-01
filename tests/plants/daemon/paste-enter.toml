@@ -24,6 +24,8 @@ paste-enter-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test",
 paste-enter-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests::an_open_of_a_harness_that_reads_a_paste_silently_says_how"]
 paste-enter-open = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::the_daemons_own_keys_hold_no_paste_and_no_claim"]
 paste-enter-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::"]
+paste-enter-bridge-reply = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste"]
+paste-enter-page-reply = ["cargo", "test", "--offline", "-p", "app", "--lib", "commands::tests::the_pages_reply_goes_past_the_humans_keys_held_after_their_paste"]
 paste-enter-replies = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_terminals_reply_goes_past_the_humans_keys_held_after_their_paste"]
 paste-enter-console = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::windows::"]
 paste-enter-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter", "tests::"]
@@ -234,6 +236,30 @@ runs = ["paste-enter-replies"]
 file = "crates/cf-panes/src/input_queue.rs"
 find = "            InputWork::Reply(_) => &route.replies,"
 replace = "            InputWork::Reply(_) => &route.sender,"
+
+[[plant]]
+name = "paste enter: the pane host takes the bridge's pane.reply for the daemon's keys"
+meant = "a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste"
+platforms = ["macos"]
+runs = ["paste-enter-bridge-reply"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "            if reply {"
+replace = "            if false {"
+
+[[plant]]
+name = "paste enter: the page's reply is enqueued as the human's keys' worker's"
+meant = "the_pages_reply_goes_past_the_humans_keys_held_after_their_paste"
+platforms = ["macos"]
+runs = ["paste-enter-page-reply"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = """        InputWork::Reply(bytes),
+        false,"""
+replace = """        InputWork::Write(bytes),
+        false,"""
 
 # --- the live suite ---
 

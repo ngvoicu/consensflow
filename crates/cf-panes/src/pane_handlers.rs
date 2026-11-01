@@ -796,6 +796,102 @@ mod tests {
         connected.bridge.wait_closed().expect("bridge closes");
     }
 
+    /// The terminal's answer over the bridge (`pane.reply`) goes past the human's keys held
+    /// after their paste (`pane.typed`), in a window whose harness reads a paste silently
+    /// (T-1048): the reply is answered while the human's paste and Enter still wait, and the
+    /// program reads it before the Enter.
+    #[cfg(unix)]
+    #[test]
+    fn a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            Arc::clone(&arbiter),
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        register_typed(&mut builder, Arc::clone(&inputs));
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut send = |id: &str, op: &str, body: Value| {
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+        };
+        let answered = |reader: &mut BufReader<UnixStream>| -> String {
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read response");
+                let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+                if frame["kind"] == "res" {
+                    assert_eq!(frame["body"]["ok"], true, "{frame}");
+                    return frame["id"].as_str().unwrap_or_default().to_owned();
+                }
+            }
+        };
+        send(
+            "n-open",
+            "pane.open",
+            json!({"id":"replied-pane","generation":1,"cwd":"/tmp",
+                   "argv":["/bin/sh","-c","stty raw -echo; printf ready; sleep 30"],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024,
+                   "silentPaste":{"paceUsPerCharacter":0,"drawnAfterMs":0,"quietMs":100,
+                                  "mostMs":1500,"mostUsPerCharacter":0}}),
+        );
+        assert_eq!(answered(&mut reader), "n-open");
+        // Once the program reads raw and echoes nothing: an echo of the paste would be the
+        // window's draw of it, and let the human's Enter go before the reply is sent.
+        let key = PaneKey::new("replied-pane", 1);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while !panes
+            .tail(&key, 5)
+            .is_ok_and(|lines| lines.iter().any(|line| line.contains("ready")))
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the program never got ready"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let pane = json!({"id":"replied-pane","generation":1});
+        let with = |bytes: &[u8]| {
+            let mut body = pane.clone();
+            body["bytes"] = json!(bytes);
+            body
+        };
+        send("n-typed", "pane.typed", with(b"\x1b[200~ab\x1b[201~\r"));
+        std::thread::sleep(Duration::from_millis(200));
+        send("n-reply", "pane.reply", with(b"R"));
+        assert_eq!(
+            answered(&mut reader),
+            "n-reply",
+            "the reply waited behind the human's held Enter"
+        );
+        assert_eq!(answered(&mut reader), "n-typed");
+
+        panes.kill(&key).expect("kill the pane");
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
     /// A pane whose kill failed takes its input with it all the same, and the
     /// daemon hears the failure. Its input worker used to stay until the app
     /// quit, admitting input for a window the daemon had closed.
