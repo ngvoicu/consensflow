@@ -21,12 +21,15 @@ fn main() -> ExitCode {
     }
     let stdout = io::stdout();
     let mut out = stdout.lock();
+    // Run by its whole path, as a window's hooks and commands are told to: a hook says the
+    // way to ask in the words it gives its model by the path it was started by.
     let ran = cf::run(
         &env,
         &args,
         &mut io::stdin().lock(),
         &mut out,
         &mut io::stderr().lock(),
+        &cf_board::door::own_cf(cf_proto::cf_word::Shell::Posix),
     )
     .and_then(|code| out.flush().map(|()| code));
     match ran {

@@ -6,6 +6,7 @@ use std::path::Path;
 
 use cf_base::env::Env;
 use cf_engine::roles::{role_instructions, staff_of, team_table, work_tier_list, RoleError};
+use cf_proto::cf_word::{CfWord, Shell};
 use serde_json::Value;
 
 use super::support::{assert_same_text, participant_of, project_of, staff_row_of, table, GOLDEN};
@@ -51,7 +52,11 @@ fn every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it() {
             .collect();
         let folder = tempfile::tempdir().unwrap();
         let env = environment(&row["card"], folder.path());
-        let answer = role_instructions(&env, role, &staff, row["cf"].as_str(), None);
+        // A row that gives a `cf` gives its path; Node said no more of the shell.
+        let cf = row["cf"]
+            .as_str()
+            .map_or_else(CfWord::bare, |path| CfWord::new(path, Shell::Posix));
+        let answer = role_instructions(&env, role, &staff, &cf, None);
         let what = format!(
             "the {role}'s text for {} (cf {}, card {})",
             row["staff"], row["cf"], row["card"]

@@ -199,7 +199,12 @@ async fn a_first_message_devin_stored_behind_bypass_is_settled_as_received_thoug
             ledger.close().unwrap();
             let stored = format!(
                 "/bypass {}",
-                cf_engine::delivery_text::delivery_text(&begun.message, &begun.carried)
+                // A human's note has no command in it: the word is of no matter.
+                cf_engine::delivery_text::delivery_text(
+                    &begun.message,
+                    &begun.carried,
+                    &cf_proto::cf_word::CfWord::bare()
+                )
             );
             // Devin's store, the message in it as Devin stored it.
             drop(devin_store(root.path(), std::slice::from_ref(&stored)));

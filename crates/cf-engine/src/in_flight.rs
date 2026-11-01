@@ -31,6 +31,7 @@ use cf_harness::contract::TurnLeft;
 use cf_harness::records::{Options, Reading, Role};
 use cf_ledger::MessageView;
 use cf_proto::agents::Harness;
+use cf_proto::cf_word::CfWord;
 use serde_json::json;
 
 use crate::deliveries::Delivering;
@@ -46,6 +47,26 @@ pub(crate) const TOOK_BEFORE_A_RESTART: &str =
     "the daemon stopped before its record showed it, and its window took it";
 
 impl Dispatcher {
+    /// How a command starts in the window `message` is for: the bundle's own `cf` by its
+    /// whole path, as that window's shell takes it ([`Roles::cf`]), or the word `cf` where
+    /// its recipient is no participant of the project any more. The texts typed into the
+    /// window start the commands they name with it ([`delivery_text`]).
+    ///
+    /// [`Roles::cf`]: crate::seams::Roles::cf
+    pub(crate) fn cf_for(&self, message: &MessageView) -> Result<CfWord, EngineError> {
+        let project = self.seams.ledger.borrow().project(message.project_id)?;
+        Ok(project
+            .and_then(|project| {
+                project
+                    .participants
+                    .into_iter()
+                    .find(|participant| participant.id == message.recipient_id)
+            })
+            .map_or_else(CfWord::bare, |participant| {
+                self.seams.roles.cf(&participant)
+            }))
+    }
+
     /// How `message` reads in its window, with the rows it `carried`: as it always does
     /// ([`delivery_text`]), but for one a start gave back though its window took it
     /// ([`TOOK_BEFORE_A_RESTART`]), which says it is sent again
@@ -62,10 +83,11 @@ impl Dispatcher {
             .ledger
             .borrow()
             .given_back_because(message.id, TOOK_BEFORE_A_RESTART)?;
+        let cf = self.cf_for(message)?;
         Ok(if again {
-            delivery_text_sent_again(message, carried)
+            delivery_text_sent_again(message, carried, &cf)
         } else {
-            delivery_text(message, carried)
+            delivery_text(message, carried, &cf)
         })
     }
 

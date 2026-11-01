@@ -28,6 +28,7 @@ use std::io::{self, Read, Write};
 
 use cf_base::env::Env;
 use cf_board::Board;
+use cf_proto::cf_word::CfWord;
 
 /// Runs `cf codex-session <codex> <args…>` when `args` ask for it: its exit
 /// code. Matched on the first argument as it came, before a hook, a token or
@@ -60,13 +61,16 @@ pub fn native_ui(env: &Env, args: &[OsString]) -> Option<i32> {
     (asked && !standalone::asks_for_help(&words)).then(|| cf_daemon::ui(env, rest))
 }
 
-/// Runs the command in `args`: its exit code. Only a failure to write is an error.
+/// Runs the command in `args`: its exit code. Only a failure to write is an error. `cf` is how
+/// a command starts in the window this runs for: the program's own path as the window's shell
+/// takes it, which a hook's words to its model start the command they teach with.
 pub fn run(
     env: &Env,
     args: &[OsString],
     input: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
+    cf: &CfWord,
 ) -> io::Result<u8> {
     // `--json` anywhere asks for the API's JSON; the words are the rest.
     let json = args.iter().any(|arg| arg == "--json");
@@ -78,7 +82,7 @@ pub fn run(
     if given.first().is_some_and(|first| first == "hook") {
         let harness = given.get(1).map(|arg| arg.to_string_lossy());
         let rest = given.get(2..).unwrap_or_default();
-        return hook::run(harness.as_deref(), rest, env, input, out);
+        return hook::run(harness.as_deref(), rest, env, input, out, cf);
     }
     match Board::from_env(env) {
         Some(board) => board::run(&given, json, &board, input, out, err),

@@ -243,7 +243,7 @@ fn a_refused_question_is_a_refusal_whose_reason_points_the_model_to_cf_ask() {
         .unwrap_err();
     assert!(refused.is_refusal());
     assert_eq!(
-        refusal_reason(&refused),
+        refusal_reason(&refused, &CfWord::bare()),
         "ConsensFlow could not put this question to the chief (T-3 was cancelled). Ask with cf ask \"…\" instead."
     );
 }
@@ -266,7 +266,7 @@ fn a_door_the_board_shut_is_refused_in_the_boards_own_words_and_any_other_refusa
     ]);
     let board = Board::new(Some(&api.url), "tok");
     let stop = AtomicBool::new(false);
-    let asked = |board: &Board| ask(board, &one_question(), DOOR_WAIT, &stop);
+    let asked = |board: &Board| ask(board, &one_question(), DOOR_WAIT, &stop, &CfWord::bare());
     assert_eq!(asked(&board), Reply::Refused(closed.to_owned()));
     assert_eq!(
         asked(&board),
@@ -428,4 +428,42 @@ fn a_window_has_a_board_when_it_has_a_url_and_a_token_even_an_empty_one() {
     assert!(board_of(&env(&[("CONSENSFLOW_TOKEN", "window-token")])).is_none());
     assert!(board_of(&env(&[("CONSENSFLOW_URL", ""), ("CONSENSFLOW_TOKEN", "t")])).is_none());
     assert!(board_of(&env(&[])).is_none());
+}
+
+#[test]
+fn a_refusal_says_to_ask_with_the_cf_of_the_window_as_its_shell_takes_it() {
+    // The shell of the window can find another `cf` first on its PATH (T-972), and a path with
+    // a space is one word to bash and a string to PowerShell until `&`.
+    let api = scripted(vec![reply(409, json!({ "message": "T-3 was cancelled" }))]);
+    let board = Board::new(Some(&api.url), "tok");
+    let refused = ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
+        .unwrap_err();
+    for (cf, said) in [
+        (
+            CfWord::new("/opt/consensflow/bin/cf", Shell::Posix),
+            "Ask with /opt/consensflow/bin/cf ask",
+        ),
+        (
+            CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::Posix),
+            "Ask with 'C:/Program Files/ConsensFlow/bin/cf.exe' ask",
+        ),
+        (
+            CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
+            "Ask with & 'C:/Program Files/ConsensFlow/bin/cf.exe' ask",
+        ),
+    ] {
+        let reason = refusal_reason(&refused, &cf);
+        assert!(reason.contains(said), "{reason}");
+        assert!(!reason.contains("with cf ask"), "{reason}");
+    }
+}
+
+#[test]
+fn the_program_that_runs_is_the_cf_of_its_window_by_its_own_path() {
+    let own = own_cf(Shell::Posix);
+    let exe = std::env::current_exe().unwrap();
+    assert_eq!(
+        own.as_str().trim_matches('\''),
+        exe.to_str().unwrap().replace('\\', "/")
+    );
 }

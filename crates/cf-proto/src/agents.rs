@@ -5,6 +5,8 @@
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::cf_word::Shell;
+
 /// A CLI ConsensFlow runs agents on, in the order Node's roster listed them.
 /// The page, the CLI and the launcher speak these names; the store and the
 /// roster speak in kinds (`claude-code`). Kinds the build does not run
@@ -63,6 +65,17 @@ impl Harness {
         match self {
             Harness::Claude => "claude-code",
             other => other.as_str(),
+        }
+    }
+
+    /// The shell its window runs a command in, as far as how it runs a program by its path:
+    /// Codex's on Windows is PowerShell (T-972, zeewin2), every other is bash-like (Git Bash
+    /// on Windows: Claude Code, Pi and Devin). `windows` is where the window runs.
+    pub fn shell(self, windows: bool) -> Shell {
+        if windows && self == Harness::Codex {
+            Shell::PowerShell
+        } else {
+            Shell::Posix
         }
     }
 }
@@ -225,6 +238,23 @@ mod tests {
             detail: "Collaborative coding and task breakdown.".into(),
             profile: muse(),
             preset: "eos".into(),
+        }
+    }
+
+    #[test]
+    fn only_codex_on_windows_runs_its_commands_in_powershell() {
+        for harness in Harness::ALL {
+            assert_eq!(
+                harness.shell(false),
+                Shell::Posix,
+                "{harness:?} off Windows"
+            );
+            let on_windows = if harness == Harness::Codex {
+                Shell::PowerShell
+            } else {
+                Shell::Posix
+            };
+            assert_eq!(harness.shell(true), on_windows, "{harness:?} on Windows");
         }
     }
 

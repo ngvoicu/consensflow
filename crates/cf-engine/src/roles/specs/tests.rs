@@ -1,5 +1,6 @@
 use cf_base::env::Env;
 use cf_catalog::WorkTier;
+use cf_proto::cf_word::{CfWord, Shell};
 
 use super::*;
 use crate::roles::{role_instructions, StaffRow};
@@ -23,7 +24,14 @@ fn given(variant: Variant) -> ProjectSpecs<'static> {
 }
 
 fn text(role: &str, specs: Option<&ProjectSpecs<'_>>) -> String {
-    role_instructions(&Env::default(), role, &staff(), Some(CF), specs).unwrap()
+    role_instructions(
+        &Env::default(),
+        role,
+        &staff(),
+        &CfWord::new(CF, Shell::Posix),
+        specs,
+    )
+    .unwrap()
 }
 
 #[test]

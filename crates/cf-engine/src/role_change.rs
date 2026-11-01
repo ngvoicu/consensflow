@@ -495,7 +495,8 @@ impl Dispatcher {
             .borrow()
             .role_notes_to(message.recipient_id)?
             .contains(&message.id);
-        Ok(says_a_role.then(|| goes_whole(message, &[])))
+        let cf = self.cf_for(message)?;
+        Ok(says_a_role.then(|| goes_whole(message, &[], &cf)))
     }
 
     /// The human is told on the board that `message`, a role cut to fit in one

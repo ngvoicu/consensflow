@@ -10,6 +10,7 @@ use std::path::Path;
 use cf_base::env::Env;
 use cf_catalog::WorkTier;
 use cf_engine::roles::{role_instructions, ProjectSpecs, StaffRow};
+use cf_proto::cf_word::{CfWord, Shell};
 use cf_proto::specs::Variant;
 use regex::Regex;
 
@@ -25,7 +26,7 @@ fn zeus() -> StaffRow {
 
 /// A role's text with no environment and no word of where its cf is.
 fn instructions(role: &str, staff: &[StaffRow]) -> String {
-    role_instructions(&Env::default(), role, staff, None, None).unwrap()
+    role_instructions(&Env::default(), role, staff, &CfWord::bare(), None).unwrap()
 }
 
 /// Whether `pattern` (a JavaScript pattern written as a Rust one) matches `text`.
@@ -242,7 +243,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         r"cf task get T-3 {15}a task and its whole thread: the work under test, or this one\n",
         &instructions("tester", &[])
     ));
-    let refused = role_instructions(&Env::default(), "pm", &[], None, None).unwrap_err();
+    let refused = role_instructions(&Env::default(), "pm", &[], &CfWord::bare(), None).unwrap_err();
     assert_eq!(refused.to_string(), "no role instructions for pm");
 }
 
@@ -368,7 +369,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
 
 /// Every role's text, with the staff and the specs a chief can be given, for the `cf` a
 /// window is told: the roles a window can have, so a role added later is read too.
-fn every_text_for(cf: &str) -> Vec<(String, String, usize)> {
+fn every_text_for(cf: &CfWord) -> Vec<(String, String, usize)> {
     let specs = ProjectSpecs {
         variant: Variant::Tdd,
         folder: "docs/specs",
@@ -379,8 +380,7 @@ fn every_text_for(cf: &str) -> Vec<(String, String, usize)> {
         "chief", "worker", "advisor", "reviewer", "tester", "designer",
     ] {
         for specs in [None, Some(&specs)] {
-            let text =
-                role_instructions(&Env::default(), role, &[zeus()], Some(cf), specs).unwrap();
+            let text = role_instructions(&Env::default(), role, &[zeus()], cf, specs).unwrap();
             // The commands each starts with: the chief's table and prose, a member's table and
             // the line of its result.
             let least = if role == "chief" { 40 } else { 7 };
@@ -406,39 +406,56 @@ fn a_bare_cf(text: &str, word: &str) -> Option<String> {
     Some(without[from..to].to_owned())
 }
 
-/// A window's shell can find another `cf` first on its PATH (a Devin member's login zsh puts
-/// the user's `~/.local/bin` first, a Claude Code member's login Git Bash `~/bin`, 2026-10-31;
-/// the Cloud Foundry CLI is a `cf` too), so every command a text teaches names this window's
-/// own `cf` by its full path, and no text says the word `cf` of a shell's own finding.
-#[test]
-fn every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path() {
-    let cf = "/opt/consensflow/bin/cf";
+/// Every text of every role starts each command with `cf`, and says the word on no other
+/// occasion.
+fn holds_for(cf: &CfWord) {
+    let word = cf.as_str();
     for (which, text, least) in every_text_for(cf) {
         assert!(
             !text.contains("This window's cf"),
             "{which}: the section that asked a window to run it by its path is gone"
         );
         assert!(!text.contains("{{"), "{which}: every placeholder is filled");
-        let commands = text.matches(&format!("{cf} ")).count();
-        assert!(
-            commands >= least,
-            "{which}: {commands} commands name the path"
-        );
-        assert_eq!(a_bare_cf(&text, cf), None, "{which}: a bare cf");
-    }
-}
-
-#[test]
-fn a_cf_a_shell_would_read_is_one_quoted_word_in_every_command() {
-    let cf = "/Users/me/My Apps/cf `x` $HOME 'q'";
-    let word = r"'/Users/me/My Apps/cf `x` $HOME '\''q'\'''";
-    for (which, text, least) in every_text_for(cf) {
         let commands = text.matches(&format!("{word} ")).count();
         assert!(
             commands >= least,
-            "{which}: {commands} commands name the word"
+            "{which}: {commands} commands start with {word}"
         );
         assert_eq!(a_bare_cf(&text, word), None, "{which}: a bare cf");
+    }
+}
+
+/// A window's shell can find another `cf` first on its PATH (a Devin member's login zsh puts
+/// the user's `~/.local/bin` first, a Claude Code member's login Git Bash `~/bin`, 2026-10-31;
+/// the Cloud Foundry CLI is a `cf` too), so every command a text teaches names this window's
+/// own `cf` by its full path, and no text says the word `cf` of a shell's own finding.
+#[test]
+fn every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path() {
+    holds_for(&CfWord::new("/opt/consensflow/bin/cf", Shell::Posix));
+}
+
+/// The default install of Windows is `C:/Program Files/ConsensFlow/bin/cf.exe`: a path with a
+/// space is one quoted word in bash, and in PowerShell a command only after `&` (T-1049). A
+/// path with a shell's own characters, a quote, a backtick, a `$`, is one in each.
+#[test]
+fn a_cf_a_shell_would_read_is_one_word_in_every_command_as_its_shell_takes_it() {
+    for (path, posix, powershell) in [
+        (
+            "C:/Program Files/ConsensFlow/bin/cf.exe",
+            "'C:/Program Files/ConsensFlow/bin/cf.exe'",
+            "& 'C:/Program Files/ConsensFlow/bin/cf.exe'",
+        ),
+        (
+            "/Users/me/My Apps/cf `x` $HOME 'q'",
+            r"'/Users/me/My Apps/cf `x` $HOME '\''q'\'''",
+            "& '/Users/me/My Apps/cf `x` $HOME ''q'''",
+        ),
+    ] {
+        for (shell, word) in [(Shell::Posix, posix), (Shell::PowerShell, powershell)] {
+            let cf = CfWord::new(path, shell);
+            assert_eq!(cf.as_str(), word);
+            holds_for(&cf);
+        }
     }
 }
 
@@ -447,7 +464,14 @@ fn with_no_path_the_commands_say_cf_and_a_path_that_is_empty_is_none() {
     for text in [
         instructions("worker", &[]),
         instructions("chief", &[zeus()]),
-        role_instructions(&Env::default(), "worker", &[], Some(""), None).unwrap(),
+        role_instructions(
+            &Env::default(),
+            "worker",
+            &[],
+            &CfWord::new("", Shell::Posix),
+            None,
+        )
+        .unwrap(),
     ] {
         assert!(text.contains("\n    cf "), "the commands start with cf");
         assert!(!text.contains("This window's cf"));
@@ -465,7 +489,8 @@ fn gives_the_chief_s_subagents_if_its_harness_has_them_nothing_beyond_searching_
 
 #[test]
 fn refuses_an_unknown_role() {
-    let refused = role_instructions(&Env::default(), "king", &[], None, None).unwrap_err();
+    let refused =
+        role_instructions(&Env::default(), "king", &[], &CfWord::bare(), None).unwrap_err();
     assert_eq!(refused.to_string(), "no role instructions for king");
 }
 
@@ -552,14 +577,25 @@ fn gives_the_chief_only_the_named_card_nothing_of_the_board_and_leaves_the_other
     let staff = [staff_row("zeus", &["worker"], WorkTier::Standard)];
     let env = Env::from_vars([("CONSENSFLOW_EVAL_CHIEF_CARD", card.as_os_str())]);
     assert_eq!(
-        role_instructions(&env, "chief", &staff, Some("/app/bin/cf"), None).unwrap(),
+        role_instructions(
+            &env,
+            "chief",
+            &staff,
+            &CfWord::new("/app/bin/cf", Shell::Posix),
+            None
+        )
+        .unwrap(),
         "You work in this project for its owner.\n",
         "no tiers, no staff, no cf"
     );
-    assert!(
-        role_instructions(&env, "worker", &staff, Some("/app/bin/cf"), None)
-            .unwrap()
-            .contains("/app/bin/cf")
-    );
+    assert!(role_instructions(
+        &env,
+        "worker",
+        &staff,
+        &CfWord::new("/app/bin/cf", Shell::Posix),
+        None
+    )
+    .unwrap()
+    .contains("/app/bin/cf"));
     assert!(instructions("chief", &staff).contains("You do not change the project yourself"));
 }

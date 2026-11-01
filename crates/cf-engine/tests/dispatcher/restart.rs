@@ -3,6 +3,7 @@
 //! the queue with its attempt, or settled by a record that shows it, and
 //! never sent again that the harness took.
 
+use cf_proto::cf_word::CfWord;
 use std::rc::Rc;
 
 use cf_engine::delivery_text::delivery_text;
@@ -303,7 +304,7 @@ fn notes_a_start_let_go_of_hold_their_task_till_each_reaches_the_worker_whatever
     // The words' turn ends with a complete answer that quotes the second note's header,
     // while the first note's paste is slow to show.
     context.adapter.with("zeus", |agent| agent.arrive = false);
-    let quoted = delivery_text(&context.message(two.id), &[]);
+    let quoted = delivery_text(&context.message(two.id), &[], &CfWord::bare());
     context.adapter.answer(
         "zeus",
         &format!("The parser writes JSON. You said:\n{quoted}"),
@@ -325,9 +326,10 @@ fn notes_a_start_let_go_of_hold_their_task_till_each_reaches_the_worker_whatever
         "not finished while the notes are on their way"
     );
     // The first note shows, and the second goes in after it.
-    let shown = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(one.id), &[]));
+    let shown = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(one.id), &[], &CfWord::bare()),
+    );
     context.adapter.with("zeus", |agent| {
         agent.arrive = true;
         agent.items.push(shown);
@@ -439,9 +441,10 @@ fn confirms_a_message_whose_header_the_copy_of_its_window_already_shows() {
     let note = context.note(project.id, "zeus", "chief", "Shown");
     context.pass().unwrap();
     // The window showed it and the copy has it; the daemon stopped before it confirmed it.
-    let shown = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let shown = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(note.id), &[], &CfWord::bare()),
+    );
     let conversation = context
         .ledger
         .borrow()
@@ -479,9 +482,10 @@ fn confirms_a_message_by_the_whole_id_the_harness_gave_the_item_that_shows_it_ho
     context.adapter.with("chief", |agent| agent.arrive = false);
     let note = context.note(project.id, "zeus", "chief", "Shown");
     context.pass().unwrap();
-    let mut shown = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let mut shown = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(note.id), &[], &CfWord::bare()),
+    );
     let long = "r".repeat(300);
     shown.id = std::sync::Arc::from(long.as_str());
     let conversation = context

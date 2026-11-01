@@ -2,6 +2,7 @@
 //! after all confirms nothing, and a window that was getting ready is handed
 //! nothing (`describe('a message withdrawn on its way into a window')`).
 
+use cf_proto::cf_word::CfWord;
 use std::rc::Rc;
 
 use cf_engine::delivery_text::{delivery_text, marker_of};
@@ -60,9 +61,10 @@ fn is_not_confirmed_when_it_shows_after_all_and_its_window_goes_with_its_work() 
         .borrow_mut()
         .release_task(tiers.project.id, 1, "by @human")
         .unwrap();
-    let shown = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(answer.id), &[]));
+    let shown = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(answer.id), &[], &CfWord::bare()),
+    );
     context
         .adapter
         .with("zeus", |agent| agent.items.push(shown));

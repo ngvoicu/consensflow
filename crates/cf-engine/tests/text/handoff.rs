@@ -3,10 +3,12 @@
 //! suite.
 
 use cf_base::refusal::Refusal;
+use cf_engine::delivery_text::delivery_text;
 use cf_engine::handoff::{
     handoff_text, history_page, history_pages, is_handoff, last_words, Handoff, HistoryPage,
     LastWords, HANDOFF_TITLE,
 };
+use cf_proto::cf_word::{CfWord, Shell};
 use cf_proto::ledger::{ChiefConversation, ChiefOpenWork, MessageView, SwitchedFrom};
 use regex::Regex;
 
@@ -400,4 +402,57 @@ fn names_the_switch_the_history_what_waits_and_the_last_word() {
     assert!(calm.contains("cf history (1 page,"));
     assert!(calm.contains("Nothing on the board waits on you."));
     assert!(!calm.contains("cut off") && !calm.contains("human's last message"));
+}
+
+/// The first message of a chief the human switched in teaches the commands of the board
+/// (`cf history` and what waits on it), and is typed into the new chief's window: each
+/// starts with that window's own `cf` (T-1049), by the rule every text ConsensFlow wrote
+/// is delivered by.
+#[test]
+fn the_first_message_of_a_switched_in_chief_starts_each_command_with_the_cf_of_its_window() {
+    let from = SwitchedFrom {
+        harness: "claude-code".to_owned(),
+        agent: None,
+    };
+    let to = seat(Some("codex"), Some("astraeus"));
+    let open = ChiefOpenWork {
+        questions: vec![message(
+            6,
+            "question",
+            Some("zeus"),
+            Some(1),
+            "Which grammar?\nLL or LR",
+        )],
+        results: vec![task(2, "Lexer", Some("diana"), "done")],
+        own: Vec::new(),
+    };
+    let text = handoff_text(&Handoff {
+        from: &from,
+        to: &to,
+        open: &open,
+        last: None,
+        cut: false,
+        pages: 3,
+    });
+    let note = message(1, "note", None, None, &text);
+    for cf in [
+        CfWord::new("/opt/consensflow/bin/cf", Shell::Posix),
+        CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
+    ] {
+        let word = cf.as_str();
+        let said = delivery_text(&note, &[], &cf);
+        assert!(said.contains(&format!("before you act: {word} history (3 pages")));
+        assert!(said.contains(&format!(
+            "{word} history --page 2 for older; {word} history --find"
+        )));
+        assert!(said.contains(&format!("({word} inbox read m-6, then {word} answer m-6")));
+        assert!(said.contains(&format!("({word} task get T-2)")));
+        let left = said.replace(word, "");
+        assert!(
+            !Regex::new(r"(?-u:\b)cf (task|ask|inbox|answer|note|tell|staff|history)")
+                .unwrap()
+                .is_match(&left),
+            "{said}"
+        );
+    }
 }

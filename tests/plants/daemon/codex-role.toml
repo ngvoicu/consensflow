@@ -1059,8 +1059,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''        Ok(says_a_role.then(|| goes_whole(message, &[])))'''
-replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[]) || true))'''
+find = '''        Ok(says_a_role.then(|| goes_whole(message, &[], &cf)))'''
+replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[], &cf) || true))'''
 
 [[plant]]
 name = "codex role: the human is not told that a role went in part"
@@ -1079,8 +1079,8 @@ runs = ["engine-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = '''    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT'''
-replace = '''    utf16_len(&words_of(message, carried).0) < INLINE_LIMIT'''
+find = '''    utf16_len(&words_of(message, carried, cf).0) <= INLINE_LIMIT'''
+replace = '''    utf16_len(&words_of(message, carried, cf).0) < INLINE_LIMIT'''
 
 [[plant]]
 name = "codex role: whether a message goes whole is told by its own words and not by the rows it carries with it"
@@ -1089,8 +1089,8 @@ runs = ["engine-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = '''    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT'''
-replace = '''    utf16_len(&words_of(message, &[]).0) <= INLINE_LIMIT'''
+find = '''    utf16_len(&words_of(message, carried, cf).0) <= INLINE_LIMIT'''
+replace = '''    utf16_len(&words_of(message, &[], cf).0) <= INLINE_LIMIT'''
 
 # What the ledger knows a replacement by, and what a record's turn is a replacement's by: the id
 # the ledger has, and never the words.

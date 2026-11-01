@@ -1444,6 +1444,7 @@ impl Dispatcher {
                 });
             }
         }
+        let cf = self.seams.roles.cf(participant);
         let pastes: Vec<Paste> = self
             .seams
             .ledger
@@ -1452,7 +1453,7 @@ impl Dispatcher {
             .into_iter()
             .map(|begun| Paste {
                 id: begun.message.id,
-                text: delivery_text(&begun.message, &begun.carried),
+                text: delivery_text(&begun.message, &begun.carried, &cf),
             })
             .collect();
         let pane = record.window.borrow().pane.clone();

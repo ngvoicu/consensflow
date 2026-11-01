@@ -734,10 +734,10 @@ runs = ["failure-reason-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-                text: delivery_text(&begun.message, &begun.carried),
+                text: delivery_text(&begun.message, &begun.carried, &cf),
 '''
 replace = '''
-                text: delivery_text(&begun.message, &[]),
+                text: delivery_text(&begun.message, &[], &cf),
 '''
 
 [[plant]]

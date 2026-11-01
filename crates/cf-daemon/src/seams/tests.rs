@@ -148,6 +148,57 @@ fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
     );
 }
 
+/// The default install of Windows (`install.ps1`) is in `Program Files`, a path with a space: a
+/// quoted word is one word to bash and a string to PowerShell, which runs it only after `&`.
+#[test]
+fn a_windows_first_word_is_the_path_as_its_harness_s_shell_runs_a_program_by_it() {
+    let scene = scene();
+    let spaced = "C:/Program Files/ConsensFlow/bin/cf.exe";
+    let member_of = |harness: Option<Harness>| {
+        let mut member = participant(&scene.project, "zeus").clone();
+        member.harness = harness.map(|harness| harness.kind().to_owned());
+        member
+    };
+    let texts = |windows| RoleTexts::new(Env::default(), spaced.to_owned()).on_windows(windows);
+    for windows in [false, true] {
+        for harness in Harness::ALL {
+            let powershell = windows && harness == Harness::Codex;
+            let expected = if powershell {
+                format!("& '{spaced}'")
+            } else {
+                format!("'{spaced}'")
+            };
+            let member = member_of(Some(harness));
+            assert_eq!(
+                texts(windows).cf(&member).as_str(),
+                expected,
+                "{harness:?}, windows {windows}"
+            );
+            let text = texts(windows)
+                .instructions(&member, &scene.project, None)
+                .unwrap();
+            assert!(
+                text.contains(&format!("\n    {expected} ask \"…\" ")),
+                "{harness:?}, windows {windows}: {text}"
+            );
+        }
+        // A participant that names no harness (or one this build does not run) is a bash-like
+        // shell's.
+        assert_eq!(
+            texts(windows).cf(&member_of(None)).as_str(),
+            format!("'{spaced}'")
+        );
+    }
+    // A path every shell takes as one word is that word, in each.
+    let plain = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned()).on_windows(true);
+    for harness in Harness::ALL {
+        assert_eq!(
+            plain.cf(&member_of(Some(harness))).as_str(),
+            "/bundle/bin/cf"
+        );
+    }
+}
+
 #[test]
 fn a_chief_given_specs_is_given_the_section_of_them_and_a_member_given_them_is_not() {
     let scene = scene();

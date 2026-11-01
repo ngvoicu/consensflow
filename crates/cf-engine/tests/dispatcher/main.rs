@@ -29,7 +29,8 @@
 //! window's on it, and what waits for a window out of quota said to the human
 //! (`quota_accounts`), and a window whose turn is over, which no stop interrupts
 //! or closes (`nothing_to_stop`), and a read of a window that fails or comes too late, which is
-//! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`).
+//! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`), and
+//! the window's own `cf` every text typed into it starts its commands with (`window_cf`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -135,6 +136,7 @@ mod window_closes;
 mod window_takes_long;
 mod window_traces;
 mod window_went_with_a_paste;
+mod window_cf;
 mod windows;
 mod withdrawn;
 mod withheld_enter;

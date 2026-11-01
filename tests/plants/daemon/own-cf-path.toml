@@ -4,32 +4,55 @@
 # on Windows through a login Git Bash that puts `~/bin` first; another program is also called `cf`,
 # the Cloud Foundry CLI). No order of a PATH can matter to a full path, so:
 #
+# - the first word of a command is `cf::CfWord` (cf-proto): the window's path as its shell takes it
+#   (`Roles::cf`, by harness and platform): as it is, one single-quoted word in a bash-like shell
+#   where it holds a space or a shell character, `& '…'` in PowerShell (Codex on Windows);
 # - the role texts (`skill/core/chief.md`, `skill/core/staff.md`) write `{{cf}}` where a command
-#   starts, and `role_instructions` puts the window's path there (quoted as one word where a shell
-#   would read it otherwise), where a section at the end asked a window to run it by its path
-#   when its own `cf` answered as another program;
+#   starts, and `role_instructions` puts the word there, where a section at the end asked a window
+#   to run it by its path when its own `cf` answered as another program;
+# - every text typed into a window (`delivery_text`) starts the commands it teaches with the word:
+#   the footers and the commands that read the rest are written with it, and what ConsensFlow
+#   wrote of a message (the engine's and the ledger's own notes, `sender` none, which the board
+#   shows with the word `cf`) has each command it names by the word `cf` started by it
+#   (`CfWord::in_text`); what a participant wrote is never changed;
 # - the hooks a launch writes (`cf hook claude`, `cf hook devin`, `cf hook devin-session`, `cf hook
-#   muse-session`) are run by that path too (`shared::shell::cf_hook`).
+#   muse-session`) are run by that path too (`shared::shell::cf_hook`); and a refusal of a question
+#   says to ask with it (`door::ask`).
 #
 # The texts are held by `crates/cf-engine/tests/text/roles.rs` (every role, with and without specs,
-# with a path and with a path a shell reads: no bare `cf` anywhere), `roles/member.rs`'s tests (the
-# part of a role gets it too) and the goldens of the texts; the hooks by the harness tests of each
-# (`claude`'s launch, `devin::install`, `muse::launch`, `tooling::launch`) and `shared::shell`.
-# `cargo xtask live own-cf` shows it on the real harnesses.
+# for a path, a path with a space and a path with a shell's characters, in each shell: no bare `cf`
+# anywhere), `roles/member.rs`'s tests (the part of a role gets it too), the goldens of the texts,
+# `tests/text/delivery_text.rs` and `handoff.rs` (every footer and note), the dispatcher's
+# `window_cf.rs` and `cf-proto`'s `cf_word`; the hooks by the harness tests of each (`claude`'s
+# launch, `devin::install`, `muse::launch`, `tooling::launch`) and `shared::shell`; the first word
+# of each harness and platform by the daemon's `seams` tests. `cargo xtask live own-cf` shows it on
+# the real harnesses.
+#
+# Not planted: the word of `why_it_failed`'s pastes (`deliveries.rs`), which no test of the
+# dispatcher can tell from the bare word without a failed turn that carries a note of
+# ConsensFlow's, and the word `cf hook` prints (`main.rs`, from the program's own path).
 #
 # Every name holds `own cf path`, so `npm run plants:daemon -- "own cf path"` runs them all.
 
 [run]
 engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::", "--", "--skip", "goldens_roles"]
 engine-text-goldens-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "goldens_roles"]
+engine-text-delivery = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "delivery_text::"]
+engine-text-handoff = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "handoff::"]
 engine-lib-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "roles::"]
+engine-dispatcher-window-cf = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_cf::"]
+proto-lib-cf-word = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "cf_word::"]
+proto-lib-agents = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "agents::"]
+board-lib-door = ["cargo", "test", "--offline", "-p", "cf-board", "--lib", "door::"]
+daemon-lib-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
 harness-lib-shell = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::shell::"]
 harness-lib-devin-install = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::install::"]
 harness-lib-muse-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::launch::"]
 harness-launch-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::launches_a_fresh_worker"]
 harness-lib-tooling-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::launch::"]
+live-own-cf = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_own_cf"]
 
-# The texts.
+# The texts of the roles.
 
 [[plant]]
 name = "own cf path: a member's command table says the word cf"
@@ -82,7 +105,7 @@ runs = ["engine-text-roles", "engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = '.replace("{{cf}}", &cf);'
+find = '.replace("{{cf}}", cf.as_str());'
 replace = '.replace("{{cf}}", "cf");'
 
 [[plant]]
@@ -92,7 +115,7 @@ runs = ["engine-text-roles", "engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = "return member::text(role, &cf);"
+find = "return member::text(role, cf.as_str());"
 replace = 'return member::text(role, "cf");'
 
 [[plant]]
@@ -105,25 +128,181 @@ file = "crates/cf-engine/src/roles/member.rs"
 find = '''own.insert(slot, text.trim_end_matches('\n').replace("{{cf}}", cf));'''
 replace = '''own.insert(slot, text.trim_end_matches('\n').to_owned());'''
 
+# The first word.
+
 [[plant]]
-name = "own cf path: a path a shell would read is not quoted"
-meant = "a_cf_a_shell_would_read_is_one_quoted_word_in_every_command"
-runs = ["engine-text-roles"]
+name = "own cf path: a path with a space is not quoted for bash"
+meant = "a_path_with_a_space_or_a_shell_character_is_one_quoted_word_in_bash_and_after_an_ampersand_in_powershell"
+runs = ["proto-lib-cf-word"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/roles.rs"
-find = '.all(|byte| byte.is_ascii_alphanumeric() || b"/._-:+~".contains(&byte));'
-replace = ".all(|_| true);"
+file = "crates/cf-proto/src/cf_word.rs"
+find = '''Shell::Posix => format!("'{}'", path.replace('\'', r"'\''")),'''
+replace = "Shell::Posix => path.to_owned(),"
+
+[[plant]]
+name = "own cf path: a path with a space is quoted for PowerShell as it is for bash"
+meant = "a_path_with_a_space_or_a_shell_character_is_one_quoted_word_in_bash_and_after_an_ampersand_in_powershell"
+runs = ["proto-lib-cf-word", "engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/cf_word.rs"
+find = '''Shell::PowerShell => format!("& '{}'", path.replace('\'', "''")),'''
+replace = '''Shell::PowerShell => format!("'{}'", path.replace('\'', "''")),'''
 
 [[plant]]
 name = "own cf path: an empty path is a path"
-meant = "with_no_path_the_commands_say_cf_and_a_path_that_is_empty_is_none"
-runs = ["engine-text-roles"]
+meant = "a_path_with_a_space_or_a_shell_character_is_one_quoted_word_in_bash_and_after_an_ampersand_in_powershell"
+runs = ["proto-lib-cf-word", "engine-text-roles"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/roles.rs"
-find = "let Some(cf) = cf.filter(|cf| !cf.is_empty()) else {"
-replace = "let Some(cf) = cf else {"
+file = "crates/cf-proto/src/cf_word.rs"
+find = "        if path.is_empty() {"
+replace = "        if false {"
+
+[[plant]]
+name = "own cf path: a path already written is written again"
+meant = "a_text_names_the_boards_commands_by_the_word_and_by_nothing_else"
+runs = ["proto-lib-cf-word"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/cf_word.rs"
+find = "            if !starts_a_word(text, at) || !names_a_command(&text[at + 3..]) {"
+replace = "            if !names_a_command(&text[at + 3..]) {"
+
+[[plant]]
+name = "own cf path: a command that is not the board's is rewritten"
+meant = "a_text_names_the_boards_commands_by_the_word_and_by_nothing_else"
+runs = ["proto-lib-cf-word"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/cf_word.rs"
+find = "            if !starts_a_word(text, at) || !names_a_command(&text[at + 3..]) {"
+replace = "            if !starts_a_word(text, at) {"
+
+[[plant]]
+name = "own cf path: every shell is taken for a bash-like one"
+meant = "only_codex_on_windows_runs_its_commands_in_powershell"
+runs = ["proto-lib-agents"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = "        if windows && self == Harness::Codex {"
+replace = "        if false {"
+
+[[plant]]
+name = "own cf path: the daemon gives every window the bash-like word"
+meant = "a_windows_first_word_is_the_path_as_its_harness_s_shell_runs_a_program_by_it"
+runs = ["daemon-lib-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = "            .map_or(Shell::Posix, |harness| harness.shell(self.windows));"
+replace = "            .map_or(Shell::Posix, |_| Shell::Posix);"
+
+# The texts typed into a window.
+
+[[plant]]
+name = "own cf path: a question's footer says the word cf"
+meant = "every_footer_and_every_command_that_reads_the_rest_starts_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '"\n\nRun in your shell: {cf} answer m-{id} \"…\" (a label or your own words{lines})"'
+replace = '"\n\nRun in your shell: cf answer m-{id} \"…\" (a label or your own words{lines})"'
+
+[[plant]]
+name = "own cf path: a result's footer says the word cf"
+meant = "every_footer_and_every_command_that_reads_the_rest_starts_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = 'format!("\n\nDecide with: {cf} task accept T-{task} · {cf} task reopen T-{task} \"…\"")'
+replace = 'format!("\n\nDecide with: cf task accept T-{task} · cf task reopen T-{task} \"…\"")'
+
+[[plant]]
+name = "own cf path: the command that reads a cut message says the word cf"
+meant = "every_footer_and_every_command_that_reads_the_rest_starts_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''None => (body_of(message, cf), format!("{cf} inbox read m-{id}")),'''
+replace = '''None => (body_of(message, cf), format!("cf inbox read m-{id}")),'''
+
+[[plant]]
+name = "own cf path: the command that reads a cut composite says the word cf"
+meant = "every_footer_and_every_command_that_reads_the_rest_starts_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''format!("{cf} task get T-{number}"),'''
+replace = '''format!("cf task get T-{number}"),'''
+
+[[plant]]
+name = "own cf path: what ConsensFlow wrote of a note keeps the word cf"
+meant = "what_consensflow_wrote_of_a_note_starts_each_command_with_the_cf_of_the_window"
+runs = ["engine-text-delivery", "engine-dispatcher-window-cf"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        cf.in_text(&row.body)"
+replace = "        Cow::Borrowed(row.body.as_str())"
+
+[[plant]]
+name = "own cf path: what a participant wrote is given the window's word too"
+meant = "what_a_participant_wrote_is_never_changed_whatever_the_window_s_word_is"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    if row.sender.is_none() {"
+replace = "    if true {"
+
+[[plant]]
+name = "own cf path: a row a carrier keeps is given as it was written"
+meant = "what_consensflow_wrote_of_a_note_starts_each_command_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''format!("{}\n{}", label(row), body_of(row, cf))'''
+replace = '''format!("{}\n{}", label(row), row.body)'''
+
+[[plant]]
+name = "own cf path: the dispatcher types a window the word cf, not its own"
+meant = "what_consensflow_wrote_of_a_note_reaches_a_window_with_the_commands_started_by_its_own_cf"
+runs = ["engine-dispatcher-window-cf"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''            .map_or_else(CfWord::bare, |participant| {
+                self.seams.roles.cf(&participant)
+            }))'''
+replace = '''            .map_or_else(CfWord::bare, |_| CfWord::bare()))'''
+
+[[plant]]
+name = "own cf path: a switched-in chief's first message says the word cf"
+meant = "the_first_message_of_a_switched_in_chief_starts_each_command_with_the_cf_of_its_window"
+runs = ["engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        cf.in_text(&row.body)"
+replace = "        Cow::Borrowed(row.body.as_str())"
+
+[[plant]]
+name = "own cf path: a refusal of a question says to ask with the word cf"
+meant = "a_refusal_says_to_ask_with_the_cf_of_the_window_as_its_shell_takes_it"
+runs = ["board-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/door.rs"
+find = 'Ask with {cf} ask \"…\" instead."'
+replace = 'Ask with cf ask \"…\" instead."'
 
 # The hooks.
 
@@ -186,3 +365,16 @@ runs = ["harness-lib-muse-launch"]
 file = "crates/cf-harness/src/muse/launch.rs"
 find = '"command": cf_hook(pane_cf, "muse-session", &[role_file, said]),'
 replace = '"command": cf_hook("cf", "muse-session", &[role_file, said]),'
+
+# The live suite.
+
+[[plant]]
+name = "own cf path: the live task tells the worker to run cf whoami"
+meant = "the_task_teaches_no_command_that_starts_with_the_word_cf"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf.rs"
+find = '''1. The `whoami` command of your ConsensFlow cf, started the way your instructions start \
+every cf command.\n\'''
+replace = '''1. `cf whoami`\n\'''

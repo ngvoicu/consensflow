@@ -964,9 +964,8 @@ builds = true
 file = "crates/cf-daemon/src/seams.rs"
 find = '''        .map_err(|failed| failed.to_string())
     }
-}
 
-/// Each launch's id'''
+    fn cf(&self, participant: &ParticipantView) -> CfWord {'''
 replace = '''        .map(|text| {
             format!(
                 "{text}\n{}",
@@ -975,9 +974,8 @@ replace = '''        .map(|text| {
         })
         .map_err(|failed| failed.to_string())
     }
-}
 
-/// Each launch's id'''
+    fn cf(&self, participant: &ParticipantView) -> CfWord {'''
 
 [[plant]]
 name = "describe rig: the new name goes into the role text of a window"
@@ -989,15 +987,13 @@ builds = true
 file = "crates/cf-daemon/src/seams.rs"
 find = '''        .map_err(|failed| failed.to_string())
     }
-}
 
-/// Each launch's id'''
+    fn cf(&self, participant: &ParticipantView) -> CfWord {'''
 replace = '''        .map(|text| format!("{text}\n{}", project.name))
         .map_err(|failed| failed.to_string())
     }
-}
 
-/// Each launch's id'''
+    fn cf(&self, participant: &ParticipantView) -> CfWord {'''
 
 [[plant]]
 name = "describe rig: a rename is not in the event file"

@@ -17,6 +17,7 @@ use cf_harness::launch::adapter;
 use cf_harness::seams::{uuid, Services, SystemEntropy};
 use cf_ledger::{ParticipantView, ProjectView};
 use cf_proto::agents::Harness;
+use cf_proto::cf_word::{CfWord, Shell};
 
 use crate::errors::{contain, Errors};
 
@@ -89,18 +90,31 @@ impl PaneEnv for WindowEnv {
 }
 
 /// The text each role's window starts with (`roles`): the role's own, with the
-/// project's staff in the chief's, and the `cf` of this window named.
+/// project's staff in the chief's, and every command starting with the `cf` of
+/// this window, by its whole path as the window's shell takes it.
 pub struct RoleTexts {
     env: Env,
     /// The bundle's `cf` as a window names it.
     pane_cf: String,
+    /// Whether the windows run on Windows, where a harness's shell can be PowerShell.
+    windows: bool,
 }
 
 impl RoleTexts {
     /// The role texts of a daemon given `env`, naming the bundle's `cf` as
-    /// `pane_cf` does.
+    /// `pane_cf` does, on the platform the daemon runs on.
     pub fn new(env: Env, pane_cf: String) -> Self {
-        Self { env, pane_cf }
+        Self {
+            env,
+            pane_cf,
+            windows: cfg!(windows),
+        }
+    }
+
+    /// These texts for windows that run on Windows, or not, whatever the daemon runs on.
+    #[must_use]
+    pub fn on_windows(self, windows: bool) -> Self {
+        Self { windows, ..self }
     }
 }
 
@@ -115,10 +129,19 @@ impl Roles for RoleTexts {
             &self.env,
             &participant.role,
             &staff_of(project),
-            Some(&self.pane_cf),
+            &self.cf(participant),
             specs,
         )
         .map_err(|failed| failed.to_string())
+    }
+
+    fn cf(&self, participant: &ParticipantView) -> CfWord {
+        let shell = participant
+            .harness
+            .as_deref()
+            .and_then(Harness::from_kind)
+            .map_or(Shell::Posix, |harness| harness.shell(self.windows));
+        CfWord::new(&self.pane_cf, shell)
     }
 }
 

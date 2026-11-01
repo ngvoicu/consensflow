@@ -3,6 +3,7 @@
 
 use cf_base::text::window_text;
 use cf_engine::delivery_text::{delivery_text, marker_of};
+use cf_proto::cf_word::CfWord;
 
 use super::support::{assert_same_text, message_of, table};
 
@@ -12,7 +13,7 @@ fn every_message_reads_in_the_window_as_node_gave_it() {
     let (mut with_text, mut halved) = (0, 0);
     for row in rows {
         let message = message_of(&row["message"]);
-        let text = delivery_text(&message, &[]);
+        let text = delivery_text(&message, &[], &CfWord::bare());
         let what = format!(
             "m-{} {} ({} units)",
             message.id,

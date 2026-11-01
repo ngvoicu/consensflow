@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use cf_base::env::Env;
 use cf_base::file::{read_file_sync, FileError};
 use cf_catalog::{WorkTier, WORK_TIERS};
+use cf_proto::cf_word::CfWord;
 use cf_proto::ledger::ProjectView;
 
 pub use skill::{team_table, work_tier_list};
@@ -77,13 +78,15 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
         .collect()
 }
 
-/// The instructions a window of `role` starts with. `cf` is where this
-/// window's `cf` is, and every command the text teaches (`{{cf}}` in
-/// `chief.md` and `staff.md`) names it by that full path: a shell that
+/// The instructions a window of `role` starts with. `cf` is how a command of
+/// this window starts, and every command the text teaches (`{{cf}}` in
+/// `chief.md` and `staff.md`) starts with it: the window's own `cf` by its full
+/// path, written as the window's shell takes it ([`CfWord`]). A shell that
 /// re-reads the user's profile can find another `cf` first (another
 /// ConsensFlow's, or the Cloud Foundry CLI: a Devin worker's `cf` was the live
 /// app's older one, 2026-09-26), and no order of a `PATH` matters to a full
-/// path. Without it the commands say `cf`, as a shell finds it.
+/// path. Where there is no path ([`CfWord::bare`]) the commands say `cf`, as a
+/// shell finds it.
 ///
 /// A chief whose project has specs on is given `specs`, and its text has the
 /// section of them after the rest; a member's never does, whatever is given,
@@ -96,15 +99,14 @@ pub fn role_instructions(
     env: &Env,
     role: &str,
     staff: &[StaffRow],
-    cf: Option<&str>,
+    cf: &CfWord,
     specs: Option<&ProjectSpecs<'_>>,
 ) -> Result<String, RoleError> {
     if role != "chief" && !MEMBERS.contains(&role) {
         return Err(RoleError::Unknown(role.to_owned()));
     }
-    let cf = command_word(cf);
     if role != "chief" {
-        return member::text(role, &cf);
+        return member::text(role, cf.as_str());
     }
     if let Some(card) = env.path(CARD) {
         // Node read its environment as UTF-8: a byte that is none was U+FFFD.
@@ -115,27 +117,9 @@ pub fn role_instructions(
     let chief = CHIEF
         .replacen("{{tiers}}", &work_tier_list(), 1)
         .replacen("{{staff}}", &team_table(staff)?, 1)
-        .replace("{{cf}}", &cf);
+        .replace("{{cf}}", cf.as_str());
     let specs = specs.map_or_else(String::new, ProjectSpecs::section);
     Ok(chief + &specs)
-}
-
-/// `cf` as the first word of a command a shell runs: the path itself where a shell
-/// takes it as one word, single-quoted where it holds a space or a character a
-/// shell reads (a bundle in `C:/Program Files`, a home with a space in its name),
-/// and `cf` where there is no path.
-fn command_word(cf: Option<&str>) -> String {
-    let Some(cf) = cf.filter(|cf| !cf.is_empty()) else {
-        return "cf".to_owned();
-    };
-    let plain = cf
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || b"/._-:+~".contains(&byte));
-    if plain {
-        cf.to_owned()
-    } else {
-        format!("'{}'", cf.replace('\'', r"'\''"))
-    }
 }
 
 /// The work tier a ledger's word names.

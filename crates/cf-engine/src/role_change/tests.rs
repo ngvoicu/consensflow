@@ -1,3 +1,4 @@
+use cf_proto::cf_word::{CfWord, Shell};
 use std::sync::Arc;
 
 use cf_base::env::Env;
@@ -134,7 +135,10 @@ fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
         &Env::default(),
         "chief",
         &staff,
-        Some("/Applications/ConsensFlow.app/Contents/Resources/bin/cf"),
+        &CfWord::new(
+            "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
+            Shell::Posix,
+        ),
         specs_on.then_some(&specs),
     )
     .unwrap()
@@ -148,8 +152,8 @@ fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
 fn the_real_text_of_a_chief_with_specs_is_told_in_part_with_the_way_to_read_the_rest() {
     let text = a_chiefs_role(25, true);
     let replacement = note(None, "note", body_of(&text));
-    assert!(!goes_whole(&replacement, &[]));
-    let said = delivery_text(&replacement, &[]);
+    assert!(!goes_whole(&replacement, &[], &CfWord::bare()));
+    let said = delivery_text(&replacement, &[], &CfWord::bare());
     assert!(!said.contains(&text), "the role is not cut");
     assert!(
         said.contains("read all of it with: cf inbox read m-4242"),
@@ -167,6 +171,7 @@ fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
                 goes_whole(
                     &note(None, "note", body_of(&a_chiefs_role(rows, specs_on))),
                     &[],
+                    &CfWord::bare(),
                 )
             })
             .last()
@@ -231,7 +236,7 @@ fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
     );
     assert_eq!(answers(&items), ["The parser is sound."]);
     // Nor does one between a replacement of the role and its word end the role's turn.
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     let mut items = vec![assistant("Parser done"), user(&replacement), summary];
     items.push(assistant("Understood."));
     assert_eq!(answers(&items), ["Parser done"]);
@@ -241,13 +246,13 @@ fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
 fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words_it_quotes() {
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     // The opening, and the whole text of the replacement, quoted in a note about
     // the task (m-7), from someone: the worker's word answers the task.
     let mut quoting = note(Some("chief"), "note", format!("Review this: {replacement}"));
     quoting.id = 7;
     quoting.task_number = Some(1);
-    let quoted = delivery_text(&quoting, &[]);
+    let quoted = delivery_text(&quoting, &[], &CfWord::bare());
     assert!(quoted.contains(OPENING), "{quoted}");
     assert_eq!(
         answers(&[user(&quoted), assistant("Parser done")]),
@@ -262,7 +267,7 @@ fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words
 
 #[test]
 fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task() {
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
 
@@ -312,7 +317,7 @@ fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_no
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
     let tool = |text: &str| said_by(Role::Tool, text, true);
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
 
     // Several words after the last tool call are all of it, in order.
     assert_eq!(

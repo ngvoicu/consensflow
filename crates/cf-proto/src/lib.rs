@@ -7,6 +7,7 @@
 
 pub mod agents;
 pub mod bridge;
+pub mod cf_word;
 pub mod codex;
 pub mod ledger;
 pub mod page;
