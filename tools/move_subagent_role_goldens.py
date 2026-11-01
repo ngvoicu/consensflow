@@ -8,7 +8,9 @@ Two files of a launch moved:
 - Codex: beside the role's file (`integrations/codex/<launch>/developer-instructions.md`) is
   `sub-agents.toml`, the configuration a sub-agent starts with in place of the role (Codex's own
   instructions, then the sentence that it is not the window's agent), with the role file's mode;
-  and the launch's environment names it in `CF_CODEX_SUBAGENT_FILE`, after the role's variable.
+  and the launch's environment names it in `CF_CODEX_SUBAGENT_FILE`, after the role's variable,
+  and the agent types it is for in `CF_CODEX_SUBAGENT_TYPES` after that (Codex's own three: no
+  recording's configuration defines one of its own).
 
 A step's `tree` is what it changed of the files, so each scenario is replayed: its files after each
 step, as its recorded changes leave them, are moved as above, and the step's `tree` is said again
@@ -28,6 +30,8 @@ CODEX_ROLE = re.compile(r"/integrations/codex/[^/]+/developer-instructions\.md$"
 ROLE_SAID = "\n\nYour ConsensFlow role is "
 ROLE_VARIABLE = "CF_CODEX_ROLE_FILE"
 SUBAGENT_VARIABLE = "CF_CODEX_SUBAGENT_FILE"
+SUBAGENT_TYPES_VARIABLE = "CF_CODEX_SUBAGENT_TYPES"
+AGENT_TYPES = "default,explorer,worker"
 
 
 def not_for_the_model(text):
@@ -118,6 +122,10 @@ def move_env(record):
         if ROLE_VARIABLE in names and SUBAGENT_VARIABLE not in names:
             at = names.index(ROLE_VARIABLE)
             env.insert(at + 1, [SUBAGENT_VARIABLE, sibling(env[at][1])])
+            names = [pair[0] for pair in env]
+        if SUBAGENT_VARIABLE in names and SUBAGENT_TYPES_VARIABLE not in names:
+            # No recording's configuration defines an agent type of its own.
+            env.insert(names.index(SUBAGENT_VARIABLE) + 1, [SUBAGENT_TYPES_VARIABLE, AGENT_TYPES])
 
 
 def move(scenarios):

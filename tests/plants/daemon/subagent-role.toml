@@ -20,6 +20,8 @@ harness-codex-role = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib",
 harness-launch-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::"]
 # Every adapter's scenarios as recorded, which hold both files.
 harness-scenarios = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "scenarios::"]
+# cf-proto's table of Codex's own agent types, held to what Codex 0.166.0 says.
+proto-codex = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "codex::agent_types"]
 # The harness's tests of how Claude Code loads a role.
 harness-claude-install = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::install"]
 # The launch suite's Claude cases.
@@ -40,24 +42,57 @@ runs = ["codex-session"]
 [[plant.edit]]
 file = "crates/cf-codex-session/src/supervisor.rs"
 find = '''        if let Some(children) = &plan.children {
-            args.extend(arguments::children(children));
+            args.extend(arguments::children(&children.file, &children.kinds));
         }'''
 replace = '''        if let Some(children) = plan.children.as_ref().filter(|_| false) {
-            args.extend(arguments::children(children));
+            args.extend(arguments::children(&children.file, &children.kinds));
         }'''
 
 [[plant]]
 name = "subagent role: a worker sub-agent of Codex still starts with the role"
-meant = "a_sub_agent_of_each_of_codexs_own_agent_types_starts_from_the_file_named"
+meant = "an_agent_type_the_owner_defines_stays_the_owners_and_one_they_do_not_is_ours"
+runs = ["harness-codex-role", "harness-launch-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = '''            .filter(|name| !owned.contains(name))'''
+replace = '''            .filter(|name| !owned.contains(name) && *name != "worker")'''
+
+[[plant]]
+name = "subagent role: an agent type the owner defines is taken over"
+meant = "an_agent_type_the_owner_defines_stays_the_owners_and_one_they_do_not_is_ours"
+runs = ["harness-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = '''        .filter(|name| agents.get(name).is_some_and(Value::is_object))'''
+replace = '''        .filter(|name| agents.get(name).is_some_and(|_| false))'''
+
+[[plant]]
+name = "subagent role: a Codex agent type is defined again without Codex's own words"
+meant = "a_sub_agent_of_each_type_named_starts_from_the_file_named_with_codexs_own_words"
 runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/arguments.rs"
-find = '''pub(crate) const AGENT_TYPES: [(&str, &str); 3] = [
-    ("default", "Default agent."),
-    ("worker", "Use for execution and production work."),'''
-replace = '''pub(crate) const AGENT_TYPES: [(&str, &str); 2] = [
-    ("default", "Default agent."),'''
+find = '''                    json_string(kind.description)
+                ),
+            ]
+        })'''
+replace = '''                    json_string(kind.description.lines().next().unwrap_or_default())
+                ),
+            ]
+        })'''
+
+[[plant]]
+name = "subagent role: the table of Codex's agent types is not what Codex 0.166.0 says"
+meant = "the_types_are_codex_0_166_0_s_own_word_for_word_and_set_nothing_else"
+runs = ["proto-codex"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/codex/agent_types.rs"
+find = '''        description: r#"Default agent."#,'''
+replace = '''        description: r#"Default agent"#,'''
 
 [[plant]]
 name = "subagent role: a window opens though its sub-agents' file cannot be read"
@@ -86,8 +121,10 @@ runs = ["harness-launch-codex", "harness-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''                env: launched.env.into_iter().chain([role, children]).collect(),'''
-replace = '''                env: launched.env.into_iter().chain([role]).chain(Some(children).filter(|_| false)).collect(),'''
+find = '''                    .chain(children)
+                    .collect(),'''
+replace = '''                    .chain(children.into_iter().filter(|_| false))
+                    .collect(),'''
 
 # --- Claude Code ---
 

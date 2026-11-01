@@ -137,9 +137,9 @@ runs = ["harness-launch-codex", "harness-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''            let children = role::write_children(&services.env, launch.id, &texts.children)?;
+find = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
             let mut args = Vec::new();'''
-replace = '''            let children = role::write_children(&services.env, launch.id, &texts.children)?;
+replace = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
             let setting = format!(
                 "developer_instructions={}",
                 cf_base::js::stringify(&serde_json::Value::String(texts.role.clone()))
@@ -154,9 +154,9 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''            let children = role::write_children(&services.env, launch.id, &texts.children)?;
+find = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
             let mut args = Vec::new();'''
-replace = '''            let children = role::write_children(&services.env, launch.id, &texts.children)?;
+replace = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
             let setting = format!(
                 "developer_instructions={}",
                 cf_base::js::stringify(&serde_json::Value::String(texts.role.clone()))
@@ -170,8 +170,10 @@ runs = ["harness-launch-codex", "harness-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''                env: launched.env.into_iter().chain([role, children]).collect(),'''
-replace = '''                env: { let _ = role; launched.env.into_iter().chain([children]).collect() },'''
+find = '''                    .chain([role])
+                    .chain(children)'''
+replace = '''                    .chain(Some(role).filter(|_| false))
+                    .chain(children)'''
 
 [[plant]]
 name = "codex role file: the role's file is readable by everyone"

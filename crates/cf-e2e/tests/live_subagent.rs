@@ -707,6 +707,48 @@ fn child(
     Ok(())
 }
 
+/// That the Codex this machine runs has the agent types a window's supervisor defines
+/// again for its sub-agents, word for word (`codex_agent_types`, recorded from Codex
+/// 0.166.0): a Codex that changed one's words, or took one out, would list another than
+/// it would have listed with no window of ConsensFlow's. Its program holds each one's words
+/// as it shows them. A Codex that is a script (an npm shim) holds none of them, and is said.
+fn its_own_types(account: &mut Account) -> Result {
+    let asked = live::ask::question(&serde_json::json!({ "op": "codex_agent_types" }))?;
+    let program = fs::canonicalize(live::installed(Harness::Codex)?.command())
+        .map_err(|cause| Error::Daemon(format!("Codex's program cannot be found: {cause}")))?;
+    let bytes = fs::read(&program)
+        .map_err(|cause| Error::Daemon(format!("{} cannot be read: {cause}", program.display())))?;
+    let types = asked["types"].as_array().cloned().unwrap_or_default();
+    if bytes.len() < 1024 * 1024 {
+        account.say(format!(
+            "Codex's agent types are not checked: {} is a script, not Codex's program",
+            program.display()
+        ));
+        return Ok(());
+    }
+    for kind in &types {
+        let name = live::text(&kind["name"]);
+        let words = live::text(&kind["description"]);
+        account.check(
+            &format!(
+                "Codex's own `{name}` is the type recorded from Codex {}, word for word",
+                live::text(&asked["codex"])
+            ),
+            !words.is_empty()
+                && bytes
+                    .windows(words.len())
+                    .any(|window| window == words.as_bytes()),
+            program.display(),
+        );
+    }
+    account.check(
+        "the supervisor defines again each of Codex's three own types",
+        types.len() == 3,
+        types.len(),
+    );
+    Ok(())
+}
+
 /// The plan of `harness`'s project for `cases`, which need one Codex home.
 fn plan(harness: Harness, core_policy: bool) -> Plan {
     let name = format!(
@@ -738,6 +780,9 @@ fn run(harness: Harness, wanted: &[String], children: usize, log: &Log) -> Resul
         .filter(|case| wanted.is_empty() || wanted.iter().any(|name| name == case.name))
         .collect();
     let mut account = Account::new();
+    if harness == Harness::Codex {
+        its_own_types(&mut account)?;
+    }
     for core_policy in [false, true] {
         let these: Vec<&Case> = cases
             .iter()

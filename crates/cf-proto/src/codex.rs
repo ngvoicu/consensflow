@@ -25,6 +25,13 @@ pub const ROLE_VARIABLE: &str = "CF_CODEX_ROLE_FILE";
 /// as Codex would.
 pub const SUBAGENT_VARIABLE: &str = "CF_CODEX_SUBAGENT_FILE";
 
+/// The environment variable that names, with commas between them, Codex's own agent types
+/// ([`agent_types`]) whose sub-agents start from the file [`SUBAGENT_VARIABLE`] names: those
+/// the owner's configuration does not define, which keep the owner's own definition.
+pub const SUBAGENT_TYPES_VARIABLE: &str = "CF_CODEX_SUBAGENT_TYPES";
+
+pub mod agent_types;
+
 /// The shortest token a broker accepts.
 const MIN_TOKEN: usize = 24;
 

@@ -730,19 +730,16 @@ fn a_windows_sub_agents_start_from_the_file_its_launch_names_which_the_server_al
     let at = server.iter().position(|arg| *arg == "app-server").unwrap();
     let quoted = format!("\"{}\"", file.display());
     let mut expected = vec!["-c".to_owned(), "model=\"gpt-5.6-luna\"".to_owned()];
-    for (name, words) in [
-        ("default", "Default agent."),
-        ("worker", "Use for execution and production work."),
-        (
-            "explorer",
-            "Use `explorer` for specific codebase questions.",
-        ),
-    ] {
+    for kind in AGENT_TYPES {
         expected.extend([
             "-c".to_owned(),
-            format!("agents.{name}.config_file={quoted}"),
+            format!("agents.{}.config_file={quoted}", kind.name),
             "-c".to_owned(),
-            format!("agents.{name}.description=\"{words}\""),
+            format!(
+                "agents.{}.description={}",
+                kind.name,
+                serde_json::Value::from(kind.description)
+            ),
         ]);
     }
     let given: Vec<String> = server[..at].iter().map(|arg| (*arg).to_owned()).collect();

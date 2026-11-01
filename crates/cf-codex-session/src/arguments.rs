@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use cf_base::env::Env;
+use cf_proto::codex::agent_types::AgentType;
 
 /// The flag that opens Codex in full-permission mode.
 pub(crate) const BYPASS: &str = "--dangerously-bypass-approvals-and-sandbox";
@@ -76,33 +77,27 @@ fn json_string(text: &str) -> String {
     serde_json::Value::from(text).to_string()
 }
 
-/// Codex's own agent types, which a `spawn_agent` call may name, each with the words
-/// Codex shows for it (the first of its own, Codex 0.166.0): a sub-agent of each starts
-/// from the configuration [`children`] names, not from the window's role.
-pub(crate) const AGENT_TYPES: [(&str, &str); 3] = [
-    ("default", "Default agent."),
-    ("worker", "Use for execution and production work."),
-    (
-        "explorer",
-        "Use `explorer` for specific codebase questions.",
-    ),
-];
-
-/// What the app-server is started with so that a sub-agent of each of Codex's own agent
-/// types starts from the configuration in `file` (`agents.<type>.config_file`), which
-/// holds its developer instructions, in place of the thread that started it: a role
-/// Codex reads from its configuration is defined by both its file and its words
-/// (`agents.<type>.description`).
-pub(crate) fn children(file: &Path) -> Vec<OsString> {
+/// What the app-server is started with so that a sub-agent of each of `kinds`, Codex's
+/// own agent types, starts from the configuration in `file` (`agents.<type>.config_file`),
+/// which holds its developer instructions alone, in place of the thread that started it.
+/// A type defined in the configuration is the configuration's whole, and one with no
+/// words is dropped, so each is given Codex's own words for it, verbatim
+/// (`agents.<type>.description`, [`AgentType::description`]): the spawn tool lists it as
+/// Codex lists its own.
+pub(crate) fn children(file: &Path, kinds: &[&AgentType]) -> Vec<OsString> {
     let file = json_string(&file.to_string_lossy());
-    AGENT_TYPES
+    kinds
         .iter()
-        .flat_map(|(name, words)| {
+        .flat_map(|kind| {
             [
                 "-c".to_owned(),
-                format!("agents.{name}.config_file={file}"),
+                format!("agents.{}.config_file={file}", kind.name),
                 "-c".to_owned(),
-                format!("agents.{name}.description={}", json_string(words)),
+                format!(
+                    "agents.{}.description={}",
+                    kind.name,
+                    json_string(kind.description)
+                ),
             ]
         })
         .map(OsString::from)
@@ -143,6 +138,8 @@ fn is_consensflow_variable(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use cf_proto::codex::agent_types::AGENT_TYPES;
+
     use super::*;
 
     const THREAD: &str = "01a09094-938f-7fd1-a2d3-315cf92b4559";
@@ -159,30 +156,51 @@ mod tests {
     }
 
     #[test]
-    fn a_sub_agent_of_each_of_codexs_own_agent_types_starts_from_the_file_named() {
-        let given = children(Path::new(
-            "/home/me/.consensflow/integrations/codex/l-1/sub-agents.toml",
-        ));
+    fn a_sub_agent_of_each_type_named_starts_from_the_file_named_with_codexs_own_words() {
+        let kinds: Vec<&AgentType> = AGENT_TYPES.iter().collect();
+        let given = children(
+            Path::new("/home/me/.consensflow/integrations/codex/l-1/sub-agents.toml"),
+            &kinds,
+        );
         let file = "\"/home/me/.consensflow/integrations/codex/l-1/sub-agents.toml\"";
+        let mut expected = Vec::new();
+        for kind in AGENT_TYPES {
+            expected.extend([
+                "-c".to_owned(),
+                format!("agents.{}.config_file={file}", kind.name),
+                "-c".to_owned(),
+                format!(
+                    "agents.{}.description={}",
+                    kind.name,
+                    json_string(kind.description)
+                ),
+            ]);
+        }
         assert_eq!(
             given,
-            args(&[
-                "-c",
-                &format!("agents.default.config_file={file}"),
-                "-c",
-                "agents.default.description=\"Default agent.\"",
-                "-c",
-                &format!("agents.worker.config_file={file}"),
-                "-c",
-                "agents.worker.description=\"Use for execution and production work.\"",
-                "-c",
-                &format!("agents.explorer.config_file={file}"),
-                "-c",
-                "agents.explorer.description=\"Use `explorer` for specific codebase questions.\"",
-            ])
+            expected.iter().map(OsString::from).collect::<Vec<_>>()
         );
+        assert_eq!(
+            given[3],
+            OsString::from("agents.default.description=\"Default agent.\""),
+        );
+        // Codex's words reach it whole: a description read back from its setting is Codex's.
+        for (at, kind) in AGENT_TYPES.iter().enumerate() {
+            let setting = given[at * 4 + 3].to_string_lossy().into_owned();
+            let value = setting.split_once('=').unwrap().1;
+            let read: String = serde_json::from_str(value).unwrap();
+            assert_eq!(read, kind.description, "{}", kind.name);
+        }
+        // Only the types named: one the owner defines is theirs.
+        let worker = children(Path::new("/f.toml"), &[&AGENT_TYPES[2]]);
+        assert_eq!(worker.len(), 4);
+        assert_eq!(
+            worker[1],
+            OsString::from("agents.worker.config_file=\"/f.toml\"")
+        );
+        assert!(children(Path::new("/f.toml"), &[]).is_empty());
         // A path Windows spells is one TOML string, its backslashes escaped.
-        let windows = children(Path::new("C:\\Users\\me\\sub-agents.toml"));
+        let windows = children(Path::new("C:\\Users\\me\\sub-agents.toml"), &kinds);
         assert_eq!(
             windows[1],
             OsString::from("agents.default.config_file=\"C:\\\\Users\\\\me\\\\sub-agents.toml\"")

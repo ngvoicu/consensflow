@@ -173,7 +173,7 @@ impl Adapter for CodexAdapter {
             // what the window's sub-agents start with in its place, by a file the
             // supervisor names to the app-server.
             let role = role::write(&services.env, launch.id, &texts.role)?;
-            let children = role::write_children(&services.env, launch.id, &texts.children)?;
+            let children = role::write_children(&services.env, launch.id, &texts)?;
             let mut args = Vec::new();
             if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
@@ -182,7 +182,12 @@ impl Adapter for CodexAdapter {
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),
-                env: launched.env.into_iter().chain([role, children]).collect(),
+                env: launched
+                    .env
+                    .into_iter()
+                    .chain([role])
+                    .chain(children)
+                    .collect(),
                 drop_env: invocation
                     .drop_env
                     .iter()

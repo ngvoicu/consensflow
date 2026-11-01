@@ -54,6 +54,7 @@ fn neither_of_codexs_programs_is_told_where_the_role_is_nor_given_an_openai_key(
     let env = Env::from_vars([
         (ROLE_VARIABLE, "/somewhere/developer-instructions.md"),
         (SUBAGENT_VARIABLE, "/somewhere/sub-agents.toml"),
+        (SUBAGENT_TYPES_VARIABLE, "default"),
         ("OPENAI_API_KEY", "sk-not-for-codex"),
     ]);
     let plan = Plan {
@@ -78,7 +79,12 @@ fn neither_of_codexs_programs_is_told_where_the_role_is_nor_given_an_openai_key(
         .filter(|(_, value)| value.is_none())
         .map(|(name, _)| name.to_string_lossy().into_owned())
         .collect();
-    for name in [ROLE_VARIABLE, SUBAGENT_VARIABLE, "OPENAI_API_KEY"] {
+    for name in [
+        ROLE_VARIABLE,
+        SUBAGENT_VARIABLE,
+        SUBAGENT_TYPES_VARIABLE,
+        "OPENAI_API_KEY",
+    ] {
         assert!(
             removed.iter().any(|gone| gone.eq_ignore_ascii_case(name)),
             "{name} is not taken out: {removed:?}"
@@ -92,9 +98,42 @@ fn the_sub_agents_file_is_the_one_the_variable_names_and_none_without_the_variab
     let file = dir.path().join("sub-agents.toml");
     std::fs::write(&file, "developer_instructions = \"Not the worker.\"\n").unwrap();
     let naming = |value: &std::ffi::OsStr| Env::from_vars([(SUBAGENT_VARIABLE, value.to_owned())]);
+    // Each of Codex's own types where none is named, in Codex's order.
     assert_eq!(
         children_of(&naming(file.as_os_str())).unwrap(),
-        Some(file.clone())
+        Some(Children {
+            file: file.clone(),
+            kinds: AGENT_TYPES.iter().collect(),
+        })
+    );
+    // The types named alone: one the owner defines is left out of them.
+    let named = |types: &str| {
+        let env = Env::from_vars([
+            (SUBAGENT_VARIABLE, file.as_os_str().to_owned()),
+            (SUBAGENT_TYPES_VARIABLE, types.into()),
+        ]);
+        children_of(&env).map(|children| {
+            children.map(|children| {
+                children
+                    .kinds
+                    .iter()
+                    .map(|kind| kind.name)
+                    .collect::<Vec<_>>()
+            })
+        })
+    };
+    assert_eq!(
+        named("default,explorer").unwrap(),
+        Some(vec!["default", "explorer"])
+    );
+    assert_eq!(
+        named("").unwrap(),
+        Some(vec![]),
+        "the owner defines all three"
+    );
+    assert_eq!(
+        named("default,awaiter").unwrap_err().to_string(),
+        "CF_CODEX_SUBAGENT_TYPES names awaiter, which is none of Codex's own agent types"
     );
     assert_eq!(
         children_of(&Env::from_vars([("HOME", "/h")])).unwrap(),

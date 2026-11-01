@@ -49,7 +49,8 @@ use cf_base::file::{make_folder, write_file, Mkdir};
 use cf_base::js;
 use cf_base::json::from_slice_lossy;
 use cf_base::path;
-use cf_proto::codex::{ROLE_VARIABLE, SUBAGENT_VARIABLE};
+use cf_proto::codex::agent_types::AGENT_TYPES;
+use cf_proto::codex::{ROLE_VARIABLE, SUBAGENT_TYPES_VARIABLE, SUBAGENT_VARIABLE};
 use serde_json::{json, Value};
 
 use crate::contract::LaunchId;
@@ -80,6 +81,12 @@ pub(super) struct Texts {
     pub(super) role: String,
     /// A sub-agent's: Codex's instructions, then that it is not the window's agent.
     pub(super) children: String,
+    /// Codex's own agent types whose sub-agents start from [`Texts::children`]: those
+    /// the owner's configuration does not define. One it defines is the owner's, as it
+    /// was: a sub-agent of it starts as the owner's configuration says (with the role,
+    /// unless that sets instructions of its own), and the role's own sentence for a
+    /// sub-agent is what it then has.
+    pub(super) kinds: Vec<&'static str>,
 }
 
 /// The texts a window of `role` is given as developer instructions, its own and its
@@ -95,12 +102,17 @@ pub(super) async fn text(
     if content.is_empty() {
         return Err(format!("the {role} window needs its role text"));
     }
-    let existing = instructions(services, executable, cwd).await?;
+    let (existing, owned) = instructions(services, executable, cwd).await?;
     Ok(Texts {
         role: format!(
             "{existing}\n\nYour ConsensFlow role is {role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{content}"
         ),
         children: format!("{existing}\n\n{}", children(role)),
+        kinds: AGENT_TYPES
+            .iter()
+            .map(|kind| kind.name)
+            .filter(|name| !owned.contains(name))
+            .collect(),
     })
 }
 
@@ -126,20 +138,30 @@ pub(super) fn write(env: &Env, launch: &LaunchId, text: &str) -> Result<(String,
 }
 
 /// Writes the configuration the sub-agents of `launch`'s window start with, whose
-/// developer instructions are `text`, beside its role and as private, and says the
-/// variable of the window's environment that names it.
+/// developer instructions are `texts`' children's, beside its role and as private, and
+/// says the variables of the window's environment that name it and the agent types it is
+/// for. Where the owner defines all of Codex's own types, nothing is written or said.
 pub(super) fn write_children(
     env: &Env,
     launch: &LaunchId,
-    text: &str,
-) -> Result<(String, String), String> {
+    texts: &Texts,
+) -> Result<Vec<(String, String)>, String> {
+    if texts.kinds.is_empty() {
+        return Ok(Vec::new());
+    }
     let folder = launch_folder(CODEX_FOLDER, env, launch)?;
     let file = path::join(&[&folder, CHILDREN_FILE]);
     let said = |error: cf_base::file::FileError| error.to_string();
     make_folder(Path::new(&folder), 0o700, Mkdir::Promise).map_err(said)?;
-    let configuration = format!("developer_instructions = {}\n", toml_string(text));
+    let configuration = format!(
+        "developer_instructions = {}\n",
+        toml_string(&texts.children)
+    );
     write_file(Path::new(&file), configuration.as_bytes(), 0o600).map_err(said)?;
-    Ok((SUBAGENT_VARIABLE.to_owned(), file))
+    Ok(vec![
+        (SUBAGENT_VARIABLE.to_owned(), file),
+        (SUBAGENT_TYPES_VARIABLE.to_owned(), texts.kinds.join(",")),
+    ])
 }
 
 /// `text` as a TOML basic string, quotes included: a backslash, a quote and a line's
@@ -167,7 +189,11 @@ fn toml_string(text: &str) -> String {
 
 /// The instructions Codex itself would give a window opened in `cwd`, asked of
 /// its app-server, which is then asked to end whatever came of it.
-async fn instructions(services: &Services, executable: &str, cwd: &str) -> Result<String, String> {
+async fn instructions(
+    services: &Services,
+    executable: &str,
+    cwd: &str,
+) -> Result<(String, Vec<&'static str>), String> {
     let program = Program {
         executable: PathBuf::from(executable),
         args: vec!["app-server".to_owned()],
@@ -192,7 +218,7 @@ async fn instructions(services: &Services, executable: &str, cwd: &str) -> Resul
 /// Kept from Node on purpose: a line of `null` fails here, where reading its
 /// `id` threw a `TypeError` out of the stream's handler; and JSON nested past
 /// 127 levels, or holding a number past a double's range, is no JSON here.
-async fn converse(child: &dyn Child, cwd: &str) -> Option<String> {
+async fn converse(child: &dyn Child, cwd: &str) -> Option<(String, Vec<&'static str>)> {
     let send =
         |message: Value| async move { child.write_line(&js::stringify(&message)).await.ok() };
     send(json!({
@@ -222,7 +248,7 @@ async fn converse(child: &dyn Child, cwd: &str) -> Option<String> {
                 });
                 send(read).await?;
             }
-            Some(2.0) => return configured(&message),
+            Some(2.0) => return configured(&message).map(|text| (text, owned(&message))),
             _ => {}
         }
     }
@@ -243,6 +269,17 @@ fn configured(message: &Value) -> Option<String> {
         Some(Value::String(text)) => Some(text.clone()),
         Some(_) => None,
     }
+}
+
+/// Codex's own agent types that the configuration the app-server's answer holds defines
+/// (`agents.<type>`, a table where it is a role: `agents` holds settings beside them).
+fn owned(message: &Value) -> Vec<&'static str> {
+    let agents = &message["result"]["config"]["agents"];
+    AGENT_TYPES
+        .iter()
+        .map(|kind| kind.name)
+        .filter(|name| agents.get(name).is_some_and(Value::is_object))
+        .collect()
 }
 
 #[cfg(test)]

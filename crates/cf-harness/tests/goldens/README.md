@@ -316,8 +316,12 @@ and the hash that names a bundle of an extension is `$HASH`.
     mode, whose `developer_instructions` are Codex's own and then the sentence that the
     child is not the window's agent (`codex::role::children`), made and removed with the
     role's file; and the launch's environment names it in `CF_CODEX_SUBAGENT_FILE`, after
-    the role's variable. The supervisor names it to the app-server alone, for each of
-    Codex's own agent types (`-c agents.<type>.config_file=…`), which no recording holds.
+    the role's variable, and the agent types it is for in `CF_CODEX_SUBAGENT_TYPES` after
+    that: `default,explorer,worker`, Codex's own three, for no recording's configuration
+    defines one of its own (one the owner defines stays theirs). The supervisor names the
+    file to the app-server alone, for each of those types, with Codex 0.166.0's own words
+    for it (`-c agents.<type>.config_file=…`, `-c agents.<type>.description=…`,
+    `cf_proto::codex::agent_types`), which no recording holds.
   `no_codex_launch_of_either_platform_puts_its_role_on_a_command_line` holds every Codex
   launch of both files to naming it. The move is `tools/move_subagent_role_goldens.py`,
   which replays each scenario's files and says each step's `tree` again; a step already

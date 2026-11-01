@@ -20,10 +20,12 @@
 //! What the window's sub-agents start with in place of its role is a second file of
 //! the launch's (`CF_CODEX_SUBAGENT_FILE`, the harness's `codex::role`), which the
 //! app-server alone is told of, as the configuration of each of Codex's own agent
-//! types (`-c agents.<type>.config_file=…`): its path is on that command line, and
-//! nothing of the role is in it. A variable set to nothing, or a file named that is
-//! not there or holds nothing, opens no window, as a role's does: a window without
-//! it would start its sub-agents as itself.
+//! types (`-c agents.<type>.config_file=…`) that the launch names
+//! (`CF_CODEX_SUBAGENT_TYPES`, all of them where it names none; the owner's own
+//! definition of one stays theirs), with Codex's own words for it: its path is on that
+//! command line, and nothing of the role is in it. A variable set to nothing, a file
+//! named that is not there or holds nothing, or a type Codex does not have opens no
+//! window, as a role's does: a window without it would start its sub-agents as itself.
 //!
 //! Each program is started through cf-process's `start_owned`, which on Windows runs it in a job of
 //! its own: ending it ends everything it started, what it starts as it is ended included (its id
@@ -43,7 +45,11 @@ use std::time::{Duration, Instant};
 use cf_base::env::Env;
 use cf_board::door::{board_of, DOOR_WAIT};
 use cf_process::{runnable, start_owned, Ending, Owned};
-use cf_proto::codex::{Bridge, InvalidBridge, BRIDGE_VARIABLE, ROLE_VARIABLE, SUBAGENT_VARIABLE};
+use cf_proto::codex::agent_types::{agent_type, AgentType, AGENT_TYPES};
+use cf_proto::codex::{
+    Bridge, InvalidBridge, BRIDGE_VARIABLE, ROLE_VARIABLE, SUBAGENT_TYPES_VARIABLE,
+    SUBAGENT_VARIABLE,
+};
 use tokio::io::AsyncReadExt;
 use tokio::process::{ChildStderr, Command};
 use tokio::task::JoinHandle;
@@ -81,6 +87,8 @@ pub(crate) enum SessionError {
     NoChildren { path: PathBuf },
     #[error("{SUBAGENT_VARIABLE} names no file")]
     NoChildrenFile,
+    #[error("{SUBAGENT_TYPES_VARIABLE} names {0}, which is none of Codex's own agent types")]
+    NoAgentType(String),
     #[error(transparent)]
     Endpoint(#[from] EndpointError),
     #[error("Codex server could not start: {0}")]
@@ -106,7 +114,7 @@ struct Plan<'a> {
     /// The developer instructions the window's main threads start with.
     role: Option<String>,
     /// The configuration its sub-agents start with, which the app-server is told of.
-    children: Option<PathBuf>,
+    children: Option<Children>,
     split: Split,
     endpoint: Endpoint,
     /// Whether the window opens in full-permission mode.
@@ -196,10 +204,21 @@ fn role_of(env: &Env) -> Result<Option<String>, SessionError> {
     }
 }
 
-/// The file of the configuration the window's sub-agents start with, which `env` names
-/// in [`SUBAGENT_VARIABLE`]: none where the variable is not set. A variable set to
-/// nothing is refused, as a file that cannot be read or holds nothing is.
-fn children_of(env: &Env) -> Result<Option<PathBuf>, SessionError> {
+/// What the window's sub-agents start with in place of its role.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Children {
+    /// The file of their configuration.
+    file: PathBuf,
+    /// The agent types whose sub-agents start from it.
+    kinds: Vec<&'static AgentType>,
+}
+
+/// What the window's sub-agents start with, which `env` names: the file in
+/// [`SUBAGENT_VARIABLE`], none where the variable is not set, and the types in
+/// [`SUBAGENT_TYPES_VARIABLE`], each of Codex's own where it is not set. A variable set
+/// to nothing is refused, as a file that cannot be read or holds nothing is, and a type
+/// that is none of Codex's own.
+fn children_of(env: &Env) -> Result<Option<Children>, SessionError> {
     if env.os(SUBAGENT_VARIABLE).is_none() {
         return Ok(None);
     }
@@ -207,11 +226,22 @@ fn children_of(env: &Env) -> Result<Option<PathBuf>, SessionError> {
         return Err(SessionError::NoChildrenFile);
     };
     let path = file.to_path_buf();
-    match std::fs::read_to_string(file) {
+    let file = match std::fs::read_to_string(file) {
         Ok(text) if text.is_empty() => Err(SessionError::NoChildren { path }),
-        Ok(_) => Ok(Some(path)),
+        Ok(_) => Ok(path),
         Err(cause) => Err(SessionError::Children { path, cause }),
-    }
+    }?;
+    // Set to nothing, the variable names no type: the owner defines every one.
+    let kinds = match env.os(SUBAGENT_TYPES_VARIABLE) {
+        None => AGENT_TYPES.iter().collect(),
+        Some(named) => named
+            .to_string_lossy()
+            .split(',')
+            .filter(|name| !name.is_empty())
+            .map(|name| agent_type(name).ok_or_else(|| SessionError::NoAgentType(name.to_owned())))
+            .collect::<Result<_, _>>()?,
+    };
+    Ok(Some(Children { file, kinds }))
 }
 
 /// The processes of one window, and its broker.
@@ -273,7 +303,7 @@ impl Session {
     ) -> Result<JoinHandle<()>, SessionError> {
         let mut args = plan.split.backend.clone();
         if let Some(children) = &plan.children {
-            args.extend(arguments::children(children));
+            args.extend(arguments::children(&children.file, &children.kinds));
         }
         args.push("app-server".into());
         args.extend(plan.endpoint.listen().iter().cloned());
@@ -445,6 +475,7 @@ fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), Stri
         .env_remove("OPENAI_API_KEY")
         .env_remove(ROLE_VARIABLE)
         .env_remove(SUBAGENT_VARIABLE)
+        .env_remove(SUBAGENT_TYPES_VARIABLE)
         .kill_on_drop(true);
     Ok((command, program))
 }
