@@ -140,16 +140,19 @@ fn clippy_windows_lints_the_workspace_but_the_app_for_the_target_from_the_root()
         archiver.starts_with('"') && archiver.ends_with(" --as-archiver\""),
         "{archiver}"
     );
+    // The xtask that is run, as the system resolves it: through a link where the tree's build
+    // folder is on another disk (`builds-disk.sh place`), so both are resolved.
     #[cfg(unix)]
-    assert_eq!(
-        archiver,
-        shown(&format!(
-            "{} --as-archiver",
-            fs::canonicalize(env!("CARGO_BIN_EXE_xtask"))
-                .unwrap()
-                .display()
-        ))
-    );
+    {
+        let program = archiver
+            .strip_prefix('"')
+            .and_then(|rest| rest.strip_suffix(" --as-archiver\""))
+            .unwrap();
+        assert_eq!(
+            fs::canonicalize(program).unwrap(),
+            fs::canonicalize(env!("CARGO_BIN_EXE_xtask")).unwrap()
+        );
+    }
     // Nothing of the app's, and the PATH as it is: no stand-in is put on it.
     assert_eq!(var_line(&report, "TAURI_CONFIG"), Some("unset"));
     assert_eq!(

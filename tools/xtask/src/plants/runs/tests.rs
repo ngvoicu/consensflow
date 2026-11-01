@@ -1057,10 +1057,13 @@ fn playwright_s_report_names_each_test_and_the_errors_outside_every_test() {
         .iter()
         .find(|test| test.name == "a group › the meant one")
         .unwrap();
-    // Told from another test of its name by where it is written.
+    // Told from another test of its name by where it is written: the file the reporter
+    // names, which is the real one when the tree's build folder is a link to another disk
+    // (`builds-disk.sh place`), so both are compared as the system resolves them.
+    let written = meant.at.strip_suffix(":4:3").unwrap();
     assert_eq!(
-        meant.at,
-        format!("{}:4:3", folder.path().join("prints.spec.mjs").display())
+        fs::canonicalize(written).unwrap(),
+        fs::canonicalize(folder.path().join("prints.spec.mjs")).unwrap()
     );
     // The list is printed, whatever reporter the configuration names.
     assert!(
