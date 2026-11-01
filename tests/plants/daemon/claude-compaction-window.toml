@@ -381,3 +381,14 @@ runs = ["cc-page-suite"]
 file = "app/ui/index.html"
 find = '''; the chief is not affected.</p>'''
 replace = '''.</p>'''
+
+[[plant]]
+name = "claude compaction: the section does not say Claude compacts a little before the size"
+meant = "Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''        <p class="dialog-help claude-compaction-margin">Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.</p>
+'''
+replace = ''''''

@@ -4624,6 +4624,10 @@ test("Project settings offers Claude's own point for the Claude members' compact
   await expect(section.group).toContainText(
     "A member's Claude window compacts at about this size from its next start, whatever your own Claude setting says; the chief is not affected.",
   )
+  // And the margin Claude keeps, which is Claude's to change: said as the version we measured it on.
+  await expect(section.group).toContainText(
+    'Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.',
+  )
   // Opening sends nothing.
   expect(await calls(page, 'project.compaction')).toEqual([])
 })

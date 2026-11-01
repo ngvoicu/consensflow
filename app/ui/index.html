@@ -315,6 +315,7 @@
       <fieldset class="project-section claude-compaction">
         <legend>Compaction for Claude members</legend>
         <p class="dialog-help">A member's Claude window compacts at about this size from its next start, whatever your own Claude setting says; the chief is not affected.</p>
+        <p class="dialog-help claude-compaction-margin">Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.</p>
         <label class="claude-compaction-choice"><input type="radio" name="claude-compaction-choice" value="own" checked> Claude's own point</label>
         <label class="claude-compaction-choice"><input type="radio" name="claude-compaction-choice" value="size"> A size</label>
         <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="claude-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
