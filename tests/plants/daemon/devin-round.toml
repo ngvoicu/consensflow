@@ -22,6 +22,12 @@
 #   the system names it (`cf-harness/src/tooling/session.rs`, `claude/computer_use.rs`).
 #   A link is a Unix one, so those plants are the Mac's and Linux's.
 #
+# - T-609's edge (T-1038, Zeus's note 4 on T-1036): a Devin model the catalog runs bare and
+#   never at the agent's level (Claude Opus 4.6, listed with no level; GLM 5.2, bare and at
+#   max) is launched bare, not at an id Devin has not (`cf-catalog/src/catalog.rs`,
+#   `launch_effort`, read by the daemon's roster, `cf-daemon/src/roster.rs`); its family is
+#   found by the parts of a Devin id (`cf-proto/src/agents.rs`, `DevinModel`).
+#
 # - T-784, `live paste-screen devin` red 2 of 3 on Devin 3000.11.228: Devin draws a title of
 #   the conversation, made from the brief's words, in the line above its input, and the
 #   suite took any line naming a brief's mark for the brief
@@ -38,6 +44,8 @@ devin-round-engine-folder = ["cargo", "test", "--offline", "-p", "cf-engine", "-
 devin-round-session-folder = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::session::tests::"]
 devin-round-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use::tests::"]
 devin-round-paste-screen = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
+devin-round-roster = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "roster::tests::"]
+devin-round-catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--test", "catalog", "every_model_devin_lists_is_a_preset::"]
 
 [[plant]]
 name = "devin round: a Devin model and its effort are joined, a variant's words before the level"
@@ -55,9 +63,9 @@ meant = "a_devin_window_names_the_family_then_the_level_then_the_variant_as_devi
 runs = ["devin-round-window-args"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/shared/window_args.rs"
-find = '''    if words.last().is_some_and(|word| DEVIN_LEVELS.contains(word)) {'''
-replace = '''    if words.last().is_some_and(|word| DEVIN_LEVELS.contains(word) && false) {'''
+file = "crates/cf-proto/src/agents.rs"
+find = '''            .filter(|word| DEVIN_LEVELS.contains(word));'''
+replace = '''            .filter(|word| DEVIN_LEVELS.contains(word) && false);'''
 
 [[plant]]
 name = "devin round: what Devin's TUI answers itself at once is work"
@@ -170,3 +178,36 @@ runs = ["devin-round-paste-screen"]
 file = "crates/cf-e2e/tests/live_paste_screen.rs"
 find = '''    begun.starts_with("PSL-") || begun.starts_with("Reply with only the sum of")'''
 replace = '''    line.contains("PSL-") || begun.starts_with("Reply with only the sum of")'''
+
+[[plant]]
+name = "devin round: a Devin agent's effort is given whatever levels the catalog runs its model at"
+meant = "a_devin_agent_on_a_model_listed_with_no_level_is_launched_with_no_effort"
+runs = ["devin-round-roster"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/roster.rs"
+find = '''                (Some(harness), Some(model)) => {
+                    self.catalog.launch_effort(harness, model, row.effort())
+                }'''
+replace = '''                (Some(_), Some(_)) => row.effort(),'''
+
+[[plant]]
+name = "devin round: a Devin model the catalog runs bare keeps the agent's effort"
+meant = "a_devin_model_listed_with_no_level_is_run_by_an_id_devin_lists_at_every_effort"
+runs = ["devin-round-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/catalog.rs"
+find = '''        (at_effort || !bare).then_some(effort)'''
+replace = '''        (at_effort || !bare || effort.is_empty() || true).then_some(effort)'''
+
+[[plant]]
+name = "devin round: a Devin model's family is looked for by the model as named, its variant words in it"
+meant = "a_devin_agent_on_a_model_the_catalog_runs_bare_and_never_at_its_effort_runs_bare"
+runs = ["devin-round-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/catalog.rs"
+find = '''        let family = DevinModel::of(model).family;'''
+replace = '''        let family = DevinModel::of(model).family.len().min(0) + model.len();
+        let family = &model[..family];'''

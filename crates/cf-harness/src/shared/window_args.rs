@@ -11,7 +11,7 @@
 //! companions. A resumed window opens on the agent's model and effort with
 //! the flags a start uses: one without them ran on the harness's default.
 
-use cf_proto::agents::Harness;
+use cf_proto::agents::{DevinModel, Harness};
 
 use crate::contract::Agent;
 
@@ -188,36 +188,22 @@ fn window(
 /// model sees: `muse-spark-1.3-contributor`.
 const CONTRIBUTOR: &str = "-contributor";
 
-/// The words Devin writes after the level in a model's id, each a variant of the family
-/// at that level: `claude-opus-5-5-medium-fast`, `gpt-6-sol-high-priority`,
-/// `swe-2-max-lightning`, `glm-5-2-max-1m` (`devin models list --format json`, Devin
-/// 3000.11.205, T-606).
-const DEVIN_VARIANTS: [&str; 5] = ["fast", "priority", "lightning", "1m", "thinking"];
-
-/// The levels Devin writes into a model's id.
-const DEVIN_LEVELS: [&str; 7] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-
 /// The id Devin names `model` by at `effort`: the family, then the level, then the
 /// variant's words, as every id Devin lists is written (`claude-opus-5-5-fast` at
 /// `medium` is `claude-opus-5-5-medium-fast`, where joining the two made an id Devin
 /// has not: T-609). A level the model already names gives way to the effort, which is
-/// said once, as the agent's; a model with no effort is run as it is named.
+/// said once, as the agent's; a model with no effort is run as it is named (the roster
+/// gives none to a model the catalog runs bare and never at the agent's level).
 fn devin_model(model: &str, effort: Option<&str>) -> String {
     let Some(effort) = effort else {
         return model.to_owned();
     };
-    let mut words: Vec<&str> = model.split('-').collect();
-    let family = words
-        .iter()
-        .rposition(|word| !DEVIN_VARIANTS.contains(word))
-        .map_or(0, |last| last + 1);
-    let variant = words.split_off(family);
-    if words.last().is_some_and(|word| DEVIN_LEVELS.contains(word)) {
-        words.pop();
-    }
-    words.push(effort);
-    words.extend(variant);
-    words.join("-")
+    let parts = DevinModel::of(model);
+    [parts.family, effort, parts.variant]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// The flags that put a window on its agent's model and effort.

@@ -201,6 +201,62 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
+/// The words Devin writes after the level in a model's id, each a variant of the family
+/// at that level: `claude-opus-5-5-medium-fast`, `gpt-6-sol-high-priority`,
+/// `swe-2-max-lightning`, `glm-5-2-max-1m` (`devin models list --format json`, Devin
+/// 3000.11.205, T-606).
+const DEVIN_VARIANTS: [&str; 5] = ["fast", "priority", "lightning", "1m", "thinking"];
+
+/// The levels Devin writes into a model's id.
+const DEVIN_LEVELS: [&str; 7] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/// A Devin model's id in the parts Devin writes it in: the family, the level, then the
+/// variant's words (`claude-opus-5-5-medium-fast` is `claude-opus-5-5`, `medium` and
+/// `fast`). The launch puts an agent's effort in as the level (T-609), and the catalog
+/// knows a family by the levels its presets run it at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevinModel<'a> {
+    /// The family (`claude-opus-5-5`): empty for an id of variant words alone.
+    pub family: &'a str,
+    /// The level the id names, if it names one.
+    pub level: Option<&'a str>,
+    /// The variant's words, joined as the id joins them (`medium-fast`'s `fast`): empty
+    /// for none.
+    pub variant: &'a str,
+}
+
+impl<'a> DevinModel<'a> {
+    /// The parts of the id `model`.
+    pub fn of(model: &'a str) -> Self {
+        let words: Vec<&str> = model.split('-').collect();
+        // Where the words before `count` of them end in `model`.
+        let end = |count: usize| -> usize {
+            words[..count].iter().map(|word| word.len()).sum::<usize>() + count.saturating_sub(1)
+        };
+        let kept = words
+            .iter()
+            .rposition(|word| !DEVIN_VARIANTS.contains(word))
+            .map_or(0, |last| last + 1);
+        let variant = if kept == words.len() {
+            ""
+        } else if kept == 0 {
+            model
+        } else {
+            &model[end(kept) + 1..]
+        };
+        let level = kept
+            .checked_sub(1)
+            .map(|last| words[last])
+            .filter(|word| DEVIN_LEVELS.contains(word));
+        let family = end(kept - usize::from(level.is_some()));
+        Self {
+            family: &model[..family],
+            level,
+            variant,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +301,35 @@ mod tests {
                 format!("\"{name}\"")
             );
         }
+    }
+
+    #[test]
+    fn a_devin_model_is_its_family_then_its_level_then_its_variant() {
+        let parts = |model| {
+            let made = DevinModel::of(model);
+            (made.family, made.level, made.variant)
+        };
+        assert_eq!(parts("swe-2"), ("swe-2", None, ""));
+        assert_eq!(
+            parts("claude-opus-5-5-max"),
+            ("claude-opus-5-5", Some("max"), "")
+        );
+        assert_eq!(
+            parts("claude-opus-5-5-medium-fast"),
+            ("claude-opus-5-5", Some("medium"), "fast")
+        );
+        assert_eq!(parts("glm-5-2-max-1m"), ("glm-5-2", Some("max"), "1m"));
+        assert_eq!(
+            parts("claude-opus-4-6-thinking"),
+            ("claude-opus-4-6", None, "thinking")
+        );
+        assert_eq!(
+            parts("gpt-6-sol-fast-priority"),
+            ("gpt-6-sol", None, "fast-priority")
+        );
+        assert_eq!(parts("fast"), ("", None, "fast"));
+        assert_eq!(parts("max-fast"), ("", Some("max"), "fast"));
+        assert_eq!(parts(""), ("", None, ""));
     }
 
     #[test]

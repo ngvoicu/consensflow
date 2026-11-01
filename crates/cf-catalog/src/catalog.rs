@@ -4,7 +4,7 @@
 //! into the manager's vocabulary (kind to harness, thinking and effort to
 //! effort); a preset whose kind is no harness the build runs is not offered.
 
-use cf_proto::agents::{CatalogEntry, FoundEntry, Harness};
+use cf_proto::agents::{CatalogEntry, DevinModel, FoundEntry, Harness};
 
 use crate::presets::Preset;
 use crate::profile::Settings;
@@ -37,6 +37,37 @@ pub struct Group {
 }
 
 impl Catalog {
+    /// The effort a window of `harness` on `model` runs at, its agent's being `effort`.
+    /// Devin writes the level into the model's id, so a level its model has not makes an
+    /// id Devin has not (`claude-opus-4-6` has no level, `glm-5-2` only `max`: T-609). A
+    /// Devin model whose family the catalog runs bare, and never at `effort`, is run
+    /// bare: none. Every other agent runs at its own, a Devin model the catalog does not
+    /// know among them (it is called by the id it names).
+    pub fn launch_effort<'e>(
+        &self,
+        harness: Harness,
+        model: &str,
+        effort: Option<&'e str>,
+    ) -> Option<&'e str> {
+        let effort = effort?;
+        if harness != Harness::Devin {
+            return Some(effort);
+        }
+        let family = DevinModel::of(model).family;
+        let runs = self
+            .presets
+            .iter()
+            .filter(|preset| preset.kind == Harness::Devin.kind() && preset.model == family);
+        let (mut bare, mut at_effort) = (false, false);
+        for preset in runs {
+            match preset.effort.as_deref() {
+                None | Some("") => bare = true,
+                Some(level) => at_effort |= level == effort,
+            }
+        }
+        (at_effort || !bare).then_some(effort)
+    }
+
     /// `CATALOG`: each harness with its entries, the harnesses in the order
     /// they first appear among the presets, which is not [`Harness::ALL`]'s order.
     pub fn groups(&self) -> &[Group] {
