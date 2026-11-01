@@ -244,6 +244,24 @@ fn drive(
         "the child echoed something other than what was typed"
     );
 
+    // A meeting with the chief, from the button on its card: the worker's result
+    // came while it was on, was held and counted, and nothing of it was typed in
+    // until the Stop.
+    let meeting = app.wait_for("meeting")?;
+    assert!(
+        meeting["data"]["started"].is_string(),
+        "the meeting never started: {meeting}"
+    );
+    assert_eq!(
+        meeting["data"]["held"],
+        json!([meeting["data"]["result"]]),
+        "the meeting did not hold the worker's result alone: {meeting}"
+    );
+    assert_eq!(
+        meeting["data"]["typedDuring"], false,
+        "the result was typed into the chief's window during the meeting"
+    );
+
     // The board both ways: the chief's task reached a worker window, and the
     // worker's result came back into the chief's window as a paste the child
     // hexed, header first.

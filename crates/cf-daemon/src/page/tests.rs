@@ -396,6 +396,7 @@ mod describing;
 mod gate;
 mod held;
 mod history;
+mod meeting;
 mod opening;
 mod reading;
 mod scripted;

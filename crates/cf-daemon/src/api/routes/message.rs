@@ -4,7 +4,7 @@
 //! is received when `cf` says it wrote it whole (`POST /api/answers/read`). A
 //! message no window was handed yet, read while the project is closed, waits for
 //! the Resume: the reader is told so (409 `waits`), and is given none of its text
-//! ([`Waits`]).
+//! ([`Waits`]); and so does one a meeting with the chief holds, for its end.
 
 use serde_json::json;
 
@@ -30,17 +30,16 @@ pub(super) async fn handle(
             && (Some(message.recipient.as_str()) == handle || message.sender.as_deref() == handle)
             && !(message.state == "gated" && Some(message.recipient.as_str()) == handle)
     });
-    match visible {
-        Some(message) if Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse(
-            409,
-            "waits",
-            format!(
-                "m-{} waits until the human resumes the project: it comes to you then. Do not ask for it again now.",
-                message.id
-            ),
-        )),
-        Some(message) => Ok(Answer::ok(json!({ "message": value(&message)? }))),
-        None => Err(Failure::refuse(
+    let until = match &visible {
+        Some(message) => Waits::now(context, caller)?.until(message),
+        None => None,
+    };
+    match (visible, until) {
+        (Some(message), Some(until)) => {
+            Err(Failure::refuse(409, "waits", until.refusal(message.id)))
+        }
+        (Some(message), None) => Ok(Answer::ok(json!({ "message": value(&message)? }))),
+        (None, _) => Err(Failure::refuse(
             404,
             "unknown-message",
             format!("no message m-{id} for you"),

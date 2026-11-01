@@ -24,7 +24,7 @@ use crate::seams::loopback::{BodyFailed, Method, Request, FETCH_FAILED};
 type Connection = Pin<Box<dyn Future<Output = hyper::Result<()>>>>;
 
 /// A reply whose head came.
-pub struct Reply {
+pub(crate) struct Reply {
     status: u16,
     body: Incoming,
     connection: Option<Connection>,
@@ -33,7 +33,7 @@ pub struct Reply {
 /// Sends `request`, if `admits` says yes once its connection is up: its reply
 /// once a head came, or why none did ([`NOT_ADMITTED`] where nothing of it was
 /// written, as `admits` said no).
-pub async fn send(request: Request, admits: &dyn Fn() -> bool) -> Result<Reply, String> {
+pub(crate) async fn send(request: Request, admits: &dyn Fn() -> bool) -> Result<Reply, String> {
     exchange(request, admits)
         .await
         .map_err(|failed| match failed {
@@ -98,12 +98,12 @@ async fn exchange(request: Request, admits: &dyn Fn() -> bool) -> Result<Reply, 
 }
 
 impl Reply {
-    pub fn status(&self) -> u16 {
+    pub(crate) fn status(&self) -> u16 {
         self.status
     }
 
     /// Its body whole, at most `limit` bytes.
-    pub async fn body(&mut self, limit: usize) -> Result<Vec<u8>, BodyFailed> {
+    pub(crate) async fn body(&mut self, limit: usize) -> Result<Vec<u8>, BodyFailed> {
         let mut bytes = Vec::new();
         poll_fn(|context| loop {
             match Pin::new(&mut self.body).poll_frame(context) {

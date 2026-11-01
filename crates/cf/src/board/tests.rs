@@ -164,6 +164,39 @@ fn a_thread_with_no_answer_waiting_says_nothing() {
     assert_eq!(asked(&ran), [("GET", "/api/tasks/3")]);
 }
 
+/// T-942: a message whose text waits (for the chief's meeting, or for the Resume) is in the
+/// thread as a line that says so, in its body; it is printed under its message's line, and
+/// it is no answer written whole, so nothing is received by the print.
+#[test]
+fn a_thread_prints_the_line_that_stands_where_a_waiting_message_is_and_receives_nothing() {
+    let waits = "(m-16 waits until your meeting with the human ends: it comes to you then)";
+    let mut task = thread();
+    task["task"]["messages"] = json!([
+        { "id": 11, "kind": "task", "state": "delivered", "task": 3, "sender": "chief", "body": "Parser" },
+        { "id": 16, "kind": "result", "state": "queued", "task": 3, "sender": "zeus", "body": waits },
+    ]);
+    for json in [false, true] {
+        // A reply for the acknowledgement too, so that one that was wrongly sent is seen.
+        let ran = cf_with(
+            &["task", "get", "T-3"],
+            json,
+            vec![reply(200, task.clone()), reply(200, json!({}))],
+            None,
+        );
+        assert_eq!(ran.code.unwrap(), 0);
+        assert!(ran.out.contains(waits), "{}", ran.out);
+        if !json {
+            assert!(
+                ran.out
+                    .contains(&format!("m-16 [queued] result T-3 from @zeus\n{waits}")),
+                "{}",
+                ran.out
+            );
+        }
+        assert_eq!(asked(&ran), [("GET", "/api/tasks/3")], "json: {json}");
+    }
+}
+
 #[test]
 fn a_transcript_says_nothing_of_any_answer_whether_it_prints_the_thread_or_not() {
     for json in [false, true] {
@@ -334,33 +367,35 @@ fn a_message_cf_inbox_read_printed_whole_while_it_waited_is_acknowledged_and_not
 /// Where the read in the inbox (T-260) meets the Resume after the Close: a
 /// message whose text waits for the Resume is refused to `cf inbox read` (409
 /// `waits`), whatever its kind, so `cf` prints none of it and says it received
-/// nothing. Only the board's refusal is said.
+/// nothing. Only the board's refusal is said. So too one a meeting with the chief
+/// holds, which waits for the meeting's end (3.0.7 chief-meeting, CMT-14).
 #[test]
 fn a_message_that_waits_for_the_resume_is_not_printed_and_nothing_is_acknowledged() {
-    let waits = json!({
-        "error": "waits",
-        "message": "m-12 waits until the human resumes the project: it comes to you then. Do not ask for it again now.",
-    });
-    for json in [false, true] {
-        let ran = cf_with(
-            &["inbox", "read", "m-12"],
-            json,
-            vec![reply(409, waits.clone()), reply(200, json!({}))],
-            None,
-        );
-        assert_ne!(ran.code.unwrap(), 0, "json: {json}");
-        assert!(!ran.out.contains("and then YAML"), "json: {json}");
-        assert!(
-            ran.err
-                .contains("waits until the human resumes the project")
-                || ran
-                    .out
-                    .contains("waits until the human resumes the project"),
-            "json: {json}: {} {}",
-            ran.out,
-            ran.err
-        );
-        assert_eq!(asked(&ran), [("GET", "/api/inbox/12")], "json: {json}");
+    for until in [
+        "until the human resumes the project",
+        "until your meeting with the human ends",
+    ] {
+        let waits = json!({
+            "error": "waits",
+            "message": format!("m-12 waits {until}: it comes to you then. Do not ask for it again now."),
+        });
+        for json in [false, true] {
+            let ran = cf_with(
+                &["inbox", "read", "m-12"],
+                json,
+                vec![reply(409, waits.clone()), reply(200, json!({}))],
+                None,
+            );
+            assert_ne!(ran.code.unwrap(), 0, "json: {json}");
+            assert!(!ran.out.contains("and then YAML"), "json: {json}");
+            assert!(
+                ran.err.contains(until) || ran.out.contains(until),
+                "json: {json}: {} {}",
+                ran.out,
+                ran.err
+            );
+            assert_eq!(asked(&ran), [("GET", "/api/inbox/12")], "json: {json}");
+        }
     }
 }
 

@@ -28,7 +28,7 @@ pub enum InputBox {
 /// from the cursor on are drawn plain, not styled: a harness draws the hint in an
 /// empty box in a colour or faint, and words typed there plain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Cursor {
+pub(crate) struct Cursor {
     pub line: usize,
     pub col: usize,
     pub shown: bool,
@@ -37,7 +37,7 @@ pub struct Cursor {
 
 impl Cursor {
     /// The cursor a snapshot's `cursor` says, where it says one.
-    pub fn of(value: Option<&Value>) -> Option<Self> {
+    pub(crate) fn of(value: Option<&Value>) -> Option<Self> {
         let value = value?;
         let number = |name: &str| {
             value
@@ -59,7 +59,11 @@ impl Cursor {
 /// none where it shows no box the harness's reader knows, or the harness has no
 /// reader (Codex and Pi take their messages through their own channels,
 /// which no typing holds back).
-pub fn read(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Option<InputBox> {
+pub(crate) fn read(
+    harness: Harness,
+    screen: &[String],
+    cursor: Option<Cursor>,
+) -> Option<InputBox> {
     match harness {
         Harness::Claude => crate::claude::input_box::read(screen, cursor),
         Harness::Devin => crate::devin::input_box::read(screen, cursor),
@@ -72,7 +76,7 @@ pub fn read(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Opti
 /// `cursor` says, for the human told of a delivery held for it: empty where its reader
 /// reads it so (a hint is no words), its words where it reads them, none where it reads
 /// no box.
-pub fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Option<String> {
+pub(crate) fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Option<String> {
     let mark = match harness {
         Harness::Claude => crate::claude::input_box::MARK,
         Harness::Devin => crate::devin::input_box::MARK,
