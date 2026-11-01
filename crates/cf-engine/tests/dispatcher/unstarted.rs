@@ -16,6 +16,7 @@ use cf_base::time::iso;
 use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
 use cf_harness::records::Role;
+use cf_harness::seams::Time;
 use serde_json::{json, Value};
 
 use crate::chiefs::{to, to_human, with_codex};
@@ -229,6 +230,9 @@ fn takes_words_and_its_time_runs_out(context: &Context, since_open: i64, answers
     context.adapter.with(ZEUS, |agent| agent.items.push(given));
     if answers {
         context.adapter.answer(ZEUS, "3470");
+    } else {
+        // Its turn ended with no word of its agent's.
+        context.adapter.with(ZEUS, |agent| agent.settled = true);
     }
     context.pass().unwrap();
     context.advance(121_000);
@@ -251,8 +255,9 @@ fn results(context: &Context, project: i64) -> Vec<String> {
 /// showed its first message", its answer lost to the chief, because Muse's record kept the
 /// paste as its box's placeholder (T-1000, twice). A window whose record shows it took
 /// words and answered them since it opened took its first message, whatever its harness
-/// kept of the words: taken for arrived unproven, its answer the task's result, the chief
-/// told once, and the window told to read the message in its inbox.
+/// kept of the words: taken for arrived unproven, its answer the task's result, and the
+/// chief told once. The window is told nothing: a note pasted into it would begin a turn
+/// whose answer, not the one it gave its brief, would be the task's result.
 #[test]
 fn a_window_that_took_words_and_answered_them_since_it_opened_took_its_first_message() {
     let context = Context::new();
@@ -284,6 +289,12 @@ fn a_window_that_took_words_and_answered_them_since_it_opened_took_its_first_mes
     assert!(
         !to_chief.iter().any(|note| note.contains("never showed")),
         "{to_chief:?}"
+    );
+    let member = context.id(project, &brief.recipient);
+    assert_eq!(
+        notes(&context, member),
+        Vec::<String>::new(),
+        "the window is told nothing"
     );
 }
 

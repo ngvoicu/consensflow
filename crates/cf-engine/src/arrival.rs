@@ -584,9 +584,11 @@ impl Dispatcher {
     /// answer lost to the chief: a window that took words and answered them is never
     /// failed so, whatever its harness's record keeps of them. It is taken for arrived
     /// unproven as CMT-23's are ([`Dispatcher::take_unproven`]): the item's shape goes to
-    /// `delivery.unproven` for filing, whoever can act is told once, and the window, which
-    /// may have been given another's words (the human typing in it), is told to read the
-    /// message in its inbox. An item whose time does not read, or reads before the window
+    /// `delivery.unproven` for filing, and whoever gave the task is told once. The window is
+    /// told nothing, as CMT-23's window is: a note pasted into it would begin a turn whose
+    /// answer, not the one it gave its brief, would be the task's result. (Limit: words the
+    /// human typed into the window before the brief went in, answered, are taken for it; the
+    /// requester's note is what says so.) An item whose time does not read, or reads before the window
     /// opened (the conversation a window opened again on), proves nothing. Only a launch's
     /// first message is taken so: a later one the record never showed is pasted again.
     fn answered_unproven(
@@ -615,7 +617,11 @@ impl Dispatcher {
         let Some(on_its_way) = on_its_way.filter(|found| found.state == "delivering") else {
             return Ok(false);
         };
-        let tell = self.unproven_notes(&on_its_way)?;
+        let tell: Vec<NewNote> = self
+            .unproven_notes(&on_its_way)?
+            .into_iter()
+            .filter(|note| note.to != on_its_way.recipient)
+            .collect();
         let item = &items[given];
         self.seams.ledger.borrow_mut().confirm_unproven(
             message,
