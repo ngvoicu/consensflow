@@ -11,7 +11,9 @@
 //! commands that read what is cut are written with it; what ConsensFlow itself wrote of a
 //! message's words, a note's (`sender` none: the engine's and the ledger's own, whose words
 //! the board shows as they are, bare) has each command it names by the word `cf` started by
-//! it instead ([`CfWord::in_text`]). What a participant wrote is never changed.
+//! it instead ([`CfWord::in_text`]). What a participant wrote is never changed; the words the
+//! human gives the page to resume a task, which the ledger writes with no sender, are read as
+//! ConsensFlow's own, and a command in them is no worse for starting with the window's `cf`.
 
 use std::borrow::Cow;
 
