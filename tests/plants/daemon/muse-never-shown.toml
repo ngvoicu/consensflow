@@ -9,7 +9,8 @@
 #   it: the message is taken for arrived unproven, whatever the harness kept of its words
 #   (`crates/cf-engine/src/arrival.rs`, `answered_unproven`, its cases in
 #   `tests/dispatcher/unstarted.rs`). Words never answered, or written before the window
-#   opened, take nothing.
+#   opened, take nothing; whoever gave the task is told, and the window nothing (a note
+#   pasted into it would begin a turn whose answer took the place of the brief's).
 #
 # Every name holds `muse never shown`: `npm run plants:daemon -- "muse never shown"` runs
 # them all.
@@ -53,3 +54,13 @@ replace = '''        if false
                 .iter()
                 .any(|item| item.role == Role::Assistant && !item.synthetic)
         {'''
+
+[[plant]]
+name = "muse never shown: the window taken for its first message is told to read it again"
+meant = "a_window_that_took_words_and_answered_them_since_it_opened_took_its_first_message"
+runs = ["muse-never-shown-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''            .filter(|note| note.to != on_its_way.recipient)'''
+replace = '''            .filter(|note| note.to != on_its_way.recipient || !note.body.is_empty())'''
