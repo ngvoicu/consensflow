@@ -24,13 +24,15 @@
 //! its control sequences taken out, is no such screen: Devin repaints its answer cell by
 //! cell at times, and the word is then never printed in one piece (T-1038's first runs,
 //! which read that, failed so on either leg); each leg says which it was. The worker's
-//! window is kept open as a person keeps one they watch (`session.open`): a free worker's
-//! window closes once its result is taken, and Devin's agent ends its turn some seconds
-//! before its screen has typed the answer out, so a window closed then keeps "Typing" and
-//! the first letters for good (T-1038's third run, on either leg).
+//! window is kept open as a person keeps one they watch (`session.open`) unless `--window
+//! closing` lets it close as the engine closes it. A free worker's window used to close as
+//! its result was taken, and Devin's agent ends its turn some seconds before its screen has
+//! typed the answer out, so a window closed then kept "Typing" and the first letters for
+//! good (T-1038's third run, on either leg). Since T-1051 it closes once its screen has
+//! been still for 1.5 s, or 10 s after it was found free; a leg let close says when it went.
 //! A that fails where B holds is the finding, reproduced. On Devin 3000.11.228 (2026-11-01)
-//! neither leg failed with the window kept open, 16 of 16; let close, one of four failed on
-//! each (T-1038).
+//! neither leg failed with the window kept open, 16 of 16; let close before T-1051, one of
+//! four failed on each (T-1038).
 //!
 //! ```text
 //! cargo xtask live linked-folder                   Devin, A then B, once
@@ -75,8 +77,13 @@ const DELIVERS: Duration = Duration::from_secs(60);
 /// "Typing" for good.
 const DRAWS: Duration = Duration::from_secs(30);
 
+/// How long a window let close has to go once the answer is on its screen: the engine holds
+/// it until the screen has been still for 1.5 s, and at most 10 s from the look that found
+/// it free (`windows.rs`' `DRAWN_QUIET_MS` and `STILL_BOUND_MS`, T-1051).
+const CLOSES: Duration = Duration::from_secs(30);
+
 /// How often the task and the screen are looked at: the window of a free worker closes
-/// once its result is taken.
+/// once its result is taken, and its screen has been drawn.
 const LOOK: Duration = Duration::from_millis(200);
 
 /// The harnesses run where none is named.
@@ -246,9 +253,10 @@ fn observe(
             .join(" "),
     );
     let number = members.give(agent, BRIEF)?;
-    // Kept open as a person keeps a window they watch: a free worker's window closes once
-    // its result is taken, and Devin's agent ends its turn before its screen has typed the
-    // answer out, so a window closed then shows what it had typed so far for good.
+    // Kept open as a person keeps a window they watch, or let close with its task: a free
+    // worker's window closes once its result is taken and its screen has been drawn (T-1051).
+    // Before, Devin's agent ended its turn before its screen had typed the answer out, and a
+    // window closed then showed what it had typed so far for good.
     let lane = find(log, "the worker's window to open", OPENS, LOOK, || {
         let lane = members.lane(agent)?;
         Ok(lane["pane"].is_object().then_some(lane))
@@ -283,6 +291,7 @@ fn observe(
         Ok(is_over(&thread).then(|| live::text(&thread["state"])))
     })?;
     let state = over.unwrap_or_else(|| "not over".to_owned());
+    let over_after = watch.given.elapsed();
     if watch.drawn.is_none() {
         find(log, "the screen to draw the answer", DRAWS, LOOK, || {
             watch.look(members, &pane)?;
@@ -315,6 +324,31 @@ fn observe(
             ),
         },
     );
+    // A window let close goes once its screen has been drawn and still (T-1051): it was open
+    // while the answer came, and it goes by itself after, within the bound.
+    if !leg.kept {
+        let closed = find(log, "the worker's window to close", CLOSES, LOOK, || {
+            watch.look(members, &pane)?;
+            Ok((!watch.open).then(|| watch.given.elapsed()))
+        })?;
+        case.check(
+            "the worker's window closed by itself once its screen had drawn the answer",
+            closed.is_some() && watch.drawn.is_some(),
+            match (closed, watch.drawn) {
+                (Some(closed), Some(drawn)) => format!(
+                    "gone {} after the task was given: {} after its result was taken, {} after the screen first held the answer",
+                    live::secs(closed),
+                    live::secs(closed.saturating_sub(over_after)),
+                    live::secs(closed.saturating_sub(drawn))
+                ),
+                (Some(closed), None) => format!(
+                    "gone {} after the task was given, with no answer on its screen",
+                    live::secs(closed)
+                ),
+                (None, _) => "still open".to_owned(),
+            },
+        );
+    }
     Ok(case)
 }
 
