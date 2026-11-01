@@ -187,6 +187,10 @@ mod tests {
     /// The table names this test's own program, which is no bundle's: what it reads is the
     /// bundles that run, and it reaches none of them.
     #[test]
+    #[cfg_attr(
+        not(target_os = "macos"),
+        ignore = "the table is read with macOS's ps, of macOS's bundles"
+    )]
     fn the_running_bundles_are_read_from_the_table() {
         let bundles = running_bundles().unwrap();
         assert!(bundles
