@@ -81,7 +81,7 @@ replace = '''        children: format!("{existing}\n\n{content}"),'''
 
 [[plant]]
 name = "subagent role: a Codex launch names no file for its sub-agents"
-meant = "no_codex_launch_of_either_platform_puts_its_role_on_a_command_line"
+meant = "runs_codex_under_its_supervisor_in_full_permission_mode_its_task_on_no_command_line"
 runs = ["harness-launch-codex", "harness-scenarios"]
 
 [[plant.edit]]
