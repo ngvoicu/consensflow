@@ -13,6 +13,8 @@ use cf_engine::testing::Context;
 use cf_harness::contract::Pane;
 use serde_json::{json, Value};
 
+use crate::fixtures::Tiers;
+
 /// How long the pane must have printed nothing: `windows.rs`' `DRAWN_QUIET_MS`.
 const STILL_MS: i64 = 1_500;
 
@@ -344,5 +346,49 @@ fn a_window_opened_since_waits_its_own_time_not_the_bound_of_the_one_that_closed
     context.advance(BOUND_MS);
     context.pass().unwrap();
     assert!(!open(&context, &second));
+    context.close();
+}
+
+#[test]
+fn a_window_the_human_opens_on_a_finished_session_waits_its_own_time_once_hidden_not_the_bound_of_the_one_that_closed(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let session = tiers.assignee(1);
+    let first = context.host.last(&session).unwrap().pane;
+    printed(&context, 300);
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert!(open(&context, &first), "its screen is being drawn");
+    context.advance(BOUND_MS);
+    context.pass().unwrap();
+    assert!(!open(&context, &first), "the bound is over");
+
+    // The human shows the session's window again, a window of its own that stays while they
+    // watch it, and hides it while its screen is drawing: it waits from then, not from the
+    // look that found the window before it free.
+    printed(&context, 5_000);
+    context.open_window(project, &session).unwrap();
+    context.pass().unwrap();
+    let shown = context.host.last(&session).unwrap().pane;
+    assert_ne!(shown, first);
+    assert!(open(&context, &shown), "shown, it stays");
+    printed(&context, 300);
+    context.hide_window(project, &session).unwrap();
+    context.pass().unwrap();
+    assert!(open(&context, &shown), "hidden, its screen is being drawn");
+    context.advance(BOUND_MS - 1);
+    context.pass().unwrap();
+    assert!(open(&context, &shown), "a millisecond before its bound");
+    context.advance(1);
+    context.pass().unwrap();
+    assert!(!open(&context, &shown), "its bound is over");
     context.close();
 }

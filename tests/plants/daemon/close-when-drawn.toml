@@ -18,7 +18,8 @@
 # - a task that is not finished (a cancel here; a pause, a failure and a hold for quota are the
 #   same by the same rule) closes its window at once, and makes no look at the screen;
 # - the next task of the session waits for the same screen, its requester told nothing;
-# - a task in hand again, and a window that closed, end the wait: the next one is its own;
+# - a task in hand again, and a window that closed (one the human shows again, and hides),
+#   end the wait: the next one is its own;
 # - the daemon's host reads `outputQuietMs` from the snapshot, none for a pane that printed
 #   nothing or an answer that does not say.
 #
@@ -150,7 +151,7 @@ replace = "                let _ = &record;"
 
 [[plant]]
 name = "close when drawn: a window that closed leaves its wait to the next one"
-meant = "a_window_opened_since_waits_its_own_time_not_the_bound_of_the_one_that_closed"
+meant = "a_window_the_human_opens_on_a_finished_session_waits_its_own_time_once_hidden_not_the_bound_of_the_one_that_closed"
 runs = ["cwd-engine"]
 
 [[plant.edit]]
