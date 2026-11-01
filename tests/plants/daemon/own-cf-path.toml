@@ -301,7 +301,7 @@ replace = "        Cow::Borrowed(row.body.as_str())"
 
 [[plant]]
 name = "own cf path: a refusal of a question says to ask with the word cf"
-meant = "a_refusal_says_to_ask_with_the_cf_of_the_window_as_its_shell_takes_it"
+meant = "a_refusal_says_to_ask_with_the_cf_the_window_was_given_as_its_shell_takes_it"
 runs = ["board-lib-door"]
 
 [[plant.edit]]

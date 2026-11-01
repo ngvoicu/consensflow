@@ -359,7 +359,7 @@ runs = ["board-lib-door"]
 [[plant.edit]]
 file = "crates/cf-board/src/door.rs"
 find = "        Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(cause.to_string()),"
-replace = "        Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(refusal_reason(&cause)),"
+replace = "        Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(refusal_reason(&cause, board.cf())),"
 
 [[plant]]
 name = "pause: a hook tells the board before it writes the answer"
