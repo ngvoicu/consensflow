@@ -480,7 +480,11 @@ impl InputArbiter {
         pane: &PaneKey,
         bytes: &[u8],
     ) -> Result<(), ArbiterError> {
-        let silent = lock_state(&self.pane_state(pane)?)?.silent_paste;
+        let silent = {
+            let state = self.pane_state(pane)?;
+            let state = lock_state(&state)?;
+            state.silent_paste
+        };
         if let Some(silent) = silent {
             for part in pasted_parts(bytes) {
                 if !part.is_empty() {
