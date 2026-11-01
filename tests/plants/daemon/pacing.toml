@@ -367,6 +367,8 @@ file = "crates/cf-engine/src/deliveries.rs"
 find = "            Some(held) if held.reason == reason && held.traced => held,"
 replace = "            Some(held) if held.reason == reason || true => held,"
 
+# Re-aimed in integration D2b (T-996): T-901 (in D1) gave `snapshot_now` a `tail`, and this plant's
+# replace still called it with one argument, so it did not compile on main. `false` is the call it made.
 [[plant]]
 name = "pacing review: snapshot: the gate's snapshot has the arrival's 5 s"
 meant = "a_pane_host_that_answers_late_holds_nothing_back"
@@ -380,7 +382,7 @@ find = '''
             .ok()
             .filter(|snapshot| snapshot.get("ok") == Some(&Value::Bool(true)));'''
 replace = '''
-        let asked = self.snapshot_now(&pane).await;'''
+        let asked = self.snapshot_now(&pane, false).await;'''
 
 [[plant]]
 name = "pacing review: unreadable: the lane of a window whose record cannot be read says nothing of it"
