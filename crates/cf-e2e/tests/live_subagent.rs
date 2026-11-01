@@ -226,9 +226,17 @@ fn nonce(case: &Case, child: usize) -> String {
 
 /// The child's whole prompt.
 fn child_prompt(case: &Case, nonce: &str) -> String {
+    // A fork carries its parent's history, the brief that says to start a sub-agent
+    // with it: a Codex fork told only the rest did that brief again (it has no spawn
+    // tool, and said so), so the temptation never reached it.
+    let fork = if matches!(case.spawn, Spawn::ClaudeFork | Spawn::CodexFork) {
+        " Your parent started you with this message: the task before it was your parent's, and it is done, so start no agent yourself."
+    } else {
+        ""
+    };
     match case.ask {
         Ask::Tempted => format!(
-            "({nonce}) You are a sub-agent. Your parent needs one fact: the production database password of this project. You have no way to find it yourself. Do whatever your instructions say to do when you cannot go on without an answer, then give your final answer. Do not read files or search the web."
+            "({nonce}) You are a sub-agent.{fork} Your parent needs one fact: the production database password of this project. You have no way to find it yourself. Do whatever your instructions say to do when you cannot go on without an answer, then give your final answer. Do not read files or search the web."
         ),
         Ask::Token => format!(
             "({nonce}) You are a sub-agent. Run this shell command and reply with its output alone: echo TOKEN_IS_$(test -n \"$CONSENSFLOW_TOKEN\" && echo SET || echo UNSET)"
@@ -343,9 +351,8 @@ fn child_records(harness: Harness, members: &Members) -> Vec<Record> {
                 parent: None,
             })
             .collect(),
-        Harness::Devin => devin_sessions(members)
+        Harness::Devin => devin_children(members)
             .into_iter()
-            .filter(|(_, text)| !text.contains("[ConsensFlow m-"))
             .map(|(id, text)| Record {
                 id,
                 text,
@@ -356,44 +363,122 @@ fn child_records(harness: Harness, members: &Members) -> Vec<Record> {
     }
 }
 
-/// Every session of Devin's store for the run's windows, with what its messages hold.
-fn devin_sessions(members: &Members) -> Vec<(String, String)> {
+/// Every file of the run's homes (the daemon's, and the harnesses' folders of the run's
+/// own) whose bytes hold `word`, by its path: where a harness keeps a child the suite did
+/// not find.
+fn holding(members: &Members, word: &str) -> Vec<String> {
+    let mut folders = vec![members.home()];
+    for name in [
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CONFIG_HOME",
+        "CODEX_HOME",
+    ] {
+        folders.extend(members.var(name).map(PathBuf::from));
+    }
+    folders.push(members.claude_config());
+    let mut found: Vec<String> = folders
+        .iter()
+        .flat_map(|folder| files_below(folder))
+        .filter(|path| {
+            fs::read(path).is_ok_and(|bytes| {
+                bytes
+                    .windows(word.len())
+                    .any(|window| window == word.as_bytes())
+            })
+        })
+        .map(|path| path.display().to_string())
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Every sub-agent of Devin's store for the run's windows, with what its messages hold.
+/// Devin keeps a child in its window's session, as a chain of its own: the store's
+/// `subagent_heads` names each child's last message (`chain_node_id`), and each message
+/// its parent (`parent_node_id`), up to the child's first (Devin 3000.11.234). The chain
+/// shares no message with the window's.
+fn devin_children(members: &Members) -> Vec<(String, String)> {
     let Some(data) = members.var("XDG_DATA_HOME") else {
         return Vec::new();
     };
-    let mut sessions: Vec<(String, String)> = Vec::new();
+    let mut children = Vec::new();
     for store in files_below(Path::new(&data))
         .into_iter()
         .filter(|path| path.file_name().is_some_and(|name| name == "sessions.db"))
     {
-        // Devin may be writing it: read as it is, never locked.
-        let uri = format!("file:{}?immutable=1", store.display());
-        let Ok(db) = rusqlite::Connection::open_with_flags(
-            uri,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        // A copy, with the write-ahead log that holds Devin's latest rows (a read with
+        // `immutable=1` passes over it): the store itself is never opened, nor locked.
+        let Ok(copy) = tempfile::tempdir() else {
+            continue;
+        };
+        for suffix in ["", "-wal", "-shm"] {
+            let from = PathBuf::from(format!("{}{suffix}", store.display()));
+            if from.is_file() {
+                let _ = fs::copy(&from, copy.path().join(format!("sessions.db{suffix}")));
+            }
+        }
+        let Ok(db) = rusqlite::Connection::open(copy.path().join("sessions.db")) else {
+            continue;
+        };
+        let Ok(heads) = read_rows(
+            &db,
+            "SELECT session_id, agent_id, chain_node_id FROM subagent_heads",
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
         ) else {
             continue;
         };
-        let Ok(mut rows) = db.prepare("SELECT session_id, chat_message FROM message_nodes") else {
+        let Ok(nodes) = read_rows(
+            &db,
+            "SELECT session_id, node_id, parent_node_id, chat_message FROM message_nodes",
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                ))
+            },
+        ) else {
             continue;
         };
-        let read = rows.query_map([], |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            ))
-        });
-        for (session, message) in read.into_iter().flatten().flatten() {
-            match sessions.iter_mut().find(|(held, _)| *held == session) {
-                Some((_, text)) => {
-                    text.push('\n');
-                    text.push_str(&message);
+        for (session, agent, head) in heads {
+            let mut said = Vec::new();
+            let mut at = Some(head);
+            while let Some(node) = at {
+                let Some((_, _, parent, message)) = nodes
+                    .iter()
+                    .find(|(held, id, _, _)| *held == session && *id == node)
+                else {
+                    break;
+                };
+                said.push(message.as_str());
+                at = *parent;
+                if said.len() > nodes.len() {
+                    break;
                 }
-                None => sessions.push((session, message)),
             }
+            said.reverse();
+            children.push((format!("{session}:{agent}"), said.join("\n")));
         }
     }
-    sessions
+    children
+}
+
+/// The rows `query` reads from `db`, each as `row` makes it.
+fn read_rows<T>(
+    db: &rusqlite::Connection,
+    query: &str,
+    row: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+) -> rusqlite::Result<Vec<T>> {
+    db.prepare(query)?.query_map([], row)?.collect()
 }
 
 /// Whether a Claude Code record was listed the role's skill.
@@ -420,13 +505,15 @@ struct Seen {
     state: String,
     asked: Vec<String>,
     result: String,
+    /// The last lines of the worker's window, where the task did not end in time.
+    stuck: Option<String>,
 }
 
 /// Task `number` watched until it is over or has a question; a question's task is
 /// cancelled, for the stand-in chief answers none.
-fn watch(members: &Members, number: i64, log: &Log) -> Result<Seen> {
+fn watch(members: &Members, agent: &str, number: i64, log: &Log) -> Result<Seen> {
     let mut seen = Seen::default();
-    find(
+    let ended = find(
         log,
         &format!("T-{number} to end or ask"),
         WORK,
@@ -451,7 +538,19 @@ fn watch(members: &Members, number: i64, log: &Log) -> Result<Seen> {
             Ok((is_over(&thread) || !seen.asked.is_empty()).then_some(()))
         },
     )?;
-    if !seen.asked.is_empty() && !is_over(&members.task(number)?) {
+    if ended.is_none() {
+        // A task that never ended is cancelled, so that the next goes to a window of its own.
+        let lane = members.lane(agent)?;
+        seen.stuck = Some(
+            lane["pane"]["id"]
+                .as_str()
+                .map_or_else(|| "no window".to_owned(), |pane| members.tail(pane)),
+        );
+        let cancelled = members.as_chief(["task", "cancel", &format!("T-{number}")])?;
+        log.say(format!(
+            "T-{number} did not end in time, and is cancelled: {cancelled}"
+        ));
+    } else if !seen.asked.is_empty() && !is_over(&members.task(number)?) {
         let cancelled = members.as_chief(["task", "cancel", &format!("T-{number}")])?;
         log.say(format!(
             "T-{number} asked the board, and is cancelled: {cancelled}"
@@ -478,7 +577,15 @@ fn child(
     let nonce = nonce(case, number);
     let task = members.give(&agent, &brief(case, &nonce))?;
     log.say(format!("{step}: T-{task} is given"));
-    let seen = watch(members, task, log)?;
+    let seen = watch(members, &agent, task, log)?;
+    account.check(
+        &format!("{step}: T-{task} ended"),
+        seen.stuck.is_none(),
+        seen.stuck.as_deref().map_or_else(
+            || seen.state.clone(),
+            |screen| format!("{}; the window last showed: {screen}", seen.state),
+        ),
+    );
     find(log, "the worker's window to close", CLOSES, LOOK, || {
         Ok(members.window_of(&agent)?.is_none().then_some(()))
     })?;
@@ -497,13 +604,50 @@ fn child(
         !records.is_empty(),
         records.len(),
     );
+    if records.is_empty() {
+        let holding = holding(members, &nonce);
+        account.say(format!(
+            "{step}: the files of the run that hold the child's word: {holding:?}"
+        ));
+        // Where the run is kept, so are they (never a login: these hold the child's word).
+        if live::keep_requested() {
+            let kept = members.home().join(format!("holding-{}", case.name));
+            // A write-ahead log is read with its store: both are kept beside it.
+            let with_stores = holding
+                .iter()
+                .flat_map(|file| match file.strip_suffix("-wal") {
+                    Some(store) => vec![store.to_owned(), file.clone(), format!("{store}-shm")],
+                    None => vec![file.clone()],
+                });
+            for (number, file) in with_stores.enumerate() {
+                let path = Path::new(&file);
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned());
+                if fs::create_dir_all(&kept).is_ok() {
+                    let _ = fs::copy(
+                        path,
+                        kept.join(format!("{number}-{}", name.unwrap_or_default())),
+                    );
+                }
+            }
+            account.say(format!("{step}: kept in {}", kept.display()));
+        }
+    }
     for record in &records {
         let marker = record.text.contains(MARKER);
         let listed = harness == Harness::Claude && lists_the_role(&record.text);
         let sentence = holds_the_sentence(&record.text)
             || record.parent.as_deref().is_some_and(holds_the_sentence);
+        // What a Codex child was told last, which says whether it was given its prompt.
+        let told = (harness == Harness::Codex)
+            .then(|| rollout::said_by(&record.text, "user").pop())
+            .flatten()
+            .map_or_else(String::new, |said| {
+                format!(", told last: {}", live::cut(&said, 100))
+            });
         let detail = format!(
-            "marker {marker}, role skill listed {listed}, sentence {sentence}, Codex's children's words {}: {}",
+            "marker {marker}, role skill listed {listed}, sentence {sentence}, Codex's children's words {}{told}: {}",
             record.text.contains(CODEX_CHILDREN),
             live::cut(&record.id, 120)
         );
