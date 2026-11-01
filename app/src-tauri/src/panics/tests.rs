@@ -516,7 +516,19 @@ fn asked_of_the_page(command: &str, args: serde_json::Value) -> Result<serde_jso
         invoke_key: INVOKE_KEY.to_string(),
     };
     let answered = panic::catch_unwind(AssertUnwindSafe(|| get_ipc_response(&webview, request)))
-        .map_err(|_| format!("{command}'s panic left the app's edge"))?;
+        .map_err(|panicked| {
+            // The stand-in's wait for the answer panics when the request's responder is dropped
+            // unanswered, as a task that panicked drops it: in the app the page's promise then
+            // never settles.
+            if panicked
+                .downcast_ref::<String>()
+                .is_some_and(|said| said.contains("Failed to receive result from command"))
+            {
+                format!("{command}'s request was dropped unanswered")
+            } else {
+                format!("{command}'s panic left the app's edge")
+            }
+        })?;
     match answered {
         Ok(body) => body.deserialize().map_err(|error| error.to_string()),
         Err(refused) => Err(format!("refused: {refused}")),
@@ -564,7 +576,8 @@ fn a_panic_in_an_async_command_the_page_asks_is_answered_and_told() {
     let (ran, written) =
         in_a_child("panics::tests::a_panic_in_an_async_command_the_page_asks_is_answered_and_told");
     let said = said(&ran);
-    assert!(ran.status.success(), "{said}");
+    // The child's own failure is written in its log, by the hook it records its panics with.
+    assert!(ran.status.success(), "{said}\nthe child's log:\n{written}");
     assert!(said.contains("the app runs on"), "{said}");
     assert_eq!(
         said.matches("told the person").count(),
@@ -616,7 +629,8 @@ fn a_panic_in_a_command_the_page_asks_is_answered_and_the_app_runs_on() {
         "panics::tests::a_panic_in_a_command_the_page_asks_is_answered_and_the_app_runs_on",
     );
     let said = said(&ran);
-    assert!(ran.status.success(), "{said}");
+    // The child's own failure is written in its log, by the hook it records its panics with.
+    assert!(ran.status.success(), "{said}\nthe child's log:\n{written}");
     assert!(said.contains("the app runs on"), "{said}");
     assert_eq!(
         said.matches("told the person").count(),
@@ -762,7 +776,8 @@ fn every_command_of_the_app_is_run_where_its_panic_is_stopped() {
         .expect("page_commands")..];
     let list =
         &page[page.find("generate_handler![").expect("the list") + "generate_handler![".len()..];
-    let list = &list[..list.find(']').expect("the list's end")];
+    // Up to the line that closes it: an entry's `#[cfg(…)]` holds a `]` of its own.
+    let list = &list[..list.find("\n    ];").expect("the list's end")];
     let mut listed: Vec<String> = list
         .lines()
         .map(str::trim)
