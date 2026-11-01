@@ -20,7 +20,7 @@
 //! must be done, its result at the chief with the word, and the brief confirmed once.
 //!
 //! ```text
-//! cargo xtask live close-early                         Claude Code and Codex, at 0 and 500 ms
+//! cargo xtask live close-early                         every harness, at 0 and 500 ms
 //! cargo xtask live close-early claude                  one harness
 //! cargo xtask live close-early claude --at-ms 0,2000   the moments named
 //! cargo xtask live close-early claude --claude-config <folder>
@@ -58,10 +58,12 @@ const DELIVERS: Duration = Duration::from_secs(60);
 const QUICK: Duration = Duration::from_millis(50);
 const LOOK: Duration = Duration::from_secs(1);
 
-/// The harnesses the words of the command line name, or the two of T-534 that stay.
+/// The harnesses the words of the command line name, or every one: the two of T-534 alone
+/// left Devin, whose brief is read from a file as its window opens, out of every check until
+/// the alpha.1 release check named it (T-1068, T-1076).
 fn workers(named: &[String]) -> Result<Vec<Harness>> {
     if named.is_empty() {
-        return Ok(vec![Harness::Claude, Harness::Codex]);
+        return Ok(Harness::ALL.to_vec());
     }
     named
         .iter()
@@ -258,6 +260,13 @@ mod tests {
         assert_eq!(moments(None).unwrap(), [0, 500]);
         assert_eq!(moments(Some("0, 2000".to_owned())).unwrap(), [0, 2000]);
         assert!(moments(Some("soon".to_owned())).is_err());
+    }
+
+    #[test]
+    fn the_workers_are_every_harness_unless_named() {
+        assert_eq!(workers(&[]).unwrap(), Harness::ALL);
+        assert_eq!(workers(&["devin".to_owned()]).unwrap(), [Harness::Devin]);
+        assert!(workers(&["opencode".to_owned()]).is_err());
     }
 
     #[test]

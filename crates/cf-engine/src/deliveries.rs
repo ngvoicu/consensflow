@@ -746,7 +746,7 @@ impl Dispatcher {
         // harness's record shows it took it (`in_flight`).
         if record.window.borrow().pane.as_ref() != Some(&pane) {
             let this = Rc::clone(self);
-            self.settle_gone(delivering, move |delivering| {
+            self.settle_gone(delivering, false, move |delivering| {
                 this.settle_failure(
                     delivering,
                     "its window closed while it was handed over",

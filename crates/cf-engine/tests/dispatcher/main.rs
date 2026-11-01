@@ -16,7 +16,8 @@
 //! window is given while the words that were for it wait at the human's gate
 //! (`approval`), and the tester, which Node's staff never had (`testers`), and
 //! the human's Resume of what a start suspended (`resume`), and of what a Close
-//! suspended, whose windows are handed nothing meanwhile (`closed_given_nothing`), the conversation its
+//! suspended, whose windows are handed nothing meanwhile (`closed_given_nothing`), and in
+//! which nothing on its way to a window fails (`close_while_delivering`), the conversation its
 //! harness holds nothing of, which a window opened again does not resume
 //! (`resumable`), and the arrival window counted in the time a window is at
 //! rest, so that a record that is late while its window is in a turn is waited
@@ -43,6 +44,7 @@ mod cancelled_task;
 mod carriers;
 mod chief_not_up;
 mod chiefs;
+mod close_while_delivering;
 mod closed_given_nothing;
 mod closing;
 mod compacting;
