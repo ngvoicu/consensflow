@@ -1,6 +1,7 @@
 //! The newest conversation a harness opened in a folder, found in the harness's
-//! own store: a window of Devin or Codex names its conversation only
-//! there (Claude Code and Pi open on an id they are given). The folder is the
+//! own store: a window of Devin, Codex or Muse names its conversation only
+//! there (Claude Code and Pi open on an id they are given; a Muse session's log
+//! names its folder in its head, `muse::paths::opened_in`). The folder is the
 //! run's own, and a window of a run with no staff is its chief's, so the newest
 //! conversation opened there since the window was is the window's.
 //!
@@ -21,7 +22,7 @@ use rusqlite::{params, Params};
 use serde_json::Value;
 
 use crate::shared::record::sqlite::Store;
-use crate::{codex, devin};
+use crate::{codex, devin, muse};
 
 /// How deep under Codex's `sessions` its rollouts are: `YYYY/MM/DD/rollout-….jsonl`.
 const DAYS: usize = 3;
@@ -42,7 +43,7 @@ pub(super) fn newest(
         Harness::Claude | Harness::Pi => Err(format!(
             "{kind} opens on a session id of its own choosing: none to find"
         )),
-        Harness::Muse => Err(format!("{kind} opens no window yet: none to find")),
+        Harness::Muse => Ok(muse::paths::opened_in(workspace, since_ms, env)),
     }
 }
 
