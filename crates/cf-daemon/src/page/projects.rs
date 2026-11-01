@@ -1,10 +1,11 @@
 //! The projects: listed, opened, resumed, closed, deleted, gated, renamed and
-//! described.
+//! described, and given the rules for their staff.
 
 use cf_base::js;
 use cf_ledger::model::parse_gate;
 use cf_ledger::{
-    parse_description, parse_name, NewChief, NewMember, NewProject, NewWakeUp, SpecsChange,
+    parse_description, parse_name, parse_staff_rules, NewChief, NewMember, NewProject, NewWakeUp,
+    SpecsChange,
 };
 use serde_json::{json, Map, Value};
 
@@ -121,6 +122,21 @@ pub(super) async fn describe(page: &Page, body: Body<'_>) -> Result<Fields, Said
         .ledger
         .borrow_mut()
         .describe_project(body.whole("project")?, description.as_deref())?;
+    one("project", project)
+}
+
+/// `project.rules`: the rules the human writes for the project's staff, plain
+/// text of at most 8,000 bytes and 150 lines, checked before the project is
+/// looked for. `rules` that are left out, `null` or blank take them away. Only
+/// the page writes them: no route of the agents' API does, so no `cf` command,
+/// the chief's or a member's, changes them. Every window of the project is given
+/// them when it next starts (the engine's `roles::with_staff_rules`).
+pub(super) async fn rules(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let rules = parse_staff_rules(body.get("rules"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_staff_rules(body.whole("project")?, rules.as_deref())?;
     one("project", project)
 }
 

@@ -6,9 +6,11 @@
 //!
 //! Both files are in the program, where Node read them at each launch. A chief
 //! whose project has specs on has a section more ([`ProjectSpecs`]); no other
-//! text has one. A harness that keeps the instructions a conversation began with
-//! is given a text that changed since in a message of its own, which says it in
-//! full (`role_change`).
+//! text has one. A project whose human wrote rules for its staff has them at the
+//! end of every text of its windows, the chief's and every member's
+//! ([`with_staff_rules`]). A harness that keeps the instructions a conversation
+//! began with is given a text that changed since in a message of its own, which
+//! says it in full (`role_change`).
 
 mod member;
 mod skill;
@@ -120,6 +122,34 @@ pub fn role_instructions(
     );
     let specs = specs.map_or_else(String::new, ProjectSpecs::section);
     Ok(chief + &specs + &here)
+}
+
+/// The heading of the project's rules for its staff, in every text that has them.
+pub const STAFF_RULES_HEADING: &str = "## The project's rules for the staff";
+
+/// What a member's text says before the project's rules for its staff.
+const STAFF_RULES_FOR_A_MEMBER: &str = "Every member of this project's staff is given these rules after its role, as you are. Follow them in every task, as you follow your role.";
+
+/// What the chief's text says before the same rules.
+const STAFF_RULES_FOR_THE_CHIEF: &str = "Every member of your staff already has these rules in its instructions, after its role. They are the human's, written in Project settings: to change one, propose it to the human here.";
+
+/// `instructions`, the text a window of `role` starts with, with the project's
+/// rules for its staff after it, under their own heading, where the human wrote
+/// some: a member is told to follow them, and the chief that every member has
+/// them. The rules are the human's own words, as they are. Where there are none
+/// the text is what it was, to the byte. Every window's text is given them here,
+/// at its launch, whatever its harness (`Dispatcher::role_text`), so a text
+/// that says a role again (`role_change`) says them too.
+pub fn with_staff_rules(instructions: String, role: &str, rules: Option<&str>) -> String {
+    let Some(rules) = rules else {
+        return instructions;
+    };
+    let said = if role == "chief" {
+        STAFF_RULES_FOR_THE_CHIEF
+    } else {
+        STAFF_RULES_FOR_A_MEMBER
+    };
+    format!("{instructions}\n{STAFF_RULES_HEADING}\n\n{said}\n\n{rules}\n")
 }
 
 /// The work tier a ledger's word names.

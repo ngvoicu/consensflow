@@ -51,6 +51,12 @@ pub struct ProjectView {
     /// only when there is one, so a project that has none reads as it always did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The rules the human wrote for the project's staff, which every member's
+    /// window is given after its role, and the chief's as what every member has:
+    /// said only when there are some, so a project that has none reads as it
+    /// always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staff_rules: Option<String>,
 }
 
 impl ProjectView {

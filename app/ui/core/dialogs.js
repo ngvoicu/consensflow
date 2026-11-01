@@ -2,6 +2,7 @@ import { button, element, redraw } from '../dom.js'
 import { isMember } from './board.js'
 import { ComputerUseSection } from './computer-use.js'
 import { ProjectSections } from './project-sections.js'
+import { StaffRules } from './staff-rules.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -470,10 +471,10 @@ export class SwitchChiefDialog {
 /**
  * Project settings: the project's staff (who the chief may hand work to, drawn
  * from the project's board, and drawn again in place while open, so it stays
- * current), and the sections New project has too (`ProjectSections`): human
- * approval, wake-up calls and specs. Each saves as it always did: the staff as
- * it is added to or removed from, the approval as it is ticked, the calls and
- * the specs by their own Save.
+ * current), the rules for the staff (`StaffRules`), and the sections New
+ * project has too (`ProjectSections`): human approval, wake-up calls and specs.
+ * Each saves as it always did: the staff as it is added to or removed from, the
+ * approval as it is ticked, the rules, the calls and the specs by their own Save.
  *
  * The dialog is for one project, the one it is asked for, from then until it
  * closes. Everything it shows is that project's and every change it makes goes
@@ -491,6 +492,8 @@ export class ProjectSettingsDialog {
   #wakeUp
   /** What the project says of specs: its own section of the dialog. */
   #specs
+  /** The rules for the staff, shown as the board has them and saved as a whole. */
+  #rules
   /** Computer use: a part for each of the project's harnesses that has one. */
   #computerUse
   /** The project the dialog was last opened for, by id: the one it is for until it closes. */
@@ -531,6 +534,13 @@ export class ProjectSettingsDialog {
     this.#gate = sections.gate
     this.#wakeUp = sections.wakeUp
     this.#specs = sections.specs
+    this.#rules = new StaffRules(dialog.querySelector('.staff-rules'), {
+      project: () => (dialog.open ? this.#project : null),
+      daemon: page.daemon,
+      act: page.act,
+      note: page.note,
+      report: page.report,
+    })
     this.#computerUse = new ComputerUseSection(dialog.querySelector('.computer-use'), {
       daemon: page.daemon,
       act: page.act,
@@ -593,6 +603,7 @@ export class ProjectSettingsDialog {
     this.#board = board
     this.#removing = null
     this.#wakeUp.show(calls)
+    this.#rules.show(board.project)
     this.#computerUse.show(computerUse)
     this.#draw()
     this.#specs.draw(board.project, true)

@@ -180,29 +180,6 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
     assert_eq!(told.len(), 1, "told once: {told:?}");
     let message = &told[0];
     assert!(message.contains(REPLACES), "{message}");
-    assert!(message.contains("it means `plans`"), "{message}");
-    // It names ConsensFlow's copy of the skill, in the folder that is kept for the
-    // harness and the variant, and that file is there: the one the window's role
-    // names too.
-    let skill = skill_named_in(message).expect("the section names the skill's file");
-    assert_eq!(
-        skill_named_in(&next_role).as_deref(),
-        Some(skill.as_str()),
-        "one copy, named alike by the window's role and by the message"
-    );
-    let skill = Path::new(&skill);
-    let kept = skill.ancestors().nth(4).expect("the copy's folder");
-    assert!(
-        is_kept(&rig, kept, "codex", "core"),
-        "{} is no folder of the copy",
-        kept.display()
-    );
-    assert!(
-        skill.is_file(),
-        "{} is where the role says",
-        skill.display()
-    );
-    assert!(skill.with_file_name("references").is_dir());
     // The daemon has seen it arrive. The role with specs on is longer than one
     // message even with one member on the staff (T-1009), so the note went in cut
     // to its opening and `cf inbox read m-N`; the window reads it, as its opening
@@ -233,6 +210,32 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
             .any(|said| said["id"] == note && said["state"] == "read"))
     })?;
 
+    // What it says is read where the window reads all of it, what `cf inbox read`
+    // printed, and not the opening, where a longer role has less of it.
+    let whole = &read.stdout;
+    assert!(whole.contains("it means `plans`"), "{whole}");
+    // It names ConsensFlow's copy of the skill, in the folder that is kept for the
+    // harness and the variant, and that file is there: the one the window's role
+    // names too.
+    let skill = skill_named_in(whole).expect("the section names the skill's file");
+    assert_eq!(
+        skill_named_in(&next_role).as_deref(),
+        Some(skill.as_str()),
+        "one copy, named alike by the window's role and by the message"
+    );
+    let skill = Path::new(&skill);
+    let kept = skill.ancestors().nth(4).expect("the copy's folder");
+    assert!(
+        is_kept(&rig, kept, "codex", "core"),
+        "{} is no folder of the copy",
+        kept.display()
+    );
+    assert!(
+        skill.is_file(),
+        "{} is where the role says",
+        skill.display()
+    );
+    assert!(skill.with_file_name("references").is_dir());
     // The next Resume has nothing to tell: the role is what it was told, and names
     // the same copy of the skill, which the window before it left where it was.
     rig.wait_for("the chief to be idle", secs(60), || chief_is_idle(&project))?;

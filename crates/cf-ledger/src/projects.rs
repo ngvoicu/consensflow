@@ -3,9 +3,11 @@
 //! to resume, logged event by event, and deleted with everything in it once
 //! closed. One opens with the wake-up calls and the specs the human says for it,
 //! in the write that makes it. The human may rename one and write a line under
-//! its name ([`describing`]).
+//! its name ([`describing`]), and write the rules its staff is given
+//! ([`staff_rules`]).
 
 mod describing;
+mod staff_rules;
 
 use cf_base::json::from_slice_lossy;
 use cf_proto::ledger::{DeletedProject, EventView, ProjectView};
@@ -15,6 +17,8 @@ use serde_json::{json, Value};
 
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
+pub(crate) use staff_rules::set_staff_rules;
+pub use staff_rules::{parse_staff_rules, STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 
 use crate::model::{self, LedgerError, COORDINATOR_HANDLES};
 use crate::specs::{keep_specs, SpecsChange};
@@ -53,6 +57,8 @@ pub(crate) struct ProjectRow {
     pub(crate) specs_variant: Option<String>,
     /// The line the human wrote under the name; null where there is none.
     pub(crate) description: Option<String>,
+    /// The rules the human wrote for the staff; null where there are none.
+    pub(crate) staff_rules: Option<String>,
 }
 
 impl ProjectRow {
@@ -69,6 +75,7 @@ impl ProjectRow {
             specs_folder: row.get("specs_folder")?,
             specs_variant: row.get("specs_variant")?,
             description: row.get("description")?,
+            staff_rules: row.get("staff_rules")?,
         })
     }
 
@@ -323,6 +330,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         participants,
         specs,
         description: row.description,
+        staff_rules: row.staff_rules,
     }))
 }
 

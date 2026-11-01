@@ -13,7 +13,8 @@
 //! `launch` for a member and `chief_launch` for the chief, what tells a
 //! replacement from any other message in `identity`, and a conversation whose
 //! harness holds nothing of it, which opens afresh and is told no role, in
-//! `fresh`.
+//! `fresh`. The project's rules for its staff, part of every window's role on
+//! every harness, in `staff_rules`.
 //! Node's dispatcher had no such harness, so no trace holds these.
 
 mod chief_launch;
@@ -23,6 +24,7 @@ mod identity;
 mod launch;
 mod members;
 mod skill;
+mod staff_rules;
 mod told;
 mod unusual;
 

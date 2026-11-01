@@ -408,6 +408,35 @@ async function open(page, data = model()) {
         }
         return answer({ project: shownProject(project)[0] })
       },
+      // The rules for a project's staff, as the daemon keeps them: trimmed, none where blank,
+      // refused over 8,000 bytes or 150 lines or with a control character, in its words.
+      'project.rules': ({ project, rules }) => {
+        const kept = (rules ?? '').trim()
+        const refused = (why) => ({
+          ok: false,
+          error: `the rules for the staff are plain text: ${why}`,
+        })
+        const bytes = new TextEncoder().encode(kept).length
+        const lines = kept === '' ? 0 : kept.split('\n').length
+        const control = (character) => {
+          const code = character.codePointAt(0)
+          return (
+            character !== '\n' &&
+            character !== '\t' &&
+            (code < 0x20 || (code >= 0x7f && code <= 0x9f))
+          )
+        }
+        if ([...kept].some(control)) {
+          return refused('they have no control characters but line breaks and tabs')
+        }
+        if (bytes > 8000) return refused(`they are at most 8000 bytes, and these are ${bytes}`)
+        if (lines > 150) return refused(`they are at most 150 lines, and these are ${lines}`)
+        for (const shown of shownProject(project)) {
+          if (kept === '') delete shown.staffRules
+          else shown.staffRules = kept
+        }
+        return answer({ project: shownProject(project)[0] })
+      },
       'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
       'wakeup.set': ({ project, on, every, unit, text }) => {
         if (!(unit in UNIT_MS) || !Number.isInteger(every) || every < 1) {
@@ -3675,8 +3704,12 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   const markup = (id) =>
     page.evaluate(
       (id) =>
-        // The shared sections only: Computer use is Project settings' own.
-        [...document.querySelectorAll(`#${id} .project-section:not(.computer-use)`)]
+        // The shared sections only: Computer use and the rules for the staff are Project settings' own.
+        [
+          ...document.querySelectorAll(
+            `#${id} .project-section:not(.computer-use):not(.staff-rules)`,
+          ),
+        ]
           .slice(1)
           .map((section) => {
             const copy = section.cloneNode(true)
@@ -4068,7 +4101,7 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
-test("names the board's button and its dialog Project settings, with Staff, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
   await open(page)
@@ -4082,12 +4115,13 @@ test("names the board's button and its dialog Project settings, with Staff, Huma
   // Computer use is last, and there since the project has Claude Code members.
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
+    'Rules for the staff',
     'Human approval',
     'Wake-up calls',
     'Specs',
     'Computer use',
   ])
-  for (const name of ['Staff', 'Human approval', 'Wake-up calls', 'Specs']) {
+  for (const name of ['Staff', 'Rules for the staff', 'Human approval', 'Wake-up calls', 'Specs']) {
     await expect(dialog.getByRole('group', { name, exact: true })).toBeVisible()
   }
   // The old title is nowhere in the page, hidden or not.
@@ -4406,6 +4440,130 @@ test('a board drawn again while the dialog is open leaves what the human is typi
   await expect(specs.folder).toHaveValue('plans')
   await expect(specs.folder).toBeDisabled()
   await expect(specs.variant).toHaveValue('core-html')
+})
+
+/** Project settings open on project 1, and its section of the rules for the staff. */
+async function rulesGroup(page) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const group = dialog.getByRole('group', { name: 'Rules for the staff' })
+  return {
+    dialog,
+    group,
+    rules: group.getByLabel('The rules'),
+    count: group.locator('.staff-rules-count'),
+    hint: group.locator('.staff-rules-hint'),
+    save: group.getByRole('button', { name: 'Save rules' }),
+  }
+}
+
+const STAFF_RULES = '- Push to origin only, never to upstream.\n- Tests use the .smoke bundle id.'
+
+test('Project settings shows the rules for the staff the board has, counted against the bounds, and says they hold no secrets', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.staffRules = STAFF_RULES
+  await open(page, data)
+  const section = await rulesGroup(page)
+  await expect(section.rules).toHaveValue(STAFF_RULES)
+  await expect(section.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
+  await expect(section.count).not.toHaveClass(/over/)
+  await expect(section.save).toBeEnabled()
+  await expect(section.group).toContainText('No secrets: no passwords, tokens or keys')
+  await expect(section.group).toContainText(
+    'Every member of the staff is given these rules after its role',
+  )
+  await expect(section.hint).toBeHidden()
+  // Opening sends nothing.
+  expect(await calls(page, 'project.rules')).toEqual([])
+})
+
+test('a project with no rules for its staff shows an empty field and a count of nothing', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await rulesGroup(page)
+  await expect(section.rules).toHaveValue('')
+  await expect(section.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
+  await expect(section.save).toBeEnabled()
+})
+
+test('saves the rules for the staff as written, by their own Save, shows what the daemon kept, and shows them when the dialog opens again', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await rulesGroup(page)
+  await section.rules.fill(`  ${STAFF_RULES}\n\n`)
+  // Counted as the ledger keeps them: trimmed.
+  await expect(section.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
+  expect(await calls(page, 'project.rules')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.rules'))
+    .toEqual([{ project: 1, rules: `  ${STAFF_RULES}\n\n` }])
+  await expect(section.rules).toHaveValue(STAFF_RULES)
+  await expect(page.locator('#status')).toHaveText(
+    'The rules for the staff are saved: each window of the project is given them when it next starts.',
+  )
+  // No other section saved with them.
+  for (const operation of ['wakeup.set', 'project.specs', 'project.gate']) {
+    expect(await calls(page, operation)).toEqual([])
+  }
+  await section.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await rulesGroup(page)
+  await expect(again.rules).toHaveValue(STAFF_RULES)
+  // Taken away: an empty field saved.
+  await again.rules.fill('')
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.rules')).toHaveLength(2)
+  expect((await calls(page, 'project.rules'))[1]).toEqual({ project: 1, rules: '' })
+  await expect(page.locator('#status')).toHaveText(
+    'The project has no rules for the staff now: windows that start from now on are given none.',
+  )
+})
+
+test('counts the rules for the staff in bytes and lines as the ledger does, and holds Save back while they are over a bound', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await rulesGroup(page)
+  for (const [text, count, over] of [
+    ['a'.repeat(8000), '8,000 of 8,000 bytes · 1 of 150 lines', false],
+    ['a'.repeat(8001), '8,001 of 8,000 bytes · 1 of 150 lines', true],
+    // Three bytes each: fewer characters than the bound, more bytes.
+    ['日'.repeat(2667), '8,001 of 8,000 bytes · 1 of 150 lines', true],
+    [Array(150).fill('a rule').join('\n'), '1,049 of 8,000 bytes · 150 of 150 lines', false],
+    [Array(151).fill('a rule').join('\n'), '1,056 of 8,000 bytes · 151 of 150 lines', true],
+    // Spaces and line breaks at either end are not kept, and are not counted.
+    [`\n\n   ${'a'.repeat(8000)}   \n`, '8,000 of 8,000 bytes · 1 of 150 lines', false],
+  ]) {
+    await section.rules.fill(text)
+    await expect(section.count).toHaveText(count)
+    if (over) {
+      await expect(section.count).toHaveClass(/over/)
+      await expect(section.rules).toHaveAttribute('aria-invalid', 'true')
+      await expect(section.save).toBeDisabled()
+    } else {
+      await expect(section.count).not.toHaveClass(/over/)
+      await expect(section.save).toBeEnabled()
+    }
+  }
+  expect(await calls(page, 'project.rules')).toEqual([])
+})
+
+test("says a refusal of the rules for the staff in their section, in the daemon's words, and keeps what was written", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await rulesGroup(page)
+  await section.rules.fill('a\u0007b')
+  await section.save.click()
+  await expect(section.hint).toHaveText(
+    'the rules for the staff are plain text: they have no control characters but line breaks and tabs',
+  )
+  await expect(section.hint).toBeVisible()
+  await expect(section.rules).toHaveValue('a\u0007b')
 })
 
 const DEFAULT_WAKE_UP_WORDS =
@@ -6168,6 +6326,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
   // Computer use is last, and there since the project has Claude Code members.
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
+    'Rules for the staff',
     'Human approval',
     'Wake-up calls',
     'Specs',

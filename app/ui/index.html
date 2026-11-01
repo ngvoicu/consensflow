@@ -300,6 +300,16 @@
           <p class="staff-hint" id="staff-hint" hidden></p>
         </fieldset>
       </fieldset>
+      <!-- The rules for the staff (core/staff-rules.js): the human's own text, which every window
+           of the project is given after its role; written here only. -->
+      <fieldset class="project-section staff-rules">
+        <legend>Rules for the staff</legend>
+        <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief sees them as what every member already has, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. A change reaches each window when it next starts: a new task's window, or after Resume.</p>
+        <label>The rules<textarea name="staff-rules" rows="8" spellcheck="false" aria-describedby="staff-rules-count"></textarea></label>
+        <p class="staff-rules-count" id="staff-rules-count" aria-live="polite"></p>
+        <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
+        <div class="dialog-actions"><button class="primary-button" type="button" name="staff-rules-save">Save rules</button></div>
+      </fieldset>
       <div data-project-sections></div>
       <!-- Computer use (core/computer-use.js): a part for each harness of the project's with a
            computer use of its own, shown only while one of its members runs on it, and

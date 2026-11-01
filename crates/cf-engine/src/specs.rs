@@ -19,7 +19,7 @@ use cf_ledger::{ParticipantView, ProjectView};
 use cf_proto::specs::{AppSpecs, SpecsSetting};
 
 use crate::dispatcher::Dispatcher;
-use crate::roles::ProjectSpecs;
+use crate::roles::{with_staff_rules, ProjectSpecs};
 use crate::seams::EngineError;
 
 /// The text a launch's window starts with, and the specs it was written for:
@@ -57,8 +57,10 @@ impl ChiefSpecs {
 
 impl Dispatcher {
     /// The text `participant`'s window starts with in `project`, with the specs
-    /// its chief is given. Asked once for a launch, where the skill is named in
-    /// the text and is the adapter's to write.
+    /// its chief is given, and the project's rules for its staff after it. Asked
+    /// once for a launch, where the skill is named in the text and is the
+    /// adapter's to write; every launch, resume and replacement of a role, on
+    /// every harness, has its text from here.
     pub(crate) fn role_text(
         &self,
         project: &ProjectView,
@@ -72,6 +74,11 @@ impl Dispatcher {
             .roles
             .instructions(participant, project, told.as_ref())
             .map_err(|cause| EngineError::said("no-role-text", cause))?;
+        let instructions = with_staff_rules(
+            instructions,
+            &participant.role,
+            project.staff_rules.as_deref(),
+        );
         Ok(RoleText {
             specs,
             instructions,

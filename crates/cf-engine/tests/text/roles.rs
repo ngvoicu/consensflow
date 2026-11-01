@@ -9,7 +9,7 @@ use std::path::Path;
 
 use cf_base::env::Env;
 use cf_catalog::WorkTier;
-use cf_engine::roles::{role_instructions, StaffRow};
+use cf_engine::roles::{role_instructions, with_staff_rules, StaffRow, STAFF_RULES_HEADING};
 use regex::Regex;
 
 use super::support::staff_row;
@@ -739,4 +739,90 @@ fn tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_put_a_long_log_in_a_file
         &instructions("designer", &[zeus()]),
         "A long log, table or listing"
     ));
+}
+
+// The project's rules for its staff (spec smaller-contexts, SCX-14 and SCX-15):
+// the human's own text, at the end of every window's text under its own heading,
+// a member told to follow them and the chief that every member has them. What
+// ConsensFlow says round them keeps the bans of its texts; the rules themselves
+// are the human's, and are not held to them.
+
+/// Rules a human might write, saying what ConsensFlow's own member texts never
+/// may: they are kept as written.
+const HUMANS_RULES: &str = "- Push to origin only, never to upstream.\n- Ask the human before any cf task add of your own.\n\tIndented, as written.";
+
+/// What ConsensFlow says in a text with rules, the rules themselves taken out.
+fn framing(text: &str) -> String {
+    text.replacen(HUMANS_RULES, "", 1)
+}
+
+#[test]
+fn tells_the_chief_every_member_has_the_projects_rules_so_a_brief_does_not_repeat_them() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &["Every member already has the project's rules for the staff (at the end of this text, when the project has any): a brief doesn't repeat them, and says only what its task needs."],
+    );
+}
+
+#[test]
+fn gives_each_member_the_projects_rules_for_the_staff_under_their_own_heading_after_its_role() {
+    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+        let role_text = instructions(role, &[zeus()]);
+        let text = with_staff_rules(role_text.clone(), role, Some(HUMANS_RULES));
+        assert!(
+            text.starts_with(&role_text),
+            "{role}: the role text comes first, whole"
+        );
+        assert_eq!(
+            &text[role_text.len()..],
+            format!(
+                "\n{STAFF_RULES_HEADING}\n\nEvery member of this project's staff is given these rules after its role, as you are. Follow them in every task, as you follow your role.\n\n{HUMANS_RULES}\n"
+            ),
+            "{role}"
+        );
+        assert_eq!(text.matches(STAFF_RULES_HEADING).count(), 1, "{role}");
+        // The member texts' bans hold of what ConsensFlow says, not of the human's rules.
+        let said = framing(&text);
+        assert!(!said.contains("the human"), "{role}");
+        assert!(!said.contains("cf task add"), "{role}");
+        assert!(text.contains(HUMANS_RULES), "{role}: the rules as written");
+    }
+}
+
+#[test]
+fn shows_the_chief_the_same_rules_marked_as_what_every_member_already_has() {
+    let role_text = instructions("chief", &[zeus()]);
+    let text = with_staff_rules(role_text.clone(), "chief", Some(HUMANS_RULES));
+    assert!(text.starts_with(&role_text));
+    let rules = section(&text, "The project's rules for the staff");
+    assert_says(
+        rules,
+        "the chief's rules for the staff",
+        &[
+            "Every member of your staff already has these rules in its instructions, after its role.",
+            "They are the human's, written in Project settings: to change one, propose it to the human here.",
+        ],
+    );
+    assert!(rules.ends_with(&format!("\n\n{HUMANS_RULES}\n")));
+    assert!(!found(
+        r"VERDICT|review policy|cf task review|Review round",
+        &framing(&text)
+    ));
+}
+
+#[test]
+fn a_project_with_no_rules_for_its_staff_leaves_every_text_as_it_was_to_the_byte() {
+    for role in [
+        "chief", "worker", "advisor", "reviewer", "tester", "designer",
+    ] {
+        let role_text = instructions(role, &[zeus()]);
+        assert_eq!(
+            with_staff_rules(role_text.clone(), role, None),
+            role_text,
+            "{role}"
+        );
+        assert!(!role_text.contains(STAFF_RULES_HEADING), "{role}");
+    }
 }

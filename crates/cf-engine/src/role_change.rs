@@ -76,9 +76,10 @@
 //! begun goes back to its queue with its attempt, to go in after the note
 //! ([`prelude`]).
 //!
-//! A role too long for one message (more than 16,000 units: a staff of more than
-//! 2 rows with specs on, 30 without, two roles to a row, on the real text; it was
-//! 37 and 65 before the chief's rules for smaller contexts, T-1009) is
+//! A role too long for one message (more than 16,000 units: a chief's with specs
+//! on at any staff, and one without at a staff of more than 27 rows, two roles to
+//! a row, on the real text; it was 37 and 65 before the chief's rules for smaller
+//! contexts, T-1009, 2 and 30 before the sentence on the staff's rules) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`),
 //! and its opening says to read the rest now ([`OPENING_IN_PART`]). It is not given
 //! in several messages. Delivered so, it is a role told in part, and not recorded
@@ -86,8 +87,15 @@
 //! note whole and said so, and the ledger then records the role told, in the
 //! write that marks the note read (`receive_read`). `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 244
-//! rows with specs on, 254 without, on the same text (its lines are the bound).
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 241
+//! rows with specs on, 251 without, on the same text (its lines are the bound).
+//!
+//! The project's rules for its staff (`roles::with_staff_rules`) are part of
+//! every text that says a role, and the ledger bounds them for it (at most 8,000
+//! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
+//! with the most rules goes into its window whole, and a chief's with specs on,
+//! the most rules and a staff of up to 86 rows (96 without specs) is read whole,
+//! a staff of 25 with 3,200 bytes and 60 lines to spare.
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).

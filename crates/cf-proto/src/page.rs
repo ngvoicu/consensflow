@@ -82,12 +82,15 @@ pub enum PageOperation {
     /// One of the System Settings panes where the human gives ConsensFlow a grant,
     /// opened outside ConsensFlow.
     ComputerUseOpen,
+    /// The rules the human writes for a project's staff, or takes away: every
+    /// window of the project is given them when it next starts.
+    ProjectRules,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 44] = [
+    pub const ALL: [PageOperation; 45] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -132,6 +135,7 @@ impl PageOperation {
         Self::HistoryPart,
         Self::ComputerUseGet,
         Self::ComputerUseOpen,
+        Self::ProjectRules,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -181,6 +185,7 @@ impl PageOperation {
             Self::HistoryPart => "history.part",
             Self::ComputerUseGet => "computer_use.get",
             Self::ComputerUseOpen => "computer_use.open",
+            Self::ProjectRules => "project.rules",
         }
     }
 
@@ -243,7 +248,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 44);
+        assert_eq!(named.len(), 45);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -298,7 +303,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 16] = [
+        const ADDED: [&str; 17] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -315,6 +320,7 @@ mod tests {
             "history.part",
             "computer_use.get",
             "computer_use.open",
+            "project.rules",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);

@@ -71,3 +71,10 @@ rows did not move, and the tester has none.
 The rows were moved by a script that put the new text where the old stood and left the
 staff table, the tiers and the note of this window's cf as they were; the test of this
 folder's rows holds that each equals what the engine renders.
+
+The chief's text, in the same 12 rows, moved again on 2026-11-01 for the same spec
+(T-1012, SCX-15): item 3 of "What you do" ends with one sentence more, that every member
+already has the project's rules for the staff, so a brief doesn't repeat them and says only
+what its task needs. Nothing else moved. The rules themselves are in no row: a row's
+project has none, and a text with none is what it was, to the byte (`with_staff_rules`).
+The rows were moved by a script that put the three lines after the last line of item 3.

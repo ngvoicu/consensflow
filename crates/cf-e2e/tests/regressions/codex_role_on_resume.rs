@@ -168,8 +168,9 @@ impl<'a> Chief<'a> {
     /// the daemon has seen it arrive: the role with specs on is longer than one
     /// message (T-1009), so the note went in cut to its opening and `cf inbox read
     /// m-N`, which its opening says to run now. The board then has it read, and the
-    /// role is what the conversation was told.
-    fn reads_its_role(&self, frame: &Value) -> Result<(), Box<dyn std::error::Error>> {
+    /// role is what the conversation was told. What the command printed: the whole of
+    /// the role, as the window reads it.
+    fn reads_its_role(&self, frame: &Value) -> Result<String, Box<dyn std::error::Error>> {
         let mut delivered = None;
         self.rig
             .wait_for("the note of the role to be delivered", secs(60), || {
@@ -204,7 +205,7 @@ impl<'a> Chief<'a> {
                 .iter()
                 .any(|said| said["id"] == note && said["state"] == "read"))
         })?;
-        Ok(())
+        Ok(read.stdout)
     }
 
     /// The user messages of the chief's thread that hold the section of specs.
@@ -265,7 +266,9 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
     )?;
 
     // What it was told, and where: the folder of the project, not Specmint's, and a
-    // skill the chief can read while its window is up.
+    // skill the chief can read while its window is up. The note went in cut to its
+    // opening, so what it says is read where the window reads all of it: what `cf
+    // inbox read` printed, and not the opening, where a longer role has less of it.
     let told = chief.told_of_specs()?;
     assert_eq!(told.len(), 1, "{told:?}");
     assert!(
@@ -273,8 +276,9 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
         "it says it is in place of the instructions it began with: {}",
         told[0]
     );
-    assert_eq!(folder_named_in(&told[0]).as_deref(), Some(FOLDER));
-    let skill = skill_named_in(&told[0]).ok_or("the message names no SKILL.md")?;
+    let whole = chief.reads_its_role(&resumed)?;
+    assert_eq!(folder_named_in(&whole).as_deref(), Some(FOLDER));
+    let skill = skill_named_in(&whole).ok_or("the message names no SKILL.md")?;
     assert!(Path::new(&skill).is_file(), "{skill}");
     assert!(
         Path::new(&skill)
@@ -291,7 +295,6 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
         rollout::said_by(&chief.record()?, "developer"),
         rollout::said_by(&before, "developer")
     );
-    chief.reads_its_role(&resumed)?;
 
     // Resumed again with nothing changed in the setting, it is told nothing: the
     // role names the skill where it was told it is, the copy of it outlasting the
@@ -321,9 +324,8 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
         secs(60),
         || Ok(chief.told_of_specs()?.len() == 2),
     )?;
-    chief.reads_its_role(&fourth)?;
-    let again = chief.told_of_specs()?;
-    let now = skill_named_in(&again[1]).ok_or("the second message names no SKILL.md")?;
+    let again = chief.reads_its_role(&fourth)?;
+    let now = skill_named_in(&again).ok_or("the second message names no SKILL.md")?;
     assert_ne!(now, skill);
     assert!(now.contains("specmint-core"), "{now}");
     assert!(Path::new(&now).is_file(), "{now}");

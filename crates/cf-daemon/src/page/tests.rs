@@ -400,6 +400,7 @@ mod opening;
 mod reading;
 mod scripted;
 mod specs;
+mod staff_rules;
 mod stopping;
 mod suspended;
 mod turns;

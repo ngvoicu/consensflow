@@ -45,7 +45,11 @@
 //! which then come as text as well: a duplicate, never a loss. So does a
 //! message `cf inbox read` printed past it (T-260): a long result or question
 //! read in the inbox stays queued and is typed in later, by design, since a
-//! read the model may not have seen whole is no proof that it has it.
+//! read the model may not have seen whole is no proof that it has it. The one
+//! exception is a role too long for one message, which goes only to the windows
+//! of Codex and Muse: their read is held to the larger bound measured on them
+//! (`cf_base::role_read`, 29,000 bytes and 500 lines), and a role printed within
+//! it counts as told.
 
 /// An output shorter than this, in bytes, is shown whole by every harness
 /// whose cut was found as a number: Codex's 10,000 tokens are the smallest

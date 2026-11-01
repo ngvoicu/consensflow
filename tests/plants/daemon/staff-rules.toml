@@ -1,0 +1,441 @@
+# The rules a human writes for a project's staff (spec smaller-contexts, SCX-12 to SCX-16,
+# T-1012): kept in the ledger (`crates/cf-ledger/src/projects/staff_rules.rs`, migration 0025),
+# written on the page alone (`project.rules`, Project settings' "Rules for the staff"), and given
+# to every window of the project at the end of its text, whatever its harness, at its launch, on
+# resume and by the note that says a role again (`crates/cf-engine/src/roles.rs`,
+# `Dispatcher::role_text`). Each plant breaks one of these and the test written for it fails.
+#
+# Every name holds `staff rules`, so `npm run plants:daemon -- "staff rules"` runs them all.
+
+[run]
+ledger-rules = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "described", "rules::"]
+ledger-rules-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "projects::staff_rules::"]
+ledger-testing-rules-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::staff_rules::"]
+engine-text-rules = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::", "--", "--skip", "goldens_roles"]
+engine-role-change-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::tests::"]
+engine-dispatcher-rules = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::staff_rules::"]
+daemon-rules-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::staff_rules"]
+proto-page-rules = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+page-rules = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "rules for the staff|rules for its staff"]
+
+# --- the ledger ---
+
+[[plant]]
+name = "staff rules: the ledger takes more bytes than the bound"
+meant = "the_rules_have_eight_thousand_bytes_and_no_more_whatever_characters_hold_them"
+runs = ["ledger-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''    if bytes > STAFF_RULES_MAX_BYTES {'''
+replace = '''    if bytes > STAFF_RULES_MAX_BYTES + 1_000 {'''
+
+[[plant]]
+name = "staff rules: the ledger counts characters, not bytes"
+meant = "the_rules_have_eight_thousand_bytes_and_no_more_whatever_characters_hold_them"
+runs = ["ledger-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''    let bytes = text.len();'''
+replace = '''    let bytes = text.chars().count();'''
+
+[[plant]]
+name = "staff rules: the ledger takes more lines than the bound"
+meant = "the_rules_have_a_hundred_and_fifty_lines_and_no_more_blank_lines_among_them"
+runs = ["ledger-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''    if lines > STAFF_RULES_MAX_LINES {'''
+replace = '''    if lines > STAFF_RULES_MAX_LINES * 2 {'''
+
+[[plant]]
+name = "staff rules: a blank line among the rules is no line"
+meant = "the_rules_have_a_hundred_and_fifty_lines_and_no_more_blank_lines_among_them"
+runs = ["ledger-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''    let lines = text.split('\n').count();'''
+replace = '''    let lines = text.lines().filter(|line| !line.trim().is_empty()).count();'''
+
+[[plant]]
+name = "staff rules: the rules are kept with the spaces they were typed with"
+meant = "the_rules_are_kept_trimmed_with_their_lines_and_tabs_and_blank_text_is_none"
+runs = ["ledger-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''    let text = js::trim(text);'''
+replace = '''    let text = js::trim_start(text);'''
+
+[[plant]]
+name = "staff rules: a control character goes into the rules"
+meant = "a_control_character_other_than_a_line_break_or_a_tab_is_refused"
+runs = ["ledger-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''    character.is_control() && !matches!(character, '\n' | '\t')'''
+replace = '''    character == '\0' '''
+
+[[plant]]
+name = "staff rules: a tab is refused"
+meant = "the_rules_are_kept_trimmed_with_their_lines_and_tabs_and_blank_text_is_none"
+runs = ["ledger-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''!matches!(character, '\n' | '\t')'''
+replace = '''!matches!(character, '\n')'''
+
+[[plant]]
+name = "staff rules: rules that are no text are taken as none"
+meant = "the_rules_are_text_or_none_and_nothing_else"
+runs = ["ledger-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''        Some(_) => Err(rules_refused("they are text, or none to take them away")),'''
+replace = '''        Some(_) => Ok(None),'''
+
+[[plant]]
+name = "staff rules: the same rules again are written and logged"
+meant = "the_same_rules_again_or_none_where_there_are_none_log_nothing_and_touch_nothing"
+runs = ["ledger-rules"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''        if from != to {'''
+replace = '''        if from != to || to.is_some() {'''
+
+[[plant]]
+name = "staff rules: the log does not say what the rules were"
+meant = "the_rules_are_set_changed_and_taken_away_and_the_view_has_them_only_while_there_are_some"
+runs = ["ledger-rules"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''json!({ "from": from, "to": to })'''
+replace = '''json!({ "to": to })'''
+
+[[plant]]
+name = "staff rules: the project is looked for before the rules are checked"
+meant = "rules_over_the_bounds_or_with_a_control_character_are_refused_and_change_nothing"
+runs = ["ledger-rules"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''    let to = rules.map(rules_of).transpose()?.flatten();
+    store.write(|store| {
+        let from = store.project_row(id)?.staff_rules;
+'''
+replace = '''    store.write(|store| {
+        let from = store.project_row(id)?.staff_rules;
+        let to = rules.map(rules_of).transpose()?.flatten();
+'''
+
+[[plant]]
+name = "staff rules: the project's view has none of its rules"
+meant = "the_rules_are_set_changed_and_taken_away_and_the_view_has_them_only_while_there_are_some"
+runs = ["ledger-rules"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        staff_rules: row.staff_rules,'''
+replace = '''        staff_rules: None,'''
+
+[[plant]]
+name = "staff rules: a project with none has the key of them in its view"
+meant = "the_rules_are_set_changed_and_taken_away_and_the_view_has_them_only_while_there_are_some"
+runs = ["ledger-rules"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/ledger.rs"
+find = '''    /// always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staff_rules: Option<String>,'''
+replace = '''    /// always did.
+    pub staff_rules: Option<String>,'''
+
+[[plant]]
+name = "staff rules: the migration gives every project rules it did not have"
+meant = "a_ledger_at_the_version_before_gains_no_rules_in_every_project_and_keeps_every_row"
+runs = ["ledger-rules"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0025.sql"
+find = '''  ALTER TABLE project ADD COLUMN staff_rules TEXT;'''
+replace = '''  ALTER TABLE project ADD COLUMN staff_rules TEXT NOT NULL DEFAULT '';'''
+
+[[plant]]
+name = "staff rules: the players of Node's recordings keep the column Node never had"
+meant = "takes_the_staff_rules_and_their_value_out_of_the_project_table_and_nothing_else"
+runs = ["ledger-testing-rules-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''        include_str!("../migrations/0025.sql"),
+'''
+replace = ""
+
+# --- the bounds, against what a role's text is told in ---
+
+[[plant]]
+name = "staff rules: a bound in bytes that leaves the chief's text read in part"
+meant = "the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''pub const STAFF_RULES_MAX_BYTES: usize = 8_000;'''
+replace = '''pub const STAFF_RULES_MAX_BYTES: usize = 12_000;'''
+
+[[plant]]
+name = "staff rules: a bound in lines that leaves a chief of 25 rows read in part"
+meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/staff_rules.rs"
+find = '''pub const STAFF_RULES_MAX_LINES: usize = 150;'''
+replace = '''pub const STAFF_RULES_MAX_LINES: usize = 300;'''
+
+# --- the texts ---
+
+[[plant]]
+name = "staff rules: the chief is not told every member has the rules"
+meant = "tells_the_chief_every_member_has_the_projects_rules_so_a_brief_does_not_repeat_them"
+runs = ["engine-text-rules"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''
+   Every member already has the project's rules for the staff (at the end of
+   this text, when the project has any): a brief doesn't repeat them, and
+   says only what its task needs.'''
+replace = ""
+
+[[plant]]
+name = "staff rules: every member is told the chief's words of them"
+meant = "gives_each_member_the_projects_rules_for_the_staff_under_their_own_heading_after_its_role"
+runs = ["engine-text-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''    let said = if role == "chief" {'''
+replace = '''    let said = if role != "worker" {'''
+
+[[plant]]
+name = "staff rules: the rules come before the role"
+meant = "gives_each_member_the_projects_rules_for_the_staff_under_their_own_heading_after_its_role"
+runs = ["engine-text-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''    format!("{instructions}\n{STAFF_RULES_HEADING}\n\n{said}\n\n{rules}\n")'''
+replace = '''    format!("{STAFF_RULES_HEADING}\n\n{said}\n\n{rules}\n\n{instructions}")'''
+
+[[plant]]
+name = "staff rules: a member's words of them say the human"
+meant = "gives_each_member_the_projects_rules_for_the_staff_under_their_own_heading_after_its_role"
+runs = ["engine-text-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''"Every member of this project's staff is given these rules after its role, as you are.'''
+replace = '''"Every member of this project's staff is given these rules of the human's after its role, as you are.'''
+
+[[plant]]
+name = "staff rules: the chief is not told to propose a change to the human"
+meant = "shows_the_chief_the_same_rules_marked_as_what_every_member_already_has"
+runs = ["engine-text-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = ''' written in Project settings: to change one, propose it to the human here.'''
+replace = ''' written in Project settings.'''
+
+[[plant]]
+name = "staff rules: a project with none has an empty section of them"
+meant = "a_project_with_no_rules_for_its_staff_leaves_every_text_as_it_was_to_the_byte"
+runs = ["engine-text-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''    let Some(rules) = rules else {
+        return instructions;
+    };'''
+replace = '''    let rules = rules.unwrap_or_default();'''
+
+# --- the engine: every window, at its launch, on resume, and by a role's note ---
+
+[[plant]]
+name = "staff rules: no window is given the rules"
+meant = "every_members_window_and_the_chiefs_next_one_start_with_the_projects_rules_on_every_harness"
+runs = ["engine-dispatcher-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = '''            project.staff_rules.as_deref(),'''
+replace = '''            None,'''
+
+[[plant]]
+name = "staff rules: only the chief's window is given the rules"
+meant = "every_members_window_and_the_chiefs_next_one_start_with_the_projects_rules_on_every_harness"
+runs = ["engine-dispatcher-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = '''            project.staff_rules.as_deref(),'''
+replace = '''            project.staff_rules.as_deref().filter(|_| participant.role == "chief"),'''
+
+[[plant]]
+name = "staff rules: a Codex chief resumed is not told them"
+meant = "a_codex_chief_resumed_after_the_rules_changed_is_told_its_role_with_them_once_and_again_at_each_change"
+runs = ["engine-dispatcher-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = '''            project.staff_rules.as_deref(),'''
+replace = '''            project.staff_rules.as_deref().filter(|_| participant.role != "chief"),'''
+
+[[plant]]
+name = "staff rules: a member's session is not given the rules"
+meant = "a_codex_members_session_resumed_after_the_rules_changed_is_told_its_role_with_them_before_its_follow_up"
+runs = ["engine-dispatcher-rules"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = '''            project.staff_rules.as_deref(),'''
+replace = '''            project.staff_rules.as_deref().filter(|_| participant.member_id.is_none()),'''
+
+# --- the page's operation ---
+
+[[plant]]
+name = "staff rules: the page's operation writes the description"
+meant = "the_human_writes_the_staffs_rules_and_every_view_of_the_project_carries_them_until_taken_away"
+runs = ["daemon-rules-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/operations.rs"
+find = '''        PageOperation::ProjectRules => projects::rules(page, body).await,'''
+replace = '''        PageOperation::ProjectRules => projects::describe(page, body).await,'''
+
+[[plant]]
+name = "staff rules: the page's operation reads the rules from another field"
+meant = "the_human_writes_the_staffs_rules_and_every_view_of_the_project_carries_them_until_taken_away"
+runs = ["daemon-rules-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '''    let rules = parse_staff_rules(body.get("rules"))?;'''
+replace = '''    let rules = parse_staff_rules(body.get("text"))?;'''
+
+[[plant]]
+name = "staff rules: the page's operation wakes nothing"
+meant = "the_human_writes_the_staffs_rules_and_every_view_of_the_project_carries_them_until_taken_away"
+runs = ["daemon-rules-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::ComputerUseOpen
+'''
+replace = '''                | Self::ComputerUseOpen
+                | Self::ProjectRules
+'''
+
+[[plant]]
+name = "staff rules: the app does not forward the rules"
+meant = "the_operations_are_the_ones_the_app_forwards"
+runs = ["proto-page-rules"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = '''    "project.rules",
+'''
+replace = ""
+
+[[plant]]
+name = "staff rules: the page's bound in bytes is not the ledger's"
+meant = "the_pages_bounds_for_the_staffs_rules_are_the_ledgers"
+runs = ["daemon-rules-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''const MOST_BYTES = 8_000'''
+replace = '''const MOST_BYTES = 9_000'''
+
+# --- the page ---
+
+[[plant]]
+name = "staff rules page: the count is of characters, not bytes"
+meant = "counts the rules for the staff in bytes and lines as the ledger does, and holds Save back while they are over a bound"
+runs = ["page-rules"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''bytes: encoder.encode(kept).length'''
+replace = '''bytes: kept.length'''
+
+[[plant]]
+name = "staff rules page: the count is of the text with its spaces"
+meant = "counts the rules for the staff in bytes and lines as the ledger does, and holds Save back while they are over a bound"
+runs = ["page-rules"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''  const kept = text.trim()'''
+replace = '''  const kept = text'''
+
+[[plant]]
+name = "staff rules page: Save is not held back over a bound"
+meant = "counts the rules for the staff in bytes and lines as the ledger does, and holds Save back while they are over a bound"
+runs = ["page-rules"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''    this.#save.disabled = over'''
+replace = '''    this.#save.disabled = false'''
+
+[[plant]]
+name = "staff rules page: Save sends the rules in another field"
+meant = "saves the rules for the staff as written, by their own Save, shows what the daemon kept, and shows them when the dialog opens again"
+runs = ["page-rules"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''this.#page.daemon('project.rules', { project, rules })'''
+replace = '''this.#page.daemon('project.rules', { project, text: rules })'''
+
+[[plant]]
+name = "staff rules page: the dialog opens with no rules shown"
+meant = "Project settings shows the rules for the staff the board has, counted against the bounds, and says they hold no secrets"
+runs = ["page-rules"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#rules.show(board.project)
+'''
+replace = ""
+
+[[plant]]
+name = "staff rules page: nothing says to keep secrets out of them"
+meant = "Project settings shows the rules for the staff the board has, counted against the bounds, and says they hold no secrets"
+runs = ["page-rules"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = ''' No secrets: no passwords, tokens or keys, since every window of the project is given the rules.'''
+replace = ""
+
+[[plant]]
+name = "staff rules page: a refusal is not said in the section"
+meant = "says a refusal of the rules for the staff in their section, in the daemon's words, and keeps what was written"
+runs = ["page-rules"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''        if (this.#page.project() === project) this.#say(words)'''
+replace = '''        if (this.#page.project() === null) this.#say(words)'''

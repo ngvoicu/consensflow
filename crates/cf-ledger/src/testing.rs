@@ -56,6 +56,7 @@ mod program_gone;
 mod role_note;
 mod role_text;
 mod specs;
+mod staff_rules;
 
 use serde_json::{Map, Value};
 
@@ -64,6 +65,7 @@ pub use handed::undo_migration_0022;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
+pub use staff_rules::undo_migration_0025;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
@@ -93,13 +95,15 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
     ("message", "door_closed_at"),
 ];
 
-/// The columns migrations 0014 and 0017 added to the `project` table, each as
-/// the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
-/// `description TEXT`, one to a line there): what Node's schema never had.
+/// The columns migrations 0014, 0017 and 0025 added to the `project` table, each
+/// as the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
+/// `description TEXT`, `staff_rules TEXT`, one to a line there): what Node's
+/// schema never had.
 fn added_columns() -> impl Iterator<Item = &'static str> {
     [
         include_str!("../migrations/0014.sql"),
         include_str!("../migrations/0017.sql"),
+        include_str!("../migrations/0025.sql"),
     ]
     .into_iter()
     .flat_map(str::lines)
@@ -114,7 +118,7 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// and its `rows`), without what Node's ledger never writes: the four
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
-/// migration 0017, the one of migration 0018, the one of migration 0020, the one
+/// migration 0017, the staff's rules of migration 0025, the one of migration 0018, the one of migration 0020, the one
 /// of migration 0021, the one of migration 0022 and the one of migration 0024
 /// (their name and, in every row, the value at its place), the table migration
 /// 0020 made (a long item's parts), the stop in the event rows that paused a
@@ -174,8 +178,8 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// `tables`), with the schema as Node's ledger had it: no version past the
 /// last Node's ledger had, no tester in the checks of the two tables that
 /// name the roles and the pools, none of the columns of a project's wake-up
-/// calls, of what it says of specs or of its description in the table of the
-/// projects, and not the column of the role text a conversation was last given,
+/// calls, of what it says of specs, of its description or of its staff's rules
+/// in the table of the projects, and not the column of the role text a conversation was last given,
 /// that of the role text a message says, that of the mark of a compaction's
 /// summary in a copy, the table and the indexes migration 0020 made, that of the
 /// mark a project's suspension leaves on the tasks it paused, that of when a
@@ -213,8 +217,8 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the
-                // column's text: the wake-up calls' columns and the description
-                // one by one, and the three of specs, which `specs` holds as the
+                // column's text: the wake-up calls' columns, the description and
+                // the staff's rules one by one, and the three of specs, which `specs` holds as the
                 // one piece they are.
                 for column in added_columns() {
                     *sql = sql.replace(&format!(", {column}"), "");

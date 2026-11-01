@@ -27,6 +27,7 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::ProjectGate => projects::gate(page, body).await,
         PageOperation::ProjectRename => projects::rename(page, body).await,
         PageOperation::ProjectDescribe => projects::describe(page, body).await,
+        PageOperation::ProjectRules => projects::rules(page, body).await,
         // The agents and the staff.
         PageOperation::AgentsList => staff::agents(page).await,
         PageOperation::StaffLast => staff::last(page).await,

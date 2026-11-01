@@ -615,10 +615,10 @@ fn a_fresh_ledger_is_made_at_0022_with_main_s_migrations_first_and_the_resume_s_
     assert_eq!(version, SCHEMA_VERSION as i64);
 }
 
-/// What alpha.2 left, version 22 with the Resume's 0021 and 0022, opens at 24: 0023,
-/// then the exit proof's 0024, whose column proves no conversation's program gone
-/// (what the daemon that wrote it knew went with it). A second open migrates nothing
-/// again.
+/// What alpha.2 left, version 22 with the Resume's 0021 and 0022, opens at the last
+/// version: 0023, then the exit proof's 0024, whose column proves no conversation's
+/// program gone (what the daemon that wrote it knew went with it), and any after it.
+/// A second open migrates nothing again.
 #[test]
 fn a_ledger_at_the_resume_s_0022_migrates_to_the_exit_proof_s_0024_proving_nothing_gone() {
     let dir = tempfile::tempdir().expect("a folder");
@@ -646,10 +646,11 @@ fn a_ledger_at_the_resume_s_0022_migrates_to_the_exit_proof_s_0024_proving_nothi
     };
     assert_eq!(proven(&file), (22, None));
 
+    let last = SCHEMA_VERSION as i64;
     drop(open_ledger(&file, Options::default()).expect("migrated and open"));
-    assert_eq!(proven(&file), (24, Some(0)));
+    assert_eq!(proven(&file), (last, Some(0)));
     let schema = schema_of(&file);
     drop(open_ledger(&file, Options::default()).expect("and open again"));
-    assert_eq!(proven(&file), (24, Some(0)));
+    assert_eq!(proven(&file), (last, Some(0)));
     assert_eq!(schema_of(&file), schema, "nothing migrated again");
 }

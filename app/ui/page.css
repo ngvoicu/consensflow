@@ -654,6 +654,12 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .wakeup-section .wakeup-when input[type="number"] { width: 6em; }
 .wakeup-section .staff-hint { color: var(--buoy); }
 .wakeup-section textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: inherit; resize: vertical; }
+/* The rules for the staff: the human's text, and its count against the ledger's bounds. */
+.staff-rules textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px/1.45 var(--mono); resize: vertical; min-height: 9em; }
+.staff-rules .staff-rules-count { margin: 0; font: 11px var(--mono); color: var(--muted); text-align: right; }
+.staff-rules .staff-rules-count.over { color: var(--buoy); }
+.staff-rules textarea[aria-invalid="true"] { border-color: var(--buoy); }
+.staff-rules .staff-hint { color: var(--buoy); }
 /* The project's specs: the controls one under another. */
 .project-specs { gap: 10px; }
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
