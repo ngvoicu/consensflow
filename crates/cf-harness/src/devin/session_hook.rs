@@ -297,9 +297,14 @@ mod tests {
         let start = event("SessionStart", "native-a");
         assert_eq!(run(&launch, &start), None, "one look finds nothing named");
         let window = window_shows(&launch, "native-a", Duration::from_millis(80));
+        let began = Instant::now();
         assert_eq!(
-            run_within(&launch, &start, Duration::from_secs(30)),
+            run_within(&launch, &start, Duration::from_secs(10)),
             Some(role())
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "answered when the log named it, not when the wait ended"
         );
         window.join().unwrap();
     }
