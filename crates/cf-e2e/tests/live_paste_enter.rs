@@ -184,8 +184,16 @@ fn chief_pane(members: &Members) -> Result<serde_json::Value> {
     Ok(members.lane(members.chief())?["pane"].clone())
 }
 
-/// How many of the window's last drawn lines a case reads.
-const DRAWN_LINES: usize = 8;
+/// How many of the window's last drawn lines a case reads, blank ones included: enough to hold
+/// the chief's answer above Codex's box, its footer and the blank lines between (eight were
+/// not, in T-1048's first run), and how many of the ones not blank its line shows.
+const DRAWN_LINES: usize = 24;
+const SHOWN_LINES: usize = 6;
+
+/// The last [`SHOWN_LINES`] of `lines`, for a case's line.
+fn shown(lines: &[String]) -> String {
+    lines[lines.len().saturating_sub(SHOWN_LINES)..].join(" | ")
+}
 
 /// How often a case looks whether its paste went.
 const LOOK: Duration = Duration::from_millis(250);
@@ -270,13 +278,13 @@ fn case(
         }
         if more < AGAIN {
             if kept.is_empty() {
-                kept = drawn(members, &pane)?.join(" | ");
+                kept = shown(&drawn(members, &pane)?);
             }
             log.say("the paste has not gone: the human presses Enter again");
             members.rig().types(&pane, ENTER)?;
         }
     }
-    Ok((Went::Never, drawn(members, &pane)?.join(" | "), entered))
+    Ok((Went::Never, shown(&drawn(members, &pane)?), entered))
 }
 
 /// What each case came to, in order: its shape, its length, and how it went. The rig's close
