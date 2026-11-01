@@ -89,7 +89,7 @@ fn a_window_whose_task_is_done_stays_open_while_its_screen_is_being_drawn_and_cl
     // Still for the whole of it: the window closes in that step, and once.
     printed(&context, STILL_MS);
     context.pass().unwrap();
-    assert_eq!(context.host.killed(), [window.clone()]);
+    assert_eq!(context.host.killed(), std::slice::from_ref(&window));
     context.pass().unwrap();
     assert_eq!(context.host.killed(), [window], "closed once");
     assert_eq!(context.task(project.id, 1).task.state, "done");
@@ -227,7 +227,7 @@ fn the_next_task_of_the_session_waits_for_the_same_screen_and_its_requester_is_t
     // The screen rests: the window closes, and T-2 opens a window of its own.
     printed(&context, STILL_MS);
     context.pass().unwrap();
-    assert_eq!(context.host.killed(), [window.clone()]);
+    assert_eq!(context.host.killed(), std::slice::from_ref(&window));
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.host.opened().len(), opened + 1);
@@ -256,7 +256,7 @@ fn the_next_task_of_the_session_waits_no_longer_than_the_bound_for_a_screen_that
     assert!(open(&context, &window), "a millisecond before the bound");
     context.advance(1);
     context.pass().unwrap();
-    assert_eq!(context.host.killed(), [window.clone()]);
+    assert_eq!(context.host.killed(), std::slice::from_ref(&window));
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.host.opened().len(), opened + 1);
@@ -320,7 +320,11 @@ fn a_window_opened_since_waits_its_own_time_not_the_bound_of_the_one_that_closed
     answers(&context);
     context.advance(BOUND_MS);
     context.pass().unwrap();
-    assert_eq!(context.host.killed(), [first.clone()], "the bound is over");
+    assert_eq!(
+        context.host.killed(),
+        std::slice::from_ref(&first),
+        "the bound is over"
+    );
 
     // T-2 opens a window, and is done in it with the screen drawing: that window waits.
     printed(&context, 5_000);
