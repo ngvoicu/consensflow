@@ -134,7 +134,6 @@ struct ModelProfile {
     model_key: String,
     model_label: String,
     route_label: String,
-    route_note: Option<String>,
 }
 
 impl Catalog {
@@ -210,7 +209,6 @@ impl Catalog {
             model_key: profile.model_key,
             model_label: profile.model_label,
             route_label: profile.route_label,
-            route_note: profile.route_note,
             work_tier: settings.work_tier.unwrap_or(tier),
         }
     }
@@ -228,7 +226,6 @@ impl Catalog {
                 model_key: named.unwrap_or("devin-configured").to_owned(),
                 model_label: named.unwrap_or("Devin configured model").to_owned(),
                 route_label: "Devin account".to_owned(),
-                route_note: None,
             };
         }
         // An image agent's window runs on Codex's own model, whatever model it names.
@@ -237,7 +234,6 @@ impl Catalog {
                 model_key: "codex-image".to_owned(),
                 model_label: "Codex Images".to_owned(),
                 route_label: "Codex login".to_owned(),
-                route_note: None,
             };
         }
         // Strip provider paths only AFTER an exact curated model/harness match.
@@ -245,9 +241,6 @@ impl Catalog {
             Some(model) => curated_key(model),
             None => model.unwrap_or("default").to_owned(),
         };
-        // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
-        let contributor =
-            known.filter(|model| key == "muse-spark-1.3" && model.contains("-contributor"));
         let route = match model {
             Some(model) if model.starts_with("openrouter/") => "OpenRouter · API",
             Some(model) if model.starts_with("openai-codex/") => "Codex subscription",
@@ -262,16 +255,6 @@ impl Catalog {
                 None => "undefined",
             },
         };
-        let mut route_label = route.to_owned();
-        let mut route_note = None;
-        if let Some(model) = contributor {
-            route_label.push_str(if model.ends_with("-free") {
-                " · Contributor · Free"
-            } else {
-                " · Contributor"
-            });
-            route_note = Some("Prompts and replies may train Meta models.".to_owned());
-        }
         let label = known
             .and_then(|_| self.model_label(&key))
             .filter(|label| !label.is_empty())
@@ -280,8 +263,7 @@ impl Catalog {
         ModelProfile {
             model_label: label.to_owned(),
             model_key: key,
-            route_label,
-            route_note,
+            route_label: route.to_owned(),
         }
     }
 }
@@ -304,10 +286,6 @@ fn curated_key(model: &str) -> String {
     // And the versions of the other families it carries (gemini-3-8-flash, claude-5-fable).
     if let Some(dotted) = devin_version_dotted(&key) {
         key = dotted;
-    }
-    // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
-    if let Some(plain) = muse_spark_plain(&key) {
-        key = plain;
     }
     key
 }
@@ -371,16 +349,6 @@ fn devin_version_dotted(key: &str) -> Option<String> {
         Some(rest) => format!("{family}{major}.{minor}-{rest}"),
         None => format!("{family}{major}.{minor}"),
     })
-}
-
-/// `key.replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')`:
-/// the rewritten key, none when the pattern does not match.
-fn muse_spark_plain(key: &str) -> Option<String> {
-    matches!(
-        key,
-        "muse-spark-1.3-contributor" | "muse-spark-1.3-contributor-free"
-    )
-    .then(|| "muse-spark-1.3".to_owned())
 }
 
 #[cfg(test)]

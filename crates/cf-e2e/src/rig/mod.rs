@@ -304,6 +304,15 @@ impl Config {
         self
     }
 
+    /// The person's home a live Muse of the rig finds its keychain login by, where the rig
+    /// runs the machine's Muse live ([`Config::muse_live`]).
+    pub fn muse_live_home(&self) -> Option<&Path> {
+        match &self.muse {
+            Some((_, crate::muse::Run::Live { real_home })) => Some(real_home),
+            _ => None,
+        }
+    }
+
     /// With the variable `name` set to `value` in the environment of the
     /// daemon, the pane host and so every window, over what the rig sets.
     #[must_use]

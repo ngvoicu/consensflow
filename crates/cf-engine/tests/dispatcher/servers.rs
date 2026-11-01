@@ -51,7 +51,7 @@ fn a_codex_window_is_marked_as_codex_and_as_opening_its_servers_with_it() {
 #[test]
 fn a_harness_that_says_nothing_of_how_it_keeps_its_servers_is_marked_so_and_the_host_goes_by_what_it_can_prove(
 ) {
-    // OpenCode's and Devin's were not probed: their adapters say nothing. The mark
+    // Devin's was not probed: its adapter says nothing. The mark
     // says so, and the host lists at a close what it proves the turn's; the result
     // ends nothing.
     let context = with_codex();

@@ -68,8 +68,7 @@ pub enum Update {
     /// The feed was not asked.
     NotChecked,
     /// The release was read, and says nothing of being newer: the versions
-    /// are no three whole numbers each, or no window is opened on the CLI
-    /// ([`Setup::NotSupportedYet`]), which is then offered as no update.
+    /// are no three whole numbers each.
     Unknown(Release),
     Available(Release),
     Current(Release),
@@ -96,11 +95,6 @@ pub enum Setup {
     Ready,
     /// Devin is older than a window needs.
     UpdateRequired {
-        reason: String,
-    },
-    /// The CLI is newer than ConsensFlow supports yet, or one no window is opened on yet
-    /// (Muse Code), and no update is the way out.
-    NotSupportedYet {
         reason: String,
     },
 }

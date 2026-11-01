@@ -13,12 +13,12 @@ a Node test or module it names is history.
 
 The versions named below are those the fixtures were captured from. A section
 that says "the newest seen" was read again on 2026-10-21 against the harnesses
-installed then (Claude Code 2.1.305, Codex 0.163.0, Pi 1.3.0, OpenCode 1.19.3),
+installed then (Claude Code 2.1.305, Codex 0.163.0, Pi 1.3.0),
 and names the newest that still writes its shape; one that no later version was
 seen to write says so.
 
 Prepared 2026-09-06 and extended 2026-09-07 from the native stores on this
-machine. Every JSONL line and every SQLite row selected below is a complete
+machine. Every JSONL line selected below is a complete
 source record: records not needed by a case are omitted, but fields inside a
 selected record are not.
 Redaction changes leaf values only:
@@ -30,11 +30,6 @@ Redaction changes leaf values only:
   repeated `L` in each staged temporary copy; the fixture on disk is unchanged;
 - the version-metadata tests mutate only version leaves in their staged
   temporary copies.
-
-The OpenCode JSON files are transport envelopes for complete rows. The
-`session`, `message`, `part`, and `event` arrays retain every column;
-JSON-valued `data` columns remain strings. Tests load those rows into a
-throwaway SQLite database. Production stores are never written.
 
 ## Codex — rollout JSONL, `codex-cli 0.153.4`
 
@@ -213,41 +208,6 @@ retry is coming. No Pi 1.x record measures it.
 No Pi user-cancellation marker was captured, so there is no synthetic
 cancellation fixture and provider errors are not reclassified as cancellation.
 
-## OpenCode — `opencode.db`, versions `1.18.27` and `1.18.29`
-
-All OpenCode row fixtures come from
-`/Users/gabrielvoicu/.local/share/opencode/opencode.db`.
-
-- `completion-window.json` — session
-  `ses_f88c0c7cdffeANJRVLwiBceADi`, message
-  `msg_0773f385a001oy2xD1d5J3DNge`, all four part rows, and complete event
-  rows 12, 13, and 15. Event 12 is `step-finish reason:stop`; event 13 has
-  native `finish:stop` but no `time.completed`; event 15 adds
-  `time.completed:1788707030665`, 92 ms after event 12.
-- `finish-length.json` — session
-  `ses_f886ed7dbffe1myK161SPisoR2`, assistant message
-  `msg_0779166e7001sYP03lgChIzdvh`, and all four parts. It retains native
-  `time.completed` and `finish:length`.
-- `api-error.json` — session `ses_f9905d94effe57fADEYMVwfKVF` and
-  assistant message `msg_066fa2779001GkIYu5W7ugNXUR`. It retains
-  `time.completed`, `error.name:APIError`, status 403, and the provider
-  message; cookie/body leaves are redacted.
-- `tool-result.json` — session
-  `ses_f87e22f72ffewC2qJ2dAyyfPe1`, its original user message and text part,
-  assistant messages
-  `msg_07834cf2a001ZxKIEEils8Twxd` and
-  `msg_07834e4450017pCEw2eVdPoUxQ`, and all eight part rows. It retains the
-  completed tool-part output and terminal native completion. The final text
-  leaf is replaced by exactly 4,515 `O` characters.
-- `native-events.json` — complete decisive `message.updated.1` or
-  `message.part.updated.1` event rows for every message/part row in the four
-  cases, plus the completion-window sequence. For `ses_f87…`, these include
-  original-message admission at sequence 1, assistant admissions at 2342 and
-  2354, final completion at 2362, the intervening session update at 2363, and
-  the original user's metadata-only summary update at 2364. Native `seq` values
-  supply item positions; timestamps remain display evidence and are never
-  ordering positions.
-
 ## Claude Code 2.1.265 (Phase 17)
 
 `claude-code/v265-tool-loop.jsonl` contains complete records 6, 27, 29,
@@ -268,28 +228,20 @@ RED: 3/4 failed because 2.1.265 was unsupported. GREEN with the existing
 queue admission and preservation of a human draft are separate checks. The
 shape is still written by 2.1.305, the newest seen.
 
-### Claude 2.1.266 and OpenCode 1.18.30 (2026-09-09)
+### Claude 2.1.266 (2026-09-09)
 
-`claude-code/v266-tool-loop.jsonl` and `opencode/v130-tool-loop.json` were
-captured from isolated ConsensFlow-owned native chief conversations. Each ran
-`/usr/bin/true` and returned `CF_NATIVE_VERSION_PROBE_DONE`. Claude remained
-unready until its root `turn_duration`; OpenCode preserved `tool-calls` then
-its final `stop` and completion time. Paths were sanitized; reasoning text and
-unrelated diagnostics were omitted. Neither fixture comes from a worker's
-private thread. Node's test of the native versions of that day exercised the real
-parsers. Both shapes are still written: the root `turn_duration` after a tool
-loop by Claude 2.1.305, and a `tool-calls` step then a final `stop` by OpenCode
-1.19.3, the newest seen.
+`claude-code/v266-tool-loop.jsonl` was captured from an isolated
+ConsensFlow-owned native chief conversation. It ran `/usr/bin/true` and
+returned `CF_NATIVE_VERSION_PROBE_DONE`. Claude remained unready until its root
+`turn_duration`. Paths were sanitized; reasoning text and unrelated diagnostics
+were omitted. The fixture does not come from a worker's private thread. Node's
+test of the native versions of that day exercised the real parser. The shape is
+still written: the root `turn_duration` after a tool loop by Claude 2.1.305, the
+newest seen.
 
 A fresh Claude 2.1.266 pane also accepted `CF_PEER266_DELIVERED` through its
 native peer queue while retaining the unsent draft `CF_UNSENT_DRAFT_266` in
 the real Xterm display. The app added no native plugin, channel or configuration.
-
-The same isolated run then dispatched the real OpenCode 1.18.30 Gefjon
-worker. Its complete `CF_OC130_AUTO_DONE` result arrived automatically as
-delivery `d-3` in the Claude 2.1.266 chief, which acknowledged it while the
-unsent `CF_UNSENT_DRAFT_266` remained visible. This checks the composed
-worker-to-chief path, separately from completion parsing and direct ingress.
 
 ## Claude Code 2.1.268 fresh /clear
 

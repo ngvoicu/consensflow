@@ -141,8 +141,8 @@ fn path(fake_bin: &Path, config: &Config) -> String {
 /// The system's own folders at the end of a rig's `PATH`: where `windows`, the ones every
 /// Windows install puts on it under its `system_root` (`System32`, the root itself,
 /// `Wbem`, and Windows PowerShell's folder, which no package manager adds and which an
-/// agent's shell finds `powershell` in: OpenCode's runs a command by cmd.exe, and a
-/// command that starts anything past cmd's own is "not recognized" without it, T-379);
+/// agent's shell finds `powershell` in: one that runs a command by cmd.exe starts
+/// anything past cmd's own as "not recognized" without it, T-379);
 /// as the Finder starts a program (`finder`) or not elsewhere.
 fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec<String> {
     if windows {
@@ -412,9 +412,9 @@ mod tests {
     #[test]
     fn the_system_folders_of_a_windows_rig_are_those_every_windows_install_has_powershell_among_them(
     ) {
-        // OpenCode 1.19.4 runs a command by `%ComSpec% /c` (cmd.exe), and an agent's command
-        // that starts anything past cmd's own (`powershell -Command Start-Process …`, the
-        // brief of the live suite's second step) is found on the `PATH` or "not recognized"
+        // An agent that runs a command by `%ComSpec% /c` (cmd.exe) has one that starts
+        // anything past cmd's own (`powershell -Command Start-Process …`, the
+        // brief of the live suite's second step) found on the `PATH` or "not recognized"
         // (T-379, zeewin, where the rig's `PATH` ended at `System32`).
         let expected = [
             r"C:\WINDOWS\System32",
@@ -429,7 +429,7 @@ mod tests {
     }
 
     /// The field shape (T-379, zeewin): a command interpreter started in the rig's
-    /// environment, as OpenCode's shell tool starts one, finds `powershell`.
+    /// environment, as an agent's shell tool starts one, finds `powershell`.
     #[cfg(windows)]
     #[test]
     fn a_command_interpreter_in_the_rigs_environment_finds_powershell() {

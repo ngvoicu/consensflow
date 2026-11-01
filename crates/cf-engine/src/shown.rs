@@ -319,8 +319,8 @@ fn outage_key(lines: &[String], keep: Keep) -> String {
 /// short or with thousands (`1.2k`, `12,345` tokens), but no count that ends a
 /// model's id (`gpt-4-32k`, `o3-mini-2k`) and no list of numbers (`500,502,503`):
 /// a thousands count only before a count's unit, a short one only where no `-`
-/// joins it to what comes before. Claude Code, Codex, Pi and
-/// OpenCode each draw some of them below the conversation; the probe of T-298
+/// joins it to what comes before. Claude Code, Codex and Pi
+/// each draw some of them below the conversation; the probe of T-298
 /// recorded counts of the brief's lines only, so which line holds which is not
 /// shown there.
 ///

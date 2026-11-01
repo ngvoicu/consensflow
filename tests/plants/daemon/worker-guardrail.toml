@@ -9,7 +9,7 @@
 #   checked it (`crates/cf-engine/tests/text/roles.rs`, and the 27 members' rows of
 #   `crates/cf-engine/tests/goldens/text.json`, moved by hand);
 # - the eval `uncommitted-work` (`crates/cf-evals/src/scenarios/uncommitted_work.rs`) plays the
-#   failure's shape on the five harnesses: a workspace that is a git repository with the owner's
+#   failure's shape on the four harnesses: a workspace that is a git repository with the owner's
 #   change not committed, set up with nothing of the person's git; a worker that adds a line to the
 #   same page and then, in the owner's second message, asked to undo its change; the page read as
 #   the run began, as T-1's result left it (just before the owner types the undo), and at the end,

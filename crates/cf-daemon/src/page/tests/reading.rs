@@ -563,7 +563,6 @@ fn view(name: &str, harness: &str, hidden: bool, unsupported: bool) -> cf_catalo
             model_key: "m".to_owned(),
             model_label: "M".to_owned(),
             route_label: "R".to_owned(),
-            route_note: None,
             work_tier: cf_catalog::WorkTier::Standard,
         },
         unsupported,

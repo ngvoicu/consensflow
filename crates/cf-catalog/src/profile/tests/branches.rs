@@ -57,14 +57,12 @@ fn an_image_agent_is_codex_images_whatever_model_it_names() {
                 profile.model_key.as_str(),
                 profile.model_label.as_str(),
                 profile.route_label.as_str(),
-                profile.route_note,
                 profile.work_tier
             ),
             (
                 "codex-image",
                 "Codex Images",
                 "Codex login",
-                None,
                 WorkTier::Light
             )
         );
@@ -325,68 +323,6 @@ fn the_prefix_of_a_model_names_its_road_before_its_harness_does() {
         });
         assert_eq!(profile.route_label, route, "{kind}");
     }
-}
-
-#[test]
-fn muse_s_contributor_routes_say_so_with_a_note_and_the_free_one_says_free() {
-    let presets = vec![
-        preset(
-            "free",
-            "pi",
-            "openrouter/meta/muse-spark-1.3-contributor-free",
-            Some("high"),
-        ),
-        preset(
-            "paid",
-            "pi",
-            "openrouter/meta/muse-spark-1.3-contributor",
-            Some("high"),
-        ),
-        preset(
-            "plain",
-            "pi",
-            "openrouter/meta/muse-spark-1.3",
-            Some("high"),
-        ),
-    ];
-    let catalog = Catalog::new(
-        presets,
-        BTreeMap::from([("muse-spark-1.3".to_owned(), "Muse Spark 1.3".to_owned())]),
-    );
-    let on = |model, kind| {
-        catalog.profile(&Settings {
-            kind: Some(kind),
-            model: Some(model),
-            effort: Some("high"),
-            ..Settings::default()
-        })
-    };
-    let free = on("openrouter/meta/muse-spark-1.3-contributor-free", "pi");
-    assert_eq!(free.route_label, "OpenRouter · API · Contributor · Free");
-    assert_eq!(
-        free.route_note.as_deref(),
-        Some("Prompts and replies may train Meta models.")
-    );
-    assert_eq!(
-        (free.model_key.as_str(), free.model_label.as_str()),
-        ("muse-spark-1.3", "Muse Spark 1.3")
-    );
-    let paid = on("openrouter/meta/muse-spark-1.3-contributor", "pi");
-    assert_eq!(paid.route_label, "OpenRouter · API · Contributor");
-    assert_eq!(
-        paid.route_note.as_deref(),
-        Some("Prompts and replies may train Meta models.")
-    );
-    let plain = on("openrouter/meta/muse-spark-1.3", "pi");
-    assert_eq!(plain.route_label, "OpenRouter · API");
-    assert_eq!(plain.route_note, None);
-    // Not a preset's pair: the model is called by its id and the route has no note.
-    let unlisted = on("openrouter/meta/muse-spark-1.3-contributor-free", "codex");
-    assert_eq!(
-        unlisted.model_key,
-        "openrouter/meta/muse-spark-1.3-contributor-free"
-    );
-    assert_eq!(unlisted.route_note, None);
 }
 
 #[test]

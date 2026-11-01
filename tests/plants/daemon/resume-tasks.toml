@@ -571,26 +571,6 @@ replace = '''
             if let Some(delivering) = delivering {'''
 
 [[plant]]
-name = "resume tasks: a window that takes its first message once it is up is given it in a closed project"
-meant = "a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume"
-runs = ["engine-closed-given-nothing"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = "        let started = caught(planned.window.started(&admitting)).await;"
-replace = "        let started = caught(planned.window.started(&*self.seams.host)).await;"
-
-[[plant]]
-name = "resume tasks: a first message the closed project kept from its window is a launch that failed"
-meant = "a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume"
-runs = ["engine-closed-given-nothing"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = "        if let Some(failed) = admitting.turned_away() {"
-replace = "        if let Some(failed) = admitting.turned_away().filter(|_| false) {"
-
-[[plant]]
 name = "resume tasks: an adapter that waits before its hand-over hands the text to a closed project's window"
 meant = "a_delivery_whose_adapter_still_waits_when_the_project_closes_hands_nothing_over_and_waits_for_the_resume"
 runs = ["engine-closed-given-nothing"]
@@ -1012,7 +992,7 @@ runs = ["ledger-suspended"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-        if join_pause_note(store, note, task.number, because)?.is_some() {
+        if join_pause_note(store, note, task.number, because, false)?.is_some() {
             return Ok(());
         }'''
 replace = '''
@@ -1536,21 +1516,6 @@ replace = ""
 # --- the Enter pressed once more, and the words of every state (round 10) ---
 
 [[plant]]
-name = "resume tasks: the Enter pressed once more asks whether the project is open alone, as round 9 left it"
-meant = "an_enter_sends_no_continuation_whose_task_was_paused_or_cancelled_while_the_screen_was_looked_at"
-runs = ["engine-closed-given-nothing"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''
-        let admitting = Admitting::new(self, project)
-            .handing(message, carried)
-            .again();'''
-replace = '''
-        let admitting = Admitting::new(self, project).again();
-        let _ = carried;'''
-
-[[plant]]
 name = "resume tasks: the Enter pressed once more is admitted without the rows its paste was begun with"
 meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
 runs = ["engine-closed-given-nothing"]
@@ -1666,7 +1631,7 @@ replace = ""
 
 [[plant]]
 name = "resume tasks: a launch's first message is not marked handed as its pane is asked for"
-meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
+meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_the_step_delivers_it_once_the_window_is_up"
 runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
@@ -1675,8 +1640,8 @@ find = '''        )? || !self.handed_on_open(delivering.as_ref(), &planned)?'''
 replace = '''        )? || !self.handed_on_open(None, &planned)?'''
 
 [[plant]]
-name = "resume tasks: a first message a window takes once it is up is marked handed as its pane is asked for"
-meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
+name = "resume tasks: a first message a window is delivered once it is up is marked handed as its pane is asked for"
+meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_the_step_delivers_it_once_the_window_is_up"
 runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
@@ -1685,28 +1650,16 @@ find = '''        let Some(first) = delivering.filter(|_| planned.first == First
 replace = '''        let Some(first) = delivering else {'''
 
 [[plant]]
-name = "resume tasks: a first message a window takes once it is up is posted with the project alone asked"
-meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
-runs = ["engine-closed-given-nothing"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = '''            .filter(|_| planned.first == FirstMessage::Started);'''
-replace = '''            .filter(|_| false);'''
-
-[[plant]]
-name = "resume tasks: a delivery's hand-over asks whether the project is open alone"
+name = "resume tasks: a hand-over asks whether the project is open alone, and lets a withdrawn message through"
 meant = "a_continuation_whose_task_is_paused_while_its_adapter_takes_it_is_withdrawn_and_handed_nothing"
 runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        let admitting = Admitting::new(self, message.project_id)
-            .handing(message.id, carried.clone())
-            .cleared(cleared);'''
+        Ok(handed == HandOver::Admitted)'''
 replace = '''
-        let admitting = Admitting::new(self, message.project_id).cleared(cleared);'''
+        Ok(handed != HandOver::Closed)'''
 
 [[plant]]
 name = "resume tasks: a paste that went back for a row withdrawn from it is said to have gone back for the Close"
@@ -1975,11 +1928,9 @@ runs = ["engine-withheld-enter"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """
-            .handing(message.id, carried.clone())
-            .cleared(cleared);"""
+        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(cleared);"""
 replace = """
-            .handing(message.id, carried.clone())
-            .cleared(false && cleared);"""
+        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(false && cleared);"""
 
 [[plant]]
 name = "resume tasks: Claude empties a box the engine just emptied, a second Control-C"
@@ -2025,10 +1976,9 @@ runs = ["engine-withheld-enter"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """
-            .handing(message, carried)
-            .again();"""
+        let admitting = Admitting::handing(self, message, carried).again();"""
 replace = """
-            .handing(message, carried);"""
+        let admitting = Admitting::handing(self, message, carried);"""
 
 [[plant]]
 name = "resume tasks: a paste the window has is given back"

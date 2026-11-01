@@ -15,9 +15,7 @@
 //! that stays out of reach. The receipt is said again as a poll is: an answer
 //! handed over and never received would be pasted a second time. A door that
 //! was shut by a pause is refused, and what the board says it is passed on
-//! as it is. OpenCode's extension keeps
-//! its own copy, `hosts/lib/question-door.js`: the harness loads it into its
-//! own runtime.
+//! as it is.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;

@@ -136,16 +136,15 @@ fn carries_the_models_verified_live_on_2026_08_21_newest_of_each_family() {
     // `gpt-6-sol`, `gpt-6-pro` and `gpt-5.6-pro` are all refused, and its
     // ladder was walked level by level (minimal refused; low..ultra answer).
     assert!(models.contains(&"gpt-6-astra"));
-    // Added 2026-08-24, each confirmed present in `pi --list-models` and
-    // `opencode models` before it was written down — two free tiers and one
-    // unbadged stealth model, on both open-model harnesses. The stealth one
-    // ended its testing period on 2026-08-27 (404 naming its own model), so nyx
-    // and nott moved to it under its real name: z-ai/glm-5.3-flash, verified
-    // that day in OpenRouter's /api/v1/models and by a live one-shot on each
-    // CLI — neither harness catalog lists it yet, both run it. Added
-    // 2026-09-03, both probed live on each harness at the level the row names.
-    // Muse Spark 1.3 needed two probes: the first answered 403 on BOTH
-    // harnesses ("18+ age confirmation"), an account attestation no catalog can
+    // Added 2026-08-24, each confirmed present in `pi --list-models` before it
+    // was written down — two free tiers and one unbadged stealth model. The
+    // stealth one ended its testing period on 2026-08-27 (404 naming its own
+    // model), so nyx and nott moved to it under its real name:
+    // z-ai/glm-5.3-flash, verified that day in OpenRouter's /api/v1/models and by
+    // a live one-shot on Pi — its catalog did not list it yet, and it ran it.
+    // Added 2026-09-03, probed live at the level the row names.
+    // Muse Spark 1.3 needed two probes: the first answered 403
+    // ("18+ age confirmation"), an account attestation no catalog can
     // show, and the rows were held back until a probe answered. See the Gemini
     // 3.8 / Muse Spark paragraph of crates/cf-catalog/data/README.md.
     for model in [

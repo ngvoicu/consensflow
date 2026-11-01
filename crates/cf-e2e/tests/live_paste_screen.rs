@@ -14,7 +14,7 @@
 //! Each harness is the one worker of a project on the native daemon, whose chief is
 //! the stand-in; the check, as the chief, gives it a brief of forty numbered lines
 //! that ends asking for a sum, through the real path a message takes to it (pasted
-//! into Claude Code and Devin, put to Codex, Pi and OpenCode through their own
+//! into Claude Code and Devin, put to Codex and Pi through their own
 //! queues). The worker's window is kept open as the human keeps one (`session.open`):
 //! it closes with its task otherwise. Through the turn, twice a second, and once at
 //! rest after it, the check asks the pane host for the window's screen as the

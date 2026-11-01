@@ -18,12 +18,13 @@ use cf_ledger::{
 };
 use cf_proto::agents::Harness;
 use cf_proto::bridge::DEADLINE;
-use cf_proto::panes::{Servers, CLOSE_GRACE};
+use cf_proto::panes::{Servers, BOTTOM_LINES, CLOSE_GRACE};
 use cf_proto::trace::WindowEvent;
 use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 
-use crate::deliveries::{Admitting, Delivering};
+use crate::at_work::OnWork;
+use crate::deliveries::Delivering;
 use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
@@ -41,6 +42,21 @@ use crate::unstarted::GivenUp;
 /// The key that interrupts a harness's current turn, and the gap of a double press.
 const ESCAPE: u8 = 27;
 const DOUBLE_PRESS: Duration = Duration::from_millis(150);
+
+/// The screen's last lines as drawn, as a snapshot sends them (`bottom`): what a harness's
+/// readers of its screen read, its prompt among them. None where it sent none.
+fn drawn_lines(snapshot: &Value) -> Vec<String> {
+    snapshot
+        .get("bottom")
+        .and_then(Value::as_array)
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| line.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 /// How long a fresh window's output must hold still before its screen counts as drawn.
 const DRAWN_QUIET_MS: f64 = 1_500.0;
@@ -357,6 +373,13 @@ pub(crate) fn pane_body(pane: &Pane) -> Value {
     json!({ "id": pane.id, "generation": pane.generation })
 }
 
+/// [`pane_body`] for a `pane.snapshot` that is to hold the screen's last lines as drawn
+/// (`bottom`), which a harness's readers of its screen read (its prompt, its input box): a
+/// host sends them only when asked, and a reader given none reads no prompt and no box.
+pub(crate) fn pane_body_drawn(pane: &Pane) -> Value {
+    json!({ "id": pane.id, "generation": pane.generation, "bottom": BOTTOM_LINES })
+}
+
 /// A harness's interrupt as keys into its window (`pressInterrupt`): Escape
 /// as many times in a row as it asks for, and, where those presses open a
 /// dialog at a turn that ended just before them (Devin's rewind), one more
@@ -621,6 +644,8 @@ impl Dispatcher {
             // Owed once the plan says the window is delivered it (`owe`).
             owed: None,
             late: false,
+            work: OnWork::default(),
+            not_ready: None,
         });
         // What fails with a launch that does not come up: its first message, or
         // the one that would have been, which the role goes ahead of. A member's
@@ -863,11 +888,6 @@ impl Dispatcher {
             part.conversation = conversation_id;
             part.unproven = resumed_on.is_some() && !proven;
         }
-        // The first message that goes in once the window is up, where there is one.
-        let posted = delivering
-            .as_ref()
-            .map(|first| first.message)
-            .filter(|_| planned.first == FirstMessage::Started);
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;
@@ -889,25 +909,7 @@ impl Dispatcher {
         }
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
-        let admitting = Admitting::new(self, project.id);
-        let admitting = match posted {
-            Some(first) => admitting.handing(first, planned.carried.clone()),
-            None => admitting,
-        };
-        let started = caught(planned.window.started(&admitting)).await;
-        // A first message that was to go in once the window was up, its project
-        // closed first: it waits for the Resume, never handed over, and the window,
-        // given nothing, goes with the Close. One withdrawn meanwhile (a
-        // continuation whose task moved on) stays so, or goes again without what
-        // was withdrawn of its paste, and the window, up, is given what waits for
-        // it at the next pass. Neither is a launch that failed.
-        if let Some(failed) = admitting.turned_away() {
-            let delivering = record.delivery.borrow_mut().delivering.take();
-            if let Some(delivering) = delivering {
-                self.give_back(delivering.message, admitting.because())?;
-            }
-            return failed.map_or(Ok(()), Err);
-        }
+        let started = caught(planned.window.started()).await;
         let started = match started {
             // A window that never came up is given up, with its first message or
             // without one: a Codex chief opened again at rest after the app's restart
@@ -1187,8 +1189,8 @@ impl Dispatcher {
     /// the ledger admits it, which marks it handed (the project is open, and nothing
     /// of its paste was withdrawn since it was begun). One it turns away goes back to
     /// its queue, unless it was withdrawn itself, and the launch is over. A launch
-    /// whose window takes it once up hands nothing over now: it is admitted as it is
-    /// posted ([`FirstMessage::Started`]) or delivered ([`FirstMessage::Delivered`]).
+    /// whose window is delivered it once up hands nothing over now: it is admitted
+    /// as it is delivered ([`FirstMessage::Delivered`]).
     fn handed_on_open(
         &self,
         delivering: Option<&Delivering>,
@@ -1468,23 +1470,37 @@ impl Dispatcher {
 
     /// Whether a window has drawn its screen: it printed, then held still for
     /// a moment (the pane host says how long it has printed nothing). A host
-    /// that cannot tell is taken as drawn.
+    /// that cannot tell is taken as drawn. A window whose harness has no word of its
+    /// own that it is at rest (`Window::idle_word`) is read at rest by the pacing's
+    /// fallback, on its record and a quiet screen, and a screen held still is no
+    /// harness that is up: Muse 1.4.14 held still six seconds as it started, before its
+    /// first frame, and keys typed then were lost (T-946). Such a window is drawn only
+    /// once its harness shows its own sign that it is up, its prompt
+    /// (`Window::shows_prompt`), which a harness read by the fallback is to give.
     pub(crate) async fn drawn(self: &Rc<Self>, record: &Rc<Record>) -> bool {
-        let (drawn, pane) = {
+        let (drawn, pane, window) = {
             let part = record.window.borrow();
-            (part.drawn, part.pane.clone())
+            (part.drawn, part.pane.clone(), part.window.clone())
         };
         if drawn {
             return true;
         }
+        let fallback = window.as_ref().is_some_and(|window| !window.idle_word());
         let snapshot = match pane {
             // `.catch(() => null)` made a promise of its own to wait on.
-            Some(pane) => returning(self.seams.host.request("pane.snapshot", pane_body(&pane)))
-                .await
-                .ok(),
+            Some(pane) => {
+                let body = if fallback {
+                    pane_body_drawn(&pane)
+                } else {
+                    pane_body(&pane)
+                };
+                returning(self.seams.host.request("pane.snapshot", body))
+                    .await
+                    .ok()
+            }
             None => None,
         };
-        let drawn = match snapshot
+        let quiet = match snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.get("outputQuietMs"))
         {
@@ -1492,6 +1508,14 @@ impl Dispatcher {
             Some(Value::Null) => false,
             Some(quiet) => quiet.as_f64().is_some_and(|quiet| quiet >= DRAWN_QUIET_MS),
         };
+        let up = match (&window, &snapshot) {
+            (Some(window), Some(snapshot)) if !window.idle_word() => {
+                window.shows_prompt(&drawn_lines(snapshot))
+            }
+            (Some(window), None) if !window.idle_word() => false,
+            _ => true,
+        };
+        let drawn = quiet && up;
         if drawn {
             record.window.borrow_mut().drawn = true;
         }

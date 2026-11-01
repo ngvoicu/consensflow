@@ -301,14 +301,14 @@ mod tests {
     fn a_child_ended_when_asked_wakes_the_work_waiting_for_it_to_close() {
         let scripted = ScriptedProcesses::default();
         scripted.child(
-            "opencode",
+            "server",
             ChildScript {
                 lines: Vec::new(),
                 ends: Ends::Asked,
             },
         );
         let child = scripted
-            .spawn(program("/bin/opencode", &["serve"]), Streams::Quiet)
+            .spawn(program("/bin/server", &["serve"]), Streams::Quiet)
             .unwrap();
         crate::testing::woken_by(child.closed(), || child.terminate(Ending::Asked));
         assert!(child.exited());
@@ -318,21 +318,21 @@ mod tests {
     fn a_child_asked_for_is_written_down_whether_it_starts_or_not() {
         let scripted = ScriptedProcesses::default();
         scripted.child(
-            "opencode",
+            "server",
             ChildScript {
                 lines: Vec::new(),
                 ends: Ends::Asked,
             },
         );
         assert!(scripted
-            .spawn(program("/bin/opencode", &["serve"]), Streams::Quiet)
+            .spawn(program("/bin/server", &["serve"]), Streams::Quiet)
             .is_ok());
         assert_eq!(
             scripted
-                .spawn(program("/bin/opencode", &["serve"]), Streams::Quiet)
+                .spawn(program("/bin/server", &["serve"]), Streams::Quiet)
                 .err()
                 .as_deref(),
-            Some("spawn opencode serve ENOENT"),
+            Some("spawn server serve ENOENT"),
             "no child is left scripted"
         );
         let spawned: Vec<String> = scripted
@@ -340,6 +340,6 @@ mod tests {
             .iter()
             .map(|(program, _)| named(program))
             .collect();
-        assert_eq!(spawned, ["opencode serve", "opencode serve"]);
+        assert_eq!(spawned, ["server serve", "server serve"]);
     }
 }

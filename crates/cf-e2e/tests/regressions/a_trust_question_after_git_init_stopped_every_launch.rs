@@ -530,7 +530,8 @@ fn a_worker_whose_question_comes_after_half_a_minute_is_answered_before_its_brie
 fn a_worker_that_never_draws_its_prompt_fails_in_its_launch_s_time() -> Outcome {
     // Owed its brief, a window is watched for its prompt past the 30 s one that asks
     // nothing is given; one that never draws it still fails in its launch's time, 15 s
-    // here, and does not wait for good. Its first frame holds still for ten minutes.
+    // here, and does not wait for good, and whoever gave it hears which screen line was
+    // waited for (T-863, T-901). Its first frame holds still for ten minutes.
     let rig = Rig::start(
         config()
             .var("CF_TEST_TRUST", "worker")
@@ -555,7 +556,7 @@ fn a_worker_that_never_draws_its_prompt_fails_in_its_launch_s_time() -> Outcome 
         .iter()
         .filter_map(|message| message["body"].as_str())
         .any(|body| {
-            body.contains("T-1 failed") && body.contains("never ready for its first message")
+            body.contains("T-1 failed: the window never showed the prompt its first message waits for, a screen line with \"bypass permissions on\"")
         });
     assert!(told, "the chief hears why: {:?}", project.inbox("chief")?);
     rig.close()?;

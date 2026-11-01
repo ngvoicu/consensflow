@@ -3,10 +3,7 @@
 # output a harness may cut, the one asked is told to answer again when an
 # answer did not stand, a row Node was pasting is not stranded, and a task
 # sent back to a busy session is told what it can do. One plant takes one fix
-# out, and a test of it fails. A run written `{ node: [...] }` is `node --test`
-# of those files.
-
-[run]
+# out, and a test of it fails.
 
 [[plant]]
 name = "review: a row Node was pasting on its own stays under the carrier it rode in when its delivery goes again"

@@ -52,14 +52,13 @@ pub(super) async fn inspect(
                 Harness::Muse => muse::version::newer(row.version.value(), &value),
                 _ => newer(row.version.value(), &value),
             };
-            let offered = offers(row.setup.as_ref());
             let release = Release {
                 value,
                 source: source.url,
                 command,
             };
             match comparison {
-                Some(true) if offered => Update::Available(release),
+                Some(true) => Update::Available(release),
                 Some(false) => Update::Current(release),
                 _ => Update::Unknown(release),
             }
@@ -120,12 +119,6 @@ fn setup(harness: Harness, version: Option<&str>) -> Option<Setup> {
         Harness::Muse => Some(muse_setup(version)),
         _ => None,
     }
-}
-
-/// Whether a release is offered as an update to a CLI whose setup is `setup`:
-/// none is to a CLI no window is opened on.
-fn offers(setup: Option<&Setup>) -> bool {
-    !matches!(setup, Some(Setup::NotSupportedYet { .. }))
 }
 
 /// What the Muse of `version` is to the page: one older than the minimum is to be

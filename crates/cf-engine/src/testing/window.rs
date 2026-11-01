@@ -18,7 +18,7 @@ use cf_harness::contract::{
     Admission, Held, InputBox, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts,
     Waiting, Window, Work, NOT_ADMITTED,
 };
-use cf_harness::records::{Item, Lines, Reading, Record, Role, Settlement};
+use cf_harness::records::{Item, Lines, Reading, Record, Settlement};
 use serde_json::{json, Value};
 
 use super::adapter::{FakeAdapter, FakeAgent, Taking};
@@ -34,6 +34,8 @@ pub const TRUST_PROMPT: &str = "Ready for work (a test's prompt)";
 /// names the question's choices without asking it: a conversation that quotes them.
 pub const TRUST_UNPLACED: &str = "Do you trust this folder? (a test's question, its choice lost)";
 pub const TRUST_QUOTED: &str = "Yes, I trust this folder / No, exit (a test's quote of them)";
+/// The line a test window's screen shows while its harness compacts its conversation.
+pub const COMPACTING: &str = "• Compacting the conversation (a test's compaction)";
 
 pub(super) struct FakeWindow {
     seam: String,
@@ -43,9 +45,6 @@ pub(super) struct FakeWindow {
     fake: Rc<FakeAdapter>,
     /// What a yes to its question would trust, where its adapter asks one.
     trusts: Option<Trusts>,
-    /// The first message it takes once it is up, where its adapter's windows
-    /// seed it so (`FakeAdapter::seeds`), not with the launch.
-    first: Option<String>,
 }
 
 impl FakeWindow {
@@ -54,7 +53,6 @@ impl FakeWindow {
         launch: String,
         session: String,
         fake: Rc<FakeAdapter>,
-        first: Option<String>,
     ) -> Self {
         let trusts = fake.trusts.borrow().clone();
         Self {
@@ -64,7 +62,6 @@ impl FakeWindow {
             pid: Cell::new(None),
             fake,
             trusts,
-            first,
         }
     }
 
@@ -129,8 +126,11 @@ impl Window for FakeWindow {
         })
     }
 
+    /// Its prompt is a line of the screen that holds [`TRUST_PROMPT`], the screen the engine
+    /// read: past the trust question, where its windows ask one.
     fn shows_prompt(&self, screen: &[String]) -> bool {
-        self.trusts.is_some() && holds(screen, TRUST_PROMPT) && self.toward_trust(screen).is_none()
+        holds(screen, TRUST_PROMPT)
+            && (self.trusts.is_none() || self.toward_trust(screen).is_none())
     }
 
     fn names_trust_choices(&self, screen: &[String]) -> bool {
@@ -138,6 +138,14 @@ impl Window for FakeWindow {
             && [TRUST_QUESTION, TRUST_UNPLACED, TRUST_QUOTED]
                 .iter()
                 .any(|words| holds(screen, words))
+    }
+
+    fn ready_sign(&self) -> Option<&str> {
+        self.trusts.is_some().then_some(TRUST_PROMPT)
+    }
+
+    fn compacting(&self, screen: &[String]) -> bool {
+        holds(screen, COMPACTING)
     }
 
     fn follow(&self, session: &str) {
@@ -150,7 +158,7 @@ impl Window for FakeWindow {
         })
     }
 
-    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         let args = json!([{ "launch": self.bag() }]);
         let at = self.call("started", args.clone());
         let wrapped = self.fake.start_holds.wrap(&args);
@@ -165,21 +173,6 @@ impl Window for FakeWindow {
                     .recorder
                     .answered(at, json!({ "nativeSession": native }));
                 return Ok(Some(native));
-            }
-            // A first message that goes in once the window is up, as OpenCode's
-            // through its server, is handed over only if the host admits it then.
-            if let Some(first) = &self.first {
-                if !host.admits() {
-                    self.fake
-                        .recorder
-                        .answered(at, json!({ "$error": { "message": NOT_ADMITTED } }));
-                    return Err(NOT_ADMITTED.to_owned());
-                }
-                let item = self.fake.item(Role::User, first);
-                self.fake.of_launch(&self.launch, |agent| {
-                    agent.items.push(item);
-                    agent.settled = false;
-                });
             }
             let answer = early.unwrap_or_else(|| started.map_or(Ok(()), |started| started()));
             let answered = match answer {

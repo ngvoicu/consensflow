@@ -47,7 +47,12 @@ for (const [harness, label] of [['pi', 'Pi']]) {
         page.getByText('Role skills included in ConsensFlow', { exact: false }),
       ).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Update skills', exact: true })).toHaveCount(0)
+      // Every harness ConsensFlow runs, Muse Code the fifth (T-946: the page listed it, and
+      // the count said four).
       await expect(page.locator('.host')).toHaveCount(5)
+      await expect(
+        page.locator('.host').filter({ has: page.locator('strong', { hasText: /^muse$/ }) }),
+      ).toHaveCount(1)
       await expect(page.locator('.host').filter({ hasText: 'claude' })).toContainText(
         'Not installed',
       )

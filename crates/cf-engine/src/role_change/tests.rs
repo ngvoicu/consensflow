@@ -443,6 +443,8 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         session: None,
         owed: None,
         late: false,
+        work: crate::at_work::OnWork::default(),
+        not_ready: None,
     };
     assert!(
         context

@@ -213,11 +213,11 @@ fn same_limit(one: &str, other: &str) -> bool {
 }
 
 /// When a window's last turn that got through answered, as its record names the
-/// time (its text, or the milliseconds OpenCode dates a message in): none for a turn
+/// time (its text, or the milliseconds a record may date a message in): none for a turn
 /// that failed or was refused. An assistant's item with nothing of the model's in it
 /// is no answer (`synthetic`, T-530): Claude Code's close of a turn it found cut,
-/// written when the next message comes, a step Pi wrote of a run that failed or was
-/// aborted before the model's first token, a message OpenCode made before the reply.
+/// written when the next message comes, and a step Pi wrote of a run that failed or was
+/// aborted before the model's first token.
 fn last_answer(observed: &Observed) -> Option<String> {
     if observed.failed
         || observed
@@ -322,8 +322,8 @@ impl Dispatcher {
         let harness = member.harness.as_deref().unwrap_or("null");
         if self.seams.adapters.adapter(harness).is_none() {
             return Some(format!(
-                "@{} runs on {harness}, whose windows ConsensFlow cannot open",
-                member.handle
+                "@{} runs on {harness}, whose windows ConsensFlow cannot open (remove @{} from the staff and add a member on another harness)",
+                member.handle, member.handle
             ));
         }
         let agent = member.agent.as_deref();

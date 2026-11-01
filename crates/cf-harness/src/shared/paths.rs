@@ -20,7 +20,7 @@ pub(crate) fn home(env: &Env) -> Result<String, String> {
 }
 
 /// The folder the agents' common standard keeps a user's skills in,
-/// `.agents/skills` in the home: Codex, OpenCode, Pi and Devin read it too.
+/// `.agents/skills` in the home: Codex, Pi and Devin read it too.
 pub(crate) fn agents_skills(env: &Env) -> Result<String, String> {
     Ok(path::join(&[&home(env)?, ".agents", "skills"]))
 }

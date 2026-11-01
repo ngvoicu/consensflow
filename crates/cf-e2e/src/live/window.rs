@@ -242,13 +242,15 @@ impl Window<'_> {
         self.record().map(|record| record.items).unwrap_or_default()
     }
 
-    /// Marks the window as the daemon does where a turn begins (`pane.mark`), its harness
-    /// keeping its servers in the window's group: what the pane host answered.
+    /// Marks the window as the daemon does where a turn begins (`pane.mark`), with the way
+    /// its harness keeps its servers as the product's adapter says it on this platform
+    /// ([`servers_of`]): what the pane host answered.
     pub fn mark_turn(&self) -> Result<Value> {
-        self.rig.host(
-            "pane.mark",
-            json!({ "id": self.id, "generation": 1, "servers": "inGroup", "harness": self.harness.name() }),
-        )
+        let mut mark = json!({ "id": self.id, "generation": 1, "harness": self.harness.name() });
+        if let Some(servers) = servers_of(self.harness, cfg!(windows)) {
+            mark["servers"] = json!(servers);
+        }
+        self.rig.host("pane.mark", mark)
     }
 
     /// How many commands of its harness the window's tree runs now, as the pane host tells
@@ -425,6 +427,22 @@ fn answered(printed: &str, items: &[Item], answer: &str) -> bool {
 /// has not drawn its prompt.
 pub fn drawn(screen: &str) -> usize {
     screen.chars().filter(|at| !at.is_whitespace()).count()
+}
+
+/// How `harness` keeps its servers, as the product's adapter says it in the window's mark
+/// (each adapter's `Window::servers`, `cf_proto::panes::Servers`), on Windows where `windows`
+/// says so; none where the adapter says it does not know, and the mark then says nothing of it,
+/// as the daemon's does. Windows has no process groups: there Claude Code runs each command of
+/// its agent in a shell of its own (`byShell`, T-906), and a host told `inGroup` tells no
+/// command, so a live run on Windows that marked every harness so read every look untold
+/// (zeewin2, T-946).
+fn servers_of(harness: Harness, windows: bool) -> Option<&'static str> {
+    match (harness, windows) {
+        (Harness::Claude, true) => Some("byShell"),
+        (Harness::Claude | Harness::Pi, false) => Some("inGroup"),
+        (Harness::Codex | Harness::Muse, false) => Some("atLaunch"),
+        _ => None,
+    }
 }
 
 /// Whether a window held still: its output (`length`, read every `step`) has

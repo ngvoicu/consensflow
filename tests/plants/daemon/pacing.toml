@@ -13,6 +13,8 @@
 pacing-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 # The engine's pacing and arrival cases (`tests/dispatcher/pacing.rs`, `unproven.rs`, `still_there.rs`, `quoted_headers.rs`).
 pacing-kit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::", "unproven::", "still_there::", "quoted_headers::"]
+# The box an interrupt of the engine's would go into, read empty or not (`withheld_enter.rs`).
+pacing-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "withheld_enter::"]
 # The ledger's order of a queue.
 pacing-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "questions_first"]
 # Codex's broker, and what its window makes of it.
@@ -628,3 +630,60 @@ replace = '''
                 return Ok(Pace::Go);
             }
             let unrest'''
+
+# T-946: a window read by the fallback is up only once its harness shows its prompt: Muse 1.4.14 held
+# still six seconds as it started, and the fallback read it at rest, so the live pacing run typed into a
+# Muse that took no keys yet.
+[[plant]]
+name = "pacing: a window read by the fallback is drawn by a quiet screen alone"
+meant = "a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_prompt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        let drawn = quiet && up;'''
+replace = '''        let drawn = quiet || up && false;'''
+
+[[plant]]
+name = "pacing: a window read by the fallback whose record has items is not asked whether it is drawn"
+meant = "a_window_read_by_the_fallback_whose_record_has_items_is_not_at_rest_before_its_prompt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''            || ((observed.items().is_empty() || unnamed || !self.idle_word(record))'''
+replace = '''            || ((observed.items().is_empty() || unnamed)'''
+
+[[plant]]
+name = "pacing: a window read by the fallback is asked for its prompt in a screen it never sent"
+meant = "a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_prompt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                window.shows_prompt(&drawn_lines(snapshot))'''
+replace = '''                window.shows_prompt(Shown::from_snapshot(snapshot).lines())'''
+
+[[plant]]
+name = "pacing: a window read by the fallback is asked whether it is drawn with no lines of its screen"
+meant = "a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_prompt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                let body = if fallback {'''
+replace = '''                let body = if fallback && false {'''
+
+# T-946: the engine read the input box from a snapshot it asked no drawn lines of, so every box read
+# not empty in the product, and the key went into empty ones too (T-829's rule); the fake host had sent
+# the lines unasked.
+[[plant]]
+name = "pacing: the box is read empty or not from a snapshot that holds none of the screen's lines"
+meant = "a_box_its_harness_reads_empty_is_pressed_no_key_and_the_words_go_into_it"
+runs = ["pacing-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                .request("pane.snapshot", pane_body_drawn(pane)),'''
+replace = '''                .request("pane.snapshot", json!({ "id": pane.id, "generation": pane.generation })),'''
+

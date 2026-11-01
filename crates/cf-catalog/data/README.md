@@ -106,9 +106,7 @@ account attestation is invisible to every catalog there is, and a preset written
 on the catalogs alone would have 403'd on every consult. Once the attestation was
 granted the same probe answered `ok`, and the row went in, at `xhigh`, the level
 both catalogs give and Pi ran. A catalog
-listing proves the id; only a run proves the account can reach it. The
-contributor and free routes of Muse 1.3 are reviewed pricing and data-use routes
-(their label says "Prompts and replies may train Meta models.").
+listing proves the id; only a run proves the account can reach it.
 
 ## GPT 6 Astra (2026-09-05)
 
@@ -242,6 +240,5 @@ tiers stay stable.
 spec, in git history). Its keys describe exact model identities, not callsigns
 or saved preset provenance. A model key is the model's id with its provider path
 stripped, after an exact match with a preset of the harness: Anthropic's own ids
-spell the version with a dash, the key with the dot, as OpenRouter does;
-Devin spells GPT versions with dashes too (`gpt-6-1-sol`); and Muse Spark's
-contributor and free routes are one model.
+spell the version with a dash, the key with the dot, as OpenRouter does,
+and Devin spells GPT versions with dashes too (`gpt-6-1-sol`).

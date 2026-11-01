@@ -1207,8 +1207,11 @@ impl Dispatcher {
         // still: nothing goes into it, as a paste's Enter would answer the question
         // (`trust`).
         let asking = record.window.borrow().trust != Trusting::Past;
+        // A window read at rest by the fallback is asked whether it is drawn whatever its
+        // record holds: its harness's prompt is its only sign that it is up (`drawn`).
         let drawing = asking
-            || ((observed.items().is_empty() || unnamed) && !returning(self.drawn(record)).await);
+            || ((observed.items().is_empty() || unnamed || !self.idle_word(record))
+                && !returning(self.drawn(record)).await);
         if self.forgotten(record) {
             return Ok(());
         }
@@ -1426,7 +1429,10 @@ impl Dispatcher {
             let next = self.next_in_line(record)?;
             // A hold is the head's: a message that left the head of its queue (withdrawn,
             // its task paused or cancelled) is held back no more (Calliope's re-check of
-            // `a0aecd192`, T-854). And what a look read of the human's input is this look's.
+            // `a0aecd192`, T-854), and the wait its window's readiness said for it is no
+            // more the lane's: the words only the human could act on, or words typed and
+            // not sent (Calliope's P3-1 of T-945). And what a look read of the human's
+            // input is this look's.
             {
                 let mut part = record.delivery.borrow_mut();
                 part.input = None;
@@ -1437,6 +1443,8 @@ impl Dispatcher {
                     .is_some_and(|held| Some(held.message) != head)
                 {
                     part.held = None;
+                    part.for_human = None;
+                    part.unsent = false;
                 }
             }
             if let Some(next) = next {

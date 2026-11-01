@@ -191,17 +191,32 @@ impl Sandbox {
 
     /// The pids the stand-in harnesses wrote: one file each.
     pub fn recorded_pids(&self) -> Result<Vec<u32>> {
-        let mut pids = Vec::new();
+        Ok(self
+            .recorded_stand_ins()?
+            .into_iter()
+            .map(|(pid, _)| pid)
+            .collect())
+    }
+
+    /// The pids the stand-in harnesses wrote, each with when its file was written: the stand-in
+    /// was running then.
+    pub fn recorded_stand_ins(&self) -> Result<Vec<(u32, std::time::SystemTime)>> {
+        let mut stand_ins = Vec::new();
         for entry in fs::read_dir(&self.pids).map_err(files("list", &self.pids))? {
             let path = entry.map_err(files("list", &self.pids))?.path();
             if path.extension().is_none_or(|extension| extension != "pid") {
                 continue;
             }
             let text = fs::read_to_string(&path).map_err(files("read", &path))?;
+            let written = fs::metadata(&path)
+                .and_then(|meta| meta.modified())
+                .map_err(files("read", &path))?;
             // A file being written is empty or short: it names no pid yet.
-            pids.extend(text.trim().parse::<u32>().ok().filter(|pid| *pid > 0));
+            if let Some(pid) = text.trim().parse::<u32>().ok().filter(|pid| *pid > 0) {
+                stand_ins.push((pid, written));
+            }
         }
-        Ok(pids)
+        Ok(stand_ins)
     }
 }
 

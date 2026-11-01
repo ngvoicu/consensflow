@@ -95,7 +95,7 @@ fn unmarked() -> Vec<Item> {
 #[test]
 fn takes_the_message_the_window_rested_on_as_the_end_of_that_turn_where_the_record_never_marks_one()
 {
-    // Devin's and OpenCode's records never say a turn is over.
+    // Devin's records never say a turn is over.
     let items = unmarked();
     assert!(
         asking_turn_end(&items[..2], &HashSet::new()).is_none(),

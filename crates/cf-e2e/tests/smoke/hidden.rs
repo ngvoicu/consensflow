@@ -64,10 +64,15 @@ fn the_built_app_reads_its_windows_while_it_is_hidden() -> Outcome {
     // not hold says where it is as the machine goes (`Machine`'s drop), and a step that
     // could not be taken says it here.
     let machine = Machine::with_harness(Path::new(PASTE_READER), patience, HARNESS)?;
+    // The app built is of the live app's identity: what is started is a copy of the smoke's,
+    // but on GitHub's runner where the release run asks for the bundle as it ships.
+    let bundle = bundle::to_start(&bundle, &machine.root)?;
     let outcome = drive(&bundle, &machine, patience, &mut std::io::stdout());
     let keep = own_var("CONSENSFLOW_SMOKE_KEEP").as_deref() == Some("1");
     machine.say_where_kept(&mut std::io::stderr(), outcome.is_err() || keep);
     outcome?;
+    // Its seal holds after it ran: nothing it did wrote into the bundle.
+    bundle::assert_sealed(&bundle.app)?;
     if !keep {
         machine.cleanup()?;
     }
@@ -84,7 +89,7 @@ fn drive(
 ) -> Outcome {
     let (go, count) = (machine.root.join("go"), machine.root.join("count"));
     let mut app = App::start(
-        Run::new(&bundle.binary)
+        bundle::run_of(bundle)
             .vars(machine.vars())
             .var("CFSMOKE_GO", &go)
             .var("CFSMOKE_COUNT", &count)

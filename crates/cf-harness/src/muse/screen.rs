@@ -25,14 +25,27 @@ fn is_rule(line: &str) -> bool {
     line.starts_with("──") && line.ends_with('─')
 }
 
+/// Whether `line` is the rule Muse draws above its box: one with a label in it (the
+/// voice key's), where the rule under the box has none.
+fn is_labelled(line: &str) -> bool {
+    is_rule(line) && line.trim().chars().any(|c| c != '─')
+}
+
+/// The place of the rule above the box: the last labelled rule in view, for the box is
+/// the screen's last thing but its status line.
+fn voice_rule(screen: &[String]) -> Option<usize> {
+    screen.iter().rposition(|line| is_labelled(line))
+}
+
 /// The box `screen` (a window's last lines) shows: its first line's place and words
-/// after the mark, and whether a line after it holds anything. None where there is
-/// none, or it is drawn halfway (no rule below it yet).
+/// after the mark, and whether a line after it holds anything. The box is found by the
+/// rule above it: its first line is the line after that rule, where it begins with the
+/// mark, and a mark anywhere else is the box's words or the conversation's (a brief
+/// that quotes a Muse screen holds such lines: Calliope's P3-2 of T-945). None where
+/// there is none, or it is drawn halfway (no rule below it yet).
 fn boxed(screen: &[String]) -> Option<(usize, &str, bool)> {
-    let first = screen
-        .iter()
-        .rposition(|line| line.trim_start().starts_with(MARK))?;
-    if first == 0 || !is_rule(&screen[first - 1]) {
+    let first = voice_rule(screen)? + 1;
+    if !screen.get(first)?.trim_start().starts_with(MARK) {
         return None;
     }
     let end = first + screen[first..].iter().position(|line| is_rule(line))?;
@@ -67,25 +80,20 @@ pub(crate) fn words(screen: &[String]) -> Option<String> {
 }
 
 /// Whether `screen` shows the tail of a box whose first line, with the mark, is out of
-/// view: no box is read whole, and above the last rule, up to the rule before it or the
-/// screen's top, are lines with words and no mark. A box holding more lines than the window
-/// keeps them under its rule and scrolls its first line out (T-829's probe, Muse 1.4.14).
+/// view: the rule above the box is in view, with words under it up to the rule below,
+/// and no mark on the first line under it. A box holding more lines than the window keeps
+/// them under its rule and scrolls its first line out (T-829's probe, Muse 1.4.14). A
+/// screen drawn halfway, the rule above the box and nothing under it yet, is no cut box.
 pub(crate) fn box_cut(screen: &[String]) -> bool {
-    if boxed(screen).is_some() {
-        return false;
-    }
-    let Some(last) = screen.iter().rposition(|line| is_rule(line)) else {
+    let Some(top) = voice_rule(screen) else {
         return false;
     };
-    let top = screen[..last]
-        .iter()
-        .rposition(|line| is_rule(line))
-        .map_or(0, |rule| rule + 1);
-    let inside = &screen[top..last];
-    inside.iter().any(|line| !line.trim().is_empty())
-        && !inside
-            .iter()
-            .any(|line| line.trim_start().starts_with(MARK))
+    let under = &screen[top + 1..];
+    let Some(end) = under.iter().position(|line| is_rule(line)) else {
+        return false;
+    };
+    let inside = &under[..end];
+    inside.iter().any(|line| !line.trim().is_empty()) && !inside[0].trim_start().starts_with(MARK)
 }
 
 /// Whether `screen` shows Muse's prompt: its input box, which it draws once it is up,
@@ -174,6 +182,44 @@ mod tests {
         // The user's words the conversation shows have no rule above them.
         let conversation = lines("  Muse Code 1.4.13\n\n❯ Say hello.\n◆ echo: Say hello.");
         assert!(!shows_prompt(&conversation));
+    }
+
+    /// Calliope's P3-2 of T-945: a brief that quotes a Muse screen has lines that begin
+    /// with the mark, which the last mark in view took for the box's first line.
+    #[test]
+    fn a_box_whose_words_begin_a_line_with_the_mark_is_read_whole_by_the_rule_above_it() {
+        let quoting = screen(
+            "❯ Say hello.",
+            "❯ Read this screen:\n  ❯ Say hello.\n  ◆ echo: Say hello.",
+        );
+        assert_eq!(read(&quoting, None), Some(InputBox::Holds));
+        assert!(shows_prompt(&quoting));
+        assert!(!box_cut(&quoting));
+        assert_eq!(
+            words(&quoting).as_deref(),
+            Some("Read this screen:\n❯ Say hello.\n◆ echo: Say hello.")
+        );
+    }
+
+    #[test]
+    fn a_cut_box_is_read_cut_with_a_mark_in_its_words_and_a_screen_drawn_halfway_is_not() {
+        // The tail of a taller box: its first line out of view, a quoted mark in it.
+        let tail = lines(&format!(
+            "{VOICE}\n  l30 of the brief\n  ❯ Say hello.\n  l32 of the brief\n{RULE}\n{STATUS}"
+        ));
+        assert_eq!(read(&tail, None), None);
+        assert!(box_cut(&tail));
+        // The rule above the box drawn, and nothing under it yet: no box, cut or whole.
+        let halfway = lines(&format!(
+            "  Muse Code 1.4.14\n\n◆ echo: a turn taken back\n{VOICE}"
+        ));
+        assert!(!box_cut(&halfway));
+        assert!(!shows_prompt(&halfway));
+        let halfway_blank = lines(&format!("  Muse Code 1.4.14\n◆ echo: one\n{VOICE}\n\n"));
+        assert!(!box_cut(&halfway_blank));
+        // A whole box is never cut, empty or holding words.
+        assert!(!box_cut(&screen("❯ Say hello.", "❯")));
+        assert!(!box_cut(&screen("", "❯ Line one\n  line two")));
     }
 
     #[test]

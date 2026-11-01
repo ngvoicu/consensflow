@@ -256,10 +256,8 @@ pub struct FakeAdapter {
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
     /// How its windows take their first message: as they open, as Devin's does
-    /// from its file (as the fake of Node's suite took it); posted once they are up,
-    /// as OpenCode's through its server, only if the host admits it then; or
-    /// delivered once they are up as any later message is, as Claude Code's, Pi's
-    /// and Codex's are.
+    /// from its file (as the fake of Node's suite took it); or delivered once they
+    /// are up as any later message is, as Claude Code's, Pi's and Codex's are.
     pub first: Cell<FirstMessage>,
     /// Where its harness has the Specmint variant installed, when the test says
     /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
@@ -1101,13 +1099,9 @@ impl Asked {
             used: None,
             unreadable: None,
         };
-        let seeded = launch
-            .message
-            .filter(|_| fake.first.get() == FirstMessage::Started)
-            .map(str::to_owned);
         if let Some(message) = launch
             .message
-            .filter(|_| seeded.is_none() && !fake.forgets_first_messages.get())
+            .filter(|_| !fake.forgets_first_messages.get())
         {
             agent.items.push(fake.item(Role::User, message));
             agent.settled = false;
@@ -1119,7 +1113,6 @@ impl Asked {
             id.clone(),
             native.clone(),
             Rc::clone(fake),
-            seeded,
         ));
         Box::pin(async move {
             // A test's own `prepare` is an async function that returns the

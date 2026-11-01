@@ -208,8 +208,8 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''message.kind != "task" && *teller != task.requester && *teller != "human"'''
-replace = "false"
+find = "teller.filter(|teller| *teller != task.requester)"
+replace = "teller.filter(|_| false)"
 
 [[plant]]
 name = "removal tellers: the engine tells the requester of a task it gives up on in a note of its own again"

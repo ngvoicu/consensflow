@@ -85,7 +85,7 @@ impl SystemProcesses {
     }
 
     /// Forces every child still running to end: what this process does on
-    /// its way out, as Node's exit hook did for OpenCode's server. A program
+    /// its way out, as Node's exit hook did for the servers it started. A program
     /// run to its end (`run`, `capture`) goes with the group it leads on Unix
     /// and the tree it started on Windows: an update's installer, and the
     /// children that installer started, are not left changing the
@@ -490,9 +490,7 @@ mod tests {
 
     /// What a child's stop waits for (`shared::child`): a program that has exited has
     /// ended, though a program it left holds its error stream open, which nothing here
-    /// reads, for thirty seconds more. Its stream is closed only then (T-566: OpenCode's
-    /// throwaway server's case, `a_server_that_has_exited_is_stopped_though_a_program_
-    /// holds_its_error_stream`, which went with OpenCode's channel).
+    /// reads, for thirty seconds more. Its stream is closed only then.
     #[cfg(unix)]
     #[test]
     fn a_child_that_has_exited_has_ended_though_a_program_it_left_holds_its_error_stream() {

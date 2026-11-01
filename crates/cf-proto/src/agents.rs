@@ -106,9 +106,6 @@ pub struct Profile {
     pub model_label: String,
     /// The road to the model (`Codex login`, `OpenRouter · API`).
     pub route_label: String,
-    /// What a person should know of the road's data use, said for Muse's contributor routes alone.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub route_note: Option<String>,
     pub work_tier: WorkTier,
 }
 
@@ -213,8 +210,7 @@ mod tests {
         Profile {
             model_key: "muse-spark-1.3".into(),
             model_label: "Muse Spark 1.3".into(),
-            route_label: "OpenRouter · Contributor · Free".into(),
-            route_note: Some("Prompts and replies may train Meta models.".into()),
+            route_label: "OpenRouter · API".into(),
             work_tier: WorkTier::Light,
         }
     }
@@ -223,9 +219,9 @@ mod tests {
         CatalogEntry {
             name: "eos".into(),
             designer: false,
-            model: "openrouter/meta/muse-spark-1.3-contributor-free".into(),
+            model: "openrouter/meta/muse-spark-1.3".into(),
             effort: Some("xhigh".into()),
-            description: "Pi Muse Spark 1.3 Contributor FREE XHIGH".into(),
+            description: "Pi Muse Spark 1.3 XHIGH".into(),
             detail: "Collaborative coding and task breakdown.".into(),
             profile: muse(),
             preset: "eos".into(),
@@ -298,20 +294,8 @@ mod tests {
     fn a_profile_writes_its_fields_in_the_order_the_catalog_builds_them() {
         assert_eq!(
             serde_json::to_string(&muse()).unwrap(),
-            r#"{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"}"#
+            r#"{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"}"#
         );
-    }
-
-    #[test]
-    fn a_profile_with_no_route_note_says_none() {
-        let plain = Profile {
-            route_note: None,
-            ..muse()
-        };
-        let written = serde_json::to_string(&plain).unwrap();
-        assert!(!written.contains("routeNote"), "{written}");
-        assert!(written
-            .ends_with(r#""routeLabel":"OpenRouter · Contributor · Free","workTier":"light"}"#));
     }
 
     #[test]
@@ -319,10 +303,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&entry()).unwrap(),
             concat!(
-                r#"{"name":"eos","model":"openrouter/meta/muse-spark-1.3-contributor-free","effort":"xhigh","#,
-                r#""description":"Pi Muse Spark 1.3 Contributor FREE XHIGH","#,
+                r#"{"name":"eos","model":"openrouter/meta/muse-spark-1.3","effort":"xhigh","#,
+                r#""description":"Pi Muse Spark 1.3 XHIGH","#,
                 r#""detail":"Collaborative coding and task breakdown.","#,
-                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
+                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"},"#,
                 r#""preset":"eos"}"#
             )
         );
@@ -400,7 +384,7 @@ mod tests {
             concat!(
                 r#"{"name":"mine","harness":"kimi","designer":true,"model":"moonshot-ai/kimi-k3","#,
                 r#""workTier":"complex","effort":"high","description":"Mine","preset":"mine","custom":true,"#,
-                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
+                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"},"#,
                 r#""unsupported":true,"hidden":true}"#
             )
         );

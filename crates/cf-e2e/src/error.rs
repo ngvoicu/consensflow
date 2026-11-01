@@ -28,6 +28,10 @@ pub enum Error {
     /// The `cf` under test could not be built, or the build left none.
     #[error("{0}")]
     Build(String),
+    /// The program is an app of the live app's identity, which no case starts
+    /// ([`cf_base::bundle`]).
+    #[error("{0}")]
+    LiveApp(String),
     /// What a command printed, which was to be JSON, is not.
     #[error("not JSON ({source}):\n{text}")]
     Json {

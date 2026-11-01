@@ -137,9 +137,6 @@ pub struct Look {
     pub options: Map<String, Value>,
     #[serde(default)]
     pub env: Option<Map<String, Value>>,
-    /// Played between OpenCode's two snapshot reads.
-    #[serde(default)]
-    pub between: Option<Vec<Step>>,
     /// The cached reader's reading.
     #[serde(default)]
     pub read: Option<usize>,
@@ -243,12 +240,8 @@ pub fn check(step: &Step, scenario: &str) {
             session,
             options,
             env,
-            between,
             ..
         }) => {
-            for inner in between.as_deref().unwrap_or_default() {
-                check(inner, scenario);
-            }
             ["codex", "claude-code", "pi", "devin"].contains(&kind.as_str())
                 && (session.is_empty() || !session.contains('/'))
                 && options.values().all(|value| !value.is_null())
@@ -260,17 +253,13 @@ pub fn check(step: &Step, scenario: &str) {
     assert!(ok, "{scenario}: {step:?}");
 }
 
-/// Every look of `steps`, those played between snapshot reads included.
+/// Every look of `steps`.
 pub fn looks(steps: &[Step]) -> Vec<&Look> {
     steps
         .iter()
-        .flat_map(|step| match step {
-            Step::Look(look) => {
-                let mut all = vec![look];
-                all.extend(looks(look.between.as_deref().unwrap_or_default()));
-                all
-            }
-            _ => Vec::new(),
+        .filter_map(|step| match step {
+            Step::Look(look) => Some(look),
+            _ => None,
         })
         .collect()
 }

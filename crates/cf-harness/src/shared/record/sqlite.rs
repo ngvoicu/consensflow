@@ -1,5 +1,5 @@
 //! A harness's SQLite store, read as `node:sqlite`'s `DatabaseSync(file, {
-//! readOnly: true })` read it (OpenCode's store, Devin's sessions):
+//! readOnly: true })` read it (Devin's sessions):
 //! - read-only, and never waiting on a writer: a busy timeout of none, as
 //!   `DatabaseSync`'s default is;
 //! - with `DatabaseSync`'s other defaults: foreign keys enforced, and no

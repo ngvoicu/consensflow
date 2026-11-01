@@ -12,7 +12,7 @@
 //! nothing, and are delivered the brief once up: Claude Code's pasted once it is past the
 //! question of trusting its folder (its record wraps the paste, as it wraps every later
 //! message), Pi's through its extension's inbox, Codex's through the broker of its
-//! supervisor. Devin reads its own from a prompt file, and OpenCode is posted its own.
+//! supervisor. Devin reads its own from a prompt file.
 //!
 //! The native daemon and the real pane host run in a home of the run's own; the chief is
 //! the stand-in, and the check plays the chief with its token. Each harness is the one

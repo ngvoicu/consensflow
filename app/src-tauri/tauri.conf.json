@@ -9,6 +9,9 @@
     "beforeDevCommand": {
       "script": "npm run prepare:app",
       "wait": true
+    },
+    "windows": {
+      "staticVCRuntime": true
     }
   },
   "app": {

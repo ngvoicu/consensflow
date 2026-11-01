@@ -8,9 +8,7 @@
 # harness; the report says what each window was launched on, as the roster row the daemon opens a
 # member's on (`agents::write_roster`) and the agent a window opened without the daemon is asked
 # for (`window::Open::open`) have it, a suite's own `--model` and all (`Log::launched`,
-# `Log::report`, `report::conclude`). A window opened without the daemon is never asked for an
-# OpenCode effort, which it would not get (`window::without_the_daemon`; resume-cut refuses it
-# first). The runs of agents of their own (`agent`, `designer`) refuse `--models`
+# `Log::report`, `report::conclude`). The runs of agents of their own (`agent`, `designer`) refuse `--models`
 # (`Log::own_agents`). xtask hands the flag on as it does every flag (`tools/xtask/src/live.rs`).
 # No harness is run: the tests of the support, of the suites that start a window of their own
 # (Codex's app-server, resume-cut's Claude) and of xtask's words catch each plant.

@@ -3,7 +3,7 @@
 #
 # - a child is stopped when its process has ended, whatever still holds its error stream open
 #   (`crates/cf-harness/src/shared/child.rs`, `cf_process::Child::ended`; a real child in
-#   `seams::processes`'s unit tests since OpenCode's throwaway server went, T-566);
+#   `seams::processes`'s unit tests since T-566);
 # - a stop waits for the pass it found running and for no longer than that, counted in the
 #   timers' own time (`crates/cf-daemon/src/stop.rs`), and so is the stop of everything open (T-376):
 #   one deadline for a pass that never ends, a door, an idle connection and a body half sent,

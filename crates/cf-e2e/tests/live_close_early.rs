@@ -9,7 +9,7 @@
 //! to 2 s of a Claude Code worker's window starting failed its task. The brief's delivery
 //! had begun, the project was suspended, the window closed, and the delivery failed
 //! "window closed"; the task went from queued to failed, the chief and the human heard
-//! it failed, and Resume brought nothing back. Codex and OpenCode were fine at 0 ms.
+//! it failed, and Resume brought nothing back. Codex was fine at 0 ms.
 //!
 //! The native daemon and the real pane host run in a home of the run's own; the chief is
 //! the stand-in, and the check plays the chief with its token. Each harness is the one

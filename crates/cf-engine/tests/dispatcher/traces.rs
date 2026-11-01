@@ -205,7 +205,7 @@ const OUT_WITH_WORK_WAITING: &str = "the chief is out of quota with a task queue
 
 /// What the engine does before a paste its record never showed goes again: the
 /// window is read once more (`arrival`, T-269, 2026-10-22).
-const READ_ONCE_MORE: &str = "before the paste its record never showed goes again, the window is read once more: the pane host is asked what the window does now (`pane.snapshot`) and the record looked at again (`observe`), where Node pasted it again on the look that found it overdue";
+const READ_ONCE_MORE: &str = "before the paste its record never showed goes again, the window is read once more: the pane host is asked what the window does now and shows (`pane.snapshot` with `tail`: a window whose harness compacts is at work, T-901) and the record looked at again (`observe`), where Node pasted it again on the look that found it overdue";
 
 /// What the engine gives as a worker's result: its final answer alone, what it wrote after
 /// its last tool call (the owner's decision of 2026-10-15), where Node's is everything the
@@ -242,6 +242,10 @@ const DEPARTED: &[(&str, &str)] = &[
     (
         "keeps a chief whose agent was deleted closed, tells the human, and holds what it was to receive",
         CHIEF_ON_NO_AGENT,
+    ),
+    (
+        "gives a member on it no work, says why, and every pass goes on",
+        "the note that T-1 waits for a free worker names the way out for a member on a harness ConsensFlow cannot open (`remove @hera from the staff and add a member on another harness`), where Node's named none (T-569, from Calliope's review of T-566)",
     ),
     (
         "reaches the chief again once the human says it is back before its reset",

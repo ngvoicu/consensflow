@@ -8,7 +8,7 @@
 # against a second paste of a message the window has:
 #
 # - the engine counts the arrival window in the time the window is at rest, its turns no part of it,
-#   and a harness that says at the hand-over that its own queue holds the message (OpenCode, Pi) is
+#   and a harness that says at the hand-over that its own queue holds the message (Pi) is
 #   waited for as one that queued it itself is;
 # - Devin's window reads busy from the prompt its TUI puts to its agent, before the agent's first
 #   word, for a gap and no longer, until the turn ends or the request is answered;

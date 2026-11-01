@@ -1,6 +1,6 @@
 //! Where an adapter asks a peer on loopback over HTTP, as the channels'
-//! `fetch` asked ConsensFlow's Codex broker and OpenCode's plugin and
-//! server: the request as its caller wrote it, the reply's head, then its
+//! `fetch` asked ConsensFlow's Codex broker: the request as its
+//! caller wrote it, the reply's head, then its
 //! body within a size. A failure says whether a head came. A timeout is the
 //! caller's: `within` around `send`, and around `body` with what is left; a
 //! reply dropped unread is `response.body.cancel()`.
@@ -25,8 +25,8 @@ pub struct Request {
     pub body: Option<Vec<u8>>,
 }
 
-/// What undici says of a request no head came for: the sentence two of
-/// its callers pass on (`started` of OpenCode's window).
+/// What undici says of a request no head came for: the sentence its
+/// callers pass on.
 pub const FETCH_FAILED: &str = "fetch failed";
 
 /// What undici says of a body the connection broke or ended before it was

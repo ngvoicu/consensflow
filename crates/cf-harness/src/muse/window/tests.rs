@@ -133,8 +133,8 @@ fn a_fresh_window_names_the_session_its_own_process_opened_before_any_hook_says_
         Ok(Readiness::Held(Held::Because(HOLD.to_owned())))
     );
     let mut driver = Driver::default();
-    let (starting, asking) = (Rc::clone(&window), Rc::clone(&host));
-    driver.begin(0, async move { starting.started(&*asking).await });
+    let starting = Rc::clone(&window);
+    driver.begin(0, async move { starting.started().await });
     assert!(driver.run().is_empty(), "nothing says a session yet");
     // Another process's session, and then the window's own, a second in.
     home.log(&v7(500), 40_086, "");
@@ -156,10 +156,9 @@ fn a_fresh_window_names_the_session_its_own_process_opened_before_any_hook_says_
 fn a_fresh_window_whose_process_says_nothing_is_given_up_with_why_and_a_hook_s_word_will_do() {
     let home = Home::new();
     let window = Rc::new(home.window(None));
-    let host = Rc::new(ScriptedHost::default());
     let mut driver = Driver::default();
-    let (starting, asking) = (Rc::clone(&window), Rc::clone(&host));
-    driver.begin(0, async move { starting.started(&*asking).await });
+    let starting = Rc::clone(&window);
+    driver.begin(0, async move { starting.started().await });
     let mut settled = driver.run();
     while home.fakes.time.fire_next(EPOCH_MS + 31_000) {
         settled.extend(driver.run());
@@ -193,8 +192,8 @@ fn a_resume_muse_will_not_make_for_another_window_is_unfit_in_muse_s_words_and_t
     let session = "01a17bc9-e758-77f3-ac8d-a725edf373ae";
     let window = home.window(Some(session));
     window.opened(Some(40_085));
+    assert_eq!(finished(window.started()), Ok(None));
     let host = ScriptedHost::default();
-    assert_eq!(finished(window.started(&host)), Ok(None));
     assert!(
         asked(&host).is_empty(),
         "a resumed window knows its session"
@@ -479,4 +478,48 @@ fn a_window_cleared_with_no_hook_and_no_word_of_its_process_is_followed_by_its_l
     assert!(!window.greeted(&cleared));
     home.hook_said(&session, "startup");
     assert!(window.greeted(&session));
+}
+
+/// Integration D1 (T-946), Muse meets chief-meeting's gate: Muse says nothing of a window
+/// at rest apart from its record, so the fallback reads it and the board says so; the
+/// gate's fresh look before a paste reads its box through Muse's own reader, and as empty
+/// where a turn taken back left its message there, which the hand-over empties first; and
+/// the trace of a hold says what the host said of the human's input at the readiness
+/// that held it.
+#[test]
+fn muse_is_read_at_rest_by_the_fallback_its_box_by_its_own_reader_and_its_input_by_its_readiness() {
+    let home = Home::new();
+    let window = home.window(Some(&v7(100)));
+    assert!(!window.idle_word());
+    let host = ScriptedHost::default();
+    host.answer("pane.snapshot", [at_prompt("half a sentence")]);
+    assert_eq!(
+        finished(window.input_box(&host, &pane())),
+        Some(InputBox::Holds)
+    );
+    host.answer("pane.snapshot", [at_prompt("")]);
+    assert_eq!(
+        finished(window.input_box(&host, &pane())),
+        Some(InputBox::Empty)
+    );
+    host.answer("pane.snapshot", [snapshot(&["  Muse Code 1.4.14", ""])]);
+    assert_eq!(finished(window.input_box(&host, &pane())), None);
+    assert_eq!(window.human_input(), None, "no readiness has looked yet");
+    host.answer("pane.snapshot", [at_prompt("")]);
+    assert_eq!(
+        finished(window.ready(&host, &pane())).unwrap(),
+        Readiness::Ready
+    );
+    let input = window.human_input().expect("the readiness's snapshot");
+    assert_eq!((input.typed, input.unsent), (Some(0), Some(false)));
+    // A turn taken back: its message is in the box, which the hand-over empties first.
+    let session = v7(200);
+    home.log(&session, 40_085, &taken_back());
+    let restored = home.window(Some(&session));
+    restored.opened(Some(40_085));
+    assert!(finished(restored.observe()).unwrap().took_back);
+    assert_eq!(
+        finished(restored.input_box(&host, &pane())),
+        Some(InputBox::Empty)
+    );
 }

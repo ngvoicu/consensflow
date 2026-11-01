@@ -95,7 +95,7 @@ use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{observed_from, switched_to};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
-use crate::shared::{pane, specmint, window_args};
+use crate::shared::{compacting, pane, specmint, window_args};
 
 /// Claude Code, as the engine launches its windows.
 pub struct ClaudeAdapter {
@@ -285,9 +285,16 @@ impl Adapter for ClaudeAdapter {
     /// servers as it takes its first message, after the window's turn is marked.
     /// What a server starts is the harness's whatever group it starts it in: the
     /// browser of `@playwright/mcp` and `chrome-devtools-mcp` leaves it.
+    ///
+    /// On Windows a job object has no groups, and Claude Code runs every command of its
+    /// agent in a shell it starts for it (Git Bash's `bash.exe`: T-375's scripts, T-858's
+    /// `exec sleep 611` in a Monitor) and its servers as their programs (npm's are a
+    /// `cmd.exe /c npx …`, which is no shell): [`Servers::ByShell`]. Said `Unknown` before
+    /// T-906, it left the host telling none of its commands, and a Monitor that Claude Code
+    /// had ended held its task until Finish.
     fn servers(&self) -> Servers {
         if self.env.on_windows() {
-            Servers::Unknown
+            Servers::ByShell
         } else {
             Servers::InGroup
         }
@@ -522,7 +529,7 @@ impl Window for ClaudeWindow {
         self.shared.set(false);
     }
 
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async { Ok(None) })
     }
 
@@ -544,6 +551,14 @@ impl Window for ClaudeWindow {
 
     fn names_trust_choices(&self, screen: &[String]) -> bool {
         super::trust::names_choices(screen)
+    }
+
+    fn ready_sign(&self) -> Option<&str> {
+        Some(super::trust::PROMPT)
+    }
+
+    fn compacting(&self, screen: &[String]) -> bool {
+        compacting::drawn(screen, &compacting::CLAUDE)
     }
 
     fn trust_servers(&self, screen: &[String]) -> Vec<String> {

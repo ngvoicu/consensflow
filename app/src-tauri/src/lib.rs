@@ -21,6 +21,7 @@ mod file_drop;
 mod launcher;
 #[cfg(windows)]
 mod page_crash;
+mod panics;
 // Only the Windows app loads a failed page again; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod page_reloads;
@@ -28,6 +29,10 @@ mod page_reloads;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
 pub mod runtime;
+// The build script's reading of the identity a build is made with, tested with the app's tests.
+#[cfg(test)]
+#[path = "../build/identity.rs"]
+mod built_identity;
 #[cfg(test)]
 mod test_manifest;
 #[cfg(test)]
@@ -227,6 +232,18 @@ fn selftest_report(event: String, data: Value) -> Value {
     json!({"ok":true})
 }
 
+/// The identity this build was made with, kept in the app's own file in these
+/// words, where a test reads it without starting the app
+/// (app/scripts/built-identity.mjs): a Windows exe says it nowhere else, and one
+/// of the release's identity started by a test keeps its runtime in the
+/// release's folder of the machine's user, whatever the test sets `LOCALAPPDATA`
+/// to (T-951). `run` reads it, so that no linker leaves it out.
+pub static BUILT_IDENTITY: &str = concat!(
+    "consensflow-built-identity:",
+    env!("CONSENSFLOW_BUILT_IDENTITY"),
+    ";"
+);
+
 /// The installed release's bundle identity: the only build that may keep the
 /// live home, `~/.consensflow`.
 pub const PRODUCTION_IDENTIFIER: &str = "dev.ngvoicu.consensflow";
@@ -238,8 +255,9 @@ pub const PRODUCTION_IDENTIFIER: &str = "dev.ngvoicu.consensflow";
 /// `~/.consensflow` — the live instance's state. The kernel lock refuses that
 /// only while the live app runs; after a reboot the newer build would open
 /// and migrate the live state. So the build decides: the release keeps the
-/// default, everything else gets `~/.consensflow-candidate`. An explicit,
-/// non-empty `CONSENSFLOW_HOME` always wins — tests and smokes set one.
+/// default, everything else gets `~/.consensflow-candidate`, but a smoke's build, which
+/// starts on no home but the one its smoke names. An explicit, non-empty
+/// `CONSENSFLOW_HOME` always wins — tests and smokes set one.
 fn isolated_home(
     identifier: &str,
     debug: bool,
@@ -252,8 +270,49 @@ fn isolated_home(
     if identifier == PRODUCTION_IDENTIFIER && !debug {
         return Ok(None);
     }
+    if identifier == cf_base::bundle::SMOKE {
+        return Err(format!(
+            "{} is a smoke's build, which starts only on the home its smoke \
+             names (CONSENSFLOW_HOME): without one it would run on the Candidate's",
+            cf_base::bundle::SMOKE
+        ));
+    }
     home.map(|home| Some(home.join(".consensflow-candidate")))
         .ok_or_else(|| "this build needs HOME to find ~/.consensflow-candidate".to_string())
+}
+
+/// The title of the app's window: the product's name, and where the build is of another
+/// identity than the release's and its name does not say so already, what that identity is
+/// (`dev.ngvoicu.consensflow.smoke` reads "ConsensFlow Smoke"), so that no window of a test's
+/// build reads as the live app's.
+fn window_title(name: &str, identifier: &str) -> String {
+    if identifier == PRODUCTION_IDENTIFIER {
+        return name.to_owned();
+    }
+    let said = identifier
+        .strip_prefix(PRODUCTION_IDENTIFIER)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .map_or_else(
+            || identifier.to_owned(),
+            |suffix| {
+                let words: Vec<String> = suffix
+                    .split(['-', '.', '_'])
+                    .filter(|word| !word.is_empty())
+                    .map(|word| {
+                        let mut letters = word.chars();
+                        letters.next().map_or_else(String::new, |first| {
+                            first.to_uppercase().chain(letters).collect()
+                        })
+                    })
+                    .collect();
+                words.join(" ")
+            },
+        );
+    if name.to_lowercase().contains(&said.to_lowercase()) {
+        name.to_owned()
+    } else {
+        format!("{name} {said}")
+    }
 }
 
 /// The variables a Claude Code session exports to its own children. A
@@ -420,12 +479,17 @@ impl<R: Runtime> PageBuilder<R> for tauri::Builder<R> {
 pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
     builder
         .manage(file_drop::Dropped::default())
-        .on_window_event(file_drop::hear)
+        .on_window_event(|window, event| {
+            panics::contained("the app's handler of a window's event", || {
+                file_drop::hear(window, event);
+            });
+        })
         .invoke_handler(page_commands())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    std::hint::black_box(BUILT_IDENTITY);
     let context = tauri::generate_context!();
     // Settled before any thread exists, so the updater and the daemon —
     // which inherits this environment, and passes it to every pane — all see
@@ -450,6 +514,12 @@ pub fn run() {
     for name in inherited_session_variables(names.iter().map(String::as_str)) {
         std::env::remove_var(name);
     }
+    // Every panic from here on is written down, and on macOS AppKit's dispatch of an event
+    // ends what unwinds out of it there, before tao's frame aborts the app (panics.rs). Once
+    // the home is settled, so a candidate's panic is never written in the live home.
+    panics::record_in(error_log);
+    #[cfg(target_os = "macos")]
+    panics::appkit::guard_event_dispatch();
     if let Some(log) = error_log() {
         redirect_stderr(&log);
     }
@@ -459,12 +529,28 @@ pub fn run() {
             .plugin(tauri_plugin_updater::Builder::new().build()),
     )
     .setup(|app| {
+        let teller = app.handle().clone();
+        panics::tell_with(move || {
+            let shown = teller.clone();
+            // Told on a thread of its own (panics::stopped), so this posts the dialog to the event
+            // loop, which shows it after the dispatch that stopped the error has ended.
+            let _ = teller.run_on_main_thread(move || {
+                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                shown
+                    .dialog()
+                    .message(panics::told(error_log().as_deref()))
+                    .title("ConsensFlow kept running")
+                    .kind(MessageDialogKind::Warning)
+                    .show(|_| {});
+            });
+        });
         app.manage(AppRuntime::start(app.handle()));
         // The terminal's command names this bundle's `cf`, whichever build wrote it.
         launcher::repair_in_background(app.handle());
         updates::setup(app)?;
-        // The product name, so a candidate's window never reads as the live app's.
-        let title = app.package_info().name.clone();
+        // The product name, and the identity where it is not the release's, so that no
+        // candidate's or test's window reads as the live app's.
+        let title = window_title(&app.package_info().name, &app.config().identifier);
         // The page runs on while its window is hidden, minimised or behind a locked
         // screen: it acknowledges the windows' output, and the pane host stops reading a
         // window that is owed too much of it, its agent waiting on its terminal. WebKit's
@@ -491,21 +577,32 @@ pub fn run() {
     .expect("error while building the ConsensFlow app");
 
     app.run(|handle, event| {
-        if matches!(event, RunEvent::Exit) {
-            at_exit(|| handle.state::<AppRuntime>().shutdown());
-        }
+        panics::contained("the app's handler of its event loop", || {
+            if matches!(event, RunEvent::Exit) {
+                at_exit(|| {
+                    if let Some(runtime) = handle.try_state::<AppRuntime>() {
+                        runtime.shutdown();
+                    }
+                });
+                // An update's restart: its app is started here, not by Tauri (updates.rs).
+                #[cfg(target_os = "macos")]
+                updates::relaunch_installed(handle);
+            }
+        });
     });
 }
 
 /// The app's last code, on the main thread, as its event loop ends: `shutdown`, then every
-/// descriptor it holds made close-on-exec. After this Tauri ends the process, or starts the app an
-/// update installed: `app.restart()` called off the main thread (the update's install is an async
-/// command) only asks the loop to end, and Tauri starts the new app here, after this, with a bare
-/// `Command`. A descriptor of this app's that is not close-on-exec then (a socket or a pipe another
+/// descriptor it holds made close-on-exec. After this Tauri ends the process, or the app an update
+/// installed is started: `app.restart()` called off the main thread (the update's install is an
+/// async command) only asks the loop to end, and the new app is started here, after this
+/// (`updates::relaunch_installed`). A descriptor of this app's that is not close-on-exec then (a socket or a pipe another
 /// thread made in std's two steps, a file a framework opened so) would be the new app's for as
 /// long as it runs. A quit that is no restart loses nothing by it: the process ends.
+/// A shutdown that panics is written down by the hook and the marking still comes: the event
+/// loop's handler is contained, so a restart may follow it (T-929).
 fn at_exit(shutdown: impl FnOnce()) {
-    shutdown();
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(shutdown));
     #[cfg(target_os = "macos")]
     if let Err(failed) = cf_process::close_all_on_exec() {
         eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
@@ -519,6 +616,21 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     const HOME: &str = "/Users/test";
+
+    /// The Windows app links the C runtime statically, Tauri 2.12's default since tauri-build
+    /// 2.7, and its configuration says so (T-930, T-941): it needs no Visual C++ redistributable,
+    /// and a Tauri whose default moves does not move it.
+    #[test]
+    fn the_windows_app_links_its_c_runtime_statically() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("the configuration");
+        assert_eq!(
+            config["build"]["windows"]["staticVCRuntime"],
+            serde_json::Value::Bool(true),
+            "{}",
+            config["build"]
+        );
+    }
 
     #[test]
     fn the_installed_release_keeps_the_live_home() {
@@ -697,6 +809,127 @@ mod tests {
         );
         assert!(ran.status.success(), "{said}");
         assert!(said.contains("1 passed"), "the test did not run: {said}");
+    }
+
+    /// A smoke's build is started by its smoke, which names its home: one opened by
+    /// hand, or by anything else, would run on the Candidate's home, its lock and its
+    /// roster, and it starts on none.
+    #[test]
+    fn a_smoke_build_starts_only_on_the_home_its_smoke_names() {
+        const SMOKE: &str = "dev.ngvoicu.consensflow.smoke";
+        for configured in [None, Some(OsStr::new(""))] {
+            let refused = isolated_home(SMOKE, false, configured, Some(Path::new(HOME)));
+            assert!(
+                refused
+                    .as_ref()
+                    .is_err_and(|said| said.contains("CONSENSFLOW_HOME")),
+                "{refused:?}"
+            );
+        }
+        assert_eq!(
+            isolated_home(
+                SMOKE,
+                false,
+                Some(OsStr::new("/smoke/home")),
+                Some(Path::new(HOME))
+            ),
+            Ok(None)
+        );
+    }
+
+    /// No window of a test's build reads as the live app's: its identity is in its title.
+    #[test]
+    fn a_window_says_which_build_it_is_when_it_is_not_the_releases() {
+        for (name, identifier, title) in [
+            ("ConsensFlow", PRODUCTION_IDENTIFIER, "ConsensFlow"),
+            (
+                "ConsensFlow",
+                "dev.ngvoicu.consensflow.smoke",
+                "ConsensFlow Smoke",
+            ),
+            (
+                "ConsensFlow Candidate",
+                "dev.ngvoicu.consensflow.candidate",
+                "ConsensFlow Candidate",
+            ),
+            (
+                "ConsensFlow",
+                "dev.ngvoicu.consensflow.paste-probe",
+                "ConsensFlow Paste Probe",
+            ),
+            (
+                "ConsensFlow",
+                "dev.example.other",
+                "ConsensFlow dev.example.other",
+            ),
+        ] {
+            assert_eq!(window_title(name, identifier), title, "{identifier}");
+        }
+    }
+
+    /// A shutdown that panics still leaves every descriptor close-on-exec: the event loop's
+    /// handler is contained, so a panic there no longer ends the app before a restart starts the
+    /// app an update installed, and the marking must come all the same (T-929).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec() {
+        const ENDED: &str = "CONSENSFLOW_TEST_AT_EXIT_PANICS";
+        if std::env::var_os(ENDED).is_some() {
+            use std::os::fd::AsRawFd;
+
+            let stray = std::fs::File::open("/dev/null").expect("a file");
+            let fd = stray.as_raw_fd();
+            // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+            at_exit(|| panic!("the shutdown of T-929 panics"));
+            // SAFETY: `fcntl` is asked the flags of a descriptor this test holds.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            assert_ne!(flags & libc::FD_CLOEXEC, 0, "left inheritable");
+            return;
+        }
+        let ran = crate::testing::command(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "tests::a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec",
+                "--nocapture",
+            ])
+            .env(ENDED, "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run the test in a child");
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ran.stdout),
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert!(ran.status.success(), "{said}");
+        assert!(said.contains("1 passed"), "the test did not run: {said}");
+    }
+
+    /// The app's file says the identity its build was made with, as Tauri's configuration says
+    /// it: its file, the target's own file and what the build was given in `TAURI_CONFIG`, read
+    /// as the build script reads them (T-978: not the file alone, which a `--config` or a
+    /// target's file naming an identifier would make wrong).
+    #[test]
+    fn the_app_says_the_identity_its_build_was_made_with() {
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let read = |name: &str| -> Result<Option<String>, String> {
+            match std::fs::read_to_string(folder.join(name)) {
+                Ok(text) => Ok(Some(text)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(format!("{name}: {error}")),
+            }
+        };
+        let (identity, _) = built_identity::built_identity(
+            &read,
+            std::env::consts::OS,
+            option_env!("TAURI_CONFIG"),
+        )
+        .expect("the identity of the build");
+        assert_eq!(
+            BUILT_IDENTITY,
+            format!("consensflow-built-identity:{identity};")
+        );
     }
 
     #[test]

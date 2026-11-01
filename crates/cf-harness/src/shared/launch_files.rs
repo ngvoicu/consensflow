@@ -35,8 +35,8 @@ use crate::shared::record::find::entries;
 pub(crate) const CODEX_FOLDER: &str = "codex";
 
 /// The harness folders a launch's files are in, in the order Node goes through
-/// them. Codex's, which Node had no files for, comes after them, and Muse's, which came
-/// after Node, last.
+/// them. Codex's, which Node had no files for, comes after them, and Muse's, which
+/// came after Node, last.
 const FOLDERS: [&str; 5] = ["claude", "pi", "devin", CODEX_FOLDER, "muse"];
 
 /// The folders a removal could not take, each with why: every other went.

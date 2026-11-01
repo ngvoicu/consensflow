@@ -75,6 +75,16 @@ impl Planned {
     pub fn name(&self) -> String {
         format!("p{} {}", self.number, self.seats.chief.name())
     }
+
+    /// The harnesses the project needs on the machine: its staff's, and Codex
+    /// where the image designer is.
+    pub fn needs(&self) -> Vec<Harness> {
+        let mut needs = self.seats.harnesses().to_vec();
+        if self.designer && !needs.contains(&Harness::Codex) {
+            needs.push(Harness::Codex);
+        }
+        needs
+    }
 }
 
 /// The seats of the project of the rotation `at` (from 0) over `seated`, the
@@ -215,26 +225,28 @@ mod tests {
         let all = projects(&[], &[], &Harness::ALL);
         let with: Vec<_> = all.iter().filter(|project| project.designer).collect();
         assert_eq!(with.len(), 1);
-        // The muse project, whose staff is claude, pi and devin: the one with no Codex.
+        // The muse project, whose staff is claude, pi and devin.
         assert_eq!(with[0].seats.chief, Harness::Muse);
         assert_eq!(with[0].steps.last(), Some(&Step::Designer));
-        // The others do not have it as a step.
+        assert_eq!(with[0].needs().last(), Some(&Harness::Codex));
+        // The others have it neither as a step nor as a harness they need.
         for project in all.iter().filter(|project| !project.designer) {
             assert!(!project.steps.contains(&Step::Designer));
+            assert_eq!(project.needs().len(), 4);
         }
+    }
+
+    #[test]
+    fn the_designer_goes_where_codex_is_a_seat_when_no_chosen_project_is_without_one() {
+        // The pi project's staff is devin, codex and muse.
+        let one = projects(&[Harness::Pi], &[], &Harness::ALL);
+        assert!(one[0].designer);
+        assert_eq!(one[0].needs().len(), 4);
         // The first chosen one whose chief is not Codex.
         let devin = projects(&[Harness::Codex, Harness::Devin], &[], &Harness::ALL);
         assert!(devin
             .iter()
             .any(|project| project.designer && project.seats.chief == Harness::Devin));
-    }
-
-    #[test]
-    fn the_designer_goes_where_codex_is_a_seat_when_no_chosen_project_is_without_one() {
-        // The devin project's staff is codex, muse and claude.
-        let one = projects(&[Harness::Devin], &[], &Harness::ALL);
-        assert!(one[0].designer);
-        assert_eq!(one[0].seats.harnesses().len(), 4);
         // Codex is the only chief: no project's chief is not Codex, so no designer.
         let codex = projects(&[Harness::Codex], &[], &Harness::ALL);
         assert!(!codex[0].designer);
@@ -268,7 +280,7 @@ mod tests {
         assert_eq!(all.len(), 4);
         for project in &all {
             assert!(
-                !project.seats.harnesses().contains(&Harness::Muse),
+                !project.needs().contains(&Harness::Muse),
                 "{}",
                 project.name()
             );
@@ -289,9 +301,9 @@ mod tests {
             .into_iter()
             .filter(|harness| *harness != Harness::Codex)
             .collect();
-        assert!(projects(&[], &[], &no_codex).iter().all(
-            |project| !project.designer && !project.seats.harnesses().contains(&Harness::Codex)
-        ));
+        assert!(projects(&[], &[], &no_codex)
+            .iter()
+            .all(|project| !project.designer && !project.needs().contains(&Harness::Codex)));
     }
 
     #[test]

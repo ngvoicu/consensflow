@@ -67,6 +67,8 @@ required-features = ["test-support"]
 # The saved agents a case names its chief by, read as the daemon reads them: the
 # harness and model the New project dialog picks for it (CHF-07).
 cf-catalog.workspace = true
+# The app bundles a case may start: none of the live app's identity.
+cf-base.workspace = true
 # What a program the rig starts is left of its descriptors: its streams alone.
 cf-process.workspace = true
 # The time the stand-in agent writes in its records.
@@ -92,6 +94,9 @@ uuid.workspace = true
 
 [dev-dependencies]
 cf-e2e = { path = ".", features = ["test-support"] }
+# The recordings (`*.json.gz`) the repository holds, read unzipped by the rule that names no
+# removed harness (`tests/cli/a_removed_harness_is_named_nowhere.rs`).
+flate2.workspace = true
 # Node's `--import` takes a module as a file URL, on Windows as anywhere.
 url.workspace = true
 # The live parity case opens Claude Code in a terminal of ConsensFlow's own (a ConPTY on

@@ -115,8 +115,8 @@
   .model-summary h3 { color: var(--foam); font-size: 18px; font-weight: 600; margin: 0 0 10px; }
   .model-group .member { padding: 12px 0; border-top: 1px solid var(--line); }
   .model-group .member:last-child { padding-bottom: 0; border-bottom: none; }
-  .agent-route, .agent-route-note { color: var(--muted); font-size: 11px; }
-  .member .agent-route, .member .agent-route-note { margin: 0; }
+  .agent-route { color: var(--muted); font-size: 11px; }
+  .member .agent-route { margin: 0; }
   .tag { overflow-wrap: anywhere; }
   button:disabled { opacity: .6; cursor: default; }
   @media (max-width: 620px) {
@@ -220,7 +220,7 @@ function browsingGroups(entries, sectionId) {
   const by = section.querySelector('[name=group]').value;
   const filtered = entries.filter(p => (tier === 'all' || p.profile.workTier === tier) &&
     [p.name, p.model, p.description, p.detail, p.harness, HARNESS_LABELS[p.harness], effortLabel(effortValue(p)),
-      WORK_TIERS[p.profile.workTier].label, p.profile.modelLabel, p.profile.routeLabel, p.profile.routeNote]
+      WORK_TIERS[p.profile.workTier].label, p.profile.modelLabel, p.profile.routeLabel]
       .filter(Boolean).join(' ').toLowerCase().includes(needle));
   section.querySelector('.section-count').textContent = filtered.length + ' of ' + entries.length + ' shown';
   const groups = new Map();
@@ -261,10 +261,7 @@ function appendProfile(host, p, fields) {
     host.append(pill);
     if (fields.includes('tierNote') && p.profile.workTier === 'critical') host.append(el('p', 'tier-note', 'Important work only · No coding'));
   }
-  if (fields.includes('routeLabel')) {
-    host.append(el('p', 'agent-route', p.profile.routeLabel));
-    if (p.profile.routeNote) host.append(el('p', 'agent-route-note', p.profile.routeNote));
-  }
+  if (fields.includes('routeLabel')) host.append(el('p', 'agent-route', p.profile.routeLabel));
 }
 
 /**
