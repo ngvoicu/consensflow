@@ -351,14 +351,19 @@ fn open_json(open: &OpenPane) -> Value {
         .iter()
         .map(|(name, value)| (name.clone(), json!(value)))
         .collect();
-    json!({
+    let mut body = json!({
         "id": open.pane.id,
         "generation": open.pane.generation,
         "cwd": open.cwd,
         "argv": open.argv,
         "env": env,
         "dropEnv": open.drop_env,
-    })
+    });
+    // As the daemon sends it: only for a harness that reads a paste silently.
+    if let Some(silent) = open.silent_paste {
+        body["silentPaste"] = json!(silent);
+    }
+    body
 }
 
 impl PaneHost for FakeHost {

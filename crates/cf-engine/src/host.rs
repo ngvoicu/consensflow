@@ -10,11 +10,13 @@
 //! that came before its open's answer is known by the time the answer is.
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
+use cf_proto::panes::SilentPaste;
 
 /// What a pane is opened with (`pane.open`): the window's pane, the folder its
 /// program starts in, the program and its arguments, the environment the
-/// engine gives it (the daemon's, the window's own, then its token), and the
-/// variables it drops.
+/// engine gives it (the daemon's, the window's own, then its token), the
+/// variables it drops, and how its harness reads a human's paste where it reads one
+/// silently ([`Adapter::silent_paste`](cf_harness::contract::Adapter::silent_paste)).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenPane {
     pub pane: Pane,
@@ -22,6 +24,7 @@ pub struct OpenPane {
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
     pub drop_env: Vec<String>,
+    pub silent_paste: Option<SilentPaste>,
 }
 
 /// What the host answered an open.

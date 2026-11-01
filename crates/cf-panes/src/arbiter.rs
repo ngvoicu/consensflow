@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use cf_proto::panes::SilentPaste;
+
 use crate::pty::{write_paste_via, PaneError, PaneInputWriter, PaneKey, PaneTable};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -181,14 +183,17 @@ impl OutputClock {
 }
 
 /// When a paste's Enter goes: once the window has taken the paste in, that
-/// is, printed something after it (its echo) and then nothing for
-/// `quiet_ms`; never sooner than `least_ms`, and at `most_ms` whatever it
-/// printed. A window silent since the paste may still be reading it: Devin
-/// draws a long paste's placeholder only once it has read all of it, and an
-/// Enter before that finds nothing to send.
+/// is, printed something after it (its echo), `drawn_after_ms` or more after it,
+/// and then nothing for `quiet_ms`; never sooner than `least_ms`, and at
+/// `most_ms` whatever it printed. A window silent since the paste may still be
+/// reading it: Devin draws a long paste's placeholder only once it has read all
+/// of it, and an Enter before that finds nothing to send. What a window prints
+/// sooner than `drawn_after_ms` after the paste is its answer to the paste's
+/// first key, not its draw of the paste (Codex on Windows, [`SilentPaste`]).
 #[derive(Clone, Copy, Debug)]
 pub struct EnterTiming {
     pub least_ms: u64,
+    pub drawn_after_ms: u64,
     pub quiet_ms: u64,
     pub most_ms: u64,
 }
@@ -198,8 +203,21 @@ impl EnterTiming {
     pub const fn fixed(milliseconds: u64) -> Self {
         Self {
             least_ms: milliseconds,
+            drawn_after_ms: 0,
             quiet_ms: 0,
             most_ms: milliseconds,
+        }
+    }
+
+    /// When the human's keys after a paste of `characters` go, in a window that reads a paste
+    /// silently: never sooner than it could have read it, once it has drawn it and gone quiet,
+    /// and at the most its cap for that length.
+    fn of_silent_paste(silent: SilentPaste, characters: usize) -> Self {
+        Self {
+            least_ms: silent.read_ms(characters),
+            drawn_after_ms: silent.drawn_after_ms,
+            quiet_ms: silent.quiet_ms,
+            most_ms: silent.most_ms(characters),
         }
     }
 
@@ -208,8 +226,11 @@ impl EnterTiming {
     fn wait(&self, output: &OutputClock, pasted: Instant) {
         loop {
             let since = u64::try_from(pasted.elapsed().as_millis()).unwrap_or(u64::MAX);
-            // How long the window has been quiet, once it printed after the paste.
-            let echoed = output.quiet_ms().filter(|quiet| *quiet < since);
+            // How long the window has been quiet, once it printed after the paste, and not
+            // only at once (its answer to the paste's first key).
+            let echoed = output
+                .quiet_ms()
+                .filter(|quiet| *quiet < since && since - quiet >= self.drawn_after_ms);
             if since >= self.most_ms
                 || (since >= self.least_ms && echoed.is_some_and(|quiet| quiet >= self.quiet_ms))
             {
@@ -243,9 +264,12 @@ struct PaneInputState {
     output: Arc<OutputClock>,
     /// When a paste was last written into this generation of the pane.
     pasted: Option<Instant>,
-    /// When the human's last paste was written, while their keys after it have not gone: they
-    /// wait for the window to take it in ([`HOLDS_HUMAN_PASTES`]).
-    human_pasted: Option<Instant>,
+    /// How the window's harness reads a human's paste, where it reads one silently: its
+    /// adapter's word, given as the pane opened ([`InputArbiter::register_with`]).
+    silent_paste: Option<SilentPaste>,
+    /// When the human's last paste was written, and when their keys after it may go, while
+    /// those keys have not gone ([`InputArbiter::write_typed`]).
+    human_pasted: Option<(Instant, EnterTiming)>,
     /// The human's last writes into this generation, oldest first ([`HUMAN_WRITES`]).
     writes: VecDeque<Written>,
 }
@@ -264,6 +288,7 @@ impl PaneInputState {
             typed_at: None,
             output: Arc::new(OutputClock::new()),
             pasted: None,
+            silent_paste: None,
             human_pasted: None,
             writes: VecDeque::new(),
         }
@@ -296,20 +321,9 @@ impl PaneInputState {
     }
 }
 
-/// Whether the human's keys after their paste wait, as a delivery's Enter does
-/// ([`EnterTiming`]), until the window has taken the paste in. On Windows the console hands a
-/// paste on to the program as key presses, one by one (`cf_base::text::console_text`), and a
-/// harness tells a paste from typing by how fast the keys come: Codex takes an Enter that comes
-/// while a paste's keys are still coming, or within 120 ms of them, for a line break in the
-/// paste (its `paste_burst`). A paste and its Enter in one write, or a long paste whose Enter a
-/// person pressed a second later, stayed in its box on Windows (T-1025), and went on the Mac,
-/// where the terminal hands the paste on whole, in its brackets.
-const HOLDS_HUMAN_PASTES: bool = cfg!(windows);
-
 pub struct InputArbiter {
     panes: Mutex<PaneStateMap>,
     enter: EnterTiming,
-    holds_human_pastes: bool,
 }
 
 impl InputArbiter {
@@ -317,24 +331,37 @@ impl InputArbiter {
         Self {
             panes: Mutex::new(HashMap::new()),
             enter,
-            holds_human_pastes: HOLDS_HUMAN_PASTES,
-        }
-    }
-
-    /// An arbiter that holds the human's keys after their paste whatever the platform, as
-    /// Windows' does.
-    #[cfg(test)]
-    fn holding_human_pastes(enter: EnterTiming) -> Self {
-        Self {
-            holds_human_pastes: true,
-            ..Self::new(enter)
         }
     }
 
     /// Takes a pane in, or a newer generation of it. The answer is the
     /// generation's output clock, for the pane's output thread to note.
     pub fn register(&self, pane: &PaneKey) -> Result<Arc<OutputClock>, ArbiterError> {
-        self.register_inner(pane, || {}, || {})
+        self.register_with(pane, None)
+    }
+
+    /// Takes a pane in as [`InputArbiter::register`] does, with how its harness reads a
+    /// human's paste where it reads one silently (`pane.open`'s `silentPaste`).
+    pub fn register_with(
+        &self,
+        pane: &PaneKey,
+        silent_paste: Option<SilentPaste>,
+    ) -> Result<Arc<OutputClock>, ArbiterError> {
+        let output = self.register_inner(pane, || {}, || {})?;
+        let state = self.pane_state(pane)?;
+        let mut state = lock_state(&state)?;
+        if state.generation == pane.generation {
+            state.silent_paste = silent_paste;
+        }
+        Ok(output)
+    }
+
+    /// How the pane's harness reads a paste, as it was registered.
+    #[cfg(test)]
+    pub(crate) fn silent_paste(&self, pane: &PaneKey) -> Option<SilentPaste> {
+        let state = self.pane_state(pane).ok()?;
+        let state = lock_state(&state).ok()?;
+        state.silent_paste
     }
 
     #[cfg(test)]
@@ -433,9 +460,11 @@ impl InputArbiter {
     }
 
     /// The human's own keys, counted for what they leave unsent in the window's input box.
-    /// They go at once, but on Windows, where a write ends a paste of theirs, what comes after
-    /// it, in that write or a later one, waits until the window has taken the paste in
-    /// ([`HOLDS_HUMAN_PASTES`]).
+    /// They go at once, but in a window whose harness reads a paste silently
+    /// ([`SilentPaste`]), where a write ends a paste of theirs, what comes after it, in that
+    /// write or a later one, waits until the window has taken the paste in: on Windows the
+    /// console hands a paste on as key presses, and Codex took an Enter that came while it
+    /// was still reading them for a line break in the paste (T-1025, T-1048).
     pub(crate) fn write_typed(
         &self,
         table: &PaneTable,
@@ -451,17 +480,19 @@ impl InputArbiter {
         pane: &PaneKey,
         bytes: &[u8],
     ) -> Result<(), ArbiterError> {
-        if self.holds_human_pastes {
+        let silent = lock_state(&self.pane_state(pane)?)?.silent_paste;
+        if let Some(silent) = silent {
             for part in pasted_parts(bytes) {
                 if !part.is_empty() {
                     self.settle_human_paste(pane)?;
                 }
                 self.write_via(writer, pane, part)?;
                 if part.ends_with(PASTE_END) {
+                    let timing = EnterTiming::of_silent_paste(silent, pasted_characters(part));
                     let state = self.pane_state(pane)?;
                     let mut state = lock_state(&state)?;
                     if state.generation == pane.generation {
-                        state.human_pasted = Some(Instant::now());
+                        state.human_pasted = Some((Instant::now(), timing));
                     }
                 }
             }
@@ -504,10 +535,10 @@ impl InputArbiter {
             state
                 .human_pasted
                 .take()
-                .map(|at| (at, Arc::clone(&state.output)))
+                .map(|(at, timing)| (at, timing, Arc::clone(&state.output)))
         };
-        if let Some((at, output)) = pasted {
-            self.enter.wait(&output, at);
+        if let Some((at, timing, output)) = pasted {
+            timing.wait(&output, at);
         }
         Ok(())
     }
@@ -665,6 +696,17 @@ fn pasted_parts(bytes: &[u8]) -> Vec<&[u8]> {
         parts.push(rest);
     }
     parts
+}
+
+/// How many characters the paste that `part` ends holds: what follows its opening marker, or
+/// all of it where the paste began in an earlier write, to its closing one.
+fn pasted_characters(part: &[u8]) -> usize {
+    let body = part.strip_suffix(PASTE_END).unwrap_or(part);
+    let body = body
+        .windows(PASTE_START.len())
+        .rposition(|window| window == PASTE_START)
+        .map_or(body, |start| &body[start + PASTE_START.len()..]);
+    body.iter().filter(|byte| **byte & 0xC0 != 0x80).count()
 }
 
 /// What `bytes`, a write of the human's path, hold, `unsent` characters left unsent
@@ -854,6 +896,8 @@ mod tests {
 
     #[cfg(unix)]
     use portable_pty::PtySize;
+
+    use cf_proto::panes::SilentPaste;
 
     use super::{sanitize, ArbiterError, EnterTiming, InputArbiter, SanitizeError};
     #[cfg(unix)]
@@ -1527,6 +1571,7 @@ mod tests {
         // scheduling gap is not the echo's end.
         let enter = EnterTiming {
             least_ms: 0,
+            drawn_after_ms: 0,
             quiet_ms: 150,
             most_ms: 5_000,
         };
@@ -1546,6 +1591,7 @@ mod tests {
         // Devin reading a long paste: silent, then its placeholder drawn.
         let enter = EnterTiming {
             least_ms: 0,
+            drawn_after_ms: 0,
             quiet_ms: 60,
             most_ms: 5_000,
         };
@@ -1564,6 +1610,7 @@ mod tests {
     fn a_paste_nothing_echoes_gets_its_enter_at_the_most() {
         let enter = EnterTiming {
             least_ms: 0,
+            drawn_after_ms: 0,
             quiet_ms: 60,
             most_ms: 300,
         };
@@ -1578,6 +1625,7 @@ mod tests {
         // however the printer is scheduled.
         let enter = EnterTiming {
             least_ms: 0,
+            drawn_after_ms: 0,
             quiet_ms: 10_000,
             most_ms: 300,
         };
@@ -1586,50 +1634,67 @@ mod tests {
         assert!(waited < Duration::from_millis(2_500), "{waited:?}");
     }
 
-    /// The human's timing of a paste's Enter: the window draws it only once it has read it all
-    /// (Codex's `[Pasted Content … chars]`, Devin's placeholder), then is quiet.
-    const HUMAN_ENTER: EnterTiming = EnterTiming {
-        least_ms: 0,
+    /// A window that reads a paste silently and then draws it, with no pace or floor of its
+    /// own: the human's keys after a paste wait for its draw and 100 ms of quiet.
+    const DRAWS: SilentPaste = SilentPaste {
+        pace_us_per_character: 0,
+        drawn_after_ms: 0,
         quiet_ms: 100,
         most_ms: 5_000,
+        most_us_per_character: 0,
     };
 
     /// A paste of the human's, as the page's terminal writes one.
     const HUMAN_PASTE: &[u8] = b"\x1b[200~a few\rlines\x1b[201~";
 
-    /// A pane of `arbiter`'s that prints nothing for `silent`, then every 10 ms for `printing`,
-    /// from now: the window reading a paste and then drawing it.
+    /// A pane of `arbiter`'s, its harness reading a paste as `silent` says, that prints at each
+    /// of `prints` (from now) and then every 10 ms for `printing`: the window reading a paste
+    /// and then drawing it.
     fn drawing(
         arbiter: &InputArbiter,
         key: &PaneKey,
-        silent: Duration,
+        silent: SilentPaste,
+        prints: &[Duration],
         printing: Duration,
     ) -> thread::JoinHandle<()> {
-        let clock = arbiter.register(key).expect("register pane");
+        let clock = arbiter
+            .register_with(key, Some(silent))
+            .expect("register pane");
+        let prints = prints.to_vec();
         thread::spawn(move || {
-            thread::sleep(silent);
             let started = Instant::now();
-            while started.elapsed() < printing {
+            for at in prints {
+                thread::sleep(at.saturating_sub(started.elapsed()));
+                clock.note();
+            }
+            let drawn = Instant::now();
+            while drawn.elapsed() < printing {
                 clock.note();
                 thread::sleep(Duration::from_millis(10));
             }
         })
     }
 
-    /// On Windows a paste reaches the program as key presses, and a harness takes an Enter that
-    /// comes while they are still coming for a line break in the paste (T-1025): the human's
-    /// paste and its Enter in one write go as two, the Enter once the window has drawn the paste
-    /// and gone quiet. The pane keeps the write as the one it was: one write of the human's,
-    /// one key more, nothing left unsent.
+    /// How long after the first of `records` its second was written.
+    fn between(records: &[RecordedWrite]) -> Duration {
+        records[1].at.duration_since(records[0].at)
+    }
+
+    /// In a window that reads a paste's keys silently, a harness takes an Enter that comes
+    /// while they are still coming for a line break in the paste (Codex on Windows, T-1025):
+    /// the human's paste and its Enter in one write go as two, the Enter once the window has
+    /// drawn the paste and gone quiet. The pane keeps the write as the one it was: one write
+    /// of the human's, one key more, nothing left unsent.
     #[test]
     fn a_humans_paste_and_its_enter_in_one_write_go_as_two_the_enter_once_the_window_took_it() {
         let key = PaneKey::new("pasted-at-once", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::holding_human_pastes(HUMAN_ENTER);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         let printer = drawing(
             &arbiter,
             &key,
-            Duration::from_millis(200),
+            DRAWS,
+            &[Duration::from_millis(200)],
             Duration::from_millis(50),
         );
         let at_once = [HUMAN_PASTE, b"\r"].concat();
@@ -1641,7 +1706,7 @@ mod tests {
         let records = writer.records();
         let written: Vec<&[u8]> = records.iter().map(|record| &record.bytes[..]).collect();
         assert_eq!(written, [HUMAN_PASTE, b"\r"]);
-        let waited = records[1].at.duration_since(records[0].at);
+        let waited = between(&records);
         assert!(
             waited >= Duration::from_millis(300),
             "{waited:?}: before the window drew the paste and went quiet"
@@ -1654,17 +1719,18 @@ mod tests {
         assert!(!snapshot.unsent, "{snapshot:?}");
     }
 
-    /// A person's Enter, pressed while the window is still reading their long paste, waits until
+    /// A person's Enter, pressed while the window is still reading their paste, waits until
     /// it has drawn it (T-1025: a second was not enough for Codex on Windows).
     #[test]
     fn a_humans_enter_while_the_window_still_reads_their_paste_waits_until_it_drew_it() {
         let key = PaneKey::new("pasted-then-enter", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::holding_human_pastes(HUMAN_ENTER);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         let printer = drawing(
             &arbiter,
             &key,
-            Duration::from_millis(400),
+            DRAWS,
+            &[Duration::from_millis(400)],
             Duration::from_millis(50),
         );
         arbiter
@@ -1678,7 +1744,7 @@ mod tests {
 
         let records = writer.records();
         assert_eq!(records.len(), 2);
-        let waited = records[1].at.duration_since(records[0].at);
+        let waited = between(&records);
         assert!(
             waited >= Duration::from_millis(500),
             "{waited:?}: before the window drew the paste and went quiet"
@@ -1694,8 +1760,8 @@ mod tests {
     fn a_humans_enter_after_the_window_took_their_paste_goes_at_once() {
         let key = PaneKey::new("pasted-and-drawn", 1);
         let (writer, observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::holding_human_pastes(HUMAN_ENTER);
-        let printer = drawing(&arbiter, &key, Duration::ZERO, Duration::from_millis(50));
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let printer = drawing(&arbiter, &key, DRAWS, &[], Duration::from_millis(50));
         arbiter
             .write_typed_via(writer.as_ref(), &key, HUMAN_PASTE)
             .expect("the human's paste");
@@ -1717,13 +1783,118 @@ mod tests {
         }
     }
 
+    /// What a window prints at once after a paste is its answer to the paste's first key, not
+    /// its draw of the paste: Codex on Windows printed at about 10 ms and drew a long paste only
+    /// at about 4.5 s (T-1048). The Enter waits for a print `drawn_after_ms` or more after the
+    /// paste.
+    #[test]
+    fn a_print_at_once_after_the_paste_is_not_its_draw_and_the_enter_waits_for_the_draw() {
+        let key = PaneKey::new("first-key-answered", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let silent = SilentPaste {
+            drawn_after_ms: 50,
+            ..DRAWS
+        };
+        let printer = drawing(
+            &arbiter,
+            &key,
+            silent,
+            &[Duration::from_millis(10), Duration::from_millis(600)],
+            Duration::ZERO,
+        );
+        let at_once = [HUMAN_PASTE, b"\r"].concat();
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, &at_once)
+            .expect("the human's paste and Enter");
+        printer.join().expect("printer");
+        let waited = between(&writer.records());
+        assert!(
+            waited >= Duration::from_millis(650),
+            "{waited:?}: the Enter went on the window's answer to the first key"
+        );
+        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
+    }
+
+    /// Never sooner than the window could have read the paste at its pace: a print and a quiet
+    /// spell while it reads (a timer of its own) do not let the Enter go.
+    #[test]
+    fn a_humans_enter_waits_at_least_as_long_as_the_window_takes_to_read_the_paste() {
+        let key = PaneKey::new("read-at-its-pace", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let silent = SilentPaste {
+            pace_us_per_character: 2_000,
+            ..DRAWS
+        };
+        // 300 characters at 2 ms each: 600 ms.
+        let paste = [&b"\x1b[200~"[..], &[b'x'; 300], b"\x1b[201~"].concat();
+        let printer = drawing(
+            &arbiter,
+            &key,
+            silent,
+            &[Duration::from_millis(100)],
+            Duration::ZERO,
+        );
+        let at_once = [&paste[..], b"\r"].concat();
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, &at_once)
+            .expect("the human's paste and Enter");
+        printer.join().expect("printer");
+        let waited = between(&writer.records());
+        assert!(
+            waited >= Duration::from_millis(600),
+            "{waited:?}: before the window could have read the paste"
+        );
+        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
+    }
+
+    /// A window that never draws the paste has the human's Enter at its cap for the paste's
+    /// length: a second and a millisecond a character for Codex on Windows.
+    #[test]
+    fn a_window_that_never_draws_the_paste_has_the_enter_at_its_cap_for_the_pastes_length() {
+        let key = PaneKey::new("never-drawn", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let silent = SilentPaste {
+            most_ms: 100,
+            most_us_per_character: 1_000,
+            ..DRAWS
+        };
+        // A cap of 100 ms and 300 characters at 1 ms each: 400 ms.
+        let paste = [&b"\x1b[200~"[..], &[b'x'; 300], b"\x1b[201~"].concat();
+        arbiter
+            .register_with(&key, Some(silent))
+            .expect("register pane");
+        let at_once = [&paste[..], b"\r"].concat();
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, &at_once)
+            .expect("the human's paste and Enter");
+        let waited = between(&writer.records());
+        assert!(waited >= Duration::from_millis(400), "{waited:?}");
+        assert!(waited < Duration::from_millis(3_000), "{waited:?}");
+    }
+
+    /// The characters of a paste, not its bytes or its markers, are what its wait is for.
+    #[test]
+    fn a_pastes_characters_are_counted_between_its_markers() {
+        assert_eq!(super::pasted_characters(b"\x1b[200~abc\x1b[201~"), 3);
+        assert_eq!(
+            super::pasted_characters("typed\x1b[200~ăî—\x1b[201~".as_bytes()),
+            3
+        );
+        assert_eq!(super::pasted_characters(b"tail of it\x1b[201~"), 10);
+    }
+
     /// The human's typing, with no paste, goes as it was written, one write.
     #[test]
     fn the_humans_typing_with_no_paste_goes_in_one_write_at_once() {
         let key = PaneKey::new("typed-alone", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::holding_human_pastes(HUMAN_ENTER);
-        arbiter.register(&key).expect("register pane");
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter
+            .register_with(&key, Some(DRAWS))
+            .expect("register pane");
         arbiter
             .write_typed_via(writer.as_ref(), &key, b"typed\r")
             .expect("the human's keys");
@@ -1735,10 +1906,10 @@ mod tests {
         assert_eq!(written, [b"typed\r".to_vec()]);
     }
 
-    /// Only Windows' console hands a paste on as key presses: elsewhere the terminal hands it on
-    /// whole, in its brackets, and the human's paste and its Enter go as they were written.
+    /// A window whose harness declares nothing has the human's paste and its Enter written as
+    /// they came, on every platform: only a harness shown to read a paste silently is held.
     #[test]
-    fn the_humans_keys_after_a_paste_wait_on_windows_alone() {
+    fn a_window_whose_harness_declares_no_silent_paste_has_the_humans_keys_as_they_came() {
         let key = PaneKey::new("pasted-here", 1);
         let (writer, _observed) = RecordingWriter::new(None);
         let arbiter = InputArbiter::new(EnterTiming::fixed(10));
@@ -1752,11 +1923,23 @@ mod tests {
             .into_iter()
             .map(|record| record.bytes)
             .collect();
-        if cfg!(windows) {
-            assert_eq!(written, [HUMAN_PASTE.to_vec(), b"\r".to_vec()]);
-        } else {
-            assert_eq!(written, [at_once]);
-        }
+        assert_eq!(written, [at_once]);
+    }
+
+    /// A newer generation of a pane is registered with its own word on how it reads a paste.
+    #[test]
+    fn a_panes_word_on_how_it_reads_a_paste_is_its_generations() {
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let first = PaneKey::new("declared", 1);
+        arbiter
+            .register_with(&first, Some(DRAWS))
+            .expect("register pane");
+        assert_eq!(arbiter.silent_paste(&first), Some(DRAWS));
+        let newer = PaneKey::new("declared", 2);
+        arbiter
+            .register(&newer)
+            .expect("register a newer generation");
+        assert_eq!(arbiter.silent_paste(&newer), None);
     }
 
     #[cfg(unix)]
@@ -2188,6 +2371,8 @@ mod tests {
         use std::thread;
         use std::time::{Duration, Instant};
 
+        use cf_proto::panes::SilentPaste;
+
         use super::super::{EnterTiming, InputArbiter};
         use crate::pty::conpty_test::{line_echo, open, powershell, read_until, take};
         use crate::pty::{serial_pty_test, PaneTable};
@@ -2209,20 +2394,26 @@ mod tests {
         }
 
         /// How many line breaks the burst reader sent with the human's `writes` (each after its
-        /// pause), typed through a Windows arbiter, and whether that took an Enter more than
-        /// theirs: where it sent nothing within ten seconds, the human presses Enter again.
+        /// pause), typed into a pane declared to read a paste silently, and whether that took an
+        /// Enter more than theirs: where it sent nothing within ten seconds, the human presses
+        /// Enter again.
         fn sent(writes: &[(Duration, Vec<u8>)]) -> (String, bool) {
             let _pty_guard = serial_pty_test();
             let table = Arc::new(PaneTable::new());
             let (key, output) = open(&table, &burst_reader(), &HashMap::new(), 1 << 20);
-            // A quiet spell well above a busy machine's scheduling gap: the reader's dots
-            // have stopped because it has read every key.
-            let arbiter = InputArbiter::new(EnterTiming {
-                least_ms: 10,
+            // A reader that prints as it reads, declared to read a paste silently: a quiet
+            // spell well above a busy machine's scheduling gap means it has read every key.
+            let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+            let silent = SilentPaste {
+                pace_us_per_character: 0,
+                drawn_after_ms: 0,
                 quiet_ms: 500,
                 most_ms: 20_000,
-            });
-            let clock = arbiter.register(&key).expect("register pane");
+                most_us_per_character: 0,
+            };
+            let clock = arbiter
+                .register_with(&key, Some(silent))
+                .expect("register pane");
             read_until(&table, &key, &output, "READY");
             let seen = Arc::new(Mutex::new(String::new()));
             let reader = {

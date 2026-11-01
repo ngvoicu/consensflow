@@ -23,7 +23,7 @@ use crate::validation::{pane_key, validate_input, validate_seq, validate_size, I
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
     BackgroundProcess, CommandsRequest, MarkRequest, PaneExit, PossiblyLeft, Rest, RestRequest,
-    SnapshotRequest, BOTTOM_LINES, TAIL_LINES,
+    SilentPaste, SnapshotRequest, BOTTOM_LINES, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -50,6 +50,10 @@ struct OpenRequest {
     size: SizeRequest,
     #[serde(default = "default_backlog_bytes")]
     backlog_bytes: usize,
+    /// How the window's harness reads a human's paste, where its adapter says it reads one
+    /// silently: the human's keys after a paste then wait until it has drawn it.
+    #[serde(default)]
+    silent_paste: Option<SilentPaste>,
 }
 
 #[derive(Deserialize)]
@@ -142,7 +146,7 @@ pub fn register_pane_handlers(
             )
             .map_err(|error| error.to_string())?;
         let printed = match open_arbiter
-            .register(&streamed.key)
+            .register_with(&streamed.key, request.silent_paste)
             .map_err(|error| error.to_string())
             .and_then(|printed| open_inputs.open(&streamed.key).map(|()| printed))
         {
@@ -693,7 +697,7 @@ mod tests {
         register_pane_handlers(
             &mut builder,
             Arc::clone(&panes),
-            arbiter,
+            Arc::clone(&arbiter),
             Arc::new(OutputHub::new()),
             Arc::clone(&inputs),
         );
@@ -729,6 +733,33 @@ mod tests {
                    "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024}),
         );
         assert_eq!(opened["ok"], true, "{opened}");
+        let typing = PaneKey::new("typing-pane", 1);
+        assert_eq!(
+            arbiter.silent_paste(&typing),
+            None,
+            "the daemon said nothing of it"
+        );
+        // A window whose harness reads a paste silently is opened saying how (T-1048).
+        let declared = ask(
+            "pane.open",
+            json!({"id":"declared-pane","generation":1,"cwd":"/tmp","argv":["/bin/sh","-c","sleep 30"],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024,
+                   "silentPaste":{"paceUsPerCharacter":600,"drawnAfterMs":50,"quietMs":120,
+                                  "mostMs":1000,"mostUsPerCharacter":1000}}),
+        );
+        assert_eq!(declared["ok"], true, "{declared}");
+        let declared_pane = PaneKey::new("declared-pane", 1);
+        assert_eq!(
+            arbiter.silent_paste(&declared_pane),
+            Some(SilentPaste {
+                pace_us_per_character: 600,
+                drawn_after_ms: 50,
+                quiet_ms: 120,
+                most_ms: 1_000,
+                most_us_per_character: 1_000,
+            })
+        );
+        panes.kill(&declared_pane).expect("kill the declared pane");
         let typed = ask(
             "pane.input",
             json!({"id":"typing-pane","generation":1,"bytes":b"half a thought".to_vec()}),

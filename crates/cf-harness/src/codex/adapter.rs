@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::Variant;
 
 use super::channel::{send, Channel, Session, Shown, Target};
@@ -121,6 +121,17 @@ impl CodexAdapter {
         }
     }
 }
+
+/// How Codex on Windows reads a paste ([`CodexAdapter::silent_paste`]): about 0.6 ms a
+/// character; its own draw of the paste comes 50 ms or more after it; then 120 ms of quiet;
+/// and at the most a second and a millisecond a character.
+const CODEX_ON_WINDOWS: SilentPaste = SilentPaste {
+    pace_us_per_character: 600,
+    drawn_after_ms: 50,
+    quiet_ms: 120,
+    most_ms: 1_000,
+    most_us_per_character: 1_000,
+};
 
 impl Adapter for CodexAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
@@ -222,6 +233,18 @@ impl Adapter for CodexAdapter {
         } else {
             Servers::AtLaunch
         }
+    }
+
+    /// On Windows Codex reads a paste's key presses without drawing anything, and takes an
+    /// Enter that comes while they are still coming, or within 120 ms of them, for a line break
+    /// in the paste (its `paste_burst`). A measured heuristic (T-1048, Codex 0.166.0 on zeewin2,
+    /// 2026-11-01): a few lines were drawn 150 to 205 ms after the paste; a paste of 7,775
+    /// characters was answered at once by a print at about 10 ms (its reaction to the first
+    /// key) and drawn as `[Pasted Content … chars]` only at about 4.5 s, about 0.6 ms a
+    /// character, and an Enter before that stayed in it. Elsewhere the terminal hands Codex a
+    /// paste whole, and it takes its Enter as it comes.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.services.env.on_windows().then_some(CODEX_ON_WINDOWS)
     }
 
     /// A resumed thread keeps the developer message its first turn began with:
