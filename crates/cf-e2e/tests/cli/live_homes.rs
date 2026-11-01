@@ -51,7 +51,7 @@ const KIT: [&str; 4] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 11] = [
+const BY_HAND: [(&str, &str, &str); 13] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -100,6 +100,18 @@ const BY_HAND: [(&str, &str, &str); 11] = [
         "crates/cf-e2e/tests/live_muse_background.rs",
         "XDG_DATA_HOME",
         "the same run's data folder, a throwaway of its own, where Muse writes its sessions",
+    ),
+    (
+        "crates/cf-e2e/tests/live_own_cf.rs",
+        "HOME",
+        "its windows' shells read the profiles of a home of the run's own, which put decoy `cf`s \
+         first on the PATH (T-972); every login stays the kit's home of the run's own, which no \
+         HOME reaches",
+    ),
+    (
+        "crates/cf-e2e/tests/live_own_cf.rs",
+        "USERPROFILE",
+        "the same home, as Windows names it",
     ),
     (
         "crates/cf-e2e/tests/live_muse_reads.rs",

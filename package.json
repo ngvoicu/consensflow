@@ -15,6 +15,7 @@
     "check": "npm run lint && npm test",
     "eval": "cargo xtask eval",
     "eval:summary": "cargo xtask eval summary",
+    "eval:chiefs": "cargo xtask eval chiefs",
     "eval:long": "cargo xtask eval long",
     "watch": "cargo xtask watch",
     "eval:windows": "cargo xtask windows-matrix",
@@ -82,6 +83,8 @@
     "test:kit-paced": "CF_KIT_PACED=1 cargo test --offline -p cf-engine --test dispatcher",
     "live:stopped": "cargo xtask live stopped",
     "live:muse-window": "cargo xtask live muse-window",
+    "live:own-cf": "cargo xtask live own-cf",
+    "live:paste-enter": "cargo xtask live paste-enter",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },
