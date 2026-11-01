@@ -69,6 +69,16 @@ impl Home {
         Self { dir, env }
     }
 
+    /// This home's environment with `name` set to `value` as well.
+    fn and(&self, name: &str, value: impl Into<OsString>) -> Env {
+        Env::from_vars(
+            self.env
+                .iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .chain([(OsString::from(name), value.into())]),
+        )
+    }
+
     /// A Codex that is this script.
     fn codex(&self, body: &str) -> PathBuf {
         let script = self.dir.path().join("codex");
@@ -693,4 +703,101 @@ fn a_socket_folder_already_gone_is_no_failure_and_one_that_cannot_go_is() {
         kept.map_err(|cause| cause.kind()),
         Err(std::io::ErrorKind::PermissionDenied)
     );
+}
+
+#[test]
+fn a_windows_sub_agents_start_from_the_file_its_launch_names_which_the_server_alone_is_told_of() {
+    let home = Home::new();
+    let file = home.dir.path().join("sub-agents.toml");
+    fs::write(&file, "developer_instructions = \"Not the worker.\"\n").unwrap();
+    let env = home.and(SUBAGENT_VARIABLE, file.as_os_str());
+    let code = crate::block_on_local(async {
+        let codex = FakeCodex::start(Behaviour::Ready).await;
+        let program = codex_on_loopback(&home, codex.address.port(), "");
+        let setup = Setup {
+            startup: Duration::from_secs(10),
+            endpoint: |_| Endpoint::loopback(),
+            ..Setup::standard()
+        };
+        let args = [program.into_os_string(), "-m".into(), "gpt-5.6-luna".into()];
+        supervise_with(&env, &args, setup).await
+    })
+    .unwrap();
+    assert_eq!(code.unwrap(), 7, "the window opened");
+    let server = fs::read_to_string(home.dir.path().join("server-args")).unwrap();
+    let server: Vec<&str> = server.lines().collect();
+    let at = server.iter().position(|arg| *arg == "app-server").unwrap();
+    let quoted = format!("\"{}\"", file.display());
+    let mut expected = vec!["-c".to_owned(), "model=\"gpt-5.6-luna\"".to_owned()];
+    for (name, words) in [
+        ("default", "Default agent."),
+        ("worker", "Use for execution and production work."),
+        (
+            "explorer",
+            "Use `explorer` for specific codebase questions.",
+        ),
+    ] {
+        expected.extend([
+            "-c".to_owned(),
+            format!("agents.{name}.config_file={quoted}"),
+            "-c".to_owned(),
+            format!("agents.{name}.description=\"{words}\""),
+        ]);
+    }
+    let given: Vec<String> = server[..at].iter().map(|arg| (*arg).to_owned()).collect();
+    assert_eq!(given, expected, "every agent type, before app-server");
+    no_secret_on(&server);
+    let tui = fs::read_to_string(home.dir.path().join("tui-args")).unwrap();
+    assert!(
+        !tui.contains("agents."),
+        "the TUI is told nothing of it: {tui}"
+    );
+}
+
+#[test]
+fn a_sub_agents_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refused_before_anything_starts(
+) {
+    let home = Home::new();
+    let empty = home.dir.path().join("empty.toml");
+    fs::write(&empty, "").unwrap();
+    let gone = home.dir.path().join("gone.toml");
+    let started = home.dir.path().join("started");
+    let codex = home.codex(&format!("echo started > '{}'", started.display()));
+    for (value, said) in [
+        (
+            OsString::new(),
+            "CF_CODEX_SUBAGENT_FILE names no file".to_owned(),
+        ),
+        (
+            empty.clone().into_os_string(),
+            format!(
+                "the file of what its sub-agents start with, {}, holds nothing",
+                empty.display()
+            ),
+        ),
+        (
+            gone.clone().into_os_string(),
+            format!(
+                "could not read what its sub-agents start with from {}: ",
+                gone.display()
+            ),
+        ),
+    ] {
+        let env = home.and(SUBAGENT_VARIABLE, value);
+        let setup = Setup {
+            startup: Duration::from_secs(5),
+            ..Setup::standard()
+        };
+        let failed = crate::block_on_local(supervise_with(
+            &env,
+            &[codex.clone().into_os_string()],
+            setup,
+        ))
+        .unwrap()
+        .unwrap_err()
+        .to_string();
+        assert!(failed.starts_with(&said), "{failed}");
+        assert!(!started.exists(), "Codex started without it");
+        assert!(!home.dir.path().join("tmp").exists(), "nothing was made");
+    }
 }

@@ -2,6 +2,7 @@
 //! and the TUI, and ConsensFlow's own variables set in Codex's shell policy.
 
 use std::ffi::OsString;
+use std::path::Path;
 
 use cf_base::env::Env;
 
@@ -75,6 +76,39 @@ fn json_string(text: &str) -> String {
     serde_json::Value::from(text).to_string()
 }
 
+/// Codex's own agent types, which a `spawn_agent` call may name, each with the words
+/// Codex shows for it (the first of its own, Codex 0.166.0): a sub-agent of each starts
+/// from the configuration [`children`] names, not from the window's role.
+pub(crate) const AGENT_TYPES: [(&str, &str); 3] = [
+    ("default", "Default agent."),
+    ("worker", "Use for execution and production work."),
+    (
+        "explorer",
+        "Use `explorer` for specific codebase questions.",
+    ),
+];
+
+/// What the app-server is started with so that a sub-agent of each of Codex's own agent
+/// types starts from the configuration in `file` (`agents.<type>.config_file`), which
+/// holds its developer instructions, in place of the thread that started it: a role
+/// Codex reads from its configuration is defined by both its file and its words
+/// (`agents.<type>.description`).
+pub(crate) fn children(file: &Path) -> Vec<OsString> {
+    let file = json_string(&file.to_string_lossy());
+    AGENT_TYPES
+        .iter()
+        .flat_map(|(name, words)| {
+            [
+                "-c".to_owned(),
+                format!("agents.{name}.config_file={file}"),
+                "-c".to_owned(),
+                format!("agents.{name}.description={}", json_string(words)),
+            ]
+        })
+        .map(OsString::from)
+        .collect()
+}
+
 /// ConsensFlow's own variables, to be set explicitly in Codex's shell policy: a
 /// user policy of `inherit = "core"` keeps only a handful of names, and a
 /// window whose commands lose `CONSENSFLOW_URL`, `_TOKEN` and `_NODE` has a
@@ -122,6 +156,37 @@ mod tests {
             .iter()
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn a_sub_agent_of_each_of_codexs_own_agent_types_starts_from_the_file_named() {
+        let given = children(Path::new(
+            "/home/me/.consensflow/integrations/codex/l-1/sub-agents.toml",
+        ));
+        let file = "\"/home/me/.consensflow/integrations/codex/l-1/sub-agents.toml\"";
+        assert_eq!(
+            given,
+            args(&[
+                "-c",
+                &format!("agents.default.config_file={file}"),
+                "-c",
+                "agents.default.description=\"Default agent.\"",
+                "-c",
+                &format!("agents.worker.config_file={file}"),
+                "-c",
+                "agents.worker.description=\"Use for execution and production work.\"",
+                "-c",
+                &format!("agents.explorer.config_file={file}"),
+                "-c",
+                "agents.explorer.description=\"Use `explorer` for specific codebase questions.\"",
+            ])
+        );
+        // A path Windows spells is one TOML string, its backslashes escaped.
+        let windows = children(Path::new("C:\\Users\\me\\sub-agents.toml"));
+        assert_eq!(
+            windows[1],
+            OsString::from("agents.default.config_file=\"C:\\\\Users\\\\me\\\\sub-agents.toml\"")
+        );
     }
 
     #[test]

@@ -71,13 +71,23 @@ pub(crate) fn settings(
 /// from its first turn. A chief given specs has ConsensFlow's own copy of its
 /// Specmint skill written where it is kept for every launch, and that folder
 /// is added to what Claude reads as well, so the skill loads with the role's.
+///
+/// The role's file is a skill in the role's folder (the layout of 3.0.0's first
+/// windows, which loaded the role as a skill alone), and Claude lists every skill it
+/// reads to a sub-agent: a `general-purpose` sub-agent of a member listed the role's
+/// and, asked to, loaded the whole role (T-766, Claude Code 2.1.310). Nothing has the
+/// model load it, for the window has the role in its system prompt from the first
+/// turn; so its front matter says the model may not ([`not_for_the_model`]), and the
+/// window keeps the role where a sub-agent never sees it. A sub-agent forked from the
+/// window carries the window's whole prompt, the role with it: the role text's own
+/// sentence for a sub-agent is for that one (`skill/core`).
 pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
     let written = write_role(
         Harness::Claude,
         launch.role,
         env,
         launch.id,
-        launch.instructions,
+        &not_for_the_model(launch.instructions),
     )?;
     let mut args = vec!["--add-dir".to_owned(), written.root];
     if let Some(copy) = specmint::write_own(Harness::Claude, env, launch)? {
@@ -90,6 +100,23 @@ pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
         "off".to_owned(),
     ]);
     Ok(args)
+}
+
+/// The front matter line of a skill the model may not load: Claude lists it to no
+/// agent, sub-agents included, and only a person may run it.
+const NOT_FOR_THE_MODEL: &str = "disable-model-invocation: true";
+
+/// `text`, a role's, with [`NOT_FOR_THE_MODEL`] first in its front matter: in the one
+/// it opens with, or in one of its own put before a text that has none (a card's).
+/// An empty text stays empty, for the role refuses it.
+fn not_for_the_model(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    match text.strip_prefix("---\n") {
+        Some(rest) => format!("---\n{NOT_FOR_THE_MODEL}\n{rest}"),
+        None => format!("---\n{NOT_FOR_THE_MODEL}\n---\n\n{text}"),
+    }
 }
 
 #[cfg(test)]

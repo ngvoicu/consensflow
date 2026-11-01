@@ -464,9 +464,10 @@ fn gives_a_chief_its_role_instructions_and_no_model_of_its_own() {
             && file.ends_with("consensflow-chief/SKILL.md"),
         "{file}"
     );
+    // Its front matter says no model may load it as a skill: a sub-agent lists none.
     assert_eq!(
         fs::read_to_string(&plan.argv[at + 1]).unwrap(),
-        "CHIEF INSTRUCTIONS"
+        "---\ndisable-model-invocation: true\n---\n\nCHIEF INSTRUCTIONS"
     );
     assert!(!plan.argv.iter().any(|arg| arg == "--model"));
 }

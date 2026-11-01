@@ -17,6 +17,14 @@
 //! own variables (the board's token among them) are on no command line either: the
 //! broker gives them to each thread in its `config`.
 //!
+//! What the window's sub-agents start with in place of its role is a second file of
+//! the launch's (`CF_CODEX_SUBAGENT_FILE`, the harness's `codex::role`), which the
+//! app-server alone is told of, as the configuration of each of Codex's own agent
+//! types (`-c agents.<type>.config_file=…`): its path is on that command line, and
+//! nothing of the role is in it. A variable set to nothing, or a file named that is
+//! not there or holds nothing, opens no window, as a role's does: a window without
+//! it would start its sub-agents as itself.
+//!
 //! Each program is started through cf-process's `start_owned`, which on Windows runs it in a job of
 //! its own: ending it ends everything it started, what it starts as it is ended included (its id
 //! alone, ended with `taskkill /T`, leaves those; zeewin, T-322). A program that ended of itself has
@@ -35,7 +43,7 @@ use std::time::{Duration, Instant};
 use cf_base::env::Env;
 use cf_board::door::{board_of, DOOR_WAIT};
 use cf_process::{runnable, start_owned, Ending, Owned};
-use cf_proto::codex::{Bridge, InvalidBridge, BRIDGE_VARIABLE, ROLE_VARIABLE};
+use cf_proto::codex::{Bridge, InvalidBridge, BRIDGE_VARIABLE, ROLE_VARIABLE, SUBAGENT_VARIABLE};
 use tokio::io::AsyncReadExt;
 use tokio::process::{ChildStderr, Command};
 use tokio::task::JoinHandle;
@@ -67,6 +75,12 @@ pub(crate) enum SessionError {
     NoRole { path: PathBuf },
     #[error("{ROLE_VARIABLE} names no file")]
     NoRoleFile,
+    #[error("could not read what its sub-agents start with from {}: {cause}", path.display())]
+    Children { path: PathBuf, cause: io::Error },
+    #[error("the file of what its sub-agents start with, {}, holds nothing", path.display())]
+    NoChildren { path: PathBuf },
+    #[error("{SUBAGENT_VARIABLE} names no file")]
+    NoChildrenFile,
     #[error(transparent)]
     Endpoint(#[from] EndpointError),
     #[error("Codex server could not start: {0}")]
@@ -91,6 +105,8 @@ struct Plan<'a> {
     bridge: Bridge,
     /// The developer instructions the window's main threads start with.
     role: Option<String>,
+    /// The configuration its sub-agents start with, which the app-server is told of.
+    children: Option<PathBuf>,
     split: Split,
     endpoint: Endpoint,
     /// Whether the window opens in full-permission mode.
@@ -137,6 +153,7 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
     let (executable, codex_args) = args.split_first().ok_or(SessionError::NoProgram)?;
     let bridge = Bridge::parse(env.text(BRIDGE_VARIABLE).unwrap_or_default())?;
     let role = role_of(env)?;
+    let children = children_of(env)?;
     let split = arguments::split(codex_args)?;
     let endpoint = (setup.endpoint)(env)?;
     let plan = Plan {
@@ -144,6 +161,7 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
         executable: Path::new(executable),
         bridge,
         role,
+        children,
         split,
         endpoint,
         bypass: codex_args.iter().any(|arg| arg == BYPASS),
@@ -175,6 +193,24 @@ fn role_of(env: &Env) -> Result<Option<String>, SessionError> {
         Ok(text) if text.is_empty() => Err(SessionError::NoRole { path }),
         Ok(text) => Ok(Some(text)),
         Err(cause) => Err(SessionError::Role { path, cause }),
+    }
+}
+
+/// The file of the configuration the window's sub-agents start with, which `env` names
+/// in [`SUBAGENT_VARIABLE`]: none where the variable is not set. A variable set to
+/// nothing is refused, as a file that cannot be read or holds nothing is.
+fn children_of(env: &Env) -> Result<Option<PathBuf>, SessionError> {
+    if env.os(SUBAGENT_VARIABLE).is_none() {
+        return Ok(None);
+    }
+    let Some(file) = env.path(SUBAGENT_VARIABLE) else {
+        return Err(SessionError::NoChildrenFile);
+    };
+    let path = file.to_path_buf();
+    match std::fs::read_to_string(file) {
+        Ok(text) if text.is_empty() => Err(SessionError::NoChildren { path }),
+        Ok(_) => Ok(Some(path)),
+        Err(cause) => Err(SessionError::Children { path, cause }),
     }
 }
 
@@ -236,6 +272,9 @@ impl Session {
         tail: &Rc<RefCell<Tail>>,
     ) -> Result<JoinHandle<()>, SessionError> {
         let mut args = plan.split.backend.clone();
+        if let Some(children) = &plan.children {
+            args.extend(arguments::children(children));
+        }
         args.push("app-server".into());
         args.extend(plan.endpoint.listen().iter().cloned());
         let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;
@@ -392,7 +431,8 @@ fn remove_folder(folder: &Path) -> io::Result<()> {
 /// starts (what a failure to start names); or why it cannot start (a Codex
 /// that is an npm shim, with no Node to run it on). An OpenAI API key in this
 /// environment never reaches Codex, which has its own login, nor the name of the
-/// role's file, which is the broker's to read; and a program
+/// role's file, which is the broker's to read, nor the variable that names its
+/// sub-agents' (the app-server is told the file itself); and a program
 /// still running when its handle is dropped is killed, not orphaned (and everything it started
 /// with it, on Windows).
 fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), String> {
@@ -404,6 +444,7 @@ fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), Stri
     command
         .env_remove("OPENAI_API_KEY")
         .env_remove(ROLE_VARIABLE)
+        .env_remove(SUBAGENT_VARIABLE)
         .kill_on_drop(true);
     Ok((command, program))
 }

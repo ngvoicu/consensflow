@@ -21,6 +21,26 @@
 //! ([`crate::contract::Adapter::keeps_first_instructions`], which the Codex adapter
 //! answers yes to). A role that changed since the thread began reaches it as a
 //! message the engine says.
+//!
+//! A sub-agent the window's agent starts (Codex's `spawn_agent`) is a thread the
+//! app-server starts itself, and it began with the window's role: it held the
+//! member's role in its developer message, on every route (T-766, Codex 0.164.0),
+//! and one given something it could not answer asked the board as the member, 4
+//! children of 4. So a launch writes a second file beside the role's, the
+//! configuration a child of each of Codex's built-in agent types starts with
+//! (`default`, `worker`, `explorer`; Codex 0.166.0 has no other): Codex's own
+//! instructions, then a sentence that says the child is not the window's agent and
+//! never runs `cf` ([`children`]). The supervisor names it to the app-server alone
+//! (`-c agents.<type>.config_file=…`), which starts each such child from it in
+//! place of the window's role. A child forked with the window's whole history
+//! (`fork_context`) carries the role in that history, and one of an agent type the
+//! owner defined in their own configuration starts from what they wrote: those are
+//! what the role text's own sentence for a sub-agent is for (`skill/core`).
+//!
+//! A child's commands have the window's board token all the same (T-766 found
+//! nothing that tells a child's shell from the window's own, on any harness):
+//! ConsensFlow scopes no token to who holds it, and keeps the role, not the token,
+//! from a child.
 
 use std::path::{Path, PathBuf};
 
@@ -29,7 +49,7 @@ use cf_base::file::{make_folder, write_file, Mkdir};
 use cf_base::js;
 use cf_base::json::from_slice_lossy;
 use cf_base::path;
-use cf_proto::codex::ROLE_VARIABLE;
+use cf_proto::codex::{ROLE_VARIABLE, SUBAGENT_VARIABLE};
 use serde_json::{json, Value};
 
 use crate::contract::LaunchId;
@@ -49,22 +69,48 @@ const LINE_LIMIT: usize = 2 * 1024 * 1024;
 /// The name of the role's file in its launch's folder.
 const FILE: &str = "developer-instructions.md";
 
-/// The text a window of `role` is given as its developer instructions: Codex's
-/// own instructions for a window opened in `cwd`, then the role's `content`.
+/// The name of the file of the configuration its sub-agents start with, in its
+/// launch's folder.
+const CHILDREN_FILE: &str = "sub-agents.toml";
+
+/// The developer instructions of a window and of the sub-agents its agent starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Texts {
+    /// The window's own: Codex's instructions, then the role.
+    pub(super) role: String,
+    /// A sub-agent's: Codex's instructions, then that it is not the window's agent.
+    pub(super) children: String,
+}
+
+/// The texts a window of `role` is given as developer instructions, its own and its
+/// sub-agents': Codex's own instructions for a window opened in `cwd`, then the
+/// role's `content` for the window, and for a sub-agent [`children`]'s sentence.
 pub(super) async fn text(
     services: &Services,
     role: &str,
     executable: &str,
     cwd: &str,
     content: &str,
-) -> Result<String, String> {
+) -> Result<Texts, String> {
     if content.is_empty() {
         return Err(format!("the {role} window needs its role text"));
     }
     let existing = instructions(services, executable, cwd).await?;
-    Ok(format!(
-        "{existing}\n\nYour ConsensFlow role is {role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{content}"
-    ))
+    Ok(Texts {
+        role: format!(
+            "{existing}\n\nYour ConsensFlow role is {role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{content}"
+        ),
+        children: format!("{existing}\n\n{}", children(role)),
+    })
+}
+
+/// What a sub-agent of a window of `role` is told in place of the role: the words a
+/// Codex child given them was seen to keep to (T-766: none of three asked the board,
+/// where four of four with the role did).
+pub(super) fn children(role: &str) -> String {
+    format!(
+        "You are a sub-agent that a ConsensFlow {role} started. You are not the {role}: you have no board identity, so never run cf; answer your parent in your final message."
+    )
 }
 
 /// Writes `text` as the role of `launch`'s window, in its own folder made private
@@ -77,6 +123,46 @@ pub(super) fn write(env: &Env, launch: &LaunchId, text: &str) -> Result<(String,
     make_folder(Path::new(&folder), 0o700, Mkdir::Promise).map_err(said)?;
     write_file(Path::new(&file), text.as_bytes(), 0o600).map_err(said)?;
     Ok((ROLE_VARIABLE.to_owned(), file))
+}
+
+/// Writes the configuration the sub-agents of `launch`'s window start with, whose
+/// developer instructions are `text`, beside its role and as private, and says the
+/// variable of the window's environment that names it.
+pub(super) fn write_children(
+    env: &Env,
+    launch: &LaunchId,
+    text: &str,
+) -> Result<(String, String), String> {
+    let folder = launch_folder(CODEX_FOLDER, env, launch)?;
+    let file = path::join(&[&folder, CHILDREN_FILE]);
+    let said = |error: cf_base::file::FileError| error.to_string();
+    make_folder(Path::new(&folder), 0o700, Mkdir::Promise).map_err(said)?;
+    let configuration = format!("developer_instructions = {}\n", toml_string(text));
+    write_file(Path::new(&file), configuration.as_bytes(), 0o600).map_err(said)?;
+    Ok((SUBAGENT_VARIABLE.to_owned(), file))
+}
+
+/// `text` as a TOML basic string, quotes included: a backslash, a quote and a line's
+/// end escaped, and every other character TOML takes in no basic string (the controls
+/// but the tab, and DEL) as its `\uXXXX`.
+fn toml_string(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\t' => quoted.push('\t'),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\u{0}'..='\u{1f}' | '\u{7f}' => {
+                quoted.push_str(&format!("\\u{:04X}", u32::from(character)));
+            }
+            other => quoted.push(other),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// The instructions Codex itself would give a window opened in `cwd`, asked of

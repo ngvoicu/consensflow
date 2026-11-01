@@ -19,6 +19,12 @@ pub const BRIDGE_VARIABLE: &str = "CF_CODEX_SESSION_BRIDGE";
 /// the text is on no command line. A window whose launch names none is given none.
 pub const ROLE_VARIABLE: &str = "CF_CODEX_ROLE_FILE";
 
+/// The environment variable that names the file of the configuration a window's
+/// sub-agents start with (`agents.<type>.config_file`), which the supervisor names
+/// to the app-server alone. A window whose launch names none starts its sub-agents
+/// as Codex would.
+pub const SUBAGENT_VARIABLE: &str = "CF_CODEX_SUBAGENT_FILE";
+
 /// The shortest token a broker accepts.
 const MIN_TOKEN: usize = 24;
 
