@@ -733,12 +733,16 @@ fn a_home_a_killed_run_left_is_taken_away_by_the_next_that_is_made() {
 #[test]
 fn a_harness_with_no_home_of_its_own_to_make_has_none() {
     let home = Path::new("/home/me");
-    assert!(Isolation::of_machine(Harness::Claude, home)
-        .unwrap()
-        .is_none());
+    assert!(
+        Isolation::of_machine_lasting(Harness::Claude, home, hours(1))
+            .unwrap()
+            .is_none()
+    );
     for harness in [Harness::Codex, Harness::Devin] {
         assert!(
-            Isolation::of_machine(harness, home).unwrap().is_some(),
+            Isolation::of_machine_lasting(harness, home, hours(1))
+                .unwrap()
+                .is_some(),
             "{harness:?}"
         );
     }
@@ -758,7 +762,280 @@ fn every_harness_the_kit_can_launch_has_a_home_of_the_runs_own_or_a_reason_it_ha
             // Pi's home needs the run's model, which this test does not ask.
             continue;
         }
-        let made = Isolation::of_machine(harness, home).unwrap();
+        let made = Isolation::of_machine_lasting(harness, home, hours(1)).unwrap();
         assert_eq!(made.is_some(), !elsewhere.contains(&harness), "{harness:?}");
     }
+}
+
+// ---------------------------------------------------------------------- the renewal (T-1067)
+
+use super::super::renew::tests::stand_in;
+use super::super::renew::TestMachine;
+
+/// The access token an entry that Pi renewed holds.
+const RENEWED: &str = "pi-RENEWED-5555555555";
+
+/// A test machine, as the runner says it.
+fn zeewin2() -> TestMachine {
+    TestMachine::signalled(Some("zeewin2")).unwrap()
+}
+
+/// The owner's `auth.json` with an `openai` entry (`access`) that ends at `expires`.
+fn auth_ending(expires: i64, access: &str) -> String {
+    json!({
+        "openrouter": { "type": "api_key", "key": KEY },
+        "openai": { "type": "oauth", "access": access, "refresh": REFRESH, "expires": expires },
+        "anthropic": oauth(OTHER, hours(9)),
+    })
+    .to_string()
+}
+
+/// A `pi` that stands in for the owner's: it writes down how it was started, does what `body` says,
+/// and ends with `status`.
+struct Renewing {
+    owner: Owner,
+    tools: tempfile::TempDir,
+}
+
+impl Renewing {
+    /// An owner whose `openai` login ended an hour before `NOW`.
+    fn new() -> Self {
+        let renewing = Self {
+            owner: Owner::new(),
+            tools: tempfile::tempdir().unwrap(),
+        };
+        write(
+            &renewing.owner.path(".pi/agent/auth.json"),
+            &auth_ending(at(NOW - 3600), ACCESS),
+        );
+        renewing
+    }
+
+    fn log(&self) -> PathBuf {
+        self.tools.path().join("log")
+    }
+
+    /// What the stand-in did, line by line: its words, then the folder it was started in. None
+    /// where it never ran.
+    fn started(&self) -> Option<Vec<String>> {
+        let text = fs::read_to_string(self.log()).ok()?;
+        Some(text.lines().map(str::to_owned).collect())
+    }
+
+    /// What the stand-in does when it renews the entry as Pi does: writes an entry that ends
+    /// eight hours after `NOW`.
+    fn renews(&self) -> String {
+        let text = auth_ending(at(NOW + 8 * 3600), RENEWED);
+        format!(
+            "cat > '{}' <<'JSON'\n{text}\nJSON",
+            self.owner.path(".pi/agent/auth.json").display()
+        )
+    }
+
+    /// Pi's home for a run on `model`, with a renewal on `machine` (none on a machine that is not
+    /// a test machine) that starts the stand-in.
+    fn pi(&self, model: &str, machine: Option<TestMachine>, body: &str, status: i32) -> Isolation {
+        let mut made = self.owner.pi(model, hours(1));
+        let program = stand_in(self.tools.path(), &self.log(), body, status);
+        made.renewal = machine.map(|machine| {
+            pi::renewal(
+                machine,
+                self.owner.home.path(),
+                &self.owner.path(".pi/agent"),
+                model,
+                move || Ok(program.clone()),
+            )
+        });
+        made
+    }
+}
+
+#[test]
+fn a_pi_entry_that_ended_on_a_test_machine_is_renewed_by_pi_once_and_the_run_goes_on() {
+    let run = Renewing::new();
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &run.renews(), 0);
+    let home = isolation.made_at(at(NOW)).unwrap();
+    // The run is given the entry Pi renewed, and only the run's provider's.
+    let held: Value =
+        serde_json::from_str(&fs::read_to_string(home.join("pi/agent/auth.json")).unwrap())
+            .unwrap();
+    assert_eq!(held["openai"]["access"], RENEWED);
+    assert_eq!(held.as_object().unwrap().len(), 1, "the one provider's");
+    // Pi was run once, in its print mode, on the run's model, with nothing to reach out for.
+    let started = run.started().unwrap();
+    assert_eq!(
+        started[0],
+        "-p Reply with the single word ok. --model openai/gpt-6-luna --thinking off --no-session \
+         --no-tools --no-extensions --no-mcp --no-skills --no-context-files --no-prompt-templates"
+    );
+    assert!(
+        started[1].contains("consensflow-integration-renew-"),
+        "{started:?}"
+    );
+    // The record is the file and when the entry ended before and after, and no entry.
+    let renewed = isolation.renewed.lock().unwrap();
+    assert_eq!(renewed.len(), 1);
+    assert_eq!(
+        (renewed[0].before, renewed[0].after),
+        (Some(at(NOW - 3600)), Some(at(NOW + 8 * 3600)))
+    );
+    assert_eq!(renewed[0].file, "~/.pi/agent/auth.json");
+    drop(renewed);
+    // The owner's file is what was copied, so nothing is stale and the run ends well.
+    isolation.finish().unwrap();
+}
+
+#[test]
+fn a_renewal_that_fails_refuses_the_pi_run_in_words_that_say_so_and_makes_no_home() {
+    let run = Renewing::new();
+    let isolation = run.pi(
+        "openai/gpt-6-luna",
+        Some(zeewin2()),
+        "echo 'Error: token refresh failed' >&2",
+        1,
+    );
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` has expired"), "{said}");
+    assert!(
+        said.contains(
+            "On zeewin2 the kit ran Pi once as the owner to renew it (T-1067), and the renewal \
+             ran and failed: it ended 1 (Error: token refresh failed)"
+        ),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said), "{said}");
+    assert_eq!(run.owner.made(), 0);
+}
+
+#[test]
+fn a_renewal_that_moves_nothing_refuses_the_pi_run_and_says_when_pi_renews_an_entry() {
+    let run = Renewing::new();
+    // An hour left of the hour and a half the run needs: Pi renews an entry once it has ended.
+    write(
+        &run.owner.path(".pi/agent/auth.json"),
+        &auth_ending(at(NOW + 3600), ACCESS),
+    );
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), "", 0);
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` expires in 1 h"), "{said}");
+    assert!(said.contains("the renewal ran and failed"), "{said}");
+    assert!(
+        said.contains("the login still ends 2027-01-15T09:00:00Z (in 1 h): Pi renews a token only once the entry has ended"),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said), "{said}");
+    assert_eq!(run.owner.made(), 0);
+}
+
+#[test]
+fn a_renewal_that_changes_the_owners_pi_files_beside_the_login_fails_and_names_the_file() {
+    let run = Renewing::new();
+    let body = format!(
+        "{}\necho '{{}}' > '{}'",
+        run.renews(),
+        run.owner.path(".pi/agent/settings.json").display()
+    );
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &body, 0);
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("the renewal ran and failed"), "{said}");
+    assert!(
+        said.contains("it changed the owner's Pi files beside its login: ~/.pi/agent/settings.json is not as it was"),
+        "{said}"
+    );
+    assert_eq!(run.owner.made(), 0);
+}
+
+#[test]
+fn an_entry_that_lasts_the_run_or_cannot_be_renewed_is_never_renewed() {
+    let run = Renewing::new();
+    // A key does not end; the run is on `openrouter`.
+    let isolation = run.pi(
+        "openrouter/meta/muse-spark-1.3",
+        Some(zeewin2()),
+        &run.renews(),
+        0,
+    );
+    assert!(isolation.made_at(at(NOW)).is_ok());
+    assert_eq!(run.started(), None, "Pi was not run");
+    // An entry that lasts nine hours.
+    write(&run.owner.path(".pi/agent/auth.json"), &auth(hours(9)));
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &run.renews(), 0);
+    assert!(isolation.made_at(at(NOW)).is_ok());
+    assert_eq!(run.started(), None, "Pi was not run");
+    // An ended entry with no refresh token: Pi cannot renew it.
+    let no_refresh = json!({
+        "openai": { "type": "oauth", "access": ACCESS, "expires": at(NOW - 3600) },
+    })
+    .to_string();
+    write(&run.owner.path(".pi/agent/auth.json"), &no_refresh);
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &run.renews(), 0);
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` has expired"), "{said}");
+    assert!(!said.contains("T-1067"), "{said}");
+    // A model with no provider has no entry to renew, whatever the owner's file holds.
+    let only_ended = json!({
+        "openai": { "type": "oauth", "access": ACCESS, "refresh": REFRESH, "expires": at(NOW - 3600) },
+    })
+    .to_string();
+    write(&run.owner.path(".pi/agent/auth.json"), &only_ended);
+    let isolation = run.pi("gpt-6-luna", Some(zeewin2()), &run.renews(), 0);
+    assert!(isolation.made_at(at(NOW)).is_err());
+    assert_eq!(run.started(), None, "Pi was not run");
+}
+
+#[test]
+fn off_a_test_machine_an_ended_pi_entry_is_not_renewed_but_refused_as_it_always_was_and_nothing_is_run(
+) {
+    let run = Renewing::new();
+    let isolation = run.pi("openai/gpt-6-luna", None, &run.renews(), 0);
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` has expired"), "{said}");
+    assert!(
+        !said.contains("renew it") && !said.contains("T-1067"),
+        "{said}"
+    );
+    assert_eq!(run.started(), None);
+    assert_eq!(run.owner.made(), 0);
+    // A home made for the machine renews only where the runner said it is on a test machine.
+    let home = run.owner.home.path();
+    let on = |machine| Isolation::of_machine_on(machine, Harness::Pi, home, hours(1));
+    assert!(on(None).unwrap().unwrap().renewal.is_none());
+    assert!(on(Some(zeewin2())).unwrap().unwrap().renewal.is_some());
+    // Codex is not covered by the rule: its logins are not renewed anywhere.
+    let codex = Isolation::of_machine_on(Some(zeewin2()), Harness::Codex, home, hours(1));
+    assert!(codex.unwrap().unwrap().renewal.is_none());
+}
+
+// ---------------------------------------------------------------------- the case's own length (T-1066)
+
+use super::super::PLANNED;
+
+#[test]
+fn a_login_must_last_the_cases_planned_length_and_the_margin_whatever_the_harness() {
+    assert_eq!(lasting(PLANNED), Duration::from_secs(40 * 60));
+    assert_eq!(lasting(hours(1)), Duration::from_secs(90 * 60));
+    assert_eq!(lasting(Duration::from_secs(90 * 60)), hours(2));
+}
+
+#[test]
+fn a_pi_login_with_forty_two_minutes_left_runs_a_case_of_ten_minutes_and_not_one_of_an_hour() {
+    // T-1066: Pi's `openai` login was refused at 42 minutes left, about an hour after the owner
+    // used it, while the kit asked every case for two hours.
+    let owner = Owner::new();
+    write(
+        &owner.path(".pi/agent/auth.json"),
+        &auth_ending(ends(Duration::from_secs(42 * 60)), ACCESS),
+    );
+    let case = owner.pi("openai/gpt-6-luna", PLANNED);
+    assert!(case.made_at(at(NOW)).is_ok());
+    let longer = owner.pi("openai/gpt-6-luna", hours(1));
+    let said = longer.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` expires in 42 min"), "{said}");
+    assert!(said.contains("at least 1 h 30 min more"), "{said}");
+    // The refusal says the harness renews an entry itself once it has ended.
+    assert!(
+        said.contains("Pi renews an entry itself once it has ended"),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said), "{said}");
 }

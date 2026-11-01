@@ -11,6 +11,9 @@ const REFRESH: &str = "sk-ant-ort01-REFRESH-9876543210";
 const MCP: &str = "mcp-token-ZZZZ";
 const SECRETS: [&str; 3] = [ACCESS, REFRESH, MCP];
 
+/// How long a login must last for a case planned at an hour and a half, with its margin.
+const LEFT: Duration = Duration::from_secs(2 * 60 * 60);
+
 /// `seconds` after the epoch, in milliseconds.
 fn at(seconds: u64) -> i64 {
     i64::try_from(seconds * 1000).unwrap()
@@ -40,7 +43,12 @@ fn hours(hours: u64) -> Duration {
 fn login(text: &str, home: &Path, parent: &Path) -> Login {
     let file = home.join("machine-login.json");
     std::fs::write(&file, text).unwrap();
-    Login::new(Source::File(file), home.to_path_buf(), parent.to_path_buf())
+    Login::new(
+        Source::File(file),
+        home.to_path_buf(),
+        parent.to_path_buf(),
+        LEFT,
+    )
 }
 
 fn mode(path: &Path) -> u32 {
@@ -124,14 +132,20 @@ fn a_run_that_states_its_own_length_is_refused_a_login_that_would_end_before_it_
 }
 
 #[test]
-fn a_login_made_for_the_machine_asks_two_hours_and_one_made_lasting_asks_what_it_is_told() {
+fn a_login_asks_what_it_is_told_a_case_or_an_eval_plans_and_nothing_of_its_own() {
     let source = Source::File(PathBuf::from("/nowhere/login.json"));
-    let made = Login::new(source, PathBuf::from("/home/me"), PathBuf::from("/tmp"));
-    assert_eq!(made.left, LEFT);
+    let made = Login::new(
+        source,
+        PathBuf::from("/home/me"),
+        PathBuf::from("/tmp"),
+        hours(3),
+    );
+    assert_eq!(made.left, hours(3));
     // On this machine, if it has a login to copy at all.
-    if let Some(eval) = Login::of_machine_lasting(hours(7)) {
-        assert_eq!(eval.left, hours(7));
-        assert_eq!(Login::of_machine().unwrap().left, LEFT);
+    for left in [Duration::from_secs(40 * 60), hours(7)] {
+        if let Some(login) = Login::of_machine_lasting(left) {
+            assert_eq!(login.left, left);
+        }
     }
 }
 
@@ -244,6 +258,7 @@ fn a_login_refused_leaves_no_folder_and_a_login_that_cannot_be_read_says_where_i
         Source::File(home.path().join("none.json")),
         home.path().to_path_buf(),
         parent.path().to_path_buf(),
+        LEFT,
     );
     let said = missing.folder_at(at(NOW)).unwrap_err().to_string();
     assert!(said.contains("none.json"), "{said}");
@@ -773,4 +788,268 @@ fn a_link_in_the_folder_is_not_followed_out_of_it() {
     assert!(!files_below(kept.path())
         .iter()
         .any(|file| file.ends_with("link.jsonl")));
+}
+
+// ---------------------------------------------------------------------- the renewal (T-1067)
+
+use super::super::renew::tests::stand_in;
+use super::super::renew::TestMachine;
+
+/// The access token a login that Claude Code renewed holds.
+const RENEWED: &str = "sk-ant-oat01-RENEWED-5555555555";
+
+/// The text the machine keeps for a login whose access token (`access`) ends at `expires`.
+fn login_ending(expires: i64, access: &str) -> String {
+    json!({
+        "mcpOAuth": { "plugin:x:x|1": { "accessToken": MCP, "refreshToken": MCP } },
+        "claudeAiOauth": {
+            "accessToken": access, "refreshToken": REFRESH, "expiresAt": expires,
+            "scopes": ["user:inference"], "subscriptionType": "max",
+        },
+    })
+    .to_string()
+}
+
+/// A test machine, as the runner says it.
+fn zeewin2() -> TestMachine {
+    TestMachine::signalled(Some("zeewin2")).unwrap()
+}
+
+/// A person whose Claude Code login ended an hour before `NOW`, and a `claude` that stands in for
+/// theirs: it writes down how it was started, does what `body` says, and ends with `status`.
+struct Renewing {
+    person: Person,
+    parent: tempfile::TempDir,
+    tools: tempfile::TempDir,
+}
+
+impl Renewing {
+    fn new() -> Self {
+        Self {
+            person: Person::new(),
+            parent: tempfile::tempdir().unwrap(),
+            tools: tempfile::tempdir().unwrap(),
+        }
+    }
+
+    fn log(&self) -> PathBuf {
+        self.tools.path().join("log")
+    }
+
+    /// What the stand-in did, line by line: its words, then the folder it was started in. None
+    /// where it never ran.
+    fn started(&self) -> Option<Vec<String>> {
+        let text = std::fs::read_to_string(self.log()).ok()?;
+        Some(text.lines().map(str::to_owned).collect())
+    }
+
+    /// The machine's login file.
+    fn file(&self) -> PathBuf {
+        self.person.home.path().join("machine-login.json")
+    }
+
+    /// What the stand-in does when it renews the login as Claude Code does: writes a login that
+    /// ends eight hours after `NOW`.
+    fn renews(&self) -> String {
+        let text = login_ending(at(NOW + 8 * 3600), RENEWED);
+        format!("cat > '{}' <<'JSON'\n{text}\nJSON", self.file().display())
+    }
+
+    /// A login on `text`, with a renewal on `machine` (none on a machine that is not a test
+    /// machine) that starts the stand-in.
+    fn login(&self, text: &str, machine: Option<TestMachine>, body: &str, status: i32) -> Login {
+        let mut login = login(text, self.person.home.path(), self.parent.path());
+        let program = stand_in(self.tools.path(), &self.log(), body, status);
+        login.renewal = machine.map(|machine| {
+            claude_renewal(machine, self.person.home.path().to_path_buf(), move || {
+                Ok(program.clone())
+            })
+        });
+        login
+    }
+
+    /// Whether the run made a folder.
+    fn made(&self) -> usize {
+        std::fs::read_dir(self.parent.path()).unwrap().count()
+    }
+}
+
+#[test]
+fn a_login_that_ended_on_a_test_machine_is_renewed_by_claude_code_once_and_the_run_goes_on() {
+    let run = Renewing::new();
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    let login = run.login(&ended, Some(zeewin2()), &run.renews(), 0);
+    let folder = login.folder_at(at(NOW)).unwrap();
+    // The run starts on the login Claude Code renewed, not on the one that had ended.
+    let held: Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join(".credentials.json")).unwrap())
+            .unwrap();
+    assert_eq!(held["claudeAiOauth"]["accessToken"], RENEWED);
+    assert_eq!(held["claudeAiOauth"]["expiresAt"], at(NOW + 8 * 3600));
+    assert_eq!(held.as_object().unwrap().len(), 1, "the login alone");
+    // Claude Code was run once, in its print mode, on the model the run uses, with nothing to
+    // reach out for, in a folder named as a folder of a run.
+    let started = run.started().unwrap();
+    assert_eq!(
+        started[0],
+        "-p Reply with the single word ok. --model claude-sonnet-5-5 --no-session-persistence \
+         --strict-mcp-config --no-chrome --disable-slash-commands --tools "
+    );
+    assert!(
+        started[1].contains("consensflow-integration-renew-"),
+        "{started:?}"
+    );
+    // What the renewal came to is kept for the run's report: the file, and when it ended before and after.
+    let made = login.made.lock().unwrap();
+    let renewed = made.as_ref().unwrap().renewed.as_ref().unwrap();
+    assert_eq!(
+        (renewed.before, renewed.after),
+        (Some(at(NOW - 3600)), Some(at(NOW + 8 * 3600)))
+    );
+    assert!(
+        renewed.file.ends_with("machine-login.json"),
+        "{}",
+        renewed.file
+    );
+    drop(made);
+    // The login the machine keeps is the one that was copied: nothing is stale, and the run ends well.
+    login.finish().unwrap();
+}
+
+#[test]
+fn a_renewal_that_fails_refuses_the_run_in_words_that_say_so_and_makes_no_folder() {
+    let run = Renewing::new();
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    let login = run.login(&ended, Some(zeewin2()), "echo 'Not logged in' >&2", 1);
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    // Today's refusal, and then that the renewal ran and how it failed.
+    assert!(said.contains("Claude Code's login has expired"), "{said}");
+    assert!(
+        said.contains(
+            "On zeewin2 the kit ran Claude Code once as the owner to renew it (T-1067), and the \
+             renewal ran and failed: it ended 1 (Not logged in)"
+        ),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said), "{said}");
+    assert_eq!(run.made(), 0);
+}
+
+#[test]
+fn a_renewal_that_moves_nothing_refuses_the_run_and_says_when_claude_code_renews_a_token() {
+    let run = Renewing::new();
+    // An hour left of the two the run needs: Claude Code renews a token with five minutes left,
+    // so running it now leaves this one as it is.
+    let near = login_ending(at(NOW + 3600), ACCESS);
+    let login = run.login(&near, Some(zeewin2()), "", 0);
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("expires in 1 h"), "{said}");
+    assert!(said.contains("the renewal ran and failed"), "{said}");
+    assert!(
+        said.contains("the login still ends 2027-01-15T09:00:00Z (in 1 h): Claude Code renews a token only when five minutes of it are left"),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said), "{said}");
+    assert_eq!(run.started().unwrap().len(), 2, "the stand-in ran once");
+    assert_eq!(run.made(), 0);
+}
+
+#[test]
+fn a_renewal_that_changes_the_owners_setup_beside_the_login_fails_and_names_the_file() {
+    let run = Renewing::new();
+    let body = format!(
+        "{}\necho '{{\"model\":\"haiku\"}}' > '{}'",
+        run.renews(),
+        run.person
+            .home
+            .path()
+            .join(".claude/settings.json")
+            .display()
+    );
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    let login = run.login(&ended, Some(zeewin2()), &body, 0);
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("the renewal ran and failed"), "{said}");
+    assert!(
+        said.contains("it changed the owner's setup beside its login: ~/.claude/settings.json is not as it was"),
+        "{said}"
+    );
+    assert_eq!(run.made(), 0);
+}
+
+#[test]
+fn a_login_that_lasts_the_run_or_cannot_be_renewed_is_never_renewed() {
+    let run = Renewing::new();
+    // Five hours left of the two the run needs.
+    let lasts = login_ending(at(NOW + 5 * 3600), ACCESS);
+    assert!(run
+        .login(&lasts, Some(zeewin2()), &run.renews(), 0)
+        .folder_at(at(NOW))
+        .is_ok());
+    assert_eq!(run.started(), None, "Claude Code was not run");
+    // An ended login with no refresh token cannot be renewed by Claude Code: today's refusal.
+    let no_refresh = json!({
+        "claudeAiOauth": { "accessToken": ACCESS, "expiresAt": at(NOW - 3600) }
+    })
+    .to_string();
+    let said = run
+        .login(&no_refresh, Some(zeewin2()), &run.renews(), 0)
+        .folder_at(at(NOW))
+        .unwrap_err()
+        .to_string();
+    assert!(said.contains("no `refreshToken`"), "{said}");
+    assert_eq!(run.started(), None, "Claude Code was not run");
+}
+
+#[test]
+fn off_a_test_machine_an_ended_login_is_not_renewed_but_refused_as_it_always_was_and_nothing_is_run(
+) {
+    let run = Renewing::new();
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    // No machine, no renewal: the login the owner's Claude Code leaves ended is refused.
+    let login = run.login(&ended, None, &run.renews(), 0);
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("Claude Code's login has expired"), "{said}");
+    assert!(
+        !said.contains("renew it") && !said.contains("T-1067"),
+        "{said}"
+    );
+    assert_eq!(run.started(), None);
+    assert_eq!(run.made(), 0);
+    // A login made for the machine renews only where the runner said it is on a test machine.
+    assert!(Login::of_machine_on(None, LEFT).is_none_or(|login| login.renewal.is_none()));
+    assert!(Login::of_machine_on(Some(zeewin2()), LEFT).is_none_or(|login| login.renewal.is_some()));
+    assert!(Login::new(
+        Source::Keychain,
+        PathBuf::from("/home"),
+        PathBuf::from("/tmp"),
+        LEFT
+    )
+    .renewal
+    .is_none());
+}
+
+// ---------------------------------------------------------------------- the case's own length (T-1066)
+
+use super::super::isolation::lasting;
+use super::super::PLANNED;
+
+#[test]
+fn a_claude_login_with_forty_two_minutes_left_runs_a_case_of_ten_minutes_and_not_one_of_an_hour() {
+    let text = machine_text(Duration::from_secs(42 * 60));
+    assert!(oauth(&text, at(NOW), lasting(PLANNED)).is_ok());
+    let said = oauth(&text, at(NOW), lasting(hours(1)))
+        .unwrap_err()
+        .to_string();
+    // The refusal says how long is left, and that Claude Code renews a token itself, once it has ended.
+    assert!(said.contains("expires in 42 min"), "{said}");
+    assert!(said.contains("at least 1 h 30 min more"), "{said}");
+    assert!(
+        said.contains(
+            "Claude Code renews a token itself, but only when five minutes of it are left"
+        ),
+        "{said}"
+    );
+    assert!(said.contains("run again once it has ended"), "{said}");
+    assert!(!said_anywhere(&said), "{said}");
 }

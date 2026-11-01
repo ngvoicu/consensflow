@@ -13,7 +13,7 @@
 //!
 //! | Harness | Variables | Copied from the owner's | Watched in the owner's |
 //! |---|---|---|---|
-//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, with 2 h of token | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
+//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, with the case's planned length and 30 min of token | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
 //! | Codex | `CODEX_HOME` | `auth.json` | `auth.json`, `config.toml` |
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
@@ -32,9 +32,10 @@
 //! **A login that refreshes.** A refresh token is used once, so a copy that refreshes leaves
 //! the owner's file with a token that no longer works. Pi refreshes an OAuth entry that has
 //! ended, so the run is given an entry only if it lasts the run's length and [`MARGIN`]
-//! ([`pi::login`]); one that does not is a refusal, in words, before anything is spent. Codex
-//! and Devin keep a login that a run does not outlast (Devin's is a key); what Codex rewrote
-//! is said when the run ends. At the end the copies are compared with what was copied, and
+//! ([`pi::login`]); one that does not is a refusal, in words, before anything is spent, except on
+//! a test machine, where Pi is first run once as the owner to renew an entry that has run short
+//! ([`super::renew`], T-1067). Codex and Devin keep a login that a run does not outlast (Devin's
+//! is a key); what Codex rewrote is said when the run ends. At the end the copies are compared with what was copied, and
 //! the owner's files with their hashes: a difference fails the run, naming the file, and
 //! nothing a login holds is said anywhere.
 //!
@@ -70,18 +71,24 @@ use tempfile::TempDir;
 use super::agents;
 use super::login::{private_folder, sweep, write_private};
 use super::machine::Harness;
+use super::renew::{Kept, Renewal, Renewed, TestMachine};
 use crate::process::own_var;
 use crate::rig::HarnessHome;
 use crate::{files, Error, Result};
 use watch::{shown, Seen};
 
-/// How long the longest live suite (the approval run) takes: a login must last that much
-/// and [`MARGIN`] for a live suite to start on a copy of it.
-pub const RUN: Duration = Duration::from_secs(90 * 60);
-
-/// What a login must last beyond the run: the end of the run (the last look, the app's
-/// close) and the time the owner's own use of the harness needs to refresh it first.
+/// What a login must last beyond the run, which a case plans the length of
+/// ([`super::Log::lasting`]): the end of the run (the last look, the app's close) and the
+/// time the owner's own use of the harness needs to refresh it first.
 pub const MARGIN: Duration = Duration::from_secs(30 * 60);
+
+/// How long a login must last for a run that is planned to take `planned`, whatever the harness:
+/// the run and [`MARGIN`]. The case states `planned` ([`super::Log::lasting`]); a login that
+/// would end before that is refused when the run starts, and where it can be (a test machine)
+/// renewed first ([`super::renew`]).
+pub const fn lasting(planned: Duration) -> Duration {
+    Duration::from_secs(planned.as_secs() + MARGIN.as_secs())
+}
 
 /// What the name of a run's home begins with, in the temporary folder: the id of the process
 /// that made it follows, so that one a killed run left behind is known to be nobody's.
@@ -307,21 +314,32 @@ pub struct Isolation {
     plan: Plan,
     /// Where the home is made.
     parent: PathBuf,
+    /// Pi run once as the owner to renew an entry that has run short: only on a test machine
+    /// ([`TestMachine::detect`]); none elsewhere, where such an entry is refused.
+    renewal: Option<Renewal>,
+    /// What the renewals made before the home came to, for the run's report.
+    renewed: Mutex<Vec<Renewed>>,
     made: Mutex<Option<Made>>,
 }
 
 impl Isolation {
-    /// The home of `harness` for a live suite ([`RUN`]), copying the login of the owner whose
+    /// The home of `harness` for a run that takes `run` (a live case states its planned length,
+    /// [`super::Log::lasting`], and an eval its own), copying the login of the owner whose
     /// home is `home` (Codex's: its own folder, `CODEX_HOME`); none for Claude Code, whose config
-    /// folder is [`super::login`]'s, and where the platform's layout
-    /// is not known (Devin's on Windows).
-    pub fn of_machine(harness: Harness, home: &Path) -> Result<Option<Self>> {
-        Self::of_machine_lasting(harness, home, RUN)
+    /// folder is [`super::login`]'s, and where the platform's layout is not known (Devin's on
+    /// Windows). A login that would end before the run and [`MARGIN`] is refused when the home is made.
+    pub fn of_machine_lasting(
+        harness: Harness,
+        home: &Path,
+        run: Duration,
+    ) -> Result<Option<Self>> {
+        Self::of_machine_on(TestMachine::detect(), harness, home, run)
     }
 
-    /// [`Isolation::of_machine`], for a run that takes `run` (an eval states its own length): a
-    /// login that would end before it and [`MARGIN`] is refused when the home is made.
-    pub fn of_machine_lasting(
+    /// [`Isolation::of_machine_lasting`] on `test_machine`, the test machine this run is on, if it
+    /// is on one: only there is a Pi login that has run short renewed.
+    fn of_machine_on(
+        test_machine: Option<TestMachine>,
         harness: Harness,
         home: &Path,
         run: Duration,
@@ -336,7 +354,13 @@ impl Isolation {
                 let agent = machine("PI_CODING_AGENT_DIR")
                     .map_or_else(|| home.join(".pi").join("agent"), PathBuf::from);
                 let model = agents::asked()?.of(Harness::Pi).name.clone();
-                Some(Self::pi(home, &agent, &model, run))
+                let mut pi = Self::pi(home, &agent, &model, run);
+                pi.renewal = test_machine.map(|machine| {
+                    pi::renewal(machine, home, &agent, &model, || {
+                        super::machine::command(Harness::Pi.name())
+                    })
+                });
+                Some(pi)
             }
             #[cfg(unix)]
             Harness::Devin => Some(Self::devin(
@@ -380,7 +404,7 @@ impl Isolation {
     /// the Pi model `model` needs, if it lasts a run of `run` and [`MARGIN`].
     pub fn pi(home: &Path, agent: &Path, model: &str, run: Duration) -> Self {
         let providers = pi::provider_of(model).map(|provider| vec![provider]);
-        Self::new(Harness::Pi, home, Plan::pi(agent, providers, run + MARGIN))
+        Self::new(Harness::Pi, home, Plan::pi(agent, providers, lasting(run)))
     }
 
     /// Devin's home, copying the login in the owner's data folder `data` and the config in `config`
@@ -396,6 +420,8 @@ impl Isolation {
             owner_home: owner_home.to_path_buf(),
             plan,
             parent: std::env::temp_dir(),
+            renewal: None,
+            renewed: Mutex::new(Vec::new()),
             made: Mutex::new(None),
         }
     }
@@ -471,13 +497,7 @@ impl Isolation {
                         self.harness.log_in()
                     ))
                 })?;
-                let entries = pi::login(
-                    &text,
-                    providers.as_deref(),
-                    now,
-                    *left,
-                    &shown(from, &self.owner_home),
-                )?;
+                let entries = self.pi_entries(from, providers.as_deref(), &text, now, *left)?;
                 Ok(Some(Placed::File {
                     to: to.clone(),
                     bytes: entries.to_string().into_bytes(),
@@ -491,6 +511,62 @@ impl Isolation {
                 except,
             })),
         }
+    }
+
+    /// The entries of the owner's `auth.json` (`text`, read from `from`) that a run of Pi is
+    /// given, as [`pi::login`] has them: with the entry of the one provider the run needs renewed
+    /// first, once, where it has run short on a test machine. Why the run is refused, with the
+    /// renewal's part in it said, where it is.
+    fn pi_entries(
+        &self,
+        from: &Path,
+        providers: Option<&[String]>,
+        text: &str,
+        now: i64,
+        left: Duration,
+    ) -> Result<Value> {
+        let shown = shown(from, &self.owner_home);
+        let refused = match pi::login(text, providers, now, left, &shown) {
+            Ok(entries) => return Ok(entries),
+            Err(refused) => refused,
+        };
+        let provider = match providers {
+            Some([provider]) => provider,
+            _ => return Err(refused),
+        };
+        let Some(renewal) = self
+            .renewal
+            .as_ref()
+            .filter(|_| pi::renewable(text, provider, now, left))
+        else {
+            return Err(refused);
+        };
+        let kept = Kept {
+            file: shown.clone(),
+            login: format!("Pi's `{provider}` login"),
+            read: &|| {
+                files::read_string(from).map_err(|failed| {
+                    Error::Daemon(format!("Pi's login in {shown} is gone ({failed})"))
+                })
+            },
+            expiry: &|text| pi::expiry(text, provider),
+        };
+        let (fresh, renewed) = renewal
+            .renew(&kept, text)
+            .map_err(|why| Error::Daemon(format!("{refused}. {why}")))?;
+        // What the renewal did is said as it is done, for a run that does not get so far.
+        let _ = writeln!(
+            std::io::stderr(),
+            "note: {}",
+            renewed.said(renewal.machine())
+        );
+        let entries = pi::login(&fresh, providers, now, left, &shown)
+            .map_err(|still| Error::Daemon(format!("{still}. {}", renewal.ended(&renewed, now))));
+        self.renewed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(renewed);
+        entries
     }
 
     /// The file `name` below the folder the variable `variable` names (`CODEX_HOME`,
@@ -660,6 +736,16 @@ impl HarnessHome for Isolation {
     }
 
     fn finish(&self) -> Result {
+        if let Some(renewal) = &self.renewal {
+            for renewed in self
+                .renewed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+            {
+                let _ = writeln!(std::io::stderr(), "{}", renewed.said(renewal.machine()));
+            }
+        }
         let (touched, refreshed) = self.findings();
         if touched.is_empty() && refreshed.is_empty() {
             if let Some(evidence) = self.evidence() {

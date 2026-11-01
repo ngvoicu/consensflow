@@ -41,6 +41,9 @@
 //! - [`human`] plays the human at a project whose chief is a real harness (the
 //!   page's calls, and the keys typed into the chief's window).
 //! - [`wire`] says Devin's wire log in runs of what its records are, and how it ends.
+//! - [`renew`] runs Claude Code and Pi once as the owner, on a test machine only, when their
+//!   logins have run short, so that they renew their own tokens before [`login`] and
+//!   [`isolation`] copy them (T-1067).
 //! - [`report`] says what each check of a run came to, and ends the run with
 //!   them ([`report::conclude`]).
 //!
@@ -61,7 +64,7 @@
 //! came to. A suite never sets or unsets `CLAUDE_CONFIG_DIR` (a test holds it to that),
 //! and ends its rigs by closing them, so that what the run did to the person's setup
 //! fails it. The rest is in [`login`]: the run refuses to start on a login that expires
-//! within two hours (a refresh by the copy would log the person out of the Keychain's),
+//! within the case's planned length and 30 minutes (a refresh by the copy would log the person out of the Keychain's),
 //! says it loudly if the copy was refreshed all the same, and fails if the person's
 //! `settings.json` changed, or `~/.claude.json`, `history.jsonl` or `projects` gained
 //! anything of the run's folders. A run with no home to look for the login in has none to
@@ -96,6 +99,7 @@ pub mod login;
 pub mod machine;
 pub mod mcp_server;
 pub mod members;
+pub mod renew;
 pub mod report;
 pub mod trace;
 pub mod tree;
@@ -119,7 +123,7 @@ use crate::rig::{HarnessHome, Rig};
 use crate::{files, Error, Result};
 
 pub use machine::{
-    claude_project_key, codex, command, installed, isolated_claude, lacks, rig,
+    claude_project_key, codex, command, installed, installed_for, isolated_claude, lacks, rig,
     rig_with_claude_config, rig_with_stand_ins, seated, shimmed_claude,
     shimmed_claude_with_servers, windows_wrapper, working_command, Harness, Installed, ISOLATION,
 };
@@ -135,6 +139,12 @@ pub const PREFIX: &str = "CONSENSFLOW_LIVE_";
 /// person to look at (the flag `--keep`, which takes no value). A rig that starts
 /// takes away the homes left so that are older than a day and worked in by no process.
 pub const KEEP: &str = "CONSENSFLOW_LIVE_KEEP";
+
+/// How long a live case is planned to take where it says nothing of its own ([`Log::lasting`]):
+/// the logins its harnesses run on must last that much and [`isolation::MARGIN`] when the run
+/// starts, or the run is refused (and, on a test machine, the login renewed first,
+/// [`renew`]). A case is minutes long (T-1066: about ten); one that is longer states its length.
+pub const PLANNED: Duration = Duration::from_secs(10 * 60);
 
 /// The variable that limits a live run to some harnesses, `claude,pi` (the flag
 /// `--harness`, and the words that name harnesses with no flag in front of them).
@@ -211,6 +221,9 @@ pub struct Log {
     /// What the run left out, each harness with why ([`seated`]): its report says it,
     /// where a green run is read.
     left_out: Arc<Mutex<Vec<String>>>,
+    /// How long the run is planned to take: what the logins of the harnesses it finds
+    /// ([`Log::found`]) must last, with [`isolation::MARGIN`].
+    planned: Duration,
 }
 
 impl Log {
@@ -222,7 +235,15 @@ impl Log {
             begun: false,
             launches: Arc::default(),
             left_out: Arc::default(),
+            planned: PLANNED,
         }
+    }
+
+    /// The same run, planned to take `planned` (a case that is longer than [`PLANNED`] says
+    /// so): the logins its harnesses run on must last that much and [`isolation::MARGIN`].
+    #[must_use]
+    pub fn lasting(self, planned: Duration) -> Self {
+        Self { planned, ..self }
     }
 
     /// A run called `name` whose harnesses run on the models of [`agents`],
@@ -271,6 +292,7 @@ impl Log {
             begun: self.begun,
             launches: Arc::clone(&self.launches),
             left_out: Arc::clone(&self.left_out),
+            planned: self.planned,
         }
     }
 
@@ -373,7 +395,7 @@ impl Log {
     /// that is not there, or not logged in, is the error, before anything is
     /// spent) and says what was found.
     pub fn found(&self, harness: Harness) -> Result<Installed> {
-        let install = installed(harness)?;
+        let install = installed_for(harness, self.planned)?;
         self.say(found_line(&install, &install.version()));
         Ok(install)
     }

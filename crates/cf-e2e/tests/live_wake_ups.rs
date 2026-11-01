@@ -74,11 +74,14 @@ fn chiefs(named: &[String]) -> Result<Vec<Who>> {
     named.iter().map(|word| Who::named(word, "chief")).collect()
 }
 
+/// How long this run is planned to take: about nine minutes for each of the five harnesses.
+const PLANNED: std::time::Duration = std::time::Duration::from_secs(45 * 60);
+
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a chief of each harness named for about nine minutes each; cargo xtask live wake-ups (npm run live:wake-ups)"]
 fn a_chief_of_each_harness_is_woken_once_at_rest_by_a_setting_a_minute_apart_and_never_in_a_turn(
 ) -> Result {
-    let log = Log::begin("live wake-ups")?;
+    let log = Log::begin("live wake-ups")?.lasting(PLANNED);
     // What a record is read by is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let whom = chiefs(&live::list("harness"))?;

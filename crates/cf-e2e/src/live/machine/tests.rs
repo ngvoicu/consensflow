@@ -291,11 +291,15 @@ fn every_harness_found_runs_on_a_home_of_the_runs_own_but_for_the_two_that_are_n
         isolated.push(Harness::Devin);
     }
     for harness in isolated {
-        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
+        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me"), PLANNED).unwrap();
         assert!(found.isolation().is_some(), "{harness:?}");
     }
     // Claude Code's is a config folder ([`Login`]).
-    let found = with_homes(Installed::at(Harness::Claude, "/opt/bin/h", "/home/me")).unwrap();
+    let found = with_homes(
+        Installed::at(Harness::Claude, "/opt/bin/h", "/home/me"),
+        PLANNED,
+    )
+    .unwrap();
     assert!(found.isolation().is_none());
 }
 

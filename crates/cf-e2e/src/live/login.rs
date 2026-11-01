@@ -34,11 +34,13 @@
 //! refreshes a token when five minutes of it are left (`now + 300000 >= expiresAt`,
 //! 2.1.309), so a run that is not longer than the token has left never does. A run
 //! starts only on a login whose access token lasts at least as long as the run is
-//! to take, with a margin: [`LEFT`] for the live suites (all shorter), or the
-//! length a run states for itself ([`Login::of_machine_lasting`]: an eval states its
-//! own, hours long). It says it if the copy changed all the same: the folder's
+//! to take, with a margin: the length the case plans for itself and the margin
+//! ([`Login::of_machine_lasting`]: a live case states its own, minutes long, and an
+//! eval its own, hours long). It says it if the copy changed all the same: the folder's
 //! `.credentials.json` is compared with what was copied, and the Keychain with the
-//! items it had. Nothing refreshes it by hand, here or anywhere.
+//! items it had. Nothing refreshes it by hand, here or anywhere. (On a test machine, the
+//! one exception: a login that has run short is renewed by Claude Code itself, run once as
+//! the owner, before the copy is made; see [`super::renew`], T-1067.)
 //!
 //! **What the run is held to** ([`ClaudeConfig::finish`], when its rig ends): the
 //! person's login (the Keychain item's `claudeAiOauth`, never its other tokens) is as it
@@ -69,6 +71,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
+use super::machine::Harness;
+use super::renew::{self, Kept, Renewal, Renewed, TestMachine};
 use crate::process::{is_alive, own_var, Run};
 use crate::rig::ClaudeConfig;
 use crate::{files, Error, Result};
@@ -76,14 +80,6 @@ use crate::{files, Error, Result};
 /// The Keychain service Claude Code keeps its login under, and the start of the
 /// names it keeps another config folder's under (`Claude Code-credentials-<8 hex>`).
 const SERVICE: &str = "Claude Code-credentials";
-
-/// How long the login's access token must last for a live suite to start on a copy
-/// of it. Claude Code refreshes a token when five minutes of it are left, so a run
-/// shorter than this never refreshes it; the longest live suite (the approval run)
-/// takes well under it, with the margin the person's own use of Claude Code needs to
-/// refresh it first. A run that is longer, or that knows its length, asks for what it
-/// needs ([`Login::of_machine_lasting`]): an eval is hours long.
-pub const LEFT: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// The user's own home on this machine: `HOME`, else `USERPROFILE` (Windows' own), as the rest
 /// of the live kit finds it ([`super::machine::home`]); none where the run has neither.
@@ -220,13 +216,39 @@ fn oauth(text: &str, now: i64, left: Duration) -> Result<Value> {
             "Claude Code's login {state}, and this run needs it to last at least {} more: a run's \
              Claude Code refreshes a token that is about to end, and the refresh would leave the login \
              that this machine keeps unusable (the owner is logged out the next time theirs needs it). \
-             Claude Code refreshes a token only when five minutes of it are left, so using it now does \
-             not help: run again after the owner's own Claude Code has refreshed it, or make the run \
+             Claude Code renews a token itself, but only when five minutes of it are left, so using it \
+             now does not help: run again once it has ended (Claude Code then renews it, as it does \
+             when the owner opens it, and on a test machine the kit asks it to), or make the run \
              shorter",
             span(left)
         )));
     }
     Ok(oauth.clone())
+}
+
+/// When the login in `text`, the machine's, ends: the `expiresAt` of its `claudeAiOauth`
+/// (milliseconds since the epoch); none where the text holds none.
+fn expires_at(text: &str) -> Option<i64> {
+    serde_json::from_str::<Value>(text)
+        .ok()?
+        .get("claudeAiOauth")?
+        .get("expiresAt")?
+        .as_i64()
+}
+
+/// Whether the login in `text` has run short of `left` from `now` and Claude Code could renew
+/// it: it has a refresh token, and an expiry that is less than `left` away. A text that is no
+/// login, or has no refresh token, is not for a renewal to mend.
+fn renewable(text: &str, now: i64, left: Duration) -> bool {
+    let has_refresh = serde_json::from_str::<Value>(text)
+        .ok()
+        .is_some_and(|login| {
+            login["claudeAiOauth"]["refreshToken"]
+                .as_str()
+                .is_some_and(|token| !token.is_empty())
+        });
+    let remaining = |expires: i64| Duration::from_millis(u64::try_from(expires - now).unwrap_or(0));
+    has_refresh && expires_at(text).is_some_and(|expires| remaining(expires) < left)
 }
 
 /// A span as hours and minutes: `1 h 12 min`, `45 min`.
@@ -426,6 +448,8 @@ struct Made {
     owner: Seen,
     /// The Keychain items of Claude Code then; none where they cannot be listed.
     services: Option<BTreeSet<String>>,
+    /// What the renewal of the login came to, where the login had run short on a test machine.
+    renewed: Option<Renewed>,
 }
 
 /// The fields of a login that a refresh changes: the tokens, and when the access token ends. A
@@ -537,35 +561,79 @@ pub struct Login {
     parent: PathBuf,
     /// How long the access token must last more for the folder to be made.
     left: Duration,
+    /// Claude Code run once as the owner to renew a login that has run short: only on a test
+    /// machine ([`TestMachine::detect`]); none elsewhere, where such a login is refused.
+    renewal: Option<Renewal>,
     made: Mutex<Option<Made>>,
 }
 
 impl Login {
-    /// The login of this machine's Claude Code, for a live suite on it ([`LEFT`]); none where
-    /// the run has no home to look for it in.
-    pub fn of_machine() -> Option<Self> {
-        Self::of_machine_lasting(LEFT)
+    /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
+    /// included: the folder is made only if the access token lasts that much more (a live case
+    /// states its planned length and the margin, [`super::Log::lasting`]; an eval, hours long,
+    /// its own). Claude Code refreshes a token when five minutes of it are left, so a run that is
+    /// shorter than the token has left never does. None where the run has no home to look for it in.
+    pub fn of_machine_lasting(left: Duration) -> Option<Self> {
+        Self::of_machine_on(TestMachine::detect(), left)
     }
 
-    /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
-    /// included: the folder is made only if the access token lasts that much more (an eval, hours
-    /// long, states its own length; the live suites' is [`LEFT`]). None where the run has no home
-    /// to look for it in.
-    pub fn of_machine_lasting(left: Duration) -> Option<Self> {
+    /// [`Login::of_machine_lasting`] on `machine`, the test machine this run is on, if it is on
+    /// one: only there is a login that has run short renewed.
+    fn of_machine_on(machine: Option<TestMachine>, left: Duration) -> Option<Self> {
         let source = Source::of_machine()?;
         let home = machine_home()?;
-        let mut login = Self::new(source, home, std::env::temp_dir());
-        login.left = left;
+        let mut login = Self::new(source, home.clone(), std::env::temp_dir(), left);
+        login.renewal = machine.map(|machine| {
+            claude_renewal(machine, home, || {
+                super::machine::command(Harness::Claude.name())
+            })
+        });
         Some(login)
     }
 
-    fn new(source: Source, owner_home: PathBuf, parent: PathBuf) -> Self {
+    fn new(source: Source, owner_home: PathBuf, parent: PathBuf, left: Duration) -> Self {
         Self {
             source,
             owner: Owner { home: owner_home },
             parent,
-            left: LEFT,
+            left,
+            renewal: None,
             made: Mutex::new(None),
+        }
+    }
+
+    /// The login of the machine in `text` as a run may start on it at `now`: renewed first, once,
+    /// where it has run short on a test machine. The login and what the renewal came to; or why the
+    /// run is refused, with the renewal's part in it said.
+    fn usable(&self, text: String, now: i64) -> Result<(Value, Option<Renewed>)> {
+        let refused = match oauth(&text, now, self.left) {
+            Ok(oauth) => return Ok((oauth, None)),
+            Err(refused) => refused,
+        };
+        let Some(renewal) = self
+            .renewal
+            .as_ref()
+            .filter(|_| renewable(&text, now, self.left))
+        else {
+            return Err(refused);
+        };
+        let kept = Kept {
+            file: self.source.described(),
+            login: "Claude Code's login".to_owned(),
+            read: &|| self.source.read(),
+            expiry: &expires_at,
+        };
+        let (fresh, renewed) = renewal
+            .renew(&kept, &text)
+            .map_err(|why| Error::Daemon(format!("{refused}. {why}")))?;
+        // What the renewal did is said as it is done, for a run that does not get so far.
+        let _ = writeln!(io::stderr(), "note: {}", renewed.said(renewal.machine()));
+        match oauth(&fresh, now, self.left) {
+            Ok(oauth) => Ok((oauth, Some(renewed))),
+            Err(still) => Err(Error::Daemon(format!(
+                "{still}. {}",
+                renewal.ended(&renewed, now)
+            ))),
         }
     }
 
@@ -575,7 +643,7 @@ impl Login {
         if let Some(made) = made.as_ref() {
             return Ok(made.folder.path().to_path_buf());
         }
-        let oauth = oauth(&self.source.read()?, now, self.left)?;
+        let (oauth, renewed) = self.usable(self.source.read()?, now)?;
         sweep(&self.parent, PREFIX);
         let folder = tempfile::Builder::new()
             .prefix(&format!("{PREFIX}{}-", std::process::id()))
@@ -597,9 +665,41 @@ impl Login {
             oauth,
             owner: self.owner.look(),
             services: keychain_services(),
+            renewed,
         });
         Ok(path)
     }
+}
+
+/// Claude Code's renewal on `machine`, for the owner whose home is `home`, started as `program`
+/// finds it: Claude Code run once on
+/// the model the run uses ([`renew::claude_words`]), and the owner's setup compared before and
+/// after, so that nothing but the login is changed ([`Owner::changes_since`]).
+fn claude_renewal(
+    machine: TestMachine,
+    home: PathBuf,
+    program: impl Fn() -> Result<PathBuf> + Send + Sync + 'static,
+) -> Renewal {
+    Renewal::new(
+        machine,
+        "Claude Code",
+        "only when five minutes of it are left",
+        move || {
+            let model = super::agents::asked()?.of(Harness::Claude).name.clone();
+            let program = program()?;
+            let owner = Owner { home: home.clone() };
+            let before = owner.look();
+            renew::one_shot(&program, &renew::claude_words(&model))?;
+            let changed = owner.changes_since(&before);
+            if changed.is_empty() {
+                return Ok(());
+            }
+            Err(Error::Daemon(format!(
+                "it changed the owner's setup beside its login: {}",
+                changed.join("; ")
+            )))
+        },
+    )
 }
 
 /// Makes the folder `path` the user's alone (mode 700): a temporary folder is made with the
@@ -754,6 +854,9 @@ impl ClaudeConfig for Login {
         let Some(made) = made.as_ref() else {
             return Ok(());
         };
+        if let Some((renewed, renewal)) = made.renewed.as_ref().zip(self.renewal.as_ref()) {
+            let _ = writeln!(io::stderr(), "{}", renewed.said(renewal.machine()));
+        }
         let mut touched = self.owner.changes_since(&made.owner);
         touched.extend(self.owner_login_changed(&made.oauth));
         if let Some(note) = made.rewritten() {
