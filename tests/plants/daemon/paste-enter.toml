@@ -1,0 +1,122 @@
+# A human's paste into a window on Windows stayed in the harness's box after Enter (T-1025,
+# T-1048; `codex-windows-ignores-enter-after-paste` in consensflow-sme). On Windows the console
+# hands a paste on to the program as key presses, and Codex takes an Enter that comes while they
+# are still coming, or within 120 ms of them, for a line break in the paste. The pane host now
+# holds the human's keys after their paste, on Windows, until the window has drawn it and gone
+# quiet, as a delivery's Enter waits: a write that ends a paste is split there, and the wait is
+# from when the paste was written. The live suite types as the page does: the human's keys
+# (`pane.typed`), each line break a carriage return, and says when each Enter was written.
+#
+# One plant takes one rule out; a test fails. The arbiter's own plants run on the Mac with an
+# arbiter that holds as Windows' does; the Windows ones (`platforms = ["windows"]`) run on a
+# Windows machine against the console host the app ships. Every name holds `paste enter`, so
+# `npm run plants:daemon -- "paste enter"` runs them all.
+
+[run]
+paste-enter-arbiter-humans = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::a_humans_"]
+paste-enter-arbiter-platform = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::the_humans_keys_after_a_paste_wait_on_windows_alone"]
+paste-enter-console = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::windows::"]
+paste-enter-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter", "tests::"]
+
+# --- the pane host ---
+
+[[plant]]
+name = "paste enter: the human's paste and its Enter in one write go as one"
+meant = "a_humans_paste_and_its_enter_in_one_write_go_as_two_the_enter_once_the_window_took_it"
+runs = ["paste-enter-arbiter-humans"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            for part in pasted_parts(bytes) {"
+replace = "            for part in [bytes] {"
+
+[[plant]]
+name = "paste enter: the human's keys after their paste go at once"
+meant = "a_humans_enter_while_the_window_still_reads_their_paste_waits_until_it_drew_it"
+runs = ["paste-enter-arbiter-humans"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            self.enter.wait(&output, at);"
+replace = "            drop((output, at));"
+
+[[plant]]
+name = "paste enter: no paste of the human's is marked to wait on"
+meant = "a_humans_enter_while_the_window_still_reads_their_paste_waits_until_it_drew_it"
+runs = ["paste-enter-arbiter-humans"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                        state.human_pasted = Some(Instant::now());"
+replace = "                        state.human_pasted = None;"
+
+[[plant]]
+name = "paste enter: the wait for the human's paste starts when their Enter comes"
+meant = "a_humans_enter_after_the_window_took_their_paste_goes_at_once"
+runs = ["paste-enter-arbiter-humans"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """
+    fn wait(&self, output: &OutputClock, pasted: Instant) {
+        loop {"""
+replace = """
+    fn wait(&self, output: &OutputClock, pasted: Instant) {
+        let _ = pasted;
+        let pasted = Instant::now();
+        loop {"""
+
+[[plant]]
+name = "paste enter: the human's pastes are held on every platform"
+meant = "the_humans_keys_after_a_paste_wait_on_windows_alone"
+platforms = ["macos"]
+runs = ["paste-enter-arbiter-platform"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "const HOLDS_HUMAN_PASTES: bool = cfg!(windows);"
+replace = "const HOLDS_HUMAN_PASTES: bool = true;"
+
+[[plant]]
+name = "paste enter windows: the human's pastes are held on no platform"
+meant = "a_humans_paste_and_its_enter_in_one_write_send_it_through_the_console"
+platforms = ["windows"]
+runs = ["paste-enter-console"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "const HOLDS_HUMAN_PASTES: bool = cfg!(windows);"
+replace = "const HOLDS_HUMAN_PASTES: bool = false;"
+
+[[plant]]
+name = "paste enter windows: an Enter pressed while the console still hands on the paste goes at once"
+meant = "a_humans_enter_pressed_while_their_long_paste_is_read_sends_it_through_the_console"
+platforms = ["windows"]
+runs = ["paste-enter-console"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            self.enter.wait(&output, at);"
+replace = "            drop((output, at));"
+
+# --- the live suite ---
+
+[[plant]]
+name = "paste enter: the live paste's line breaks are written as line feeds"
+meant = "a_pastes_line_breaks_are_written_as_the_pages_terminal_sends_them"
+runs = ["paste-enter-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = """    let typed = text.replace("\\r\\n", "\\r").replace('\\n', "\\r");"""
+replace = """    let typed = text.to_owned();"""
+
+[[plant]]
+name = "paste enter: a live case's line does not say when its Enter was written"
+meant = "a_cases_line_says_when_its_enter_was_written_and_the_screen_where_it_was_kept"
+runs = ["paste-enter-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = "        entered.as_millis()"
+replace = "        0"
