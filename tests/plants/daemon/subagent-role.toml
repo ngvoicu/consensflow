@@ -102,7 +102,7 @@ runs = ["codex-session"]
 [[plant.edit]]
 file = "crates/cf-codex-session/src/supervisor.rs"
 find = '''        Err(cause) => Err(SessionError::Children { path, cause }),'''
-replace = '''        Err(_) => Ok(Some(path)),'''
+replace = '''        Err(_) => Ok(path),'''
 
 [[plant]]
 name = "subagent role: a Codex sub-agent is given the role in place of the sentence"
