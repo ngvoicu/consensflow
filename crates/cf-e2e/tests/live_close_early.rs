@@ -266,7 +266,7 @@ mod tests {
     fn the_workers_are_every_harness_unless_named() {
         assert_eq!(workers(&[]).unwrap(), Harness::ALL);
         assert_eq!(workers(&["devin".to_owned()]).unwrap(), [Harness::Devin]);
-        assert!(workers(&["opencode".to_owned()]).is_err());
+        assert!(workers(&["nonesuch".to_owned()]).is_err());
     }
 
     #[test]
