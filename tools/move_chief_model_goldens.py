@@ -35,7 +35,7 @@ import os
 import re
 import sys
 
-HARNESS_NAMES = {"claude-code": "Claude Code", "codex": "Codex", "pi": "Pi", "devin": "Devin", "opencode": "OpenCode"}
+HARNESS_NAMES = {"claude-code": "Claude Code", "codex": "Codex", "pi": "Pi", "devin": "Devin"}
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEAMS = os.path.join(HERE, "..", "crates", "cf-engine", "src", "testing", "seams.rs")
 PRESETS = os.path.join(HERE, "..", "crates", "cf-catalog", "data", "presets.json")
