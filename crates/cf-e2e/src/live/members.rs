@@ -398,8 +398,10 @@ impl Members {
             .collect()
     }
 
-    /// The screen of the window whose pane is `pane` (its id), as the pane host
-    /// draws it.
+    /// What the window whose pane is `pane` (its id) printed, its control sequences
+    /// taken out ([`Rig::screen`]): what was drawn over is still in it, and a word the
+    /// program repaints cell by cell is not in it in one piece. The screen as the pane
+    /// host draws it is [`Rig::snapshot`]'s.
     pub fn screen(&self, pane: &str) -> String {
         self.rig.screen(pane)
     }
