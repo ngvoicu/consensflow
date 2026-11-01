@@ -9,7 +9,7 @@ use cf_engine::testing::Context;
 use cf_harness::records::Role;
 use cf_proto::cf_word::{CfWord, Shell};
 
-const CF: &str = "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf";
+const CF: &str = "/Users/me/consensflow-dist/Contents/Resources/cli/bin/cf";
 
 /// What the window of `handle` was given as the message `id`, whole.
 fn given(context: &Context, handle: &str, id: i64) -> String {

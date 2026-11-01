@@ -212,7 +212,7 @@ fn cuts_a_long_composite_whole_and_names_the_command_that_shows_every_row() {
 fn words() -> [CfWord; 3] {
     [
         CfWord::new(
-            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            "/Users/me/consensflow-dist/Contents/Resources/cli/bin/cf",
             Shell::Posix,
         ),
         CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::Posix),

@@ -475,7 +475,7 @@ fn the_first_message_of_a_switched_in_chief_starts_each_command_with_the_cf_of_i
 #[test]
 fn a_page_names_its_commands_with_the_cf_of_its_reader_and_still_fits_what_each_harness_shows() {
     let cf = CfWord::new(
-        "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+        "/Users/me/consensflow-dist/Contents/Resources/cli/bin/cf",
         Shell::Posix,
     );
     let word = cf.as_str();
