@@ -86,7 +86,11 @@ fn a_busy_worker_that_ignores_its_pause_keeps_its_window_and_its_work_until_the_
     })?;
     sleep(secs(15));
     assert_eq!(project.task(1)?["state"], "paused");
-    assert_eq!(project.lane(&handle)?["pane"], pane, "the window is open, as it was");
+    assert_eq!(
+        project.lane(&handle)?["pane"],
+        pane,
+        "the window is open, as it was"
+    );
     assert!(
         is_alive(job.pid()) && !job.released(),
         "its work runs on, never asked to end"
@@ -95,7 +99,8 @@ fn a_busy_worker_that_ignores_its_pause_keeps_its_window_and_its_work_until_the_
     assert!(
         to_chief.len() == 1
             && to_chief[0].contains("ConsensFlow keeps the window open for it")
-            && to_chief[0].contains("only the human can end the work sooner, by deleting its session"),
+            && to_chief[0]
+                .contains("only the human can end the work sooner, by deleting its session"),
         "the chief was told: {to_chief:?}"
     );
     assert!(

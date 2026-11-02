@@ -358,14 +358,20 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
         told_the_human(&human_inbox),
         told_the_requester(&requester_inbox),
     );
-    // A window that ignored every round is closed, and the requester's note says so;
-    // one the host would not close shows `unstopped` on its lane.
-    let closed = requester.iter().any(|note| {
-        note["body"]
-            .as_str()
-            .is_some_and(|body| body.contains("so ConsensFlow closed it"))
-    });
-    let exhausted = closed || seen.iter().any(|word| word.contains("unstopped"));
+    // A window that ignored every round while its command runs is kept open for it, and
+    // the requester's note and the human's say so (T-1117: a pause never ends a window's
+    // work); a close of it would have ended the command. Either shows `unstopped` on its
+    // lane while it lasts.
+    let says = |notes: &[&Value], words: &str| {
+        notes.iter().any(|note| {
+            note["body"]
+                .as_str()
+                .is_some_and(|body| body.contains(words))
+        })
+    };
+    let closed = says(&requester, "so ConsensFlow closed it");
+    let kept = says(&requester, "ConsensFlow keeps the window open for it");
+    let exhausted = closed || kept || seen.iter().any(|word| word.contains("unstopped"));
     let gaps = crate::slow::gaps(&presses);
     case.say(format!(
         "{} Escapes: {}{}; the lane over the stop: {}",
@@ -415,7 +421,9 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
         case.say(format!(
             "{name} kept working through its presses, and {}: {} note to the human ({}), {} to the requester ({})",
             if closed {
-                "the daemon closed its window"
+                "the daemon closed its window, ending its command"
+            } else if kept {
+                "the daemon kept its window open for its command"
             } else {
                 "the host would not close its window"
             },
@@ -435,9 +443,10 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
         ));
     }
     say_events(case, members, number);
-    // Either end is an answer: a window that ignores (closed, and told once, to the
-    // requester: one note of one event, T-551) or one that stops.
-    case.require(!exhausted || (human.is_empty() && requester.len() == 1));
+    // Either end is an answer: a window that ignores (kept open for its command, never
+    // closed, and told once each to the requester and the human: one note of one event
+    // to each, T-551, T-1117) or one that stops.
+    case.require(!exhausted || (kept && !closed && human.len() == 1 && requester.len() == 1));
     Ok(())
 }
 

@@ -42,8 +42,9 @@
 //!
 //! Any harness (`--harness`, or its name):
 //!
-//! - `stuck`     A window that may not stop, pressed through every round and closed if
-//!   it ignores them all (the human and the requester are told): a command that
+//! - `stuck`     A window that may not stop, pressed through every round and kept open
+//!   for its command if it ignores them all, never closed (the human and the requester
+//!   are told, T-1117): a command that
 //!   ignores `INT`, `TERM` and `HUP` is run, then the task paused. When the harness
 //!   stops anyway, it says so, and at which press.
 //! - `midturn`   A window in the middle of a turn that runs no command (the member is
