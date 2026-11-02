@@ -240,8 +240,8 @@ mod tests {
         assert!(midtool.files.is_empty());
         assert_eq!(midtool.roster[1]["kind"], "codex");
         let stuck = plan_of(Case::Stuck, Harness::Codex, &options);
-        assert_eq!(stuck.files[0].0, "ignore-signals-cf-stops-live.sh");
-        assert!(stuck.files[0].1.contains("trap '' INT TERM HUP"));
+        assert_eq!(stuck.files[0].0, "ignore-signals-cf-stops-live.cjs");
+        assert!(stuck.files[0].1.contains("process.on(signal, () => {})"));
         assert!(plan_of(Case::Command, Harness::Claude, &options)
             .files
             .is_empty());

@@ -385,7 +385,7 @@ fn a_window_whose_harness_keeps_commands_running_that_no_tree_shows_is_kept_open
     context.pass().unwrap();
     context.adapter.busy("zeus");
     context.adapter.with("zeus", |agent| {
-        agent.kept_commands = Some(vec!["sh ./ignore-signals-cf-stops-live.sh".to_owned()]);
+        agent.kept_commands = Some(vec!["node ./ignore-signals-cf-stops-live.cjs".to_owned()]);
     });
     context.pause_task(project.id, 1);
     for _ in 0..4 {
@@ -399,7 +399,7 @@ fn a_window_whose_harness_keeps_commands_running_that_no_tree_shows_is_kept_open
     assert_eq!(
         did_not_stop(&context, project.id, "chief"),
         [kept_for(
-            "the commands its harness keeps running: sh ./ignore-signals-cf-stops-live.sh"
+            "the commands its harness keeps running: node ./ignore-signals-cf-stops-live.cjs"
         )]
     );
     context.close();

@@ -34,7 +34,7 @@ fn the_commands_codex_keeps_running_for_the_shown_thread_are_its_own_list_of_the
             f.respond(
                 "thread/backgroundTerminals/list",
                 json!({ "data": [
-                    { "command": "sh ./ignore-signals-cf-stops-live.sh", "cwd": "/w", "itemId": "i", "processId": "94610", "osPid": 94611 },
+                    { "command": "node ./ignore-signals-cf-stops-live.cjs", "cwd": "/w", "itemId": "i", "processId": "94610", "osPid": 94611 },
                     { "command": "ping -n 361 127.0.0.1", "cwd": "/w", "itemId": "j", "processId": "7" },
                 ], "nextCursor": null }),
             ),
@@ -44,7 +44,7 @@ fn the_commands_codex_keeps_running_for_the_shown_thread_are_its_own_list_of_the
         assert_eq!(
             body["commands"],
             json!([
-                "sh ./ignore-signals-cf-stops-live.sh",
+                "node ./ignore-signals-cf-stops-live.cjs",
                 "ping -n 361 127.0.0.1"
             ])
         );
