@@ -378,6 +378,14 @@ impl Log {
         self.say(found_line(&install, &install.version()));
         Ok(install)
     }
+
+    /// [`Log::found`], for a run that takes `left` at the most, margin included
+    /// ([`machine::installed_lasting`]).
+    pub fn found_lasting(&self, harness: Harness, left: Duration) -> Result<Installed> {
+        let install = machine::installed_lasting(harness, left)?;
+        self.say(found_line(&install, &install.version()));
+        Ok(install)
+    }
 }
 
 /// Why the run `name`, which runs agents of its own, is not run where it was

@@ -31,6 +31,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::isolation::Isolation;
 use super::launcher::Guard;
@@ -579,6 +580,18 @@ pub fn rig_with_stand_ins(
 /// its login is read from. A machine without it, or without the home it logs
 /// in at, is an error that says what to do.
 pub fn installed(harness: Harness) -> Result<Installed> {
+    installed_for(harness, None)
+}
+
+/// [`installed`], for a run that knows how long it takes (`left` at the most, its margin
+/// included): its logins are copied if they last that much more, and not only the two hours a
+/// live suite is held to. A window opened and held for a few minutes asks for as many, and
+/// is not made to wait for the owner's own Claude Code to refresh a login that lasts an hour.
+pub fn installed_lasting(harness: Harness, left: Duration) -> Result<Installed> {
+    installed_for(harness, Some(left))
+}
+
+fn installed_for(harness: Harness, left: Option<Duration>) -> Result<Installed> {
     let name = harness.name();
     let command = command(name)?;
     let home = home_of(
@@ -598,7 +611,7 @@ pub fn installed(harness: Harness) -> Result<Installed> {
     if !has_login(&places) {
         return Err(no_login(harness, &places));
     }
-    let installed = with_homes(Installed::at(harness, command, home))?;
+    let installed = with_homes(Installed::at(harness, command, home), left)?;
     // A machine with no Node has a harness that needs none (a native one).
     Ok(match command_folder("node") {
         Some(node) => installed.with_node(node),
@@ -611,12 +624,27 @@ pub fn installed(harness: Harness) -> Result<Installed> {
 /// with a copy of the login and none of the person's other files, and the person's setup
 /// checked when the run is over. Every harness found goes through here, so that no live
 /// case has to make one, or can forget to.
-fn with_homes(mut installed: Installed) -> Result<Installed> {
+///
+/// Its logins must last `left` more where it is given (the run's own length, margin included),
+/// else as long as a live suite is held to.
+fn with_homes(mut installed: Installed, left: Option<Duration>) -> Result<Installed> {
     let harness = installed.harness;
-    if let Some(login) = Login::of_machine().filter(|_| harness == Harness::Claude) {
+    let login = match left {
+        Some(left) => Login::of_machine_lasting(left),
+        None => Login::of_machine(),
+    };
+    if let Some(login) = login.filter(|_| harness == Harness::Claude) {
         installed = installed.with_claude_config(Arc::new(login));
     }
-    if let Some(isolation) = Isolation::of_machine(harness, installed.home())? {
+    let isolation = match left {
+        Some(left) => Isolation::of_machine_lasting(
+            harness,
+            installed.home(),
+            left.saturating_sub(super::isolation::MARGIN),
+        )?,
+        None => Isolation::of_machine(harness, installed.home())?,
+    };
+    if let Some(isolation) = isolation {
         installed = installed.with_isolation(Arc::new(isolation));
     }
     Ok(installed)

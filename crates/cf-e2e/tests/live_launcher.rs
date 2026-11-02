@@ -51,6 +51,11 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 /// seconds after the screen mounted on the machine of the run that found it (2.1.314, 2.1.316).
 const HELD: Duration = Duration::from_secs(45);
 
+/// How long the real window's login must last: the stage takes about three minutes (the window
+/// opens in under a minute and is held `HELD`), so a login that lasts less than the kit's two
+/// hours is copied all the same, and never refreshed by a window that ends long before it does.
+const REAL_LASTS: Duration = Duration::from_secs(20 * 60);
+
 /// How long the control waits for the updater to show that it runs at all.
 const CONTROL: Duration = Duration::from_secs(90);
 
@@ -152,7 +157,7 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
 /// environment, held as long as the updater needs: the guard of the rig hashed the owner's
 /// launcher before it started and looks at it as the rig ends.
 fn owner_own(log: &Log) -> Result<(PathBuf, bool, Result)> {
-    let real = log.found(Harness::Claude)?;
+    let real = log.found_lasting(Harness::Claude, REAL_LASTS)?;
     let link = real.home().join(".local/bin/claude");
     let was = points(&link)?;
     log.say(format!(
