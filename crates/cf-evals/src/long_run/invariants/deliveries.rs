@@ -180,6 +180,15 @@ pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<
 /// daemon copied under that uuid since), and no other record the watch reads carries its
 /// uuid. Without such a record, it is held as any item is.
 fn is_summary(look: &Look, item: &Item) -> bool {
+    // A harness whose record the watch does not read (every one but Claude Code: a Devin
+    // compaction's summary on its chain, T-655 and T-660) has the copy's own mark, which the
+    // daemon wrote from that harness's record and is all there is.
+    let claude = look.ledger.conversations.iter().any(|conversation| {
+        conversation.id == item.conversation && conversation.harness == "claude-code"
+    });
+    if !claude {
+        return item.compaction;
+    }
     let copied = crate::clock::millis(&item.copied_at).unwrap_or(i64::MAX);
     look.record_through(item.conversation, copied)
         .is_ok_and(|record| record.is_summary(&item.id))

@@ -443,3 +443,36 @@ fn a_cut_note_that_quotes_a_delivery_is_no_delivery_of_it_though_claude_code_esc
         ]
     );
 }
+
+#[test]
+fn a_summary_the_copy_marks_for_a_harness_whose_record_the_watch_does_not_read_is_no_prompt() {
+    // T-655 and T-660: a Devin conversation's compaction writes a summary in the user's
+    // place, which the copy marks (`compaction`). It quotes the prompts before it whole, m-246
+    // among them, and was given none. Only Claude Code's record is read by the watch (its own
+    // flag, `isCompactSummary`); for every other harness the copy's mark is all there is.
+    let scene = Scene::new(&[("long-worker", "devin")]);
+    let conversation = chief(&scene);
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(
+        conversation,
+        2,
+        "user",
+        &format!("This session is being continued. The earlier prompts:\n\n{FIRST}\n\nDone."),
+        true,
+        &t(2, 2),
+    );
+    // Unmarked, it is a prompt that holds m-246 again: a real retry.
+    assert_eq!(said_of(&scene.look(ms(4, 0))), [TWICE]);
+    scene.compaction(conversation, 2);
+    assert_eq!(said_of(&scene.look(ms(4, 0))), Vec::<String>::new());
+    // A Claude Code conversation is held to its own record's flag, whatever the copy says:
+    // a row marked in the copy and not by the record is a prompt.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(conversation, 2, "user", FIRST, true, &t(2, 2));
+    scene.compaction(conversation, 2);
+    assert_eq!(said_of(&scene.look(ms(4, 0))), [TWICE]);
+}

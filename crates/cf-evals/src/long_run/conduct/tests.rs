@@ -112,6 +112,7 @@ fn answered() -> Ledger {
         complete: true,
         at: Some(at.clone()),
         copied_at: at,
+        compaction: false,
     };
     ledger.items.push(item(
         0,
@@ -831,6 +832,7 @@ fn the_last_look_lets_a_jobs_end_be_told_within_the_settle_time_of_its_result() 
             complete: true,
             at: Some(iso(minute, second)),
             copied_at: iso(minute, second),
+            compaction: false,
         });
     }
     closed.messages.push(message(
@@ -920,6 +922,7 @@ fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
             complete: role == "assistant",
             at: Some(iso(2, second)),
             copied_at: iso(2, second),
+            compaction: false,
         });
     }
     // The brief, m-120, delivered to the worker: its turn is the result's.

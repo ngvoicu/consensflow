@@ -178,6 +178,17 @@ impl Scene {
             .unwrap();
     }
 
+    /// The item `seq` of `conversation`, as the daemon's copy marks the summary a compaction
+    /// wrote in the user's place (`transcript.compaction`, migration 0020).
+    pub fn compaction(&self, conversation: i64, seq: i64) {
+        self.db
+            .execute(
+                "UPDATE transcript SET compaction = 1 WHERE conversation_id = ?1 AND item_id = ?2",
+                params![conversation, format!("i-{conversation}-{seq}")],
+            )
+            .unwrap();
+    }
+
     /// An entry of the log.
     pub fn event(&self, at: &str, kind: &str, data: &Value) {
         self.db
