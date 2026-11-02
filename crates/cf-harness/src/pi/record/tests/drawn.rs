@@ -173,7 +173,9 @@ fn a_live_chiefs_session_reads_as_the_live_check_read_it() {
     .map(|line| serde_json::from_str(line).unwrap())
     .collect();
     let record = Stage::with(&records).at(0);
-    let tools: Vec<(Option<String>, Option<Status>, Option<u64>, bool)> = record
+    // Each call's header, end, time and whether it says a change.
+    type Said = (Option<String>, Option<Status>, Option<u64>, bool);
+    let tools: Vec<Said> = record
         .items
         .iter()
         .filter(|item| item.kind() == Kind::Tool)

@@ -57,7 +57,7 @@ fn a_calls_detail_is_kept_and_written_again_when_it_says_more_with_the_same_word
     let running = call("running", 0, "");
     assert_eq!(
         ledger
-            .copy_transcript(conversation, &[running.clone()], 0)
+            .copy_transcript(conversation, std::slice::from_ref(&running), 0)
             .expect("copied"),
         1
     );
@@ -72,7 +72,7 @@ fn a_calls_detail_is_kept_and_written_again_when_it_says_more_with_the_same_word
     let ended = call("failed", 1_200, "");
     assert_eq!(
         ledger
-            .copy_transcript(conversation, &[ended.clone()], 0)
+            .copy_transcript(conversation, std::slice::from_ref(&ended), 0)
             .expect("copied"),
         1,
         "a status or a time with the same words is written again"

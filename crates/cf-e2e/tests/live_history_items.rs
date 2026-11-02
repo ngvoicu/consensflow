@@ -313,7 +313,7 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
     } else {
         plan
     };
-    let mut members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
+    let members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
     std::fs::write(members.folder().join(NOTES), NOTES_TEXT)
         .map_err(|failed| Error::Daemon(format!("{NOTES}: {failed}")))?;
     if !members.chief_is_idle(log)? {

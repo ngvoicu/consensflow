@@ -454,10 +454,12 @@ fn a_live_chiefs_transcript_reads_as_the_live_check_read_it() {
 #[test]
 #[ignore = "by hand: CF_MEASURE_TRANSCRIPT=<a Claude transcript> cargo test -p cf-harness --lib measure -- --ignored --nocapture"]
 fn measure_what_the_history_adds_to_a_real_transcripts_copy() {
-    let Some(path) = std::env::var_os("CF_MEASURE_TRANSCRIPT") else {
+    let Some(path) = Env::from_process()
+        .path("CF_MEASURE_TRANSCRIPT")
+        .map(Path::to_path_buf)
+    else {
         return;
     };
-    let path = PathBuf::from(path);
     let session = path.file_stem().unwrap().to_string_lossy().into_owned();
     let root = tempfile::tempdir().unwrap();
     let projects = root.path().join("projects").join("measured");

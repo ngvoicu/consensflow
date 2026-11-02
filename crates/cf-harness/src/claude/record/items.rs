@@ -57,6 +57,14 @@ struct Beside {
     answered: bool,
 }
 
+/// The items in their order, the place of the record each began in, and those only the
+/// history shows, each with the place among the items it stands before.
+type Laid = (Vec<Item>, Vec<usize>, Vec<(usize, Item)>);
+
+/// The items in their order, the place of the record each began in, and the place of the
+/// latest record that said anything of each.
+type Ordered = (Vec<Item>, Vec<usize>, Vec<usize>);
+
 /// Where an item only the history shows stands among the items of the record that said it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Stands {
@@ -264,10 +272,7 @@ impl Items {
     /// the same record, before or after them as it [`Stands`], and after those of the
     /// records before it. A call whose turn is over without its result (`open`, the calls
     /// open, does not hold it) says no more that it runs.
-    pub(super) fn timeline(
-        &self,
-        open: &std::collections::HashSet<Key>,
-    ) -> Result<(Vec<Item>, Vec<usize>, Vec<(usize, Item)>), String> {
+    pub(super) fn timeline(&self, open: &std::collections::HashSet<Key>) -> Result<Laid, String> {
         let (items, places, seqs) = self.ordered()?;
         let mut beside: Vec<&Beside> = self
             .beside
@@ -302,7 +307,7 @@ impl Items {
 
     /// The items in the record's order, the place of the record each began in, and the
     /// place of the latest record that said anything of each.
-    fn ordered(&self) -> Result<(Vec<Item>, Vec<usize>, Vec<usize>), String> {
+    fn ordered(&self) -> Result<Ordered, String> {
         let entries: Vec<&Entry> = self.list.iter().collect();
         let sorted = sort(entries, |left, right| {
             let order = left
