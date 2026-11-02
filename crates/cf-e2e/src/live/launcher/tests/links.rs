@@ -2,6 +2,7 @@
 // is a file as Windows installs it, are in the parent.
 
 use std::os::unix::fs::{symlink, PermissionsExt};
+use std::path::Path;
 
 use super::*;
 use crate::live::machine::Installed;
