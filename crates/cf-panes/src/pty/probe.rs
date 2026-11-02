@@ -75,9 +75,8 @@ const fn enter_after() -> u64 {
     300
 }
 
-/// `text` with `${TEMP}` as `temp` (`${TEMP_JSON}` as a JSON string spells it), `${LAST_SESSION}` as the newest Muse session in its
-/// data folder (`data/muse/sessions/YYYY/MM/DD/<id>`), and every other `${NAME}` as
-/// the test's own variable.
+/// `text` with each `${NAME}` as [`value`] says it, and `${NAME_JSON}` as a JSON string
+/// spells that (its backslashes doubled), for a value inside a JSON argument.
 fn expand(text: &str, temp: &str) -> String {
     let mut out = String::new();
     let mut rest = text;
@@ -87,19 +86,70 @@ fn expand(text: &str, temp: &str) -> String {
             break;
         };
         let name = &rest[at + 2..at + end];
-        if name == "TEMP" {
-            out.push_str(temp);
-        } else if name == "TEMP_JSON" {
-            out.push_str(&temp.replace('\\', "\\\\"));
-        } else if name == "LAST_SESSION" {
-            out.push_str(&last_session(std::path::Path::new(temp)).unwrap_or_default());
-        } else {
-            out.push_str(&std::env::var(name).unwrap_or_default());
+        match name.strip_suffix("_JSON") {
+            Some(base) => out.push_str(&value(base, temp).replace('\\', "\\\\")),
+            None => out.push_str(&value(name, temp)),
         }
         rest = &rest[at + end + 1..];
     }
     out.push_str(rest);
     out
+}
+
+/// What `${name}` stands for in a case: `TEMP` the case's folder `temp`, `LAST_SESSION`
+/// the newest Muse session in its data folder (`data/muse/sessions/YYYY/MM/DD/<id>`),
+/// `MUSE_BIN` the machine's Muse binary ([`muse_bin`]), `TOUCH` a command that makes the
+/// file it is given, in a folder with a blank ([`touch_in`]), `CF_BLANK_WORD` a program
+/// in a folder with a blank as the product names `cf` on a Muse hook's line
+/// ([`cf_blank_word`]), and every other name the test's own variable.
+fn value(name: &str, temp: &str) -> String {
+    let folder = std::path::Path::new(temp);
+    match name {
+        "TEMP" => temp.to_owned(),
+        "LAST_SESSION" => last_session(folder).unwrap_or_default(),
+        "MUSE_BIN" => muse_bin(std::env::var("LOCALAPPDATA").ok().as_deref()).unwrap_or_default(),
+        "TOUCH" => touch_in(folder),
+        "CF_BLANK_WORD" => cf_blank_word(folder),
+        _ => std::env::var(name).unwrap_or_default(),
+    }
+}
+
+/// The Muse binary its installer put in `local` (`%LOCALAPPDATA%`): the
+/// `muse-bin-<version>.exe` the `.muse-version` beside its launcher names, so a case
+/// runs whatever Muse the machine has (T-985 P3-4).
+fn muse_bin(local: Option<&str>) -> Option<String> {
+    let folder = std::path::Path::new(local?).join("Programs").join("muse");
+    let version = std::fs::read_to_string(folder.join(".muse-version")).ok()?;
+    let binary = folder.join(format!("muse-bin-{}.exe", version.trim()));
+    Some(binary.to_string_lossy().into_owned())
+}
+
+/// A batch file made in `temp`'s folder `cmd touch` (a blank in its name) that makes the
+/// file it is given, empty: what a hook runs where a program's path needs quotes, on any
+/// machine, with no Git for Windows' `touch.exe` (T-985 P3-4).
+fn touch_in(temp: &std::path::Path) -> String {
+    let folder = temp.join("cmd touch");
+    std::fs::create_dir_all(&folder).expect("the touch folder");
+    let touch = folder.join("touch.cmd");
+    std::fs::write(&touch, "@type nul > \"%~1\"\r\n").expect("touch.cmd");
+    touch.to_string_lossy().into_owned()
+}
+
+/// A copy of the system's `cmd.exe` as `cf.exe` in `temp`'s folder `cf blank`, named as
+/// the product names its `cf` on a Muse hook's line: its path written with forward slashes
+/// (`pane_cf`, `cf-daemon/src/machine.rs`), as one quote-free word of cmd.exe's
+/// (`cf_process::cmd_word`, its short form for the blank). `NO-WORD` where there is none,
+/// as on a volume with 8.3 names off (T-985 P2-3).
+fn cf_blank_word(temp: &std::path::Path) -> String {
+    let folder = temp.join("cf blank");
+    std::fs::create_dir_all(&folder).expect("the cf folder");
+    let cf = folder.join("cf.exe");
+    let system =
+        std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned());
+    std::fs::copy(system, &cf).expect("a copy of cmd.exe");
+    let forward = cf.to_string_lossy().replace('\\', "/");
+    println!("cf in a folder with a blank: {forward}");
+    cf_process::cmd_word(std::path::Path::new(&forward)).unwrap_or_else(|| "NO-WORD".to_owned())
 }
 
 /// The newest session Muse began in `temp`'s data folder, by its id (a UUIDv7, which
@@ -445,7 +495,7 @@ fn probe() {
 
 #[cfg(test)]
 mod tests {
-    use super::{expand, key_bytes, modes};
+    use super::{expand, key_bytes, modes, muse_bin, touch_in};
 
     #[test]
     fn the_modes_a_pane_printed_are_its_private_modes_keyboard_protocols_and_queries() {
@@ -469,5 +519,40 @@ mod tests {
         assert_eq!(expand("${TEMP}\\data", "C:\\t"), "C:\\t\\data");
         assert_eq!(expand("${TEMP_JSON}", "C:\\t"), "C:\\\\t");
         assert_eq!(expand("a${CF_NO_SUCH_VARIABLE_HERE}b", "x"), "ab");
+    }
+
+    /// A case runs the Muse the machine has, read from its installer's version line, never
+    /// one version named in the file (T-985 P3-4).
+    #[test]
+    fn the_muse_a_case_runs_is_the_one_the_version_line_beside_its_launcher_names() {
+        let local = super::tempfile_dir("muse-bin");
+        let folder = local.join("Programs").join("muse");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(".muse-version"), "1.4.14-R7309.1\r\n").unwrap();
+        assert_eq!(
+            muse_bin(local.to_str()),
+            Some(
+                folder
+                    .join("muse-bin-1.4.14-R7309.1.exe")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        assert_eq!(muse_bin(None), None);
+    }
+
+    /// The stand-in for `touch` makes the file it is given, through cmd.exe, from a folder
+    /// with a blank, the file's own name holding one too.
+    #[test]
+    fn the_touch_stand_in_makes_the_file_it_is_given() {
+        let temp = super::tempfile_dir("touch");
+        let touch = touch_in(&temp);
+        let made = temp.join("four quotes.txt");
+        let ran = std::process::Command::new(&touch)
+            .arg(&made)
+            .status()
+            .unwrap();
+        assert!(ran.success());
+        assert!(made.is_file());
     }
 }

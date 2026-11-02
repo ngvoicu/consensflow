@@ -537,10 +537,9 @@ fn rig_keeping_claude_in(
 /// [`crate::muse::Installed::through`]), which this kit has none of: a rig that seats Muse there
 /// is refused in plain words before anything is spent (T-985).
 fn muse_of(install: &Installed) -> crate::muse::Installed {
-    assert!(
-        !cfg!(windows),
-        "a members-kit rig seats Muse on a Mac only: on Windows the rig's Muse runs through the `muse-stand-in` a case names, which this kit has none of"
-    );
+    if cfg!(windows) {
+        panic!("a members-kit rig seats Muse on a Mac only: on Windows the rig's Muse runs through the `muse-stand-in` a case names, which this kit has none of");
+    }
     let folder = install
         .command
         .parent()

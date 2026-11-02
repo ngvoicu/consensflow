@@ -393,7 +393,10 @@ fn on_windows_a_lock_whose_words_cannot_be_read_is_named_by_the_process_that_hol
             .open(&lock)
             .unwrap()
     };
-    assert!(fs::read_to_string(&lock).is_err(), "its words cannot be read");
+    assert!(
+        fs::read_to_string(&lock).is_err(),
+        "its words cannot be read"
+    );
     let mut child = std::process::Command::new(r"C:\Windows\System32\PING.EXE")
         .args(["-n", "30", "127.0.0.1"])
         .stdout(file)

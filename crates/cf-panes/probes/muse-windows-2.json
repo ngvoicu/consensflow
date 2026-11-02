@@ -3,9 +3,9 @@
   {
    "name": "muse-hooks-cmd",
    "argv": [
-    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "${MUSE_BIN}",
     "-c",
-    "hooks={\"SessionStart\":[{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"echo %CMDCMDLINE%> \\\"${TEMP_JSON}\\\\cmdline.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"C:\\\\Program Files\\\\Git\\\\usr\\\\bin\\\\touch.exe\\\" \\\"${TEMP_JSON}\\\\four quotes.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"\\\"C:\\\\Program Files\\\\Git\\\\usr\\\\bin\\\\touch.exe\\\" \\\"${TEMP_JSON}\\\\wrapped quotes.txt\\\"\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"set > \\\"${TEMP_JSON}\\\\env.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"findstr \\\"^\\\" > \\\"${TEMP_JSON}\\\\stdin.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"C:\\\\Program Files\\\\Git\\\\usr\\\\bin\\\\touch.exe\\\" \\\"${TEMP_JSON}\\\\per%%cent.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo %CMDCMDLINE%> \\\"${TEMP_JSON}\\\\posix-cmdline.txt\\\"\",\"timeout\":10}]}]}",
+    "hooks={\"SessionStart\":[{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"echo %CMDCMDLINE%> \\\"${TEMP_JSON}\\\\cmdline.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"${TOUCH_JSON}\\\" \\\"${TEMP_JSON}\\\\four quotes.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"\\\"${TOUCH_JSON}\\\" \\\"${TEMP_JSON}\\\\wrapped quotes.txt\\\"\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"set > \\\"${TEMP_JSON}\\\\env.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"findstr \\\"^\\\" > \\\"${TEMP_JSON}\\\\stdin.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"${TOUCH_JSON}\\\" \\\"${TEMP_JSON}\\\\per%%cent.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo %CMDCMDLINE%> \\\"${TEMP_JSON}\\\\posix-cmdline.txt\\\"\",\"timeout\":10}]}]}",
     "--provider",
     "echo",
     "--echo-delay-ms",
@@ -31,6 +31,46 @@
      "paste": "probe nine: cmd hooks",
      "enter_after_ms": 400,
      "note": "the first prompt fires SessionStart"
+    },
+    {
+     "after_ms": 8000,
+     "note": "done"
+    }
+   ]
+  },
+  {
+   "name": "muse-hook-cf-in-a-blank",
+   "argv": [
+    "${MUSE_BIN}",
+    "-c",
+    "hooks={\"SessionStart\":[{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"${CF_BLANK_WORD_JSON} /c echo hook ran> ${TEMP_JSON}\\\\blank-word.txt\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"echo [%CF_MUSE_HOOK_PROBE%]> ${TEMP_JSON}\\\\env-handed.txt\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"%CF_MUSE_HOOK_LINE%> ${TEMP_JSON}\\\\via-variable.txt\",\"timeout\":10}]}]}",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "3000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9",
+    "CF_MUSE_HOOK_PROBE": "handed",
+    "CF_MUSE_HOOK_LINE": "\"${TEMP}\\cf blank\\cf.exe\" /c echo via a variable ran"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "note": "up"
+    },
+    {
+     "paste": "probe: cf in a folder with a blank",
+     "enter_after_ms": 400,
+     "note": "the first prompt fires SessionStart: blank-word.txt says 'hook ran' where the short word ran; env-handed.txt says [handed] where Muse hands hooks its environment, [%CF_MUSE_HOOK_PROBE%] where it clears it; via-variable.txt says 'via a variable ran' where a quoted line in a variable runs"
     },
     {
      "after_ms": 8000,

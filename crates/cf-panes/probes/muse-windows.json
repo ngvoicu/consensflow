@@ -3,7 +3,7 @@
   {
    "name": "muse",
    "argv": [
-    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "${MUSE_BIN}",
     "--provider",
     "echo",
     "--echo-delay-ms",
@@ -86,7 +86,7 @@
   {
    "name": "muse-resumed",
    "argv": [
-    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "${MUSE_BIN}",
     "resume",
     "${LAST_SESSION}",
     "--provider",
@@ -127,7 +127,7 @@
   {
    "name": "muse-taken-back",
    "argv": [
-    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "${MUSE_BIN}",
     "--provider",
     "echo",
     "--echo-delay-ms",
@@ -186,7 +186,7 @@
   {
    "name": "muse-taken-back-resumed",
    "argv": [
-    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "${MUSE_BIN}",
     "resume",
     "${LAST_SESSION}",
     "--provider",
@@ -227,7 +227,7 @@
   {
    "name": "muse-zoë-日本",
    "argv": [
-    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "${MUSE_BIN}",
     "--provider",
     "echo",
     "--echo-delay-ms",
@@ -265,7 +265,7 @@
   {
    "name": "muse-hooks",
    "argv": [
-    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "${MUSE_BIN}",
     "-c",
     "hooks={\"SessionStart\":[{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"'C:\\\\Windows\\\\System32\\\\cmd.exe' /c echo command-ran> \\\"${TEMP_JSON}\\\\command.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"& 'C:\\\\Windows\\\\System32\\\\cmd.exe' /c echo windows-ran> '${TEMP_JSON}\\\\windows.txt'\",\"timeout\":10},{\"type\":\"command\",\"command\":\"$PSVersionTable.PSVersion.ToString() | Out-File -LiteralPath '${TEMP_JSON}\\\\ps.txt'\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"$input | Out-File -LiteralPath '${TEMP_JSON}\\\\stdin.txt'; Get-ChildItem env: | Out-File -LiteralPath '${TEMP_JSON}\\\\env.txt'\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"& 'C:\\\\Windows\\\\System32\\\\cmd.exe' /c echo quotes-ran> '${TEMP_JSON}\\\\it’’s-‘‘q’’.txt'\",\"timeout\":10}]}]}",
     "--provider",
@@ -303,7 +303,7 @@
   {
    "name": "muse-win32",
    "argv": [
-    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "${MUSE_BIN}",
     "--provider",
     "echo",
     "--echo-delay-ms",
