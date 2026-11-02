@@ -10,6 +10,13 @@
 //! marks it incomplete). While a tell to the window is queued or being pasted Finish is refused:
 //! the record holds the turn from before the tell, which is not its answer.
 //!
+//! A waiting task is finished the same way (T-1119): its window asked a question and ended its
+//! turn, and the words it ended on are the result. The way out of a question that ConsensFlow
+//! raised from a turn's last words (`turn_end::asks`) that were the result after all; the
+//! question is withdrawn with the move, and `cf answer` no longer reaches it
+//! (`cf-ledger`'s `withdraw_open_questions`). The chief's word is over the reader's here as
+//! everywhere in Finish.
+//!
 //! It is the way out of a wait that has no end, and of a reader that reads a turn at work
 //! that is not (T-442, dip-agentos's T-20): a job that runs for ever (a dev server, a
 //! headless browser the harness moved to the background) never wakes its agent, and its
@@ -87,7 +94,7 @@ impl Dispatcher {
     }
 
     /// The task, its worker and the record of the window that works on it, where it is one
-    /// to finish: working or paused, a member's, its window open.
+    /// to finish: working, waiting or paused, a member's, its window open.
     fn finishable(
         &self,
         project: i64,
@@ -100,7 +107,7 @@ impl Dispatcher {
                 format!("no task T-{number} in this project"),
             ));
         };
-        if !matches!(thread.task.state.as_str(), "working" | "paused") {
+        if !matches!(thread.task.state.as_str(), "working" | "waiting" | "paused") {
             return Err(refused(
                 "invalid-transition",
                 format!("cannot finish T-{number}: it is {}", thread.task.state),

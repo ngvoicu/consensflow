@@ -25,7 +25,7 @@ use super::{
 use crate::messages::{
     drop_queued_but_told, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
     queued_paused_answers, say_again, tell_sent_back, warnings_on_their_way, warnings_queued,
-    withdraw_paused_answers, Afterwards, Dropped,
+    withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
@@ -48,7 +48,7 @@ pub(crate) fn record_result(
     number: i64,
     body: &str,
 ) -> Result<TaskMoved, LedgerError> {
-    record(store, project_id, number, body, &ACTIVE_TASK_STATES)
+    record(store, project_id, number, body, &ACTIVE_TASK_STATES, false)
 }
 
 /// The chief or the human takes what the worker said last as the result (Finish):
@@ -62,18 +62,29 @@ pub(crate) fn record_finished(
     number: i64,
     body: &str,
 ) -> Result<TaskMoved, LedgerError> {
-    record(store, project_id, number, body, &FINISHABLE_TASK_STATES)
+    record(
+        store,
+        project_id,
+        number,
+        body,
+        &FINISHABLE_TASK_STATES,
+        true,
+    )
 }
 
 /// The states a task can be finished at the word of the chief or the human.
 const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
 
+/// `finished_by_word`: the chief or the human finishes the task, so its window's open
+/// questions are withdrawn with the move; the window's own result leaves them to be
+/// answered until the task is accepted.
 fn record(
     store: &mut Store,
     project_id: i64,
     number: i64,
     body: &str,
     states: &[&str],
+    finished_by_word: bool,
 ) -> Result<TaskMoved, LedgerError> {
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
@@ -99,6 +110,12 @@ fn record(
             withdraw_paused_answers(store, &task, "finished")?;
             leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
         }
+        // Finished at a word with a question of its window still open (it waited for the
+        // answer, or was paused on it), nobody waits for the answer any more: the question is
+        // withdrawn, and `cf answer` no longer reaches it (T-1119).
+        if finished_by_word {
+            withdraw_open_questions(store, &task, "was finished")?;
+        }
         let message_id = queue(
             store,
             project_id,
@@ -113,6 +130,11 @@ fn record(
         )?;
         store.move_task(&task, "done", json!({ "result": message_id }))?;
         release_ready(store, project_id)?;
+        // A question its window asked through its harness's tool, still open at its door, is
+        // shut out of waiting as an acceptance does.
+        if let (true, Some(assignee)) = (finished_by_word, task.assignee_id) {
+            shut_doors(store, &task, assignee)?;
+        }
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,

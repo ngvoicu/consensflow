@@ -133,3 +133,8 @@ result`, in the six prints of `board.json` that hold it (`cf`, `cf help`, `cf --
 script from the binary's own output, and nothing else in them moved. The daemon's traces
 hold no `cf task finish` line (`cf-board-028` and `-029` are departed for that, and are not
 played), so none was changed.
+
+T-1119 (3.0.7-alpha.2): a waiting task too, the one whose window asked a question and ended its
+turn, or whose last words ConsensFlow raised as a question (`turn_end::asks` of the engine): the
+usage's entry now reads `take what a working, waiting or paused task's worker said last as its
+result`, and the same six prints of `board.json` hold it.

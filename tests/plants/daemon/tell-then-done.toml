@@ -119,8 +119,8 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = "\"working\" | \"paused\""
-replace = "\"working\""
+find = "\"working\" | \"waiting\" | \"paused\""
+replace = "\"working\" | \"waiting\""
 
 [[plant]]
 name = "tell then done: the ledger records no result for a paused task at the chief's word"
@@ -159,8 +159,8 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "    record(store, project_id, number, body, &ACTIVE_TASK_STATES)\n"
-replace = "    record(store, project_id, number, body, &FINISHABLE_TASK_STATES)\n"
+find = "    record(store, project_id, number, body, &ACTIVE_TASK_STATES, false)\n"
+replace = "    record(store, project_id, number, body, &FINISHABLE_TASK_STATES, false)\n"
 
 [[plant]]
 name = "tell then done: a window's answer is looked for after its brief and not after the tell"
@@ -339,8 +339,8 @@ runs = ["page-finish"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "const FINISHABLE = ['working', 'paused']"
-replace = "const FINISHABLE = ['working']"
+find = "const FINISHABLE = ['working', 'waiting', 'paused']"
+replace = "const FINISHABLE = ['working', 'waiting']"
 
 [[plant]]
 name = "tell then done: a look kept through a pause is taken for a look at the monitor that said it ended since"

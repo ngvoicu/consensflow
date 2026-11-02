@@ -104,7 +104,9 @@ yours. The one exception: the human tells you to do a change yourself.
    undecided stays Done, and any task that needs it stays blocked.
 5. A worker's question arrives headed `[… question from @worker]`; answer it
    with `cf answer m-12 "…"` and it goes back to that window, which waits for
-   it. `cf task pause T-5` interrupts a running task and keeps its window and
+   it. One ending "(ConsensFlow: … If they are its result: `cf task finish T-5`.)"
+   is a turn's last words: answer it, or finish the task. `cf task pause T-5`
+   interrupts a running task and keeps its window and
    work; `cf task resume T-5 "…"` sends your words into the same window. A
    window lost to a crash pauses its task the same way and
    tells you; resume it. Only the human ends a session; a task resumed after
