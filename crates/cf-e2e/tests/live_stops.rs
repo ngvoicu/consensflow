@@ -68,6 +68,9 @@
 //! - `midwsl`    `midtool` with the field's command of T-1117, run only when named and
 //!   on Windows only: a sleep in WSL's Ubuntu through `wsl.exe` (a worker's database
 //!   tests ran so when a pause closed its window, and ended them).
+//! - `midbg`     `midtool` after a command the member started in the background (the
+//!   field's `wsl` sleep on Windows, a long ping elsewhere), run only when named: the
+//!   pause must leave that command running.
 //!
 //! ```text
 //! cargo xtask live stops                                  every case, `stuck`, `midturn` and `midtool` on Devin
@@ -217,6 +220,7 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
         Case::MidTurn => midturn::run(&ctx, &mut account, harness),
         Case::MidTool => midturn::tool::run(&ctx, &mut account, harness, Command::here()),
         Case::MidWsl => midturn::tool::run(&ctx, &mut account, harness, Command::wsl()),
+        Case::MidBg => midturn::tool::run(&ctx, &mut account, harness, Command::after_background()),
         Case::Tell => tell::tell(&ctx, &mut account),
     };
     if let Some(folder) = &options.transcripts {

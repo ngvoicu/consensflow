@@ -57,6 +57,9 @@ pub struct Command {
     mark: String,
     /// What it prints as it goes, which no other thing on the screen says.
     replies: Option<&'static str>,
+    /// A command the member starts in the background first, and does not wait for: its
+    /// line, and what the line of its process holds (`midbg`).
+    background: Option<(String, String)>,
 }
 
 impl Command {
@@ -71,6 +74,7 @@ impl Command {
             text: format!("ping {mark}"),
             mark,
             replies: Some("from 127.0.0.1"),
+            background: None,
         }
     }
 
@@ -84,6 +88,7 @@ impl Command {
             text,
             mark,
             replies: None,
+            background: None,
         }
     }
 
@@ -111,6 +116,28 @@ impl Command {
             text: format!("wsl {mark}"),
             mark,
             replies: None,
+            background: None,
+        }
+    }
+
+    /// [`Command::here`], after a command started in the background that runs on longer
+    /// than the watch: the field's `wsl` sleep on Windows (T-1117: the worker's database
+    /// tests ran in WSL while its turn went on, and the pause's close ended them), a ping
+    /// of the machine's own address elsewhere.
+    pub fn after_background() -> Self {
+        let seconds = 2 * STUCK_WATCH.as_secs() + 60;
+        let background = if cfg!(windows) {
+            let mark = format!("-d Ubuntu -- sleep {seconds}");
+            (format!("wsl {mark}"), mark)
+        } else {
+            let mark = format!("-c {seconds} 127.0.0.1");
+            let program =
+                command("ping").map_or("ping".to_owned(), |path| path.display().to_string());
+            (format!("{program} {mark}"), mark)
+        };
+        Self {
+            background: Some(background),
+            ..Self::here()
         }
     }
 
@@ -125,10 +152,18 @@ impl Command {
 
     /// What the member is told to do: run this, and nothing else.
     pub fn brief(&self) -> String {
-        format!(
+        let foreground = format!(
             "Run exactly this one shell command, wait for it to end, then stop: {}",
             self.text
-        )
+        );
+        match &self.background {
+            None => foreground,
+            Some((background, _)) => format!(
+                "First start this shell command in the background, with your shell tool's own \
+                 way of running a command in the background, and do not wait for it or look at \
+                 it again: {background}\nThen, in the foreground: {foreground}"
+            ),
+        }
     }
 
     /// The command line.
@@ -310,6 +345,9 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
     // Where the host's tree was not what showed the command running, it may not list it
     // at all, and what it says of it after the stop says nothing.
     let listed = begun.seen.starts_with(IN_TREE);
+    let background = command.background.as_ref().map(|(_, mark)| mark.as_str());
+    let before =
+        background.map(|mark| holding(&tree::read(ctx.members.rig(), &begun.window.pane), mark));
     stop_it(
         ctx,
         case,
@@ -317,7 +355,43 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
         &begun.window,
         Some(harness),
         hold(&command, listed),
+    )?;
+    if let (Some(mark), Some(before)) = (background, before) {
+        let after = holding(&tree::read(ctx.members.rig(), &begun.window.pane), mark);
+        case.check(
+            "the pause left the work started in the background running",
+            !before.is_empty() && !after.is_empty(),
+            format!(
+                "before the pause: {}; after the watch: {}",
+                said(&before),
+                said(&after)
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// The processes of `read` whose line holds `mark`, each its number and line; none where it
+/// could not be read.
+fn holding(read: &Read, mark: &str) -> Vec<String> {
+    read.as_ref().map_or_else(
+        |_| Vec::new(),
+        |tree| {
+            tree.holding(mark)
+                .into_iter()
+                .map(|process| format!("{} {}", process.pid, cut(&process.command, 80)))
+                .collect()
+        },
     )
+}
+
+/// What [`holding`] found, as a line says it.
+fn said(found: &[String]) -> String {
+    if found.is_empty() {
+        "the host's tree does not have it".to_owned()
+    } else {
+        format!("the host's tree has it ({})", found.join("; "))
+    }
 }
 
 #[cfg(test)]

@@ -24,6 +24,9 @@ pub enum Case {
     /// `midtool` with the field's command (T-1117): a sleep in WSL's Ubuntu, through
     /// `wsl.exe`. Windows only, and run only when named.
     MidWsl,
+    /// `midtool` after a command started in the background, which the pause must leave
+    /// running (T-1117). Run only when named.
+    MidBg,
     Tell,
 }
 
@@ -42,7 +45,7 @@ impl Case {
     ];
 
     /// Every case a command line may name: [`Case::ALL`], and those run only when named.
-    pub const NAMED: [Case; 10] = [
+    pub const NAMED: [Case; 11] = [
         Case::Command,
         Case::Early,
         Case::Hook,
@@ -52,6 +55,7 @@ impl Case {
         Case::MidTurn,
         Case::MidTool,
         Case::MidWsl,
+        Case::MidBg,
         Case::Tell,
     ];
 
@@ -66,6 +70,7 @@ impl Case {
             Case::MidTurn => "midturn",
             Case::MidTool => "midtool",
             Case::MidWsl => "midwsl",
+            Case::MidBg => "midbg",
             Case::Tell => "tell",
         }
     }
@@ -74,7 +79,7 @@ impl Case {
     pub const fn on_any_harness(self) -> bool {
         matches!(
             self,
-            Case::Stuck | Case::MidTurn | Case::MidTool | Case::MidWsl
+            Case::Stuck | Case::MidTurn | Case::MidTool | Case::MidWsl | Case::MidBg
         )
     }
 }
@@ -130,7 +135,7 @@ pub fn plan_of(case: Case, harness: Harness, options: &Options) -> Plan {
             .with_file(stuck::SCRIPT, stuck::script_text()),
         // Their folders tell a window to do what each message asks, and run no tools but
         // the one a message tells it to.
-        Case::MidTurn | Case::MidTool | Case::MidWsl => Plan::new(
+        Case::MidTurn | Case::MidTool | Case::MidWsl | Case::MidBg => Plan::new(
             &format!("stops-{name}-{}", harness.name()),
             stand_in_chief(),
         )
