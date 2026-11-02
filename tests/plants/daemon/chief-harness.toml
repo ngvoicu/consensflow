@@ -84,6 +84,7 @@ it-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "transcri
 it-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::tests::depth::"]
 it-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "transcript_pages"]
 it-viewer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::"]
+it-evals = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "measure::tests::"]
 
 [[plant]]
 name = 'listing: a stale listing gives a default'
@@ -1727,3 +1728,13 @@ runs = ["it-codex"]
 file = "crates/cf-harness/src/codex/record.rs"
 find = '            Some("FileChange") if completed => {'
 replace = '            Some("FileChanges") if completed => {'
+
+[[plant]]
+name = "items: the evals count the history's own items among a run's words"
+meant = "a_read_of_the_words_leaves_out_the_historys_own_items_where_a_ledger_has_them"
+runs = ["it-evals"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure.rs"
+find = '    Ok(if has { " AND t.drawn_only = 0" } else { "" })'
+replace = '    Ok(if has { "" } else { "" })'

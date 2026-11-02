@@ -49,7 +49,8 @@ fn items(db: &Connection, condition: &str, params: impl rusqlite::Params) -> Res
         "SELECT t.item_id, t.role, t.text, t.complete FROM transcript t
          JOIN conversation c ON c.id = t.conversation_id
          JOIN participant p ON p.id = c.participant_id
-         WHERE {condition} ORDER BY t.conversation_id, t.seq"
+         WHERE {condition}{} ORDER BY t.conversation_id, t.seq",
+        crate::measure::words_only(db)?
     ))?;
     let found = statement
         .query_map(params, |row| {

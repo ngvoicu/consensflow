@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn keeps_each_migration_byte_for_byte_as_it_shipped() {
         use sha2::{Digest, Sha256};
-        const SHIPPED: [&str; 27] = [
+        const SHIPPED: [&str; 28] = [
             "51006450d3168c24b6a42ce41afdcf525994957ea22161b4a82f12bf26b65c01",
             "2c6ed236d1829599fbb378164b0c830893fac89eb9780f634688f9ca40f7f0f0",
             "14165bc20e6cb9d4c3c46a81bee45a95b4962ab759f4622aa1cebb8f8edc1ff2",
@@ -167,6 +167,7 @@ mod tests {
             "40c33635e8d295fd3e4627945039d738fec8f388cee41a4586ff4f7db1eb4e8e",
             "31301910ef2d690f1a505af6b238fce655119196717215c4eb648ec60f2f3b67",
             "62b85e52ff13bb47d900b48629ca79be159622665d66e2a1a0931e8c7e0f87a9",
+            "e2f198e8ebb4711a7b9ab5191caf31af81e396a5ab0239612d5c259a0e67d96f",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())
