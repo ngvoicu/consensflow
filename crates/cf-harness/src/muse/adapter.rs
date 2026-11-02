@@ -141,7 +141,13 @@ impl Adapter for MuseAdapter {
     /// it is not known (T-792): that shape is told by process groups, which Windows has
     /// none of, and a server and the agent's shell are both children of Muse's process
     /// in the window's job, which nothing here tells apart; so the host leaves them
-    /// alone and tells the turn no command of Muse's there. Linux has not been probed.
+    /// alone and tells the turn no command of Muse's there. What the board shows for it:
+    /// a Muse member's task on Windows whose monitor said its command ended is told that
+    /// ConsensFlow cannot see that command on this machine, and waits for the member's
+    /// Finish (`cf-engine` `turn_end.rs`), the hold T-906 lifted for Claude with
+    /// `Servers::ByShell`. Whether Muse runs each command of its agent in a shell of its
+    /// own after the mark, which `ByShell` needs, is untried: it takes a live monitor-wait
+    /// case on Windows (T-985 P3-2, T-954). Linux has not been probed.
     fn servers(&self) -> Servers {
         if cfg!(target_os = "macos") && !self.env().on_windows() {
             Servers::AtLaunch
