@@ -777,7 +777,14 @@ fn conduct(
                     every: options.look,
                     looked: Instant::now(),
                 };
-                play::play(stage, &mut watching, disruption, &choice.target, &with)?
+                play::play(
+                    stage,
+                    &mut watching,
+                    disruption,
+                    &choice.target,
+                    choice.recompact,
+                    &with,
+                )?
             };
             run.came_of(floor, &choice, begun.elapsed(), outcome)?;
             changed = Instant::now();

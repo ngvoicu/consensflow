@@ -483,12 +483,13 @@ fn ended_by(look: &Look, worker: &Participant, id: &str, at: i64) -> bool {
     let in_copy = look.items_by(worker.id, at).iter().any(|item| {
         item.role == "user" && jobs_ended_in(&item.text).iter().any(|ended| ended == id)
     });
-    in_copy || look.record_of(worker.id).is_some_and(|record| {
-        record.entries.iter().any(|entry| {
+    in_copy
+        || look.record_of(worker.id).is_some_and(|record| {
+            record.entries.iter().any(|entry| {
             matches!(&entry.kind, Kind::JobEnded(ended) | Kind::JobStopped(ended) if ended == id)
                 && entry.at.is_none_or(|said| said <= at)
         })
-    })
+        })
 }
 
 /// Whether ConsensFlow's note that `task` was finished at someone's word came before

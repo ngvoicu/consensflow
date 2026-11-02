@@ -18,6 +18,7 @@ fn choice(disruption: Disruption, how: &'static str) -> Choice {
         target: Target::Project,
         how,
         lacks: None,
+        recompact: false,
     }
 }
 
