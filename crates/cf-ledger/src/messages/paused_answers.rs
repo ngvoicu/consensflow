@@ -79,10 +79,12 @@ const IS_PAUSED: &str = " is paused, and @";
 const WAS_PAUSED: &str = ", paused when @";
 const TURN_ON: &str = "'s turn on the words put to its window (m-";
 const IS_OVER: &str = ") is over. What it said last:\n\n";
+const MOVED_ON: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. What the turn on those words ended with:\n\n";
 /// Where the window wrote other words first (T-1151): these, then its reply, then [`LAST`].
 const IS_OVER_AFTER_A_REPLY: &str = ") is over. What it wrote first, before any tool:\n\n";
 const LAST: &str = "\n\nWhat it said last:\n\n";
-const MOVED_ON_HEAD: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. ";
+/// What a note of a task that moved on says of the words it was given at the end of its
+/// turn, and, with a reply, of those it wrote first.
 const MOVED_ON_ENDED: &str = "What the turn on those words ended with:\n\n";
 const MOVED_ON_AFTER_A_REPLY: &str =
     "What the turn on those words wrote first, before any tool:\n\n";
@@ -112,24 +114,41 @@ fn render(answered: &Answered) -> String {
         words,
         then,
     } = answered;
-    match (then, reply) {
-        (Then::Paused(next), None) => format!(
+    // A note of a build before T-958 is written no more, and has no reply.
+    if let Some(reply) = reply.as_deref().filter(|_| *then != Then::MovedBefore) {
+        return render_after_a_reply(answered, reply);
+    }
+    match then {
+        Then::Paused(next) => format!(
             "T-{number}{IS_PAUSED}{handle}{TURN_ON}{tell}{IS_OVER}{words}{}",
             tail(*number, *next)
         ),
-        (Then::Paused(next), Some(reply)) => format!(
+        Then::Moved => format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON}{words}"),
+        Then::MovedBefore => {
+            format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_BEFORE}{words}")
+        }
+    }
+}
+
+/// The words of a note where the window wrote other words first, before its first tool call
+/// (T-1151): what it wrote first, then what it said last.
+fn render_after_a_reply(answered: &Answered, reply: &str) -> String {
+    let Answered {
+        number,
+        handle,
+        tell,
+        words,
+        then,
+        ..
+    } = answered;
+    match then {
+        Then::Paused(next) => format!(
             "T-{number}{IS_PAUSED}{handle}{TURN_ON}{tell}{IS_OVER_AFTER_A_REPLY}{reply}{LAST}{words}{}",
             tail(*number, *next)
         ),
-        (Then::Moved, None) => format!(
-            "T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_HEAD}{MOVED_ON_ENDED}{words}"
-        ),
-        (Then::Moved, Some(reply)) => format!(
-            "T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_HEAD}{MOVED_ON_AFTER_A_REPLY}{reply}{ENDED_WITH}{words}"
-        ),
-        // A build before T-958 wrote no reply, and a note it wrote keeps its words.
-        (Then::MovedBefore, _) => {
-            format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_BEFORE}{words}")
+        Then::Moved | Then::MovedBefore => {
+            let head = MOVED_ON.strip_suffix(MOVED_ON_ENDED).unwrap_or(MOVED_ON);
+            format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{head}{MOVED_ON_AFTER_A_REPLY}{reply}{ENDED_WITH}{words}")
         }
     }
 }
@@ -150,42 +169,57 @@ fn read(body: &str) -> Option<Answered> {
     };
     let (handle, rest) = rest.split_once(TURN_ON)?;
     let (tell, rest) = number_in(rest)?;
-    // A reply, where there is one, ends where the words that follow it begin; `render` below
-    // proves the split was the note's own, whichever of its markers stood in the reply.
-    let (reply, words, then) = if paused {
-        let (rest, after_a_reply) = match rest.strip_prefix(IS_OVER) {
-            Some(rest) => (rest, false),
-            None => (rest.strip_prefix(IS_OVER_AFTER_A_REPLY)?, true),
+    if let Some((reply, words, then)) = after_a_reply(number, paused, rest) {
+        let answered = Answered {
+            number,
+            handle: handle.to_owned(),
+            tell,
+            reply: Some(reply.to_owned()),
+            words: words.to_owned(),
+            then,
         };
-        let (kept, then) = [Next::Chief, Next::Human]
+        return (render(&answered) == body).then_some(answered);
+    }
+    let (words, then) = if paused {
+        let rest = rest.strip_prefix(IS_OVER)?;
+        [Next::Chief, Next::Human]
             .into_iter()
-            .find_map(|next| Some((rest.strip_suffix(&tail(number, next))?, Then::Paused(next))))?;
-        if after_a_reply {
-            let (reply, words) = kept.split_once(LAST)?;
-            (Some(reply), words, then)
-        } else {
-            (None, kept, then)
-        }
-    } else if let Some(rest) = rest.strip_prefix(MOVED_ON_HEAD) {
-        match rest.strip_prefix(MOVED_ON_AFTER_A_REPLY) {
-            Some(rest) => {
-                let (reply, words) = rest.split_once(ENDED_WITH)?;
-                (Some(reply), words, Then::Moved)
-            }
-            None => (None, rest.strip_prefix(MOVED_ON_ENDED)?, Then::Moved),
-        }
+            .find_map(|next| Some((rest.strip_suffix(&tail(number, next))?, Then::Paused(next))))?
+    } else if let Some(words) = rest.strip_prefix(MOVED_ON) {
+        (words, Then::Moved)
     } else {
-        (None, rest.strip_prefix(MOVED_ON_BEFORE)?, Then::MovedBefore)
+        (rest.strip_prefix(MOVED_ON_BEFORE)?, Then::MovedBefore)
     };
     let answered = Answered {
         number,
         handle: handle.to_owned(),
         tell,
-        reply: reply.map(str::to_owned),
+        reply: None,
         words: words.to_owned(),
         then,
     };
     (render(&answered) == body).then_some(answered)
+}
+
+/// What a note says where the window wrote other words first (T-1151), or none: after `rest`,
+/// the note's words from the tell on, its reply, the words it ended with, and how it stands.
+/// A reply ends where the words that follow it begin; `read` proves the split was the note's
+/// own by writing it again, whichever of those words the reply quoted.
+fn after_a_reply(number: i64, paused: bool, rest: &str) -> Option<(&str, &str, Then)> {
+    if paused {
+        let rest = rest.strip_prefix(IS_OVER_AFTER_A_REPLY)?;
+        let (kept, then) = [Next::Chief, Next::Human]
+            .into_iter()
+            .find_map(|next| Some((rest.strip_suffix(&tail(number, next))?, Then::Paused(next))))?;
+        let (reply, words) = kept.split_once(LAST)?;
+        return Some((reply, words, then));
+    }
+    let head = MOVED_ON.strip_suffix(MOVED_ON_ENDED).unwrap_or(MOVED_ON);
+    let rest = rest
+        .strip_prefix(head)?
+        .strip_prefix(MOVED_ON_AFTER_A_REPLY)?;
+    let (reply, words) = rest.split_once(ENDED_WITH)?;
+    Some((reply, words, Then::Moved))
 }
 
 /// The words every note of T-`number` begins with, paused or moved on: what a withdrawal of

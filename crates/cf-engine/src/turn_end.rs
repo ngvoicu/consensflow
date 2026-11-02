@@ -1122,7 +1122,7 @@ pub(crate) fn words_of(final_run: &[&Item]) -> String {
 pub(crate) fn reply_of(reply: &[&Item]) -> Option<String> {
     let words: Vec<&str> = reply
         .iter()
-        .map(|item| js::trim(&item.text))
+        .map(|item| js::trim(item.text.as_ref()))
         .filter(|text| !text.is_empty())
         .collect();
     (!words.is_empty()).then(|| words.join("\n\n"))

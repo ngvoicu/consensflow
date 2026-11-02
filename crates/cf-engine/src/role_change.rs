@@ -573,9 +573,7 @@ pub(crate) fn answers_to_the_task<'a>(
     let mut last = None;
     let mut final_run = Vec::new();
     let mut complete_run = None;
-    // The words written before the first tool call, and whether a tool call came after them.
-    let mut first_run: Vec<&Item> = Vec::new();
-    let mut first_run_over = false;
+    let mut first = FirstRun::default();
     for item in items.iter().filter(|item| !item.compaction) {
         match item.role {
             Role::User => {
@@ -586,37 +584,59 @@ pub(crate) fn answers_to_the_task<'a>(
                 if !of_the_role {
                     final_run.clear();
                     last = None;
-                    first_run.clear();
-                    first_run_over = false;
                 }
             }
-            Role::Tool if !of_the_role => {
-                final_run.clear();
-                first_run_over = true;
-            }
+            Role::Tool if !of_the_role => final_run.clear(),
             Role::Assistant if !of_the_role => {
                 last = Some(item);
                 final_run.push(item);
-                if !first_run_over && !item.synthetic {
-                    first_run.push(item);
-                }
                 if item.complete {
                     complete_run = Some(final_run.clone());
                 }
             }
             _ => {}
         }
+        first.see(item, of_the_role);
     }
-    // Where no tool call came, the first run is the whole turn: its words are the final answer.
-    let reply = if first_run_over {
-        first_run
-    } else {
-        Vec::new()
-    };
     (last.is_some() || complete_run.is_some()).then_some(Answers {
         last,
         final_run,
         complete_run,
-        reply,
+        reply: first.reply(),
     })
+}
+
+/// What a member wrote before its first tool call, as the walk over its record meets it
+/// (`Answers::reply`): the assistant's items from its latest message to its first tool call,
+/// and whether a tool call came. A message to the member begins it again, a replacement of the
+/// role (`of_the_role`) none; the harness's own words are none of it.
+#[derive(Default)]
+struct FirstRun<'a> {
+    run: Vec<&'a Item>,
+    over: bool,
+}
+
+impl<'a> FirstRun<'a> {
+    /// The next item of the record, `of_the_role` whether it is of a turn on a replacement.
+    fn see(&mut self, item: &'a Item, of_the_role: bool) {
+        if of_the_role {
+            return;
+        }
+        match item.role {
+            Role::User => *self = Self::default(),
+            Role::Tool => self.over = true,
+            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),
+            _ => {}
+        }
+    }
+
+    /// Its words, where a tool call came after them: with none, the one run is the turn's
+    /// final answer, and it is no reply apart from it.
+    fn reply(self) -> Vec<&'a Item> {
+        if self.over {
+            self.run
+        } else {
+            Vec::new()
+        }
+    }
 }

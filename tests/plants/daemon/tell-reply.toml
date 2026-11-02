@@ -33,8 +33,8 @@ runs = ["tell-reply-unit", "tell-reply-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = "                if !first_run_over && !item.synthetic {\n                    first_run.push(item);\n                }\n"
-replace = ""
+find = "            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),"
+replace = "            Role::Assistant if !self.over && !item.synthetic => {}"
 
 [[plant]]
 name = "tell reply: the words between a member's tools are its reply too"
@@ -43,8 +43,8 @@ runs = ["tell-reply-engine", "tell-reply-unit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = "                if !first_run_over && !item.synthetic {"
-replace = "                if !item.synthetic {"
+find = "            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),"
+replace = "            Role::Assistant if !item.synthetic => self.run.push(item),"
 
 [[plant]]
 name = "tell reply: what a harness wrote itself is a reply"
@@ -53,8 +53,8 @@ runs = ["tell-reply-engine", "tell-reply-unit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = "                if !first_run_over && !item.synthetic {"
-replace = "                if !first_run_over {"
+find = "            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),"
+replace = "            Role::Assistant if !self.over => self.run.push(item),"
 
 [[plant]]
 name = "tell reply: a turn with no tool call has the whole of its words for a reply"
@@ -63,8 +63,8 @@ runs = ["tell-reply-unit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = "    let reply = if first_run_over {\n        first_run\n    } else {\n        Vec::new()\n    };"
-replace = "    let reply = first_run;"
+find = "        if self.over {\n            self.run\n        } else {\n            Vec::new()\n        }"
+replace = "        self.run"
 
 [[plant]]
 name = "tell reply: a turn's reply stays when a later message begins another"
@@ -73,8 +73,8 @@ runs = ["tell-reply-unit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = "                    first_run.clear();\n                    first_run_over = false;\n"
-replace = ""
+find = "            Role::User => *self = Self::default(),"
+replace = "            Role::User => {}"
 
 [[plant]]
 name = "tell reply: the words a member wrote first are not told in the note"
@@ -123,8 +123,8 @@ runs = ["tell-reply-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "    let words: Vec<&str> = reply\n        .iter()\n        .map(|item| js::trim(&item.text))"
-replace = "    let words: Vec<&str> = reply\n        .iter()\n        .filter(|item| !item.commentary)\n        .map(|item| js::trim(&item.text))"
+find = "    let words: Vec<&str> = reply\n        .iter()\n        .map(|item| js::trim(item.text.as_ref()))"
+replace = "    let words: Vec<&str> = reply\n        .iter()\n        .filter(|item| !item.commentary)\n        .map(|item| js::trim(item.text.as_ref()))"
 
 [[plant]]
 name = "tell reply: the reply is not trimmed of its blank items"
@@ -153,8 +153,8 @@ runs = ["tell-reply-ledger-notes", "tell-reply-ledger-unit"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = "{MOVED_ON_HEAD}{MOVED_ON_AFTER_A_REPLY}{reply}{ENDED_WITH}{words}\""
-replace = "{MOVED_ON_HEAD}{MOVED_ON_ENDED}{words}\""
+find = "{head}{MOVED_ON_AFTER_A_REPLY}{reply}{ENDED_WITH}{words}"
+replace = "{MOVED_ON}{words}"
 
 [[plant]]
 name = "tell reply: a resume writes the note again without its reply"
@@ -173,8 +173,8 @@ runs = ["tell-reply-ledger-notes", "tell-reply-ledger-unit"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = "            None => (rest.strip_prefix(IS_OVER_AFTER_A_REPLY)?, true),"
-replace = "            None => return None,"
+find = "        let rest = rest.strip_prefix(IS_OVER_AFTER_A_REPLY)?;"
+replace = "        let rest = rest.strip_prefix(IS_OVER_AFTER_A_REPLY).filter(|_| false)?;"
 
 [[plant]]
 name = "tell reply: the stand-in's said line writes no step"
@@ -184,5 +184,25 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent/steps.rs"
-find = "            reply_to(&on, window).map(|answer| (vec![Step::saying(&words)], answer)),"
-replace = "            reply_to(&on, window).map(|answer| (Vec::new(), answer)),"
+find = "reply_to(&on, window).map(|answer| (vec![Step::saying(&words)], answer))"
+replace = "reply_to(&on, window).map(|answer| (Vec::new(), answer))"
+
+[[plant]]
+name = "tell reply: a replacement of the role ends the reply"
+meant = "only_the_turn_after_the_latest_message_has_a_reply"
+runs = ["tell-reply-unit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = "        if of_the_role {\n            return;\n        }\n        match item.role {\n            Role::User => *self = Self::default(),"
+replace = "        match item.role {\n            Role::User => *self = Self::default(),"
+
+[[plant]]
+name = "tell reply: a note of a build before T-958 is written with a reply"
+meant = "a_build_before_t_958_has_no_reply_to_write_and_keeps_its_note"
+runs = ["tell-reply-ledger-unit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "reply.as_deref().filter(|_| *then != Then::MovedBefore)"
+replace = "reply.as_deref()"
