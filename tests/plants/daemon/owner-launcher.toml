@@ -7,8 +7,9 @@
 # every launcher of a harness the rig seats is hashed around the run, as the link it reads, where
 # it ends, the bytes of the file it ends at, and the entries of the folder the harness installs
 # its versions in. One plant takes one rule out; a test of it fails. Every name holds `owner launcher`.
-# The tests are the Unix machines' (links, a shell updater), so the plants are run on those: on Windows
-# the same cases would run no test and every plant would read as missed.
+# Most tests make links and run a shell updater, which only the Unix machines have, so most plants are run
+# there; the ones whose tests hold with a launcher that is a file, as Windows installs one, are run on
+# every machine (without them a plants run on Windows would run no test and read every plant as missed).
 
 [run]
 launcher-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::launcher"]
@@ -18,7 +19,6 @@ launcher-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "
 name = "owner launcher: the windows of a rig are told to update no harness"
 meant = "the_windows_of_a_rig_are_told_to_update_no_harness"
 runs = ["launcher-rig"]
-platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/install.rs"
@@ -46,7 +46,6 @@ replace = '''        crate::live::launcher::updates_off()
 name = "owner launcher: Claude Code is told one switch of its two as off, and the other as on"
 meant = "the_switches_are_claude_codes_two_and_muses_one_and_every_window_has_all_three"
 runs = ["launcher-unit"]
-platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -270,3 +269,37 @@ platforms = ["macos", "linux"]
 file = "crates/cf-e2e/src/live/launcher.rs"
 find = '''        if harness != Harness::Codex {'''
 replace = '''        if harness != Harness::Pi {'''
+
+[[plant]]
+name = "owner launcher: the bytes of a launcher that is a file are not compared, and a file written over has no link to have moved"
+meant = "a_launcher_that_is_a_file_and_is_overwritten_is_named_though_no_link_moved"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''            } else if was.ends_at == now.ends_at && was.bytes != now.bytes {'''
+replace = '''            } else if was.ends_at == now.ends_at && was.bytes != now.bytes && false {'''
+
+[[plant]]
+name = "owner launcher: a launcher that is made by the run is not named"
+meant = "a_launcher_that_is_a_file_and_is_removed_or_made_is_named_for_it"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''                    found.push(format!("{name} was made"));'''
+replace = '''                    let _ = &name;'''
+
+[[plant]]
+name = "owner launcher: a rig seats no guard, and the owner's copy of a launcher is written over"
+meant = "a_run_that_overwrites_a_launcher_that_is_a_file_fails_the_rig_that_ends_and_names_it"
+runs = ["launcher-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''        config = config.isolated(Arc::new(Guard::new(
+            install.harness,
+            &install.command,
+            &install.home,
+        )));'''
+replace = '''        let _ = Guard::new(install.harness, &install.command, &install.home);'''

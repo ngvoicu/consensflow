@@ -129,7 +129,6 @@ mod meeting;
 #[path = "rig/muse_window.rs"]
 mod muse_window;
 #[path = "rig/owner_launchers.rs"]
-#[cfg(unix)]
 mod owner_launchers;
 #[path = "rig/pacing.rs"]
 mod pacing;
