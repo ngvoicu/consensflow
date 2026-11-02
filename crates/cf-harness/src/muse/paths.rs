@@ -105,15 +105,13 @@ const HEAD: u64 = 64 * 1024;
 const SKEW_MS: i64 = 5_000;
 
 /// What the head of a session's log says of where the session came from: the Muse
-/// process that opened it (`runtime.session.route_facts`), the session it was
+/// process that opened it (`runtime.session.route_facts`), and the session it was
 /// started from, by a `/clear` in its window (`session.started`'s
-/// `previous_session_stream`), and the folder it was opened in
-/// (`runtime.session.metadata`'s `workspace_root`, the second record Muse 1.4.14 writes).
+/// `previous_session_stream`).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Head {
     pid: Option<u64>,
     previous: Option<String>,
-    workspace: Option<String>,
 }
 
 /// The heads of the session logs a window has read, by session id ([`Head`]). A head
@@ -177,23 +175,6 @@ pub(crate) fn opened_by(pid: u32, launched_ms: i64, env: &Env, heads: &Heads) ->
         .map(|(id, _)| id)
 }
 
-/// The newest session begun since `since_ms` in the folder `workspace`, compared by its
-/// real path: the one whose head names that folder ([`Head`]). What the live kit's
-/// windows ask (`tooling`), which open Muse on no id of their own and have no pid of its
-/// process to find it by. None while no log names it.
-pub(crate) fn opened_in(workspace: &str, since_ms: i64, env: &Env) -> Option<String> {
-    let folder = real_path(Path::new(workspace));
-    begun_since(since_ms, env, &Heads::default())
-        .into_iter()
-        .rev()
-        .find(|(_, head)| {
-            head.workspace
-                .as_deref()
-                .is_some_and(|named| real_path(Path::new(named)) == folder)
-        })
-        .map(|(id, _)| id)
-}
-
 /// The session a window that shows `session` shows now, where a `/clear` in it started
 /// others since `launched_ms`: the last of the chain of sessions each started from the
 /// one before (`previous_session_stream`), or `session` itself. A cleared session's log
@@ -246,10 +227,7 @@ fn head(log: &Path) -> Head {
         .lines()
         .map_while(Result::ok)
     {
-        if !line.contains("\"route_facts\"")
-            && !line.contains("\"session_started\"")
-            && !line.contains("\"workspace_root\"")
-        {
+        if !line.contains("\"route_facts\"") && !line.contains("\"session_started\"") {
             continue;
         }
         let Ok(record) = serde_json::from_str::<serde_json::Value>(&line) else {
@@ -258,13 +236,6 @@ fn head(log: &Path) -> Head {
         let payload = &record["payload"];
         match payload["kind"].as_str() {
             Some("route_facts") => head.pid = head.pid.or(payload["record"]["pid"].as_u64()),
-            Some("metadata") => {
-                head.workspace = head.workspace.take().or_else(|| {
-                    payload["record"]["workspace_root"]
-                        .as_str()
-                        .map(str::to_owned)
-                });
-            }
             Some("session_started") => {
                 head.previous = head.previous.take().or_else(|| {
                     payload["previous_session_stream"]["id"]
