@@ -1,0 +1,136 @@
+# A live Muse on Windows runs in the rig's own folders on a copy of the login that holds no refresh
+# token (T-1084). Before, the rig's Muse there ran on the person's profile and config folder and read
+# and refreshed their `auth.json` in place (T-985's P2-1). One plant takes one rule out; a test of it
+# fails. The tests are path and JSON arithmetic, so a Mac catches them. Every name holds `kit windows muse`.
+
+[run]
+muse-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::"]
+
+# ---------------------------------------------------------------------------- the copy of the login
+
+[[plant]]
+name = "kit windows muse: the login is copied with its refresh token"
+meant = "a_copy_of_muse_s_login_holds_no_refresh_token_at_any_depth"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''            map.retain(|key, _| !key.to_ascii_lowercase().contains("refresh"));'''
+replace = '''            map.retain(|_, _| true);'''
+
+[[plant]]
+name = "kit windows muse: only the top of the login is cleared of a refresh token"
+meant = "a_copy_of_muse_s_login_holds_no_refresh_token_at_any_depth"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''            map.values_mut().for_each(without_refresh);'''
+replace = ''''''
+
+[[plant]]
+name = "kit windows muse: a refresh token is known by its name in lower case alone"
+meant = "a_copy_of_muse_s_login_holds_no_refresh_token_at_any_depth"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''            map.retain(|key, _| !key.to_ascii_lowercase().contains("refresh"));'''
+replace = '''            map.retain(|key, _| !key.contains("refresh"));'''
+
+[[plant]]
+name = "kit windows muse: a login that is a JSON array is copied"
+meant = "a_login_that_is_not_a_json_object_is_not_copied"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    if !login.is_object() {'''
+replace = '''    if false && !login.is_object() {'''
+
+[[plant]]
+name = "kit windows muse: a rig's home is given the person's login whole"
+meant = "a_live_rig_s_home_is_given_settings_and_the_login_copied_without_a_refresh_token"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    files::write(&config.join("auth.json"), login_copy(&text)?)'''
+replace = '''    files::write(&config.join("auth.json"), text)'''
+
+[[plant]]
+name = "kit windows muse: a rig's home is given no settings"
+meant = "a_live_rig_s_home_is_given_settings_and_the_login_copied_without_a_refresh_token"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    files::write(&config.join("settings.json"), "{\"schema_version\":1}\n")?;
+    let auth = real_home'''
+replace = '''    let auth = real_home'''
+
+# ---------------------------------------------------------------------------- the window's folders
+
+[[plant]]
+name = "kit windows muse: a live window's config folder is the person's"
+meant = "a_live_muse_on_windows_is_given_none_of_the_persons_folders"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''                    ("XDG_CONFIG_HOME".to_owned(), at(self.rig_home.join(".config"))),'''
+replace = '''                    ("XDG_CONFIG_HOME".to_owned(), "C:/Users/AGV/.config".to_owned()),'''
+
+[[plant]]
+name = "kit windows muse: a live window's cache folder is left to the person's"
+meant = "a_live_muse_on_windows_is_given_none_of_the_persons_folders"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''                    ("XDG_CACHE_HOME".to_owned(), at(self.rig_home.join(".cache"))),'''
+replace = ''''''
+
+[[plant]]
+name = "kit windows muse: a stand-in that names no rig home is read as one"
+meant = "a_live_muse_on_windows_is_given_none_of_the_persons_folders"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''            rig_home: PathBuf::from(value["rig"].as_str()?),'''
+replace = '''            rig_home: PathBuf::from(value["rig"].as_str().unwrap_or("C:/Users/AGV")),'''
+
+[[plant]]
+name = "kit windows muse: the rig's home is not written beside the stand-in"
+meant = "the_rig_s_muse_on_windows_runs_the_machine_s_on_echo_without_a_model_or_live_as_given"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''"argv": self.argv, "run": run, "rig": self.rig_home })'''
+replace = '''"argv": self.argv, "run": run, "rig": self.argv })'''
+
+# ---------------------------------------------------------------------------- the allowance read
+
+[[plant]]
+name = "kit windows muse: the allowance is read with the person's profile on Windows"
+meant = "muse_usage_is_run_on_the_copy_of_the_login_and_on_windows_names_none_of_the_persons_folders"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''        vars.push(("USERPROFILE", root.into()));'''
+replace = '''        vars.push(("USERPROFILE", real_home.into()));'''
+
+[[plant]]
+name = "kit windows muse: the allowance is read on the person's config folder on Windows"
+meant = "muse_usage_is_run_on_the_copy_of_the_login_and_on_windows_names_none_of_the_persons_folders"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''        vars.push(("XDG_CONFIG_HOME", config_home.into()));
+    } else {'''
+replace = '''        vars.push(("XDG_CONFIG_HOME", real_home.join(".config").into()));
+    } else {'''

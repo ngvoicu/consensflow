@@ -41,9 +41,39 @@ pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
     files::write(&config.join("auth.json"), login_copy(&text)?)
 }
 
-/// STUB.
+/// The person's login as a live rig's home is given it: `text` as JSON, with every key whose
+/// name has `refresh` in it taken out, at any depth. Muse's own on Windows holds an access token
+/// and an API key and no refresh token, so nothing is taken out of it today; a Muse that keeps one
+/// later is given a login that cannot use up the person's (the rule of T-1067 for Claude Code and
+/// Pi). A file that is no JSON object cannot be shown free of one and is not copied.
 pub fn login_copy(text: &str) -> Result<String> {
-    Ok(text.to_owned())
+    let said = |why: String| {
+        Error::Daemon(format!(
+            "Muse's login is {why}: it cannot be shown free of a refresh token, so it is not copied"
+        ))
+    };
+    let mut login: Value =
+        serde_json::from_str(text).map_err(|failed| said(format!("no JSON ({failed})")))?;
+    if !login.is_object() {
+        return Err(said("no JSON object".to_owned()));
+    }
+    without_refresh(&mut login);
+    let mut copy = serde_json::to_string_pretty(&login)
+        .map_err(|failed| said(format!("not written again ({failed})")))?;
+    copy.push('\n');
+    Ok(copy)
+}
+
+/// `value` without the keys that name a refresh token, at any depth.
+fn without_refresh(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.retain(|key, _| !key.to_ascii_lowercase().contains("refresh"));
+            map.values_mut().for_each(without_refresh);
+        }
+        Value::Array(items) => items.iter_mut().for_each(without_refresh),
+        _ => {}
+    }
 }
 
 /// The home of whoever runs the tests, where their Muse login is found: the profile on
@@ -209,21 +239,29 @@ impl StandIn {
         args
     }
 
-    /// What Muse is given besides the window's environment: live, the person's profile
-    /// and config folder, where Muse on Windows keeps its login in a file
-    /// (`auth.json`, `credential_backend: file`), which is used where it is and never
-    /// copied (a copy's refresh would leave the person's stale); its sessions stay in
-    /// the rig's home, where the daemon reads them.
+    /// What Muse is given besides the window's environment: live, the rig's own config, data
+    /// and cache folders (T-1084), with the copy of the person's login and the settings
+    /// [`seed_live_home`] made in the first. Muse on Windows honours these and keeps its login
+    /// in that file (`credential_backend: file`); the person's profile and home are named
+    /// nowhere, so what the window finds of the person's own Muse is nothing.
     pub fn env(&self) -> Vec<(String, String)> {
         match &self.run {
             Run::Echo { .. } => Vec::new(),
-            Run::Live { real_home } => {
-                let real = real_home.to_string_lossy().into_owned();
-                let config = real_home.join(".config").to_string_lossy().into_owned();
+            Run::Live { .. } => {
+                let at = |path: PathBuf| path.to_string_lossy().into_owned();
                 vec![
-                    ("USERPROFILE".to_owned(), real.clone()),
-                    ("HOME".to_owned(), real),
-                    ("XDG_CONFIG_HOME".to_owned(), config),
+                    (
+                        "XDG_CONFIG_HOME".to_owned(),
+                        at(self.rig_home.join(".config")),
+                    ),
+                    (
+                        "XDG_DATA_HOME".to_owned(),
+                        at(self.rig_home.join(".local").join("share")),
+                    ),
+                    (
+                        "XDG_CACHE_HOME".to_owned(),
+                        at(self.rig_home.join(".cache")),
+                    ),
                 ]
             }
         }
@@ -300,11 +338,13 @@ exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{dela
 
 /// Writes the rig's Muse in `dir` for a live run: its launcher, the version line, and
 /// the binary that runs `install`'s on the real model, with the model and effort it is
-/// given, writing each command line to `argv` as [`write_stand_in`]'s does. Muse keeps
-/// its login's secret in the system's keychain, which it finds by the person's home
-/// (`real_home`: a throwaway home opens its onboarding, T-705); its settings, the copy of
-/// the login's metadata, and its sessions are in the rig's home (`rig_home`), where the
-/// daemon reads them, so nothing of the person's Muse folders is read or written.
+/// given, writing each command line to `argv` as [`write_stand_in`]'s does. On a Mac Muse
+/// keeps its login's secret in the system's keychain, which it finds by the person's home
+/// (`real_home`: a throwaway home opens its onboarding, T-705); on Windows its login is the
+/// file in its config folder and the person's home is named nowhere ([`StandIn::env`]). Its
+/// settings, the copy of the login ([`login_copy`]), and its sessions are in the rig's home
+/// (`rig_home`), where the daemon reads them, so nothing of the person's Muse folders is
+/// read or written.
 pub fn write_live_stand_in(
     dir: &Path,
     install: &Installed,
@@ -517,9 +557,10 @@ fn usage_vars(
         ("MUSE_LOGIN", "0".into()),
     ];
     if windows {
-        // STUB: the old Windows run, on the person's profile and config folder.
-        vars.push(("USERPROFILE", real_home.into()));
-        vars.push(("XDG_CONFIG_HOME", real_home.join(".config").into()));
+        let root = config_home.parent().unwrap_or(config_home);
+        vars.push(("USERPROFILE", root.into()));
+        vars.push(("HOME", root.into()));
+        vars.push(("XDG_CONFIG_HOME", config_home.into()));
     } else {
         vars.push(("HOME", real_home.into()));
         vars.push(("XDG_CONFIG_HOME", config_home.into()));
