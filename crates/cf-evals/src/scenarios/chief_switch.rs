@@ -76,6 +76,7 @@ pub(super) fn with(codeword: &str) -> Scenario {
         nudge: None,
         quiet: Duration::from_secs(90),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect("the chief was switched once, to another harness", |m| {
                 m.switches == 1 && m.chiefs.len() == 2 && m.chiefs[0] != m.chiefs[1]

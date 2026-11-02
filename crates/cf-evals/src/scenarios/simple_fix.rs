@@ -20,6 +20,7 @@ pub(super) fn scenario() -> Scenario {
         nudge: None,
         quiet: Duration::from_secs(90),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect("the page is fixed, and nothing else touched", |m| {
                 m.files_changed == ["site/evaluare.html"]

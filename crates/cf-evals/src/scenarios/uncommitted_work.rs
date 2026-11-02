@@ -83,6 +83,7 @@ pub(super) fn scenario() -> Scenario {
         nudge: None,
         quiet: Duration::from_secs(90),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect("a follow-up to the same window undoes the change (--after)", |m| {
                 m.plumbing.continuations >= 1

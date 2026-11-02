@@ -382,16 +382,43 @@ fn member_questions_value(asked: &MemberQuestions) -> Value {
 }
 
 /// One expectation or one check of the board's plumbing, and whether it held.
+///
+/// An expectation can also be **unmet**: it reads something the run never made (the second
+/// review of a chief that asked for none), so it judged nothing. An unmet check is not `ok`,
+/// and is no failure of the chief's either; a report says it apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
     pub name: String,
     pub ok: bool,
+    pub unmet: bool,
 }
 
 impl Check {
-    /// A check as a report keeps it.
+    /// A check that held, or did not.
+    pub fn new(name: impl Into<String>, ok: bool) -> Self {
+        Self {
+            name: name.into(),
+            ok,
+            unmet: false,
+        }
+    }
+
+    /// A check that judged nothing, since what it reads was not there.
+    pub fn unmet(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ok: false,
+            unmet: true,
+        }
+    }
+
+    /// A check as a report keeps it: `unmet` is a key only of a check that is.
     pub fn to_value(&self) -> Value {
-        json!({ "name": self.name, "ok": self.ok })
+        if self.unmet {
+            json!({ "name": self.name, "ok": self.ok, "unmet": true })
+        } else {
+            json!({ "name": self.name, "ok": self.ok })
+        }
     }
 }
 

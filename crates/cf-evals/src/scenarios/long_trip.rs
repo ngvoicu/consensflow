@@ -84,6 +84,7 @@ pub(super) fn scenario() -> Scenario {
         nudge: None,
         quiet: Duration::from_secs(180),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect(
                 "the worker's result is long (8000 characters or more)",

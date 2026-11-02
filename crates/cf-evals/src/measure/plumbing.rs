@@ -180,10 +180,8 @@ pub(super) fn member_questions_by(
 /// and the answer delivered, every task shown on the board (`board_tasks`: how
 /// many the board listed when the run ended).
 pub fn mechanics(plumbing: &Plumbing, board_tasks: i64) -> Vec<Check> {
-    let held = |name: &str, got: i64, of: i64| Check {
-        name: format!("{name} ({got}/{of})"),
-        ok: got == of,
-    };
+    let held =
+        |name: &str, got: i64, of: i64| Check::new(format!("{name} ({got}/{of})"), got == of);
     vec![
         held(
             "every task brief was delivered",

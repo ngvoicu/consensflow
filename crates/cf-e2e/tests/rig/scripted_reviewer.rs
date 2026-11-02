@@ -1,4 +1,4 @@
-//! The evals' scripted reviewer (T-1010, SCX-17) end to end through the real pane host: a
+//! The evals' scripted reviewer and worker (T-1010, T-1101, SCX-17) end to end through the real pane host: a
 //! reviewer whose window is started with `CF_TEST_SCRIPTED_RESULTS` answers each review the
 //! chief puts on the board with the next result of the run's folder, whatever the brief says,
 //! and the daemon collects it as the review's result like any other. The brief is the live
@@ -90,6 +90,83 @@ fn a_reviewer_whose_folder_is_no_eval_runs_is_refused_and_says_so_instead_of_ans
         !folder.path().join(".taken-1").exists(),
         "and nothing was taken from it"
     );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_that_is_the_scripted_stand_in_writes_the_files_of_its_answer_in_the_project_and_answers(
+) -> Outcome {
+    let folder = tempfile::tempdir()?;
+    fs::write(folder.path().join(".eval-run"), "")?;
+    for (number, result, page) in [
+        (
+            1,
+            "WORK ONE: the page, with 0 to 100",
+            "<p>between 0 and 100</p>",
+        ),
+        (2, "WORK TWO: the page, fixed", "<p>a scale from 1 to 5</p>"),
+    ] {
+        fs::write(folder.path().join(format!("{number}.md")), result)?;
+        let files = folder.path().join(format!("{number}.files/site/en"));
+        fs::create_dir_all(&files)?;
+        fs::write(files.join("assessment.html"), page)?;
+    }
+    let rig = cf_e2e::rig::Rig::start(
+        config().var("CF_TEST_SCRIPTED_RESULTS", folder.path().to_string_lossy()),
+    )?;
+    write_staff(&rig)?;
+    let project = Project::open_with_staff(&rig, "chief", None, &[("worker", "worker")])?;
+    let tier = project.tiers()?.get("worker").cloned().unwrap_or_default();
+    let page = rig.workspace().join("site/en/assessment.html");
+    // The brief is the chief's, and says nothing of the script: the worker writes what the script has.
+    for (number, expected, content) in [
+        (
+            1,
+            "WORK ONE: the page, with 0 to 100",
+            "<p>between 0 and 100</p>",
+        ),
+        (2, "WORK TWO: the page, fixed", "<p>a scale from 1 to 5</p>"),
+        (3, "WORK TWO: the page, fixed", "<p>a scale from 1 to 5</p>"),
+    ] {
+        rig.tell(
+            project.id(),
+            &format!("DISPATCH --tier {tier} Make the English page with the guide's scale (task {number})."),
+        )?;
+        rig.wait_for(&format!("task T-{number} to be done"), secs(90), || {
+            Ok(project.task(number)?["state"] == "done")
+        })?;
+        assert_eq!(
+            result_of(&project, number)?,
+            json!(expected),
+            "T-{number}'s result"
+        );
+        assert_eq!(
+            fs::read_to_string(&page)?,
+            content,
+            "the page after T-{number}"
+        );
+        // Put the page back to what it was, to see the next answer write it.
+        fs::write(&page, "left by someone")?;
+    }
+    // Every brief taken is written down whole, with the answer it was given and the file it wrote.
+    let journal: Vec<Value> = fs::read_to_string(folder.path().join("journal.jsonl"))?
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(journal.len(), 3);
+    assert_eq!(
+        journal
+            .iter()
+            .map(|line| line["given"].clone())
+            .collect::<Vec<_>>(),
+        [json!(1), json!(2), json!(2)]
+    );
+    assert!(journal[0]["brief"]
+        .as_str()
+        .unwrap()
+        .contains("Make the English page with the guide's scale (task 1)"));
+    assert_eq!(journal[2]["wrote"], json!(["site/en/assessment.html"]));
     rig.close()?;
     Ok(())
 }

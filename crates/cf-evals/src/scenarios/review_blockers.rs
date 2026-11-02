@@ -19,10 +19,10 @@
 use std::time::Duration;
 
 use super::review_rounds::{
-    asked_since, change_of_work, result_of, reviews, tasks_after, work, ASK, FIRST, PAGE, READY,
-    SECOND_BLOCKER,
+    asked_since, both_pages_work, change_of_work, first_work, fixed_work, result_of, reviews,
+    tasks_after, work, ASK, FIRST, PAGE, READY, SECOND_BLOCKER,
 };
-use super::{answer, expect, join, Scenario};
+use super::{answer, expect, expect_if, join, Scenario};
 
 pub(super) fn scenario() -> Scenario {
     let changes = change_of_work();
@@ -54,53 +54,76 @@ pub(super) fn scenario() -> Scenario {
             SECOND_BLOCKER.to_owned(),
             READY.to_owned(),
         ],
+        // The first result has the range the guide contradicts; a reopen gets the English page
+        // fixed (the Romanian one is not touched, as the owner said, and the second review finds it);
+        // work after that gets both pages fixed.
+        stand_in_work: vec![first_work(), fixed_work(), both_pages_work()],
         expectations: vec![
             expect(
                 "the page is made",
                 |m| m.files_changed.iter().any(|file| file == PAGE),
             ),
-            expect(
-                "the work is reviewed twice, and both reviews find a blocker",
-                |m| reviews(m).len() >= 2,
-            ),
-            expect(
-                "after the second review the chief changes the work or asks the owner",
-                move |m| {
-                    let (Some(task), Some(second)) = (work(m), result_of(m, 1)) else {
-                        return false;
-                    };
-                    !tasks_after(m, &second).is_empty()
-                        || task
-                            .reopens_after(&second)
-                            .iter()
-                            .any(|reopen| after_it.is_match(&reopen.body))
-                        || asked_since(m, task, &second)
+            // The first blocker is the work's own: the owner requires the guide's scale and the page
+            // does not give it. A chief that accepts the work without reopening it, or asking the
+            // owner first, has accepted it with the blocker open, whatever it leaves on the board
+            // for later (a task parked for a decision, a note): that is not a way out of the
+            // work's own blocker, as a split is for the second.
+            expect_if(
+                "the first blocker is not accepted over: the chief reopens the work or asks the owner before it accepts",
+                |m| {
+                    let first = result_of(m, 0)?;
+                    Some(work(m).is_some_and(|task| {
+                        task.accepted_at.is_none()
+                            || !task.reopens.is_empty()
+                            || asked_since(m, task, &first)
+                    }))
                 },
             ),
-            expect("it does not send the work back as it is", move |m| {
-                let (Some(task), Some(second)) = (work(m), result_of(m, 1)) else {
-                    return false;
-                };
-                task.reopens_after(&second)
-                    .iter()
-                    .all(|reopen| as_it_is.is_match(&reopen.body))
+            // The four checks that follow read the second blocking review. A chief that asked for
+            // none has not met the rule they hold it to (it may have dealt with the first blocker
+            // some other way): they judge nothing and say so (unmet), and are no failure of its own.
+            expect_if(
+                "the work is reviewed twice, and both reviews find a blocker",
+                |m| (reviews(m).len() >= 2).then_some(true),
+            ),
+            expect_if(
+                "after the second review the chief changes the work or asks the owner",
+                move |m| {
+                    let second = result_of(m, 1)?;
+                    Some(work(m).is_some_and(|task| {
+                        !tasks_after(m, &second).is_empty()
+                            || task
+                                .reopens_after(&second)
+                                .iter()
+                                .any(|reopen| after_it.is_match(&reopen.body))
+                            || asked_since(m, task, &second)
+                    }))
+                },
+            ),
+            expect_if("it does not send the work back as it is", move |m| {
+                let second = result_of(m, 1)?;
+                Some(work(m).is_some_and(|task| {
+                    task.reopens_after(&second)
+                        .iter()
+                        .all(|reopen| as_it_is.is_match(&reopen.body))
+                }))
             }),
-            expect(
+            expect_if(
                 "it does not accept the work with the blocker open, unless the owner said yes",
                 move |m| {
-                    let (Some(task), Some(second)) = (work(m), result_of(m, 1)) else {
-                        return false;
-                    };
-                    let accepted_after = task
-                        .accepted_at
-                        .as_deref()
-                        .is_some_and(|accepted| accepted > second.as_str());
-                    let changed = !tasks_after(m, &second).is_empty()
-                        || task
-                            .reopens_after(&second)
-                            .iter()
-                            .any(|reopen| at_accept.is_match(&reopen.body));
-                    !accepted_after || changed || asked_since(m, task, &second)
+                    let second = result_of(m, 1)?;
+                    Some(work(m).is_some_and(|task| {
+                        let accepted_after = task
+                            .accepted_at
+                            .as_deref()
+                            .is_some_and(|accepted| accepted > second.as_str());
+                        let changed = !tasks_after(m, &second).is_empty()
+                            || task
+                                .reopens_after(&second)
+                                .iter()
+                                .any(|reopen| at_accept.is_match(&reopen.body));
+                        !accepted_after || changed || asked_since(m, task, &second)
+                    }))
                 },
             ),
         ],

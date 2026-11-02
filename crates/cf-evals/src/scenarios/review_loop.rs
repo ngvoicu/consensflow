@@ -12,10 +12,10 @@
 use std::time::Duration;
 
 use super::review_rounds::{
-    change_since, names_finding, names_the_change, notes, reopened_before, result_of, reviews,
-    tasks_after, work, ASK, FIRST, NOTES_ONLY, NOTES_ONLY_AGAIN, PAGE,
+    change_since, first_work, fixed_work, names_finding, names_the_change, notes, reopened_before,
+    result_of, reviews, tasks_after, work, ASK, FIRST, NOTES_ONLY, NOTES_ONLY_AGAIN, PAGE,
 };
-use super::{expect, join, pattern, Scenario};
+use super::{expect, expect_if, join, pattern, Scenario};
 
 pub(super) fn scenario() -> Scenario {
     let bug = pattern(r"(?i)\bF1\b|score|scale|scor|scară|scara|100|1 (?:to|la|-|–) 5");
@@ -44,60 +44,64 @@ pub(super) fn scenario() -> Scenario {
             NOTES_ONLY.to_owned(),
             NOTES_ONLY_AGAIN.to_owned(),
         ],
+        // The first result has the range the guide contradicts, the owner's requirement unmet;
+        // every later answer (a reopen, a task for the notes) is the page fixed.
+        stand_in_work: vec![first_work(), fixed_work()],
         expectations: vec![
             expect("the page is made, and no other file changes", |m| {
                 m.files_changed == [PAGE]
             }),
-            expect(
+            // The checks that read the second review are judged only if the chief asked for one:
+            // a chief that did not has not met the rule they hold it to, and they say so (unmet),
+            // which is no failure of its own.
+            expect_if(
                 "the work is reviewed again after the fix: two reviews at least",
-                |m| reviews(m).len() >= 2,
+                |m| (reviews(m).len() >= 2).then_some(true),
             ),
             expect("the work is reopened once, for the bug", move |m| {
                 work(m).is_some_and(|task| {
                     task.reopens.len() == 1 && bug.is_match(&task.reopens[0].body)
                 })
             }),
-            expect(
+            expect_if(
                 "the work is never sent back after the review that found notes only",
                 |m| {
-                    let (Some(task), Some(notes_only)) = (work(m), result_of(m, 1)) else {
-                        return false;
-                    };
-                    task.reopens_after(&notes_only).is_empty()
+                    let notes_only = result_of(m, 1)?;
+                    Some(work(m).is_some_and(|task| task.reopens_after(&notes_only).is_empty()))
                 },
             ),
-            expect(
+            expect_if(
                 "the work is accepted once only notes are left, not before",
                 |m| {
-                    let (Some(task), Some(notes_only)) = (work(m), result_of(m, 1)) else {
-                        return false;
-                    };
-                    task.accepted_at
-                        .as_deref()
-                        .is_some_and(|accepted| accepted > notes_only.as_str())
+                    let notes_only = result_of(m, 1)?;
+                    Some(work(m).is_some_and(|task| {
+                        task.accepted_at
+                            .as_deref()
+                            .is_some_and(|accepted| accepted > notes_only.as_str())
+                    }))
                 },
             ),
-            expect(
+            expect_if(
                 "the notes go into one later task or a note, not into many tasks",
                 move |m| {
-                    let Some(notes_only) = result_of(m, 1) else {
-                        return false;
-                    };
+                    let notes_only = result_of(m, 1)?;
                     let later = tasks_after(m, &notes_only);
-                    later.len() <= 1
-                        && (later.iter().any(|task| nits.is_match(&task.brief))
-                            || nits.is_match(&m.notes_text))
+                    Some(
+                        later.len() <= 1
+                            && (later.iter().any(|task| nits.is_match(&task.brief))
+                                || nits.is_match(&m.notes_text)),
+                    )
                 },
             ),
-            expect(
+            expect_if(
                 "the second review's brief names the earlier findings by number and the change since",
                 move |m| {
-                    let (Some(task), Some(review)) = (work(m), reviews(m).get(1).copied()) else {
-                        return false;
-                    };
-                    reopened_before(task, &review.created_at)
-                        && names_finding(&review.brief, 1)
-                        && names_the_change(&since, &review.brief)
+                    let review = reviews(m).get(1).copied()?;
+                    Some(work(m).is_some_and(|task| {
+                        reopened_before(task, &review.created_at)
+                            && names_finding(&review.brief, 1)
+                            && names_the_change(&since, &review.brief)
+                    }))
                 },
             ),
             expect(

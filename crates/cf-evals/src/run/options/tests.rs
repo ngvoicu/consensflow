@@ -191,7 +191,7 @@ fn a_gate_and_a_model_are_taken_as_given() {
 fn a_review_scenario_needs_a_claude_code_in_the_run_for_its_stand_in_reviewer() {
     for id in ["review-loop", "review-blockers"] {
         let refused = format!(
-            "{id} has a stand-in reviewer, a Claude Code window: claude must be the chief or on --staff"
+            "{id} has stand-in members, Claude Code windows: claude must be the chief or on --staff"
         );
         assert_eq!(
             of(&format!("--scenario {id} --chief codex --staff pi"))

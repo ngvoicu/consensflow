@@ -264,13 +264,26 @@ impl Board {
     }
 }
 
-/// The names of the expectations of scenario `id` that do not hold on `metrics`.
+/// The names of the expectations of scenario `id` that fail on `metrics`: a check that judged
+/// nothing (unmet) is none of them.
 fn failing(id: &str, metrics: &Metrics) -> Vec<String> {
     scenarios::by_id(id)
         .unwrap()
         .verdict(metrics)
         .into_iter()
-        .filter(|check| !check.ok)
+        .filter(|check| !check.ok && !check.unmet)
+        .map(|check| check.name)
+        .collect()
+}
+
+/// The names of the expectations of scenario `id` that judged nothing on `metrics`, for want of
+/// what they read.
+fn unmet(id: &str, metrics: &Metrics) -> Vec<String> {
+    scenarios::by_id(id)
+        .unwrap()
+        .verdict(metrics)
+        .into_iter()
+        .filter(|check| check.unmet)
         .map(|check| check.name)
         .collect()
 }
@@ -362,22 +375,58 @@ fn a_chief_that_sends_the_work_back_for_the_notes_and_asks_a_third_review_fails_
     );
 }
 
+/// The checks of `review-loop` that read the second review, which a chief that asked for none
+/// did not meet.
+const SECOND_REVIEW_CHECKS_OF_THE_LOOP: [&str; 5] = [
+    "the work is reviewed again after the fix: two reviews at least",
+    "the work is never sent back after the review that found notes only",
+    "the work is accepted once only notes are left, not before",
+    "the notes go into one later task or a note, not into many tasks",
+    "the second review's brief names the earlier findings by number and the change since",
+];
+
 #[test]
-fn a_chief_that_accepts_the_work_with_the_bug_open_fails_what_names_it() {
+fn a_chief_that_accepts_the_work_with_the_bug_open_fails_the_reopen_and_leaves_the_second_review_unmet(
+) {
     let (mut board, work, first) = after_the_first_review();
     board.accepts(work);
     board.accepts(first);
+    let metrics = board.measured();
     assert_eq!(
-        failing(REVIEW_LOOP, &board.measured()),
-        [
-            "the work is reviewed again after the fix: two reviews at least",
-            "the work is reopened once, for the bug",
-            "the work is never sent back after the review that found notes only",
-            "the work is accepted once only notes are left, not before",
-            "the notes go into one later task or a note, not into many tasks",
-            "the second review's brief names the earlier findings by number and the change since",
-        ]
+        failing(REVIEW_LOOP, &metrics),
+        ["the work is reopened once, for the bug"]
     );
+    // It asked for no second review: the five checks that read one judged nothing, and are
+    // no failure of its own to count.
+    assert_eq!(
+        unmet(REVIEW_LOOP, &metrics),
+        SECOND_REVIEW_CHECKS_OF_THE_LOOP
+    );
+}
+
+#[test]
+fn a_chief_that_reopens_and_asks_for_no_second_review_fails_nothing_and_leaves_the_second_review_unmet(
+) {
+    // It sent the work back for the bug and accepted the fix on its own look: the rule asks it
+    // nothing more, and what reads a second review is not judged.
+    let (mut board, work, first) = after_the_first_review();
+    board.reopens(work, REOPEN_BUG);
+    board.finishes(work, "Fixed: the sentence now gives a scale from 1 to 5.");
+    board.accepts(work);
+    board.accepts(first);
+    let metrics = board.measured();
+    assert_eq!(failing(REVIEW_LOOP, &metrics), Vec::<String>::new());
+    assert_eq!(
+        unmet(REVIEW_LOOP, &metrics),
+        SECOND_REVIEW_CHECKS_OF_THE_LOOP
+    );
+}
+
+#[test]
+fn a_chief_that_asks_for_a_second_review_leaves_nothing_unmet() {
+    let board = the_chief_that_behaves();
+    let metrics = board.measured();
+    assert_eq!(unmet(REVIEW_LOOP, &metrics), Vec::<String>::new());
 }
 
 #[test]
@@ -838,9 +887,68 @@ fn a_run_that_makes_no_page_fails_the_page_check_of_the_blockers_alone() {
     assert_eq!(failing(REVIEW_BLOCKERS, &metrics), ["the page is made"]);
 }
 
+const FIRST_BLOCKER_CHECK: &str = "the first blocker is not accepted over: the chief reopens the work or asks the owner before it accepts";
+
+/// What the checks that read the second review say of a chief that asked for none.
+const SECOND_REVIEW_CHECKS_OF_THE_BLOCKERS: [&str; 4] = [
+    "the work is reviewed twice, and both reviews find a blocker",
+    "after the second review the chief changes the work or asks the owner",
+    "it does not send the work back as it is",
+    "it does not accept the work with the blocker open, unless the owner said yes",
+];
+
 #[test]
-fn a_chief_that_never_asks_for_the_second_review_has_not_met_the_rule_and_fails_every_check_of_it()
-{
+fn a_chief_that_accepts_the_first_blocker_as_out_of_scope_and_asks_the_owner_after_fails_the_first_blocker_check(
+) {
+    // Both live chiefs of 2026-11-02 did this: F1 comes from the source, so the work is accepted,
+    // and the decision is put to the owner (the second run asked, after accepting).
+    let (mut board, work, first) = after_the_first_review();
+    board.accepts(work);
+    board.accepts(first);
+    board.asks_the_owner();
+    board.asks(
+        "worker",
+        "Change the score range on both pages, the owner chose 1 to 5.",
+    );
+    let metrics = board.measured();
+    assert_eq!(failing(REVIEW_BLOCKERS, &metrics), [FIRST_BLOCKER_CHECK]);
+    // It asked for no second review: what reads one is not judged.
+    assert_eq!(
+        unmet(REVIEW_BLOCKERS, &metrics),
+        SECOND_REVIEW_CHECKS_OF_THE_BLOCKERS
+    );
+}
+
+#[test]
+fn a_chief_that_accepts_the_first_blocker_and_parks_a_task_and_a_note_for_later_fails_it_too() {
+    // The other live chief parked a task for the owner's decision, left a note, and asked nothing.
+    let (mut board, work, first) = after_the_first_review();
+    board.accepts(work);
+    board.accepts(first);
+    board.asks(
+        "worker",
+        "PARKED: waits for the human's decision on the correct score range.",
+    );
+    board.notes("Left for later: T-3 waits for your decision on the score range.");
+    assert_eq!(
+        failing(REVIEW_BLOCKERS, &board.measured()),
+        [FIRST_BLOCKER_CHECK]
+    );
+}
+
+#[test]
+fn a_chief_that_asks_the_owner_about_the_first_blocker_before_it_accepts_holds_the_first_blocker_check(
+) {
+    let (mut board, work, first) = after_the_first_review();
+    board.asks_the_owner();
+    board.accepts(work);
+    board.accepts(first);
+    let metrics = board.measured();
+    assert_eq!(failing(REVIEW_BLOCKERS, &metrics), Vec::<String>::new());
+}
+
+#[test]
+fn a_chief_that_reopens_the_work_for_the_first_blocker_holds_the_first_blocker_check() {
     let (mut board, work, first) = after_the_first_review();
     board.reopens(work, REOPEN_BUG);
     board.finishes(work, "Fixed.");
@@ -848,12 +956,50 @@ fn a_chief_that_never_asks_for_the_second_review_has_not_met_the_rule_and_fails_
     board.accepts(first);
     assert_eq!(
         failing(REVIEW_BLOCKERS, &board.measured()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_chief_that_has_not_accepted_the_work_yet_has_accepted_nothing_over_the_first_blocker() {
+    let (board, _work, _first) = after_the_first_review();
+    assert_eq!(
+        failing(REVIEW_BLOCKERS, &board.measured()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_chief_that_asks_for_no_second_review_has_met_no_rule_of_the_blockers_and_each_check_says_so() {
+    let (mut board, work, first) = after_the_first_review();
+    board.reopens(work, REOPEN_BUG);
+    board.finishes(work, "Fixed.");
+    board.accepts(work);
+    board.accepts(first);
+    let metrics = board.measured();
+    // Not four failures: the four checks read a second blocking review that was never asked for.
+    assert_eq!(failing(REVIEW_BLOCKERS, &metrics), Vec::<String>::new());
+    assert_eq!(
+        unmet(REVIEW_BLOCKERS, &metrics),
         [
             "the work is reviewed twice, and both reviews find a blocker",
             "after the second review the chief changes the work or asks the owner",
             "it does not send the work back as it is",
             "it does not accept the work with the blocker open, unless the owner said yes",
         ]
+    );
+}
+
+#[test]
+fn a_chief_that_asks_for_the_second_review_leaves_none_of_the_blockers_checks_unmet() {
+    let (mut board, work, first, second) = after_the_second_blocking_review();
+    board.asks_the_owner();
+    board.accepts(work);
+    board.accepts(first);
+    board.accepts(second);
+    assert_eq!(
+        unmet(REVIEW_BLOCKERS, &board.measured()),
+        Vec::<String>::new()
     );
 }
 

@@ -77,6 +77,13 @@ pub const STAND_IN_MODEL: &str = "scripted-reviewer";
 /// The roster id of the stand-in reviewer.
 pub const STAND_IN_AGENT: &str = "eval-scripted-reviewer";
 
+/// The model of the stand-in worker of a scenario that scripts one
+/// ([`crate::scenarios::Scenario::stand_in_work`]), and its roster id: the wrapper starts a window on
+/// the model as the stand-in agent, with the folder of the work's answers, and refuses it outside an
+/// eval run.
+pub const STAND_IN_WORKER_MODEL: &str = "scripted-worker";
+pub const STAND_IN_WORKER: &str = "eval-scripted-worker";
+
 /// The roles a staff harness fills: two workers, so parallel work has somewhere to run.
 const ROLES: [(&str, &str); 4] = [
     ("worker", "worker"),
@@ -221,6 +228,32 @@ pub fn with_stand_in_reviewer(mut staff: Staff, effort: Option<&str>) -> Result<
         STAND_IN_AGENT.to_owned(),
         harness("claude")?,
         STAND_IN_MODEL,
+        effort,
+    ));
+    Ok(staff)
+}
+
+/// `staff` with its workers taken out and one stand-in worker (a Claude Code agent on
+/// [`STAND_IN_WORKER_MODEL`], standard tier) in their place: the advisors and the reviewers stay what
+/// they were, and a task for a worker can only go to the stand-in. (One worker runs as many tasks at
+/// once as the chief gives it, each in a window of its own.)
+pub fn with_stand_in_worker(mut staff: Staff, effort: Option<&str>) -> Result<Staff> {
+    let workers: Vec<String> = staff
+        .members
+        .iter()
+        .filter(|member| member.role == "worker")
+        .map(|member| member.agent.clone())
+        .collect();
+    staff.members.retain(|member| member.role != "worker");
+    staff.agents.retain(|agent| !workers.contains(&agent.id));
+    staff.members.push(Member {
+        agent: STAND_IN_WORKER.to_owned(),
+        role: "worker",
+    });
+    staff.agents.push(Agent::new(
+        STAND_IN_WORKER.to_owned(),
+        harness("claude")?,
+        STAND_IN_WORKER_MODEL,
         effort,
     ));
     Ok(staff)

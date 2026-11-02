@@ -58,9 +58,9 @@ struct Scene {
 pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
     let (options, scenario) = (plan.options, &plan.options.scenario);
     let mut floor = Floor::new(out);
-    // The stand-in reviewer answers each play from its first review.
-    if let Some(reviews) = &plan.reviews {
-        reviews.restart()?;
+    // The stand-in members answer each play from their first answer.
+    if let Some(stand_ins) = &plan.stand_ins {
+        stand_ins.restart()?;
     }
     let workspace = workspace::fresh(plan.machine, scenario)?;
     let rig = start(plan, &mut floor, &workspace)?;
@@ -92,17 +92,24 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
             rounds: scenario.reads_the_rounds(),
         },
     )?;
+    // The play's folder was measured: it goes with the play.
+    workspace::retire(&workspace);
+    // What the scripted worker was asked, read before the next play makes its folder again.
+    let scripted = match &plan.stand_ins {
+        Some(stand_ins) => stand_ins.work_taken()?,
+        None => None,
+    };
     let checks = scenario.verdict(&metrics);
     let mut board = mechanics(&metrics.plumbing, scene.board_tasks);
     board.extend(login::left_as_it_was(plan.machine, &mut floor)?);
     if options.gate {
-        board.push(Check {
-            name: format!(
+        board.push(Check::new(
+            format!(
                 "the gate held the messages for the owner's approval ({} approved)",
                 scene.approvals
             ),
-            ok: scene.approvals > 0 && scene.refused.is_empty(),
-        });
+            scene.approvals > 0 && scene.refused.is_empty(),
+        ));
     }
     let mut kept = Card {
         options,
@@ -119,6 +126,7 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
         refused: scene.refused,
         approvals: scene.approvals,
         log: floor.log(),
+        scripted,
         path: PathBuf::new(),
     };
     let name = file_name(jiff::Timestamp::now(), options, index);

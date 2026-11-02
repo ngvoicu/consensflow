@@ -153,6 +153,8 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
         files_read: ended(&workspace, &begun)?,
         ..bare_metrics(&items, changed(&fixture, &workspace)?, &ends)
     };
+    // The play's folder was measured: it goes with the play.
+    super::workspace::retire(&workspace);
     let mut checks = scenario.verdict(&metrics);
     checks.extend(login::left_as_it_was(plan.machine, &mut floor)?);
     let kept = Bare {

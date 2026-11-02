@@ -21,8 +21,8 @@ use super::login::Throwaway;
 use super::options::Crew;
 use crate::plan::ChiefSetup;
 
-/// Where the folders of a run are, below the user's home: one fixed workspace,
-/// trusted once per run (Claude asks about an unknown folder), and the wrappers.
+/// Where the folders of a run are, below the user's home: a workspace for each play,
+/// trusted once per play (Claude asks about an unknown folder), and the wrappers.
 const EVALS: [&str; 2] = [".consensflow-candidate", "evals"];
 
 /// The folders on a Mac's or a Linux machine's `PATH` that a window finds its
@@ -134,15 +134,23 @@ impl Machine {
             .join(name)
     }
 
-    /// The one fixed workspace, trusted once per run.
-    pub fn workspace(&self) -> PathBuf {
-        self.below("workspace")
+    /// The folder the workspaces of the plays are made in: one folder of its own for each play
+    /// ([`super::workspace::fresh`]), so that nothing another run left or writes at the same time
+    /// can reach it. (Before 2026-11-02 every play worked in one fixed folder below the same
+    /// home, `workspace`, which a run begun beside another shared with it.)
+    pub fn workspaces(&self) -> PathBuf {
+        self.below("workspaces")
     }
 
     /// The folder of the stand-in reviewer's results, which only a run that has one makes
     /// ([`super::stand_in`]).
     pub fn scripted_reviews(&self) -> PathBuf {
         self.below("scripted-reviews")
+    }
+
+    /// The folder of the stand-in worker's answers and files, of a run that has one.
+    pub fn scripted_work(&self) -> PathBuf {
+        self.below("scripted-work")
     }
 
     /// The wrappers every Claude and Codex window of a run starts through, first on

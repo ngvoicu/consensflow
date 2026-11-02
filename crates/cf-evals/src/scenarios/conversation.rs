@@ -34,6 +34,7 @@ pub(super) fn scenario() -> Scenario {
         nudge: None,
         quiet: Duration::from_secs(120),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect("at least three changes go to the board", |m| {
                 m.tasks.len() >= 3

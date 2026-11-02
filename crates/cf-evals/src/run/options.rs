@@ -143,18 +143,18 @@ impl Options {
                 scenario.id
             )));
         }
-        if arm == Arm::Bare && scenario.reads_the_rounds() {
+        if arm == Arm::Bare && scenario.has_a_stand_in() {
             return Err(Error::Usage(format!(
                 "{} holds the chief to what it does with a review on the board, which a bare chief has none of",
                 scenario.id
             )));
         }
-        if scenario.reads_the_rounds()
+        if scenario.has_a_stand_in()
             && chief != "claude"
             && !staff.iter().any(|name| name == "claude")
         {
             return Err(Error::Usage(format!(
-                "{} has a stand-in reviewer, a Claude Code window: claude must be the chief or on --staff",
+                "{} has stand-in members, Claude Code windows: claude must be the chief or on --staff",
                 scenario.id
             )));
         }

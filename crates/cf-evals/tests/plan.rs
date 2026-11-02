@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use cf_evals::plan::{
     chief_environment, dialog_answers, harness, last_lines, staff_for, terminal_answer,
-    with_stand_in_reviewer, DialogQuestion, Staff, CHIEF_MODEL, CLAUDE_CHIEF_MODEL, HARNESSES,
+    with_stand_in_reviewer, with_stand_in_worker, DialogQuestion, Staff, CHIEF_MODEL,
+    CLAUDE_CHIEF_MODEL, HARNESSES,
 };
 use cf_evals::scenarios::{Answer, Scenario};
 use regex::Regex;
@@ -35,6 +36,7 @@ fn answering(answers: Vec<Answer>, fallback: &str) -> Scenario {
         nudge: None,
         quiet: Duration::from_secs(1),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: Vec::new(),
     }
 }
@@ -319,4 +321,51 @@ fn a_stand_in_reviewer_takes_the_place_of_every_reviewer_and_nothing_else_of_the
         members: Vec::new(),
     };
     assert_eq!(with_stand_in_reviewer(none, None).unwrap().members.len(), 1);
+}
+
+#[test]
+fn a_stand_in_worker_takes_the_place_of_every_worker_and_nothing_else_of_the_staff_moves() {
+    let staff = staff_for(&["claude", "codex"], &[], Some("medium")).unwrap();
+    let with = with_stand_in_worker(staff.clone(), Some("medium")).unwrap();
+    // Every worker is gone, and one is there: the stand-in, a Claude Code agent of standard tier on
+    // the model the wrapper reads.
+    let workers: Vec<&str> = with
+        .members
+        .iter()
+        .filter(|member| member.role == "worker")
+        .map(|member| member.agent.as_str())
+        .collect();
+    assert_eq!(workers, ["eval-scripted-worker"]);
+    let stand_in = with
+        .agents
+        .iter()
+        .find(|agent| agent.id == "eval-scripted-worker")
+        .unwrap();
+    assert_eq!(
+        stand_in.to_value(),
+        json!({
+            "id": "eval-scripted-worker",
+            "kind": "claude-code",
+            "model": "scripted-worker",
+            "workTier": "standard",
+            "effort": "medium",
+        })
+    );
+    // The advisors and the reviewers are what they were, in their order.
+    let others = |staff: &Staff| -> Vec<String> {
+        staff
+            .members
+            .iter()
+            .filter(|member| member.role != "worker")
+            .map(|member| format!("{}:{}", member.agent, member.role))
+            .collect()
+    };
+    assert_eq!(others(&with), others(&staff));
+    assert_eq!(with.agents.len(), staff.agents.len() - 4 + 1);
+    // With the reviewer a stand-in too, the staff is the two stand-ins and the advisors.
+    let both = with_stand_in_reviewer(with, Some("medium")).unwrap();
+    let roles: Vec<&str> = both.members.iter().map(|member| member.role).collect();
+    assert_eq!(roles.iter().filter(|role| **role == "worker").count(), 1);
+    assert_eq!(roles.iter().filter(|role| **role == "reviewer").count(), 1);
+    assert_eq!(roles.iter().filter(|role| **role == "advisor").count(), 2);
 }

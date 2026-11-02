@@ -17,6 +17,14 @@
 #   a change by a phrase that says what was done, or a head, and only for work that was reopened before
 #   it: the findings quoted (their location is `<head>`) name none. The first blocker's requirement is
 #   stated against the guide alone.
+# - The expectations can be UNMET (T-1101): an expectation that reads a second review the chief never
+#   asked for judges nothing, and a report, the console and RESULTS.md say it apart from a failure.
+#   Every play works in a folder of its own, taken away once measured. The worker of the two
+#   scenarios is a script as the reviewer is (the same stand-in agent, a second model and folder, the
+#   files of an answer written in the project, a journal of the briefs), so that the first blocker is
+#   the work's own by construction; the owner requires the guide's scale and says not what it is; the
+#   first blocker is not accepted over without a reopen or the owner asked first; the stand-in's
+#   notes are true of the page a live worker wrote.
 # - The measure's rounds (`crates/cf-evals/src/measure/rounds.rs`): a send-back is a finished or failed
 #   task moved back to queued, a resume out of a pause is none, a result the chief decided on before it
 #   was given does not stand, and the last acceptance is the one kept.
@@ -45,12 +53,24 @@ review-loops-stand-in = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib"
 review-loops-scenarios = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "scenarios"]
 # The words and heads the review scenarios read, and the moments they place a question by.
 review-loops-rounds-lib = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "scenarios::review_rounds::"]
-# The staff of a run with a stand-in reviewer.
+# What a run says of a check that judged nothing, and of the worker that is a script.
+review-loops-report-lib = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::report::"]
+# The results table's ratio.
+review-loops-results = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "results"]
+# The workspace of each play.
+review-loops-workspace-lib = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::workspace::"]
+# The staff of a run with a stand-in reviewer or worker.
 review-loops-plan = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "plan"]
 # What a run of the review scenarios is asked for.
 review-loops-options = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::options::"]
 # The stand-in agent's scripted-results mode.
 review-loops-fake-agent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "scripted::"]
+
+
+
+
+
+
 
 [[plant]]
 name = "review loops: the review-loop does not hold the page made and no other file changed"
@@ -61,16 +81,6 @@ runs = ["review-loops-chiefs"]
 file = "crates/cf-evals/src/scenarios/review_loop.rs"
 find = 'm.files_changed == [PAGE]'
 replace = 'true'
-
-[[plant]]
-name = "review loops: the review-loop does not ask for the work to be reviewed again after the fix"
-meant = "a_chief_that_accepts_the_work_with_the_bug_open_fails_what_names_it"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_loop.rs"
-find = '|m| reviews(m).len() >= 2,'
-replace = '|_| true,'
 
 [[plant]]
 name = "review loops: the review-loop lets the work be reopened more than once"
@@ -113,43 +123,6 @@ find = 'is_some_and(|accepted| accepted > notes_only.as_str())'
 replace = 'is_some()'
 
 [[plant]]
-name = "review loops: the review-loop does not hold the work accepted at all"
-meant = "a_chief_that_never_accepts_the_work_after_the_notes_only_review_fails_that_alone"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_loop.rs"
-find = '''
-task.accepted_at
-                        .as_deref()
-                        .is_some_and(|accepted| accepted > notes_only.as_str())'''
-replace = 'true'
-
-[[plant]]
-name = "review loops: the review-loop lets the notes go into many tasks"
-meant = "many_tasks_for_the_notes_are_not_one"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_loop.rs"
-find = '''
-later.len() <= 1
-                        && ('''
-replace = '('
-
-[[plant]]
-name = "review loops: the review-loop does not look for the notes in a later task or a note"
-meant = "a_chief_that_leaves_the_notes_nowhere_fails_that_alone"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_loop.rs"
-find = '''
-&& (later.iter().any(|task| nits.is_match(&task.brief))
-                            || nits.is_match(&m.notes_text))'''
-replace = ""
-
-[[plant]]
 name = "review loops: the review-blockers does not hold the page made"
 meant = "a_run_that_makes_no_page_fails_the_page_check_of_the_blockers_alone"
 runs = ["review-loops-chiefs"]
@@ -157,29 +130,6 @@ runs = ["review-loops-chiefs"]
 [[plant.edit]]
 file = "crates/cf-evals/src/scenarios/review_blockers.rs"
 find = 'm.files_changed.iter().any(|file| file == PAGE)'
-replace = 'true'
-
-[[plant]]
-name = "review loops: the review-blockers does not hold two reviews"
-meant = "a_chief_that_never_asks_for_the_second_review_has_not_met_the_rule_and_fails_every_check_of_it"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '|m| reviews(m).len() >= 2,'
-replace = '|_| true,'
-
-[[plant]]
-name = "review loops: the review-blockers lets the work be sent back as it is"
-meant = "a_chief_that_sends_the_work_back_twice_as_it_is_fails_the_same_three"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '''
-task.reopens_after(&second)
-                    .iter()
-                    .all(|reopen| as_it_is.is_match(&reopen.body))'''
 replace = 'true'
 
 [[plant]]
@@ -320,18 +270,6 @@ find = '    since.is_match(brief) || has_a_head(brief)'
 replace = '    since.is_match(brief)'
 
 [[plant]]
-name = "review loops: a change is named for work that was never reopened"
-meant = "a_second_review_brief_that_says_a_change_where_the_work_was_never_reopened_names_none"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_loop.rs"
-find = '''
-reopened_before(task, &review.created_at)
-                        && '''
-replace = ""
-
-[[plant]]
 name = "review loops: a date is a head"
 meant = "a_head_is_a_commit_id_with_a_digit_and_a_letter_in_it_and_a_date_or_a_word_is_none"
 runs = ["review-loops-rounds-lib"]
@@ -374,60 +312,6 @@ runs = ["review-loops-scenarios"]
 file = "crates/cf-evals/src/scenarios/review_rounds.rs"
 find = '''Requirement: the English page does not promise a score range that the manager's guide contradicts'''
 replace = '''Requirement: the English page says of the result what the Romanian page and the manager's guide say, and promises no score range that the guide contradicts'''
-
-[[plant]]
-name = "review loops: the review-blockers does not count a new task for the work as a change"
-meant = "a_chief_that_splits_the_work_into_a_new_task_holds_the_review_blockers"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '''
-!tasks_after(m, &second).is_empty()
-                        || task
-                            .reopens_after(&second)
-                            .iter()
-                            .any(|reopen| after_it.is_match(&reopen.body))
-                        || asked_since(m, task, &second)'''
-replace = '''
-task
-                            .reopens_after(&second)
-                            .iter()
-                            .any(|reopen| after_it.is_match(&reopen.body))
-                        || asked_since(m, task, &second)'''
-
-[[plant]]
-name = "review loops: the review-blockers does not count a reopen that changes the work as a change"
-meant = "a_chief_that_simplifies_the_work_in_a_reopen_holds_the_review_blockers"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '''
-!tasks_after(m, &second).is_empty()
-                        || task
-                            .reopens_after(&second)
-                            .iter()
-                            .any(|reopen| after_it.is_match(&reopen.body))
-                        || asked_since(m, task, &second)'''
-replace = '!tasks_after(m, &second).is_empty() || asked_since(m, task, &second)'
-
-[[plant]]
-name = "review loops: the review-blockers does not count a question to the owner as a change"
-meant = "a_chief_that_asks_the_owner_after_the_second_blocking_review_holds_the_review_blockers"
-runs = ["review-loops-chiefs"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/scenarios/review_blockers.rs"
-find = '''
-                        || asked_since(m, task, &second)
-                },
-            ),
-            expect("it does not send'''
-replace = '''
-                },
-            ),
-            expect("it does not send'''
 
 [[plant]]
 name = "review loops: the review-blockers lets the work be accepted with the blocker open"
@@ -556,82 +440,6 @@ find = '"    exit 1 ;;".to_owned(),'
 replace = '"    exit 0 ;;".to_owned(),'
 
 [[plant]]
-name = "review loops: the wrapper does not give the stand-in the folder of the results"
-meant = "a_window_on_the_stand_in_model_is_the_stand_in_agent_with_this_runs_folder_and_its_words"
-runs = ["review-loops-wrappers"]
-platforms = ["macos", "linux"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/wrappers.rs"
-find = 'format!("      {variable}={folder}; export {variable}"),'
-replace = 'format!("      : {variable}={folder}"),'
-
-[[plant]]
-name = "review loops: a run without the Claude Code the stand-in is gets a wrapper"
-meant = "a_stand_in_needs_a_claude_in_the_run_and_a_machine_that_is_not_windows"
-runs = ["review-loops-wrappers"]
-platforms = ["macos", "linux"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/wrappers.rs"
-find = 'if reviews.is_some() && !crew.in_run("claude") {'
-replace = 'if false {'
-
-[[plant]]
-name = "review loops: a play begins on the counters of the one before"
-meant = "the_folder_holds_the_marker_and_the_scenarios_reviews_in_order_and_is_made_again_for_each_play"
-runs = ["review-loops-stand-in"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/stand_in.rs"
-find = '''
-        // A folder that is not there is already fresh.
-        let _ = fs::remove_dir_all(&self.folder);
-'''
-replace = ""
-
-[[plant]]
-name = "review loops: the run's folder stays after the run"
-meant = "the_folder_goes_with_the_run"
-runs = ["review-loops-stand-in"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/stand_in.rs"
-find = '''
-        let _ = fs::remove_dir_all(&self.folder);
-    }
-}
-
-#[cfg(test)]'''
-replace = '''
-    }
-}
-
-#[cfg(test)]'''
-
-[[plant]]
-name = "review loops: the folder of the results has no marker"
-meant = "the_folder_holds_the_marker_and_the_scenarios_reviews_in_order_and_is_made_again_for_each_play"
-runs = ["review-loops-stand-in"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/stand_in.rs"
-find = '''
-        files::write(&self.folder.join(MARKER), "")?;
-'''
-replace = ""
-
-[[plant]]
-name = "review loops: the stand-in's names are spelled one way in the wrapper and another in the stand-in"
-meant = "the_names_the_wrapper_and_the_stand_in_agree_on_are_the_ones_the_fake_agent_reads"
-runs = ["review-loops-stand-in"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/stand_in.rs"
-find = 'pub const FOLDER: &str = "CF_TEST_SCRIPTED_RESULTS";'
-replace = 'pub const FOLDER: &str = "CF_TEST_SCRIPTED_REVIEWS";'
-
-[[plant]]
 name = "review loops: the stand-in is one reviewer more, and the cheap harnesses' reviewers stay"
 meant = "a_stand_in_reviewer_takes_the_place_of_every_reviewer_and_nothing_else_of_the_staff_moves"
 runs = ["review-loops-plan"]
@@ -642,16 +450,6 @@ find = '''
     staff.members.retain(|member| member.role != "reviewer");
 '''
 replace = ""
-
-[[plant]]
-name = "review loops: a run of the review scenarios on a bare chief is not refused"
-meant = "a_bare_chief_has_no_board_to_review_on_so_the_review_scenarios_are_refused_for_it"
-runs = ["review-loops-options"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/options.rs"
-find = 'if arm == Arm::Bare && scenario.reads_the_rounds() {'
-replace = 'if false {'
 
 [[plant]]
 name = "review loops: a run of the review scenarios with no Claude Code in it is not refused"
@@ -711,3 +509,619 @@ runs = ["review-loops-fake-agent"]
 file = "crates/cf-e2e/src/bin/fake_agent/scripted.rs"
 find = 'if !pattern::once(&HEADER, BRIEF).is_match(text) {'
 replace = 'if false {'
+
+[[plant]]
+name = "review loops: the review-loop does not ask for the work to be reviewed again after the fix"
+meant = "a_chief_that_accepts_the_work_with_the_bug_open_fails_the_reopen_and_leaves_the_second_review_unmet"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_loop.rs"
+find = '(reviews(m).len() >= 2).then_some(true)'
+replace = 'Some(reviews(m).len() >= 2)'
+
+[[plant]]
+name = "review loops: the review-loop does not hold the work accepted at all"
+meant = "a_chief_that_never_accepts_the_work_after_the_notes_only_review_fails_that_alone"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_loop.rs"
+find = '''
+task.accepted_at
+                            .as_deref()
+                            .is_some_and(|accepted| accepted > notes_only.as_str())'''
+replace = 'true'
+
+[[plant]]
+name = "review loops: the review-loop lets the notes go into many tasks"
+meant = "many_tasks_for_the_notes_are_not_one"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_loop.rs"
+find = '''
+later.len() <= 1
+                            && ('''
+replace = '('
+
+[[plant]]
+name = "review loops: the review-loop does not look for the notes in a later task or a note"
+meant = "a_chief_that_leaves_the_notes_nowhere_fails_that_alone"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_loop.rs"
+find = '''
+
+                            && (later.iter().any(|task| nits.is_match(&task.brief))
+                                || nits.is_match(&m.notes_text))'''
+replace = ""
+
+[[plant]]
+name = "review loops: the review-blockers does not hold two reviews"
+meant = "a_chief_that_asks_for_no_second_review_has_met_no_rule_of_the_blockers_and_each_check_says_so"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '(reviews(m).len() >= 2).then_some(true)'
+replace = 'Some(reviews(m).len() >= 2)'
+
+[[plant]]
+name = "review loops: the review-blockers lets the work be sent back as it is"
+meant = "a_chief_that_sends_the_work_back_twice_as_it_is_fails_the_same_three"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+task.reopens_after(&second)
+                        .iter()
+                        .all(|reopen| as_it_is.is_match(&reopen.body))'''
+replace = 'true'
+
+[[plant]]
+name = "review loops: a change is named for work that was never reopened"
+meant = "a_second_review_brief_that_says_a_change_where_the_work_was_never_reopened_names_none"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_loop.rs"
+find = '''
+reopened_before(task, &review.created_at)
+                            && '''
+replace = ""
+
+[[plant]]
+name = "review loops: the review-blockers does not count a new task for the work as a change"
+meant = "a_chief_that_splits_the_work_into_a_new_task_holds_the_review_blockers"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+!tasks_after(m, &second).is_empty()
+                            || task
+                                .reopens_after(&second)
+                                .iter()
+                                .any(|reopen| after_it.is_match(&reopen.body))
+                            || asked_since(m, task, &second)'''
+replace = '''
+task
+                                .reopens_after(&second)
+                                .iter()
+                                .any(|reopen| after_it.is_match(&reopen.body))
+                            || asked_since(m, task, &second)'''
+
+[[plant]]
+name = "review loops: the review-blockers does not count a reopen that changes the work as a change"
+meant = "a_chief_that_simplifies_the_work_in_a_reopen_holds_the_review_blockers"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+!tasks_after(m, &second).is_empty()
+                            || task
+                                .reopens_after(&second)
+                                .iter()
+                                .any(|reopen| after_it.is_match(&reopen.body))
+                            || asked_since(m, task, &second)'''
+replace = '!tasks_after(m, &second).is_empty() || asked_since(m, task, &second)'
+
+[[plant]]
+name = "review loops: the review-blockers does not count a question to the owner as a change"
+meant = "a_chief_that_asks_the_owner_after_the_second_blocking_review_holds_the_review_blockers"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+                                .any(|reopen| after_it.is_match(&reopen.body))
+                            || asked_since(m, task, &second)
+'''
+replace = '''
+                                .any(|reopen| after_it.is_match(&reopen.body))
+'''
+
+[[plant]]
+name = "review loops: the wrapper does not give the stand-in the folder of the results"
+meant = "a_window_on_the_stand_in_model_is_the_stand_in_agent_with_this_runs_folder_and_its_words"
+runs = ["review-loops-wrappers"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/wrappers.rs"
+find = '; export {variable}", word(folder)),'
+replace = '", word(folder)),'
+
+[[plant]]
+name = "review loops: a run without the Claude Code the stand-ins are gets a wrapper"
+meant = "a_stand_in_needs_a_claude_in_the_run_and_a_machine_that_is_not_windows"
+runs = ["review-loops-wrappers"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/wrappers.rs"
+find = 'if stand_ins.is_some() && !crew.in_run("claude") {'
+replace = 'if false {'
+
+[[plant]]
+name = "review loops: a play begins on the counters, the journal and the files of the one before"
+meant = "the_folders_hold_the_marker_and_the_scenarios_answers_in_order_with_the_workers_files_and_are_made_again_for_each_play"
+runs = ["review-loops-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/stand_in.rs"
+find = '''
+        // A folder that is not there is already fresh.
+        let _ = fs::remove_dir_all(&self.folder);
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: the run's folders stay after the run"
+meant = "the_folders_go_with_the_run"
+runs = ["review-loops-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/stand_in.rs"
+find = '''
+            let _ = fs::remove_dir_all(&part.folder);
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: the folder of the answers has no marker"
+meant = "the_folders_hold_the_marker_and_the_scenarios_answers_in_order_with_the_workers_files_and_are_made_again_for_each_play"
+runs = ["review-loops-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/stand_in.rs"
+find = '''
+        files::write(&self.folder.join(MARKER), "")?;
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: the stand-in's names are spelled one way in the wrapper and another in the stand-in"
+meant = "the_names_the_wrapper_and_the_stand_in_agent_agree_on_are_the_ones_the_fake_agent_reads"
+runs = ["review-loops-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/stand_in.rs"
+find = 'pub const FOLDER: &str = "CF_TEST_SCRIPTED_RESULTS";'
+replace = 'pub const FOLDER: &str = "CF_TEST_SCRIPTED_REVIEWS";'
+
+[[plant]]
+name = "review loops: a run of the review scenarios on a bare chief is not refused"
+meant = "a_bare_chief_has_no_board_to_review_on_so_the_review_scenarios_are_refused_for_it"
+runs = ["review-loops-options"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/options.rs"
+find = 'if arm == Arm::Bare && scenario.has_a_stand_in() {'
+replace = 'if false {'
+
+[[plant]]
+name = "review loops: a check that judged nothing counts as held"
+meant = "a_chief_that_accepts_the_work_with_the_bug_open_fails_the_reopen_and_leaves_the_second_review_unmet"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios.rs"
+find = 'None => Check::unmet(expectation.name),'
+replace = 'None => Check::new(expectation.name, true),'
+
+[[plant]]
+name = "review loops: a check that judged nothing counts as a failure"
+meant = "a_chief_that_accepts_the_work_with_the_bug_open_fails_the_reopen_and_leaves_the_second_review_unmet"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios.rs"
+find = 'None => Check::unmet(expectation.name),'
+replace = 'None => Check::new(expectation.name, false),'
+
+[[plant]]
+name = "review loops: a report does not say a check is unmet"
+meant = "a_check_that_judged_nothing_is_said_unmet_and_is_no_pass_and_no_failure_of_the_chief"
+runs = ["review-loops-report-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/metrics.rs"
+find = '''
+        if self.unmet {
+            json!'''
+replace = '''
+        if false {
+            json!'''
+
+[[plant]]
+name = "review loops: a check that judged nothing is held"
+meant = "a_check_that_judged_nothing_is_said_unmet_and_is_no_pass_and_no_failure_of_the_chief"
+runs = ["review-loops-report-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/metrics.rs"
+find = '''
+            ok: false,
+            unmet: true,'''
+replace = '''
+            ok: true,
+            unmet: true,'''
+
+[[plant]]
+name = "review loops: the console says an unmet check failed"
+meant = "a_check_that_judged_nothing_is_said_unmet_and_is_no_pass_and_no_failure_of_the_chief"
+runs = ["review-loops-report-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/report.rs"
+find = '''
+        let word = if check.unmet {
+            "UNMET"'''
+replace = '''
+        let word = if false {
+            "UNMET"'''
+
+[[plant]]
+name = "review loops: the table counts an unmet check in the ratio"
+meant = "a_check_that_judged_nothing_is_left_out_of_the_ratio_and_counted_beside_it"
+runs = ["review-loops-results"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/results.rs"
+find = 'checks.len() - unmet,'
+replace = 'checks.len(),'
+
+[[plant]]
+name = "review loops: the table does not count the unmet beside the ratio"
+meant = "a_check_that_judged_nothing_is_left_out_of_the_ratio_and_counted_beside_it"
+runs = ["review-loops-results"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/results.rs"
+find = 'if unmet > 0 {'
+replace = 'if false {'
+
+[[plant]]
+name = "review loops: every play works in the one fixed folder"
+meant = "every_play_has_a_folder_of_its_own_below_the_workspaces_and_what_one_holds_is_not_in_another"
+runs = ["review-loops-workspace-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/workspace.rs"
+find = 'machine.workspaces().join(unique_name(scenario))'
+replace = 'machine.workspaces().join("workspace")'
+
+[[plant]]
+name = "review loops: two plays of a process are not told apart"
+meant = "two_plays_of_one_process_made_in_the_same_instant_are_told_apart_by_their_count"
+runs = ["review-loops-workspace-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/workspace.rs"
+find = 'PLAYS.fetch_add(1, Ordering::Relaxed),'
+replace = '0,'
+
+[[plant]]
+name = "review loops: a play's folder does not say the process that made it"
+meant = "a_name_says_the_process_it_was_made_in_so_two_runs_at_once_never_share_one"
+runs = ["review-loops-workspace-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/workspace.rs"
+find = 'std::process::id(),'
+replace = '0,'
+
+[[plant]]
+name = "review loops: a play retires any folder it is given"
+meant = "a_play_retires_the_folder_it_made_and_no_other"
+runs = ["review-loops-workspace-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/workspace.rs"
+find = '.is_some_and(|parent| parent == "workspaces");'
+replace = '.is_some_and(|_| true);'
+
+[[plant]]
+name = "review loops: the staff keeps the workers beside the stand-in worker"
+meant = "a_stand_in_worker_takes_the_place_of_every_worker_and_nothing_else_of_the_staff_moves"
+runs = ["review-loops-plan"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/plan.rs"
+find = '''
+    staff.members.retain(|member| member.role != "worker");
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: the stand-in worker's files are not in its folder"
+meant = "the_folders_hold_the_marker_and_the_scenarios_answers_in_order_with_the_workers_files_and_are_made_again_for_each_play"
+runs = ["review-loops-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/stand_in.rs"
+find = '''
+                files::write(
+                    &self.folder.join(format!("{number}.files")).join(path),
+                    text,
+                )?;
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: the wrapper knows no stand-in worker"
+meant = "a_window_on_the_stand_in_model_is_the_stand_in_agent_with_this_runs_folder_and_its_words"
+runs = ["review-loops-wrappers"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/wrappers.rs"
+find = '''
+        (stand_in::WORKER_MODEL, "worker", stand_ins.worker_folder()),
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: a worker is no stand-in where only the reviewer is"
+meant = "a_run_with_only_a_stand_in_reviewer_has_a_wrapper_that_knows_no_stand_in_worker"
+runs = ["review-loops-wrappers"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/wrappers.rs"
+find = 'let Some(folder) = folder else { continue };'
+replace = 'let folder = folder.unwrap_or(std::path::Path::new("/"));'
+
+[[plant]]
+name = "review loops: the stand-in writes no file of its answer"
+meant = "the_files_of_a_result_are_written_below_the_windows_folder_before_it_answers_and_the_last_again"
+runs = ["review-loops-fake-agent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/scripted.rs"
+find = 'let wrote = write_files(&folder.join(format!("{given}.files")), into)?;'
+replace = 'let wrote: Vec<String> = Vec::new();'
+
+[[plant]]
+name = "review loops: the stand-in keeps no journal of the briefs it takes"
+meant = "every_brief_taken_is_written_down_whole_with_its_number_the_result_it_got_and_the_files_it_wrote"
+runs = ["review-loops-fake-agent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/scripted.rs"
+find = '''
+    note(folder, taken, given, text, &wrote)?;
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: a brief that leaves a file alone asks for it"
+meant = "a_file_is_asked_for_that_the_script_holds_not_where_a_line_of_the_brief_makes_or_changes_it"
+runs = ["review-loops-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/stand_in.rs"
+find = 'makes.is_match(line) && !alone.is_match(line)'
+replace = 'makes.is_match(line)'
+
+[[plant]]
+name = "review loops: a brief that only reads a file asks for it"
+meant = "a_file_is_asked_for_that_the_script_holds_not_where_a_line_of_the_brief_makes_or_changes_it"
+runs = ["review-loops-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/stand_in.rs"
+find = 'makes.is_match(line) && !alone.is_match(line)'
+replace = '!alone.is_match(line)'
+
+[[plant]]
+name = "review loops: a file the script wrote is asked for again by its full path"
+meant = "a_file_is_asked_for_that_the_script_holds_not_where_a_line_of_the_brief_makes_or_changes_it"
+runs = ["review-loops-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/stand_in.rs"
+find = ' || file.ends_with(&format!("/{written}"))'
+replace = ""
+
+[[plant]]
+name = "review loops: the report does not say the worker is a script"
+meant = "a_run_with_a_scripted_worker_says_so_and_what_the_script_was_asked_that_it_holds_not"
+runs = ["review-loops-report-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/report.rs"
+find = '''
+        if let Some(taken) = &self.scripted {
+            value['''
+replace = '''
+        if let Some(taken) = &None::<Vec<Taken>> {
+            value['''
+
+[[plant]]
+name = "review loops: the console does not say what the script was asked that it holds not"
+meant = "a_run_with_a_scripted_worker_says_so_and_what_the_script_was_asked_that_it_holds_not"
+runs = ["review-loops-report-lib"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/report.rs"
+find = '.filter(|(_, brief)| !brief.unheld.is_empty())'
+replace = '.filter(|_| false)'
+
+[[plant]]
+name = "review loops: the scripted worker's first page has the guide's scale"
+meant = "the_scripted_worker_writes_the_page_with_the_range_the_guide_contradicts_then_the_page_fixed_then_both_pages"
+runs = ["review-loops-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = 'writes: vec![(PAGE.to_owned(), PAGE_AS_FIRST_MADE.to_owned())],'
+replace = 'writes: vec![(PAGE.to_owned(), PAGE_FIXED.to_owned())],'
+
+[[plant]]
+name = "review loops: the scripted worker's second answer fixes the Romanian page too"
+meant = "the_scripted_worker_writes_the_page_with_the_range_the_guide_contradicts_then_the_page_fixed_then_both_pages"
+runs = ["review-loops-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '''
+        writes: vec![(PAGE.to_owned(), PAGE_FIXED.to_owned())],
+    }
+}
+
+/// The stand-in worker's third answer'''
+replace = '''
+        writes: vec![(PAGE.to_owned(), PAGE_FIXED.to_owned()), (RO_PAGE.to_owned(), RO_PAGE_FIXED.to_owned())],
+    }
+}
+
+/// The stand-in worker's third answer'''
+
+[[plant]]
+name = "review loops: the scripted worker's third answer leaves the Romanian page"
+meant = "the_scripted_worker_writes_the_page_with_the_range_the_guide_contradicts_then_the_page_fixed_then_both_pages"
+runs = ["review-loops-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '''
+            (RO_PAGE.to_owned(), RO_PAGE_FIXED.to_owned()),
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: the first blocker is accepted over without a reopen"
+meant = "a_chief_that_reopens_the_work_for_the_first_blocker_holds_the_first_blocker_check"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+                            || !task.reopens.is_empty()
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: the first blocker is accepted over without the owner asked first"
+meant = "a_chief_that_asks_the_owner_about_the_first_blocker_before_it_accepts_holds_the_first_blocker_check"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+                            || asked_since(m, task, &first)
+'''
+replace = ""
+
+[[plant]]
+name = "review loops: a work not yet accepted is accepted over the first blocker"
+meant = "a_chief_that_has_not_accepted_the_work_yet_has_accepted_nothing_over_the_first_blocker"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+                        task.accepted_at.is_none()
+                            || '''
+replace = '                        '
+
+[[plant]]
+name = "review loops: a task parked for later is a way out of the first blocker"
+meant = "a_chief_that_accepts_the_first_blocker_and_parks_a_task_and_a_note_for_later_fails_it_too"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+                            || !task.reopens.is_empty()
+'''
+replace = '''
+                            || !task.reopens.is_empty()
+                            || !tasks_after(m, &first).is_empty()
+'''
+
+[[plant]]
+name = "review loops: a question put after the acceptance is a yes to the first blocker"
+meant = "a_chief_that_accepts_the_first_blocker_as_out_of_scope_and_asks_the_owner_after_fails_the_first_blocker_check"
+runs = ["review-loops-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_blockers.rs"
+find = '''
+                            || asked_since(m, task, &first)
+'''
+replace = '''
+                            || m.asked_in_terminal() > 0
+'''
+
+[[plant]]
+name = "review loops: the owner's prompt does not require the guide's scale"
+meant = "the_review_prompts_say_what_the_work_is_and_that_it_is_reviewed_and_nothing_of_what_to_do_with_a_finding"
+runs = ["review-loops-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = '''
+    "engleză a paginii site/evaluare.html, în același stil. Pagina engleză trebuie să dea scorul așa",
+    "cum îl dă ghidul managerului (docs/ghidul-managerului.md). Nu modifica alte fișiere. Când e",
+'''
+replace = '''
+    "engleză a paginii site/evaluare.html, în același stil. Nu modifica alte fișiere. Când e",
+    "gata, cere unui reviewer",
+'''
+
+[[plant]]
+name = "review loops: the owner's prompt says the scale"
+meant = "the_review_prompts_say_what_the_work_is_and_that_it_is_reviewed_and_nothing_of_what_to_do_with_a_finding"
+runs = ["review-loops-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = 'cum îl dă ghidul managerului (docs/ghidul-managerului.md). Nu modifica'
+replace = 'cum îl dă ghidul managerului (docs/ghidul-managerului.md, de la 1 la 5). Nu modifica'
+
+[[plant]]
+name = "review loops: the owner's prompt lets the worker touch another file"
+meant = "the_review_prompts_say_what_the_work_is_and_that_it_is_reviewed_and_nothing_of_what_to_do_with_a_finding"
+runs = ["review-loops-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = 'Nu modifica alte fișiere. Când e'
+replace = 'Modifică ce trebuie. Când e'
+
+[[plant]]
+name = "review loops: a note the page does not deserve is restored"
+meant = "every_finding_of_the_stand_in_is_true_of_the_page_a_worker_wrote_and_none_is_vacuous"
+runs = ["review-loops-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/review_rounds.rs"
+find = 'F2 [note, does not block] The page has no <meta name=\"viewport\">, so a phone shows it at the width of a desktop. Evidence: grep -c viewport site/en/assessment.html prints 0. Location: site/en/assessment.html, <head>.'
+replace = 'F2 [note, does not block] The <title> carries the page name and not the site name; \"Assessment — Burnout at Work\" would match the other pages. Location: site/en/assessment.html, <head>.'

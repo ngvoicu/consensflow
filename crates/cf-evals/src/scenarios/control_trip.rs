@@ -32,6 +32,7 @@ pub(super) fn scenario() -> Scenario {
         // windows waits out the grace before it is pasted (a known bug).
         quiet: Duration::from_secs(240),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect("the chief stops the task with cf tell", |m| {
                 m.plumbing.tells >= 1

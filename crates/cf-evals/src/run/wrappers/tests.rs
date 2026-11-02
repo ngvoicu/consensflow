@@ -276,11 +276,11 @@ fn a_harness_that_is_not_in_the_run_is_an_error_that_names_it() {
     );
 }
 
-/// The stand-in reviewer of a run of `review-loop` on `machine`, played by `agent`.
+/// The stand-in members of a run of `review-loop` on `machine`, played by `agent`.
 #[cfg(unix)]
-fn stand_in_reviews(machine: &Machine, agent: &Path) -> Reviews {
+fn stand_ins_for(machine: &Machine, agent: &Path) -> StandIns {
     let scenario = crate::scenarios::by_id("review-loop").unwrap();
-    Reviews::of(machine, &scenario, agent).unwrap()
+    StandIns::of(machine, &scenario, agent).unwrap()
 }
 
 /// What the wrapper at `wrapper` does with `words`: the code it exits with, and what it prints.
@@ -295,9 +295,9 @@ fn ran(wrapper: &Path, words: &[&str]) -> (Option<i32>, String, String) {
 }
 
 /// A run's machine with a real Claude that echoes its words, a stand-in agent that writes the folder
-/// it was given and its words to `played`, and the claude wrapper written for a stand-in reviewer.
+/// it was given and its words to `played`, and the claude wrapper written for the stand-in members.
 #[cfg(unix)]
-fn with_a_stand_in(home: &Path) -> (Machine, Reviews, PathBuf, PathBuf) {
+fn with_stand_ins(home: &Path) -> (Machine, StandIns, PathBuf, PathBuf) {
     let machine = machine(home, &[(Harness::Claude, Path::new("/bin/echo"))]);
     let played = home.join("played");
     let agent = home.join("fake-agent");
@@ -309,52 +309,73 @@ fn with_a_stand_in(home: &Path) -> (Machine, Reviews, PathBuf, PathBuf) {
         ),
     )
     .unwrap();
-    let reviews = stand_in_reviews(&machine, &agent);
+    let stand_ins = stand_ins_for(&machine, &agent);
     let run_options = options("--chief claude --staff claude");
     let chief = chief_environment("claude", None).unwrap();
-    let wrappers = write_with(&machine, &run_options, &chief, Some(&reviews)).unwrap();
-    (machine, reviews, wrappers.claude.unwrap(), played)
+    let wrappers = write_with(&machine, &run_options, &chief, Some(&stand_ins)).unwrap();
+    (machine, stand_ins, wrappers.claude.unwrap(), played)
+}
+
+/// The two models of the stand-in members, with the folder of each in `stand_ins`.
+#[cfg(unix)]
+fn members(stand_ins: &StandIns) -> [(&'static str, PathBuf); 2] {
+    [
+        (
+            "scripted-reviewer",
+            stand_ins.reviewer_folder().unwrap().to_path_buf(),
+        ),
+        (
+            "scripted-worker",
+            stand_ins.worker_folder().unwrap().to_path_buf(),
+        ),
+    ]
 }
 
 #[cfg(unix)]
 #[test]
 fn a_window_on_the_stand_in_model_is_the_stand_in_agent_with_this_runs_folder_and_its_words() {
     let home = tempfile::tempdir().unwrap();
-    let (_machine, reviews, wrapper, played) = with_a_stand_in(home.path());
-    reviews.restart().unwrap();
-    let (code, stdout, stderr) = ran(
-        &wrapper,
-        &[
-            "--session-id",
-            "s-1",
-            "--model",
-            "scripted-reviewer",
-            "--effort",
-            "medium",
-            "the brief",
-        ],
-    );
-    assert_eq!((code, stdout.as_str(), stderr.as_str()), (Some(0), "", ""));
-    assert_eq!(
-        cf_e2e::files::read_string(&played).unwrap(),
-        format!(
-            "{}|--session-id s-1 --model scripted-reviewer --effort medium the brief\n",
-            reviews.folder().display()
-        ),
-        "the stand-in, with the folder and the words as the daemon gave them: none of the wrapper's flags"
-    );
+    let (_machine, stand_ins, wrapper, played) = with_stand_ins(home.path());
+    stand_ins.restart().unwrap();
+    for (model, folder) in members(&stand_ins) {
+        let (code, stdout, stderr) = ran(
+            &wrapper,
+            &[
+                "--session-id",
+                "s-1",
+                "--model",
+                model,
+                "--effort",
+                "medium",
+                "the brief",
+            ],
+        );
+        assert_eq!((code, stdout.as_str(), stderr.as_str()), (Some(0), "", ""));
+        assert_eq!(
+            cf_e2e::files::read_string(&played).unwrap(),
+            format!(
+                "{}|--session-id s-1 --model {model} --effort medium the brief\n",
+                folder.display()
+            ),
+            "the stand-in, with the folder of its own and the words as the daemon gave them: none of the wrapper's flags"
+        );
+    }
+    let folders = members(&stand_ins);
+    assert_ne!(folders[0].1, folders[1].1, "one folder for each");
 }
 
 #[cfg(unix)]
 #[test]
 fn a_window_on_any_other_model_is_the_real_claude_with_the_flags_as_always() {
     let home = tempfile::tempdir().unwrap();
-    let (_machine, reviews, wrapper, played) = with_a_stand_in(home.path());
-    reviews.restart().unwrap();
+    let (_machine, stand_ins, wrapper, played) = with_stand_ins(home.path());
+    stand_ins.restart().unwrap();
     for model in [
         "claude-haiku-4-5-20251001",
         "scripted-reviewer-2",
         "xscripted-reviewer",
+        "scripted-worker-2",
+        "xscripted-worker",
     ] {
         let (code, stdout, _) = ran(&wrapper, &["--session-id", "s-1", "--model", model]);
         assert_eq!(code, Some(0));
@@ -371,50 +392,92 @@ fn a_window_on_any_other_model_is_the_real_claude_with_the_flags_as_always() {
 #[cfg(unix)]
 #[test]
 fn the_wrapper_refuses_the_stand_in_model_outside_an_eval_run_and_runs_neither_program() {
-    let home = tempfile::tempdir().unwrap();
-    let (_machine, reviews, wrapper, played) = with_a_stand_in(home.path());
-    let words = [
-        "--session-id",
-        "s-1",
-        "--model",
-        "scripted-reviewer",
-        "the brief",
-    ];
-    // Before the run made its folder, and once it has made it: the run's marker is what lets it in.
-    let refused = |when: &str| {
-        let (code, stdout, stderr) = ran(&wrapper, &words);
-        assert_eq!(code, Some(1), "{when}");
-        assert_eq!(stdout, "", "{when}: the real Claude did not run");
-        assert!(
-            stderr.contains("scripted-reviewer is the stand-in reviewer of an eval run, and this is none: refused"),
-            "{when}: {stderr}"
-        );
-        assert!(!played.exists(), "{when}: the stand-in did not run");
-    };
-    refused("before the run's folder");
-    reviews.restart().unwrap();
-    let marker = reviews.folder().join(".eval-run");
-    std::fs::remove_file(&marker).unwrap();
-    refused("a folder with no marker");
-    // The run is over: its folder is gone, and the wrapper it left is refused the same way.
-    drop(reviews);
-    refused("after the run");
+    for role in ["reviewer", "worker"] {
+        let home = tempfile::tempdir().unwrap();
+        let (_machine, stand_ins, wrapper, played) = with_stand_ins(home.path());
+        let model = format!("scripted-{role}");
+        let words = [
+            "--session-id",
+            "s-1",
+            "--model",
+            model.as_str(),
+            "the brief",
+        ];
+        // Before the run made its folder, and once it has made it: the run's marker is what lets it in.
+        let refused = |when: &str| {
+            let (code, stdout, stderr) = ran(&wrapper, &words);
+            assert_eq!(code, Some(1), "{role}: {when}");
+            assert_eq!(stdout, "", "{role}: {when}: the real Claude did not run");
+            assert!(
+                stderr.contains(&format!(
+                    "{model} is the stand-in {role} of an eval run, and this is none: refused"
+                )),
+                "{role}: {when}: {stderr}"
+            );
+            assert!(!played.exists(), "{role}: {when}: the stand-in did not run");
+        };
+        refused("before the run's folder");
+        stand_ins.restart().unwrap();
+        let folder = members(&stand_ins)
+            .into_iter()
+            .find(|(has, _)| *has == model)
+            .unwrap()
+            .1;
+        std::fs::remove_file(folder.join(".eval-run")).unwrap();
+        refused("a folder with no marker");
+        // The run is over: its folders are gone, and the wrapper it left is refused the same way.
+        drop(stand_ins);
+        refused("after the run");
+    }
 }
 
 #[cfg(unix)]
 #[test]
 fn the_wrapper_refuses_the_stand_in_model_when_the_agent_is_not_there() {
     let home = tempfile::tempdir().unwrap();
-    let (_machine, reviews, wrapper, played) = with_a_stand_in(home.path());
-    reviews.restart().unwrap();
+    let (_machine, stand_ins, wrapper, played) = with_stand_ins(home.path());
+    stand_ins.restart().unwrap();
     std::fs::remove_file(home.path().join("fake-agent")).unwrap();
-    let (code, stdout, stderr) = ran(
-        &wrapper,
-        &["--session-id", "s-1", "--model", "scripted-reviewer"],
-    );
-    assert_eq!((code, stdout.as_str()), (Some(1), ""));
-    assert!(stderr.contains("this is none: refused"), "{stderr}");
+    for (model, _) in members(&stand_ins) {
+        let (code, stdout, stderr) = ran(&wrapper, &["--session-id", "s-1", "--model", model]);
+        assert_eq!((code, stdout.as_str()), (Some(1), ""), "{model}");
+        assert!(
+            stderr.contains("this is none: refused"),
+            "{model}: {stderr}"
+        );
+    }
     assert!(!played.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_with_only_a_stand_in_reviewer_has_a_wrapper_that_knows_no_stand_in_worker() {
+    let home = tempfile::tempdir().unwrap();
+    let machine = machine(home.path(), &[(Harness::Claude, Path::new("/bin/echo"))]);
+    let mut scenario = crate::scenarios::by_id("review-loop").unwrap();
+    scenario.stand_in_work.clear();
+    let stand_ins = StandIns::of(&machine, &scenario, Path::new("/bin/fake-agent")).unwrap();
+    assert!(stand_ins.worker_folder().is_none());
+    let chief = chief_environment("claude", None).unwrap();
+    let wrappers = write_with(
+        &machine,
+        &options("--chief claude"),
+        &chief,
+        Some(&stand_ins),
+    )
+    .unwrap();
+    let text = cf_e2e::files::read_string(wrappers.claude.as_deref().unwrap()).unwrap();
+    assert!(
+        text.contains("scripted-reviewer") && !text.contains("scripted-worker"),
+        "{text}"
+    );
+    // A window on the worker's model is the real Claude, as any other.
+    let (code, stdout, _) = ran(
+        wrappers.claude.as_deref().unwrap(),
+        &["--model", "scripted-worker"],
+    );
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("--model scripted-worker"), "{stdout}");
 }
 
 #[cfg(unix)]
@@ -426,7 +489,9 @@ fn a_run_with_no_stand_in_has_a_wrapper_that_knows_no_such_model() {
     let wrappers = write(&machine, &options("--chief claude"), &chief).unwrap();
     let text = cf_e2e::files::read_string(wrappers.claude.as_deref().unwrap()).unwrap();
     assert!(
-        !text.contains("scripted-reviewer") && !text.contains("fake-agent"),
+        !text.contains("scripted-reviewer")
+            && !text.contains("scripted-worker")
+            && !text.contains("fake-agent"),
         "{text}"
     );
 }
@@ -436,13 +501,13 @@ fn a_run_with_no_stand_in_has_a_wrapper_that_knows_no_such_model() {
 fn a_stand_in_needs_a_claude_in_the_run_and_a_machine_that_is_not_windows() {
     let home = tempfile::tempdir().unwrap();
     let machine = machine(home.path(), &[(Harness::Pi, Path::new("/bin/echo"))]);
-    let reviews = stand_in_reviews(&machine, Path::new("/bin/fake-agent"));
+    let stand_ins = stand_ins_for(&machine, Path::new("/bin/fake-agent"));
     let chief = chief_environment("pi", None).unwrap();
     let failed = write_with(
         &machine,
         &options("--chief pi --staff pi"),
         &chief,
-        Some(&reviews),
+        Some(&stand_ins),
     )
     .unwrap_err();
     assert!(

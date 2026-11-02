@@ -101,6 +101,7 @@ fn trip(id: &'static str, title: &'static str, how: &str) -> Scenario {
         nudge: None,
         quiet: Duration::from_secs(120),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations,
     }
 }

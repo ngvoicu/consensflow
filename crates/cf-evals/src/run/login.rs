@@ -88,10 +88,10 @@ pub fn left_as_it_was(machine: &Machine, floor: &mut Floor) -> Result<Option<Che
             "the run left the owner's Claude setup or login changed: {found}"
         ))?;
     }
-    Ok(Some(Check {
-        name: "the owner's Claude setup and the machine's login were left as they were".to_owned(),
-        ok: found.is_none(),
-    }))
+    Ok(Some(Check::new(
+        "the owner's Claude setup and the machine's login were left as they were",
+        found.is_none(),
+    )))
 }
 
 /// A Claude config folder (the kit's throwaway, with a copy of the machine's login) whose rig

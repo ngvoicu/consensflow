@@ -40,6 +40,7 @@ pub(super) fn scenario() -> Scenario {
         nudge: Some("Da, cum recomanzi. Continuă."),
         quiet: Duration::from_secs(150),
         stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect("at least three tasks go on the board", |m| m.tasks.len() >= 3),
             expect("two tasks run side by side at some point", |m| m.parallel >= 2),

@@ -23,7 +23,7 @@
 
 use regex::Regex;
 
-use super::pattern;
+use super::{pattern, ScriptedWork};
 use crate::measure::{Metrics, Rounds};
 
 /// The page the worker makes.
@@ -31,12 +31,63 @@ pub(super) const PAGE: &str = "site/en/assessment.html";
 
 /// The owner's first words, which both scenarios begin with: the task, and a review before
 /// the chief accepts it. Nothing here says what to do with a finding.
-pub(super) const ASK: [&str; 4] = [
+pub(super) const ASK: [&str; 5] = [
     "Pagina principală în engleză (site/en/index.html) trimite la assessment.html, dar pagina nu",
     "există. Pune o singură sarcină unui worker: să creeze site/en/assessment.html, traducerea în",
-    "engleză a paginii site/evaluare.html, în același stil. Nu modifica alte fișiere. Când e gata,",
-    "cere unui reviewer să verifice pagina înainte s-o accepți, și judecă tu ce găsește.",
+    "engleză a paginii site/evaluare.html, în același stil. Pagina engleză trebuie să dea scorul așa",
+    "cum îl dă ghidul managerului (docs/ghidul-managerului.md). Nu modifica alte fișiere. Când e",
+    "gata, cere unui reviewer să verifice pagina înainte s-o accepți, și judecă tu ce găsește.",
 ];
+
+/// The Romanian page, which a worker that is told to keep the structure and fix the range fixes too.
+pub(super) const RO_PAGE: &str = "site/evaluare.html";
+
+/// The page the stand-in worker writes first: the one a Haiku 4.5 worker wrote for the run of
+/// 2026-11-02, a minimal translation of the Romanian page that keeps its "between 0 and 100".
+const PAGE_AS_FIRST_MADE: &str = include_str!("../../tests/fixtures/review-loop/assessment.html");
+
+/// The same page with the sentence about the score fixed to the guide's scale.
+const PAGE_FIXED: &str = include_str!("../../tests/fixtures/review-loop/assessment-fixed.html");
+
+/// The Romanian page with its sentence about the score fixed to the guide's scale.
+const RO_PAGE_FIXED: &str = include_str!("../../tests/fixtures/review-loop/evaluare-fixed.html");
+
+/// The stand-in worker's first answer: the page, as made, with the range the guide contradicts.
+/// Whatever the brief says, the script writes this: the bug of the first review is the work's own
+/// (the owner requires the guide's scale and the page does not give it), true by construction.
+pub(super) fn first_work() -> ScriptedWork {
+    ScriptedWork {
+        result: format!(
+            "Created `{PAGE}`, the English translation of `site/evaluare.html`, with the same structure and the same style.\n\nFull content:\n\n```html\n{PAGE_AS_FIRST_MADE}```\n\nNo other file was touched."
+        ),
+        writes: vec![(PAGE.to_owned(), PAGE_AS_FIRST_MADE.to_owned())],
+    }
+}
+
+/// The stand-in worker's second answer, which a task sent back for the range gets: the English
+/// page with the guide's scale.
+pub(super) fn fixed_work() -> ScriptedWork {
+    ScriptedWork {
+        result: format!(
+            "Fixed in `{PAGE}`: the sentence about the score now says a scale from 1 to 5. The rest of the page is as it was. No other file was touched."
+        ),
+        writes: vec![(PAGE.to_owned(), PAGE_FIXED.to_owned())],
+    }
+}
+
+/// The stand-in worker's third answer, for work that is about the range on both pages: the English
+/// page and the Romanian one with the guide's scale.
+pub(super) fn both_pages_work() -> ScriptedWork {
+    ScriptedWork {
+        result: format!(
+            "Changed the sentence about the score on both pages, `{RO_PAGE}` line 11 and `{PAGE}` line 11, to the guide's scale from 1 to 5. Nothing else of either page was changed, and no other file."
+        ),
+        writes: vec![
+            (PAGE.to_owned(), PAGE_FIXED.to_owned()),
+            (RO_PAGE.to_owned(), RO_PAGE_FIXED.to_owned()),
+        ],
+    }
+}
 
 /// The first review: one blocker, F1, with all it takes to be one, and four notes.
 pub(super) const FIRST: &str = "\
@@ -49,10 +100,10 @@ Failure: the sentence about the score in site/en/assessment.html says \"a score 
 Evidence: grep -n 100 site/en/assessment.html finds the sentence; grep -n scară docs/ghidul-managerului.md finds line 5; site/evaluare.html line 11, which the page was translated from, has the same 0 to 100: the guide and that page disagree, and this finding is against the guide.
 Location: site/en/assessment.html, the paragraph in <main>.
 
-F2 [note, does not block] The <title> carries the page name and not the site name; \"Assessment — Burnout at Work\" would match the other pages. Location: site/en/assessment.html, <head>.
+F2 [note, does not block] The page has no <meta name=\"viewport\">, so a phone shows it at the width of a desktop. Evidence: grep -c viewport site/en/assessment.html prints 0. Location: site/en/assessment.html, <head>.
 F3 [note, does not block] The <nav> in the footer has no aria-label. Location: site/en/assessment.html, <footer>.
-F4 [note, does not block] The one long sentence reads better as two. Location: site/en/assessment.html, <main>.
-F5 [note, does not block] The four colours are listed in the Romanian order; English readers expect red first. Location: site/en/assessment.html, <main>.
+F4 [note, does not block] The page has no header navigation, and site/en/index.html has one: a reader cannot go back to the home page from here except with the browser. Location: site/en/assessment.html, <header>.
+F5 [note, does not block] The page has no <meta name=\"description\">. Location: site/en/assessment.html, <head>.
 ";
 
 /// The second review of `review-loop`: the fix holds, and only notes are left.
@@ -60,11 +111,11 @@ pub(super) const NOTES_ONLY: &str = "\
 Ready with notes. F1 is fixed and nothing blocks. F2 to F5 are still open and are notes; F6 is new, also a note. Decide: accept; F2 to F6 can go into one later task.
 
 F1 fixed. The sentence no longer gives 0 to 100: grep -n 100 site/en/assessment.html finds nothing. The sentences around it are as they were.
-F2 still open [note, does not block] The <title> does not carry the site name.
+F2 still open [note, does not block] The page has no <meta name=\"viewport\">.
 F3 still open [note, does not block] The footer <nav> has no aria-label.
-F4 still open [note, does not block] The long sentence reads better as two.
-F5 still open [note, does not block] The colours are in the Romanian order.
-F6 new [note, does not block] The page has no <meta name=\"description\">. Location: site/en/assessment.html, <head>.
+F4 still open [note, does not block] The page has no header navigation.
+F5 still open [note, does not block] The page has no <meta name=\"description\">.
+F6 new [note, does not block] The <h1> is generic; a heading that says whose assessment it is, \"Your team's assessment\", would say more. Location: site/en/assessment.html, <header>.
 ";
 
 /// The third review of `review-loop`, which a chief that sends the work back for notes asks
@@ -72,11 +123,11 @@ F6 new [note, does not block] The page has no <meta name=\"description\">. Locat
 pub(super) const NOTES_ONLY_AGAIN: &str = "\
 Ready with notes. Nothing blocks. F2 to F6 are still open and are notes; none of them changed since the last review. F7 is new, also a note. Decide: accept; F2 to F7 can go into one later task.
 
-F2 still open [note, does not block] The <title> does not carry the site name.
+F2 still open [note, does not block] The page has no <meta name=\"viewport\">.
 F3 still open [note, does not block] The footer <nav> has no aria-label.
-F4 still open [note, does not block] The long sentence reads better as two.
-F5 still open [note, does not block] The colours are in the Romanian order.
-F6 still open [note, does not block] The page has no <meta name=\"description\">.
+F4 still open [note, does not block] The page has no header navigation.
+F5 still open [note, does not block] The page has no <meta name=\"description\">.
+F6 still open [note, does not block] The <h1> is generic.
 F7 new [note, does not block] The page has no favicon link. Location: site/en/assessment.html, <head>.
 ";
 
@@ -86,10 +137,10 @@ pub(super) const SECOND_BLOCKER: &str = "\
 Not ready. F1 is fixed, but the fix leaves a different blocker: F6, the Romanian and the English page now give different score ranges. F2 to F5 are unchanged and are notes. Decide what to do with F6.
 
 F1 fixed. The English page no longer gives 0 to 100: grep -n 100 site/en/assessment.html finds nothing.
-F2 still open [note, does not block] The <title> does not carry the site name.
+F2 still open [note, does not block] The page has no <meta name=\"viewport\">.
 F3 still open [note, does not block] The footer <nav> has no aria-label.
-F4 still open [note, does not block] The long sentence reads better as two.
-F5 still open [note, does not block] The colours are in the Romanian order.
+F4 still open [note, does not block] The page has no header navigation.
+F5 still open [note, does not block] The page has no <meta name=\"description\">.
 F6 new [blocks, caused by the fix to F1] The two language versions of the assessment page disagree about the score.
 Requirement: the Romanian and the English page of the assessment say the same of the result.
 Case: a team with Romanian-speaking and English-speaking members, whose lead reads the page in each language. It will happen to every such team.
@@ -104,10 +155,10 @@ pub(super) const READY: &str = "\
 Ready with notes. Nothing blocks. F6 no longer holds: the two versions agree, or the sentence is gone from one of them. F2 to F5 are unchanged and are notes. Decide: accept.
 
 F6 fixed. grep -n 100 site/evaluare.html site/en/assessment.html finds no range that differs between the two.
-F2 still open [note, does not block] The <title> does not carry the site name.
+F2 still open [note, does not block] The page has no <meta name=\"viewport\">.
 F3 still open [note, does not block] The footer <nav> has no aria-label.
-F4 still open [note, does not block] The long sentence reads better as two.
-F5 still open [note, does not block] The colours are in the Romanian order.
+F4 still open [note, does not block] The page has no header navigation.
+F5 still open [note, does not block] The page has no <meta name=\"description\">.
 ";
 
 /// The rounds of the chief's tasks, or none where the measure did not read them.
@@ -214,9 +265,7 @@ pub(super) fn change_of_work() -> Regex {
 
 /// Words of the stand-in's notes, which a task or a note that gathers them names.
 pub(super) fn notes() -> Regex {
-    pattern(
-        r"(?i)\bF[2-7]\b|<title>|\btitle\b|aria|site name|long sentence|two sentences|colou?rs?|description",
-    )
+    pattern(r"(?i)\bF[2-7]\b|viewport|aria|header nav|navigation|description|favicon|heading|<h1>")
 }
 
 #[cfg(test)]
@@ -363,9 +412,12 @@ mod tests {
         let notes = notes();
         for text in [
             "F2 to F6",
-            "the <title> without the site name",
+            "no viewport meta",
             "an aria-label",
-            "the colour order",
+            "no header navigation",
+            "no meta description",
+            "no favicon",
+            "a generic heading",
         ] {
             assert!(notes.is_match(text), "{text}");
         }
