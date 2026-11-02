@@ -477,6 +477,13 @@ async fn a_follow_up_goes_back_to_the_session_that_did_the_task_whatever_the_spe
     for after in ["1", r#""1""#, "1.0", r#""0x1""#, "[1]", "true"] {
         let scene = scene();
         assert_eq!(finished_session_task(&scene), 1);
+        // The chief has decided it: a follow-up of a task still undecided waits (T-1118).
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .accept_task(scene.project.id, 1, "chief")
+            .unwrap();
         let body = format!(r#"{{"after":{after},"body":"Now the lexer"}}"#);
         let (status, said) = post(&scene, &scene.chief, &body).await;
         assert_eq!(status, 201, "{after}: {said}");
@@ -521,6 +528,49 @@ async fn a_follow_up_of_a_task_still_at_work_waits_for_it_and_is_not_queued_for_
         (status, said["task"]["blockedBy"].clone()),
         (201, json!([next]))
     );
+}
+
+/// T-1118: a follow-up of a task whose result is in and not accepted waits for it, as one
+/// of a task at work does; it was queued for the window at once, before the chief decided.
+#[tokio::test]
+async fn a_follow_up_of_a_task_with_its_result_in_waits_for_it_and_is_not_queued_for_the_window() {
+    let scene = scene();
+    let finished = finished_session_task(&scene);
+    let body = format!(r#"{{"after":{finished},"body":"Now the lexer"}}"#);
+    let (status, said) = post(&scene, &scene.chief, &body).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["task"]["state"], "open");
+    assert_eq!(said["task"]["blockedBy"], json!([finished]));
+    assert!(
+        said["task"]["assignee"]
+            .as_str()
+            .unwrap()
+            .starts_with("zeus-"),
+        "{said}"
+    );
+    assert!(
+        said["message"].is_null(),
+        "nothing is queued for the window"
+    );
+
+    // Accepted, it goes to the window.
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .accept_task(scene.project.id, finished, "chief")
+        .unwrap();
+    let next = said["task"]["number"].as_i64().unwrap();
+    let (status, said) = api(
+        &scene,
+        Method::GET,
+        &format!("/api/tasks/{next}"),
+        &scene.chief,
+        "",
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["state"], "queued");
 }
 
 /// The title of task `number` as `token`'s window lists the board: on its lane, or

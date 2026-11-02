@@ -125,24 +125,25 @@ pub(crate) fn bring_back(
 /// that task.
 pub(crate) struct FollowUp {
     pub session: ParticipantRow,
-    /// The window is still on T-`after` (or will be: it waits for its needs, or
-    /// is paused): the follow-up waits for it to be accepted, as it would for
-    /// any task it needs, and goes into the window then.
+    /// T-`after` is not accepted and may still be the window's (it is at work, will
+    /// be, is paused, or its result is in and waits for the chief): the follow-up
+    /// waits for it to be accepted, as it would for any task it needs, and goes
+    /// into the window then.
     pub behind: bool,
 }
 
 /// The session that did T-`after`, on the board (brought back if the human had
-/// deleted it) for a follow-up. A follow-up of a task whose result is not in
-/// goes behind it (`FollowUp::behind`) and asks nothing of the session. One of
-/// a task whose result is in goes to the session now, and is refused while the
-/// session has another task in hand (`require_free`); unless follow-ups already
-/// wait for that task's acceptance, which the new one lines up behind (by
-/// number), but for those it is put `before`.
+/// deleted it) for a follow-up. A follow-up of a task the chief has not decided,
+/// whether it is still on its work or its result is in (`done`), goes behind it
+/// (`FollowUp::behind`) and asks nothing of the session: the window takes it when
+/// the task is accepted (T-1118: a follow-up of a done task went into the window
+/// before the chief had decided the task). One of a task that is accepted, failed
+/// or cancelled goes to the session now, and is refused while the session has
+/// another task in hand (`require_free`).
 pub(crate) fn follow_up_session(
     store: &mut Store,
     project_id: i64,
     after: i64,
-    before: &[i64],
 ) -> Result<FollowUp, LedgerError> {
     let previous = store.task_row(project_id, after)?;
     if previous.assignee_id.is_none() {
@@ -189,13 +190,13 @@ pub(crate) fn follow_up_session(
     };
     // A session the human ended is not on a task's work: a task of its that is
     // paused waits for its resumption, not for a follow-up.
-    let at_work = HELD_TASK_STATES.contains(&previous.state.as_str())
-        || matches!(previous.state.as_str(), "open" | "paused");
-    // A task whose result is in but not accepted still has follow-ups waiting for
-    // it, and one added now lines up behind them (by number), not ahead.
-    let others_wait =
-        previous.state == "done" && others_wait_for(store, &previous, session.id, before)?;
-    let behind = session.left_at.is_none() && (at_work || others_wait);
+    let at_work = session.left_at.is_none()
+        && (HELD_TASK_STATES.contains(&previous.state.as_str())
+            || matches!(previous.state.as_str(), "open" | "paused"));
+    // A task whose result is in and not accepted is the chief's to decide (it may
+    // be reopened), so a follow-up waits for its acceptance as one of a task at
+    // work does, and the follow-ups of a task go in the order they were given.
+    let behind = at_work || previous.state == "done";
     if !behind {
         require_free(store, &session, Giving::Task)?;
     }
@@ -203,26 +204,6 @@ pub(crate) fn follow_up_session(
         session: bring_back(store, session)?,
         behind,
     })
-}
-
-/// Whether open tasks bound to `session` wait for `task` to be accepted, other
-/// than those the new follow-up is put `before` (the chief says it goes ahead of
-/// them: the rule of 2026-10-15).
-fn others_wait_for(
-    store: &Store,
-    task: &TaskRow,
-    session: i64,
-    before: &[i64],
-) -> Result<bool, LedgerError> {
-    let waiting: Vec<i64> = store
-        .db
-        .prepare(
-            "SELECT t.number FROM task_need n JOIN task t ON t.id = n.task_id
-       WHERE n.needs_id = ? AND t.state = 'open' AND t.assignee_id = ?",
-        )?
-        .query_map(params![task.id, session], |row| row.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    Ok(waiting.iter().any(|number| !before.contains(number)))
 }
 
 /// How a task comes to a session, which is what a refusal can tell it to do

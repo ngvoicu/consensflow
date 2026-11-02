@@ -22,8 +22,15 @@ fn done_by_a_session(w: &mut World) -> (String, i64) {
     (session, task)
 }
 
-/// A follow-up of `after` for its session, delivered and at work: the task.
+/// A follow-up of `after` for its session, delivered and at work: the task. The chief
+/// has accepted `after` (a follow-up of a task still undecided waits for that), and
+/// the window is free, so the follow-up goes to it now.
 fn at_work_on_a_follow_up(w: &mut World, after: i64, body: &str) -> i64 {
+    if w.state(after) == "done" {
+        w.ledger
+            .accept_task(w.project, after, "chief")
+            .expect("accepted");
+    }
     let given = w.follow_up(after, body, &[]).expect("a follow-up");
     w.deliver(given.message.expect("its brief").id);
     assert_eq!(w.state(given.task.number), "working");
@@ -98,20 +105,25 @@ fn a_follow_up_is_refused_while_its_session_is_on_its_work_and_goes_once_it_is_f
 fn a_task_is_not_reopened_onto_a_session_that_has_another_and_is_told_what_a_reopen_can_do() {
     let mut w = world();
     let (session, a) = done_by_a_session(&mut w);
-    // B goes to the session that did A, and is at work.
-    let b = at_work_on_a_follow_up(&mut w, a, "Tests");
+    // B is named for the session that did A (a follow-up of A, undecided, would wait
+    // for it), and is at work.
+    let b = w
+        .give_to(&session, &[], "Tests")
+        .expect("the session is free");
+    w.deliver(b.message.expect("its brief").id);
+    let b = b.task.number;
+    assert_eq!(w.state(b), "working");
 
-    // A is sent back to the session that is on B: refused as a follow-up is, in
-    // the words of a task sent back, which cannot be opened for a tier.
+    // A is sent back to the session that is on B: refused, in the words of a task
+    // sent back, which cannot be opened for a tier. A follow-up of A waits instead:
+    // A is not decided, and the session takes it when A is accepted.
     let reopened = w
         .ledger
         .reopen_task(w.project, a, "chief", "More")
         .expect_err("the session is on its work");
-    let followed = w
-        .follow_up(a, "More tests", &[])
-        .expect_err("the session is on its work");
     assert_busy(reopened, &session, &sent_back(a));
-    assert_busy(followed, &session, OPEN_FOR_ITS_TIER);
+    let followed = w.follow_up(a, "More tests", &[]).expect("it waits for A");
+    assert_eq!(w.state(followed.task.number), "open");
     assert_eq!(
         w.state(a),
         "done",
@@ -245,10 +257,11 @@ fn a_follow_up_waiting_for_what_it_needs_leaves_its_session_free_to_every_door()
 /// The owner's report of 2026-10-14 (ConsensFlow 3.0.3): T-43, a follow-up for a
 /// session, waited on the board for T-41 and T-42, and T-44, a follow-up for the
 /// same session that the chief put before it, was refused, though the window was
-/// idle. It goes to the window now, and T-43 goes after it, once what it needs
-/// is accepted.
+/// idle. It goes to the window as soon as the task they follow is accepted (since
+/// T-1118 a follow-up of a task with its result in waits for that), and T-43 goes
+/// after it, once what it needs is accepted.
 #[test]
-fn a_follow_up_put_before_one_that_waits_goes_to_the_window_now_and_the_waiting_one_after_it() {
+fn a_follow_up_put_before_one_that_waits_goes_to_the_window_first_and_the_waiting_one_after_it() {
     let mut w = world();
     let (session, a) = done_by_a_session(&mut w);
     let needs = [w.open("Lexer").task.number, w.open("Docs").task.number];
@@ -262,7 +275,16 @@ fn a_follow_up_put_before_one_that_waits_goes_to_the_window_now_and_the_waiting_
         .expect("taken, though a follow-up waits for the session");
     assert_eq!(first.task.assignee.as_deref(), Some(session.as_str()));
     let first = first.task.number;
-    assert_eq!(w.state(first), "queued");
+    assert_eq!(
+        w.state(first),
+        "open",
+        "it waits for A, which is not decided"
+    );
+    w.ledger
+        .accept_task(w.project, a, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(first), "queued", "A is accepted: the window has it");
+    assert_eq!(w.state(later), "open", "and the other waits for it");
     deliver_next(&mut w, &session);
     assert_eq!(w.state(first), "working");
     w.ledger
@@ -300,12 +322,18 @@ fn a_waiting_follow_up_paused_is_not_resumed_into_a_session_at_work_on_another()
         .expect("a follow-up")
         .task
         .number;
-    // First is put before the one that waits, which the chief says: it goes now.
+    // First is put before the one that waits, which the chief says: it goes first, once
+    // A is accepted.
     let first = w
         .follow_up_before(a, "First", &[later])
-        .expect("a follow-up put before the waiting one");
-    w.deliver(first.message.expect("its brief").id);
-    let first = first.task.number;
+        .expect("a follow-up put before the waiting one")
+        .task
+        .number;
+    w.ledger
+        .accept_task(w.project, a, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(first), "queued");
+    deliver_next(&mut w, &session);
     assert_eq!(w.state(first), "working");
     w.pause(later);
     assert_eq!(w.state(later), "paused");
@@ -324,7 +352,7 @@ fn a_waiting_follow_up_paused_is_not_resumed_into_a_session_at_work_on_another()
         .record_result(w.project, first, "First, done")
         .expect("a result");
     w.ledger
-        .accept_task(w.project, a, "chief")
+        .accept_task(w.project, first, "chief")
         .expect("accepted");
     assert_eq!(w.state(later), "paused");
     w.resume(later, "Go on");

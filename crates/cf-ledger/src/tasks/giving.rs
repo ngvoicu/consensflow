@@ -143,8 +143,9 @@ fn distinct(numbers: &[u64], field: &str) -> Result<Vec<i64>, LedgerError> {
 
 /// A task, from the chief or the human. Given `to`, it is queued for that
 /// participant at once (the chief, the human, or the requester itself). Given
-/// `after`, it is queued for the session that did that task at once, or, when the
-/// task is still on its work, waits on the board for it to be accepted.
+/// `after`, it is queued for the session that did that task at once when that
+/// task is accepted (or failed, or cancelled), and otherwise, at work or with its
+/// result in, waits on the board for it to be accepted.
 /// Given a pool and tier instead, it opens for the daemon to assign to a
 /// member of that pool and tier. A task on the board may need other tasks:
 /// it waits until each is accepted, one the human cleared from the board
@@ -183,15 +184,15 @@ pub(crate) fn create_task(
         }
         // A follow-up goes to the session that did the task followed, while it
         // is still there: the one case a coordinator names a window. For a task
-        // whose result is in, the session must be free; for one still on its
-        // work, the follow-up waits on the board behind it, T-`after` being one
-        // of the tasks it needs. A task named for a session is held to the free
-        // rule, whether it goes to the window now or waits on the board for what
-        // it needs.
+        // that is accepted, the session must be free; for one still on its work
+        // or with its result in and not decided, the follow-up waits on the
+        // board behind it, T-`after` being one of the tasks it needs. A task
+        // named for a session is held to the free rule, whether it goes to the
+        // window now or waits on the board for what it needs.
         let mut behind = None;
         let assignee = match (request.after, &request.to) {
             (Some(after), _) => {
-                let follow_up = follow_up_session(store, project_id, after, &blocking)?;
+                let follow_up = follow_up_session(store, project_id, after)?;
                 if follow_up.behind {
                     behind = Some(after);
                 }

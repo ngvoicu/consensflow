@@ -199,6 +199,9 @@ const CLOSE_RESUMED: &str = "the human resumes the project the Close suspended: 
 /// has been told to its requester in a note not yet given.
 const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
 
+/// A follow-up of a task whose result is in waits for the acceptance (T-1118).
+const FOLLOW_UP_DECIDED: &str = "the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once";
+
 /// What waits for a chief out of quota is said to the human (the field report of
 /// 2026-10-22, T-254).
 const OUT_WITH_WORK_WAITING: &str = "the chief is out of quota with a task queued for it: the human is told once that it waits (`@chief is out of quota until …, and m-2 (the words of T-1) waits for it`), where Node says nothing and the task waits for the reset";
@@ -293,6 +296,14 @@ const DEPARTED: &[(&str, &str)] = &[
         SENT_BACK_BEFORE_GIVEN,
     ),
     (
+        "fails a deleted session's follow-up as any launch fails when its harness has lost the conversation, and the task goes to its tier instead",
+        FOLLOW_UP_DECIDED,
+    ),
+    (
+        "continues a finished task's session with --after: the same window comes back on its conversation",
+        FOLLOW_UP_DECIDED,
+    ),
+    (
         "brings a deleted session back when a follow-up comes with --after: its window opens on its own conversation, and a busy session still refuses",
         "the chief accepts T-1 while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision",
     ),
@@ -314,7 +325,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",
-        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset",
+        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset; and the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once",
     ),
     (
         "fails a launch whose first message never arrives",
@@ -386,7 +397,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "lets go of its participant: its next step runs, the failure is written down, and an operation waiting on it ends",
-        "the window goes with a paste on its way into it that its harness took and its record shows: the record is read (`record`) and the paste confirmed, where Node gave it back to its queue to be pasted again into the conversation that held it; and the Close comes while the session's window holds T-2's brief, read as the window opened and not confirmed yet: the window closed with its project, so its record is read and the brief, which it shows, is confirmed, and T-2 pauses with the Close (T-1076), where Node failed the brief and T-2 and told the chief (`@zeus-amber-pine's window closed`), as the alpha.1 release check saw a Devin worker's task fail at a Close",
+        "the window goes with a paste on its way into it that its harness took and its record shows: the record is read (`record`) and the paste confirmed, where Node gave it back to its queue to be pasted again into the conversation that held it; and the Close comes while the session's window holds T-2's brief, read as the window opened and not confirmed yet: the window closed with its project, so its record is read and the brief, which it shows, is confirmed, and T-2 pauses with the Close (T-1076), where Node failed the brief and T-2 and told the chief (`@zeus-amber-pine's window closed`), as the alpha.1 release check saw a Devin worker's task fail at a Close; and the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once",
     ),
     (
         "gives the new chief its handoff again when its first window closes before showing it",

@@ -189,6 +189,7 @@ fn continues_a_finished_tasks_session_with_after_the_same_window_comes_back_on_i
     context.host.exits_showing(Some(0), None, None);
     let tiers = finished(&context);
     let native = native_of(&context, tiers.id("zeus-amber-pine"));
+    context.accept_if_done(tiers.project.id, 1);
     context.create_task(
         tiers.project.id,
         NewTask {

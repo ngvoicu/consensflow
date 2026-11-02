@@ -329,7 +329,8 @@ fn a_member_removed_with_a_task_a_follow_up_waits_behind_cancels_both_and_tells_
 }
 
 #[test]
-fn a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to_the_window_now() {
+fn a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to_the_window_first_when_it_is_accepted(
+) {
     let mut w = world();
     let (session, a) = at_work(&mut w);
     let b = w
@@ -341,12 +342,21 @@ fn a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to
         .record_result(w.project, a, "Parser, done")
         .expect("a result");
 
-    // The chief says it goes ahead of T-2: the rule of 2026-10-15 holds.
+    // The chief says it goes ahead of T-2: the rule of 2026-10-15 holds. Like T-2 it
+    // waits for T-1, which has its result in and is not decided (T-1118).
     let first = w
         .follow_up_before(a, "First", &[b])
         .expect("put before the one that waits");
-    assert_eq!(first.task.state, "queued");
+    assert_eq!(first.task.state, "open");
+    assert_eq!(first.task.blocked_by, [a]);
     let first = first.task.number;
+    assert_eq!(w.next(&session), None, "nothing is for the window yet");
+
+    w.ledger
+        .accept_task(w.project, a, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(first), "queued");
+    assert_eq!(w.state(b), "open", "T-2 waits for it");
     let head = w.next(&session).expect("for the window");
     assert_eq!(w.message(head).task_number, Some(first));
 }
