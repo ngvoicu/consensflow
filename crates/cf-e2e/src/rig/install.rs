@@ -638,10 +638,10 @@ mod tests {
         let theirs = person.path().join(".config").join("muse");
         files::make_dir(&theirs).unwrap();
         files::write(&theirs.join("auth.json"), "{\"login\":\"metadata\"}\n").unwrap();
-        let install = crate::muse::Installed {
-            binary: PathBuf::from("/the/muse-binary"),
-            version: "Muse Code 1.4.14".to_owned(),
-        };
+        // The rig asks a live Muse its allowance as it writes the launcher (T-1076): this
+        // one answers it, at half the week.
+        let bin = tempfile::tempdir().unwrap();
+        let install = muse_in(bin.path(), 50);
         for given in [
             config().muse_live(install.clone(), person.path()),
             config()
@@ -700,10 +700,9 @@ mod tests {
     }
 
     /// A machine's Muse whose `usage --json` answers that `weekly` percent of the week is
-    /// used, and a person's home in `real` with the metadata of a login: what a live rig
-    /// seats.
+    /// used: what a live rig asks before it seats Muse.
     #[cfg(unix)]
-    fn muse_at(bin: &Path, real: &Path, weekly: u64) -> crate::muse::Installed {
+    fn muse_in(bin: &Path, weekly: u64) -> crate::muse::Installed {
         let binary = bin.join("muse-bin-1.4.14-R7309.1");
         let answer = format!(
             r#"{{"schemaVersion":1,"allowance":{{"window":{{"usedPercent":10,"resetsAtMs":1}},"weekly":{{"usedPercent":{weekly},"resetsAtMs":2}}}}}}"#
@@ -713,11 +712,18 @@ mod tests {
             format!("#!/bin/sh\n[ \"$1 $2\" = \"usage --json\" ] || exit 9\necho '{answer}'\n"),
         )
         .unwrap();
-        files::write(&real.join(".config").join("muse").join("auth.json"), "{}\n").unwrap();
         crate::muse::Installed {
             binary,
             version: "1.4.14-R7309.1".to_owned(),
         }
+    }
+
+    /// [`muse_in`], and a person's home in `real` with the metadata of a login: what a live
+    /// rig seats.
+    #[cfg(unix)]
+    fn muse_at(bin: &Path, real: &Path, weekly: u64) -> crate::muse::Installed {
+        files::write(&real.join(".config").join("muse").join("auth.json"), "{}\n").unwrap();
+        muse_in(bin, weekly)
     }
 
     /// T-1076: every rig that runs the machine's Muse live asks its allowance as it writes
