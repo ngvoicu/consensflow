@@ -24,14 +24,18 @@
 //! it), so a pause that kept a window for the work it would end, and the note of a close, said
 //! nothing of it, and a close ended it unnamed (T-1145: Muse on Windows detached a `ping` with
 //! `Start-Process`, and Pi and Devin on the Mac detach with `&`). So the host names it
-//! as **detached work** ([`detached`]), beside the turn's, and a tree that holds it says so:
-//! a process of the tree that began after the mark, that is none of the harness's own, and
-//! whose starter has gone (no parent), with whatever descends from it. The chain is still the
-//! only proof of whose it is, and nothing is concluded from it but that the window would
-//! end it: it is listed so that a pause keeps its window for it, the chief is told it runs
-//! and a close names what it ended; it is never ended by anything but the close, and it is
-//! never taken for a command the harness waits on ([`super::Baseline::commands`] goes by
-//! the chain alone).
+//! as **detached work** ([`detached`]), beside the turn's: a process of the tree that began after
+//! the mark, that is none of the harness's own, and whose starter has gone (no parent), with
+//! whatever descends from it, **where the platform can prove it the agent's**. The chain is still the
+//! only proof of whose it is; this says that the window would end it, and that nothing but a
+//! detach explains it. On the Mac it is in the window's session or under its program, which a close
+//! ends: a daemon (Gradle's, an `adb` server) makes a session of its own, which is what keeps it
+//! out. On Windows the pane's job holds a build's daemon as it holds a `Start-Process` job, and
+//! the owner does not want the chief told of the daemon (2026-10-15), so it is proved by what
+//! started it, read when it began: a shell ([`super::births`]). It is listed so that a pause keeps
+//! its window for it, the chief is told it runs and a close names what it ended; it is never
+//! ended by anything but the close, and never taken for a command the harness waits on
+//! ([`super::Baseline::commands`] goes by the chain alone).
 //!
 //! Limits, each of them a process that is left running, never one that is ended by
 //! mistake, but for the last:
@@ -53,7 +57,9 @@
 //!   have. Such a job survives the window's close too, so a pause that closed the window
 //!   ended nothing of it, and a marker that can be read names it as possibly the window's
 //!   (`possibly_left`). On Windows no such job exists: the pane's job holds what a
-//!   process starts wherever it goes.
+//!   process starts wherever it goes. What it cannot prove there is a job whose starter was
+//!   not read as a shell: `cmd.exe /c start …` (`cmd.exe` is no shell here), one started
+//!   by a service (`schtasks`, a WMI call), and one whose birth the job's port did not tell.
 //! - On Windows a program of Git Bash's own kind that a script started (`sleep`, `grep`) names
 //!   a parent that has gone, a forked copy of the shell, so the walk up from it stops there:
 //!   the reader of the job's members gives it the parent `ps -W` of Git Bash says
@@ -93,7 +99,7 @@ const SHELLS: [&str; 10] = [
 ];
 
 /// Whether `program` is the name of one of [`SHELLS`]; Windows' names have no case.
-fn is_shell(program: &str) -> bool {
+pub(super) fn is_shell(program: &str) -> bool {
     let name = program.to_ascii_lowercase();
     let name = name.strip_suffix(".exe").unwrap_or(&name);
     SHELLS.contains(&name)

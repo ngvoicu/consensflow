@@ -415,4 +415,61 @@ mod windows {
         // The pane's job is the window's: its close ends it with the rest.
         table.kill(&key).expect("close the pane");
     }
+
+    /// What a build's tool leaves is not what an agent detaches (T-1145): Gradle's daemon is
+    /// started by the build tool, which ends, and the owner does not want the chief told of it
+    /// (`regressions/a_builds_daemon_held_a_workers_task`). The job holds it all the same, with
+    /// no parent, as it holds a `Start-Process` job; what tells them apart is the starter, read
+    /// as the job began (`cmd.exe` is no shell here), and the host names the one only.
+    #[test]
+    fn a_job_whose_starter_was_no_shell_is_in_the_pane_job_with_no_parent_and_the_host_names_nothing_of_it(
+    ) {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let ping = system("PING.EXE");
+        let cmd = system("cmd.exe");
+        let (key, output) = open(
+            &table,
+            &powershell(&format!(
+                // Once told to go, a build tool that leaves its daemon and ends: `cmd.exe`
+                // starts a ping apart and ends at once.
+                "Write-Output 'READY#'; [Console]::In.ReadLine() | Out-Null; \
+                 Start-Process -WindowStyle Hidden -FilePath '{cmd}' -ArgumentList '/c','start \"\" /b {ping} -n 1006 127.0.0.1'; \
+                 Write-Output 'STARTED#'; Start-Sleep 1000"
+            )),
+            &HashMap::new(),
+            1 << 20,
+        );
+        read_until(&table, &key, &output, "READY#");
+        table
+            .mark(&key, Servers::Unknown, None)
+            .expect("mark the turn");
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "STARTED#");
+
+        // The ping is in the job once the `cmd.exe` that started it has gone.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let found = held(&table, &key);
+            if on_its_own(&found, "-n 1006") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the ping was never in the job on its own: {found:?}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // Its starter was no shell: nothing proves the agent detached it, and it is not named.
+        // (A moment is given for a look that came too early to have found a birth not yet read.)
+        std::thread::sleep(Duration::from_secs(2));
+        let found = listed(&table, &key);
+        assert!(
+            !found.iter().any(|(_, command)| command.contains("-n 1006")),
+            "the host names a job a build tool left: {found:?}"
+        );
+        assert!(on_its_own(&held(&table, &key), "-n 1006"), "it runs on");
+        table.kill(&key).expect("close the pane");
+    }
 }

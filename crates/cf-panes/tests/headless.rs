@@ -3235,6 +3235,21 @@ fn a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_r
         closed.exit
     );
     assert!(alive, "the server runs on");
+    // It is named as possibly the window's and not as work the close ended (T-1145): the close
+    // did not end it, and a job only the window's marker ties to it is not detached work.
+    let ended: Vec<i64> = closed.exit["background"]
+        .as_array()
+        .map(|work| {
+            work.iter()
+                .filter_map(|work| work["pid"].as_i64())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !ended.contains(&i64::from(job)),
+        "the exit says the close ended it: {}",
+        closed.exit
+    );
     assert!(
         closed
             .after

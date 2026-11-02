@@ -921,7 +921,7 @@ fn the_names_are_the_turns_work_and_the_detached_work_that_a_close_ends_oldest_f
     ];
     let named = |closing: &[u32]| -> Vec<u32> {
         baseline
-            .named(&tree, || {
+            .named(&tree, |_| {
                 Ok(Some(closing.iter().map(|pid| key(*pid)).collect()))
             })
             .expect("named")
@@ -931,7 +931,7 @@ fn the_names_are_the_turns_work_and_the_detached_work_that_a_close_ends_oldest_f
     };
 
     // Where a close ends every one (a Windows job), all of them.
-    let every = baseline.named(&tree, || Ok(None)).expect("named");
+    let every = baseline.named(&tree, |_| Ok(None)).expect("named");
     assert_eq!(
         every
             .iter()
@@ -948,7 +948,7 @@ fn the_names_are_the_turns_work_and_the_detached_work_that_a_close_ends_oldest_f
 fn the_host_is_asked_what_a_close_ends_only_when_a_job_lost_its_starter() {
     let baseline = marked(&[program()], None, None);
     let calls = std::cell::Cell::new(0);
-    let counting = || {
+    let counting = |_: &[Member]| {
         calls.set(calls.get() + 1);
         Ok(None)
     };
@@ -964,4 +964,52 @@ fn the_host_is_asked_what_a_close_ends_only_when_a_job_lost_its_starter() {
     let tree = vec![program(), member(30, "sleep 600", "sleep", None)];
     assert_eq!(baseline.named(&tree, counting).expect("named").len(), 1);
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn of_the_detached_work_a_windows_job_proves_those_whose_starter_was_a_shell_and_what_descends_from_them(
+) {
+    let detached = vec![
+        // `Start-Process ping` from a PowerShell that ended, and a job it started.
+        member(30, "ping -n 600 127.0.0.1", "ping.exe", None),
+        member(31, "ffmpeg", "ffmpeg.exe", of(30)),
+        // A build's daemon, whose starter was the build tool, and what it started.
+        member(40, "java GradleDaemon", "java.exe", None),
+        member(41, "java worker", "java.exe", of(40)),
+        // A job whose birth was never read.
+        member(50, "sleep", "sleep.exe", None),
+    ];
+    let born_of_a_shell = |key: ProcessKey| key.pid == 30;
+
+    let proved = proved_by_birth(&detached, born_of_a_shell);
+
+    let mut proved: Vec<u32> = proved.iter().map(|key| key.pid).collect();
+    proved.sort_unstable();
+    assert_eq!(proved, [30, 31]);
+}
+
+#[test]
+fn a_process_whose_parent_is_not_among_the_detached_work_is_never_proved_by_a_birth() {
+    // A list that is not closed under descent (a parent that is the turn's, say): nothing is
+    // concluded from the birth of a process that is no root.
+    let detached = vec![member(31, "ffmpeg", "ffmpeg.exe", of(30))];
+
+    assert!(proved_by_birth(&detached, |_| true).is_empty());
+}
+
+#[test]
+fn a_shell_is_told_by_the_host_with_or_without_its_extension() {
+    for shell in [
+        "powershell.exe",
+        "PowerShell.EXE",
+        "pwsh",
+        "bash.exe",
+        "sh",
+        "zsh",
+    ] {
+        assert!(is_a_shell(shell), "{shell}");
+    }
+    for other in ["cmd.exe", "java.exe", "ping.exe", "node", ""] {
+        assert!(!is_a_shell(other), "{other}");
+    }
 }
