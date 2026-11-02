@@ -17,11 +17,23 @@
 
 [run]
 bnb-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "brief_never_began::"]
+bnb-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_follow_up_whose_window_never_began"]
 
 [[plant]]
 name = "brief never began: a turn that came to nothing is not watched, and its task stays working for good (main's shape)"
 meant = "a_brief_a_window_at_rest_never_began_is_pressed_enter_once_then_its_task_is_paused_and_its_requester_told"
 runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                if matches!(turn, Turn::Open) {"
+replace = "                if matches!(turn, Turn::Answered) {"
+
+[[plant]]
+name = "brief never began: the field's follow-up on the rig, its window in its prompt's hooks, stays working for good (main's shape)"
+meant = "a_follow_up_whose_window_never_began_its_brief_is_paused_its_chief_told_and_its_resume_goes_into_the_same_window"
+runs = ["bnb-rig"]
+builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
