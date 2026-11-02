@@ -319,9 +319,6 @@ pub(crate) fn remove_member(
             drop_queued(store, task.id)?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
         }
-        for (task, _) in &open {
-            tell_stranded_waiters(store, project_id, task)?;
-        }
         for id in &windows {
             let kept = kept_through_leaving(store, *id, &reason)?;
             store.db.execute(
@@ -371,6 +368,12 @@ pub(crate) fn remove_member(
         for ((task, _), dropped) in open.iter().zip(&dropped) {
             let lead = format!("T-{} was cancelled: {reason}.", task.number);
             dropped.tell_the_others(store, task, &lead, &leaving)?;
+        }
+        // Last: what waited on the work that went is told after the word of its going, which the
+        // chief is given first (it is given its notes one at a time, the oldest first; a wait told
+        // before its cause reached it as news with the cause unknown).
+        for (task, _) in &open {
+            tell_stranded_waiters(store, project_id, task)?;
         }
         Ok(RemovedMember {
             member: participant_view(&store.participant_row(member.id)?)?,

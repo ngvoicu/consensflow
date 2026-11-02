@@ -148,15 +148,25 @@ name = "waited for: a member's removal tells the chief of a waiter right after e
 meant = "a_waiter_of_several_tasks_a_removed_member_held_is_told_to_the_chief_once_naming_each"
 runs = ["ledger-waited-for"]
 
+# The step tells the chief of a waiter after all its cancels and its other words (board notices,
+# T-1113); the plant tells it right after each cancel instead.
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
-find = """            store.move_task(task, "cancelled", json!({ "reason": reason }))?;
-        }
+find = """        // Last: what waited on the work that went is told after the word of its going, which the
+        // chief is given first (it is given its notes one at a time, the oldest first; a wait told
+        // before its cause reached it as news with the cause unknown).
         for (task, _) in &open {
             tell_stranded_waiters(store, project_id, task)?;
         }
 """
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = """            store.move_task(task, "cancelled", json!({ "reason": reason }))?;
+        }
+        for id in &windows {"""
 replace = """            store.move_task(task, "cancelled", json!({ "reason": reason }))?;
             tell_stranded_waiters(store, project_id, task)?;
         }
-"""
+        for id in &windows {"""
