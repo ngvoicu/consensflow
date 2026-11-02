@@ -30,6 +30,16 @@ const SHOULD_I_CONTINUE: &str = "Should I continue with the live A/B runs and th
 const WAITING_FOR_THE_INSTALL: &str =
     "Question for you: has the Build Tools 2022 install finished? I'm waiting for your answer.";
 
+/// Whether `body` is the question ConsensFlow raised from the last words `words` of a turn: the
+/// words, and the line that says whose turn it was and how to take them as the result.
+fn is_raised_from(body: &str, words: &str) -> bool {
+    body.starts_with(words)
+        && body[words.len()..].starts_with("\n\n(ConsensFlow: @")
+        && body.ends_with(
+            "'s turn ended on these words. If they are its result: `cf task finish T-1`.)",
+        )
+}
+
 /// A board whose worker ended its turn on T-1 with `words` for its last words: the project,
 /// once T-1 is no longer at work.
 fn ended_on<'a>(rig: &'a Rig, words: &str) -> cf_e2e::Result<Project<'a>> {
@@ -57,9 +67,16 @@ fn a_turn_that_ends_asking_whether_to_go_on_is_a_question_the_chief_answers_and_
     assert_eq!(project.task(1)?["state"], "waiting", "not done");
     let thread = told(&project)?;
     assert_eq!(
-        thread,
-        [("question".to_owned(), SHOULD_I_CONTINUE.to_owned())],
-        "the worker's words as its question, and no result"
+        thread
+            .iter()
+            .map(|(kind, _)| kind.as_str())
+            .collect::<Vec<_>>(),
+        ["question"],
+        "the worker's words as its question, and no result: {thread:?}"
+    );
+    assert!(
+        is_raised_from(&thread[0].1, SHOULD_I_CONTINUE),
+        "{thread:?}"
     );
 
     // `cf answer` reaches it: the worker takes the answer in and its reply is the result.
@@ -88,9 +105,38 @@ fn a_turn_that_ends_saying_it_waits_for_the_chiefs_answer_is_a_question_and_its_
     let project = ended_on(&rig, WAITING_FOR_THE_INSTALL)?;
 
     assert_eq!(project.task(1)?["state"], "waiting", "not done");
-    assert_eq!(
-        told(&project)?,
-        [("question".to_owned(), WAITING_FOR_THE_INSTALL.to_owned())]
+    let thread = told(&project)?;
+    assert_eq!(thread.len(), 1, "{thread:?}");
+    assert_eq!(thread[0].0, "question");
+    assert!(
+        is_raised_from(&thread[0].1, WAITING_FOR_THE_INSTALL),
+        "{thread:?}"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+/// The way out of a question nobody meant: `cf task finish` takes a waiting task's last words
+/// as the result, from the chief's window, on the real daemon.
+#[test]
+fn the_chief_finishes_a_raised_question_and_its_words_are_the_result() -> Outcome {
+    let rig = Rig::start(config())?;
+    let project = ended_on(&rig, WAITING_FOR_THE_INSTALL)?;
+    assert_eq!(project.task(1)?["state"], "waiting");
+
+    rig.tell(project.id(), "CF task finish T-1")?;
+    rig.wait_for("T-1 to be finished", secs(60), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let results: Vec<String> = told(&project)?
+        .into_iter()
+        .filter(|(kind, _)| kind == "result")
+        .map(|(_, body)| body)
+        .collect();
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert!(
+        results[0].starts_with(WAITING_FOR_THE_INSTALL),
+        "{results:?}"
     );
     rig.close()?;
     Ok(())

@@ -60,6 +60,8 @@ fn a_worker_that_waits_for_the_chiefs_answer_asks() {
         "The composition is unchanged and awaits your approval after the review.",
         "**Still waiting on you:** the fix for the two Windows reds is not pushed.",
         "I'm waiting for you to land the fix.",
+        "I await your decision to proceed.",
+        "I await your decision on whether to continue.",
         "I did not run the gate and am waiting for your go.",
         "Nothing blocks me, so I'm waiting for your go.",
     ] {
@@ -155,6 +157,7 @@ fn a_question_that_is_not_the_workers_to_ask_is_none() {
         "The customer's last line was: \"How should I configure the proxy?\"",
         "Added two FAQ entries: 'How do I reset my password?' and 'Can I change my plan?'",
         "The prompt reads `Should I continue?` and then waits.",
+        "The prompt is `Should I continue?`",
         "The script ends with:\n\n```python\nanswer = input('Should I continue? ')\n```",
         "The script ends with:\n```\nShould I continue?\n```",
         "> Should I continue?",
@@ -247,6 +250,7 @@ fn a_negation_takes_back_a_wait() {
     }
     // But, and and so end a clause for it: the wait is a new one.
     asks("It is not a failure, but I'm waiting for your go.");
+    asks("It is not a failure but I'm waiting for your go.");
 }
 
 /// A negator inside the quoted words is not the worker's: the quote is out of the sentence.
@@ -254,6 +258,7 @@ fn a_negation_takes_back_a_wait() {
 fn a_negator_in_quoted_words_does_not_count_and_a_wait_in_them_neither() {
     does_not_ask("The screen reads: 'nothing here yet \u{2014} waiting for your first upload.'");
     does_not_ask("The screen reads: \"nothing here yet \u{2014} waiting for your first upload.\"");
+    does_not_ask("The button reads 'waiting for your go' until it loads.");
     asks("The log says 'ok'. I'm waiting for your go.");
     asks("I read \"nothing to do\" in the log, and I'm waiting for your go.");
 }

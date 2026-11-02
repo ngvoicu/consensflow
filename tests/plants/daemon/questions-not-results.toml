@@ -33,7 +33,7 @@ qnr-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "
 qnr-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_workers_question_in_its_last_words"]
 qnr-fake = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "a_line_that_says_words"]
 qnr-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "finished_questions"]
-qnr-ledger-open = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "chief_open_work"]
+qnr-ledger-answers = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "questions::"]
 qnr-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
 qnr-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "waits on a question"]
 
@@ -155,8 +155,8 @@ replace = "task_id = ?2 AND ?3 = ?3 AND kind = 'question'"
 
 [[plant]]
 name = "questions not results: a withdrawn question with an answer that failed is refused another"
-meant = "an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_obliging"
-runs = ["qnr-ledger-open", "qnr-ledger"]
+meant = "questions::an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_obliging"
+runs = ["qnr-ledger-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
@@ -482,19 +482,8 @@ runs = ["qnr-lib"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/asks.rs"
 find = '''            starts_a_word(paragraph, at)
-                && after.starts_with(' ')'''
-replace = "            after.starts_with(' ')"
-
-[[plant]]
-name = "questions not results: a wait needs no word after the stem"
-meant = "a_phrase_inside_another_word_is_none"
-runs = ["qnr-lib"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_end/asks.rs"
-find = '''                && after.starts_with(' ')
                 && waits_for_who(after.trim_start())'''
-replace = '                && waits_for_who(after.trim_start())'
+replace = "            waits_for_who(after.trim_start())"
 
 [[plant]]
 name = "questions not results: a negation takes nothing back from a wait"
@@ -557,8 +546,8 @@ find = '''                && ends_there
 replace = ''
 
 [[plant]]
-name = "questions not results: a word of 'you' starts a wait at any place in a word"
-meant = "a_phrase_inside_another_word_is_none"
+name = "questions not results: a wait phrase may start inside another word"
+meant = "a_wait_phrase_that_stands_in_another_word_is_none"
 runs = ["qnr-lib"]
 
 [[plant.edit]]
@@ -568,4 +557,15 @@ find = '''    !paragraph[..at]
         .next_back()
         .is_some_and(char::is_alphanumeric)'''
 replace = '    paragraph.len() > at'
+
+[[plant]]
+name = "questions not results: the rig's Finish of a task that waits is refused"
+meant = "the_chief_finishes_a_raised_question_and_its_words_are_the_result"
+runs = ["qnr-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '"working" | "waiting" | "paused"'
+replace = '"working" | "paused"'
 

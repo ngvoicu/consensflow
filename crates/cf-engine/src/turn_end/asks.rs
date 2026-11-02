@@ -281,7 +281,6 @@ fn waits_for_the_chief(paragraph: &str) -> bool {
         paragraph.match_indices(stem).any(|(at, _)| {
             let after = &paragraph[at + stem.len()..];
             starts_a_word(paragraph, at)
-                && after.starts_with(' ')
                 && waits_for_who(after.trim_start())
                 && !negated(&paragraph[..at])
         })
