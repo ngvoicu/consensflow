@@ -323,7 +323,7 @@ pub fn used_percent(usage: &Value) -> Option<(u64, u64)> {
 }
 
 /// The share of its window or of its week at which a live run never starts: a run may use
-/// all of Muse's allowance (T-1123, Gabriel 2026-11-02), but every rig that runs the
+/// all of Muse's allowance (T-1123, the owner's decision of 2026-11-02), but every rig that runs the
 /// machine's Muse asks first ([`guard_allowance`]), so no case starts on an allowance that
 /// is used up (T-1076: `live close-early` had no such check, ran at 99% of the week, and
 /// its task never finished; only `live muse-window` asked).
