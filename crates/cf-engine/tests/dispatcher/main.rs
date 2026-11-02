@@ -59,6 +59,7 @@ mod deliveries;
 mod exit_overdue;
 mod exit_proof;
 mod exit_unsettled;
+mod failure_first;
 mod failure_reasons;
 mod final_answer;
 mod first_delivered;
