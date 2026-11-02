@@ -482,11 +482,18 @@ fn question_case(live: &Live) -> Result<String> {
             .find(|message| message["kind"] == kind)
             .unwrap_or_default())
     };
-    rig.wait_for(
+    let asked = rig.wait_for(
         "the worker's question to reach the chief",
         secs(300),
         || Ok(!chiefs(&project, "question")?.is_null()),
-    )?;
+    );
+    if let Err(waited) = asked {
+        // What the worker did instead, for the red to be read (T-954: one run of nine timed out
+        // here and said nothing more; its rerun held).
+        let did = what_the_worker_did(&rig, &project);
+        rig.close()?;
+        return Err(Error::Daemon(format!("{waited}\n{did}")));
+    }
     done(&rig, &project, 1, secs(300))?;
     let question = chiefs(&project, "question")?;
     let worker = worker(&project)?;
@@ -543,6 +550,23 @@ fn question_case(live: &Live) -> Result<String> {
         held(read, format!("the foreign rules were not read: {said}"))?;
     }
     Ok(said)
+}
+
+/// What the worker did, as a red case says it: its task as the board has it, the last lines its
+/// window drew, and the shape of its session.
+fn what_the_worker_did(rig: &Rig, project: &Project<'_>) -> String {
+    let task = project
+        .task(1)
+        .map_or_else(|failed| failed.to_string(), |task| task.to_string());
+    let screen = pane_of(project)
+        .ok()
+        .and_then(|pane| pane["id"].as_str().map(|id| rig.screen(id)))
+        .map_or_else(String::new, |screen| live::last_lines(&screen));
+    format!(
+        "the task: {}\nits window last drew:\n{screen}\nits session: {}",
+        live::cut(&task, 1_500),
+        shape_of(rig)
+    )
 }
 
 /// The person's own Claude Code rules in the home `home`, which Muse reads as theirs before
