@@ -66,6 +66,11 @@
 //!   starts them so and goes on with `rest` as the line it was given, as a turn does
 //!   that starts agents and works on (T-604's, 2026-10-25): an Escape or a refusal
 //!   then ends a turn whose agents still run, and whose record counts none of them.
+//! - A line `PACED <n> <seconds> <words>` is a turn that works through `n` steps, each a message
+//!   that calls a tool, with `seconds` between one and the next, as the record of a turn at
+//!   work grows (an Escape in one of them stops it there), and then answers the words. Unlike
+//!   `STEPS`, which writes its steps at once, it can follow `REPLY … THEN`: a window that
+//!   answers the chief's tell and carries on with its work, as the field's did (T-1139).
 //! - A line `STEPS <n> <words>` is a turn that writes `n` lines of progress, each a
 //!   message that calls a tool, before its answer, and `CLAUDE-JOB [--silent] <seconds>
 //!   <words> :: <report>` a turn that starts a job in the background as Claude Code does,
@@ -102,7 +107,7 @@ use serde_json::{json, Value};
 
 use crate::agents::Agents;
 use crate::background::{until_up, Jobs, Server, THINKING};
-use crate::steps::Tasks;
+use crate::steps::{Step, Tasks};
 use crate::stop::Stop;
 
 /// How long the shell that detaches a job may take to end: a PowerShell's
@@ -155,6 +160,10 @@ pub enum Reply {
     Refused,
     /// An Escape stopped the turn before it answered.
     Stopped,
+    /// The turn works through these steps, a pause after each (an Escape in one of them
+    /// stops it there), and then answers the text: a turn whose record grows while it
+    /// is at work (`PACED`).
+    Worked(Vec<Step>, Duration, String),
 }
 
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever
@@ -272,6 +281,7 @@ fn print_lines(bytes: usize) -> std::io::Result<()> {
 
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
+    static PACED: OnceLock<Regex> = OnceLock::new();
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static HANG: OnceLock<Regex> = OnceLock::new();
     static PRINT: OnceLock<Regex> = OnceLock::new();
@@ -304,6 +314,17 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         .collect();
     if !accepted.is_empty() {
         return Ok(Reply::Text(format!("accepted: {}", accepted.join(" | "))));
+    }
+    if let Some(paced) = pattern::once(&PACED, r"(?m)^PACED (\d+) (\d+) (.+)$").captures(text) {
+        let (steps, seconds): (u64, u64) = match (paced[1].parse(), paced[2].parse()) {
+            (Ok(steps), Ok(seconds)) => (steps, seconds),
+            _ => return Err(format!("PACED {} {}", &paced[1], &paced[2])),
+        };
+        return Ok(Reply::Worked(
+            (1..=steps).map(|at| Step::progress(at, steps)).collect(),
+            Duration::from_secs(seconds),
+            paced[3].to_owned(),
+        ));
     }
     if let Some(slow) = pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         let seconds: u64 = slow[1].parse().map_err(|_| format!("SLEEP {}", &slow[1]))?;
@@ -687,6 +708,37 @@ mod tests {
         assert!(!is_session_of("worker2-amber-pine", "worker"));
         assert!(!is_session_of("chief", "worker"));
         assert!(!is_session_of("worker", "worker-amber"));
+    }
+
+    #[test]
+    fn a_paced_turn_works_through_its_steps_a_pause_after_each_and_answers_the_words_after_them() {
+        let reply = reply_to("PACED 3 2 Reply with exactly: REPORT", &window()).unwrap();
+        let Reply::Worked(steps, gap, answer) = reply else {
+            panic!("a paced turn: {reply:?}");
+        };
+        assert_eq!(gap, Duration::from_secs(2));
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| step.said.as_str())
+                .collect::<Vec<_>>(),
+            ["Step 1 of 3", "Step 2 of 3", "Step 3 of 3"]
+        );
+        assert_eq!(answer, "Reply with exactly: REPORT");
+    }
+
+    #[test]
+    fn a_paced_turn_follows_the_answer_to_a_tell_in_the_same_turn() {
+        // `REPLY … THEN PACED …`: the window answers the chief's tell with `cf answer` and
+        // goes on working (T-1139), the answer to the tell failing here as no `cf` is run.
+        let reply = reply_to(
+            "[ConsensFlow m-3 \u{b7} T-1 \u{b7} question from @chief]\nStop. REPLY ok THEN PACED 2 1 Reply with exactly: END",
+            &window(),
+        )
+        .unwrap();
+        assert!(
+            matches!(reply, Reply::Worked(steps, _, answer) if steps.len() == 2 && answer.ends_with("END"))
+        );
     }
 
     #[test]

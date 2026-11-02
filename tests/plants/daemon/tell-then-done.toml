@@ -159,8 +159,8 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "    record(store, project_id, number, body, &ACTIVE_TASK_STATES)\n"
-replace = "    record(store, project_id, number, body, &FINISHABLE_TASK_STATES)\n"
+find = "    record(store, project_id, number, body, &ACTIVE_TASK_STATES, true)\n"
+replace = "    record(store, project_id, number, body, &FINISHABLE_TASK_STATES, true)\n"
 
 [[plant]]
 name = "tell then done: a window's answer is looked for after its brief and not after the tell"

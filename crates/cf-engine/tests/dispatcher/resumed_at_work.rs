@@ -17,6 +17,7 @@
 //! end is still not the resumed task's result: its answer is the follow-up to them.
 
 use cf_engine::testing::Context;
+use cf_harness::contract::Over;
 use cf_harness::records::{Item, Role};
 use cf_ledger::GivenUp;
 use cf_proto::ledger::{Claim, MessageView};
@@ -299,5 +300,141 @@ fn a_turn_that_ends_after_the_resume_shows_nothing_of_work_and_the_task_is_worki
         context.pass().unwrap();
     }
     assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn a_record_rewritten_under_the_baseline_claims_no_work_until_the_agent_writes_again() {
+    // A compaction rewrites the record: the item the watch stood on is gone, and what the
+    // rewritten record holds says nothing of work after the resume.
+    let context = Context::new();
+    let (project, _told, _words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    let summary = context
+        .adapter
+        .item(Role::Assistant, "Where the work stands");
+    context.adapter.with("zeus", |agent| {
+        agent.items.clear();
+        agent.items.push(summary);
+    });
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn what_the_harness_writes_in_its_agents_place_and_a_message_typed_in_are_no_work_of_the_agent() {
+    let context = Context::new();
+    let (project, _told, _words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    // Claude Code's close of a cut turn, a compaction's summary, and the human's own words.
+    let mut closing = context
+        .adapter
+        .item(Role::Assistant, "No response requested.");
+    closing.synthetic = true;
+    closing.commentary = true;
+    let mut summary = context
+        .adapter
+        .item(Role::User, "The summary of the conversation");
+    summary.compaction = true;
+    let typed = context
+        .adapter
+        .item(Role::User, "Please also check the lockfile");
+    context.adapter.with("zeus", |agent| {
+        agent.items.extend([closing, summary, typed])
+    });
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    // The agent's own step after them is the work.
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn the_daemons_bare_words_that_resume_a_held_task_are_no_resume_words_of_a_task_shown_working() {
+    // A task held for quota and resumed by the daemon with its own bare words: a window
+    // that goes on by itself withdraws them (`went_on_by_itself`), so its turn at work is
+    // that path's, and the task is not shown working with them waiting.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.hold_task(project.id, 1);
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(project.id, 1, None, cf_ledger::RESUME_WORDS)
+        .unwrap();
+    assert_eq!(state(&context, project.id), "queued");
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .resume_words_waiting(project.id, 1)
+            .unwrap(),
+        None
+    );
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo build)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project.id), "queued");
+}
+
+#[test]
+fn the_ledger_shows_no_work_for_words_that_are_being_pasted_already() {
+    // Their paste is begun: their arrival moves the task, as it moves any.
+    let context = Context::new();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .begin_delivery(words.id)
+        .unwrap();
+    let refused = context
+        .ledger
+        .borrow_mut()
+        .work_while_resumed(project, 1)
+        .expect_err("refused");
+    assert!(
+        refused.to_string().contains("not waiting for the words"),
+        "{refused}"
+    );
+    assert_eq!(state(&context, project), "queued");
+}
+
+#[test]
+fn a_first_brief_waiting_for_its_window_is_no_resume_words() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .resume_words_waiting(project.id, 1)
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn a_turn_the_record_says_is_over_but_has_not_said_so_a_moment_shows_no_work() {
+    let context = Context::new();
+    let (project, _told, _words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context
+        .adapter
+        .with("zeus", |agent| agent.over = Over::Pending);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    context.adapter.with("zeus", |agent| agent.over = Over::No);
+    context.pass().unwrap();
     assert_eq!(state(&context, project), "working");
 }
