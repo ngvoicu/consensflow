@@ -166,19 +166,6 @@ fn pause_key(stop: &Stop) -> StopKey {
     }
 }
 
-/// The turn the first round of `stop` was pressed into, by the message of the user's that
-/// began it: none where no key was pressed for it.
-fn pressed_turn(record: &Record, stop: &Stop) -> Option<Arc<str>> {
-    let key = pause_key(stop);
-    record
-        .window
-        .borrow()
-        .interrupted
-        .as_ref()
-        .filter(|done| done.key == key)
-        .and_then(|done| done.turn.clone())
-}
-
 /// The message of the user's the look's record shows last, by its id: what began the
 /// turn at work, or what came after it. A compaction's summary, which the harness writes
 /// in the user's place within a turn, is none.
@@ -200,8 +187,15 @@ fn last_message(observed: &Observed) -> Option<Arc<str>> {
 /// was asked of, and a key pressed into them, or a close, ends what the window does on
 /// its own (T-604's agents).
 fn past_its_turn(record: &Record, stop: &Stop, observed: &Observed) -> bool {
-    pressed_turn(record, stop)
-        .is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed))
+    let key = pause_key(stop);
+    let pressed = record
+        .window
+        .borrow()
+        .interrupted
+        .as_ref()
+        .filter(|done| done.key == key)
+        .and_then(|done| done.turn.clone());
+    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed))
 }
 
 impl Dispatcher {
@@ -276,9 +270,9 @@ impl Dispatcher {
                     if observed.took_back {
                         self.take_back(participant, &stop, observed)?;
                     }
-                    self.pay(record, &stop);
                     // Not taken back yet: the record may say so at the next look.
                     record.window.borrow_mut().paid_untaken = (!observed.took_back).then_some(stop);
+                    self.pay(record, &stop);
                     // The window stays: what its turn left runs on, named and never ended.
                     self.tell_paused_left_running(project, record, stop.number)
                         .await
