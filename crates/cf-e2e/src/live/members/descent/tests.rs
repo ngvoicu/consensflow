@@ -699,18 +699,18 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("tests/live_approval/flow.rs", "not a Windows case: an advisor's window on a Mac"),
     ("tests/live_approval/minute.rs", "not a Windows case: an advisor's window on a Mac"),
     ("tests/live_asks.rs", "Claude Code's commands run in Git Bash on Windows"),
-    ("tests/live_devin_wire.rs", "Devin's `sleep 30` is PowerShell's Start-Sleep on Windows"),
+    ("tests/live_devin_wire.rs", "`sleep 30` is PowerShell's Start-Sleep and Git Bash's own (not run in cmd.exe; Devin's shell on Windows is unchecked)"),
     ("tests/live_finish/leaving.rs", "`ps` on the Unix side, PowerShell's table on Windows"),
     ("tests/live_finish/leaving/tests.rs", "tests of the Unix side"),
     ("tests/live_folder_trust.rs", "a server of a .mcp.json the dialog asks of, never started"),
     ("tests/live_monitor_wait.rs", "Claude Code's commands run in Git Bash on Windows"),
     ("tests/live_muse_background.rs", "a Mac case: the keychain, lsof"),
-    ("tests/live_muse_window.rs", "Muse's `sleep 25`"),
+    ("tests/live_muse_window.rs", "`sleep 25` is PowerShell's Start-Sleep and Git Bash's own (Muse's shell on Windows is unchecked)"),
     ("tests/live_parity/claude.rs", "macOS's keychain"),
     ("tests/live_parity/terminal_env.rs", "a Mac case: refuses elsewhere"),
     ("tests/live_stops/midturn/tool.rs", "text of process lists the case reads"),
     ("tests/live_stops/slow.rs", "a Claude hook, which Claude Code runs in Git Bash on Windows"),
-    ("tests/live_tell.rs", "`sleep 15` is PowerShell's Start-Sleep on Windows; Claude's Monitor runs in Git Bash"),
+    ("tests/live_tell.rs", "`sleep 15` is PowerShell's Start-Sleep and Git Bash's own; Claude's Monitor runs in Git Bash"),
 ];
 
 /// The first Unix-only program a line of Rust starts (`Run::new`, `Command::new` or a `run`
