@@ -33,13 +33,13 @@ runs = ["ff-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        self.tell_given_up(message, because)?;\n"
-replace = ""
+find = "        let told_the_requester = self.tell_given_up(message, because, failed_before)?;\n"
+replace = "        let told_the_requester = true;\n"
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                &thread.task.requester,\n            )?;\n        }\n        Ok(())\n    }\n"
-replace = "                &thread.task.requester,\n            )?;\n        }\n        self.tell_given_up(message, because)?;\n        Ok(())\n    }\n"
+find = "                &thread.task.requester,\n            )?;\n        }\n        Ok(())\n    }\n\n    /// Whether the task `message` is about has failed."
+replace = "                &thread.task.requester,\n            )?;\n        }\n        self.tell_given_up(message, because, failed_before)?;\n        Ok(())\n    }\n\n    /// Whether the task `message` is about has failed."
 
 [[plant]]
 name = "failure first: the requesters of the other waiters of a task a delivery failed are never told"
@@ -58,7 +58,7 @@ runs = ["ff-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                let waits = self.seams.ledger.borrow().waiting_for_it(\n                    project.id,\n                    number,\n                    &task.requester,\n                )?;\n"
+find = "                let waits = if failed_before {\n                    String::new()\n                } else {\n                    self.seams.ledger.borrow().waiting_for_it(\n                        project.id,\n                        number,\n                        &task.requester,\n                    )?\n                };\n"
 replace = "                let waits = String::new();\n"
 
 [[plant]]
@@ -78,7 +78,7 @@ runs = ["ff-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                let waits = self.seams.ledger.borrow().waiting_for_it(\n                    project.id,\n                    number,\n                    &task.requester,\n                )?;\n"
+find = "                let waits = if failed_before {\n                    String::new()\n                } else {\n                    self.seams.ledger.borrow().waiting_for_it(\n                        project.id,\n                        number,\n                        &task.requester,\n                    )?\n                };\n"
 replace = "                let waits = String::new();\n"
 
 [[plant.edit]]
