@@ -34,10 +34,12 @@ const COPIES: [&str; 3] = [
     "option(\"claude-config\")",
 ];
 
-/// The folders of the sources that run real harnesses.
-const LOOKED_IN: [&str; 3] = [
+/// The folders of the sources that run real harnesses: the matrix's among them (LMX-04), which
+/// seats every harness through the kit.
+const LOOKED_IN: [&str; 4] = [
     "crates/cf-e2e/tests",
     "crates/cf-e2e/src/live",
+    "crates/cf-e2e/src/matrix",
     "crates/cf-evals/src",
 ];
 

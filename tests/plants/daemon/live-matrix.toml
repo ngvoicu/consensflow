@@ -1,0 +1,117 @@
+# The live matrix's runner (spec `live-matrix`, LMX-04, T-1135): `crates/cf-e2e/src/matrix/`, a
+# real harness in each position of a board, the chief driven by a scripted human, and an oracle
+# that reads the ledger and the windows' records. Its control (`tests/live_matrix.rs`,
+# `the_matrix_passes_its_scenario_on_the_rigs_stand_ins`) runs the same driver and oracle on the
+# rig's stand-ins and passes; the first two plants put a wrong assignee and a missing result in
+# what the oracle reads, and the control fails. The others take a rule of the oracle, the
+# driver, the bindings or the stand-in out, and the matrix's or the stand-in's own tests fail.
+#
+# Every name holds `live matrix`, so `cargo xtask plants daemon "live matrix"` runs them all.
+
+[run]
+# The control, on the rig's stand-ins.
+matrix-control = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::"]
+# The matrix's own tests.
+matrix-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
+# The stand-in agent's replies.
+matrix-fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "reply::"]
+
+[[plant]]
+name = "live matrix: the oracle reads each task's assignee as another task's (a wrong assignee)"
+meant = "the_matrix_passes_its_scenario_on_the_rigs_stand_ins"
+runs = ["matrix-control"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/oracle.rs"
+find = '''        let assignee = task["assignee"].as_str().unwrap_or_default();'''
+replace = '''        let assignee = snapshot.task(number % 4 + 1).and_then(|other| other["assignee"].as_str()).unwrap_or_default();'''
+
+[[plant]]
+name = "live matrix: the oracle looks for each result under another task (a missing result)"
+meant = "the_matrix_passes_its_scenario_on_the_rigs_stand_ins"
+runs = ["matrix-control"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/oracle.rs"
+find = '''        let result = snapshot.delivered_result(number);'''
+replace = '''        let result = snapshot.delivered_result(number + 100);'''
+
+[[plant]]
+name = "live matrix: a task done by another member passes as the seated one's"
+meant = "a_task_done_by_another_member_is_a_wrong_assignee"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/oracle.rs"
+find = '''            agent.as_deref() == Some(seat.agent().as_str()),'''
+replace = '''            true || agent.as_deref() == Some(seat.agent().as_str()),'''
+
+[[plant]]
+name = "live matrix: a result not yet delivered to the chief counts"
+meant = "a_result_counts_only_delivered_and_of_its_own_task"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/observe.rs"
+find = '''                && message["state"] == "delivered"'''
+replace = '''                && message["state"] != "nothing"'''
+
+[[plant]]
+name = "live matrix: a task a member asked for is bound as the chief's"
+meant = "tasks_are_bound_by_their_pool_oldest_first_and_never_by_their_number"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/observe.rs"
+find = '''            .filter(|task| task["pool"] == pool && task["requester"] == "chief")'''
+replace = '''            .filter(|task| task["pool"] == pool)'''
+
+[[plant]]
+name = "live matrix: the turn ceiling is checked before the deadline"
+meant = "the_deadline_is_checked_before_the_turns_and_neither_is_moved_by_anything"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/human.rs"
+find = '''        if elapsed >= self.deadline {'''
+replace = '''        if elapsed >= self.deadline && taken <= self.turns {'''
+
+[[plant]]
+name = "live matrix: an ask counts as gone in once its record shows it, with no turn begun"
+meant = "an_ask_went_in_only_when_its_record_and_its_turn_were_both_seen"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/human.rs"
+find = '''        self.in_record_ms.is_some() && self.turn_ms.is_some()'''
+replace = '''        self.in_record_ms.is_some()'''
+
+[[plant]]
+name = "live matrix: the oracle runs the project's own checker, which a worker can rewrite"
+meant = "the_fixture_passes_once_the_change_is_made_and_not_before"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/oracle.rs"
+find = '''        .args(["-e", CHECK])'''
+replace = '''        .args(["check.cjs"])'''
+
+[[plant]]
+name = "live matrix: an owner's file that changed is not seen"
+meant = "the_owners_files_are_unchanged_until_one_is_written_or_a_link_moved"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/evidence.rs"
+find = '''            changed.is_empty(),'''
+replace = '''            true,'''
+
+[[plant]]
+name = "live matrix: the stand-in runs the first CF line of a message alone"
+meant = "each_cf_line_of_a_message_is_run_in_order_with_its_last_word_whole"
+runs = ["matrix-fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = '''    let each = line.captures_iter(text);'''
+replace = '''    let each = line.captures_iter(text).take(1);'''

@@ -1,0 +1,164 @@
+//! The live matrix (spec `live-matrix`, LMX-04): a real harness in every position of a board,
+//! the chief driven by a scripted human through a scenario, and an oracle that reads the
+//! ledger and the windows' records (`cf_e2e::matrix`). It is opt-in: it spends the quota of
+//! every harness it seats, so it is ignored unless asked for and is no part of `check` or CI.
+//!
+//! ```text
+//! cargo xtask live matrix --board 0 --scenario smoke -- --test-threads 1
+//! ```
+//!
+//! Board 0 seats Claude Code as the chief, Codex as the worker, Pi as the reviewer, Devin as
+//! the advisor and Muse Code as the tester, each on the kit's model for it. The evidence of a
+//! run is under `evals/reports/live-matrix/<run-id>/`. The control below runs the same driver
+//! and oracle on the rig's stand-ins, offline.
+
+use std::path::Path;
+
+use cf_e2e::checkout;
+use cf_e2e::live::report;
+use cf_e2e::live::{self, Log};
+use cf_e2e::matrix::evidence::{Owner, REPORTS};
+use cf_e2e::matrix::run::{run, Matrix};
+use cf_e2e::matrix::scenario::Scenario;
+use cf_e2e::matrix::seating::Seating;
+use cf_e2e::{Error, Result};
+
+/// The stand-in agent's program: the stand-in seats' windows, and the one a rig has where no
+/// window runs it.
+const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
+
+/// The board and the scenario the words ask for: `--board` (0 where none is said) and
+/// `--scenario` (`smoke`). The harnesses are the board's; a harness named besides is refused.
+fn asked(
+    board: Option<&str>,
+    scenario: Option<&str>,
+    harnesses: &[String],
+) -> Result<(Seating, Scenario)> {
+    if !harnesses.is_empty() {
+        return Err(Error::Daemon(format!(
+            "the matrix seats the harnesses its board names, and takes none by name: {}",
+            harnesses.join(" ")
+        )));
+    }
+    let number = board.unwrap_or("0");
+    let board = number
+        .parse::<u8>()
+        .map_err(|_| Error::Daemon(format!("--board takes a board's number, not {number}")))?;
+    Ok((
+        Seating::board(board)?,
+        Scenario::named(scenario.unwrap_or("smoke"))?,
+    ))
+}
+
+#[test]
+#[ignore = "opt-in: spends the quota of every harness the board seats; cargo xtask live matrix --board 0 --scenario smoke -- --test-threads 1"]
+fn a_board_of_real_harnesses_goes_through_its_scenario_as_the_ledger_and_the_records_say() -> Result
+{
+    let log = Log::begin("live matrix")?;
+    let (seating, scenario) = asked(
+        live::option("board").as_deref(),
+        live::option("scenario").as_deref(),
+        &live::list("harness"),
+    )?;
+    let matrix = Matrix {
+        seating,
+        scenario,
+        stand_in: Path::new(FAKE_AGENT),
+        reports: checkout::path(REPORTS),
+        owner: Owner::of_machine()?,
+    };
+    let outcome = run(&matrix, &log)?;
+    log.say(format!(
+        "{} s, {} turns: {:?}; the evidence is in {}",
+        outcome.elapsed.as_secs(),
+        outcome.total_turns,
+        outcome.turns,
+        outcome.evidence.folder.display()
+    ));
+    report::conclude(
+        &log,
+        "what each check of the matrix came to",
+        &outcome.checks,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_words_ask_for_board_0_and_smoke_and_nothing_else_yet() {
+        let (seating, scenario) = asked(None, None, &[]).unwrap();
+        assert_eq!((seating.board, scenario.name), (Some(0), "smoke"));
+        let refused = |board, scenario, harnesses: &[String]| {
+            asked(board, scenario, harnesses)
+                .err()
+                .map(|failed| failed.to_string())
+                .unwrap_or_default()
+        };
+        assert!(refused(Some("1"), None, &[]).contains("board 0 alone so far"));
+        assert!(refused(Some("one"), None, &[]).contains("--board takes a board's number, not one"));
+        assert!(refused(None, Some("core"), &[]).contains("smoke alone so far"));
+        assert!(refused(None, None, &["claude".to_owned()]).contains("takes none by name: claude"));
+    }
+
+    /// The control: the same driver and oracle, on a board whose five positions the rig's
+    /// stand-in plays. The human asks the stand-in chief in its own words, which hands out the
+    /// advice, the change, the review and the test and accepts them; the oracle reads the
+    /// ledger and the records, and every check holds. No harness is covered by it.
+    #[test]
+    fn the_matrix_passes_its_scenario_on_the_rigs_stand_ins() {
+        let log = Log::new("live matrix control");
+        let reports = tempfile::tempdir().unwrap();
+        let owned = reports.path().join("owner.json");
+        std::fs::write(&owned, "{}").unwrap();
+        let matrix = Matrix {
+            seating: Seating::stand_ins(),
+            scenario: Scenario::named("smoke").unwrap(),
+            stand_in: Path::new(FAKE_AGENT),
+            reports: reports.path().to_path_buf(),
+            owner: Owner::look(&[], &[owned]),
+        };
+        let outcome = run(&matrix, &log).unwrap();
+        let table = report::table(&outcome.checks);
+        log.report("what each check of the control came to", &table);
+        assert!(outcome.checks.iter().all(|check| check.ok), "{table}");
+        // Every check the oracle has was made: the staff, the asks, the tasks, the fixture,
+        // the bounds and the owner's.
+        for who in [
+            "staff",
+            "chief",
+            "steps",
+            "human",
+            "advice (advisor stand-in)",
+            "change (worker stand-in)",
+            "review (reviewer stand-in)",
+            "test (tester stand-in)",
+            "fixture",
+            "bounds",
+            "owner",
+        ] {
+            assert!(
+                outcome.checks.iter().any(|check| check.who == who),
+                "no check of {who}:\n{table}"
+            );
+        }
+        assert!(outcome.total_turns <= 20, "{:?}", outcome.turns);
+        for file in [
+            "manifest.json",
+            "human.json",
+            "bindings.json",
+            "events.jsonl",
+            "checks.json",
+            "verdict.txt",
+        ] {
+            assert!(
+                outcome.evidence.folder.join(file).is_file(),
+                "no {file} in {}",
+                outcome.evidence.folder.display()
+            );
+        }
+        let verdict = std::fs::read_to_string(outcome.evidence.folder.join("verdict.txt")).unwrap();
+        assert!(verdict.starts_with("GREEN"), "{verdict}");
+    }
+}

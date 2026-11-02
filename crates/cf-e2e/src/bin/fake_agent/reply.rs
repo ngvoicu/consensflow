@@ -17,7 +17,12 @@
 //! - A line `CF <words>` runs any other `cf` with those words as they stand
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
-//!   verbs, as it would type them.
+//!   verbs, as it would type them. Each such line of a message is run, in order
+//!   (a chief that accepts three tasks in one turn: the matrix's stand-in chief).
+//! - A line `WRITE <file> :: <text>` is a worker that changes a file: it writes the
+//!   text (`\n` in it a line break, and one at its end) to the file, a path below the
+//!   window's folder, and answers `wrote <file>` (the matrix's stand-in worker, whose
+//!   change the scenario's checker reads).
 //! - A result delivered to the chief's window started with `CF_TEST_ACCEPT_RESULTS`
 //!   set is accepted, `cf task accept` of the task its envelope (its first line, the
 //!   result's header) names, and nothing else in it is done: a chief that takes its
@@ -287,6 +292,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static VERB: OnceLock<Regex> = OnceLock::new();
     static REFUSED: OnceLock<Regex> = OnceLock::new();
     static SAVED: OnceLock<Regex> = OnceLock::new();
+    static WRITE: OnceLock<Regex> = OnceLock::new();
     static LONG: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
@@ -455,19 +461,16 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             dispatched.join(" | ")
         )));
     }
-    if let Some(verb) = pattern::once(&VERB, r"(?m)^CF (.+)$").captures(text) {
-        let mut parts = verb[1].split(" :: ");
-        let mut words: Vec<String> = parts
-            .next()
-            .unwrap_or_default()
-            .split(' ')
-            .map(str::to_owned)
-            .collect();
-        let said: Vec<&str> = parts.collect();
-        if !said.is_empty() {
-            words.push(said.join(" :: "));
-        }
-        return Ok(Reply::Text(format!("ran cf: {}", run_cf(&words))));
+    let verbs: Vec<String> = verbs(text, pattern::once(&VERB, r"(?m)^CF (.+)$"))
+        .iter()
+        .map(|words| run_cf(words))
+        .collect();
+    if !verbs.is_empty() {
+        return Ok(Reply::Text(format!("ran cf: {}", verbs.join(" | "))));
+    }
+    if let Some(write) = pattern::once(&WRITE, r"(?m)^WRITE (\S+) :: (.*)$").captures(text) {
+        let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
+        return written_in(&folder, &write[1], &write[2]).map(Reply::Text);
     }
     if refused(text, window, pattern::once(&REFUSED, "QUOTA-OUT")) {
         return Ok(Reply::Refused);
@@ -519,6 +522,48 @@ fn saved_in(folder: &Path, names: &str, words: &str) -> Result<String, String> {
     }
     lines.push(words.to_owned());
     Ok(lines.join("\n"))
+}
+
+/// A worker's change: `text` (each `\n` in it a line break, and a line break at its end)
+/// written to `name`, a path below `folder`, which is answered as `wrote <name>`. A name
+/// that leaves the folder (absolute, or with `..`) is refused: the stand-in writes only
+/// in the project it works in.
+fn written_in(folder: &Path, name: &str, text: &str) -> Result<String, String> {
+    let relative = Path::new(name);
+    let inside = relative
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)));
+    if !inside {
+        return Err(format!(
+            "WRITE {name}: not a path below the window's folder"
+        ));
+    }
+    let path = folder.join(relative);
+    std::fs::write(&path, format!("{}\n", text.replace("\\n", "\n")))
+        .map_err(|failed| format!("WRITE {name}: {failed}"))?;
+    Ok(format!("wrote {name}"))
+}
+
+/// The words of `cf` each `CF` line of `text` asks for, in the order of the lines
+/// (`line` is the pattern of one): its words as they stand, and what follows a ` :: `
+/// as one last word, spaces and all.
+fn verbs(text: &str, line: &Regex) -> Vec<Vec<String>> {
+    let each = line.captures_iter(text);
+    each.map(|verb| {
+        let mut parts = verb[1].split(" :: ");
+        let mut words: Vec<String> = parts
+            .next()
+            .unwrap_or_default()
+            .split(' ')
+            .map(str::to_owned)
+            .collect();
+        let said: Vec<&str> = parts.collect();
+        if !said.is_empty() {
+            words.push(said.join(" :: "));
+        }
+        words
+    })
+    .collect()
 }
 
 /// The words of `cf task add` each `DISPATCH` line of `text` asks for, in the
@@ -650,6 +695,43 @@ mod tests {
         assert!(saved_in(&folder.path().join("none"), "a.png", "x")
             .unwrap_err()
             .starts_with("SAVED a.png: "));
+    }
+
+    #[test]
+    fn a_worker_writes_its_change_below_its_folder_and_answers_the_file() {
+        let folder = tempfile::tempdir().unwrap();
+        assert_eq!(
+            written_in(folder.path(), "greet.cjs", "a();\\nb();").unwrap(),
+            "wrote greet.cjs"
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.path().join("greet.cjs")).unwrap(),
+            "a();\nb();\n"
+        );
+        for outside in ["../x.cjs", "/tmp/x.cjs", "a/../../x.cjs"] {
+            let refused = written_in(folder.path(), outside, "x").unwrap_err();
+            assert!(
+                refused.starts_with(&format!("WRITE {outside}: ")),
+                "{refused}"
+            );
+        }
+        assert!(!folder.path().join("../x.cjs").exists());
+    }
+
+    #[test]
+    fn each_cf_line_of_a_message_is_run_in_order_with_its_last_word_whole() {
+        let line = Regex::new(r"(?m)^CF (.+)$").unwrap();
+        assert_eq!(
+            verbs(
+                "CF task accept T-1\nnoise\nCF tell T-2 :: Stop now :: please",
+                &line
+            ),
+            [
+                vec!["task", "accept", "T-1"],
+                vec!["tell", "T-2", "Stop now :: please"],
+            ]
+        );
+        assert!(verbs("no verb here", &line).is_empty());
     }
 
     #[test]

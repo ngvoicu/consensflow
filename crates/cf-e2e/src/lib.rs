@@ -110,6 +110,7 @@ mod error;
 pub mod files;
 pub mod http;
 pub mod live;
+pub mod matrix;
 pub mod muse;
 mod outcome;
 pub mod pattern;
