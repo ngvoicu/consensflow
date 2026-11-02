@@ -12,6 +12,13 @@
 # - The rig's Muse on echo keeps its folders in the rig's home, as the live one does
 #   (`crates/cf-e2e/src/muse.rs`, `write_stand_in`).
 #
+# The same live case then showed a second cause, the product's: a pause cancelled the advisor's
+# backgrounded command, and Muse 1.4.14 filled its empty box with one of its tips ("Ask to monitor
+# a running build or log and get pinged on changes"), which Muse's reader took for words: the
+# resume was held for them, 2 runs of 2. A box that shows only a tip, as the cursor says (at the
+# box's start, nothing from it drawn plain), is empty, and the human is told so
+# (`crates/cf-harness/src/muse/screen.rs`, `only_a_tip`).
+#
 # Every name holds `muse advisor start`: `npm run plants:daemon -- "muse advisor start"` runs them
 # all.
 
@@ -19,6 +26,7 @@
 muse-advisor-start-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "harness_homes::"]
 muse-advisor-start-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::"]
 muse-advisor-start-kit-muse = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::tests::"]
+muse-advisor-start-screen = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::screen::"]
 
 [[plant]]
 name = "muse advisor start: the daemon reads Muse's folders where a home moved them, not where the rig's Muse writes"
@@ -71,3 +79,35 @@ replace = '''# The rig's Muse: the machine's, on its fake model. Echo takes no m
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
 : '{rig}'
 '''
+
+[[plant]]
+name = "muse advisor start: a box that shows only Muse's tip holds words"
+meant = "a_box_that_shows_only_muse_s_tip_is_empty_and_words_typed_there_are_held"
+runs = ["muse-advisor-start-screen"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/screen.rs"
+find = '''        if (typed.is_empty() && !more) || only_a_tip(screen, first, more, cursor) {'''
+replace = '''        if (typed.is_empty() && !more) || (false && only_a_tip(screen, first, more, cursor)) {'''
+
+[[plant]]
+name = "muse advisor start: the human is told Muse's tip as the box's words"
+meant = "a_box_that_shows_only_muse_s_tip_is_empty_and_words_typed_there_are_held"
+runs = ["muse-advisor-start-screen"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/screen.rs"
+find = '''    if only_a_tip(screen, first, more, cursor) {
+        return Some(String::new());
+    }'''
+replace = ""
+
+[[plant]]
+name = "muse advisor start: words typed in Muse's box with the cursor at their start read as a tip"
+meant = "a_box_that_shows_only_muse_s_tip_is_empty_and_words_typed_there_are_held"
+runs = ["muse-advisor-start-screen"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/screen.rs"
+find = '''            cursor.line == first && cursor.col == start && cursor.plain_after == 0'''
+replace = '''            cursor.line == first && cursor.col == start'''

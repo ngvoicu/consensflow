@@ -553,12 +553,12 @@ mod tests {
         files::make_dir(&bin).unwrap();
         let argv = folder.path().join("argv.log");
         let ran = |launcher: &Path| {
-            let status = std::process::Command::new(launcher)
-                .env("XDG_CONFIG_HOME", "/a-home/config")
-                .env("XDG_DATA_HOME", "/a-home/data")
-                .status()
+            let ran = crate::process::Run::new(launcher)
+                .var("XDG_CONFIG_HOME", "/a-home/config")
+                .var("XDG_DATA_HOME", "/a-home/data")
+                .run()
                 .unwrap();
-            assert!(status.success());
+            assert_eq!(ran.code, Some(0), "{ran}");
             std::fs::read_to_string(&said).unwrap()
         };
         let wanted = format!("{0}/.config {0}/.local/share", rig.display());
