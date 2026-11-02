@@ -3219,8 +3219,8 @@ runs = ["muse-e2e-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''                    ("XDG_CONFIG_HOME".to_owned(), config),'''
-replace = '''                    ("XDG_CONFIG_HOME_UNREAD".to_owned(), config),'''
+find = '''                        "XDG_CONFIG_HOME".to_owned(),'''
+replace = '''                        "XDG_CONFIG_HOME_UNREAD".to_owned(),'''
 
 # The hook on Windows: Muse runs `commandWindows` in cmd.exe through Rust's quoting, where no
 # quoted word survives (T-792's probe; Calliope's T-824 P2-4 took it for PowerShell's): a line
