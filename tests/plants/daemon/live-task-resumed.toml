@@ -1,0 +1,52 @@
+# The resume suite (T-1107, T-1116): `cargo xtask live task-resumed` stops a Devin worker's task (a pause, a
+# cut window, a Close of the project) and resumes it, and says whether the board read the task "working" in
+# time. The suite is opt-in, so what is planted is its judgement and its choices, which its own unit tests
+# hold: the first look that reads the task working within the time it had, and the moments the early shape
+# pauses at. One plant takes one rule out; a test of it fails.
+
+[run]
+resumed-suite = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_task_resumed", "tests::"]
+
+[[plant]]
+name = "live task-resumed: a task that reads queued counts as gone on, as only a paused one did not"
+meant = "a_task_that_only_read_queued_or_paused_never_went_on"
+runs = ["resumed-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_task_resumed.rs"
+find = '''        .find(|(at, state)| state == "working" && *at <= within)'''
+replace = '''        .find(|(at, state)| state != "paused" && *at <= within)'''
+
+[[plant]]
+name = "live task-resumed: a task that reads working after the time it had counts as gone on"
+meant = "a_working_look_after_the_time_it_had_is_too_late"
+runs = ["resumed-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_task_resumed.rs"
+find = '''        .find(|(at, state)| state == "working" && *at <= within)'''
+replace = '''        .find(|(at, state)| state == "working" && *at <= within * 100)'''
+
+[[plant]]
+name = "live task-resumed: the first look is not the moment, the last working look is"
+meant = "the_task_went_on_at_the_first_look_that_read_it_working"
+runs = ["resumed-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_task_resumed.rs"
+find = '''    looks
+        .iter()
+        .find(|(at, state)| state == "working" && *at <= within)'''
+replace = '''    looks
+        .iter()
+        .rfind(|(at, state)| state == "working" && *at <= within)'''
+
+[[plant]]
+name = "live task-resumed: the early shape pauses at the start only where no moment is named"
+meant = "the_early_shape_pauses_at_six_moments_unless_some_are_named_and_a_word_that_is_no_number_is_left_out"
+runs = ["resumed-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_task_resumed.rs"
+find = '''        vec![0, 1000, 3000, 6000, 10_000, 20_000]'''
+replace = '''        vec![0]'''
