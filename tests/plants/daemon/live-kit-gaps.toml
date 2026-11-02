@@ -1,0 +1,254 @@
+# The live kit's gaps on real harnesses (T-972, 3.0.7; the regression audits T-961 and
+# T-962): the judges of the live suites this round added, held by their own tests.
+#
+# - `live own-cf`: a member's shell finds its window's own `cf` ahead of a decoy its profile
+#   puts first (`devin-shell-finds-installed-cf`, `devin-shell-on-windows-does-not-find-cf`):
+#   a decoy that was run fails the worker by its folder, only the daemon's own answer to
+#   `cf whoami` proves the window's `cf`, and the run's home puts the decoys first;
+# - `live paste-enter`: a paste the human sends with Enter goes on that Enter
+#   (`codex-windows-ignores-enter-after-paste`): the two shapes of typing, and the verdict;
+# - `eval chiefs`: the `conversation` eval for each chief harness (`chief-does-the-work-itself`);
+# - `live resume-cut`: a cut that found the turn over cut nothing, and the case was not run
+#   (`live-resume-cut-codex-never-reaches-the-cut`);
+# - the kit: a window on a home of the run's own is given the person's home, never the folder
+#   its harness reads its login from (Codex's `~/.codex`, where project folders were made);
+# - the `conversation` eval's expectations: only the owner's changes count, the English task names
+#   the evaluation page, a chief's own edits are none (`chief-does-the-work-itself`);
+# - `live --set windows`: the regular Windows live run, the typed marks of `live parity` in it
+#   (`human-typing-loses-marks-in-devin-codex-on-windows`).
+#
+# One plant takes one rule out; a test fails. Every name holds `live kit gaps`, so
+# `npm run plants:daemon -- "live kit gaps"` runs them all.
+
+[run]
+live-own-cf = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_own_cf"]
+live-paste-enter = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter"]
+evals-chiefs = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "chiefs::"]
+live-resume-cut = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_resume_cut"]
+e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
+evals-scenarios = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "scenarios"]
+xtask-live = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "live::"]
+
+[[plant]]
+name = "live kit gaps: a decoy cf the worker's shell ran does not fail it"
+meant = "a_decoy_that_was_run_fails_it_by_its_folder_whatever_the_result_says"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
+find = "    for (label, calls) in &seen.decoys {"
+replace = "    for (label, calls) in seen.decoys.iter().filter(|_| false) {"
+
+[[plant]]
+name = "live kit gaps: any result proves the window's own cf, the stand-in's answer too"
+meant = "a_result_with_no_answer_of_the_daemons_proves_nothing_and_fails"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
+find = "            .is_some_and(|result| result.contains(&whoami_of(handle)));"
+replace = "            .is_some();"
+
+[[plant]]
+name = "live kit gaps: the run's profiles put the decoys last on the PATH"
+meant = "every_profile_puts_local_bin_first_then_the_package_managers_folder_by_whole_paths"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/home.rs"
+find = '''            "export PATH=\"{}:$PATH\"",'''
+replace = '''            "export PATH=\"$PATH:{}\"",'''
+
+[[plant]]
+name = "live kit gaps: the windows run on the person's HOME, not the run's"
+meant = "the_windows_run_on_the_runs_home_and_their_zsh_reads_its_profiles"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf.rs"
+find = '''    .with_var("HOME", root.clone())
+'''
+replace = ""
+
+[[plant]]
+name = "live kit gaps: a zsh with the person's HOME reads the person's profiles"
+meant = "the_windows_run_on_the_runs_home_and_their_zsh_reads_its_profiles"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf.rs"
+find = '''    .with_var("ZDOTDIR", root.clone());'''
+replace = "    ;"
+
+[[plant]]
+name = "live kit gaps: a person's paste and its Enter are typed in one write"
+meant = "at_once_is_one_write_of_the_paste_and_enter_and_then_enter_is_two"
+runs = ["live-paste-enter"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = "        Shape::ThenEnter => vec![paste, ENTER.to_vec()],"
+replace = "        Shape::ThenEnter => vec![[paste.as_slice(), ENTER].concat()],"
+
+[[plant]]
+name = "live kit gaps: a paste that needed another Enter holds"
+meant = "only_a_paste_that_went_on_its_own_enter_holds"
+runs = ["live-paste-enter"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = "        self == Went::After(0)"
+replace = "        self != Went::Never"
+
+[[plant]]
+name = "live kit gaps: a chief of eval chiefs runs on its default model, not the cheap one"
+meant = "a_chiefs_run_is_its_own_staff_on_its_cheap_model_with_the_reports_kept_together"
+runs = ["evals-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/chiefs.rs"
+find = '''        "--model",
+        model,'''
+replace = '''        "--model",
+        "",'''
+
+[[plant]]
+name = "live kit gaps: a chief's line holds whatever its checks said"
+meant = "a_line_says_the_tasks_on_the_board_and_every_check_that_did_not_hold"
+runs = ["evals-chiefs"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/chiefs.rs"
+find = "        held: failed.is_empty(),"
+replace = "        held: true,"
+
+[[plant]]
+name = "live kit gaps: the Windows live set leaves out the typed marks of parity"
+meant = "the_windows_set_holds_the_typed_marks_of_parity_for_codex_and_devin"
+runs = ["xtask-live"]
+
+[[plant.edit]]
+file = "tools/xtask/src/live.rs"
+find = """        "parity codex devin",
+"""
+replace = ""
+
+[[plant]]
+name = "live kit gaps: a worker the board named no handle of is judged by an empty one"
+meant = "a_worker_the_board_named_no_handle_of_proves_nothing"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
+find = "    let answered = !handle.is_empty()\n        && seen"
+replace = "    let answered = true\n        && seen"
+
+[[plant]]
+name = "live kit gaps: a resume-cut whose turn had answered is taken for a cut turn"
+meant = "a_turn_ended_where_an_answer_after_the_message_ends_in_its_closing_word"
+runs = ["live-resume-cut"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_resume_cut/read.rs"
+find = "        .any(|item| item.role == \"assistant\" && item.text.trim_end().ends_with(last))"
+replace = "        .any(|item| item.role == \"assistant\")"
+
+[[plant]]
+name = "live kit gaps: a Codex window on a home of the run's own has the owner's Codex folder for its HOME"
+meant = "a_codex_on_a_home_of_the_runs_own_is_given_the_persons_home_not_its_codex_folder"
+runs = ["e2e-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = "            let person = isolation.owner_home().to_string_lossy().into_owned();"
+replace = "            let person = { let _ = isolation; home.clone() };"
+
+[[plant]]
+name = "live kit gaps: every paste of a shape asks the same word"
+meant = "each_case_is_a_shape_and_a_length_and_asks_a_word_of_its_own"
+runs = ["live-paste-enter"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = "            let word = format!(\"PASTED{}\", cases.len());"
+replace = "            let word = format!(\"PASTED{}\", cases.len() / 3 * 3);"
+
+[[plant]]
+name = "live kit gaps: a decoy run is said without the known gap it is"
+meant = "a_decoy_that_was_run_fails_it_by_its_folder_whatever_the_result_says"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/verdict.rs"
+find = "there; {KNOWN_RED}\","
+replace = "there\","
+
+[[plant]]
+name = "live kit gaps: the run's home writes a .zshenv the owner's has none of"
+meant = "no_profile_is_one_the_owners_home_lacks_and_an_earlier_ones_zshenv_is_stale"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf/home.rs"
+find = "    [\n        \".zprofile\",\n        \".zshrc\","
+replace = "    [\n        \".zshenv\",\n        \".zprofile\",\n        \".zshrc\","
+
+[[plant]]
+name = "live kit gaps: the conversation eval's expectations as they were before the Haiku run"
+meant = "the_haiku_chief_that_did_every_change_itself_reads_as_the_bug_and_not_as_held"
+runs = ["evals-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                        .filter(|change| m.tasks.iter().any(|task| change.is_match(&task.title)))
+                        .count()
+                        >= 3'''
+replace = '''                        .count()
+                        .max(m.tasks.len())
+                        >= 3'''
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                        !matches!(task.pool.as_deref(), Some("advisor" | "reviewer"))
+                            && english.is_match(&task.title)'''
+replace = '''                        english.is_match(&task.title) || task.title.contains("English")'''
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                |m| m.chief_edits.unwrap_or(0) == 0,'''
+replace = '''                |m| m.chief_edits.is_some() || m.chief_edits.is_none(),'''
+
+[[plant]]
+name = "live kit gaps: any three tasks are the owner's changes on the board"
+meant = "the_conversation_wants_the_owners_changes_on_the_board_the_english_page_a_workers_the_work_done_and_no_edit_of_the_chiefs"
+runs = ["evals-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                        .filter(|change| m.tasks.iter().any(|task| change.is_match(&task.title)))
+                        .count()
+                        >= 3'''
+replace = '''                        .count()
+                        .max(m.tasks.len())
+                        >= 3'''
+
+[[plant]]
+name = "live kit gaps: a task with English in its title is the English evaluation page's"
+meant = "the_conversation_wants_the_owners_changes_on_the_board_the_english_page_a_workers_the_work_done_and_no_edit_of_the_chiefs"
+runs = ["evals-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                        !matches!(task.pool.as_deref(), Some("advisor" | "reviewer"))
+                            && english.is_match(&task.title)'''
+replace = '''                        english.is_match(&task.title) || task.title.contains("English")'''
+
+[[plant]]
+name = "live kit gaps: a chief's own edits are let pass"
+meant = "the_conversation_wants_the_owners_changes_on_the_board_the_english_page_a_workers_the_work_done_and_no_edit_of_the_chiefs"
+runs = ["evals-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/scenarios/conversation.rs"
+find = '''                |m| m.chief_edits.unwrap_or(0) == 0,'''
+replace = '''                |m| m.chief_edits.is_some() || m.chief_edits.is_none(),'''

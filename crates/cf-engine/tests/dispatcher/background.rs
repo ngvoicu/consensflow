@@ -12,7 +12,7 @@
 use crate::fixtures::{closed, given, Tiers};
 use cf_engine::testing::Context;
 use cf_ledger::NewTask;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Servers, SilentPaste};
 
 pub(crate) const LOCK: &str = "python3 lock.py record --run 7";
 pub(crate) const LOG: &str = "tail -f run.log";
@@ -228,6 +228,27 @@ fn marks_the_window_where_a_turn_begins_and_again_as_each_message_goes_in() {
 
     assert_eq!(context.background.marked(), [pane.clone(), pane]);
     assert_eq!(given(&context, "zeus").len(), 2, "the tell was delivered");
+}
+
+/// A window whose harness reads a human's paste silently is opened saying how, from its
+/// adapter, for the pane host to hold the human's keys after their paste by (T-1048); one
+/// whose adapter declares nothing is opened saying nothing of it.
+#[test]
+fn a_window_is_opened_with_how_its_harness_reads_a_paste_where_it_reads_one_silently() {
+    let silent = SilentPaste {
+        pace_us_per_character: 600,
+        drawn_after_ms: 50,
+        quiet_ms: 120,
+        most_ms: 1_000,
+        most_us_per_character: 1_000,
+    };
+    for declared in [None, Some(silent)] {
+        let context = Context::new();
+        context.adapter.silent_paste.set(declared);
+        let _tiers = working(&context);
+        let opened = context.host.last("zeus").expect("its window");
+        assert_eq!(opened.silent_paste, declared);
+    }
 }
 
 #[test]

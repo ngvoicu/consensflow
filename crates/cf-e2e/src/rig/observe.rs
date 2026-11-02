@@ -170,6 +170,12 @@ impl Rig {
         crate::muse::launches(&self.root.join("muse-argv.log"))
     }
 
+    /// Each window of the rig's Muse, by its process and its Muse's, oldest first
+    /// ([`crate::muse::pids`]).
+    pub fn muse_pids(&self) -> Vec<(u32, u32)> {
+        crate::muse::pids(&self.root.join("muse-argv.log"))
+    }
+
     /// The sessions the rig's Muse keeps in the rig's home, oldest first, each with its log.
     pub fn muse_sessions(&self) -> Vec<(String, std::path::PathBuf)> {
         crate::muse::sessions(std::path::Path::new(self.var("HOME").unwrap_or_default()))

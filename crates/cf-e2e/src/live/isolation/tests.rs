@@ -509,6 +509,27 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
     assert!(owner.path(".local/share/other-tool/auth.json").is_file());
 }
 
+/// T-1081: Devin's home moves the XDG folders, and Muse keeps its settings and sessions below
+/// them too. A home that reached the owner's Muse through a link put the owner's sessions where
+/// the daemon looks for a rig's Muse window's, and the owner's settings where it reads a
+/// launch's hooks: the folders of the harnesses on the XDG layout are reached by no home.
+#[test]
+fn a_devin_home_reaches_none_of_the_owners_muse() {
+    let owner = Owner::new();
+    write(&owner.path(".config/muse/settings.json"), SENTINEL);
+    write(&owner.path(".local/share/muse/session-index.db"), SENTINEL);
+    let isolation = owner.devin();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    for below in ["config/muse", "data/muse"] {
+        assert!(
+            fs::symlink_metadata(home.join(below)).is_err(),
+            "{below} is in the run's home"
+        );
+    }
+    // What another program keeps there is still reached.
+    assert!(fs::symlink_metadata(home.join("data/other-tool")).is_ok());
+}
+
 #[test]
 fn the_variables_of_a_home_name_none_of_the_owners_folders() {
     let owner = Owner::new();

@@ -47,7 +47,7 @@
 //! a harness may run a command in the background (Claude Code did, on the Mac).
 //!
 //! ```text
-//! cargo xtask live notes                      Devin and Claude, each as the chief
+//! cargo xtask live notes                      Devin, Claude and Muse, each as the chief
 //! cargo xtask live notes devin                one
 //! cargo xtask live notes claude devin         each, one after the other
 //! cargo xtask live notes devin --keep         leaves the run's home and project where they are
@@ -55,9 +55,12 @@
 //! cargo xtask windows --host zeewin -- cargo xtask live notes devin
 //! ```
 //!
-//! Harnesses: the two the app pastes into, claude and devin (Codex and Pi take
-//! their messages through their own queues, and the daemon waits for the record
-//! of what they queued). The run fails when a note went into a chief's record twice, or
+//! Harnesses: the three the app pastes into, claude, devin and muse (Codex and Pi
+//! take their messages through their own queues, and the daemon waits for the record
+//! of what they queued). Muse was refused here as one of those until T-954: it is
+//! pasted into as Claude is (`Input::Pasted`), and its chief's record is found as
+//! Devin's, by the newest session of the chief's folder, for its window is given no
+//! session id. The run fails when a note went into a chief's record twice, or
 //! never, or when the check could not hold a turn open to find out.
 
 // The parts are in `live_notes/`: cargo looks for the modules of a test's root file
@@ -81,20 +84,20 @@ use cf_e2e::{Error, Result};
 const HELD: &str = "a chief in a turn is handed each of two notes once";
 const FAILED: &str = "a chief in a turn was not handed each of two notes once";
 
-/// The chiefs a run is asked for: Devin and Claude when none is named, else those
+/// The chiefs a run is asked for: Devin, Claude and Muse when none is named, else those
 /// named, each once, in the order given. Only the harnesses the daemon pastes into
 /// can be asked: the rest queue what they are given, and the daemon waits for them.
 fn chiefs(named: &[String]) -> Result<Vec<Harness>> {
     if named.is_empty() {
-        return Ok(vec![Harness::Devin, Harness::Claude]);
+        return Ok(vec![Harness::Devin, Harness::Claude, Harness::Muse]);
     }
     let mut asked = Vec::new();
     for word in named {
         let harness = match Harness::from_name(word) {
-            Some(harness @ (Harness::Claude | Harness::Devin)) => harness,
+            Some(harness @ (Harness::Claude | Harness::Devin | Harness::Muse)) => harness,
             Some(other) => {
                 return Err(Error::Daemon(format!(
-                    "{} takes its messages through its own queue and is never pasted into: only claude and devin can be the chief of this check",
+                    "{} takes its messages through its own queue and is never pasted into: only claude, devin and muse can be the chief of this check",
                     other.name()
                 )))
             }
@@ -141,13 +144,15 @@ mod tests {
     }
 
     #[test]
-    fn devin_and_claude_are_the_chiefs_unless_told_and_those_told_run_once_each_in_the_order_given()
-    {
+    fn devin_claude_and_muse_are_the_chiefs_unless_told_and_those_told_run_once_each_in_the_order_given(
+    ) {
         assert_eq!(
             chiefs(&[]).unwrap(),
-            [Harness::Devin, Harness::Claude],
-            "both, Devin first"
+            [Harness::Devin, Harness::Claude, Harness::Muse],
+            "every harness the daemon pastes into, Devin first"
         );
+        // Muse is pasted into, as Claude is: it is no harness of its own queue (T-954).
+        assert_eq!(chiefs(&words(&["muse"])).unwrap(), [Harness::Muse]);
         assert_eq!(
             chiefs(&words(&["claude", "devin", "claude"])).unwrap(),
             [Harness::Claude, Harness::Devin]

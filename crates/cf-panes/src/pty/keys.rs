@@ -274,6 +274,57 @@ mod conpty {
         );
     }
 
+    /// The keys a crossterm program reads (Muse's TUI and Codex's read the console's key
+    /// events, `ReadConsoleInputW`, in raw mode, so a Control-C is a key and no signal), as
+    /// the pane host writes the Enter after a paste, the Control-C that clears Muse's box
+    /// and the Escape of an interrupt: `\r`, `0x03` and `ESC`, as they are. The console
+    /// host makes each the key it is (T-792: T-708 read Muse's raw CR and Control-C as
+    /// failing through the system's own host, where its CR came in the same breath as the
+    /// paste and its two Control-Cs cleared the box, then armed the quit, as Muse's do).
+    #[test]
+    fn enter_control_c_and_escape_as_the_pane_host_writes_them_reach_a_key_reader_as_those_keys() {
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let reader = powershell(
+            "[Console]::TreatControlCAsInput = $true; Write-Output 'READY'; foreach ($n in 1..3) { $k = [Console]::ReadKey($true); \
+             Write-Output (\"KEY{0}=[{1}|{2}|{3}]#\" -f $n, $k.Key, [int]$k.KeyChar, [int]$k.Modifiers) }",
+        );
+        let (key, output) = open(&table, &reader, &HashMap::new(), 1 << 20);
+        read_until(&table, &key, &output, "READY");
+        let mut seen = String::new();
+        for (bytes, until) in [
+            (&b"\r"[..], "KEY1="),
+            (&[3u8][..], "KEY2="),
+            (&[27u8][..], "KEY3="),
+        ] {
+            table.write(&key, bytes).expect("press the key");
+            seen.push_str(&read_until(&table, &key, &output, until));
+        }
+        let settled = Instant::now() + SETTLE;
+        while keys_read(&seen).len() < 3 && Instant::now() < settled {
+            if let Ok(chunk) = output.recv_timeout(Duration::from_millis(100)) {
+                seen.push_str(&take(&table, &key, &chunk));
+            }
+        }
+        table.kill(&key).expect("close the pane");
+        let key_of = |number: usize, key: &str, character: u32, modifiers: u32| KeyRead {
+            number,
+            key: key.to_owned(),
+            character,
+            modifiers,
+        };
+        assert_eq!(
+            keys_read(&seen),
+            [
+                key_of(1, "Enter", 13, 0),
+                key_of(2, "C", 3, 4),
+                KeyRead::escape(3)
+            ],
+            "its screen: {seen:?}"
+        );
+    }
+
     /// The first key a program that reads key events reads of `bytes`, written to its pane
     /// at once, and what its screen said.
     fn first_key(bytes: &[u8]) -> (Vec<KeyRead>, String) {

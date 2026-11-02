@@ -200,8 +200,9 @@ impl Installed {
     /// `folder` spells it ([`Isolation::made_in`]).
     pub fn with_homes_in(mut self, folder: &Path) -> Result<Self> {
         if self.isolation.is_some() {
-            self.isolation = Isolation::of_machine(self.harness, &self.home)?
-                .map(|isolation| Arc::new(isolation.made_in(folder)));
+            self.isolation =
+                Isolation::of_machine_lasting(self.harness, &self.home, super::PLANNED)?
+                    .map(|isolation| Arc::new(isolation.made_in(folder)));
         }
         Ok(self)
     }
@@ -295,10 +296,14 @@ impl Installed {
         // live/…`), and for nothing it reads its login by. (Not a home of the rig's: Devin's
         // window, opened in a folder below one, which macOS spells through the `/var` link of its
         // temporary folder, shows no answer, 2026-10-27.)
-        if self.isolation.is_some() {
-            let mut vars = vec![("HOME".to_owned(), home.clone())];
+        // The person's home is the isolation's, not the folder the login is read from: Codex's
+        // is `~/.codex`, and a Codex window given that for its HOME had its project folders made
+        // in the owner's Codex folder (`~/.codex/.consensflow-candidate/live/…`, T-972).
+        if let Some(isolation) = &self.isolation {
+            let person = isolation.owner_home().to_string_lossy().into_owned();
+            let mut vars = vec![("HOME".to_owned(), person.clone())];
             if cfg!(windows) {
-                vars.push(("USERPROFILE".to_owned(), home));
+                vars.push(("USERPROFILE".to_owned(), person));
             }
             return vars;
         }
@@ -550,16 +555,46 @@ fn rig_keeping_claude_in(
 /// the person's own `~/.config/muse` and `~/.local/share/muse` (T-946: the members kit's live
 /// pacing run wrote them). A Muse the launcher cannot be made for stops the run before anything
 /// is spent.
+///
+/// On Windows, which has no `exec`, the rig's Muse is the `muse-stand-in` program of this crate
+/// ([`crate::muse::Installed::through`]), found beside the test program that runs
+/// ([`muse_stand_in_beside`]): it runs the machine's Muse in the rig's own folders on a copy of the
+/// person's login (T-1084), where before this kit refused a rig that seats Muse there (T-985).
 fn muse_of(install: &Installed) -> crate::muse::Installed {
     let folder = install
         .command
         .parent()
         .map(|folder| folder.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let home = install.home.to_string_lossy();
-    crate::muse::installed_on(&folder, Some(&home)).unwrap_or_else(|why| {
+    let place = install.home.join(".local").join("bin");
+    let found = crate::muse::installed_on(&folder, Some(&place)).unwrap_or_else(|why| {
         panic!("a rig that seats Muse runs it through its own launcher, and {why}")
-    })
+    });
+    if !cfg!(windows) {
+        return found;
+    }
+    let program = std::env::current_exe().unwrap_or_else(|why| {
+        panic!("a rig that seats Muse on Windows finds its stand-in beside the test program, and the test program is not known: {why}")
+    });
+    let stand_in = muse_stand_in_beside(&program);
+    assert!(
+        stand_in.is_file(),
+        "a rig that seats Muse on Windows runs it through the `muse-stand-in` program of cf-e2e, which cargo builds beside the tests, and {} is not there",
+        stand_in.display()
+    );
+    found.through(&stand_in.to_string_lossy())
+}
+
+/// Where the rig's Muse on Windows, the `muse-stand-in` program of this crate, is for the test
+/// program `test_program`: one folder above the tests' own. Cargo puts a package's programs in
+/// `target/debug` and its tests in `target/debug/deps`, and builds the programs before it runs a
+/// test.
+fn muse_stand_in_beside(test_program: &Path) -> PathBuf {
+    let programs = test_program
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new("."));
+    programs.join(format!("muse-stand-in{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// A rig for `installs`, one of which is the machine's Claude Code, whose Claude

@@ -113,14 +113,16 @@ fn no_live_test_sets_or_clears_the_config_folder_of_its_claude_code() {
 
 /// The live tests whose windows run agents of their own, not the models of
 /// [`agents`]: the catalog's agents named (`live_agent.rs`), and the catalog's
-/// image designer (`live_designer.rs`); Muse's background work, one turn on its own
-/// model in its own TUI (`live_muse_background.rs`); and the one that runs no window and
+/// image designer (`live_designer.rs`); Muse's background work and its member's
+/// posture, turns on its own model in its own TUI (`live_muse_background.rs`,
+/// `live_muse_posture.rs`); and the one that runs no window and
 /// no model at all, which reads what Muse says of its models and its allowance
 /// (`live_muse_reads.rs`): a `--models` would be read by nothing there too.
-const OWN_AGENTS: [&str; 4] = [
+const OWN_AGENTS: [&str; 5] = [
     "live_agent.rs",
     "live_designer.rs",
     "live_muse_background.rs",
+    "live_muse_posture.rs",
     "live_muse_reads.rs",
 ];
 
@@ -360,6 +362,22 @@ fn a_harness_found_is_said_with_its_program_its_version_and_where_its_login_is_r
     assert_eq!(
         found_line(&codex, "unknown"),
         "codex is /opt/codex (unknown); its login is read from /home/me/.codex"
+    );
+}
+
+/// T-1121's finding 7: a Muse with no isolation row of the kit's (Windows, until T-1084's row
+/// lands) is not read in place: the rig copies its login into its own home, every key named
+/// `refresh` left out (`cf_e2e::muse::seed_live_home`), and its line says so.
+#[test]
+fn a_muse_found_with_no_home_of_the_kits_says_its_login_is_copied_into_the_rigs_home() {
+    let muse = Installed::at(Harness::Muse, "/m/muse.cmd", "/home/me");
+    assert_eq!(
+        found_line(&muse, "1.4.14"),
+        format!(
+            "muse is /m/muse.cmd (1.4.14); its login is copied from {} into the rig's own home, \
+             with no key named refresh",
+            Path::new("/home/me/.config/muse/auth.json").display()
+        )
     );
 }
 

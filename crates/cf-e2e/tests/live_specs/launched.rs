@@ -119,7 +119,7 @@ pub fn skill_called(file_text: &str) -> Option<String> {
 }
 
 /// Where a window was given its role text, by what its `pane.open` says: a file
-/// (Claude's, Devin's and Codex's), or the text itself (Pi's).
+/// (Claude's, Devin's, Codex's and Muse's), or the text itself (Pi's).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoleText {
     File(String),
@@ -127,8 +127,9 @@ pub enum RoleText {
 }
 
 /// How the window of `frame` (a `pane.open` request) was given its role: Claude
-/// appends a file to its system prompt, Pi appends the text, and Codex's broker
-/// and Devin read the file their environment names.
+/// appends a file to its system prompt, Pi appends the text, Codex's broker
+/// and Devin read the file their environment names, and Muse's SessionStart hook
+/// (`-c hooks=…`) hands it the file its `cf hook muse-session` names ([`muse_role_file`]).
 pub fn role_of(frame: &Value) -> Option<RoleText> {
     let argv: Vec<&str> = frame["argv"]
         .as_array()
@@ -153,7 +154,75 @@ pub fn role_of(frame: &Value) -> Option<RoleText> {
             return Some(RoleText::File(file.to_owned()));
         }
     }
+    argv.iter()
+        .find_map(|word| muse_role_file(word))
+        .map(RoleText::File)
+}
+
+/// The role file a Muse window's `-c hooks=<json>` word gives its SessionStart hook: the
+/// word after `hook muse-session` in the hook's POSIX `command`, which quotes each word in
+/// single quotes (`cf_harness::muse::launch`), or in its Windows `commandWindows`, which
+/// quotes none. None for any other word (T-954: `live specs muse` read no role of Muse's).
+pub fn muse_role_file(word: &str) -> Option<String> {
+    let hooks: Value = serde_json::from_str(word.strip_prefix("hooks=")?).ok()?;
+    let lines = hooks["SessionStart"]
+        .as_array()?
+        .iter()
+        .flat_map(|entry| entry["hooks"].as_array().into_iter().flatten())
+        .flat_map(|hook| [(&hook["command"], true), (&hook["commandWindows"], false)])
+        .filter_map(|(line, posix)| Some((line.as_str()?, posix)));
+    for (line, posix) in lines {
+        let words = if posix {
+            shell_words(line)
+        } else {
+            line.split_whitespace().map(str::to_owned).collect()
+        };
+        if let Some(at) = words
+            .windows(2)
+            .position(|pair| pair[0] == "hook" && pair[1] == "muse-session")
+        {
+            return words.get(at + 2).cloned();
+        }
+    }
     None
+}
+
+/// The words of a POSIX shell's line of plain and single-quoted words (`'it'\''s'` is
+/// one word, `it's`): what a Muse hook's `command` is made of.
+fn shell_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut started = false;
+    let mut quoted = false;
+    let mut characters = line.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '\'' => {
+                quoted = !quoted;
+                started = true;
+            }
+            '\\' if !quoted => {
+                if let Some(next) = characters.next() {
+                    word.push(next);
+                    started = true;
+                }
+            }
+            blank if blank.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            other => {
+                word.push(other);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
 }
 
 /// That no word of the window's launch (its command line and its environment)

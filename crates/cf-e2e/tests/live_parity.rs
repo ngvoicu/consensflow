@@ -10,8 +10,13 @@
 //!   loads opened plainly in that folder, and its role's skill besides, on macOS and on
 //!   Windows (a ConPTY of ConsensFlow's own there).
 //!
+//! - **Codex's, Devin's and Muse Code's workers** (`codex_devin.rs`): the MCP servers, skills,
+//!   hooks and instructions of the human's own setup reach the worker, and it takes its
+//!   interrupt after the human typed.
+//!
 //! ```text
-//! cargo xtask live parity                                   both
+//! cargo xtask live parity                                   every part
+//! cargo xtask live parity muse -- a_codex_or_devin_worker   Muse Code's worker alone
 //! cargo xtask live parity -- a_claude_member                Claude Code's alone
 //! cargo xtask windows --host zeewin -- cargo xtask live parity -- a_claude_member
 //! ```
@@ -36,19 +41,30 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 const WORK: Duration = Duration::from_secs(300);
 const LOOK: Duration = Duration::from_secs(2);
 
-/// The workers named (`cargo xtask live parity <harness>`), Codex and Devin where none
-/// is. Each test takes the harnesses of its own.
+/// The workers named (`cargo xtask live parity <harness>`), Codex, Devin and Muse where
+/// none is (Muse on a Mac alone: its live kit on Windows is T-1084's). Each test takes the
+/// harnesses of its own.
 fn workers() -> Result<Vec<Harness>> {
     let named = live::list("harness");
     if named.is_empty() {
-        return Ok(vec![Harness::Codex, Harness::Devin]);
+        let mut workers = vec![Harness::Codex, Harness::Devin];
+        if cfg!(target_os = "macos") {
+            workers.push(Harness::Muse);
+        }
+        return Ok(workers);
     }
     named
         .iter()
         .map(|word| match Who::named(word, "worker")? {
-            Who::Harness(harness @ (Harness::Codex | Harness::Devin)) => Ok(harness),
+            Who::Harness(Harness::Muse) if !cfg!(target_os = "macos") => Err(Error::Daemon(
+                "live parity runs a Muse worker on a Mac alone: the live kit's Muse on Windows is T-1084's"
+                    .to_owned(),
+            )),
+            Who::Harness(harness @ (Harness::Codex | Harness::Devin | Harness::Muse)) => {
+                Ok(harness)
+            }
             _ => Err(Error::Daemon(format!(
-                "live parity's workers are Codex and Devin, not {word}"
+                "live parity's workers are Codex, Devin and Muse, not {word}"
             ))),
         })
         .collect()
@@ -82,7 +98,7 @@ fn failure(members: &Members, harness: Harness, log: &Log) {
 mod codex_devin;
 
 #[test]
-#[ignore = "opt-in: spends the machine's quota on two short tasks of each harness named; cargo xtask live parity codex devin"]
+#[ignore = "opt-in: spends the machine's quota on two short tasks of each harness named; cargo xtask live parity codex devin muse"]
 fn a_codex_or_devin_worker_has_what_its_harness_has_in_a_terminal_and_takes_its_interrupt_after_typing(
 ) -> Result {
     let log = Log::begin("live parity")?;

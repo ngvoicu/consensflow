@@ -26,6 +26,7 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// before it draws it.
 pub const ENTER: EnterTiming = EnterTiming {
     least_ms: 10,
+    drawn_after_ms: 0,
     quiet_ms: 120,
     most_ms: 2_000,
 };

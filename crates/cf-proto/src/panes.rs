@@ -399,8 +399,71 @@ pub struct SnapshotTail {
     pub tail: Option<Vec<String>>,
 }
 
+/// How a harness's window reads a human's paste where it reads the paste's keys without drawing
+/// anything until it has read them all (`pane.open`'s `silentPaste`, from the adapter). On Windows
+/// the console hands a paste on to the program as key presses, and such a harness takes an Enter
+/// that comes while they are still coming for a line break in the paste. Where a window declares
+/// it, the pane host holds the human's keys after their paste until the window has drawn it:
+/// never sooner than `pace` says it could have read it, by output that came `drawn_after_ms` or
+/// more after the paste (its reaction to the first key comes sooner), then `quiet_ms` of nothing,
+/// and at the most `most_ms` and `most_us_per_character` for each character, whatever it drew. A
+/// window that declares nothing has the human's keys written as they come.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SilentPaste {
+    /// How long the window takes to read each character, in microseconds.
+    pub pace_us_per_character: u64,
+    pub drawn_after_ms: u64,
+    pub quiet_ms: u64,
+    pub most_ms: u64,
+    pub most_us_per_character: u64,
+}
+
+impl SilentPaste {
+    /// How long a paste of `characters` takes the window to read, at its pace.
+    pub fn read_ms(&self, characters: usize) -> u64 {
+        per_character_ms(self.pace_us_per_character, characters)
+    }
+
+    /// The longest the human's keys wait after a paste of `characters`.
+    pub fn most_ms(&self, characters: usize) -> u64 {
+        self.most_ms
+            .saturating_add(per_character_ms(self.most_us_per_character, characters))
+    }
+}
+
+/// `characters` at `us` microseconds each, in milliseconds.
+fn per_character_ms(us: u64, characters: usize) -> u64 {
+    us.saturating_mul(u64::try_from(characters).unwrap_or(u64::MAX)) / 1_000
+}
+
 #[cfg(test)]
 mod tests {
+    /// A silent paste's wait is its pace and its cap for the paste's length, and goes on the
+    /// wire in the words the pane host reads.
+    #[test]
+    fn a_silent_paste_says_its_read_time_and_its_cap_for_a_pastes_length() {
+        let silent = SilentPaste {
+            pace_us_per_character: 600,
+            drawn_after_ms: 50,
+            quiet_ms: 120,
+            most_ms: 1_000,
+            most_us_per_character: 1_000,
+        };
+        assert_eq!(silent.read_ms(7_775), 4_665);
+        assert_eq!(silent.most_ms(7_775), 8_775);
+        assert_eq!(silent.most_ms(0), 1_000);
+        let wire = serde_json::to_value(silent).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "paceUsPerCharacter": 600, "drawnAfterMs": 50, "quietMs": 120,
+                "mostMs": 1000, "mostUsPerCharacter": 1000,
+            })
+        );
+        assert_eq!(serde_json::from_value::<SilentPaste>(wire).unwrap(), silent);
+    }
+
     use serde_json::json;
 
     use super::*;

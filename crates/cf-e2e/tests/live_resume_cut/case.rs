@@ -20,7 +20,7 @@ use cf_e2e::rig::Rig;
 use cf_e2e::{files, Result};
 use serde_json::Value;
 
-use crate::read::{answer_to, before_answer, change, reading, tail, unanswered};
+use crate::read::{answer_to, before_answer, change, ended, reading, tail, unanswered};
 use crate::{Case, FOLDER, LONG, SECOND, WATCH, WORK};
 
 /// What a case needs of the check that runs it.
@@ -169,7 +169,16 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
         said_ended(said, "the cut window", left.map(|left| end_chosen(&left)));
     }
     sleep(Duration::from_secs(1));
-    said.say(format!("cut: {}", tail(&cut.recorded(), 3)));
+    let left_by_the_cut = cut.recorded();
+    said.say(format!("cut: {}", tail(&left_by_the_cut, 3)));
+    if ended(&left_by_the_cut, &case.message(), case.last()) {
+        said.fail(format!(
+            "the turn was over before the cut (its answer, ending in {}, is in the record): \
+             nothing was cut",
+            case.last()
+        ));
+        return Ok(());
+    }
     said.say(reading(run.read(&session).as_ref()));
     if claude {
         keep(run, &cut, (case, "cut"), &session)?;

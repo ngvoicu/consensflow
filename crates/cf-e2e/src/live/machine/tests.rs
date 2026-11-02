@@ -336,6 +336,22 @@ fn an_install_on_a_home_of_the_runs_own_is_given_the_persons_home_and_none_of_th
 }
 
 #[test]
+fn a_codex_on_a_home_of_the_runs_own_is_given_the_persons_home_not_its_codex_folder() {
+    let codex = Installed::at(Harness::Codex, "/codex/bin/codex", "/home/me/.codex")
+        .with_isolation(Arc::new(Isolation::codex(
+            Path::new("/home/me"),
+            Path::new("/home/me/.codex"),
+        )));
+    let debug = format!("{:?}", rig(&[codex], "/the/stand-in"));
+    // The project folders are below the windows' home: never in the owner's Codex folder.
+    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
+    assert!(
+        !debug.contains("(\"HOME\", \"/home/me/.codex\")"),
+        "{debug}"
+    );
+}
+
+#[test]
 fn a_rig_for_several_harnesses_has_each_ones_folders_once_and_claude_without_its_config_dir() {
     let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine");
     let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/machine").with_node("/node/bin");
@@ -744,4 +760,17 @@ fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_pers
     assert!(home.join("auth.json").is_file(), "{}", home.display());
     let bare = Installed::at(Harness::Codex, "codex", &theirs);
     assert!(bare.home_outside_a_rig().is_err());
+}
+
+/// On Windows the rig's Muse is the stand-in program cargo builds beside the tests, one folder
+/// above the test program's own (T-1084).
+#[test]
+fn the_rig_s_muse_on_windows_is_the_stand_in_cargo_built_beside_the_tests() {
+    let exe = std::env::consts::EXE_SUFFIX;
+    let test =
+        Path::new("/t/target/debug/deps").join(format!("live_paste_enter-4234f6de7b1954fd{exe}"));
+    assert_eq!(
+        muse_stand_in_beside(&test),
+        Path::new("/t/target/debug").join(format!("muse-stand-in{exe}"))
+    );
 }

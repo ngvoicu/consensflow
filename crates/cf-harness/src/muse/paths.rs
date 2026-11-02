@@ -1,13 +1,16 @@
 //! Where Muse Code keeps its things: its data folder, `muse` in `XDG_DATA_HOME`, else
-//! `.local/share/muse` in the home, on a Mac too (Muse 1.4.13; its own session reader,
-//! which the binary carries, reads the same). An `XDG_DATA_HOME` set empty is none, as
-//! Muse reads it, where the other harnesses' XDG places keep it ([`data_home`]).
+//! `.local/share/muse` in the home, on a Mac and on Windows too (Muse 1.4.13; its own
+//! session reader, which the binary carries, reads the same). An `XDG_DATA_HOME` set
+//! empty is none, as Muse reads it, where the other harnesses' XDG places keep it
+//! ([`data_home`]). The home is the user's profile on Windows (`USERPROFILE`, T-708:
+//! `C:\Users\AGV\.local\share\muse`), whatever a `HOME` says there, and `HOME` elsewhere.
 //!
 //! In it, one folder per session by the local date it began,
-//! `sessions/YYYY/MM/DD/<session>/`, holds the session's log, `session.jsonl`, and the
-//! logs of its child agents under `subagent/`; `session-index.db` beside `sessions` is
-//! Muse's index of them ([`super::index`]). Windows keeps the same places in the user's
-//! home, as far as Muse's docs say: not yet seen on a Windows machine (MUS-20).
+//! `sessions/YYYY/MM/DD/<session>/`, holds the session's log, `session.jsonl`, the lock
+//! its process holds while it is open ([`LOCK`]), and the logs of its child agents under
+//! `subagent/`; `session-index.db` beside `sessions` is Muse's index of them
+//! ([`super::index`]). Windows writes some of its paths in their verbatim form
+//! (`\\?\C:\…`, T-708), which a folder given so is read as ([`plain`]).
 //!
 //! [`data_home`]: crate::shared::paths::data_home
 
@@ -25,12 +28,41 @@ use crate::shared::paths::{home, set};
 /// The log of a session in its folder.
 const LOG: &str = "session.jsonl";
 
+/// The home Muse reads: the user's profile on Windows, where Muse takes no `HOME`, and
+/// `HOME` elsewhere, each the other where it is not set.
+fn muse_home(env: &Env) -> Result<String, String> {
+    if env.on_windows() {
+        if let Some(profile) = set(env, "USERPROFILE") {
+            return Ok(profile);
+        }
+    }
+    home(env)
+}
+
+/// `path` in its plain form: a verbatim path of Windows' (`\\?\C:\…`, `\\?\UNC\server\…`),
+/// which Muse writes some of its paths in and which no `/` may be joined to, as the drive
+/// or share path it names; any other as it is.
+pub(crate) fn plain(path: &str) -> String {
+    if let Some(share) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}");
+    }
+    match path.strip_prefix(r"\\?\") {
+        Some(rest)
+            if rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                && rest.as_bytes().get(1) == Some(&b':') =>
+        {
+            rest.to_owned()
+        }
+        _ => path.to_owned(),
+    }
+}
+
 /// The folder Muse's data folder is in, as the environment names it.
 fn data_home(env: &Env) -> Result<PathBuf, String> {
-    Ok(PathBuf::from(match set(env, "XDG_DATA_HOME") {
+    Ok(PathBuf::from(plain(&match set(env, "XDG_DATA_HOME") {
         Some(data) => data,
-        None => path::join(&[&home(env)?, ".local", "share"]),
-    }))
+        None => path::join(&[&muse_home(env)?, ".local", "share"]),
+    })))
 }
 
 /// Muse's data folder, by its real path: where a window's Muse writes when it is given
@@ -55,9 +87,11 @@ pub(crate) fn data_home_given(env: &Env) -> Option<String> {
 pub(crate) fn settings(env: &Env) -> Result<PathBuf, String> {
     let base = match set(env, "XDG_CONFIG_HOME") {
         Some(config) => config,
-        None => path::join(&[&home(env)?, ".config"]),
+        None => path::join(&[&muse_home(env)?, ".config"]),
     };
-    Ok(PathBuf::from(base).join("muse").join("settings.json"))
+    Ok(PathBuf::from(plain(&base))
+        .join("muse")
+        .join("settings.json"))
 }
 
 /// The folder of every session's own folder.
@@ -104,9 +138,18 @@ const HEAD: u64 = 64 * 1024;
 /// clock read twice: the session's id and the launch's.
 const SKEW_MS: i64 = 5_000;
 
+/// The file in a session's folder its process holds while the session is open, which
+/// names it: `pid=<pid>` and, on a Mac, `host=<name>`, a line each, and nothing once the
+/// session is closed (Muse 1.4.13 on Windows, 1.4.14 on a Mac; T-792). On Windows Muse
+/// locks its words from every other reader while it holds it ("another process has
+/// locked a portion of the file"), so there the process is the one that holds it open.
+const LOCK: &str = ".session.lock";
+
 /// What the head of a session's log says of where the session came from: the Muse
-/// process that opened it (`runtime.session.route_facts`), and the session it was
-/// started from, by a `/clear` in its window (`session.started`'s
+/// process that opened it (`runtime.session.route_facts`, or else the process its
+/// [`LOCK`] names: Muse on Windows writes none at a session's start, T-708 and T-792, and
+/// only at its end, before a resume reopens it, T-985), and the
+/// session it was started from, by a `/clear` in its window (`session.started`'s
 /// `previous_session_stream`).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Head {
@@ -162,17 +205,35 @@ fn begun_since(launched_ms: i64, env: &Env, heads: &Heads) -> Vec<(String, Head)
     found
 }
 
-/// The session the Muse process `pid` opened since `launched_ms`, where a log says it:
-/// the newest whose route facts name `pid` ([`begun_since`]). Muse writes the log as its
-/// TUI opens, a second in, and its SessionStart hook only at the window's first prompt
-/// (Muse 1.4.13, T-787's probe): a window opened with no first message would say nothing
-/// of itself until one came.
+/// The session the Muse process `pid` opened since `launched_ms`, where its folder says
+/// it: the newest whose route facts, or else whose lock, name `pid` ([`begun_since`],
+/// [`Head`]); where none does, the newest such of a process `pid` started. Windows has no
+/// `exec`, so a launcher runs Muse as its child, and the window's process is the
+/// launcher's. The product runs Muse's own `muse-bin-<v>.exe` (`launch::pinned`), whose
+/// pid is the window's: this second rule serves a launcher that wraps Muse with no
+/// `.muse-version` beside it (a shim on the PATH, which no Muse install ships today) and
+/// the rig's stand-in on Windows, its one user now (T-985 P3-1). It is kept because the
+/// stand-in, on a system with no `exec`, has no other way to be the window's process. Muse writes both as
+/// its TUI opens, a second in, and its SessionStart hook only at the window's first
+/// prompt (Muse 1.4.13, T-787's probe): a window opened with no first message would say
+/// nothing of itself until one came.
 pub(crate) fn opened_by(pid: u32, launched_ms: i64, env: &Env, heads: &Heads) -> Option<String> {
-    begun_since(launched_ms, env, heads)
-        .into_iter()
-        .rev()
-        .find(|(_, head)| head.pid == Some(u64::from(pid)))
-        .map(|(id, _)| id)
+    let begun = begun_since(launched_ms, env, heads);
+    let named = |of: &dyn Fn(u64) -> bool| {
+        begun
+            .iter()
+            .rev()
+            .find(|(_, head)| head.pid.is_some_and(of))
+            .map(|(id, _)| id.clone())
+    };
+    named(&|named| named == u64::from(pid)).or_else(|| {
+        named(&|named| {
+            u32::try_from(named)
+                .ok()
+                .and_then(cf_process::parent)
+                .is_some_and(|parent| parent == pid)
+        })
+    })
 }
 
 /// The session a window that shows `session` shows now, where a `/clear` in it started
@@ -215,8 +276,54 @@ pub(crate) fn begun_ms(id: &str) -> Option<i64> {
     i64::from_str_radix(&format!("{}{}", &id[..8], &id[9..13]), 16).ok()
 }
 
-/// What the head of the log `log` says ([`Head`]): nothing where it cannot be read.
+/// What the head of the log `log` says ([`Head`]), its process the one the session's
+/// lock beside it names where the log names none: nothing where neither can be read.
 fn head(log: &Path) -> Head {
+    head_by(log, &cf_process::holders)
+}
+
+/// [`head`], asking `holders` which processes hold a lock open.
+fn head_by(log: &Path, holders: &dyn Fn(&Path) -> Vec<u32>) -> Head {
+    let mut head = logged(log);
+    if head.pid.is_none() {
+        head.pid = log.parent().and_then(|folder| {
+            let lock = folder.join(LOCK);
+            match locked_by(&lock) {
+                Ok(named) => named,
+                // Muse on Windows keeps its open lock's words from every reader: only
+                // then is the process that holds it asked for.
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    held_by(&lock, holders)
+                }
+                Err(_) => None,
+            }
+        });
+    }
+    head
+}
+
+/// The one process that holds the lock `lock` open (Windows', whose words it keeps from
+/// being read), as `holders` says: none where none does, as of a closed session's, or
+/// where more than one does, which no one Muse's is.
+fn held_by(lock: &Path, holders: &dyn Fn(&Path) -> Vec<u32>) -> Option<u64> {
+    match holders(lock).as_slice() {
+        [one] => Some(u64::from(*one)),
+        _ => None,
+    }
+}
+
+/// The process the session lock `lock` names (`pid=<pid>`): none where it names none, as
+/// a closed session's lock, which Muse empties; why not where it cannot be read.
+fn locked_by(lock: &Path) -> std::io::Result<Option<u64>> {
+    let text = fs::read_to_string(lock)?;
+    Ok(text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("pid="))
+        .and_then(|pid| pid.trim().parse().ok()))
+}
+
+/// What the head of the log `log` itself says ([`Head`]): nothing where it cannot be read.
+fn logged(log: &Path) -> Head {
     use std::io::{BufRead, BufReader, Read};
 
     let mut head = Head::default();

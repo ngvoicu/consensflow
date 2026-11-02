@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_proto::agents::Harness;
-use cf_proto::panes::{HumanInput, Servers};
+use cf_proto::panes::{HumanInput, Servers, SilentPaste};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -115,6 +115,17 @@ pub trait Adapter {
     /// harness's own, or pasted into the window's input box ([`Input`]).
     fn input(&self) -> Input {
         Input::Channel
+    }
+
+    /// How its windows read a human's paste, where they read its keys without drawing anything
+    /// until they have read them all ([`SilentPaste`], told to the pane host as the window
+    /// opens): the human's keys after their paste then wait until the window has drawn it. A
+    /// harness that declares nothing has the human's keys written as they come. Only what was
+    /// measured is declared: Codex on Windows (T-1048), Devin on every platform (T-1086) and Muse on
+    /// Windows (T-954). Claude Code 2.1.316 and Pi 1.4.0 on Windows, and Muse on the Mac, took a
+    /// paste and its Enter as they came, in one write too (T-1048, T-1080, T-1086).
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        None
     }
 
     /// Where the window of a chief given specs finds the Specmint skill of
