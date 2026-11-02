@@ -93,20 +93,24 @@ impl Held {
                         .as_ref()
                         .and_then(|call| self.drawn.remove(call))
                         .unwrap_or_else(|| Detail::of(Kind::Tool));
+                    let output = ["text", "output", "result"].iter().find_map(|name| {
+                        field(Some(result), name).filter(|found| !found.is_null())
+                    });
+                    let text = words(output);
+                    let ran = ran(&text);
                     let failed = result.get("is_error") == Some(&Value::Bool(true))
                         || matches!(
                             result.get("status").and_then(Value::as_str),
                             Some("error" | "failed")
-                        );
+                        )
+                        || ran.failed;
                     detail.status = Some(if failed { Status::Failed } else { Status::Ok });
+                    detail.diff = changed(&text).map(Arc::from);
                     let id = match call {
                         Some(call) => call,
                         None => Arc::from(format!("{}:{at}", record_id()?)),
                     };
-                    let output = ["text", "output", "result"].iter().find_map(|name| {
-                        field(Some(result), name).filter(|found| !found.is_null())
-                    });
-                    said.push((id, Role::Tool, words(output), Some(detail)));
+                    said.push((id, Role::Tool, text, Some(detail)));
                 }
                 said
             }
@@ -180,6 +184,36 @@ fn id_of(value: &Value, names: &[&str]) -> Option<Arc<str>> {
         .find_map(|name| value.get(name).and_then(Value::as_str))
         .filter(|id| !id.is_empty())
         .map(Arc::from)
+}
+
+/// What a command's result says of its run, as Muse 1.4.14 writes it: JSON text that names
+/// its `exit_code` and its `terminal_status`. A result that is no such text says nothing.
+struct Ran {
+    failed: bool,
+}
+
+fn ran(said: &str) -> Ran {
+    let Ok(Value::Object(run)) = serde_json::from_str::<Value>(said.trim()) else {
+        return Ran { failed: false };
+    };
+    let code = run.get("exit_code").and_then(Value::as_i64);
+    let status = run.get("terminal_status").and_then(Value::as_str);
+    Ran {
+        failed: code.is_some_and(|code| code != 0) || status == Some("failed"),
+    }
+}
+
+/// The change an edit's result says, as Muse 1.4.14 writes it (`edited`, the lines it
+/// changed, then `--- original`, `+++ updated` and its hunks): the hunks' lines, from the
+/// first `@@`. None for a result that says no such change.
+fn changed(said: &str) -> Option<String> {
+    let (_, after) = said.split_once("--- original\n+++ updated\n")?;
+    let hunks: Vec<&str> = after
+        .lines()
+        .skip_while(|line| !line.starts_with("@@"))
+        .take_while(|line| line.starts_with(['@', '+', '-', ' ']))
+        .collect();
+    (!hunks.is_empty()).then(|| hunks.join("\n"))
 }
 
 /// A tool's output as text: text is itself, nothing is nothing, anything else its JSON.

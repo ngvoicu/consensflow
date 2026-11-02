@@ -108,3 +108,97 @@ fn a_compactions_summary_is_a_compaction_with_its_tokens_where_muse_says_them() 
     assert_eq!(summary.kind(), Kind::Compaction);
     assert_eq!(summary.detail.as_deref().unwrap().tokens, Some(9_000));
 }
+
+#[test]
+fn a_commands_result_says_its_exit_and_an_edits_its_change_as_muse_writes_them() {
+    // As Muse 1.4.14 wrote them live (T-728): a command's result is JSON text, an edit's
+    // names its two sides and its hunk.
+    let called =
+        |id: &str, name: &str, args: &str| json!({ "name": name, "args": args, "call_id": id });
+    let records = vec![
+        intent(1, "i1", "go"),
+        run(2, "run-1", json!({ "kind": "started" })),
+        run(
+            3,
+            "run-1",
+            json!({ "kind": "assistant_tool_calls_committed", "tool_calls": [
+            called("c1", "bash", "{\"command\":\"ls no-such-folder\"}"),
+            called("c2", "edit_file", "{\"find\":\"red\",\"path\":\"notes.txt\",\"replace\":\"blue\"}"),
+        ] }),
+        ),
+        run(
+            4,
+            "run-1",
+            json!({ "kind": "tool_result_batch_committed", "results": [
+            { "tool_call_id": "c1", "text": "{\n  \"command\": \"ls no-such-folder\",\n  \"exit_code\": 1,\n  \"terminal_status\": \"failed\",\n  \"output\": \"ls: no-such-folder\\n\"\n}" },
+            { "tool_call_id": "c2", "text": "edited\nchanged lines: line 1\n--- original\n+++ updated\n@@\n-The light is red.\n+The light is blue.\n" },
+        ] }),
+        ),
+    ];
+    let record = record_of(&records);
+    let command = record.items[1].detail.clone().unwrap();
+    assert_eq!(command.header.as_deref(), Some("$ ls no-such-folder"));
+    assert_eq!(command.status, Some(Status::Failed));
+    assert_eq!(command.diff, None);
+    let edit = record.items[2].detail.clone().unwrap();
+    assert_eq!(edit.header.as_deref(), Some("edit notes.txt"));
+    assert_eq!(edit.status, Some(Status::Ok));
+    assert_eq!(
+        edit.diff.as_deref(),
+        Some("@@\n-The light is red.\n+The light is blue.")
+    );
+}
+
+/// The live run's session (T-728: Muse Code 1.4.14 on muse-spark-1.3 at minimal, a read, a
+/// command that fails, an edit and `/compact`; its reasoning is encrypted, no words), with
+/// what its reader reads alone kept and the folders replaced.
+#[test]
+fn a_live_chiefs_session_reads_as_the_live_check_read_it() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/history-items/muse.jsonl"
+    ))
+    .unwrap();
+    let session = text
+        .lines()
+        .find_map(|line| {
+            let record: Value = serde_json::from_str(line).ok()?;
+            record["stream"]["id"].as_str().map(str::to_owned)
+        })
+        .unwrap();
+    let record = known(&fresh_reading(&session, &text)).clone();
+    let tools: Vec<(Option<String>, Option<Status>, bool)> = record
+        .items
+        .iter()
+        .filter(|item| item.kind() == Kind::Tool)
+        .map(|item| {
+            let detail = item.detail.as_deref().unwrap();
+            (
+                detail.header.as_deref().map(str::to_owned),
+                detail.status,
+                detail.diff.is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            (Some("read notes.txt".to_owned()), Some(Status::Ok), false),
+            (
+                Some("$ ls no-such-folder".to_owned()),
+                Some(Status::Failed),
+                false
+            ),
+            (Some("edit notes.txt".to_owned()), Some(Status::Ok), true),
+        ]
+    );
+    assert!(record
+        .items
+        .iter()
+        .any(|item| item.kind() == Kind::Compaction));
+    // Its reasoning holds no words: no thinking to show.
+    assert!(record
+        .beside
+        .iter()
+        .all(|(_, item)| item.kind() != Kind::Thinking));
+}

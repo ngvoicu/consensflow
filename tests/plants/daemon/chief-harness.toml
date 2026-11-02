@@ -1748,3 +1748,23 @@ runs = ["it-shared"]
 file = "crates/cf-harness/src/shared/record/drawn.rs"
 find = '    const RUNS: [&str; 6] = ["-c", "-lc", "-ic", "/c", "-command", "-encodedcommand"];'
 replace = '    const RUNS: [&str; 6] = ["-c", "-lc", "-ic", "-c", "-c", "-encodedcommand"];'
+
+[[plant]]
+name = "items: Muse's command that exited 1 is no failure"
+meant = "a_commands_result_says_its_exit_and_an_edits_its_change_as_muse_writes_them"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '        failed: code.is_some_and(|code| code != 0) || status == Some("failed"),'
+replace = '        failed: code.is_some_and(|code| code > 1),'
+
+[[plant]]
+name = "items: Muse's edit says no change"
+meant = "a_commands_result_says_its_exit_and_an_edits_its_change_as_muse_writes_them"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '    let (_, after) = said.split_once("--- original\n+++ updated\n")?;'
+replace = '    let (_, after) = said.split_once("--- before\n+++ after\n")?;'

@@ -107,9 +107,9 @@ fn the_muse_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
 #[test]
 fn the_history_items_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
     // The live chiefs' records the readers' history is held to (T-728), of Claude Code,
-    // Codex and Pi.
+    // Codex, Pi and Muse Code.
     let folder = folder("history-items");
-    for name in ["claude.jsonl", "codex.jsonl", "pi.jsonl"] {
+    for name in ["claude.jsonl", "codex.jsonl", "pi.jsonl", "muse.jsonl"] {
         let text = fs::read_to_string(folder.join(name)).unwrap();
         for (pattern, _) in PERSONAL {
             let found = Regex::new(pattern).unwrap();
