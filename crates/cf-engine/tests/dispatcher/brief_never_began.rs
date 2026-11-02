@@ -138,7 +138,7 @@ fn never_begun_is_pressed_enter_once_then_paused_and_told(at_rest: bool) {
     let note = &notes[0];
     assert!(note.contains(&format!("m-{brief}")), "{note}");
     assert!(note.contains("began no turn"), "{note}");
-    assert!(note.contains("Enter"), "{note}");
+    assert!(note.contains("Enter was pressed once more"), "{note}");
     assert!(note.contains("its screen ended with"), "{note}");
     assert!(note.contains("cf task resume T-2"), "{note}");
     for _ in 0..3 {
@@ -232,4 +232,103 @@ fn a_brief_whose_window_begins_late_is_neither_pressed_again_nor_paused() {
     assert_eq!(tiers.task(2).task.state, "done");
     assert!(pause_notes(&tiers).is_empty());
     assert_eq!(enters(&context), before + 1);
+}
+
+/// A turn that began is the turn's, however quiet its screen: a call that prints nothing
+/// for hours is never pressed into, nor its task paused.
+#[test]
+fn a_brief_whose_turn_began_is_never_pressed_however_quiet_its_screen() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    a_follow_up_whose_window_never_begins(&context, &tiers, false);
+    context.adapter.writes(
+        "zeus",
+        "Running the lexer's tests",
+        "2026-11-02T22:35:10.000Z",
+    );
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 600_000 }));
+    let before = enters(&context);
+    for _ in 0..4 {
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    assert_eq!(enters(&context), before);
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert!(pause_notes(&tiers).is_empty());
+}
+
+/// Words the human typed into the window and did not send would go with an Enter: none is
+/// pressed, and the task is paused all the same, its note saying why nothing was pressed.
+#[test]
+fn a_window_holding_words_the_human_did_not_send_is_pressed_nothing_and_its_task_paused() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    a_follow_up_whose_window_never_begins(&context, &tiers, true);
+    context.host.set_snapshot(
+        json!({ "outputQuietMs": 600_000, "unsent": true, "tail": ["Ready for the next step."] }),
+    );
+    let before = enters(&context);
+    for _ in 0..2 {
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    assert_eq!(enters(&context), before, "nothing pressed");
+    assert_eq!(tiers.task(2).task.state, "paused");
+    let notes = pause_notes(&tiers);
+    assert_eq!(notes.len(), 1, "{notes:#?}");
+    assert!(
+        notes[0].contains("no Enter was pressed") && notes[0].contains("not sent"),
+        "{}",
+        notes[0]
+    );
+}
+
+/// A harness that takes its messages over a channel of its own (Pi's inbox, Codex's broker)
+/// is pressed nothing: its window is paused after the same two waits, its note saying so.
+#[test]
+fn a_brief_a_channel_harness_never_began_is_pressed_nothing_and_its_task_paused() {
+    let context = Context::new();
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "staff": [{ "agent": "ares", "harness": "pi", "role": "worker", "tier": "standard" }],
+        }))
+        .unwrap()
+        .expect("the project");
+    context.adapter.never_begins.set(Some(false));
+    context.give(project.id, "ares", "Write the parser");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 600_000, "tail": ["Ready for the next step."] }));
+    let before = enters(&context);
+    for _ in 0..2 {
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    assert_eq!(enters(&context), before, "nothing pressed");
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+    let chief = context.id(project.id, "chief");
+    let notes: Vec<String> = context
+        .inbox(chief)
+        .into_iter()
+        .map(|message| message.body)
+        .filter(|body| body.starts_with("T-1 is paused"))
+        .collect();
+    assert_eq!(notes.len(), 1, "{notes:#?}");
+    assert!(
+        notes[0].contains("its harness takes no Enter"),
+        "{}",
+        notes[0]
+    );
 }

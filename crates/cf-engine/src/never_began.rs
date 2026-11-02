@@ -71,11 +71,44 @@ pub(crate) struct Unbegun {
     message: Option<i64>,
     /// When a look first found it alone, on the engine's clock.
     since: i64,
-    /// When Enter was pressed once more for it, or its once was spent on a window
-    /// pressed nothing.
-    entered: Option<i64>,
+    /// When its once was spent, and what it came to.
+    entered: Option<(i64, Pressed)>,
     /// Its task was paused for it, and its requester told.
     told: bool,
+}
+
+/// What the once of a message standing alone came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Pressed {
+    /// Enter, pressed once more.
+    Enter,
+    /// None: the window's box held words the human typed and had not sent.
+    Unsent,
+    /// None: the window's screen was printing.
+    Printing,
+    /// None: its pane host did not answer in time.
+    Unanswered,
+    /// None: its harness takes its messages over a channel of its own.
+    Channel,
+}
+
+impl Pressed {
+    /// What a note says of it, `at` when it came.
+    fn said(self, at: &str) -> String {
+        match self {
+            Self::Enter => format!("Enter was pressed once more at {at} UTC"),
+            Self::Unsent => format!(
+                "no Enter was pressed at {at} UTC, as its box held words the human had not sent"
+            ),
+            Self::Printing => {
+                format!("no Enter was pressed at {at} UTC, as its screen was printing")
+            }
+            Self::Unanswered => {
+                format!("no Enter was pressed at {at} UTC, as its pane host did not answer")
+            }
+            Self::Channel => "its harness takes no Enter".to_owned(),
+        }
+    }
 }
 
 impl Dispatcher {
@@ -109,7 +142,7 @@ impl Dispatcher {
         if unbegun.told {
             return Ok(());
         }
-        let from = unbegun.entered.unwrap_or(unbegun.since);
+        let from = unbegun.entered.map_or(unbegun.since, |(at, _)| at);
         if now - from <= self.seams.limits.arrival_ms {
             return Ok(());
         }
@@ -126,17 +159,15 @@ impl Dispatcher {
         if record.never_began.borrow().as_ref() != Some(&unbegun) || self.forgotten(record) {
             return Ok(());
         }
-        let Some(entered) = unbegun.entered else {
-            if let Some(unbegun) = record.never_began.borrow_mut().as_mut() {
-                unbegun.entered = Some(now);
-            }
-            return self.press_begun(record, &unbegun).await;
+        let Some((entered, pressed)) = unbegun.entered else {
+            // Spent before the host is asked: no other look presses it meanwhile.
+            self.spent(record, &unbegun.item, now, Pressed::Unanswered);
+            let pressed = self.press_begun(record, &unbegun).await?;
+            self.spent(record, &unbegun.item, now, pressed);
+            return Ok(());
         };
         // What it shows goes with the note: a snapshot of its screen.
         let Some(snapshot) = self.snapshot_now(&pane, true).await else {
-            if let Some(unbegun) = record.never_began.borrow_mut().as_mut() {
-                unbegun.entered = Some(now);
-            }
             return Ok(());
         };
         if record.never_began.borrow().as_ref() != Some(&unbegun) || self.forgotten(record) {
@@ -153,7 +184,6 @@ impl Dispatcher {
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
             return Ok(());
         };
-        let pressed = matches!(record.window.borrow().input, Input::Pasted { .. });
         // When it went in, as the ledger has it: its record's showing of it.
         let sent = match unbegun.message {
             Some(id) => self.seams.ledger.borrow().message(id)?,
@@ -223,25 +253,44 @@ impl Dispatcher {
         Ok(Some((Arc::clone(&item.id), header_id(&item.text))))
     }
 
+    /// The once of `item`, standing alone, spent at `at` on what it came to.
+    fn spent(&self, record: &Record, item: &Arc<str>, at: i64, pressed: Pressed) {
+        if let Some(unbegun) = record
+            .never_began
+            .borrow_mut()
+            .as_mut()
+            .filter(|unbegun| unbegun.item == *item)
+        {
+            unbegun.entered = Some((at, pressed));
+        }
+    }
+
     /// The once of a message standing alone: Enter, into a window that takes pastes, quiet
     /// and holding none of the human's words unsent. A harness that takes its messages over
     /// a channel of its own is pressed nothing, and its once is spent all the same.
-    async fn press_begun(&self, record: &Record, unbegun: &Unbegun) -> Result<(), EngineError> {
+    async fn press_begun(
+        &self,
+        record: &Record,
+        unbegun: &Unbegun,
+    ) -> Result<Pressed, EngineError> {
         let pane = record.window.borrow().pane.clone();
         let pasted = matches!(record.window.borrow().input, Input::Pasted { .. });
         let Some(pane) = pane.filter(|_| pasted) else {
-            return Ok(());
+            return Ok(Pressed::Channel);
         };
         // What the human typed and has not sent would go with it: the host says so.
         let Some(snapshot) = self.snapshot_now(&pane, false).await else {
-            return Ok(());
+            return Ok(Pressed::Unanswered);
         };
+        if js::truthy(snapshot.get("unsent")) {
+            return Ok(Pressed::Unsent);
+        }
         let quiet = snapshot
             .get("outputQuietMs")
             .and_then(Value::as_f64)
             .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);
-        if !quiet || js::truthy(snapshot.get("unsent")) {
-            return Ok(());
+        if !quiet {
+            return Ok(Pressed::Printing);
         }
         let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });
         // A key the host did not take is not pressed again: the next wait's end tells.
@@ -253,16 +302,16 @@ impl Dispatcher {
                 .message
                 .map_or_else(|| "its latest message".to_owned(), |id| format!("m-{id}")),
         ));
-        match unbegun.message {
-            Some(message) => self.trace_window(record, WindowEvent::EnterAgain { message }),
-            None => Ok(()),
+        if let Some(message) = unbegun.message {
+            self.trace_window(record, WindowEvent::EnterAgain { message })?;
         }
+        Ok(Pressed::Enter)
     }
 }
 
 /// Why a task is paused for a message its window began no turn on: which message, when it
 /// went in (`sent`), what was pressed and when, in UTC, as the engine's notes say times.
-fn never_began(unbegun: &Unbegun, sent: i64, entered: i64, pressed: bool, now: i64) -> String {
+fn never_began(unbegun: &Unbegun, sent: i64, entered: i64, pressed: Pressed, now: i64) -> String {
     let clock = |at: i64| {
         let at = time::iso(at);
         at.get(11..16).map_or_else(|| at.clone(), str::to_owned)
@@ -270,11 +319,7 @@ fn never_began(unbegun: &Unbegun, sent: i64, entered: i64, pressed: bool, now: i
     let message = unbegun
         .message
         .map_or_else(|| "its latest message".to_owned(), |id| format!("m-{id}"));
-    let again = if pressed {
-        format!("Enter was pressed once more at {} UTC", clock(entered))
-    } else {
-        "its harness takes no Enter".to_owned()
-    };
+    let again = pressed.said(&clock(entered));
     format!(
         "its window began no turn on {message}: it went in at {} UTC and its record shows it with nothing after it, \
          {again}, and nothing began by {} UTC",

@@ -1,0 +1,109 @@
+# A follow-up showed "working" for an hour while its window never began it, and nothing told anyone
+# (T-1130, the field bug of 2026-11-02). A task is working once its window's record shows its brief,
+# and every wait of the delivery's is over then; a window that kept the words and began nothing read
+# in flight for ever (Claude Code's, Codex's and Pi's readers) or at rest with no answer (Devin's and
+# Muse's), and a turn's end had nothing to take and said nothing.
+#
+# - The latest message of a working task that stands alone in its window's record for a whole
+#   arrival window, the screen quiet, is pressed Enter once in a window that takes pastes
+#   (`cf-engine`'s `never_began.rs`).
+# - A whole arrival window more with nothing begun pauses the task, and its requester is told once
+#   what went in, when, what was pressed and what the screen ends with.
+# - Something after the message in the record, a screen that prints, a box holding the human's
+#   unsent words, and a harness that takes its messages over a channel each hold back the Enter or
+#   the pause as the module says.
+#
+# Every name holds `brief never began`, so `npm run plants:daemon -- "brief never began"` runs them all.
+
+[run]
+bnb-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "brief_never_began::"]
+
+[[plant]]
+name = "brief never began: a turn that came to nothing is not watched, and its task stays working for good (main's shape)"
+meant = "a_brief_a_window_at_rest_never_began_is_pressed_enter_once_then_its_task_is_paused_and_its_requester_told"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                if matches!(turn, Turn::Open) {"
+replace = "                if matches!(turn, Turn::Answered) {"
+
+[[plant]]
+name = "brief never began: an answer written after the message does not end the watch, and a turn at work is pressed into"
+meant = "a_brief_whose_turn_began_is_never_pressed_however_quiet_its_screen"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        if items[at + 1..].iter().any(|item| item.role != Role::Custom) {"
+replace = "        if items[at + 1..].iter().any(|item| item.role == Role::Tool) {"
+
+[[plant]]
+name = "brief never began: a screen that prints is taken for a window that began nothing"
+meant = "a_brief_whose_window_prints_is_left_be"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        if !quiet.is_some_and(|quiet| quiet >= QUIET_MS) {"
+replace = "        if quiet.is_none() {"
+
+[[plant]]
+name = "brief never began: the pause follows the Enter at the next look, with no wait for what the Enter began"
+meant = "a_brief_a_window_at_rest_never_began_is_pressed_enter_once_then_its_task_is_paused_and_its_requester_told"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        let from = unbegun.entered.map_or(unbegun.since, |(at, _)| at);"
+replace = "        let from = unbegun.since;"
+
+[[plant]]
+name = "brief never began: what the once came to is not kept, and the note says no Enter was pressed"
+meant = "a_brief_a_window_at_rest_never_began_is_pressed_enter_once_then_its_task_is_paused_and_its_requester_told"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "            self.spent(record, &unbegun.item, now, pressed);"
+replace = "            let _ = pressed;"
+
+[[plant]]
+name = "brief never began: the human's unsent words are sent with the Enter"
+meant = "a_window_holding_words_the_human_did_not_send_is_pressed_nothing_and_its_task_paused"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        if js::truthy(snapshot.get(\"unsent\")) {"
+replace = "        if js::truthy(snapshot.get(\"unsentNever\")) {"
+
+[[plant]]
+name = "brief never began: a harness that takes its messages over a channel is pressed Enter"
+meant = "a_brief_a_channel_harness_never_began_is_pressed_nothing_and_its_task_paused"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        let Some(pane) = pane.filter(|_| pasted) else {"
+replace = "        let Some(pane) = pane else {"
+
+[[plant]]
+name = "brief never began: the pause note leaves out what the window's screen shows"
+meant = "a_brief_a_window_at_rest_never_began_is_pressed_enter_once_then_its_task_is_paused_and_its_requester_told"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        let said = Shown::from_snapshot(&snapshot).after(&because);"
+replace = "        let said = because.clone();"
+
+[[plant]]
+name = "brief never began: a window read in flight for ever is never noticed, only one at rest"
+meant = "a_brief_a_window_read_in_flight_never_began_is_pressed_enter_once_then_its_task_is_paused_and_its_requester_told"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "            || observed.failed"
+replace = "            || observed.failed\n            || !observed.settled"
