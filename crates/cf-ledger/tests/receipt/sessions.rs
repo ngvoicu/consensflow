@@ -736,3 +736,34 @@ fn a_done_task_goes_back_to_the_window_that_did_it_when_the_window_holds_nothing
     w.deliver(words.id);
     assert_eq!(w.state(a), "working");
 }
+
+/// A task paused under a session the human ended waits for its resume, not for a
+/// follow-up: a follow-up of it is not queued behind it, to wait for an acceptance
+/// that only a resume leads to, but meets the session it brings back, which holds the
+/// paused task, in the words of any busy window.
+#[test]
+fn a_follow_up_of_a_task_paused_under_an_ended_session_brings_the_session_back_and_is_refused_for_the_paused_task(
+) {
+    let mut w = world();
+    let task = w.open("Parser").task.number;
+    let moved = w.assign(task, "zeus");
+    let session = moved.task.assignee.clone().expect("a session");
+    w.deliver(moved.message.expect("its brief").id);
+    w.pause(task);
+    w.ledger
+        .end_session(w.project, &session, "human")
+        .expect("the human ends a session whose task is paused");
+
+    let refused = w
+        .follow_up(task, "Tests", &[])
+        .expect_err("the session holds the paused task");
+
+    assert_busy(refused, &session, (task, "paused"), GIVING_ANOTHER);
+    assert!(
+        w.ledger
+            .task(w.project, task + 1)
+            .expect("a read")
+            .is_none(),
+        "nothing of the refused follow-up is left"
+    );
+}
