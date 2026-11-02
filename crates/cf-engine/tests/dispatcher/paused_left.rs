@@ -335,7 +335,7 @@ fn once_the_work_a_window_was_kept_for_ends_fresh_rounds_go_in_and_ignored_with_
     assert_eq!(told.len(), 2, "{told:?}");
     assert_eq!(
         told[1],
-        "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. T-1 stays paused, and its window reopens on its conversation when it is resumed."
+        "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed."
     );
     context.close();
 }

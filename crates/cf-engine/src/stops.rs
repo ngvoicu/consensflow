@@ -196,7 +196,7 @@ fn next_round(done: Option<&Interrupted>, key: StopKey, now: i64) -> Round {
 }
 
 /// What the note of a window closed for a stop it ignored says was checked first.
-const CHECKED: &str = "First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none.";
+const CHECKED: &str = "First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names.";
 
 /// What a pause's `stop` is pressed for.
 fn pause_key(stop: &Stop) -> StopKey {

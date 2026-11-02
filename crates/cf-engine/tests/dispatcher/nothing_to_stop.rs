@@ -442,7 +442,7 @@ fn a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_
     assert_eq!(context.host.killed().len(), 1, "a hung turn is closed");
     assert_eq!(
         closes_told(&context, project.id),
-        ["@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. T-1 stays paused, and its window reopens on its conversation when it is resumed."],
+        ["@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed."],
         "one note, in the human's words, and none to the chief"
     );
 }
@@ -450,8 +450,8 @@ fn a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_
 /// What the human and the chief read of a window closed for a stop it ignored, its
 /// task still paused.
 const CLOSED: [&str; 2] = [
-    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
-    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
 ];
 
 #[test]

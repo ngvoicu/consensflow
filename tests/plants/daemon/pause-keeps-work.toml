@@ -139,7 +139,7 @@ runs = ["engine-dispatcher-stops-keeps"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = 'const CHECKED: &str = "First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none.";'
+find = 'const CHECKED: &str = "First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names.";'
 replace = 'const CHECKED: &str = "";'
 
 [[plant]]

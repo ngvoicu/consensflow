@@ -110,14 +110,14 @@ fn a_stall_a_resume_and_a_fresh_window_press_no_escape() {
 /// What the human and the chief are told of a window closed for a pause it
 /// ignored, while its task is still paused.
 const CLOSED_PAUSED: [&str; 2] = [
-    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
-    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
 ];
 
 /// What they are told of it once the task was resumed while the window ignored the rounds.
 const CLOSED_RESUMED: [&str; 2] = [
-    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. The words that resume T-1 go in once its window reopens on its conversation.",
-    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. Your words go in once it reopens on its conversation.",
+    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. The words that resume T-1 go in once its window reopens on its conversation.",
+    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. Your words go in once it reopens on its conversation.",
 ];
 
 /// The notes the human and the chief were given that a window did not stop.
@@ -384,8 +384,8 @@ fn a_task_cancelled_while_its_window_is_closed_is_said_to_be_cancelled_and_no_wo
     assert_eq!(
         told(&context, project),
         to_the_chief([
-            "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. T-1 was cancelled.",
-            "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended none. T-1 was cancelled.",
+            "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 was cancelled.",
+            "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 was cancelled.",
         ])
     );
 }
