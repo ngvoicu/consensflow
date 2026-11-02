@@ -83,7 +83,9 @@ enum Outcome {
 /// work moved: Node refuses it; and the one that names
 /// `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks waiting
 /// for a member moved; and the 4 that name `ANSWERED_AS_IT_WAITED`, which
-/// the settling of a question answered as it waited moved (T-260).
+/// the settling of a question answered as it waited moved (T-260); and the one
+/// that names `BUSY_NAMES_ITS_HOLDER`, which the naming of the task that holds a
+/// window in a `session-busy` refusal moved (T-1122).
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -160,7 +162,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-staff-016", 17, RESULT_ACCEPTED),
     ("ledger-staff-017", 20, RESULT_ACCEPTED),
     ("ledger-staff-018", 17, RESULT_SENT_BACK),
-    ("ledger-staff-019", 18, KEPT_BY_PAUSE),
+    ("ledger-staff-019", 15, BUSY_NAMES_ITS_HOLDER),
     ("ledger-staff-022", 14, RESULT_ACCEPTED),
     ("ledger-staff-023", 13, "the chief sends T-1 back while its result is still queued for it: the result is withdrawn then, with the reason `T-1 was sent back`, where Node leaves it queued until the task is cancelled, which withdraws it as `cancelled by @chief`"),
     ("ledger-tasks-004", 13, RESULT_ACCEPTED),
@@ -186,6 +188,10 @@ const DEPARTED: &[(&str, usize, &str)] = &[
 /// would be queued, once its needs were accepted, for a window nothing opens).
 const REMOVAL_CANCELS_WAITING: &str =
     "the chief removes a member that a task given to it by name waits on the board for (`removeMember` with an open task bound to its lane): the task is cancelled with the member, where Node left it open; the trace's later departure (the chief accepting the task while its result is still queued for it, `RESULT_ACCEPTED`) is no longer reached";
+/// A window that holds a task keeps every other task out, and the refusal says
+/// which one holds it and what to do about it (T-1122).
+const BUSY_NAMES_ITS_HOLDER: &str =
+    "a door refuses a task for a window that holds one (`createTask` with `after`, here T-1 paused): `session-busy` names the task that holds the window and its state, and how to free it (\"@x's window holds T-1, paused: resume T-1 and wait for its result, or cancel T-1, before giving it another task; or open the task for its tier\"), where Node said \"@x is still on its work: wait for its result, or open the task for its tier\"; the trace's later departure (a pause keeps what is on its way: a question, a task message, a result) is behind it";
 /// A follow-up of a task still on its work is taken, and waits on the board
 /// for that task to be accepted.
 const FOLLOW_UP_BEHIND_WORK: &str =

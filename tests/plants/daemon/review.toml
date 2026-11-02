@@ -30,10 +30,10 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-            Giving::SentBack(number) => {
-                format!(" before sending T-{number} back, or open a new task for its tier")
-            }'''
-replace = '            Giving::SentBack(_) => ", or open the task for its tier".to_owned(),'
+        Giving::SentBack(number) => {
+            format!("sending T-{number} back; or open a new task for its tier")
+        }'''
+replace = '        Giving::SentBack(_) => "giving it another task; or open the task for its tier".to_owned(),'
 
 [[plant]]
 name = "review: an answer that failed to arrive is not told to the one asked"

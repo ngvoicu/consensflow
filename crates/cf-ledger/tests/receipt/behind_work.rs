@@ -187,7 +187,7 @@ fn a_follow_up_of_a_task_whose_window_is_on_another_is_refused_as_before() {
     assert_eq!(
         refused.to_string(),
         format!(
-            "@{session} is still on its work: wait for its result, or open the task for its tier"
+            "@{session}'s window holds T-{b}, working: wait for its result, or cancel T-{b}, before giving it another task; or open the task for its tier"
         )
     );
 }

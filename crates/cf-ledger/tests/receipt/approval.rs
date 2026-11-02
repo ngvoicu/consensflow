@@ -485,6 +485,46 @@ fn a_result_the_human_never_passed_on_cannot_be_passed_on_once_they_decided_its_
 }
 
 #[test]
+fn the_chief_cannot_cancel_a_done_task_whose_result_waits_at_the_gate_and_the_human_can() {
+    let mut w = gated_world();
+    let task = at_work(&mut w);
+    let result = result_of(&mut w, task);
+    assert_eq!(w.message(result).state, "gated");
+
+    // A cancel decides the result, as accepting and sending back do: the chief may
+    // not decide what it has not been given.
+    let refused = w
+        .ledger
+        .cancel_task(w.project, task, "chief")
+        .expect_err("the result waits for the human");
+    assert_eq!(refused.code(), Some("result-gated"));
+    assert_eq!(
+        refused.to_string(),
+        "T-1's result waits for the human's approval: it reaches you once they pass it on"
+    );
+    assert_eq!(w.state(task), "done");
+    assert_eq!(w.message(result).state, "gated", "nothing is touched");
+
+    // The human cancels it themselves, and the result they never passed on goes.
+    w.ledger
+        .cancel_task(w.project, task, "human")
+        .expect("cancelled by the human");
+    let withdrawn = w.message(result);
+    assert_eq!(
+        (withdrawn.state.as_str(), withdrawn.reason.as_deref()),
+        ("cancelled", Some("cancelled by @human"))
+    );
+    assert_eq!(w.state(task), "cancelled");
+    let told = w.next("chief").map(|id| w.message(id));
+    assert_eq!(
+        told.as_ref()
+            .map(|note| (note.kind.as_str(), note.body.as_str())),
+        Some(("note", "@human cancelled T-1 (Parser).")),
+        "the chief is told, as for any cancel, and never given the result"
+    );
+}
+
+#[test]
 fn words_that_send_a_task_back_wait_at_the_gate_and_go_to_its_window_once_passed_on() {
     let mut w = gated_world();
     let task = finished(&mut w);
