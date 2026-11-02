@@ -527,6 +527,47 @@ mod tests {
             .starts_with(std::fs::canonicalize(real.path()).unwrap()));
     }
 
+    /// T-1081: the rig's Muse on echo keeps its settings and sessions in the rig's home, as
+    /// the live one does, whatever XDG folders the windows were given (a Devin home moves them
+    /// all): a rig case on echo then meets the folders the live kit's Muse does.
+    #[cfg(unix)]
+    #[test]
+    fn the_rigs_muse_on_echo_keeps_its_folders_in_the_rigs_home_as_the_live_one_does() {
+        let folder = tempfile::tempdir().unwrap();
+        let said = folder.path().join("said");
+        let binary = folder.path().join("real-muse");
+        files::write_executable(
+            &binary,
+            format!(
+                "#!/bin/sh\nprintf '%s %s' \"$XDG_CONFIG_HOME\" \"$XDG_DATA_HOME\" > '{}'\n",
+                said.display()
+            ),
+        )
+        .unwrap();
+        let install = super::Installed {
+            binary,
+            version: "1.4.14-R7309.1".to_owned(),
+        };
+        let rig = folder.path().join("rig-home");
+        let bin = folder.path().join("bin");
+        files::make_dir(&bin).unwrap();
+        let argv = folder.path().join("argv.log");
+        let ran = |launcher: &Path| {
+            let status = std::process::Command::new(launcher)
+                .env("XDG_CONFIG_HOME", "/a-home/config")
+                .env("XDG_DATA_HOME", "/a-home/data")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            std::fs::read_to_string(&said).unwrap()
+        };
+        let wanted = format!("{0}/.config {0}/.local/share", rig.display());
+        super::write_stand_in(&bin, &install, 10, &rig, &argv).unwrap();
+        assert_eq!(ran(&bin.join("muse")), wanted, "on echo");
+        super::write_live_stand_in(&bin, &install, folder.path(), &rig, &argv).unwrap();
+        assert_eq!(ran(&bin.join("muse")), wanted, "live");
+    }
+
     /// T-829's live run (Muse 1.4.14, 2026-10-28): a window of the subscription in which
     /// nothing was used yet answers no allowance with `server_sent_no_usage`, which is no
     /// account without one: nothing of it is spent, and the run goes on.

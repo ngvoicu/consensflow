@@ -1,0 +1,73 @@
+# A Muse window in a rig that seats Devin never named its session (T-1081; alpha.1's Mac release
+# check, a Muse advisor under a Devin chief, 2 runs of 2): Devin's home sets the four XDG folders
+# as the rig's last word, and the daemon looked for the Muse window's session in Devin's data
+# folder while the rig's Muse wrote it in the rig's home. Each plant takes one rule of the fix out,
+# and the case named in `meant` fails.
+#
+# - The rig links `muse` under each XDG folder a home moved to the rig's own Muse folder
+#   (`crates/cf-e2e/src/rig/install.rs`, `give_muse_its_folders`), and puts back a link a rig
+#   before it left in the same home.
+# - Devin's home reaches none of the owner's Muse (`crates/cf-e2e/src/live/isolation.rs`,
+#   `XDG_HARNESSES`).
+# - The rig's Muse on echo keeps its folders in the rig's home, as the live one does
+#   (`crates/cf-e2e/src/muse.rs`, `write_stand_in`).
+#
+# Every name holds `muse advisor start`: `npm run plants:daemon -- "muse advisor start"` runs them
+# all.
+
+[run]
+muse-advisor-start-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "harness_homes::"]
+muse-advisor-start-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::"]
+muse-advisor-start-kit-muse = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::tests::"]
+
+[[plant]]
+name = "muse advisor start: the daemon reads Muse's folders where a home moved them, not where the rig's Muse writes"
+meant = "a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes"
+runs = ["muse-advisor-start-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/install.rs"
+find = '''    if config.muse.is_none() {
+        return Ok(());
+    }
+    let own = files::real_path(&root.join("home"));'''
+replace = '''    if true || config.muse.is_none() {
+        return Ok(());
+    }
+    let own = files::real_path(&root.join("home"));'''
+
+[[plant]]
+name = "muse advisor start: a rig on a home another rig linked fails to start"
+meant = "a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes"
+runs = ["muse-advisor-start-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/install.rs"
+find = '''                std::fs::remove_file(&link).map_err(Error::file("remove", &link))?;'''
+replace = ""
+
+[[plant]]
+name = "muse advisor start: Devin's home reaches the owner's Muse"
+meant = "a_devin_home_reaches_none_of_the_owners_muse"
+runs = ["muse-advisor-start-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''const XDG_HARNESSES: [&str; 2] = ["devin", "muse"];'''
+replace = '''const XDG_HARNESSES: [&str; 2] = ["devin", "devin"];'''
+
+[[plant]]
+name = "muse advisor start: the rig's Muse on echo keeps its folders where a home moved them"
+meant = "the_rigs_muse_on_echo_keeps_its_folders_in_the_rigs_home_as_the_live_one_does"
+runs = ["muse-advisor-start-kit-muse"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''# The rig's Muse: the machine's, on its fake model. Echo takes no model or effort.
+( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
+export XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
+'''
+replace = '''# The rig's Muse: the machine's, on its fake model. Echo takes no model or effort.
+( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
+: '{rig}'
+'''

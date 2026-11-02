@@ -284,42 +284,47 @@ fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() ->
         binary: PathBuf::from("/nowhere/muse-bin-1.4.14-R7309.1"),
         version: "1.4.14-R7309.1".to_owned(),
     };
-    let config = live::rig(&owner.installs(), FAKE_AGENT).muse_live(muse, owner.home.path());
-    let rig = Rig::start(config)?;
-    let root = rig.home();
-    let root = root
-        .parent()
-        .ok_or("the daemon's home is in the rig's folder")?;
-    let own = fs::canonicalize(root.join("home"))?;
-    for (name, below) in [
-        ("XDG_CONFIG_HOME", ".config"),
-        ("XDG_DATA_HOME", ".local/share"),
-    ] {
-        // Devin's home still holds the folder the variable names.
-        let given = named(&rig, name);
-        assert!(
-            !given.starts_with(own.as_path()),
-            "{name} is {}",
-            given.display()
-        );
-        let read = fs::canonicalize(given.join("muse"))
-            .map_err(|failed| format!("{name}'s muse folder: {failed}"))?;
-        assert_eq!(read, own.join(below).join("muse"), "{name}");
+    // A home lasts the run, and the next rig starts on it (the next project, the app's restart):
+    // it finds the link the last one left, which leads to that rig's Muse.
+    let installs = owner.installs();
+    for run in 1..=2 {
+        let config = live::rig(&installs, FAKE_AGENT).muse_live(muse.clone(), owner.home.path());
+        let rig = Rig::start(config)?;
+        let root = rig.home();
+        let root = root
+            .parent()
+            .ok_or("the daemon's home is in the rig's folder")?;
+        let own = fs::canonicalize(root.join("home"))?;
+        for (name, below) in [
+            ("XDG_CONFIG_HOME", ".config"),
+            ("XDG_DATA_HOME", ".local/share"),
+        ] {
+            // Devin's home still holds the folder the variable names.
+            let given = named(&rig, name);
+            assert!(
+                !given.starts_with(own.as_path()),
+                "{name} is {}",
+                given.display()
+            );
+            let read = fs::canonicalize(given.join("muse"))
+                .map_err(|failed| format!("{name}'s muse folder: {failed}"))?;
+            assert_eq!(read, own.join(below).join("muse"), "{name}, rig {run}");
+        }
+        // The daemon finds the session a window of the rig's Muse writes.
+        let session = "01a19a82-dd62-7210-add6-a1f89c2624bc";
+        let log = own
+            .join(".local/share/muse/sessions/2026/11/02")
+            .join(session)
+            .join("session.jsonl");
+        fs::create_dir_all(log.parent().ok_or("a log has a folder")?)?;
+        fs::write(&log, "{}\n")?;
+        let found = named(&rig, "XDG_DATA_HOME")
+            .join("muse/sessions/2026/11/02")
+            .join(session)
+            .join("session.jsonl");
+        assert!(found.is_file(), "{}", found.display());
+        rig.close()?;
     }
-    // The daemon finds the session a window of the rig's Muse writes.
-    let session = "01a19a82-dd62-7210-add6-a1f89c2624bc";
-    let log = own
-        .join(".local/share/muse/sessions/2026/11/02")
-        .join(session)
-        .join("session.jsonl");
-    fs::create_dir_all(log.parent().ok_or("a log has a folder")?)?;
-    fs::write(&log, "{}\n")?;
-    let found = named(&rig, "XDG_DATA_HOME")
-        .join("muse/sessions/2026/11/02")
-        .join(session)
-        .join("session.jsonl");
-    assert!(found.is_file(), "{}", found.display());
-    rig.close()?;
     assert_eq!(
         owner.everything()?,
         before,
