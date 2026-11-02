@@ -139,6 +139,9 @@ pub struct FakeAgent {
     /// Why its record cannot be read now: each look reads none (`Reading::Unknown`),
     /// as when the reader's read of the transcript fails.
     pub unreadable: Option<String>,
+    /// The commands its harness says it keeps running (`Window::kept_commands`): none
+    /// unless a test says, and none where it says the harness could not tell.
+    pub kept_commands: Option<Vec<String>>,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -1055,6 +1058,7 @@ impl Asked {
             opening: None,
             resumable: Some(true),
             unreadable: None,
+            kept_commands: Some(Vec::new()),
         };
         if let Some(message) = launch
             .message

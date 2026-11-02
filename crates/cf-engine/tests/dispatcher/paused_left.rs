@@ -371,3 +371,63 @@ fn a_window_whose_harness_says_its_jobs_and_agents_run_is_kept_open_for_them_wit
     );
     context.close();
 }
+
+#[test]
+fn a_window_whose_harness_keeps_commands_running_that_no_tree_shows_is_kept_open_for_them() {
+    // Codex 0.166 runs a command with no shell, a program of its own child, and keeps one a
+    // pause interrupted as a background terminal (T-1137): the host lists neither as the
+    // turn's work, and only Codex's own word names them.
+    let context = Context::new();
+    context.background.leaves(Some(Background::default()));
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context.adapter.with("zeus", |agent| {
+        agent.kept_commands = Some(vec!["sh ./ignore-signals-cf-stops-live.sh".to_owned()]);
+    });
+    context.pause_task(project.id, 1);
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert!(
+        context.host.killed().is_empty(),
+        "a pause ends none of its work"
+    );
+    assert_eq!(
+        did_not_stop(&context, project.id, "chief"),
+        [kept_for(
+            "the commands its harness keeps running: sh ./ignore-signals-cf-stops-live.sh"
+        )]
+    );
+    context.close();
+}
+
+#[test]
+fn a_window_whose_harness_cannot_say_what_it_keeps_running_is_kept_open() {
+    let context = Context::new();
+    context.background.leaves(Some(Background::default()));
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context
+        .adapter
+        .with("zeus", |agent| agent.kept_commands = None);
+    context.pause_task(project.id, 1);
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert!(context.host.killed().is_empty());
+    assert_eq!(
+        did_not_stop(&context, project.id, "chief"),
+        [kept_for(
+            "what its harness could not list (it gave no answer)"
+        )]
+    );
+    context.close();
+}

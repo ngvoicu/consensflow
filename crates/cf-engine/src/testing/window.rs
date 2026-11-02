@@ -394,6 +394,15 @@ impl Window for FakeWindow {
         self.fake.of_launch(&self.launch, |agent| agent.held)
     }
 
+    /// What the agent says its harness keeps running; not written down, as no Node
+    /// trace asked it.
+    fn kept_commands(&self) -> Work<'_, Option<Vec<String>>> {
+        let kept = self
+            .fake
+            .of_launch(&self.launch, |agent| agent.kept_commands.clone());
+        Box::pin(async move { kept })
+    }
+
     /// Counted on the agent, and not written down: the JavaScript fake was
     /// never told, so the Node traces have no such call.
     fn interrupted(&self) {
