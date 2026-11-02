@@ -506,3 +506,38 @@ fn a_task_shown_working_does_not_read_queued_while_its_words_go_in_at_the_settle
     }
     assert_eq!(context.message(words.id).state, "delivered");
 }
+
+#[test]
+fn a_follow_up_that_reopened_a_done_task_is_no_resume_words() {
+    // Its move to queued names its message too, but it comes from done, not from paused.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Done.");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(state(&context, project.id), "done");
+    // The chief has the result, and sends the task back.
+    for _ in 0..4 {
+        context.adapter.answer("chief", "Read.");
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project.id, 1, "chief", "Fix the typo in its name")
+        .unwrap();
+    assert_eq!(state(&context, project.id), "queued");
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .resume_words_waiting(project.id, 1)
+            .unwrap(),
+        None
+    );
+}
