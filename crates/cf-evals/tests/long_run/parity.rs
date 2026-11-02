@@ -565,7 +565,7 @@ fn a_compaction_is_cancelled_only_by_the_words_before_a_command_beside_the_bare_
         lines.extend(extra);
         lines
     };
-    let cases = vec![
+    let cases = [
         ("cancelled", with("/compact", vec![caveat(11, 2, true)])),
         (
             "cancelled with instructions",

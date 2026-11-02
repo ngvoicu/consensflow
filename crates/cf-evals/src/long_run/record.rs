@@ -17,6 +17,15 @@
 //! ConsensFlow typed), and the operations on Claude Code's queue of messages (a
 //! message waiting there is a turn not over).
 //!
+//! This reader is a copy of the product's rules, kept on purpose (this crate depends on no crate
+//! of the product, so the watch holds the daemon to a reading that is not the daemon's), and
+//! a copy falls behind each time the product learns a rule (T-483's cancelled `/compact`, a
+//! `TaskStop`, a Monitor's start, a notification's status; T-1069's false breaks). It is held to
+//! the product's reader by `tests/long_run/parity.rs`: every fixture of the product's, and the
+//! shapes made there for the rules those do not hold, are read by both after each line, the
+//! product's through the test binary `harness-ask` (`claude_prefixes`), and a rule one has and
+//! the other lacks fails there, at the line it begins.
+//!
 //! The record is replayed as the product's reader replays it
 //! (`crates/cf-harness/src/claude/record/`): a message queued and not yet taken keeps
 //! the turn in flight, a removal or a `popAll` naming it as the product names it (its
