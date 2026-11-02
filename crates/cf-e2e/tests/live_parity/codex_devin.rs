@@ -132,8 +132,8 @@ const DOUBLE_PRESS: Duration = Duration::from_millis(150);
 struct Case {
     plan: Plan,
     words: Vec<(&'static str, &'static str)>,
-    /// Files written in the rig's home once the project is open, before the worker's
-    /// window: each by its path below the home.
+    /// Files written in the rig's own home once the project is open, before the worker's
+    /// window: each by its path below it.
     rig_files: Vec<(String, String)>,
     _folders: Vec<TempDir>,
 }
@@ -518,7 +518,11 @@ fn check(harness: Harness, log: &Log) -> Result {
         _ => devin_case()?,
     };
     let mut members = Members::open(&case.plan, Path::new(FAKE_AGENT), log)?;
-    let home = files::real_path(&members.rig().home());
+    // The rig's own home (`<rig>/home`), whose XDG folders its Muse launcher gives every Muse
+    // window (`rig::install`): never the daemon's (`CONSENSFLOW_HOME`, `<rig>/consensflow`),
+    // where no Muse reads (the first live run wrote there, and the worker had none of it).
+    let daemons = members.rig().home();
+    let home = files::real_path(&daemons.parent().unwrap_or(&daemons).join("home"));
     for (name, text) in &case.rig_files {
         files::write(&home.join(name), text)?;
         log.say(format!(
