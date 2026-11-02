@@ -10,7 +10,7 @@ use crate::conversations::current_conversation;
 use crate::model::{sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::projects::known_project;
 use crate::store::Store;
-use crate::views::{ParticipantRow, TaskRow};
+use crate::views::ParticipantRow;
 
 /// A member's new session: its own participant, named after the member,
 /// with the member's agent, harness, designer flag and tier and the role

@@ -94,8 +94,8 @@ runs = ["ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    let behind = session.left_at.is_none() && (at_work || others_wait);\n"
-replace = "    let behind = at_work || others_wait;\n"
+find = "    let at_work = session.left_at.is_none()\n        && (HELD_TASK_STATES.contains(&previous.state.as_str())\n            || matches!(previous.state.as_str(), \"open\" | \"paused\"));\n"
+replace = "    let at_work = HELD_TASK_STATES.contains(&previous.state.as_str())\n        || matches!(previous.state.as_str(), \"open\" | \"paused\");\n"
 
 [[plant]]
 name = "behind work: two follow-ups of one window go to it together"
@@ -320,8 +320,8 @@ runs = ["cf-lib-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "    if matches!(action, \"done\" | \"reopen\" | \"edit\" | \"resume\") && js::trim(&text).is_empty() {\n"
-replace = "    if matches!(action, \"done\" | \"reopen\" | \"resume\") && js::trim(&text).is_empty() {\n"
+find = "    if matches!(action, \"done\" | \"reopen\" | \"edit\" | \"resume\")\n"
+replace = "    if matches!(action, \"done\" | \"reopen\" | \"resume\")\n"
 
 [[plant]]
 name = "brief edit: the usage of `cf` does not list `cf task edit`"
@@ -335,7 +335,7 @@ replace = ""
 
 [[plant]]
 name = "brief edit: the chief is not told of `cf task edit`"
-meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
 runs = ["engine-text-roles"]
 
 [[plant.edit]]
@@ -345,12 +345,12 @@ replace = ""
 
 [[plant]]
 name = "behind work: the chief is told that a window at work refuses a follow-up, as 3.0.5 did"
-meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
 runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "conversation, and only the follow-up goes in. A window still at work on T-3\ntakes it too: it waits for T-3 to be accepted and goes in then. A window on\nanother task refuses and tells you to open the task for its tier instead.\n"
+find = "conversation, and only the follow-up goes in. It waits for T-3 to be accepted,\nat work or done, and goes in then. A window on another task refuses and tells\nyou to open the task for its tier instead.\n"
 replace = "conversation, and only the follow-up goes in. A window still busy refuses\nand tells you to open the task for its tier instead.\n"
 
 [[plant]]
@@ -458,26 +458,6 @@ find = "            if can_continue(store, &assignee)? {\n"
 replace = "            if false {\n"
 
 [[plant]]
-name = "behind work: a follow-up added with the result in overtakes the ones already waiting"
-meant = "a_follow_up_added_after_the_result_but_before_the_acceptance_lines_up_behind_the_ones_waiting"
-runs = ["ledger-behind-work"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "        previous.state == \"done\" && others_wait_for(store, &previous, session.id, before)?;\n"
-replace = "        false && others_wait_for(store, &previous, session.id, before)?;\n"
-
-[[plant]]
-name = "behind work: a follow-up put before the ones waiting for a task with its result in waits behind them"
-meant = "a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to_the_window_now"
-runs = ["ledger-behind-work"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    Ok(waiting.iter().any(|number| !before.contains(number)))\n"
-replace = "    Ok(!waiting.is_empty())\n"
-
-[[plant]]
 name = "behind work: an edit gives every queued task message the new brief again"
 meant = "a_task_held_for_quota_and_resumed_by_the_daemon_is_edited_in_its_brief_alone"
 runs = ["ledger-edited-brief"]
@@ -529,7 +509,7 @@ replace = "(open, blocked or queued)"
 
 [[plant]]
 name = "brief edit: the chief's role text says a task paused before any window had it is not editable"
-meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
 runs = ["engine-text-roles"]
 
 [[plant.edit]]

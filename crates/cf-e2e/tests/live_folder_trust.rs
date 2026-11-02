@@ -1276,6 +1276,12 @@ fn plan_words(tier: &str) -> Vec<String> {
 /// A worker's task, T-`number`, given by the stand-in chief with the words of `cf task
 /// add` before `brief`, done within [`DONE`]: whether it was.
 fn done_task(members: &Members, number: i64, words: &[String], brief: &str) -> Result<bool> {
+    // A follow-up (`--after T-n`) of a task with its result in waits for the chief to accept it.
+    if let Some(after) = words.iter().position(|word| word == "--after") {
+        if let Some(followed) = words.get(after + 1) {
+            members.as_chief(["task", "accept", followed.as_str()])?;
+        }
+    }
     let mut asked: Vec<&str> = vec!["task", "add"];
     asked.extend(words.iter().map(String::as_str));
     asked.push(brief);

@@ -89,7 +89,7 @@ replace = "        if assignee.member_id.is_some() && false && has_task_in_hand(
 
 [[plant]]
 name = "session: a task waiting for its session is not released when its need is accepted"
-meant = "a_follow_up_put_before_one_that_waits_goes_to_the_window_now_and_the_waiting_one_after_it"
+meant = "a_follow_up_put_before_one_that_waits_goes_to_the_window_first_and_the_waiting_one_after_it"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]

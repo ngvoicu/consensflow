@@ -173,6 +173,25 @@ fn the_items_of_a_record_that_shrank_come_after_the_ones_the_copy_kept() {
         "in the order they came"
     );
     assert_eq!(ids(&ledger, Some(2)), ["a-10", "a-11"]);
+
+    // An item the copy has, written again with its text changed, stays where it is: the
+    // record shows it at an earlier place than the one the copy gave it.
+    ledger
+        .copy_transcript(
+            conversation,
+            &[
+                item("a-9", "assistant", "Again, in full"),
+                item("a-10", "assistant", "And again"),
+                item("a-11", "assistant", "Done"),
+            ],
+            1,
+        )
+        .expect("copied");
+    assert_eq!(
+        ids(&ledger, None),
+        ["u-1", "a-1", "a-2", "a-9", "a-10", "a-11"],
+        "in the order they came"
+    );
 }
 
 #[test]
