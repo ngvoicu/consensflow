@@ -149,7 +149,7 @@ const INTERLEAVED: &[&str] = &[];
 /// What the engine does when the chief sends back a task whose result it has
 /// not been given: the result is withdrawn, where Node pastes it into the
 /// chief's window after the decision it asked for.
-const SENT_BACK_BEFORE_GIVEN: &str = "the chief sends T-1 back while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision";
+const SENT_BACK_BEFORE_GIVEN: &str = "the chief sends T-1 back while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them";
 
 /// What a start does now: it settles what was on its way into a window and
 /// opens nothing, and the human's Resume brings the project back; Node resumed
@@ -199,8 +199,12 @@ const CLOSE_RESUMED: &str = "the human resumes the project the Close suspended: 
 /// has been told to its requester in a note not yet given.
 const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
 
+/// A resumed window's record is copied after the items the copy kept (T-1118).
+const RESUMED_COPY: &str = "the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them";
 /// A follow-up of a task whose result is in waits for the acceptance (T-1118).
 const FOLLOW_UP_DECIDED: &str = "the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once";
+/// The same, for a follow-up whose window resumes its record.
+const FOLLOW_UP_DECIDED_RESUMED: &str = "the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them";
 
 /// What waits for a chief out of quota is said to the human (the field report of
 /// 2026-10-22, T-254).
@@ -301,15 +305,31 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "continues a finished task's session with --after: the same window comes back on its conversation",
-        FOLLOW_UP_DECIDED,
+        FOLLOW_UP_DECIDED_RESUMED,
     ),
     (
         "brings a deleted session back when a follow-up comes with --after: its window opens on its own conversation, and a busy session still refuses",
-        "the chief accepts T-1 while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision",
+        "the chief accepts T-1 while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them",
     ),
     (
         "reopens a finished task on its own session, resumed with the follow-up and nothing else",
         SENT_BACK_BEFORE_GIVEN,
+    ),
+    (
+        "keeps a window the human hid while its agent is at work, and closes it once the turn ends",
+        RESUMED_COPY,
+    ),
+    (
+        "makes a window the human hid theirs again when they show it while it still works",
+        RESUMED_COPY,
+    ),
+    (
+        "pauses the task and tells the requester when the worker window closes mid-task, and resumes it on its conversation",
+        RESUMED_COPY,
+    ),
+    (
+        "brings a tell to a task whose window is gone on that window's own conversation, still paused",
+        RESUMED_COPY,
     ),
     (
         "closes a project: its windows go, work in them pauses, and Resume brings the chief back",
@@ -321,11 +341,11 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "fails the Close that made its exit, which nothing logs: the exit it settles is its own",
-        "the human resumes the project the Close suspended: T-1, which the Close paused, is at work again in the same write, and its window comes back after the chief's, told its turn was cut, where Node leaves T-1 paused for the chief to resume; and when the chief's next window closes by itself, the note that T-1 is paused says the worker's window went with the project (`@zeus's window closed with the project when @chief's window closed`), where Node's says `@zeus's window closed`, as a worker's own crash does (the report of 2026-10-15, B2); and the window goes with a paste on its way into it that its harness took and its record shows: the record is read (`record`) and the paste confirmed, where Node gave it back to its queue to be pasted again into the conversation that held it",
+        "the human resumes the project the Close suspended: T-1, which the Close paused, is at work again in the same write, and its window comes back after the chief's, told its turn was cut, where Node leaves T-1 paused for the chief to resume; and when the chief's next window closes by itself, the note that T-1 is paused says the worker's window went with the project (`@zeus's window closed with the project when @chief's window closed`), where Node's says `@zeus's window closed`, as a worker's own crash does (the report of 2026-10-15, B2); and the window goes with a paste on its way into it that its harness took and its record shows: the record is read (`record`) and the paste confirmed, where Node gave it back to its queue to be pasted again into the conversation that held it; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them",
     ),
     (
         "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",
-        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset; and the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once",
+        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset; and the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them",
     ),
     (
         "fails a launch whose first message never arrives",

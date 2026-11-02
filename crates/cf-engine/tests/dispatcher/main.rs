@@ -126,6 +126,7 @@ mod throws_early;
 mod told_once;
 mod trace_untold;
 mod traces;
+mod transcript_whole;
 mod turn_end;
 mod turns_at_seams;
 mod unavailable_accounts;
