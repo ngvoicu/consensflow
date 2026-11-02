@@ -317,7 +317,13 @@ fn a_window_read_by_the_fallback_that_prints_and_shows_the_same_is_let_in() {
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [note.id]);
     let begun = logged(&context, "delivery.begun");
-    assert_eq!(begun[0]["look"]["screenQuietMs"], json!(6 * SETTLE));
+    assert_eq!(
+        (
+            &begun[0]["look"]["screenQuietMs"],
+            &begun[0]["look"]["outputQuietMs"]
+        ),
+        (&json!(6 * SETTLE), &json!(40))
+    );
 }
 
 /// T-946: Muse 1.4.14 held still six seconds as it started, before its first frame, and the

@@ -121,6 +121,9 @@ pub(crate) struct Paced {
     rest_ms: i64,
     typed_quiet_ms: Option<i64>,
     screen_quiet_ms: Option<i64>,
+    /// How long the pane had printed nothing: not what let it go, said beside the screen's
+    /// clock so a window that prints and shows the same is seen as one (T-1083).
+    output_quiet_ms: Option<i64>,
     fallback: bool,
 }
 
@@ -135,6 +138,7 @@ impl Paced {
             "restMs": self.rest_ms,
             "typedQuietMs": self.typed_quiet_ms,
             "screenQuietMs": self.screen_quiet_ms,
+            "outputQuietMs": self.output_quiet_ms,
         })
     }
 }
@@ -316,6 +320,7 @@ impl Dispatcher {
                 rest_ms,
                 typed_quiet_ms: None,
                 screen_quiet_ms: None,
+                output_quiet_ms: None,
                 fallback,
             });
             return Ok(Pace::Go);
@@ -373,6 +378,7 @@ impl Dispatcher {
             rest_ms,
             typed_quiet_ms,
             screen_quiet_ms,
+            output_quiet_ms: ms(&snapshot, "outputQuietMs"),
             fallback,
         });
         Ok(Pace::Go)
