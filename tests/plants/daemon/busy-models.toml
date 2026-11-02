@@ -122,7 +122,7 @@ find = '''
 '''
 replace = '''
             .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none())
-            || project.participants.iter().any(|other| other.handle.starts_with("diana")))
+            || true)
 '''
 
 [[plant]]
@@ -253,10 +253,10 @@ runs = ["busy-models-readers"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/quota.rs"
 find = '''
-const BUSY_STATUSES: [f64; 5] = [500.0, 502.0, 503.0, 504.0, 529.0];
+const BUSY_STATUSES: [f64; 7] = [500.0, 502.0, 503.0, 504.0, 520.0, 524.0, 529.0];
 '''
 replace = '''
-const BUSY_STATUSES: [f64; 4] = [500.0, 502.0, 503.0, 504.0];
+const BUSY_STATUSES: [f64; 6] = [500.0, 502.0, 503.0, 504.0, 520.0, 524.0];
 '''
 
 [[plant]]
@@ -267,10 +267,10 @@ runs = ["busy-models-readers"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/quota/patterns.rs"
 find = '''
-        r"(?i-u:overloaded|at capacity|server(?:s)? (?:is |are )?busy|server_busy|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
+        r"(?i-u:overloaded|at capacity|server(?:s)? (?:is |are )?(?:currently )?busy|server_busy|high demand|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
 '''
 replace = '''
-        r"(?i-u:overloaded|server(?:s)? (?:is |are )?busy|server_busy|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
+        r"(?i-u:overloaded|server(?:s)? (?:is |are )?(?:currently )?busy|server_busy|high demand|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
 '''
 
 [[plant]]

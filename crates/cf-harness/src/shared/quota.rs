@@ -265,9 +265,10 @@ pub(crate) fn unavailable_quota(at_ms: f64, refusal: Refusal, said: &str) -> Res
     })
 }
 
-/// The statuses of a request a provider refused for a moment: a server error, its gateway's,
-/// a service unavailable, and Anthropic's 529 `overloaded_error` (T-1112).
-const BUSY_STATUSES: [f64; 5] = [500.0, 502.0, 503.0, 504.0, 529.0];
+/// The statuses of a request a provider refused for a moment: a server error, its gateway's
+/// (Cloudflare's 520 and 524 too, which Pi's own retry takes), a service unavailable, and
+/// Anthropic's 529 `overloaded_error` (T-1112).
+const BUSY_STATUSES: [f64; 7] = [500.0, 502.0, 503.0, 504.0, 520.0, 524.0, 529.0];
 
 /// Whether a provider's refusal is one for a moment, which waiting cures (T-1112): a
 /// server error or its model overloaded or at capacity, by `status` where the record names

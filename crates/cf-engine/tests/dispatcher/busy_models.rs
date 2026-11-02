@@ -335,24 +335,29 @@ fn a_chiefs_busy_turn_is_the_humans_to_hear_and_holds_nothing() {
     assert_eq!(tiers.task(1).task.state, "working", "zeus's task goes on");
 }
 
-/// What each harness's reader reads of its recorded busy refusal (its own tests, from the
-/// recorded lines): the words it says, and the refusal for a moment it is.
+/// The words each harness's reader says of its busy refusal, as its own reader test reads
+/// them, and where the shape comes from: a refusal for a moment, `Quota::Busy`, for each.
 const SHAPES: [(&str, &str); 5] = [
-    // Claude Code: an API error message, `apiErrorStatus` 529.
+    // Claude Code: an API error message whose `error` is `server_error` (repeated 529s), its
+    // words as Claude Code 2.1.316's binary writes them.
     (
         "claude",
-        r#"API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+        "API Error: Repeated 529 Overloaded errors. The API is at capacity \u{2014} this is usually temporary. Try again in a moment.",
     ),
-    // Codex: `task_complete`'s error, `codex_error_info` `server_overloaded`.
+    // Codex: `task_complete`'s error, `codex_error_info` `server_overloaded`: recorded
+    // (`errored-task-complete.jsonl`, codex-cli 0.153.4).
     ("codex", AT_CAPACITY),
-    // Pi: an assistant message stopped on `error`, the provider's status first.
+    // Pi: an assistant message stopped on `error`, the Anthropic SDK's status then body, after
+    // Pi's own retries (pi-ai's `utils/retry.js` takes it for retryable).
     (
         "pi",
         r#"529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
     ),
-    // Devin: the turn's end, cause `error`, in `errorMessage`.
-    ("devin", "upstream model is overloaded, please retry"),
-    // Muse: a run that failed, `API error <status>`.
+    // Devin: the turn's end, cause `error`, in `errorMessage`. Provisional: no Devin record of
+    // a server's error is on file; the words are the shared ones.
+    ("devin", "Model provider error: 529 overloaded_error: Overloaded"),
+    // Muse: a run that failed, in the shape of its recorded 402 (`API error <status>
+    // [request_id=…]: <message> (<kind>)`, T-705) with a server's status. Provisional.
     (
         "muse",
         "API error 503 [request_id=req_1]: The service is temporarily unavailable (server_error)",

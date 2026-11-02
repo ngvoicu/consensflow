@@ -55,12 +55,14 @@ pub(super) static CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// A provider's words for a request it refused for a moment (T-1112): Anthropic's
-/// `overloaded_error` ("Overloaded"), a model "at capacity", a server "busy" or
-/// "overloaded", a service "temporarily unavailable", a server error by its name. A quota
-/// ("rate limit") and an account's refusal are read before these.
+/// `overloaded_error` ("Overloaded"), a model "at capacity" (Codex's "Selected model is at
+/// capacity"), servers "currently busy" or in "high demand", a service "temporarily
+/// unavailable", a server error by its name: the load and server words of Pi's own retry
+/// classifier (pi-ai's `utils/retry.js`, 2026-11), without its network and limit words. A
+/// quota ("rate limit") and an account's refusal are read before these.
 pub(super) static BUSY: LazyLock<Regex> = LazyLock::new(|| {
     compile(
-        r"(?i-u:overloaded|at capacity|server(?:s)? (?:is |are )?busy|server_busy|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
+        r"(?i-u:overloaded|at capacity|server(?:s)? (?:is |are )?(?:currently )?busy|server_busy|high demand|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
     )
 });
 

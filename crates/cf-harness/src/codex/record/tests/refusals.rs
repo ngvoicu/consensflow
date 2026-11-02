@@ -117,6 +117,10 @@ fn a_turn_its_server_refused_for_a_moment_is_busy_and_no_quota() {
         (json!("server_overloaded"), at_capacity),
         (json!("internal_server_error"), "Internal server error"),
         (
+            json!("policy_capacity_unavailable"),
+            "Policy-restricted capacity is unavailable. Please try again later.",
+        ),
+        (
             json!({ "response_too_many_failed_attempts": { "http_status_code": 503 } }),
             "exceeded retry limit, last status: 503 Service Unavailable",
         ),

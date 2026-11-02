@@ -505,6 +505,8 @@ fn a_providers_refusal_for_a_moment_is_busy_and_no_quota() {
         r#"529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
         "OpenAI API error (503): Service Unavailable",
         "Provider returned error: model is at capacity",
+        "The servers are currently busy, please try again",
+        "520 Cloudflare: web server returned an unknown error",
     ] {
         let mut stage = Stage::with(&[
             header(),

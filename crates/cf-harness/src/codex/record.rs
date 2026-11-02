@@ -87,12 +87,19 @@ const LIMITS: [&str; 2] = ["usage_limit_exceeded", "rate_limit_exceeded"];
 
 /// The `codex_error_info` of a turn its server refused for a moment (T-1112): its model at
 /// capacity ("Selected model is at capacity. Please try a different model.",
-/// `errored-task-complete.jsonl`, codex-cli 0.153.4), or the server's own error.
-const BUSY: [&str; 2] = ["server_overloaded", "internal_server_error"];
+/// `errored-task-complete.jsonl`, codex-cli 0.153.4), the server's own error, or capacity
+/// held for a policy ("Policy-restricted capacity is unavailable. Please try again later.").
+/// The names are `CodexErrorInfo`'s in the binary of Codex 0.166.0.
+const BUSY: [&str; 3] = [
+    "server_overloaded",
+    "internal_server_error",
+    "policy_capacity_unavailable",
+];
 
 /// The `codex_error_info` that name the status of a request Codex gave up on, as an object
-/// (`{"<kind>": {"http_status_code": 503}}`): a refusal for a moment where the status is a
-/// server's error.
+/// (`{"<kind>": {"http_status_code": 503}}`; the names and the field are in the binary of
+/// Codex 0.166.0, the object's shape is serde's for its variants, unrecorded): a refusal for a
+/// moment where the status is a server's error.
 const GAVE_UP: [&str; 4] = [
     "http_connection_failed",
     "response_stream_connection_failed",
