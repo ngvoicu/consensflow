@@ -23,8 +23,8 @@
 use cf_base::refusal::Refusal;
 use cf_base::text::utf16_len;
 use cf_ledger::{
-    HistoryFrom, HistoryKey, HistoryRead, HistoryRow, MessageOpening, TextCut, OPENING_COST,
-    PAGE_BYTES,
+    HistoryFrom, HistoryKey, HistoryRead, HistoryRow, ItemDetail, MessageOpening, TextCut,
+    OPENING_COST, PAGE_BYTES,
 };
 use serde::Serialize;
 
@@ -85,6 +85,10 @@ pub struct ShownItem {
     /// The text shown is a part of a longer one, which the page reads whole.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cut: Option<TextCut>,
+    /// What the history draws of it besides its words (chief-harness CHF-16), where its
+    /// reader said it: none for an item copied before, which draws as a plain one.
+    #[serde(flatten)]
+    pub detail: Option<ItemDetail>,
 }
 
 /// A delivery's line, and where in the item's text the delivery begins (in
@@ -195,6 +199,7 @@ fn shown(row: &HistoryRow, opening: Openings<'_>) -> Result<ShownItem, Refusal> 
         compaction: item.compaction,
         delivery,
         cut: row.cut,
+        detail: item.detail.clone(),
     })
 }
 

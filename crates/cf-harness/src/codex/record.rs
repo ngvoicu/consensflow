@@ -23,6 +23,7 @@
 //! answer by them.
 
 mod directives;
+mod drawn;
 mod fields;
 mod images;
 mod inputs;
@@ -43,6 +44,7 @@ use super::paths::transcript;
 use super::quota::codex_quota;
 use crate::shared::quota::{Level, Quota};
 use crate::shared::record::cache::Look;
+use crate::shared::record::drawn::{beside_item, took, Detail, Kind};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -80,6 +82,11 @@ fn handed_out(item: &Item) -> Item {
     }
 }
 
+/// A record's time in milliseconds since the epoch, where it is a timestamp's text.
+fn millis(at: &Value) -> Option<i64> {
+    at.as_str().and_then(time::parse)
+}
+
 /// The `codex_error_info` of a turn Codex ended for a limit: its usage limit
 /// (as Codex 0.163 names a plan or balance that has no quota too), or a rate
 /// limit it gave up retrying. The chief's rule (T-95): wait on any limit.
@@ -107,6 +114,19 @@ struct Rollout {
     /// The place among the records of the one being read.
     reading: usize,
     keys: Keys,
+    /// The items only the history shows (a reasoning's summary, a command still running, a
+    /// compaction), in the order the rollout said them.
+    beside: Vec<Beside>,
+    /// Each command still running among them, by its id: its place among them.
+    running: HashMap<Arc<str>, usize>,
+}
+
+/// An item only the history shows, the place among the items it stands before, and
+/// whether it was a command whose item Codex has completed since.
+struct Beside {
+    place: usize,
+    item: Item,
+    answered: bool,
 }
 
 /// An item as the rollout left it, and the text Codex marked its final
@@ -124,6 +144,9 @@ struct Call {
     turn: Key,
     /// The tool it called (`name`), when the call named one.
     tool: Option<Arc<str>>,
+    /// What the history draws of it, and the time of its record.
+    detail: Detail,
+    made: Option<i64>,
 }
 
 /// A turn as the rollout told it.
@@ -170,7 +193,34 @@ impl Rollout {
             records: 0,
             reading: 0,
             keys: Keys::default(),
+            beside: Vec::new(),
+            running: HashMap::new(),
         }
+    }
+
+    /// An item only the history shows, where it stands: after the items so far.
+    fn beside(&mut self, item: Item) {
+        self.beside.push(Beside {
+            place: self.items.len(),
+            item,
+            answered: false,
+        });
+    }
+
+    /// A `compacted` record: Codex compacted the thread. No item of its words: the
+    /// history's alone, by its place among the records.
+    fn compacted(&mut self, payload: Option<&Value>, at: Value, seq: &Value) {
+        let id = Arc::from(format!("compacted:{}", js::text(Some(seq))));
+        let summary = field(payload, "message")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        self.beside(beside_item(
+            id,
+            Role::Custom,
+            summary,
+            Some(at),
+            Detail::of(Kind::Compaction),
+        ));
     }
 
     /// `codexTurn`: the turn `key` names, made when the rollout first names
@@ -236,13 +286,42 @@ impl Rollout {
                     let tool = field(payload, "name")
                         .and_then(Value::as_str)
                         .map(Arc::from);
-                    self.calls.insert(call, Call { turn, tool });
+                    let detail = drawn::called(payload);
+                    let made = millis(&at);
+                    self.calls.insert(
+                        call,
+                        Call {
+                            turn,
+                            tool,
+                            detail,
+                            made,
+                        },
+                    );
+                }
+            }
+            // What Codex keeps readable of its model's thinking: a reasoning's summary.
+            (Some("reasoning"), _) => {
+                if let Some(said) = drawn::reasoning(payload) {
+                    let id = match field(payload, "id").and_then(Value::as_str) {
+                        Some(id) if !id.is_empty() => Arc::from(format!("{id}:thinking")),
+                        _ => Arc::from(format!("reasoning:{}", js::text(Some(seq)))),
+                    };
+                    self.beside(beside_item(
+                        id,
+                        Role::Custom,
+                        &said,
+                        Some(at),
+                        Detail::of(Kind::Thinking),
+                    ));
                 }
             }
             (Some("function_call_output" | "custom_tool_call_output"), _) => {
                 let call = self.keys.of(field(payload, "call_id"));
                 let called = self.calls.get(&call);
                 let tool = called.and_then(|called| called.tool.clone());
+                let mut detail =
+                    called.map_or_else(|| Detail::of(Kind::Tool), |called| called.detail.clone());
+                let made = called.and_then(|called| called.made);
                 let owner = match called {
                     Some(called) if !called.turn.is_nullish() => called.turn.clone(),
                     _ => turn,
@@ -250,8 +329,13 @@ impl Rollout {
                 if let Some(open) = self.turn(&owner) {
                     open.tools.remove(&call);
                 }
+                let (status, took_ms) = drawn::ended(field(payload, "output"));
+                detail.status = Some(status);
+                detail.took_ms = took_ms.or_else(|| took(made, millis(&at)));
                 let output = output_text(field(payload, "output"), tool.as_deref());
-                self.add_item(field(payload, "id"), Role::Tool, output, true, at, seq)?;
+                let place =
+                    self.add_item(field(payload, "id"), Role::Tool, output, true, at, seq)?;
+                self.items[place].item.detail = Some(Arc::new(detail));
             }
             _ => {}
         }
@@ -461,6 +545,19 @@ impl Rollout {
                             open.tools.insert(command);
                         }
                     }
+                    // Running, until Codex completes it: the history's alone.
+                    if let Some(id) = field(native, "id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                    {
+                        let id: Arc<str> = Arc::from(id);
+                        if !self.running.contains_key(&id) && !self.places.contains_key(&id) {
+                            let mut detail = drawn::command(native);
+                            detail.status = Some(crate::shared::record::drawn::Status::Running);
+                            self.running.insert(Arc::clone(&id), self.beside.len());
+                            self.beside(beside_item(id, Role::Tool, "", Some(at), detail));
+                        }
+                    }
                     return Ok(());
                 }
                 if let Some(open) = self.turn(turn) {
@@ -469,7 +566,16 @@ impl Rollout {
                 // `String(output)`, where V8 throws on an object with a
                 // `toString` of its own.
                 let output = or_empty(field(native, "aggregated_output"))?;
-                self.add_item(field(native, "id"), Role::Tool, output, true, at, seq)?;
+                if let Some(place) = field(native, "id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| self.running.remove(id))
+                {
+                    self.beside[place].answered = true;
+                }
+                let detail = drawn::command(native);
+                let place =
+                    self.add_item(field(native, "id"), Role::Tool, output, true, at, seq)?;
+                self.items[place].item.detail = Some(Arc::new(detail));
             }
             Some("SubAgentActivity") => {
                 let agent = self.keys.of(field(native, "agent_thread_id"));
@@ -548,6 +654,7 @@ impl Rollout {
                 commentary: false,
                 synthetic: false,
                 compaction: false,
+                detail: None,
             },
             final_text: None,
             began: self.reading,
@@ -620,6 +727,10 @@ impl Parser for Rollout {
         match record.get("type").and_then(Value::as_str) {
             Some("response_item") => self.response_item(payload, at, &seq),
             Some("event_msg") => self.event(payload, at, &seq),
+            Some("compacted") => {
+                self.compacted(payload, at, &seq);
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -648,6 +759,12 @@ impl Answer for Rollout {
             .map(|kept| handed_out(&kept.item))
             .collect();
         record.lines.places = Some(self.items.iter().map(|kept| kept.began).collect());
+        record.beside = self
+            .beside
+            .iter()
+            .filter(|beside| !beside.answered)
+            .map(|beside| (beside.place, beside.item.clone()))
+            .collect();
         record.in_flight = in_flight;
         record.failed = matches!(end, Some((_, End::Failed { .. })));
         if let Some((_, End::Failed { said, .. })) = end {

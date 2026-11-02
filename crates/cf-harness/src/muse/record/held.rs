@@ -19,11 +19,15 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::field;
+use crate::shared::record::drawn::{self, Detail, Kind, Status};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::reading::{native_id, Role};
 
-/// An item a record says: its id, role and text.
-pub(super) type Said = (Arc<str>, Role, String);
+/// An item a record says: its id, role and text, and what the history draws of it besides
+/// its words where it is a tool's result (chief-harness CHF-15, provisional: Muse 1.4.13's
+/// calls as T-705 and T-718 saw them, `name` and `args`; a result's end as its `is_error`
+/// or `status` says, which no live run has shown yet).
+pub(super) type Said = (Arc<str>, Role, String, Option<Detail>);
 
 /// What each run holds open.
 #[derive(Default)]
@@ -32,6 +36,9 @@ pub(super) struct Held {
     calls: HashMap<Arc<str>, HashSet<Arc<str>>>,
     /// The questions and approvals each run asked that are not settled.
     asked: HashMap<Arc<str>, HashSet<Arc<str>>>,
+    /// What the history draws of each call, by its id, while it runs: its tool's name and
+    /// header.
+    drawn: HashMap<Arc<str>, Detail>,
 }
 
 impl Held {
@@ -50,6 +57,17 @@ impl Held {
             "assistant_tool_calls_committed" => {
                 for call in list(field(event, "tool_calls")) {
                     if let Some(id) = id_of(call, &["call_id", "id"]) {
+                        let name = call
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or("tool");
+                        let arguments = call.get("args").or_else(|| call.get("arguments"));
+                        let header = drawn::guess(name, arguments);
+                        self.drawn.insert(
+                            Arc::clone(&id),
+                            drawn::tool(name, header, Some(Status::Running)),
+                        );
                         self.calls.entry(Arc::clone(run)).or_default().insert(id);
                     }
                 }
@@ -71,6 +89,16 @@ impl Held {
                             open.remove(call);
                         }
                     }
+                    let mut detail = call
+                        .as_ref()
+                        .and_then(|call| self.drawn.remove(call))
+                        .unwrap_or_else(|| Detail::of(Kind::Tool));
+                    let failed = result.get("is_error") == Some(&Value::Bool(true))
+                        || matches!(
+                            result.get("status").and_then(Value::as_str),
+                            Some("error" | "failed")
+                        );
+                    detail.status = Some(if failed { Status::Failed } else { Status::Ok });
                     let id = match call {
                         Some(call) => call,
                         None => Arc::from(format!("{}:{at}", record_id()?)),
@@ -78,7 +106,7 @@ impl Held {
                     let output = ["text", "output", "result"].iter().find_map(|name| {
                         field(Some(result), name).filter(|found| !found.is_null())
                     });
-                    said.push((id, Role::Tool, words(output)));
+                    said.push((id, Role::Tool, words(output), Some(detail)));
                 }
                 said
             }
@@ -94,6 +122,11 @@ impl Held {
             }
             _ => Vec::new(),
         })
+    }
+
+    /// The calls running now, as the history draws each while it runs, by their ids.
+    pub(super) fn running(&self) -> impl Iterator<Item = (&Arc<str>, &Detail)> {
+        self.drawn.iter()
     }
 
     /// An approval's event (`payload.kind: approval`) of the run `run`.

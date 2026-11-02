@@ -57,6 +57,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         commentary: false,
         synthetic: false,
         compaction: false,
+        detail: None,
     }
 }
 
@@ -77,6 +78,7 @@ fn look(items: Vec<Item>) -> Observed {
             pending: Default::default(),
             monitors: Vec::new(),
             lines: Box::default(),
+            beside: Vec::new(),
         }))),
         settled: true,
         over: Over::No,

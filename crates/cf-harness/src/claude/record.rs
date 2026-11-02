@@ -252,6 +252,9 @@ struct Transcript {
     /// The turn ended at such a cancel, and Claude Code put the `/compact` back in
     /// its input box (`Lines::put_back`), until a record moves the turn again.
     put_back: bool,
+    /// The tokens the latest compaction's boundary said it compacted from, until the summary
+    /// that follows it takes them.
+    compacted_from: Option<u64>,
 }
 
 /// A `/compact` as it was typed: the record it is a child of.
@@ -330,6 +333,7 @@ impl Transcript {
             last_at: None,
             typed_compact: None,
             put_back: false,
+            compacted_from: None,
         }
     }
 
@@ -480,9 +484,10 @@ impl Answer for Transcript {
         }
         let settlement = self.settlement();
         let mut record = Record::new();
-        let (items, places) = self.items.sorted()?;
+        let (items, places, beside) = self.items.timeline(&self.open_tools)?;
         record.items = items;
         record.lines.places = Some(places);
+        record.beside = beside;
         record.in_flight = settlement == Settlement::InFlight;
         record.failed = self.failure.is_some();
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());

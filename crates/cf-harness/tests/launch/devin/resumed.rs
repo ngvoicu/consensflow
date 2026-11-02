@@ -35,6 +35,7 @@ fn item(id: &str, role: Role, complete: bool) -> Item {
         commentary: false,
         compaction: false,
         synthetic: false,
+        detail: None,
     }
 }
 
@@ -54,6 +55,7 @@ fn record(items: Vec<Item>, settlement: Settlement, in_flight: bool) -> Record {
         pending: Default::default(),
         monitors: Vec::new(),
         lines: Box::default(),
+        beside: Vec::new(),
     }
 }
 

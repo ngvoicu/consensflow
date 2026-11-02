@@ -356,6 +356,7 @@ fn record_of(texts: &[&str]) -> Record {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         });
     }
     record
@@ -752,6 +753,7 @@ fn a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_w
         commentary: false,
         synthetic: false,
         compaction: false,
+        detail: None,
     });
     let window = devin_window(
         Env::default(),

@@ -48,6 +48,7 @@ fn row(conversation: i64, seq: i64, role: &str, text: &str) -> HistoryRow {
             complete: true,
             at: Some(format!("2026-10-1{conversation}T10:{seq:02}:00.000Z")),
             compaction: role == "summary",
+            detail: None,
         },
         cut: None,
     }

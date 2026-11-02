@@ -42,10 +42,11 @@ mod wake_ups;
 pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
     DeletedProject, EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead,
-    HistoryRow, Lane, LastSwitch, LatestMessages, LatestTranscript, MemberView, MessageOpening,
-    MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume,
-    Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits,
-    TaskThread, TaskTranscript, TaskView, TextCut, TextPart, TierChange,
+    HistoryRow, ItemDetail, Lane, LastSwitch, LatestMessages, LatestTranscript, MemberView,
+    MessageOpening, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
+    RemovedMember, Resume, Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved,
+    TaskReleased, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
+    TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{

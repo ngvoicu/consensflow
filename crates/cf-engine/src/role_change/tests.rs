@@ -186,6 +186,7 @@ fn said_by(role: Role, text: &str, complete: bool) -> Item {
         commentary: false,
         synthetic: false,
         compaction: false,
+        detail: None,
     }
 }
 

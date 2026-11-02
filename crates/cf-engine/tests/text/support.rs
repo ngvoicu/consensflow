@@ -257,6 +257,7 @@ pub fn conversation<R: AsRef<str>, T: AsRef<str>>(
                 complete: true,
                 at: None,
                 compaction: false,
+                detail: None,
             })
             .collect(),
     }
@@ -293,6 +294,7 @@ pub fn conversation_of(row: &Value) -> ChiefConversation {
                 complete: item["complete"].as_bool().unwrap(),
                 at: text(item, "at"),
                 compaction: false,
+                detail: None,
             })
             .collect(),
     }

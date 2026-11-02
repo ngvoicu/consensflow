@@ -442,6 +442,7 @@ impl FakeAdapter {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         }
     }
 

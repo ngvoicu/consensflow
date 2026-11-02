@@ -435,6 +435,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
                 places,
                 ..Lines::default()
             }),
+            beside: Vec::new(),
         })))
     };
     // A window that shows another conversation than its launch's: that

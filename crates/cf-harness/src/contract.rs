@@ -20,7 +20,7 @@ use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use crate::records::{
-    Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
+    Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement, Timeline,
 };
 /// What an input box on the screen holds ([`Window::input_box`]).
 pub use crate::shared::input_box::InputBox;
@@ -815,6 +815,15 @@ impl Observed {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => &record.items,
             Some(Reading::Unknown(_) | Reading::Missing(_)) | None => &[],
+        }
+    }
+
+    /// The conversation's items and those only the history shows, in the history's order:
+    /// what ConsensFlow's copy keeps. None where its record could not be read.
+    pub fn timeline(&self) -> Timeline<'_> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => Timeline::of(record),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Timeline::none(),
         }
     }
 

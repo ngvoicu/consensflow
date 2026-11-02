@@ -25,7 +25,7 @@
 
 pub(crate) mod evidence;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -40,6 +40,7 @@ use crate::shared::quota::{
     account_refusal, exhausted_quota, refused_for_quota, unavailable_quota, Quota,
 };
 use crate::shared::record::cache::{Look, Options};
+use crate::shared::record::drawn::{self, Action, Detail, Kind, Status};
 use crate::shared::record::followed::{Followed, Parser};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -131,6 +132,12 @@ struct Session {
     quota: Option<Arc<Quota>>,
     records: usize,
     keys: Keys,
+    /// The items only the history shows (a step's thinking, a compaction), each with the
+    /// place among the items it stands before.
+    beside: Vec<(usize, Item)>,
+    /// What the history draws of each call a step made, by its id, and the time of the
+    /// step: what its result's item says of it.
+    calls: HashMap<Key, (Detail, Option<i64>)>,
 }
 
 /// The end of the last assistant step: how, and which item it was.
@@ -165,7 +172,36 @@ impl Session {
             quota: None,
             records: 0,
             keys: Keys::default(),
+            beside: Vec::new(),
+            calls: HashMap::new(),
         }
+    }
+
+    /// An item only the history shows, where it stands: after the items so far.
+    fn beside(&mut self, item: Item) {
+        self.beside.push((self.items.len(), item));
+    }
+
+    /// A `compaction`: Pi compacted the conversation, from `tokensBefore` tokens, into its
+    /// `summary`. No item of the conversation's words: the history's alone.
+    fn compaction(&mut self, record: &Value, at: Value, seq: &Value) -> Result<(), Stop> {
+        let id = native_id(record.get("id"), "pi compaction", seq).map_err(Stop::Failed)?;
+        let summary = record
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let detail = Detail {
+            tokens: record.get("tokensBefore").and_then(Value::as_u64),
+            ..Detail::of(Kind::Compaction)
+        };
+        self.beside(drawn::beside_item(
+            id,
+            Role::Custom,
+            summary,
+            Some(at),
+            detail,
+        ));
+        Ok(())
     }
 
     fn push(&mut self, id: Arc<str>, role: Role, text: String, complete: bool, at: Value) {
@@ -179,6 +215,7 @@ impl Session {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         });
     }
 
@@ -223,7 +260,11 @@ impl Session {
                 if call.truthy() {
                     self.open_tools.remove(&call);
                 }
+                let detail = self.result_detail(&call, &field, &at);
                 self.push(id, Role::Tool, pi_text(field("content")), true, at);
+                if let Some(result) = self.items.last_mut() {
+                    result.detail = Some(Arc::new(detail));
+                }
             }
             Some("assistant") => self.assistant(id, &field, at)?,
             _ => {}
@@ -239,13 +280,36 @@ impl Session {
         field: &dyn Fn(&str) -> Option<&'a Value>,
         at: Value,
     ) -> Result<(), Stop> {
+        let made = millis(&at);
         if let Some(Value::Array(blocks)) = field("content") {
-            for block in blocks {
-                if block.get("type").and_then(Value::as_str) == Some("toolCall") {
-                    let call = self.keys.of(block.get("id"));
-                    if call.truthy() {
-                        self.open_tools.insert(call);
+            for (place, block) in blocks.iter().enumerate() {
+                match block.get("type").and_then(Value::as_str) {
+                    Some("toolCall") => {
+                        let call = self.keys.of(block.get("id"));
+                        if call.truthy() {
+                            self.calls.insert(call.clone(), (called(block), made));
+                            self.open_tools.insert(call);
+                        }
                     }
+                    // The step's thinking, which stands before its words.
+                    Some("thinking") => {
+                        let thought = block
+                            .get("thinking")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        if !js::trim(thought).is_empty() {
+                            let id = Arc::from(format!("{id}:thinking:{place}"));
+                            let detail = Detail::of(Kind::Thinking);
+                            self.beside(drawn::beside_item(
+                                id,
+                                Role::Custom,
+                                thought,
+                                Some(at.clone()),
+                                detail,
+                            ));
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -317,6 +381,39 @@ impl Session {
         Ok(())
     }
 
+    /// What the history draws of a tool's result: the call's name and header, how it
+    /// ended (`isError`), how long it took (`durationMs`, else the time from its step to
+    /// its result) and the change an edit made (`details.diff`).
+    fn result_detail<'a>(
+        &self,
+        call: &Key,
+        field: &dyn Fn(&str) -> Option<&'a Value>,
+        at: &Value,
+    ) -> Detail {
+        let (mut detail, made) = self
+            .calls
+            .get(call)
+            .cloned()
+            .unwrap_or_else(|| (Detail::of(Kind::Tool), None));
+        if detail.name.is_none() {
+            detail.name = field("toolName").and_then(Value::as_str).map(Arc::from);
+        }
+        detail.status = Some(if field("isError") == Some(&Value::Bool(true)) {
+            Status::Failed
+        } else {
+            Status::Ok
+        });
+        detail.took_ms = field("durationMs")
+            .and_then(Value::as_u64)
+            .or_else(|| drawn::took(made, millis(at)));
+        detail.diff = field("details")
+            .and_then(|details| details.get("diff"))
+            .and_then(Value::as_str)
+            .filter(|diff| !diff.is_empty())
+            .map(Arc::from);
+        detail
+    }
+
     /// The answer, with the extension's evidence and the session file's quiet
     /// as they are now. Fails for a session of no records, for evidence that
     /// cannot be read, and for a file that cannot be looked at.
@@ -357,6 +454,7 @@ impl Session {
         let mut record = Record::new();
         record.items = self.items.clone();
         record.lines.places = Some(self.places.clone());
+        record.beside = self.beside.clone();
         record.in_flight = in_flight;
         record.failed = self.failed;
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
@@ -394,9 +492,57 @@ impl Parser for Session {
         match record.get("type").and_then(Value::as_str) {
             Some("custom_message") => self.custom(&record, at, &seq),
             Some("message") => self.message(&record, message, at, &seq),
+            Some("compaction") => self.compaction(&record, at, &seq),
             _ => Ok(()),
         }
     }
+}
+
+/// A record's time in milliseconds since the epoch: a timestamp's text, or a number of them.
+fn millis(at: &Value) -> Option<i64> {
+    match at {
+        Value::String(text) => cf_base::time::parse(text),
+        Value::Number(number) => number.as_i64(),
+        _ => None,
+    }
+}
+
+/// What the history draws of a `toolCall` block while it runs: its tool's name and header,
+/// from its `arguments` by the tool it is (Pi's own: `read`, `bash`, `edit`, `write`).
+fn called(block: &Value) -> Detail {
+    let name = block
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("tool");
+    let arguments = block.get("arguments");
+    let says = |member: &str| {
+        arguments
+            .and_then(|arguments| arguments.get(member))
+            .and_then(Value::as_str)
+    };
+    let number = |member: &str| {
+        arguments
+            .and_then(|arguments| arguments.get(member))
+            .and_then(Value::as_u64)
+    };
+    let action = match name {
+        "bash" => Action::Shell(says("command").unwrap_or_default()),
+        "read" => Action::Read {
+            path: says("path").unwrap_or_default(),
+            from: number("offset"),
+            lines: number("limit"),
+        },
+        "edit" => Action::Edit(says("path").unwrap_or_default()),
+        "write" => Action::Write(says("path").unwrap_or_default()),
+        _ => Action::Other {
+            name,
+            about: ["command", "path", "pattern", "query", "url"]
+                .into_iter()
+                .find_map(says),
+        },
+    };
+    drawn::tool(name, drawn::header(action), Some(Status::Running))
 }
 
 /// `piText`: the text blocks of a message's content, a line each; none for

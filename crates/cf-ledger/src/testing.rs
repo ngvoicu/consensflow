@@ -55,6 +55,7 @@
 mod chief_model;
 mod compaction;
 mod described;
+mod drawn_items;
 mod handed;
 mod history_indexes;
 mod model_list;
@@ -69,6 +70,7 @@ use serde_json::{Map, Value};
 
 pub use chief_model::undo_migration_0026;
 pub use compaction::undo_migration_0020;
+pub use drawn_items::undo_migration_0028;
 pub use handed::undo_migration_0022;
 pub use history_indexes::undo_migration_0027;
 pub use model_list::undo_migration_0025;
@@ -126,9 +128,10 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
 /// migration 0017, the one of migration 0018, the one of migration 0020, the one
-/// of migration 0021, the one of migration 0022, the one of migration 0024 and the
-/// four of migration 0026 (their name and, in every row, the value at its place), the table
-/// migration 0020 made (a long item's parts), the stop in the event rows that paused a
+/// of migration 0021, the one of migration 0022, the one of migration 0024, the
+/// four of migration 0026 and the two of migration 0028 (their name and, in every row, the
+/// value at its place), the tables migrations 0020 and 0028 made (a long item's parts, an
+/// edit's change), the stop in the event rows that paused a
 /// task, and the look in the event rows of a delivery's begin, retry or failure.
 /// A dump from before the migrations has none of them, and is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
@@ -145,6 +148,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(pasted_into::COLUMNS)
         .chain(program_gone::COLUMNS)
         .chain(chief_model::COLUMNS)
+        .chain(drawn_items::COLUMNS)
     {
         take_column_out(tables, table, column);
     }
@@ -153,7 +157,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     }
     // Kept in their order: a table taken out mid-list must not move the last into its place.
     let made: Vec<&str> = compaction::made("TABLE")
-        .chain([model_list::TABLE])
+        .chain([model_list::TABLE, drawn_items::TABLE])
         .collect();
     tables.retain(|table, _| !made.contains(&table.as_str()));
 }
@@ -212,7 +216,9 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             .any(|made| made == name)
     });
     schema.retain(|entry| {
-        entry["name"] != pasted_into::TRIGGER && entry["name"] != model_list::TABLE
+        entry["name"] != pasted_into::TRIGGER
+            && entry["name"] != model_list::TABLE
+            && entry["name"] != drawn_items::TABLE
     });
     for entry in schema {
         let name = entry["name"].as_str().map(str::to_owned);
@@ -252,7 +258,9 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql.replace(pasted_into::COLUMN_LINES, "");
             }
             Some("transcript") => {
-                *sql = sql.replace(compaction::COLUMN_LINES, "");
+                *sql = sql
+                    .replace(compaction::COLUMN_LINES, "")
+                    .replace(drawn_items::COLUMN_LINES, "");
             }
             _ => {}
         }

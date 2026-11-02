@@ -5,6 +5,12 @@
 //! result is one item by the call it answers. Each item keeps the place
 //! (`seq`) of the latest record that said anything of it, which orders the
 //! items in an answer; neither that nor the fragments are in what it says.
+//!
+//! Beside them are the items only the history shows ([`Record::beside`]): a
+//! record's thinking, which stands before the message it is of, and a call with
+//! no result yet, which stands after it until its result is an item.
+//!
+//! [`Record::beside`]: crate::shared::record::reading::Record::beside
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,6 +18,8 @@ use std::sync::Arc;
 use cf_base::js;
 use serde_json::Value;
 
+use crate::shared::record::drawn::{self, Detail, Kind};
+use crate::shared::record::key::Key;
 use crate::shared::record::reading::{Item, Role};
 use crate::shared::record::sort::sort;
 
@@ -22,6 +30,10 @@ pub(super) struct Items {
     assistants: HashMap<Arc<str>, usize>,
     /// Each tool's result, by the call's native id.
     tools: HashMap<Arc<str>, usize>,
+    /// The items only the history shows, in the order they were pushed.
+    beside: Vec<Beside>,
+    /// Each call with no result yet among them, by its native id: its place among them.
+    running: HashMap<Arc<str>, usize>,
 }
 
 struct Entry {
@@ -30,6 +42,28 @@ struct Entry {
     /// The place of the record it began in, which no later record moves.
     began: usize,
     fragments: Fragments,
+}
+
+/// An item only the history shows, the place of the record that said it, and where it
+/// stands among the items of that record ([`Stands`]).
+struct Beside {
+    item: Item,
+    seq: usize,
+    stands: Stands,
+    /// The call it is, where it is one: no longer running once the turn is over without
+    /// its result ([`Items::timeline`]).
+    call: Option<Key>,
+    /// Its result came, and is an item of its own.
+    answered: bool,
+}
+
+/// Where an item only the history shows stands among the items of the record that said it.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Stands {
+    /// Before them: a message's thinking, before its words.
+    Before,
+    /// After them: a call, after the words of the message that made it.
+    After,
 }
 
 /// An assistant's text in the pieces its records said it in.
@@ -55,11 +89,72 @@ impl Items {
     }
 
     /// The summary a compaction wrote in the user's place: a user's item, as Node read
-    /// it, that says it is the harness's own.
-    pub(super) fn summary(&mut self, id: Arc<str>, text: &str, at: &Value, seq: usize) {
+    /// it, that says it is the harness's own; and what the history draws of it, the tokens
+    /// the compaction's boundary said it compacted from.
+    pub(super) fn summary(
+        &mut self,
+        id: Arc<str>,
+        text: &str,
+        at: &Value,
+        seq: usize,
+        tokens: Option<u64>,
+    ) {
         let mut entry = Entry::new(id, Role::User, text, true, at, seq);
         entry.item.compaction = true;
+        entry.item.detail = Some(Arc::new(Detail {
+            tokens,
+            ..Detail::of(Kind::Compaction)
+        }));
         self.list.push(entry);
+    }
+
+    /// What a record said its message's model thought (`thinking`): an item only the
+    /// history shows, by the record's uuid and its place among the record's thinking
+    /// blocks, which stands before the words of the record's message.
+    pub(super) fn thinking(&mut self, record: &str, text: &str, at: &Value, seq: usize) {
+        let place = self
+            .beside
+            .iter()
+            .filter(|beside| beside.seq == seq)
+            .count();
+        let id = Arc::from(format!("{record}:thinking:{place}"));
+        self.beside.push(Beside {
+            item: drawn::beside_item(
+                id,
+                Role::Custom,
+                text,
+                Some(at.clone()),
+                Detail::of(Kind::Thinking),
+            ),
+            seq,
+            stands: Stands::Before,
+            call: None,
+            answered: false,
+        });
+    }
+
+    /// A call a record made (`call`, by the native id `id` its result will be the item
+    /// of): an item only the history shows until its result is one, running, with what the
+    /// history draws of it. Said again, it is the same call.
+    pub(super) fn called(
+        &mut self,
+        id: Arc<str>,
+        call: Key,
+        detail: Detail,
+        at: &Value,
+        seq: usize,
+    ) {
+        if self.running.contains_key(&id) || self.tools.contains_key(&id) {
+            return;
+        }
+        self.running.insert(Arc::clone(&id), self.beside.len());
+        self.beside.push(Beside {
+            item: drawn::beside_item(id, Role::Tool, "", Some(at.clone()), detail),
+            seq,
+            stands: Stands::After,
+            call: Some(call),
+            answered: false,
+        });
     }
 
     /// `addAssistant`: the message `id` names, made when it is the first
@@ -105,18 +200,39 @@ impl Items {
     }
 
     /// `addTool`: the result of the call `id` names, made at the first
-    /// record of it and said anew by a later one.
-    pub(super) fn tool(&mut self, id: Arc<str>, text: &str, at: &Value, seq: usize) {
+    /// record of it and said anew by a later one; and what the history draws of it
+    /// (`detail`), which the call it answers no longer stands beside the items as.
+    pub(super) fn tool(
+        &mut self,
+        id: Arc<str>,
+        text: &str,
+        at: &Value,
+        seq: usize,
+        detail: Detail,
+    ) {
+        if let Some(place) = self.running.remove(&id) {
+            self.beside[place].answered = true;
+        }
+        let detail = Some(Arc::new(detail));
         if let Some(&place) = self.tools.get(&id) {
             let entry = &mut self.list[place];
             entry.item.text = Arc::from(text);
             entry.item.at = Some(at.clone());
+            entry.item.detail = detail;
             entry.seq = seq;
             return;
         }
         self.tools.insert(Arc::clone(&id), self.list.len());
-        self.list
-            .push(Entry::new(id, Role::Tool, text, true, at, seq));
+        let mut entry = Entry::new(id, Role::Tool, text, true, at, seq);
+        entry.item.detail = detail;
+        self.list.push(entry);
+    }
+
+    /// The call `id` names while it ran, as the history drew it, where it did: what its
+    /// result's item starts from.
+    pub(super) fn call_of(&self, id: &str) -> Option<&Item> {
+        let place = *self.running.get(id)?;
+        Some(&self.beside[place].item)
     }
 
     /// The item pushed last, in the order pushed (`list.at(-1)`).
@@ -140,11 +256,53 @@ impl Items {
         }
     }
 
-    /// The items in the record's order: an item's `seq` is its line's place,
+    /// The items in the record's order (an item's `seq` is its line's place,
     /// and those of one line are ordered by id, as `localeCompare` orders
-    /// under ICU's root collation, whatever the machine's locale; and the
-    /// place of the record each began in.
-    pub(super) fn sorted(&self) -> Result<(Vec<Item>, Vec<usize>), String> {
+    /// under ICU's root collation, whatever the machine's locale), with the place of
+    /// the record each began in, and those only the history shows, each
+    /// with the place among the items it stands before: a record's beside the items of
+    /// the same record, before or after them as it [`Stands`], and after those of the
+    /// records before it. A call whose turn is over without its result (`open`, the calls
+    /// open, does not hold it) says no more that it runs.
+    pub(super) fn timeline(
+        &self,
+        open: &std::collections::HashSet<Key>,
+    ) -> Result<(Vec<Item>, Vec<usize>, Vec<(usize, Item)>), String> {
+        let (items, places, seqs) = self.ordered()?;
+        let mut beside: Vec<&Beside> = self
+            .beside
+            .iter()
+            .filter(|beside| !beside.answered)
+            .collect();
+        // Stable: those of one record and one standing keep the order they were pushed in.
+        beside.sort_by_key(|beside| (beside.seq, beside.stands));
+        let mut shown = Vec::with_capacity(beside.len());
+        let mut next = 0;
+        for one in beside {
+            // The first item it stands before: the first of a later record, or of its own
+            // where it stands before them.
+            while next < seqs.len()
+                && (seqs[next] < one.seq || (seqs[next] == one.seq && one.stands == Stands::After))
+            {
+                next += 1;
+            }
+            let mut item = one.item.clone();
+            if one.call.as_ref().is_some_and(|call| !open.contains(call)) {
+                if let Some(detail) = &item.detail {
+                    item.detail = Some(Arc::new(Detail {
+                        status: None,
+                        ..Detail::clone(detail)
+                    }));
+                }
+            }
+            shown.push((next, item));
+        }
+        Ok((items, places, shown))
+    }
+
+    /// The items in the record's order, the place of the record each began in, and the
+    /// place of the latest record that said anything of each.
+    fn ordered(&self) -> Result<(Vec<Item>, Vec<usize>, Vec<usize>), String> {
         let entries: Vec<&Entry> = self.list.iter().collect();
         let sorted = sort(entries, |left, right| {
             let order = left
@@ -157,10 +315,15 @@ impl Items {
                 std::cmp::Ordering::Greater => 1.0,
             })
         })?;
-        Ok(sorted
-            .into_iter()
-            .map(|entry| (entry.item.clone(), entry.began))
-            .unzip())
+        let mut items = Vec::with_capacity(sorted.len());
+        let mut places = Vec::with_capacity(sorted.len());
+        let mut seqs = Vec::with_capacity(sorted.len());
+        for entry in sorted {
+            items.push(entry.item.clone());
+            places.push(entry.began);
+            seqs.push(entry.seq);
+        }
+        Ok((items, places, seqs))
     }
 }
 
@@ -177,6 +340,7 @@ impl Entry {
                 commentary: false,
                 synthetic: false,
                 compaction: false,
+                detail: None,
             },
             seq,
             began: seq,

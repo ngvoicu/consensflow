@@ -123,6 +123,7 @@ fn known(roles: &[Role]) -> Reading {
             commentary: false,
             compaction: false,
             synthetic: false,
+            detail: None,
         })
         .collect();
     Reading::Known(record)

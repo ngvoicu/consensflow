@@ -30,6 +30,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         commentary: false,
         synthetic: false,
         compaction: false,
+        detail: None,
     }
 }
 
@@ -48,6 +49,7 @@ fn reading(items: Vec<Item>, settlement: Settlement) -> Arc<Reading> {
         pending: Default::default(),
         monitors: Vec::new(),
         lines: Box::default(),
+        beside: Vec::new(),
     }))
 }
 

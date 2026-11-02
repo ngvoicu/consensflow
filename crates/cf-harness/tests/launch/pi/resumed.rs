@@ -43,6 +43,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         commentary: false,
         synthetic: false,
         compaction: false,
+        detail: None,
     }
 }
 

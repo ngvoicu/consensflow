@@ -37,6 +37,7 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
     let mut record = Record::new();
     record.asking = chain.asking;
     record.lines.lost = wires.lost();
+    record.beside = chain.beside.clone();
     record.items = chain
         .entries
         .iter()
