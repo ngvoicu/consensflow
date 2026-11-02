@@ -64,6 +64,7 @@ muse-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli"
 muse-live-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_notes", "tests::"]
 muse-live-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
 muse-live-specs-role = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "launched::"]
+muse-silent-paste = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "silent_paste::"]
 muse-live-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "codex_devin::tests::"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
@@ -3592,3 +3593,26 @@ runs = ["muse-live-agents"]
 file = "crates/cf-e2e/src/live/agents.rs"
 find = '''        Harness::Muse => ("muse-spark-1.3-contributor", Some("minimal")),'''
 replace = '''        Harness::Muse => ("muse-spark-1.3", Some("minimal")),'''
+
+# T-954 (the chief's m-6883): Muse on Windows loses an Enter that comes while it still reads a
+# paste's keys, or soon after the last; its adapter declares how it reads a paste there, and on
+# the Mac, where it took its Enter as it came, nothing.
+[[plant]]
+name = "muse: Muse on Windows declares no silent paste"
+meant = "on_windows_codex_devin_and_muse_read_a_paste_silently_at_their_measured_paces"
+runs = ["muse-silent-paste"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''        self.env().on_windows().then_some(MUSE_ON_WINDOWS)'''
+replace = '''        self.env().on_windows().then_some(MUSE_ON_WINDOWS).filter(|_| false)'''
+
+[[plant]]
+name = "muse: Muse declares a silent paste on the Mac too"
+meant = "elsewhere_devin_alone_reads_a_paste_silently_at_the_same_pace"
+runs = ["muse-silent-paste"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''        self.env().on_windows().then_some(MUSE_ON_WINDOWS)'''
+replace = '''        Some(MUSE_ON_WINDOWS)'''

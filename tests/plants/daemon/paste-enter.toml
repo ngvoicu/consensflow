@@ -44,7 +44,7 @@ replace = "        per_character_ms(self.pace_us_per_character, 1)"
 
 [[plant]]
 name = "paste enter: Codex's adapter declares no silent paste on Windows"
-meant = "on_windows_codex_and_devin_read_a_paste_silently_at_their_measured_paces"
+meant = "on_windows_codex_devin_and_muse_read_a_paste_silently_at_their_measured_paces"
 runs = ["paste-enter-harness"]
 
 [[plant.edit]]
@@ -65,7 +65,7 @@ replace = "        Some(CODEX_ON_WINDOWS)"
 
 [[plant]]
 name = "paste enter: Devin's adapter declares no silent paste"
-meant = "on_windows_codex_and_devin_read_a_paste_silently_at_their_measured_paces"
+meant = "on_windows_codex_devin_and_muse_read_a_paste_silently_at_their_measured_paces"
 runs = ["paste-enter-harness"]
 
 [[plant.edit]]

@@ -25,7 +25,7 @@ use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::Variant;
 
 use super::index;
@@ -64,6 +64,18 @@ impl MuseAdapter {
         &self.services.records
     }
 }
+
+/// How Muse on Windows reads a paste (`Adapter::silent_paste`): never sooner than 0.5 ms a
+/// character (it read at 0.6 to 0.75), by what it drew from the paste's first key on, then 200 ms
+/// of nothing (it redraws every 50 to 65 ms while it reads, and took an Enter 157 ms after its last
+/// draw), at the most a second and a millisecond a character.
+const MUSE_ON_WINDOWS: SilentPaste = SilentPaste {
+    pace_us_per_character: 500,
+    drawn_after_ms: 0,
+    quiet_ms: 200,
+    most_ms: 1_000,
+    most_us_per_character: 1_000,
+};
 
 impl Adapter for MuseAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
@@ -160,6 +172,20 @@ impl Adapter for MuseAdapter {
     /// the command line, which every process on the machine reads.
     fn first_message(&self) -> FirstMessage {
         FirstMessage::Delivered
+    }
+
+    /// On Windows Muse reads a paste's key presses a character at a time, redrawing its box as it
+    /// goes, and takes an Enter that comes while they are still coming, or soon after the last,
+    /// for a line break in the paste. A measured heuristic (T-954, Muse Code 1.4.14 on zeewin2,
+    /// 2026-11-02, `live paste-enter muse -- probe_the_gap`): a line was drawn whole at 58 to 93
+    /// ms, and an Enter 100 ms after the paste stayed in it while one at 250 ms went; 7,775
+    /// characters (`[Pasted Content … chars]`) were read at 0.6 to 0.75 ms a character, redrawn
+    /// every 50 to 65 ms and whole at 4.5 to 5.8 s, and an Enter at 1.5 and 3 s stayed in it while
+    /// one at 6 s went. Unheld, an Enter in the paste's own write was lost at every length, and one
+    /// a second after the long paste too (T-1084, 4 of 6). On the Mac the terminal hands Muse a
+    /// paste whole, and it took its Enter as it came, 6 of 6 (T-1086).
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.env().on_windows().then_some(MUSE_ON_WINDOWS)
     }
 
     /// Pasted, and its box cleared with Control-C ([`CLEAR_INPUT`]).

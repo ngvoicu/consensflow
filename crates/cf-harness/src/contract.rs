@@ -121,9 +121,9 @@ pub trait Adapter {
     /// until they have read them all ([`SilentPaste`], told to the pane host as the window
     /// opens): the human's keys after their paste then wait until the window has drawn it. A
     /// harness that declares nothing has the human's keys written as they come. Only what was
-    /// measured is declared: Codex on Windows (T-1048) and Devin on every platform (T-1086). Claude
-    /// Code 2.1.316 and Pi 1.4.0 on Windows took a paste and its Enter as they came, in one write
-    /// too (T-1048, T-1080). Muse is not run on Windows by the live kit, and is unproven there.
+    /// measured is declared: Codex on Windows (T-1048), Devin on every platform (T-1086) and Muse on
+    /// Windows (T-954). Claude Code 2.1.316 and Pi 1.4.0 on Windows, and Muse on the Mac, took a
+    /// paste and its Enter as they came, in one write too (T-1048, T-1080, T-1086).
     fn silent_paste(&self) -> Option<SilentPaste> {
         None
     }
