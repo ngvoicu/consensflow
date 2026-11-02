@@ -287,8 +287,9 @@ impl Config {
     }
 
     /// [`Config::muse`], live: the windows run the machine's Muse on the model each is
-    /// launched on, with the person's login (its secret in the keychain, which Muse finds
-    /// by `real_home`), their settings and sessions in the rig's home
+    /// launched on, with the person's login (on a Mac its secret in the keychain, which Muse
+    /// finds by `real_home`; on Windows a copy of its file without a refresh token, in the
+    /// rig's home), their settings and sessions in the rig's home
     /// ([`crate::muse::write_live_stand_in`]). It spends the account's allowance.
     #[must_use]
     pub fn muse_live(
