@@ -151,6 +151,9 @@ pub struct Models {
     models: [Model; 5],
     /// The harnesses the flags named, in the order they did.
     named: Vec<Harness>,
+    /// What the run says besides, of a model it chose for a harness the flags did not name
+    /// ([`Models::on_machine`]).
+    notes: Vec<String>,
 }
 
 impl Models {
@@ -169,12 +172,56 @@ impl Models {
     /// says what each window was launched on: [`super::Log::launched`]).
     pub fn line(&self) -> String {
         let each: Vec<String> = self.models.iter().map(Model::to_string).collect();
-        format!(
+        let mut line = format!(
             "the models --models and the cheap ones give: {}",
             each.join("; ")
-        )
+        );
+        for note in &self.notes {
+            line.push_str(&format!(". {note}"));
+        }
+        line
+    }
+
+    /// These models on the test machine `machine` (none on the owner's Mac), whose Pi has the
+    /// logins `pi_providers` (their names; none where the file could not be read): a Pi the flags
+    /// did not name, on a machine that has no login for the cheap model's provider
+    /// (OpenRouter) and has one the kit knows a model for ([`PI_ON`]), runs on that model, and
+    /// the run says which provider and model, and why. Nothing else is chosen: not on the
+    /// owner's Mac, not for a login the kit has no model for, not for a machine it has no entry
+    /// for. Those runs keep the cheap model, which the kit's isolation then refuses before
+    /// anything is spent, naming the logins Pi has.
+    #[must_use]
+    pub fn on_machine(mut self, machine: Option<&str>, pi_providers: Option<&[String]>) -> Self {
+        let (Some(machine), Some(providers)) = (machine, pi_providers) else {
+            return self;
+        };
+        let cheap_provider = cheap(Harness::Pi).0.split('/').next().unwrap_or_default();
+        if self.named.contains(&Harness::Pi) || providers.iter().any(|name| name == cheap_provider)
+        {
+            return self;
+        }
+        let Some((_, provider, model)) = PI_ON.iter().find(|(on, provider, _)| {
+            *on == machine && providers.iter().any(|name| name == provider)
+        }) else {
+            return self;
+        };
+        self.models[slot(Harness::Pi)].name = (*model).to_owned();
+        self.notes.push(format!(
+            "pi runs on {model} because {machine}'s Pi has a `{provider}` login (a ChatGPT subscription's allowance, no usage credits) and none for {cheap_provider}, the cheap model's provider; --models pi=… names another"
+        ));
+        self
     }
 }
+
+/// The model of Pi that a test machine gets when its Pi has no login for the cheap model's
+/// provider: the machine, the provider of the login it has, and the model the kit names for it.
+/// A subscription's login, never a key that is charged by use. (zeewin2's and zeewin's Pi 1.4.0 hold
+/// a ChatGPT login under `openai` and no OpenRouter entry; `openai/gpt-5.6-luna` is the cheap
+/// Codex model on that login and ran Pi 6 of 6 there, T-1080.)
+const PI_ON: [(&str, &str, &str); 2] = [
+    ("zeewin2", "openai", "openai/gpt-5.6-luna"),
+    ("zeewin", "openai", "openai/gpt-5.6-luna"),
+];
 
 /// What `--models` and `--claude-model` say (the variables' values, none where
 /// they are not set): the model of each harness, its cheap one where neither
@@ -230,6 +277,7 @@ pub fn parse(
     Ok(Models {
         models: chosen,
         named,
+        notes: Vec::new(),
     })
 }
 
@@ -282,7 +330,28 @@ fn model_of(harness: Harness, given: &str, flag: &str) -> std::result::Result<Mo
 /// `--claude-model` set), or why no window could be asked for them, before
 /// anything is spent.
 pub fn asked() -> Result<Models> {
-    asked_of(requested)
+    let models = asked_of(requested)?;
+    let machine = super::renew::TestMachine::detect();
+    Ok(models.on_machine(
+        machine.as_ref().map(super::renew::TestMachine::name),
+        pi_providers().as_deref(),
+    ))
+}
+
+/// The names of the logins in the owner's Pi `auth.json` (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`),
+/// never what they hold; none where the file cannot be read.
+fn pi_providers() -> Option<Vec<String>> {
+    let folder = crate::process::own_var("PI_CODING_AGENT_DIR")
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            super::machine::home()
+                .ok()
+                .map(|home| home.join(".pi").join("agent"))
+        })?;
+    let text = std::fs::read_to_string(folder.join("auth.json")).ok()?;
+    let logins: Value = serde_json::from_str(&text).ok()?;
+    Some(logins.as_object()?.keys().cloned().collect())
 }
 
 /// [`asked`], of the variables as `read` has them.
@@ -744,5 +813,81 @@ mod tests {
                 "{harness:?}"
             );
         }
+    }
+
+    /// A test machine whose Pi has an `openai` login (a ChatGPT subscription's) and none for the
+    /// cheap model's provider, OpenRouter, runs Pi on the model the kit names for that machine, and
+    /// the run says which provider and model, and that it spends no usage credits (T-1136: zeewin2's
+    /// Pi has no OpenRouter entry).
+    #[test]
+    fn a_test_machine_whose_pi_has_no_openrouter_login_runs_pi_on_the_model_the_kit_names_for_it_and_says_so(
+    ) {
+        let have = |providers: &[&str]| {
+            providers
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let models = parse(None, None)
+            .unwrap()
+            .on_machine(Some("zeewin2"), Some(&have(&["openai"])));
+        let pi = models.of(Harness::Pi);
+        assert_eq!(pi.name, "openai/gpt-5.6-luna");
+        let said = models.line();
+        assert!(said.contains("pi openai/gpt-5.6-luna"), "{said}");
+        assert!(
+            said.contains("`openai`") && said.contains("none for openrouter"),
+            "{said}"
+        );
+        assert!(said.contains("no usage credits"), "{said}");
+        // The other harnesses keep their cheap models.
+        for harness in [
+            Harness::Claude,
+            Harness::Codex,
+            Harness::Devin,
+            Harness::Muse,
+        ] {
+            let (name, _) = cheap(harness);
+            assert_eq!(models.of(harness).name, name);
+        }
+    }
+
+    /// Nothing else is chosen for Pi: not on the owner's Mac (no test machine), not where a flag
+    /// named a model, not where an OpenRouter login is there, not on a machine the kit has no
+    /// entry for, and not for a login the kit has no model for.
+    #[test]
+    fn pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance() {
+        let have = |providers: &[&str]| {
+            providers
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let cheap_pi = cheap(Harness::Pi).0;
+        let run = |models: Option<&str>, machine: Option<&str>, providers: &[&str]| {
+            parse(models, None)
+                .unwrap()
+                .on_machine(machine, Some(&have(providers)))
+                .of(Harness::Pi)
+                .name
+                .clone()
+        };
+        assert_eq!(run(None, None, &["openai"]), cheap_pi, "the owner's Mac");
+        assert_eq!(
+            run(Some("pi=openrouter/x/y"), Some("zeewin2"), &["openai"]),
+            "openrouter/x/y",
+            "a model the run named"
+        );
+        assert_eq!(
+            run(None, Some("zeewin2"), &["openai", "openrouter"]),
+            cheap_pi
+        );
+        assert_eq!(run(None, Some("elsewhere"), &["openai"]), cheap_pi);
+        assert_eq!(run(None, Some("zeewin2"), &["cliproxyapi"]), cheap_pi);
+        assert_eq!(run(None, Some("zeewin2"), &[]), cheap_pi);
+        // An unreadable login file is no reason to choose.
+        let unread = parse(None, None).unwrap().on_machine(Some("zeewin2"), None);
+        assert_eq!(unread.of(Harness::Pi).name, cheap_pi);
+        assert!(!unread.line().contains("usage credits"));
     }
 }

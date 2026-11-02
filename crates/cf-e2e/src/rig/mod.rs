@@ -59,6 +59,7 @@ pub use names::project_name;
 pub use project::{write_staff, Project};
 pub use route::{Held, Pasted};
 
+pub(crate) use homes::clashing;
 pub(crate) use observe::events_of;
 
 use homes::Homes;
