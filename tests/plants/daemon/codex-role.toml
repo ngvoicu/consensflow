@@ -336,9 +336,8 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                KEPT,
-                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
-replace = '''                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
 
 [[plant]]
 name = "codex role: the copy's folder is named by the variant and not by the commit it is vendored at"
@@ -347,8 +346,8 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{}", variant.as_str(), &commit[..0]),'''
+find = '''format!("{}-{commit}", variant.as_str())'''
+replace = '''format!("{}-{}", variant.as_str(), &commit[..0])'''
 
 [[plant]]
 name = "codex role: a copy's file that is what the build ships is written again at every launch"
@@ -1526,9 +1525,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                KEPT,
-                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
-replace = '''                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
 
 [[plant]]
 name = "codex role rig: Claude is not given the folder the copy is kept in (the Claude rig)"
@@ -1549,8 +1547,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &format!("{name}{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos()))],'''
 
 [[plant]]
 name = "codex role rig: the copy's place differs at every launch, as it did in a launch's own folder (the regression)"
@@ -1560,8 +1558,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &format!("{name}{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos()))],'''
 
 [[plant]]
 name = "codex role rig: a resumed thread is given its role again, by the broker and a stand-in Codex that takes it (the rig)"
