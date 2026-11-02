@@ -258,7 +258,7 @@ fn a_negation_takes_back_a_wait() {
 fn a_negator_in_quoted_words_does_not_count_and_a_wait_in_them_neither() {
     does_not_ask("The screen reads: 'nothing here yet \u{2014} waiting for your first upload.'");
     does_not_ask("The screen reads: \"nothing here yet \u{2014} waiting for your first upload.\"");
-    does_not_ask("The button reads 'waiting for your go' until it loads.");
+    does_not_ask("The button reads 'waiting for your go.' until it loads.");
     asks("The log says 'ok'. I'm waiting for your go.");
     asks("I read \"nothing to do\" in the log, and I'm waiting for your go.");
 }
