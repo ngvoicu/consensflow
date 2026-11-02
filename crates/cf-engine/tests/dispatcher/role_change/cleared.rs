@@ -82,6 +82,54 @@ fn a_session_no_hook_greeted_is_given_the_role_first_and_one_a_hook_greeted_noth
     assert_eq!(greetings(&context, chief).len(), 2);
 }
 
+/// A role too long for one message goes to a session no hook greeted cut to its
+/// opening, which says to read the rest now, and the command that prints it; it is
+/// recorded told once its window has read it in its inbox (`cf inbox read`), and
+/// nothing is said to the human.
+#[test]
+fn a_session_no_hook_greeted_is_given_a_long_role_in_part_and_told_it_once_it_is_read() {
+    let context = Context::new();
+    context
+        .roles
+        .rewritten
+        .replace(format!(" {}", "x".repeat(17_000)));
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let notes = greetings(&context, chief);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    let note = context.message(notes[0].id);
+    assert_eq!(note.state, "delivered");
+    assert!(
+        note.body.starts_with(
+            "This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints"
+        ),
+        "{}",
+        &note.body[..400]
+    );
+    assert!(
+        recorded(&context, chief).is_none_or(|told| !told.ends_with('x')),
+        "told in part: not recorded until it is read"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[note.id], cf_ledger::Read::Inbox)
+        .unwrap();
+    assert!(recorded(&context, chief).is_some_and(|told| told.ends_with('x')));
+    assert!(
+        to_human(&context, project.id).is_empty(),
+        "nothing is said to the human"
+    );
+}
+
 #[test]
 fn a_harness_that_keeps_its_first_instructions_is_given_nothing_at_a_switch() {
     let context = Context::new();

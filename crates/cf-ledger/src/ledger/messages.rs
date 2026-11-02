@@ -54,6 +54,12 @@ impl Ledger {
         messages::role_notes_to(&self.store, participant_id)
     }
 
+    /// The role text a note says its recipient ([`Ledger::note_role`]); none
+    /// for a message that says no role, or no message.
+    pub fn role_of_note(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::role_of_note(&self.store, message_id)
+    }
+
     /// ConsensFlow tells `to` that T-`number` is paused and why, when a stall
     /// paused it: a note of the task alone, which the other stalls of the
     /// pass join ([`Ledger::join_pause_note`]).

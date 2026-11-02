@@ -428,6 +428,40 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
 }
 
 #[test]
+fn a_claude_member_of_a_project_that_chose_a_size_gets_it_in_the_settings_file_of_its_launch() {
+    let home = tempfile::tempdir().unwrap();
+    let settings = |compaction: Option<u64>| {
+        let mut question = json!({
+            "env": { "CONSENSFLOW_HOME": home.path().to_str().unwrap() },
+            "launch": LAUNCH,
+        });
+        if let Some(size) = compaction {
+            question["compaction"] = json!(size);
+        }
+        let args = answer(&ask("claude_settings", question)).unwrap();
+        let file = args[1].as_str().unwrap().to_owned();
+        serde_json::from_str::<Value>(&fs::read_to_string(file).unwrap()).unwrap()
+    };
+    assert_eq!(settings(Some(400_000))["autoCompactWindow"], json!(400_000));
+    assert!(
+        settings(None).get("autoCompactWindow").is_none(),
+        "no size, no key: the file is as it always was"
+    );
+    let refused = answer(&ask(
+        "claude_settings",
+        json!({
+            "env": { "CONSENSFLOW_HOME": home.path().to_str().unwrap() },
+            "launch": LAUNCH,
+            "compaction": u64::MAX,
+        }),
+    ));
+    assert_eq!(
+        refused.unwrap_err(),
+        format!("the compaction {} is too large", u64::MAX)
+    );
+}
+
+#[test]
 fn a_claude_window_gets_the_settings_file_of_its_launch() {
     let home = tempfile::tempdir().unwrap();
     let settings = |board_questions: bool| {

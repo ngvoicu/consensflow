@@ -21,6 +21,7 @@ use cf_board::{Board, BoardError};
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
+use cf_base::role_read::role_read_whole;
 use lines::{list, message_line};
 use usage::usage;
 use words::{message_id, quoted, require_text, split, task_number, Shape};
@@ -68,10 +69,12 @@ pub struct Said {
 }
 
 /// The messages a command's output carries whole, and how it was read: what
-/// `cf` says to the board, once the output is complete, to have them received.
+/// `cf` says to the board, once the output is complete, to have them received,
+/// if its window reads all of the output (`seen`).
 struct Wrote {
     via: &'static str,
     answers: Vec<i64>,
+    seen: fn(&str) -> bool,
 }
 
 impl Said {
@@ -87,7 +90,23 @@ impl Said {
     /// cuts them, or leaves them out, has none to say): those are the ones it
     /// wrote whole, `via` the way it was read.
     fn having_written(mut self, via: &'static str, answers: Vec<i64>) -> Self {
-        self.wrote = Some(Wrote { via, answers });
+        self.wrote = Some(Wrote {
+            via,
+            answers,
+            seen: cut::seen_whole,
+        });
+        self
+    }
+
+    /// Of an output that carries whole the role the note `id` told its window
+    /// in part: it is read whole by the windows a role goes to by a note up to a
+    /// bound of its own, past the one every harness shows (`role_read_whole`).
+    fn having_written_a_role(mut self, id: i64) -> Self {
+        self.wrote = Some(Wrote {
+            via: "inbox",
+            answers: vec![id],
+            seen: role_read_whole,
+        });
         self
     }
 }
@@ -148,7 +167,7 @@ pub fn run(
             };
             out.write_all(printed.as_bytes())?;
             out.flush()?;
-            if let Some(wrote) = wrote.filter(|_| cut::seen_whole(&printed)) {
+            if let Some(wrote) = wrote.filter(|wrote| (wrote.seen)(&printed)) {
                 wrote.acknowledge(board);
             }
             Ok(0)
@@ -194,8 +213,12 @@ fn command(
 }
 
 /// `cf inbox read m-N` prints a message whole, and so says it wrote it whole
-/// when it still waited to be pasted: the board decides what that receives. `cf inbox` lists first lines, cut, and says nothing of what
-/// it printed: no preview is a body, and a list does not know which are.
+/// when it still waited to be pasted: the board decides what that receives. It
+/// says so too of a role that went into its window in part (the board answers
+/// `"role": true` of a note that tells its reader a role), once it was
+/// delivered: the role is told once the window has read it. `cf inbox` lists
+/// first lines, cut, and says nothing of what it printed: no preview is a body,
+/// and a list does not know which are.
 fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let reading = rest.first().map(String::as_str) == Some("read");
     let asked = if reading {
@@ -214,14 +237,25 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     if reading {
         let id = message_id(rest.get(1).map(String::as_str))?;
         let path = format!("/api/inbox/{id}");
-        let message = board.get(&path)?.take("message")?;
+        let mut answer = board.get(&path)?;
+        let role = answer.value().get("role") == Some(&Value::Bool(true));
+        let message = answer.take("message")?;
         let text = format!(
             "{}\n\n{}",
             message_line(&message),
             js::text(message.get("body"))
         );
+        let delivered = message.get("state").and_then(Value::as_str) == Some("delivered");
+        let told = message
+            .get("id")
+            .and_then(Value::as_i64)
+            .filter(|_| role && delivered);
         let waiting = lines::waiting_message(&message);
-        return Ok(Said::new(message, text).having_written("inbox", waiting));
+        let said = Said::new(message, text);
+        return Ok(match told {
+            Some(id) => said.having_written_a_role(id),
+            None => said.having_written("inbox", waiting),
+        });
     }
     let mut answer = board.get("/api/inbox")?;
     let messages = answer.take("messages")?;

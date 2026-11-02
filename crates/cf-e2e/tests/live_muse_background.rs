@@ -24,11 +24,14 @@
 //! personal rules and skills, telemetry, session messaging and reminders off; a
 //! throwaway project. It refuses to start while another test runs a Muse (one live
 //! session at a time; the owner's own Muse in the home is no test's), or when
-//! `muse usage --json` says 90 % of a window is spent, and stops at once on any model
-//! but the one it launched (Muse moves a session to a contributor model by itself after
-//! a refusal: T-705). The owner's `settings.json`, `trust.json` and install files are
-//! fingerprinted before and after and must not change. `--keep` leaves the run's home
-//! where it is, for `cargo xtask scrub-muse-session` to make a fixture of its log.
+//! `muse usage --json` says a window or the week of the allowance is all spent (a run
+//! may use all of it: T-1123), and stops at once on any model but the one it launched
+//! (Muse moves a session to a contributor model by itself after a refusal: T-705). A
+//! failure says what of the allowance was spent after the run ("Muse allowance after
+//! the run"), so a red an empty allowance caused is told from a bug. The owner's
+//! `settings.json`, `trust.json` and install files are fingerprinted before and after
+//! and must not change. `--keep` leaves the run's home where it is, for `cargo xtask
+//! scrub-muse-session` to make a fixture of its log.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -227,13 +230,14 @@ fn set_up(root: &Path) -> Outcome {
     .map(|_| ())
 }
 
-/// What `muse usage --json` says is spent of each window, in percent.
+/// What `muse usage --json` says is spent of each window, in percent, and the answer,
+/// which a failure's "Muse allowance after the run" is read from.
 fn usage(
     binary: &Path,
     env: &BTreeMap<String, String>,
     root: &Path,
     log: &Log,
-) -> Result<Vec<f64>, String> {
+) -> Result<(Vec<f64>, Value), String> {
     let said = ran(binary, &["usage", "--json"], env, &root.join("work"))?;
     let value: Value = serde_json::from_str(&said)
         .map_err(|error| format!("muse usage --json said no JSON: {error}"))?;
@@ -244,7 +248,7 @@ fn usage(
     if spent.is_empty() && value["reason"] == "server_sent_no_usage" {
         spent.push(0.0);
     }
-    Ok(spent)
+    Ok((spent, value))
 }
 
 fn percentages(value: &Value, into: &mut Vec<f64>) {
@@ -479,14 +483,14 @@ fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcom
     let root_path = root.path().to_path_buf();
     set_up(&root_path)?;
     let env = environment(&root_path);
-    let spent = usage(&binary, &env, &root_path, &log)?;
+    let (spent, _) = usage(&binary, &env, &root_path, &log)?;
     if spent.is_empty() {
         return Err(
-            "muse usage --json said nothing spent: the 90 % stop cannot be kept".to_owned(),
+            "muse usage --json said nothing spent: the 100 % stop cannot be kept".to_owned(),
         );
     }
-    if spent.iter().any(|spent| *spent >= 90.0) {
-        return Err(format!("90 % of a window is spent ({spent:?}): stopped"));
+    if spent.iter().any(|spent| *spent >= 100.0) {
+        return Err(format!("100 % of a window is spent ({spent:?}): stopped"));
     }
     let owner_before = owner_files();
     let mut window = Window::open(&binary, &env, &root_path)?;
@@ -499,13 +503,22 @@ fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcom
         let kept = root.keep();
         log.say(format!("kept the run's home: {}", kept.display()));
     }
+    let spent_after = match &after {
+        Ok((_, said)) => match cf_e2e::muse::used_percent(said) {
+            Some((window, week)) => format!("window {window}%, week {week}%"),
+            None => "no allowance".to_owned(),
+        },
+        Err(why) => format!("unreadable ({why})"),
+    };
     if owner_before != owner_after {
         return Err(format!(
-            "the owner's Muse files changed: {owner_before:?} → {owner_after:?}"
+            "the owner's Muse files changed: {owner_before:?} → {owner_after:?}\nMuse allowance after the run: {spent_after}"
         ));
     }
     log.say(format!("usage after: {after:?}"));
-    outcome.map_err(|failed| format!("{failed}\nthe window's last bytes:\n{tail}"))
+    outcome.map_err(|failed| {
+        format!("{failed}\nMuse allowance after the run: {spent_after}\nthe window's last bytes:\n{tail}")
+    })
 }
 
 /// Pastes the turn's words and reads the record until what holds the task and lets it

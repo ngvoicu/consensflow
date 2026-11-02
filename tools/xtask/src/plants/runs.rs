@@ -558,7 +558,7 @@ impl Execute {
         }
         Err(process::Failure::NotFound {
             program: format!(
-                "cargo-nextest (install it for the workspace: cargo install cargo-nextest --locked --root {TOOLS})"
+                "cargo-nextest (a fresh tree copies it in: mkdir -p {TOOLS}/bin && cp ~/Projects/ngvoicu/consensflow-trees/.runs/tools/bin/cargo-nextest {TOOLS}/bin/)"
             ),
         }
         .into())

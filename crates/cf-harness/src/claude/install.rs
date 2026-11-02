@@ -29,10 +29,18 @@ const QUESTION_HOOK_SECONDS: u32 = 3600;
 /// counted as done. A member's question tool is
 /// answered from the board (`board_questions`); the chief's shows Claude's
 /// own dialog, where the human answers it.
+///
+/// A member of a project that chose a size for its Claude windows to compact at
+/// is given it here, as `autoCompactWindow` (`compaction`, in tokens): live,
+/// Claude Code fires at that window less its own margin, the launch's file
+/// outranks the owner's saved setting and `/autocompact` typed in the window
+/// (T-1016, 2.1.316 on macOS, 2.1.312 on Windows), and nothing is written to the
+/// owner's files. With none the file is as it always was.
 pub(crate) fn settings(
     env: &Env,
     launch: &LaunchId,
     board_questions: bool,
+    compaction: Option<u32>,
 ) -> Result<Vec<String>, String> {
     let root = launch_folder("claude", env, launch)?;
     let said = |error: FileError| error.to_string();
@@ -47,7 +55,7 @@ pub(crate) fn settings(
         "hooks": [{ "type": "command", "command": "cf hook claude", "timeout": QUESTION_HOOK_SECONDS }],
     });
     let settings = path::join(&[&root, "settings.json"]);
-    let text = js::stringify(&json!({
+    let mut file = json!({
         // Full permission (the window's flags) without its one-time
         // acceptance dialog, which no one could answer in a host-started pane.
         "permissions": { "defaultMode": "bypassPermissions" },
@@ -60,7 +68,11 @@ pub(crate) fn settings(
             "PreToolUse": if board_questions { vec![question] } else { Vec::new() },
             "Stop": [turn_end],
         },
-    }));
+    });
+    if let Some(window) = compaction {
+        file["autoCompactWindow"] = json!(window);
+    }
+    let text = js::stringify(&file);
     write_file(Path::new(&settings), text.as_bytes(), 0o600).map_err(said)?;
     Ok(vec!["--settings".to_owned(), settings])
 }

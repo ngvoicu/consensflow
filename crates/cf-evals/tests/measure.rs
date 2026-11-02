@@ -25,3 +25,5 @@ mod placed;
 mod questions;
 #[path = "measure/recordings.rs"]
 mod recordings;
+#[path = "measure/rounds.rs"]
+mod rounds;

@@ -100,6 +100,27 @@ fn turns_a_report_into_one_row_of_the_same_numbers_the_summary_prints() {
 }
 
 #[test]
+fn a_check_that_judged_nothing_is_left_out_of_the_ratio_and_counted_beside_it() {
+    // One held, one failed, three that read a second review the chief never asked for: 1 of 2, and 3 unmet.
+    let unmet = |name: &str| json!({ "name": name, "ok": false, "unmet": true });
+    let value = with(
+        report(),
+        json!({ "checks": [
+            { "name": "a", "ok": true },
+            { "name": "b", "ok": false },
+            unmet("c"), unmet("d"), unmet("e"),
+        ] }),
+        &[],
+    );
+    assert_eq!(row(&kept(value))[4], "1/2 +3u");
+    // A report that has no unmet check says what it always said.
+    assert_eq!(row(&kept(report()))[4], "1/3");
+    // All unmet: nothing was judged.
+    let none = with(report(), json!({ "checks": [unmet("a"), unmet("b")] }), &[]);
+    assert_eq!(row(&kept(none))[4], "0/0 +2u");
+}
+
+#[test]
 fn says_a_question_mark_for_a_column_a_report_predates_and_writes_a_markdown_table() {
     let older = with(report(), json!({}), &["mechanics", "terminalAnswers"]);
     let row = row(&kept(older.clone()));

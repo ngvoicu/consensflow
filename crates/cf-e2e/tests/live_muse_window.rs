@@ -10,10 +10,13 @@
 //! model's. Here each case runs once on the real model (Gabriel, 2026-10-26: echo is never
 //! the proof), in a rig of its own: a throwaway project, the windows' Muse settings and
 //! sessions in the rig's home, the person's login reached through their keychain
-//! ([`cf_e2e::muse::write_live_stand_in`]). One Muse session at a time; before each case
-//! the allowance is asked (`muse usage --json`), and at 90% of its window or its week the
-//! run stops with the reset time. A case whose session Muse moved to another model on its
-//! own (`model_reconfigure`) stops the run too (T-705's contributor switch).
+//! ([`cf_e2e::muse::write_live_stand_in`]). One Muse session at a time; a run may use all
+//! of the allowance: before each case it is asked (`muse usage --json`), and only on a
+//! window or a week used up the run stops with the reset time. A failed case says what of
+//! it was spent after the run ("Muse allowance after the run"), so a red an empty
+//! allowance caused is told from a bug (T-1123). A case whose session Muse moved to
+//! another model on its own (`model_reconfigure`) stops the run too (T-705's contributor
+//! switch).
 //!
 //! What a case reads is what the rig's do (the board, the worker's inbox, the keys the
 //! daemon pressed, the session's log), and each says the shape of its session, so that
@@ -100,6 +103,30 @@ impl Live {
         log.say(format!("allowance: {said}"));
         // The kit's stop, which every rig that seats Muse asks as it starts too.
         muse::allowance_left(&usage).map_err(Error::Daemon)
+    }
+
+    /// What of the allowance is spent now, asked as [`Live::allowance`] asks it (`muse
+    /// usage --json` on a copy of the login), for a failed case's report: a run may start
+    /// near the end and run out midway, so a red an empty allowance caused is told from a
+    /// bug (T-1123). Why it could not be asked, where it could not.
+    fn allowance_after(&self) -> String {
+        let asked = tempfile::tempdir()
+            .map_err(|source| Error::File {
+                action: "make",
+                path: PathBuf::from("a temporary folder"),
+                source,
+            })
+            .and_then(|folder| {
+                muse::seed_live_home(folder.path(), &self.home)?;
+                muse::usage(&self.install, &self.home, &folder.path().join(".config"))
+            });
+        match asked {
+            Ok(usage) => match muse::used_percent(&usage) {
+                Some((window, week)) => format!("window {window}%, week {week}%"),
+                None => format!("no allowance: {usage}"),
+            },
+            Err(why) => why.to_string(),
+        }
     }
 }
 
@@ -493,11 +520,12 @@ fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
                 checks.push(Check::passed("muse", case, before));
             }
             Err(failed) => {
+                let after = format!("Muse allowance after the run: {}", live.allowance_after());
                 log.block(
                     &format!("{case}: FAILED (allowance before: {before})"),
-                    &failed.to_string(),
+                    &format!("{failed}\n{after}"),
                 );
-                checks.push(Check::failed("muse", case, failed.to_string()));
+                checks.push(Check::failed("muse", case, format!("{after}\n{failed}")));
             }
         }
         if stop {

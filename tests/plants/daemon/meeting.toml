@@ -308,11 +308,9 @@ runs = ["meeting-proto"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/commands.rs"
-find = '''    "computer_use.open",
-    "project.meeting",
-];'''
-replace = '''    "computer_use.open",
-];'''
+find = '''    "project.meeting",
+'''
+replace = ""
 
 [[plant]]
 name = "meeting page: the human's Start and Stop wake no dispatcher"

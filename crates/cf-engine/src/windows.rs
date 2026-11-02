@@ -1143,6 +1143,12 @@ impl Dispatcher {
             agent: saved.as_ref().map(SavedAgent::agent),
             instructions: &instructions,
             specs: specs.as_ref().map(ChiefSpecs::launch),
+            // The size the project chose for its Claude members' windows to compact at:
+            // a Claude member's launch is given it, at launch and on resume alike; the
+            // chief's never is, and no other harness's member.
+            compaction: project.claude_compaction.filter(|_| {
+                participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
+            }),
             first_message_ms: self.seams.limits.launch_ms,
             starts_given_up: record.window.borrow().starts_given_up,
         };

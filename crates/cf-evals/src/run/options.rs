@@ -142,6 +142,21 @@ impl Options {
                 scenario.id
             )));
         }
+        if arm == Arm::Bare && scenario.has_a_stand_in() {
+            return Err(Error::Usage(format!(
+                "{} holds the chief to what it does with a review on the board, which a bare chief has none of",
+                scenario.id
+            )));
+        }
+        if scenario.has_a_stand_in()
+            && chief != "claude"
+            && !staff.iter().any(|name| name == "claude")
+        {
+            return Err(Error::Usage(format!(
+                "{} has stand-in members, Claude Code windows: claude must be the chief or on --staff",
+                scenario.id
+            )));
+        }
         if scenario.switches_the_chief()
             && !switch_to
                 .as_ref()

@@ -42,6 +42,8 @@ pub(super) fn scenario() -> Scenario {
         nudge: Some("Da, cum recomanzi. Continuă."),
         // Stop once nothing has moved for this long after the last activity.
         quiet: Duration::from_secs(120),
+        stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect(
                 "the owner is asked in the terminal, at least three questions",

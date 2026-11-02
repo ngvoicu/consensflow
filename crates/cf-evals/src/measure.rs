@@ -20,6 +20,7 @@ mod copy;
 mod files;
 mod metrics;
 mod plumbing;
+mod rounds;
 mod sentences;
 
 use std::collections::BTreeMap;
@@ -33,8 +34,8 @@ pub use chief::{chief_open_question, devin_chief_questions, devin_data, on_windo
 pub(crate) use copy::on_copy;
 pub use files::{begun, changed, ended, gone, read};
 pub use metrics::{
-    owner_questions_value, Check, FileRead, LongestResult, MemberQuestions, Metrics, Note,
-    OwnerQuestions, Plumbing, ProjectRef, Task,
+    owner_questions_value, Asking, Check, FileRead, LongestResult, MemberQuestions, Metrics, Note,
+    OwnerQuestions, Plumbing, ProjectRef, Reopen, Rounds, Task,
 };
 pub use plumbing::mechanics;
 pub use sentences::{count_questions, owner_questions, question_sentences};
@@ -59,6 +60,9 @@ pub struct Options<'a> {
     /// Whether the scenario counts the files of the fixture the run deleted
     /// ([`crate::scenarios::Scenario::counts_gone_files`]).
     pub gone: bool,
+    /// Whether the scenario holds the chief to the rounds of its tasks
+    /// ([`crate::scenarios::Scenario::reads_the_rounds`]).
+    pub rounds: bool,
 }
 
 /// The numbers of the ledger `file`, closed by the daemon.
@@ -131,6 +135,12 @@ pub fn measure(file: &Path, options: &Options) -> Result<Metrics> {
             (Some((_, workspace)), Some(seen)) => ended(workspace, seen)?,
             _ => BTreeMap::new(),
         },
+        rounds: if options.rounds {
+            Some(rounds::rounds(&db, project.id, &chief.handle)?)
+        } else {
+            None
+        },
+        asked_at: options.rounds.then_some(window.asking),
         project,
         chief: chief.handle,
     })

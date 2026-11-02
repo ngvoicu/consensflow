@@ -230,6 +230,11 @@ pub struct Launch<'a> {
     /// The specs a chief plans with, when its project has them on: only a
     /// chief's launch is given any, and with none the launch is as it always was.
     pub specs: Option<Specs<'a>>,
+    /// The size, in tokens, the project chose for its Claude members' windows to
+    /// compact at (Claude Code's `autoCompactWindow`, which fires a little before
+    /// the window fills): only a member's launch is given one, and with none the
+    /// launch is as it always was. Claude's adapter is the only one that reads it.
+    pub compaction: Option<u32>,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
     /// window waits for before that message can show, such as the conversation
@@ -590,6 +595,12 @@ pub trait PaneHost {
         false
     }
 }
+
+/// The heading the engine gives the project's rules for its staff in a window's role
+/// text (`cf_engine::roles::with_staff_rules`): the human's own words follow it, to the
+/// end of the text. What a harness adds to the role of its own, where it adds any, goes
+/// before it, so that nothing of ConsensFlow's reads as the human's.
+pub const STAFF_RULES_HEADING: &str = "## The project's rules for the staff";
 
 /// What a hand-over the pane host did not admit ([`PaneHost::admits`]) says:
 /// nothing of it reached the window.

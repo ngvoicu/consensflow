@@ -322,14 +322,15 @@ pub fn used_percent(usage: &Value) -> Option<(u64, u64)> {
     ))
 }
 
-/// The share of its window or of its week at which a live run spends nothing more of Muse's
-/// allowance: every rig that runs the machine's Muse asks first ([`guard_allowance`]), so no
-/// case starts on an allowance at its end (T-1076: `live close-early` had no such check, ran
-/// at 99% of the week, and its task never finished; only `live muse-window` asked).
-pub const STOP_AT_PERCENT: u64 = 90;
+/// The share of its window or of its week at which a live run never starts: a run may use
+/// all of Muse's allowance (T-1123, the owner's decision of 2026-11-02), but every rig that runs the
+/// machine's Muse asks first ([`guard_allowance`]), so no case starts on an allowance that
+/// is used up (T-1076: `live close-early` had no such check, ran at 99% of the week, and
+/// its task never finished; only `live muse-window` asked).
+pub const STOP_AT_PERCENT: u64 = 100;
 
 /// What `usage` (`muse usage --json`) says is left of the allowance, in words, or why a live
-/// run spends none of it: [`STOP_AT_PERCENT`] reached in its window or its week, with when
+/// run spends none of it: its window or its week is used up ([`STOP_AT_PERCENT`]), with when
 /// each resets, or no allowance at all.
 pub fn allowance_left(usage: &Value) -> std::result::Result<String, String> {
     match used_percent(usage) {
@@ -572,26 +573,28 @@ mod tests {
         assert_eq!(used_percent(&none), None);
     }
 
-    /// T-1076: a live run stops at 90% of the window or of the week, before it spends any,
-    /// and says when each resets; under it, and on a window nothing was spent of yet, it runs.
+    /// T-1076's guard at T-1123's share: a run may use all of the allowance, so it stops
+    /// only where the window or the week is used up, and says when each resets; under
+    /// that, and on a window nothing was spent of yet, it runs.
     #[test]
-    fn a_live_run_stops_at_ninety_percent_of_the_window_or_the_week_and_runs_under_it() {
+    fn a_live_run_stops_where_the_window_or_the_week_is_used_up_and_runs_under_it() {
         let at = |window: u64, weekly: u64| {
             json!({ "schemaVersion": 1, "allowance": {
                 "window": { "usedPercent": window, "resetsAtMs": 1 },
                 "weekly": { "usedPercent": weekly, "resetsAtMs": 2 },
             } })
         };
-        let refused = allowance_left(&at(10, 95)).unwrap_err();
-        assert!(refused.contains("95% of its week"), "{refused}");
+        let refused = allowance_left(&at(10, 100)).unwrap_err();
+        assert!(refused.contains("100% of its week"), "{refused}");
+        assert!(refused.contains("stops at 100%"), "{refused}");
         assert!(refused.contains("resets: 1 and 2"), "{refused}");
-        assert!(allowance_left(&at(90, 0)).is_err(), "90% of the window");
-        assert!(allowance_left(&at(0, 90)).is_err(), "90% of the week");
+        assert!(allowance_left(&at(100, 0)).is_err(), "100% of the window");
+        assert!(allowance_left(&at(0, 100)).is_err(), "100% of the week");
         assert_eq!(
             allowance_left(&at(50, 50)).unwrap(),
             "50% of the window, 50% of the week"
         );
-        assert!(allowance_left(&at(89, 89)).is_ok());
+        assert!(allowance_left(&at(99, 99)).is_ok(), "99% of each runs");
         let fresh =
             json!({ "schemaVersion": 1, "allowance": null, "reason": "server_sent_no_usage" });
         assert!(allowance_left(&fresh).is_ok());

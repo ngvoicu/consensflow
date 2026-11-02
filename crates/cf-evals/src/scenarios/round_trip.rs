@@ -26,6 +26,8 @@ pub(super) fn scenario() -> Scenario {
         fallback: "Da.".to_owned(),
         nudge: None,
         quiet: Duration::from_secs(90),
+        stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect("one task goes to a worker", |m| {
                 m.tasks.iter().any(|task| {

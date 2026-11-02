@@ -31,6 +31,7 @@ use tempfile::TempDir;
 mod agents;
 mod closed_at_rest;
 mod compact_cancelled;
+mod compaction_window;
 mod moves;
 mod outside;
 mod relaunched;
@@ -144,6 +145,8 @@ struct Request {
     agent: Option<Agent<'static>>,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
+    /// The size the project chose for its Claude members' windows to compact at.
+    compaction: Option<u32>,
 }
 
 impl Default for Request {
@@ -162,6 +165,7 @@ impl Default for Request {
                 designer: false,
             }),
             specs: None,
+            compaction: None,
         }
     }
 }
@@ -208,6 +212,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
             .specs
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
+        compaction: request.compaction,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };
