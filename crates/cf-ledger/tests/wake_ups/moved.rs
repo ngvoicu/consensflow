@@ -189,12 +189,15 @@ fn an_item_copied_again_as_it_was_is_not_new_and_one_a_tool_wrote_is_no_typing()
     w.ledger
         .copy_transcript(conversation.id, &[typed.clone(), tool, said], 0)
         .unwrap();
+    // An interval on: a nudge never follows the human's words at once, so what is new shows later.
+    w.advance(MINUTE);
     assert!(w.due().is_none(), "nothing the human typed is new");
     // The same text once more (a window read again from its first item) is not new.
     w.advance(MINUTE);
     w.ledger
         .copy_transcript(conversation.id, &[typed], 0)
         .unwrap();
+    w.advance(MINUTE);
     assert!(
         w.due().is_none(),
         "what was typed before the wake-up, copied again, is no news"
