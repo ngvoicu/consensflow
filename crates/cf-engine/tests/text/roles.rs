@@ -231,7 +231,9 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         }
         assert!(found(&format!(r"\n# ConsensFlow {title}\n"), &text));
         assert!(found(
-            &format!(r"leave\s+nothing running\.\s+Keep this {role} role for the whole session\.\n$"),
+            &format!(
+                r"leave\s+nothing running\.\s+Keep this {role} role for the whole session\.\n$"
+            ),
             &text
         ));
     }
