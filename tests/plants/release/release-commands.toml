@@ -1114,8 +1114,38 @@ runs = ["release-commands"]
 
 [[plant.edit]]
 file = "tools/xtask/src/release/verify.rs"
-find = '''name != "SHA256SUMS" && !listed.contains_key(name)'''
+find = '''name != SUMS && name != SIGNATURE && !listed.contains_key(name)'''
 replace = "false"
+
+[[plant]]
+name = "release: a release without the signature of its SHA256SUMS is let by"
+meant = "a_release_without_the_signature_of_its_sha256sums_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''        self.check_sums_signature(version, tag, folder, &names, &mut report)?;'''
+replace = '''        let _ = version;'''
+
+[[plant]]
+name = "release: the signature of SHA256SUMS is refused for the sums not listing it"
+meant = "a_release_that_is_as_it_should_be_passes_and_says_what_it_checked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''            if name != SUMS && name != SIGNATURE && !listed.contains_key(name) {'''
+replace = '''            if name != SUMS && !listed.contains_key(name) {'''
+
+[[plant]]
+name = "release: a signature of the sums that does not hold is taken"
+meant = "a_signature_of_the_sums_that_does_not_hold_fails"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/verify.rs"
+find = '''        match check_signed_sums(key, &read(SIGNATURE)?, &read(SUMS)?, &name) {'''
+replace = '''        match Result::<(), String>::Ok(()) {'''
 
 [[plant]]
 name = "release: a line of SHA256SUMS that is no hash and name is let by"

@@ -18,7 +18,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use cf_base::env::Env;
+use cf_publish::testing::signing::{sign, test_key};
 use serde_json::json;
 
 use sha2::{Digest, Sha256};
@@ -27,18 +30,47 @@ use crate::process::{self, Captured, Invocation};
 use crate::release::system::System;
 use crate::release::{Error, Pace, Release, DOWNLOADS};
 
-/// The key the stand-in checkout pins in `tauri.conf.json`, as that file writes it
-/// (the base64 of the key's two lines); the archive below is signed with it, by
-/// Tauri's own signer. A second key, signing nothing, for a checkout that pins the
-/// wrong one. No secret key is kept.
-pub const SIGNING_KEY: &str = include_str!("fixtures/signing.pub");
+/// The id the tests' key says of itself, as a minisign public key's comment writes it.
+pub const KEY_ID: &str = "CF7E57C0FFEE0001";
+/// A key, signing nothing, for a checkout that pins the wrong one.
 pub const OTHER_KEY: &str = include_str!("fixtures/other.pub");
-/// The update archive of every stand-in release, and its `.sig` as the signer wrote it.
+/// The update archive of every stand-in release.
 pub const ARCHIVE: &[u8] = include_bytes!("fixtures/archive.bin");
-pub const ARCHIVE_SIG: &str = include_str!("fixtures/archive.bin.sig");
 
 /// The files of a stand-in release by their names, as a published one holds them.
 pub type Files = BTreeMap<String, Vec<u8>>;
+
+/// The key the stand-in checkout pins in `tauri.conf.json`, as that file writes
+/// it (the base64 of the key's two lines): cf-publish's tests' key, with which
+/// every `.sig` a stand-in release carries is made, as Tauri's signer makes them.
+pub fn signing_key() -> String {
+    STANDARD.encode(format!(
+        "untrusted comment: minisign public key: {KEY_ID}\n{}\n",
+        test_key()
+    ))
+}
+
+/// The `.sig` of the update archive of `version`, signed by the tests' key as
+/// Tauri's signer leaves it (the base64 of the minisign signature's text, its
+/// trusted comment naming the archive).
+pub fn archive_sig(version: &str) -> String {
+    sign(ARCHIVE, &archive_name(version))
+}
+
+/// `sums`'s signature for `version` under the tests' key, as the sign job leaves
+/// it beside the list: its trusted comment names the release's SHA256SUMS.
+pub fn signature_of(sums: &str, version: &str) -> Vec<u8> {
+    let version = cf_publish::version::Version::parse(version).unwrap();
+    sign(sums.as_bytes(), &cf_publish::sums::signed_name(&version)).into_bytes()
+}
+
+/// The files' SHA256SUMS and its signature under the tests' key, as the sign job
+/// leaves them beside each other.
+pub fn sign_sums(files: &mut Files, version: &str) {
+    let sums = sums_of(files);
+    files.insert("SHA256SUMS".to_owned(), sums.clone().into_bytes());
+    files.insert("SHA256SUMS.sig".to_owned(), signature_of(&sums, version));
+}
 
 /// The name of the update archive of `version`'s release.
 pub fn archive_name(version: &str) -> String {
@@ -60,12 +92,12 @@ pub fn sha256(bytes: &[u8]) -> String {
 
 /// The files `version`'s release publishes when nothing is wrong with it: the
 /// update archive and its signature, the feed's entry, an installer or two, and
-/// a SHA256SUMS over every one but itself.
+/// a SHA256SUMS over every one but itself, with the list's signature beside it.
 pub fn good_release(version: &str) -> Files {
     let mut files = Files::new();
     let archive = archive_name(version);
     files.insert(archive.clone(), ARCHIVE.to_vec());
-    files.insert(format!("{archive}.sig"), ARCHIVE_SIG.as_bytes().to_vec());
+    files.insert(format!("{archive}.sig"), archive_sig(version).into_bytes());
     files.insert(
         format!("ConsensFlow_{version}_aarch64.dmg"),
         format!("the DMG of {version}\n").into_bytes(),
@@ -75,15 +107,16 @@ pub fn good_release(version: &str) -> Files {
         format!("the installer of {version}\n").into_bytes(),
     );
     files.insert("latest.json".to_owned(), latest(version).into_bytes());
-    files.insert("SHA256SUMS".to_owned(), sums_of(&files).into_bytes());
+    sign_sums(&mut files, version);
     files
 }
 
-/// A SHA256SUMS over `files`, as `sha256sum` writes it.
+/// A SHA256SUMS over `files`, as `sha256sum` writes it: neither itself nor its
+/// signature is listed, the list being what the signature signs.
 pub fn sums_of(files: &Files) -> String {
     files
         .iter()
-        .filter(|(name, _)| *name != "SHA256SUMS")
+        .filter(|(name, _)| *name != "SHA256SUMS" && *name != "SHA256SUMS.sig")
         .map(|(name, bytes)| format!("{}  {name}\n", sha256(bytes)))
         .collect()
 }
@@ -153,7 +186,7 @@ pub fn version_files(version: &str) -> Vec<(&'static str, String)> {
         ),
         (
             "app/src-tauri/tauri.conf.json",
-            conf(version, SIGNING_KEY.trim()),
+            conf(version, &signing_key()),
         ),
     ]
 }
@@ -911,7 +944,7 @@ pub fn latest(version: &str) -> String {
         "notes": "notes",
         "platforms": {
             "darwin-aarch64": {
-                "signature": ARCHIVE_SIG.trim(),
+                "signature": archive_sig(version).trim().to_owned(),
                 "url": archive_url(version),
             }
         },
