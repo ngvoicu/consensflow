@@ -280,8 +280,16 @@ fn a_pi_login_that_will_not_last_the_run_stops_the_rig_before_anything_starts() 
 fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() -> Outcome {
     let owner = Owner::new()?;
     let before = owner.everything()?;
+    // No window runs Muse here; a live rig asks Muse its allowance before it writes its
+    // launcher (T-1076), which this one answers, at 10% of its window and its week.
+    let bin = tempfile::tempdir()?;
+    let binary = bin.path().join("muse-bin-1.4.14-R7309.1");
+    cf_e2e::files::write_executable(
+        &binary,
+        "#!/bin/sh\n[ \"$1 $2\" = \"usage --json\" ] || exit 9\necho '{\"schemaVersion\":1,\"allowance\":{\"window\":{\"usedPercent\":10,\"resetsAtMs\":1},\"weekly\":{\"usedPercent\":10,\"resetsAtMs\":2}}}'\n",
+    )?;
     let muse = cf_e2e::muse::Installed {
-        binary: PathBuf::from("/nowhere/muse-bin-1.4.14-R7309.1"),
+        binary,
         version: "1.4.14-R7309.1".to_owned(),
         stand_in: None,
     };
