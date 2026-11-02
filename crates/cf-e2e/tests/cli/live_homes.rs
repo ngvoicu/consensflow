@@ -51,7 +51,7 @@ const KIT: [&str; 4] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 11] = [
+const BY_HAND: [(&str, &str, &str); 12] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -111,6 +111,14 @@ const BY_HAND: [(&str, &str, &str); 11] = [
         "crates/cf-e2e/tests/live_muse_reads.rs",
         "XDG_DATA_HOME",
         "the same reads' data folder, a throwaway holding a copy of the model catalog alone",
+    ),
+    (
+        "crates/cf-e2e/tests/live_launcher.rs",
+        "XDG_DATA_HOME",
+        "it gives a window the incident's environment on purpose (T-1082): the owner's HOME and a \
+         throwaway XDG_DATA_HOME, which a seat for Muse gives every window, so that Claude Code's \
+         updater finds its versions apart from its launcher. The folder is the run's own and nothing \
+         of the owner's is read there; `live::launcher` is what holds the owner's launcher",
     ),
 ];
 
