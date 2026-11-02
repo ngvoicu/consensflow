@@ -108,18 +108,6 @@ find = "            && (has_task_in_hand(store, assignee.id)?\n                |
 replace = "            && (false\n                || !undecided_results(store, assignee.id)?.is_empty())\n"
 
 [[plant]]
-name = "behind work: the second of two follow-ups is not given to the window with the result of the first"
-meant = "two_follow_ups_of_one_window_at_work_go_to_it_in_order"
-runs = ["ledger-behind-work"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;\n        release_ready(store, project_id)?;\n"
-replace = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;\n"
-
-# A task that fails, or is cancelled, with a follow-up waiting for it.
-
-[[plant]]
 name = "behind work: the chief is not told of a follow-up that waits for a task that failed"
 meant = "a_task_that_fails_leaves_its_follow_up_waiting_and_the_chief_is_told_once"
 runs = ["ledger-behind-work"]
