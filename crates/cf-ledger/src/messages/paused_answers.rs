@@ -6,6 +6,11 @@
 //! words, and the two ways on (`cf task finish T-n` takes them as the result, a resume
 //! sends the window on).
 //!
+//! The note holds the window's last words and, where it wrote other words first, before its
+//! first tool call, those too (T-1151): the window's reply to the tell is the first thing it
+//! writes, and a turn that goes on (a tool call, then more text) leaves it behind the last
+//! words, in the transcript alone. What it wrote between its tools stays there.
+//!
 //! It is a `note` of ConsensFlow's own, told by its words ([`read`]), which are written
 //! here and nowhere else: a kind of its own would be a migration, and the schema is held
 //! byte for byte by Node's. What the note says stays true as the task moves:
@@ -59,12 +64,13 @@ enum Then {
 }
 
 /// What a note says: the task, the window's handle, the tell whose words the turn was on,
-/// the words the turn ended with, and how it stands now.
+/// what the window wrote first (T-1151), the words the turn ended with, and how it stands now.
 #[derive(Debug, PartialEq, Eq)]
 struct Answered {
     number: i64,
     handle: String,
     tell: i64,
+    reply: Option<String>,
     words: String,
     then: Then,
 }
@@ -73,7 +79,14 @@ const IS_PAUSED: &str = " is paused, and @";
 const WAS_PAUSED: &str = ", paused when @";
 const TURN_ON: &str = "'s turn on the words put to its window (m-";
 const IS_OVER: &str = ") is over. What it said last:\n\n";
-const MOVED_ON: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. What the turn on those words ended with:\n\n";
+/// Where the window wrote other words first (T-1151): these, then its reply, then [`LAST`].
+const IS_OVER_AFTER_A_REPLY: &str = ") is over. What it wrote first, before any tool:\n\n";
+const LAST: &str = "\n\nWhat it said last:\n\n";
+const MOVED_ON_HEAD: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. ";
+const MOVED_ON_ENDED: &str = "What the turn on those words ended with:\n\n";
+const MOVED_ON_AFTER_A_REPLY: &str =
+    "What the turn on those words wrote first, before any tool:\n\n";
+const ENDED_WITH: &str = "\n\nand ended with:\n\n";
 /// What a note of a task that moved on said before T-958, which a ledger may still hold
 /// queued: read, never written. Such a note keeps these words: `keep_moved` rewrites only a
 /// note of a task still paused.
@@ -95,16 +108,27 @@ fn render(answered: &Answered) -> String {
         number,
         handle,
         tell,
+        reply,
         words,
         then,
     } = answered;
-    match then {
-        Then::Paused(next) => format!(
+    match (then, reply) {
+        (Then::Paused(next), None) => format!(
             "T-{number}{IS_PAUSED}{handle}{TURN_ON}{tell}{IS_OVER}{words}{}",
             tail(*number, *next)
         ),
-        Then::Moved => format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON}{words}"),
-        Then::MovedBefore => {
+        (Then::Paused(next), Some(reply)) => format!(
+            "T-{number}{IS_PAUSED}{handle}{TURN_ON}{tell}{IS_OVER_AFTER_A_REPLY}{reply}{LAST}{words}{}",
+            tail(*number, *next)
+        ),
+        (Then::Moved, None) => format!(
+            "T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_HEAD}{MOVED_ON_ENDED}{words}"
+        ),
+        (Then::Moved, Some(reply)) => format!(
+            "T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_HEAD}{MOVED_ON_AFTER_A_REPLY}{reply}{ENDED_WITH}{words}"
+        ),
+        // A build before T-958 wrote no reply, and a note it wrote keeps its words.
+        (Then::MovedBefore, _) => {
             format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_BEFORE}{words}")
         }
     }
@@ -126,20 +150,38 @@ fn read(body: &str) -> Option<Answered> {
     };
     let (handle, rest) = rest.split_once(TURN_ON)?;
     let (tell, rest) = number_in(rest)?;
-    let (words, then) = if paused {
-        let rest = rest.strip_prefix(IS_OVER)?;
-        [Next::Chief, Next::Human]
+    // A reply, where there is one, ends where the words that follow it begin; `render` below
+    // proves the split was the note's own, whichever of its markers stood in the reply.
+    let (reply, words, then) = if paused {
+        let (rest, after_a_reply) = match rest.strip_prefix(IS_OVER) {
+            Some(rest) => (rest, false),
+            None => (rest.strip_prefix(IS_OVER_AFTER_A_REPLY)?, true),
+        };
+        let (kept, then) = [Next::Chief, Next::Human]
             .into_iter()
-            .find_map(|next| Some((rest.strip_suffix(&tail(number, next))?, Then::Paused(next))))?
-    } else if let Some(words) = rest.strip_prefix(MOVED_ON) {
-        (words, Then::Moved)
+            .find_map(|next| Some((rest.strip_suffix(&tail(number, next))?, Then::Paused(next))))?;
+        if after_a_reply {
+            let (reply, words) = kept.split_once(LAST)?;
+            (Some(reply), words, then)
+        } else {
+            (None, kept, then)
+        }
+    } else if let Some(rest) = rest.strip_prefix(MOVED_ON_HEAD) {
+        match rest.strip_prefix(MOVED_ON_AFTER_A_REPLY) {
+            Some(rest) => {
+                let (reply, words) = rest.split_once(ENDED_WITH)?;
+                (Some(reply), words, Then::Moved)
+            }
+            None => (None, rest.strip_prefix(MOVED_ON_ENDED)?, Then::Moved),
+        }
     } else {
-        (rest.strip_prefix(MOVED_ON_BEFORE)?, Then::MovedBefore)
+        (None, rest.strip_prefix(MOVED_ON_BEFORE)?, Then::MovedBefore)
     };
     let answered = Answered {
         number,
         handle: handle.to_owned(),
         tell,
+        reply: reply.map(str::to_owned),
         words: words.to_owned(),
         then,
     };
@@ -156,7 +198,8 @@ pub(super) fn prefixes(number: i64) -> [String; 2] {
 }
 
 /// Tells T-`number`'s requester what the window of `handle` ended its turn on tell `tell`
-/// with: `words`, the last complete answer it wrote after the tell; the task is paused, or
+/// with: `words`, the last complete answer it wrote after the tell, and `reply`, what it wrote
+/// first, before its first tool call, where that is other words (T-1151); the task is paused, or
 /// has been resumed since (its resume waits for the turn's end). A note for each tell,
 /// however often it is asked: none is written where the task's thread has one for this tell
 /// already, whatever became of it. The note, or none where there is one.
@@ -166,6 +209,7 @@ pub(crate) fn note(
     number: i64,
     handle: &str,
     tell: i64,
+    reply: Option<&str>,
     words: &str,
 ) -> Result<Option<MessageView>, LedgerError> {
     store.write(|store| {
@@ -190,6 +234,7 @@ pub(crate) fn note(
             number,
             handle: handle.to_owned(),
             tell,
+            reply: reply.map(str::to_owned),
             words: words.to_owned(),
             then,
         });
@@ -341,6 +386,7 @@ mod tests {
             number: 7,
             handle: "zeus-amber-pine".to_owned(),
             tell: 12,
+            reply: None,
             words: "Done.\n\nThe parser is on grammar v2.".to_owned(),
             then,
         }
@@ -357,6 +403,57 @@ mod tests {
             let answered = said(then);
             assert_eq!(read(&render(&answered)), Some(answered));
         }
+    }
+
+    #[test]
+    fn a_note_with_the_windows_first_words_is_read_back_as_it_was_written_in_each_of_its_words() {
+        for then in [
+            Then::Paused(Next::Chief),
+            Then::Paused(Next::Human),
+            Then::Moved,
+        ] {
+            for reply in [
+                "Stopped.",
+                "Stopped.\n\nThe lexer is next.",
+                // Words of the note's own in the reply split it elsewhere, and render the same.
+                "It said:\n\nWhat it said last:\n\nnothing",
+                "Done\n\nand ended with:\n\nnothing",
+            ] {
+                let answered = Answered {
+                    reply: Some(reply.to_owned()),
+                    ..said(then)
+                };
+                let body = render(&answered);
+                let read = read(&body).unwrap_or_else(|| panic!("{body:?}"));
+                assert_eq!((read.number, read.tell, read.then), (7, 12, then));
+                assert_eq!(render(&read), body, "{reply:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_build_before_t_958_has_no_reply_to_write_and_keeps_its_note() {
+        let before = Answered {
+            reply: Some("ignored".to_owned()),
+            ..said(Then::MovedBefore)
+        };
+        assert_eq!(render(&before), render(&said(Then::MovedBefore)));
+    }
+
+    #[test]
+    fn the_words_of_a_note_with_a_reply_say_what_the_window_wrote_first_and_what_it_said_last() {
+        let with_a_reply = |then| Answered {
+            reply: Some("Stopped.".to_owned()),
+            ..said(then)
+        };
+        assert_eq!(
+            render(&with_a_reply(Then::Paused(Next::Chief))),
+            "T-7 is paused, and @zeus-amber-pine's turn on the words put to its window (m-12) is over. What it wrote first, before any tool:\n\nStopped.\n\nWhat it said last:\n\nDone.\n\nThe parser is on grammar v2.\n\nIf that is the result, take it: cf task finish T-7. To send it on: cf task resume T-7 \"…\"."
+        );
+        assert_eq!(
+            render(&with_a_reply(Then::Moved)),
+            "T-7, paused when @zeus-amber-pine's turn on the words put to its window (m-12) began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. What the turn on those words wrote first, before any tool:\n\nStopped.\n\nand ended with:\n\nDone.\n\nThe parser is on grammar v2."
+        );
     }
 
     #[test]

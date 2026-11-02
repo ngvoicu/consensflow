@@ -1,0 +1,188 @@
+# The words a window writes in reply to a tell, before its first tool call (T-1151). `live tell
+# devin` on the Mac (T-1131's sweep, 2026-11-02, Devin 3000.11.234): the chief asked for one line as
+# text, a short command, and a last line. Devin wrote the line, ran the command (and `cf answer m-2`
+# with the last line, in the second run), and ended with the last line. The note a tell's turn leaves
+# (T-442) took what follows the turn's last tool call and called the rest progress, so nothing
+# carried the line written first. The sweep's Claude Code, Codex and Muse records hold the same shape;
+# theirs reached the chief because the model put the line into `cf answer` or wrote it again.
+#
+# The rules (`crates/cf-engine/src/role_change.rs` `answers_to_the_task`, `crates/cf-engine/src/
+# turn_end.rs` `reply_of`, `crates/cf-engine/src/turn_end/paused.rs`, `crates/cf-ledger/src/messages/
+# paused_answers.rs`): what a member wrote after its message and before its first tool call is its
+# reply, where a tool call followed; what a harness wrote itself is none, and what it marks as
+# progress (Codex) is one; what it wrote between its tools is not; the note holds the reply beside the
+# last words, unless they are the same words or the window sent them with `cf answer`; a resume
+# keeps the reply in the words of a task that has moved on; a note with a reply is read back as
+# itself. Finish takes the last words alone, as before.
+#
+# Each plant takes one rule out again. The names begin with `tell reply`, so
+# `cargo xtask plants daemon "tell reply"` runs them.
+
+[run]
+tell-reply-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_answers::"]
+tell-reply-unit = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::tests::"]
+tell-reply-ledger-unit = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::paused_answers::"]
+tell-reply-ledger-notes = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "pause_notes"]
+tell-reply-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_reply_written_before_the_tools_of_a_tells_turn"]
+tell-reply-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "steps::tests::a_said_line"]
+
+[[plant]]
+name = "tell reply: a member's first words are never collected"
+meant = "what_a_member_writes_before_its_first_tool_call_is_its_reply_and_what_it_writes_between_its_tools_is_not"
+runs = ["tell-reply-unit", "tell-reply-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = "                if !first_run_over && !item.synthetic {\n                    first_run.push(item);\n                }\n"
+replace = ""
+
+[[plant]]
+name = "tell reply: the words between a member's tools are its reply too"
+meant = "the_progress_a_window_writes_between_its_tools_stays_out_of_the_note"
+runs = ["tell-reply-engine", "tell-reply-unit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = "                if !first_run_over && !item.synthetic {"
+replace = "                if !item.synthetic {"
+
+[[plant]]
+name = "tell reply: what a harness wrote itself is a reply"
+meant = "what_a_harness_wrote_itself_is_no_reply"
+runs = ["tell-reply-engine", "tell-reply-unit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = "                if !first_run_over && !item.synthetic {"
+replace = "                if !first_run_over {"
+
+[[plant]]
+name = "tell reply: a turn with no tool call has the whole of its words for a reply"
+meant = "a_turn_with_no_tool_call_or_with_one_before_its_words_has_no_reply"
+runs = ["tell-reply-unit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = "    let reply = if first_run_over {\n        first_run\n    } else {\n        Vec::new()\n    };"
+replace = "    let reply = first_run;"
+
+[[plant]]
+name = "tell reply: a turn's reply stays when a later message begins another"
+meant = "only_the_turn_after_the_latest_message_has_a_reply"
+runs = ["tell-reply-unit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = "                    first_run.clear();\n                    first_run_over = false;\n"
+replace = ""
+
+[[plant]]
+name = "tell reply: the words a member wrote first are not told in the note"
+meant = "the_words_a_window_wrote_before_its_first_tool_in_the_turn_of_a_tell_reach_the_chief_beside_its_last_when_it_ran_no_cf_answer"
+runs = ["tell-reply-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "            reply.as_deref(),\n"
+replace = "            None,\n"
+
+[[plant]]
+name = "tell reply: the reply is told again when the turn ends with the same words"
+meant = "a_reply_the_turn_ends_with_again_is_told_once"
+runs = ["tell-reply-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "            *reply != words\n                && !thread"
+replace = "            !thread"
+
+[[plant]]
+name = "tell reply: the reply is told again when the window sent it with cf answer"
+meant = "a_reply_the_window_also_sent_with_cf_answer_is_not_told_again"
+runs = ["tell-reply-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "                && !thread.messages.iter().any(|message| {"
+replace = "                && !thread.messages.iter().any(|message| false && {"
+
+[[plant]]
+name = "tell reply: a cf answer to another tell takes the reply from this one"
+meant = "a_reply_the_window_also_sent_with_cf_answer_is_not_told_again"
+runs = ["tell-reply-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "                        && message.reply_to == Some(tell)\n"
+replace = ""
+
+[[plant]]
+name = "tell reply: what a harness marks as progress is no reply"
+meant = "a_reply_a_harness_marks_as_progress_is_still_the_reply_to_the_tell"
+runs = ["tell-reply-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "    let words: Vec<&str> = reply\n        .iter()\n        .map(|item| js::trim(&item.text))"
+replace = "    let words: Vec<&str> = reply\n        .iter()\n        .filter(|item| !item.commentary)\n        .map(|item| js::trim(&item.text))"
+
+[[plant]]
+name = "tell reply: the reply is not trimmed of its blank items"
+meant = "a_turn_that_runs_a_tool_before_it_writes_anything_has_no_reply_to_tell"
+runs = ["tell-reply-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        .filter(|text| !text.is_empty())\n        .collect();\n    (!words.is_empty()).then(|| words.join(\"\\n\\n\"))"
+replace = "        .collect();\n    (!words.is_empty()).then(|| words.join(\"\\n\\n\"))"
+
+[[plant]]
+name = "tell reply: the note of a paused task drops the reply"
+meant = "what_a_window_wrote_first_is_noted_beside_its_last_words_once_for_each_tell"
+runs = ["tell-reply-ledger-notes", "tell-reply-ledger-unit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "{IS_OVER_AFTER_A_REPLY}{reply}{LAST}{words}{}\","
+replace = "{IS_OVER}{words}{}\","
+
+[[plant]]
+name = "tell reply: the note of a task that moved on drops the reply"
+meant = "a_resume_keeps_what_a_window_wrote_first_in_the_words_of_a_task_that_moved_on"
+runs = ["tell-reply-ledger-notes", "tell-reply-ledger-unit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "{MOVED_ON_HEAD}{MOVED_ON_AFTER_A_REPLY}{reply}{ENDED_WITH}{words}\""
+replace = "{MOVED_ON_HEAD}{MOVED_ON_ENDED}{words}\""
+
+[[plant]]
+name = "tell reply: a resume writes the note again without its reply"
+meant = "a_resume_keeps_what_a_window_wrote_first_in_the_words_of_a_task_that_moved_on"
+runs = ["tell-reply-ledger-notes"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "            let body = render(&Answered {\n                then: Then::Moved,\n                ..said\n            });"
+replace = "            let body = render(&Answered {\n                then: Then::Moved,\n                reply: None,\n                ..said\n            });"
+
+[[plant]]
+name = "tell reply: a note with a reply is not read back as a note of its tell"
+meant = "what_a_window_wrote_first_is_noted_beside_its_last_words_once_for_each_tell"
+runs = ["tell-reply-ledger-notes", "tell-reply-ledger-unit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "            None => (rest.strip_prefix(IS_OVER_AFTER_A_REPLY)?, true),"
+replace = "            None => return None,"
+
+[[plant]]
+name = "tell reply: the stand-in's said line writes no step"
+meant = "the_words_a_worker_writes_before_its_tools_in_the_turn_of_a_tell_reach_the_chief_beside_its_last_words"
+runs = ["tell-reply-stand-in", "tell-reply-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/steps.rs"
+find = "            reply_to(&on, window).map(|answer| (vec![Step::saying(&words)], answer)),"
+replace = "            reply_to(&on, window).map(|answer| (Vec::new(), answer)),"

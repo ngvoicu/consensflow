@@ -539,6 +539,16 @@ pub(crate) struct Answers<'a> {
     /// Finish takes where the turn after it is still under way (a call open, a
     /// notification's turn begun). None where it wrote none complete.
     pub(crate) complete_run: Option<Vec<&'a Item>>,
+    /// What the member wrote after the message it was given and before its first tool call,
+    /// in the items it was written in, where a tool call came after it: its reply. A turn
+    /// that answers a question puts the answer first, and goes on; the words of that answer
+    /// are not the turn's last (T-1151: Devin, Claude Code, Codex and Muse all write text, run
+    /// a tool, and write the last words after it). A harness's own words in the member's place
+    /// (`synthetic`) are no reply; a note it marks as progress (Codex's `commentary`) is the
+    /// reply all the same, as it is the first words a question gets. Holds no words where the
+    /// member ran a tool before it wrote (a call that says nothing is an item with none),
+    /// where it ran none (its one run is the final answer), or where it wrote nothing.
+    pub(crate) reply: Vec<&'a Item>,
 }
 
 /// The answer to the task in `items`, a member's record after its latest message: what
@@ -563,6 +573,9 @@ pub(crate) fn answers_to_the_task<'a>(
     let mut last = None;
     let mut final_run = Vec::new();
     let mut complete_run = None;
+    // The words written before the first tool call, and whether a tool call came after them.
+    let mut first_run: Vec<&Item> = Vec::new();
+    let mut first_run_over = false;
     for item in items.iter().filter(|item| !item.compaction) {
         match item.role {
             Role::User => {
@@ -573,12 +586,20 @@ pub(crate) fn answers_to_the_task<'a>(
                 if !of_the_role {
                     final_run.clear();
                     last = None;
+                    first_run.clear();
+                    first_run_over = false;
                 }
             }
-            Role::Tool if !of_the_role => final_run.clear(),
+            Role::Tool if !of_the_role => {
+                final_run.clear();
+                first_run_over = true;
+            }
             Role::Assistant if !of_the_role => {
                 last = Some(item);
                 final_run.push(item);
+                if !first_run_over && !item.synthetic {
+                    first_run.push(item);
+                }
                 if item.complete {
                     complete_run = Some(final_run.clone());
                 }
@@ -586,9 +607,16 @@ pub(crate) fn answers_to_the_task<'a>(
             _ => {}
         }
     }
+    // Where no tool call came, the first run is the whole turn: its words are the final answer.
+    let reply = if first_run_over {
+        first_run
+    } else {
+        Vec::new()
+    };
     (last.is_some() || complete_run.is_some()).then_some(Answers {
         last,
         final_run,
         complete_run,
+        reply,
     })
 }

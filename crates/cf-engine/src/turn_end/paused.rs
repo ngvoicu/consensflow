@@ -44,7 +44,7 @@
 use cf_harness::contract::Observed;
 use cf_ledger::{ParticipantView, ProjectView};
 
-use super::{pending_after_look, words_of, Watching, WITHOUT_ANSWER};
+use super::{pending_after_look, reply_of, words_of, Watching, WITHOUT_ANSWER};
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::role_change::answers_to_the_task;
@@ -110,11 +110,23 @@ impl Dispatcher {
         if words == WITHOUT_ANSWER {
             return Ok(());
         }
+        // What it wrote first, before its first tool call, is its reply to the tell: told
+        // beside its last words, unless those are the same words or it sent them with `cf
+        // answer`, which reached the chief as a message of its own.
+        let reply = reply_of(&answers.reply).filter(|reply| {
+            *reply != words
+                && !thread.messages.iter().any(|message| {
+                    message.kind == "answer"
+                        && message.reply_to == Some(tell)
+                        && message.body.contains(reply.as_str())
+                })
+        });
         let written = self.seams.ledger.borrow_mut().note_paused_answer(
             project.id,
             thread.task.number,
             &participant.handle,
             tell,
+            reply.as_deref(),
             &words,
         )?;
         if written.is_none() {

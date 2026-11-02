@@ -375,6 +375,124 @@ fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_no
     assert_eq!(answers(&silent), [""]);
 }
 
+/// The words of the reply of `items`: what the member wrote after its message and before its
+/// first tool call, where a tool call followed (`Answers::reply`).
+fn reply(items: &[Item], replacements: &[i64]) -> Vec<String> {
+    answers_to_the_task(items, replacements).map_or_else(Vec::new, |answers| {
+        answers
+            .reply
+            .into_iter()
+            .map(|item| item.text.to_string())
+            // A call that says nothing is an item of the record, with no words.
+            .filter(|text| !text.trim().is_empty())
+            .collect()
+    })
+}
+
+#[test]
+fn what_a_member_writes_before_its_first_tool_call_is_its_reply_and_what_it_writes_between_its_tools_is_not(
+) {
+    // Devin's turn on a tell (T-1151), and Claude Code's, Codex's and Muse's: text, a tool,
+    // another call, a tool, text.
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str, complete| said_by(Role::Assistant, text, complete);
+    let items = [
+        user("Go"),
+        assistant("Stopped", false),
+        said_by(Role::Tool, "No output produced after 10.0 seconds", true),
+        assistant("Reading on", false),
+        said_by(Role::Tool, "Exited with code 0", true),
+        assistant("The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
+    assert_eq!(answers(&items), ["The last words"]);
+    // Several items before the first tool are one reply, in order.
+    let items = [
+        user("Go"),
+        assistant("Stopped", false),
+        assistant("and ready", false),
+        said_by(Role::Tool, "out", true),
+        assistant("The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped", "and ready"]);
+}
+
+#[test]
+fn a_turn_with_no_tool_call_or_with_one_before_its_words_has_no_reply() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    // No tool call: the one run is the final answer, and the reply is nothing besides it.
+    assert!(reply(&[user("Go"), assistant("Done")], &[]).is_empty());
+    // A tool call first (an empty call, a result), then words.
+    assert!(reply(
+        &[
+            user("Go"),
+            said_by(Role::Assistant, "", false),
+            said_by(Role::Tool, "out", true),
+            assistant("Done"),
+        ],
+        &[]
+    )
+    .is_empty());
+    // No answer at all.
+    assert!(answers_to_the_task(&[user("Go"), said_by(Role::Tool, "out", true)], &[]).is_none());
+}
+
+#[test]
+fn only_the_turn_after_the_latest_message_has_a_reply() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    let tool = |text: &str| said_by(Role::Tool, text, true);
+    let items = [
+        user("Go"),
+        assistant("Looking at the first"),
+        tool("out"),
+        assistant("First done"),
+        user("And now this"),
+        assistant("Stopped"),
+        tool("out"),
+        assistant("Second done"),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
+    // A message to the member that is a role begins a turn of its own: its words are the role's,
+    // and neither end nor begin the reply.
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let items = [
+        user("Go"),
+        assistant("Stopped"),
+        tool("out"),
+        user(&replacement),
+        assistant("Understood."),
+        tool("out"),
+        assistant("The last words"),
+    ];
+    assert_eq!(reply(&items, &[4242]), ["Stopped"]);
+}
+
+#[test]
+fn what_a_harness_wrote_itself_is_no_reply_but_its_progress_marks_are_kept() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    // Claude Code's close of a turn it found cut: no model behind it.
+    let closed = Item {
+        synthetic: true,
+        commentary: true,
+        ..said_by(Role::Assistant, "No response requested.", true)
+    };
+    // Codex marks all it writes before a tool call as progress.
+    let progress = Item {
+        commentary: true,
+        ..said_by(Role::Assistant, "Stopped", false)
+    };
+    let items = [
+        user("Go"),
+        closed,
+        progress,
+        said_by(Role::Tool, "out", true),
+        said_by(Role::Assistant, "The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
+}
+
 #[test]
 fn a_message_to_the_member_after_its_answer_leaves_the_turn_unanswered_and_its_last_complete_answer_kept(
 ) {
