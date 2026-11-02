@@ -616,18 +616,20 @@ replace = '''                self.seams
             }
 '''
 
+# Re-aimed by T-1074 (the critical review T-1014, note 4): the plant that put `|| true` in
+# `tells_a_role` was missed since T-1021, which took the delivery-time "told in part" line
+# out, so a message that says no role taken for one changes nothing anyone can see there.
+# `says_a_role` of the ledger's receipt still decides something: whether `cf inbox read`
+# receives a queued note, or leaves it to be typed in.
 [[plant]]
-name = "codex role: every message that comes into the window is taken for a role told"
-meant = "a_long_message_that_says_no_role_goes_cut_as_any_is_and_is_no_role_told_in_part"
-runs = ["engine-role-change"]
+name = "codex role: every message read in the inbox is taken for one that says a role"
+meant = "a_result_or_a_note_read_in_the_inbox_is_read_and_never_typed_in"
+runs = ["ledger-receipt"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
-find = '''            .role_notes_to(message.recipient_id)?
-            .contains(&message.id);'''
-replace = '''            .role_notes_to(message.recipient_id)?
-            .contains(&message.id)
-            || true;'''
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''        .prepare("SELECT 1 FROM message WHERE id = ? AND role_text IS NOT NULL")?'''
+replace = '''        .prepare("SELECT 1 FROM message WHERE id = ?")?'''
 
 [[plant]]
 name = "codex role: a replacement that waited for a conversation is left to be told to the one a switch begins"
@@ -791,18 +793,18 @@ runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''The instructions below replace the ones you were given then: follow these from now on'''
-replace = '''The instructions below are these: follow them from now on'''
+find = '''The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. This is context'''
+replace = '''The instructions below are these: follow them from now on, and where they differ from what you were told before, these are right. This is context'''
 
 [[plant]]
-name = "codex role: a replacement is longer than a message goes in whole, with the text at its start"
-meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_goes_in_whole_as_a_replacement"
+name = "codex role: a replacement is longer than its window reads whole, with the text at its start"
+meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read"
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''    format!("{OPENING}\n\n{instructions}")'''
-replace = '''    format!("{OPENING}\n\n{instructions}{}", "\n".repeat(2_000))'''
+find = '''    note_of(OPENING, OPENING_IN_PART, instructions)'''
+replace = '''    format!("{}{}", note_of(OPENING, OPENING_IN_PART, instructions), "\n".repeat(2_000))'''
 
 [[plant]]
 name = "codex role: the staff's rows grow, and the command line the docs measured is not the text's"
@@ -1053,8 +1055,8 @@ replace = '''            let conversation = current_conversation(store, confirme
             set_conversation_role_text(store, conversation.id, &role)?;'''
 
 [[plant]]
-name = "codex role: a role told in part is recorded as told, and said no more"
-meant = "a_role_too_long_for_one_message_goes_cut_is_not_recorded_as_told_and_the_human_is_told_so_at_every_resume"
+name = "codex role: a role told in part is recorded as told before it is read"
+meant = "a_role_too_long_for_one_message_goes_cut_with_the_word_to_read_the_rest_now_and_is_told_only_once_its_note_is_read"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
@@ -1063,8 +1065,8 @@ find = '''        Ok(says_a_role.then(|| goes_whole(message, &[])))'''
 replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[]) || true))'''
 
 [[plant]]
-name = "codex role: the human is not told that a role went in part"
-meant = "a_role_too_long_for_one_message_goes_cut_is_not_recorded_as_told_and_the_human_is_told_so_at_every_resume"
+name = "codex role: the human is not told that a role told in part was not read by the next Resume"
+meant = "a_role_told_in_part_and_not_read_by_the_next_resume_is_said_again_and_the_human_is_told_so"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
@@ -1079,8 +1081,8 @@ runs = ["engine-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = '''    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT'''
-replace = '''    utf16_len(&words_of(message, carried).0) < INLINE_LIMIT'''
+find = '''    utf16_len(words) <= INLINE_LIMIT'''
+replace = '''    utf16_len(words) < INLINE_LIMIT'''
 
 [[plant]]
 name = "codex role: whether a message goes whole is told by its own words and not by the rows it carries with it"
@@ -1089,8 +1091,8 @@ runs = ["engine-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = '''    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT'''
-replace = '''    utf16_len(&words_of(message, &[]).0) <= INLINE_LIMIT'''
+find = '''    fits_whole(&words_of(message, carried).0)'''
+replace = '''    fits_whole(&words_of(message, &[]).0)'''
 
 # What the ledger knows a replacement by, and what a record's turn is a replacement's by: the id
 # the ledger has, and never the words.
@@ -1647,3 +1649,13 @@ runs = ["live-specs-judge"]
 file = "crates/cf-e2e/tests/live_specs/launched.rs"
 find = '''        Some(said) if said.contains(REPLACES) => Ok('''
 replace = '''        Some(said) if said.contains(REPLACES) || said.contains(SECTION) => Ok('''
+
+[[plant]]
+name = "codex role: the human is told the cut is at exactly 16,000 characters"
+meant = "a_role_told_in_part_and_not_read_by_the_next_resume_is_said_again_and_the_human_is_told_so"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''went in cut at about 16,000 characters with'''
+replace = '''went in cut at 16,000 characters with'''

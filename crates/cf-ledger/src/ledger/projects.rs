@@ -67,6 +67,28 @@ impl Ledger {
         projects::describe_project(&mut self.store, id, description)
     }
 
+    /// Writes the rules the human gives a project's staff (plain text, at most
+    /// 8,000 bytes and 150 lines), or takes them away: none, or blank text. They
+    /// reach each window of the project when it next starts.
+    pub fn set_staff_rules(
+        &mut self,
+        id: i64,
+        rules: Option<&str>,
+    ) -> Result<ProjectView, LedgerError> {
+        projects::set_staff_rules(&mut self.store, id, rules)
+    }
+
+    /// Chooses the size, in tokens, at which the project's Claude member windows
+    /// compact (100,000 to 1,000,000), or takes the choice away: none is Claude's
+    /// own point. It reaches each window when it next starts.
+    pub fn set_claude_compaction(
+        &mut self,
+        id: i64,
+        window: Option<u32>,
+    ) -> Result<ProjectView, LedgerError> {
+        projects::set_claude_compaction(&mut self.store, id, window)
+    }
+
     /// What the project says of specs: whether they are on, the folder and the
     /// Specmint variant, all three at once. It applies at the chief's next launch.
     pub fn set_specs(&mut self, id: i64, change: &SpecsChange) -> Result<ProjectView, LedgerError> {

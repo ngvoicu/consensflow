@@ -288,6 +288,7 @@ pub(super) fn prepare_as(
             .specs
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
+        compaction: None,
         first_message_ms: request.first_message_ms,
         starts_given_up: 0,
     };

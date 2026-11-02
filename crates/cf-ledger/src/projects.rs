@@ -3,9 +3,13 @@
 //! to resume, logged event by event, and deleted with everything in it once
 //! closed. One opens with the wake-up calls and the specs the human says for it,
 //! in the write that makes it. The human may rename one and write a line under
-//! its name ([`describing`]).
+//! its name ([`describing`]), write the rules its staff is given
+//! ([`staff_rules`]) and choose the size its Claude members' windows compact at
+//! ([`claude_compaction`]).
 
+mod claude_compaction;
 mod describing;
+mod staff_rules;
 
 use cf_base::json::from_slice_lossy;
 use cf_proto::ledger::{DeletedProject, EventView, ProjectView};
@@ -13,8 +17,14 @@ use cf_proto::specs::SpecsView;
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::{json, Value};
 
+pub(crate) use claude_compaction::set_claude_compaction;
+pub use claude_compaction::{
+    parse_claude_compaction, CLAUDE_COMPACTION_MAX, CLAUDE_COMPACTION_MIN,
+};
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
+pub(crate) use staff_rules::set_staff_rules;
+pub use staff_rules::{parse_staff_rules, STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 
 use crate::meeting::{end_every_meeting, end_meeting, Ended};
 use crate::model::{self, LedgerError, COORDINATOR_HANDLES};
@@ -56,6 +66,11 @@ pub(crate) struct ProjectRow {
     pub(crate) description: Option<String>,
     /// When the human began a meeting with the chief; null while none is on.
     pub(crate) meeting_at: Option<String>,
+    /// The rules the human wrote for the staff; null where there are none.
+    pub(crate) staff_rules: Option<String>,
+    /// The size in tokens the human chose for the Claude members' windows to
+    /// compact at; null for Claude's own point.
+    pub(crate) claude_compaction: Option<u32>,
 }
 
 impl ProjectRow {
@@ -73,6 +88,8 @@ impl ProjectRow {
             specs_variant: row.get("specs_variant")?,
             description: row.get("description")?,
             meeting_at: row.get("meeting_at")?,
+            staff_rules: row.get("staff_rules")?,
+            claude_compaction: row.get("claude_compaction")?,
         })
     }
 
@@ -328,6 +345,8 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         specs,
         description: row.description,
         meeting: row.meeting_at,
+        staff_rules: row.staff_rules,
+        claude_compaction: row.claude_compaction,
     }))
 }
 

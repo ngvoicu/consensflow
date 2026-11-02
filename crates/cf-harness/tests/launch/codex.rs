@@ -166,6 +166,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
             .specs
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
+        compaction: None,
         first_message_ms: request.first_message_ms,
         starts_given_up: request.starts_given_up,
     };

@@ -204,5 +204,5 @@ replace = '''
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "wrote.filter(|_| cut::seen_whole(&printed))"
-replace = "wrote.filter(|_| cut::seen_whole(&measured))"
+find = "wrote.filter(|wrote| (wrote.seen)(&printed))"
+replace = "wrote.filter(|wrote| (wrote.seen)(&measured))"

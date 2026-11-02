@@ -773,3 +773,37 @@ fn a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_w
     );
     assert!(finished(window.observe()).unwrap().settled);
 }
+
+#[test]
+fn a_windows_devin_is_told_how_to_name_files_before_the_projects_rules_for_the_staff_and_not_under_their_heading(
+) {
+    // What the engine gives a window: the role, then the human's rules under their own heading.
+    let role = "# ConsensFlow worker\n\nRole text.\n";
+    let rules = format!(
+        "\n{STAFF_RULES_HEADING}\n\nEvery member of this project's staff is given these rules after its role, as you are.\n\n- Push to origin only.\n"
+    );
+    let given = format!("{role}{rules}");
+    let windows = role_text(&given, &Env::from_vars([("OS", "Windows_NT")]));
+    // The sentence follows the role and ends before the heading, which and what follows are as given.
+    assert_eq!(windows, format!("{role}\n\n{WINDOWS_PATHS}\n{rules}"));
+    let at = windows.find(WINDOWS_PATHS).expect("the sentence");
+    assert!(at < windows.find(STAFF_RULES_HEADING).expect("the heading"));
+    assert!(
+        windows.ends_with(&rules),
+        "the rules are the human's, as they were"
+    );
+    // Elsewhere, and where the project has no rules, nothing about the rules moves.
+    let elsewhere = role_text(&given, &Env::from_vars([("HOME", "/h")]));
+    assert_eq!(
+        elsewhere,
+        if cfg!(windows) {
+            windows
+        } else {
+            given.clone()
+        }
+    );
+    assert_eq!(
+        role_text(role, &Env::from_vars([("OS", "Windows_NT")])),
+        format!("{role}\n\n{WINDOWS_PATHS}\n")
+    );
+}

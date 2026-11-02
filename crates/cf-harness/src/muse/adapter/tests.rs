@@ -62,6 +62,7 @@ fn launch<'a>(id: &'a LaunchId, resume: Option<&'a str>) -> Launch<'a> {
         }),
         instructions: "# ConsensFlow worker",
         specs: None,
+        compaction: None,
         first_message_ms: 1,
         starts_given_up: 0,
     }
