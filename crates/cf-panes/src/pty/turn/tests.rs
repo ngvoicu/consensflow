@@ -165,7 +165,7 @@ time.sleep(60)
 "#;
 
         #[test]
-        fn a_job_detached_from_the_shell_that_started_it_is_the_windows_by_its_session_and_no_work_of_the_turn(
+        fn a_job_detached_from_the_shell_that_started_it_is_the_windows_by_its_session_and_is_named_as_work_a_close_ends(
         ) {
             let _serial = serial_pty_test();
             let mut outsider = Sentinel::start();
@@ -174,9 +174,14 @@ time.sleep(60)
                 let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
 
                 // The job's shell is gone, and the system names no parent of its that
-                // the tree has: it is in the window's session, which is the window's
-                // and nothing of the turn's: it is not listed, and the close ends it.
-                assert_eq!(listed(&table, &pane.key), Vec::<u32>::new(), "{servers:?}");
+                // the tree has: it is in the window's session, which is the window's, and
+                // no chain of processes that run makes it the turn's. The host names it
+                // all the same (T-1145), as what the window's close ends.
+                assert_eq!(
+                    listed(&table, &pane.key),
+                    numbers(&pid, &["job"]),
+                    "{servers:?}"
+                );
                 table.kill(&pane.key).expect("close the pane");
                 assert!(gone(pid["job"]), "{servers:?}: the close ended it");
                 assert!(outsider.runs(), "{servers:?}: a process outside the window");
@@ -332,14 +337,15 @@ time.sleep(60)
 
     /// A program that ends on its own with a job still running: reparented, the job is
     /// the window's (it carries the marker its environment has, which a system binary
-    /// such as `sleep` does not show, so the job is a Python's), but no work of the turn:
-    /// no chain of processes that run leads from it to a shell the harness started,
-    /// the program being gone. The exit lists none, and the retirement that follows
-    /// ends it. The job ignores the hangup the terminal sends the program's group as
-    /// its leader goes.
+    /// such as `sleep` does not show, so the job is a Python's), and no work of the turn
+    /// by a chain of processes that run: the program that started it is gone. It is
+    /// detached work all the same (T-1145): it began after the mark, it is none of the
+    /// harness's own and it has lost its starter, so the exit lists it, and the retirement
+    /// that follows ends it. The job ignores the hangup the terminal sends the program's
+    /// group as its leader goes.
     #[cfg(target_os = "macos")]
     #[test]
-    fn a_program_that_exits_leaving_a_job_running_lists_none_of_it_in_its_exit_and_the_retirement_ends_it(
+    fn a_program_that_exits_leaving_a_job_running_lists_it_in_its_exit_as_detached_work_and_the_retirement_ends_it(
     ) {
         let _serial = serial_pty_test();
         let mut outsider = crate::pty::Sentinel::start();
@@ -364,7 +370,15 @@ time.sleep(60)
 
         let left = table.left_running_at_exit(&pane.key, &pane.ended);
 
-        assert_eq!(left, Vec::new(), "no chain proves it the turn's");
+        assert_eq!(
+            left.len(),
+            1,
+            "no chain proves it the turn's, and it is named all the same: {left:?}"
+        );
+        assert!(
+            left[0].command.contains("time.sleep(31)"),
+            "the job, by its command line: {left:?}"
+        );
         assert!(
             table.retire_exited(&pane.key).expect("retire the pane"),
             "the retirement ends what the program left"

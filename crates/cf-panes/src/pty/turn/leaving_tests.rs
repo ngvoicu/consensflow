@@ -29,7 +29,7 @@ mod macos {
     const GRACE: Duration = Duration::from_millis(1500);
 
     #[test]
-    fn a_job_the_agent_detached_from_a_shell_that_ended_is_left_running_unnamed_and_the_close_ends_it(
+    fn a_job_the_agent_detached_from_a_shell_that_ended_is_named_as_work_the_window_left_and_the_close_ends_it_and_names_it(
     ) {
         let _serial = serial_pty_test();
         let mut outsider = Sentinel::start();
@@ -38,13 +38,28 @@ mod macos {
             let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
 
             // The shell has gone and the job has no parent: no chain of processes that
-            // run leads from it to a shell the harness started, and its being in the
-            // window's session, which it is, is no proof of whose work it is.
-            assert_eq!(listed(&table, &pane.key), Vec::<u32>::new(), "{servers:?}");
+            // run leads from it to a shell the harness started. It is in the window's
+            // session, which the window's close ends, and it began after the mark, and
+            // it is none of the harness's own: the host names it, as the work the
+            // window left running that a pause (or a close) would end (T-1145).
+            assert_eq!(
+                listed(&table, &pane.key),
+                numbers(&pid, &["job"]),
+                "{servers:?}"
+            );
             assert!(process_exists(pid["job"]), "{servers:?}: it runs on");
-            // It is the window's all the same: the window's close ends it.
+            // The window's close ends it, and says it did.
             table.kill(&pane.key).expect("close the pane");
             assert!(gone(pid["job"]), "{servers:?}: the close ended it");
+            let mut kept: Vec<u32> = pane
+                .ended
+                .background()
+                .expect("the close kept its list")
+                .iter()
+                .map(|process| process.pid)
+                .collect();
+            kept.sort_unstable();
+            assert_eq!(kept, numbers(&pid, &["job"]), "{servers:?}: it named it");
             assert!(outsider.runs(), "{servers:?}: a process outside the window");
         }
     }
@@ -108,8 +123,8 @@ mod macos {
 }
 
 /// The same on Windows, where the tree is the pane's job: what a shell started
-/// after the mark is the turn's, with what it started, and the rest (a job with no
-/// parent left among it) is not named.
+/// after the mark is the turn's, with what it started, and a job with no parent left among it is
+/// named as detached work (T-1145); the window's program and a server it started late are not.
 #[cfg(windows)]
 mod windows {
     use std::collections::HashMap;
@@ -324,7 +339,7 @@ mod windows {
     }
 
     #[test]
-    fn a_job_whose_shell_has_ended_is_in_the_pane_job_still_with_no_parent_and_is_left_running_unnamed(
+    fn a_job_whose_shell_has_ended_is_in_the_pane_job_still_with_no_parent_and_the_host_names_it_as_work_the_close_ends(
     ) {
         let _pty_guard = serial_pty_test();
         let table = Arc::new(PaneTable::new());
@@ -371,10 +386,32 @@ mod windows {
         }
 
         // With no process of the job that started it, no chain of processes that run
-        // leads from the ping to a shell the harness started: nothing proves whose it
-        // is, so it is not listed and not named.
-        assert_eq!(listed(&table, &key), Vec::new());
+        // leads from the ping to a shell the harness started. The job holds it all the
+        // same, it began after the mark and it is none of the harness's own: the host
+        // names it, as the work the window left running that its close would end
+        // (T-1145; before it, `Start-Process` left a job the close ended unnamed).
+        let found = listed(&table, &key);
+        assert!(
+            found
+                .iter()
+                .any(|(_, command)| command.contains("ping.exe") && command.contains("-n 1004")),
+            "the host names the detached ping: {found:?}"
+        );
         assert!(on_its_own(&held(&table, &key), "-n 1004"), "it runs on");
+        // What a close keeps for its exit is what the host finds at two looks, a moment
+        // apart: the ping is still there at both.
+        let (baseline, tree) = {
+            let panes = table.lock_panes().expect("the panes");
+            let pane = panes.get(&key).expect("the pane");
+            (pane.baseline.clone(), pane.tree())
+        };
+        let kept = super::super::steadily_looked_at(&baseline, &tree).expect("two looks");
+        assert!(
+            kept.processes
+                .iter()
+                .any(|process| process.command.to_lowercase().contains("-n 1004")),
+            "the close names it: {kept:?}"
+        );
         // The pane's job is the window's: its close ends it with the rest.
         table.kill(&key).expect("close the pane");
     }
