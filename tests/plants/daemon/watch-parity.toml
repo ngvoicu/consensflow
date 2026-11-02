@@ -426,3 +426,23 @@ runs = ["watch-lib-long-run"]
 file = "crates/cf-evals/src/long_run/disruptions.rs"
 find = '''            let recompact = after_compaction && can_compact(moment);'''
 replace = '''            let recompact = false;'''
+
+[[plant]]
+name = "watch-parity: what a command that may go on to the model printed ends the command's turn"
+meant = "what_a_command_printed_ends_the_turn_of_a_command_that_runs_no_model_and_of_none_that_does"
+runs = ["watch-parity"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = '''    quiet(last) && last.uuid.is_some() && last.uuid == output.parent'''
+replace = '''    last.uuid.is_some() && last.uuid == output.parent'''
+
+[[plant]]
+name = "watch-parity: what a command printed ends the turn whatever the agent said since the command"
+meant = "what_a_command_printed_ends_the_turn_of_a_command_that_runs_no_model_and_of_none_that_does"
+runs = ["watch-parity"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = '''                    if last.is_some_and(|said| follows_its_command(said, entry)) =>'''
+replace = '''                    if true =>'''

@@ -627,3 +627,90 @@ fn a_line_that_is_no_json_in_the_middle_of_a_record_is_passed_over_by_both() {
     let found = over("a torn line", &lines);
     assert!(found.is_empty(), "\n{}", found.join("\n"));
 }
+
+#[test]
+fn what_a_command_printed_ends_the_turn_of_a_command_that_runs_no_model_and_of_none_that_does() {
+    // T-483: a command Claude Code writes whole as the system's record (`/mcp`, `/plugin`)
+    // began no turn, and its output is the child of no user's record; the output of a `/clear`,
+    // `/compact` or `/model` ends the command's turn, and one of a command that may go on to
+    // the model (2.1.303's `/plan`) does not.
+    let command = |second: u32, parent: Option<u32>, name: &str| {
+        typed(
+            second,
+            parent,
+            &format!(
+                "<command-name>/{name}</command-name>\n<command-message>{name}</command-message>"
+            ),
+        )
+    };
+    let printed = |second: u32, parent: u32, text: &str| {
+        rec(
+            second,
+            json!({ "type": "system", "subtype": "local_command", "parentUuid": format!("u-{parent}"),
+                    "isMeta": false, "level": "info",
+                    "content": format!("<local-command-stdout>{text}</local-command-stdout>") }),
+        )
+    };
+    let printed_by_user = |second: u32, parent: u32, text: &str| {
+        typed(
+            second,
+            Some(parent),
+            &format!("<local-command-stdout>{text}</local-command-stdout>"),
+        )
+    };
+    let after_a_turn = vec![
+        typed(0, None, "Hi."),
+        says(1, 0, "Hello.", "end_turn"),
+        took(2, 1, ""),
+    ];
+    let with = |extra: Vec<String>| {
+        let mut lines = after_a_turn.clone();
+        lines.extend(extra);
+        lines
+    };
+    let cases = [
+        // Written whole by the system: no turn, at rest throughout.
+        ("/mcp", with(vec![printed(10, 2, "No MCP servers")])),
+        // A command that runs no model, and what it printed as the system's record or the user's.
+        (
+            "/clear",
+            with(vec![command(10, Some(2), "clear"), printed(11, 10, "")]),
+        ),
+        (
+            "/model",
+            with(vec![
+                command(10, Some(2), "model"),
+                printed_by_user(11, 10, "Set model"),
+            ]),
+        ),
+        (
+            "/compact with nothing to compact",
+            with(vec![
+                command(10, Some(2), "compact"),
+                printed(11, 10, "Nothing to compact"),
+            ]),
+        ),
+        // A command that may go on to the model: its output ends nothing.
+        (
+            "/plan",
+            with(vec![
+                command(10, Some(2), "plan"),
+                printed_by_user(11, 10, "Planning"),
+            ]),
+        ),
+        // The output of a command with something open between.
+        (
+            "an output after the agent spoke",
+            with(vec![
+                command(10, Some(2), "clear"),
+                says(11, 10, "Wait.", "tool_use"),
+                printed(12, 10, ""),
+            ]),
+        ),
+    ];
+    let found: Vec<String> = cases
+        .iter()
+        .flat_map(|(name, lines)| over(name, lines))
+        .collect();
+    assert!(found.is_empty(), "\n{}", found.join("\n"));
+}
