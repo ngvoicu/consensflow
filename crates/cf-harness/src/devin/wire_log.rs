@@ -81,6 +81,8 @@ struct State {
     identity: Option<Identity>,
     written: Option<f64>,
     looked_ms: i64,
+    /// When the look began that first found it last written at `written`.
+    since_ms: i64,
     read: DefaultHasher,
     /// What follows its last newline: a line still being written.
     carry: String,
@@ -126,11 +128,14 @@ impl WireLog {
             .map_err(|error| FileError::call(error, "fstat", None).to_string())?;
         let (size, written) = (metadata.len(), mtime_ms(&metadata).ok());
         let identity = identity(&file).ok();
-        if state.offset > 0 && state.replaced(&mut file, size, identity, written)? {
+        if state.offset > 0 && state.replaced(&mut file, size, identity, written, at_ms)? {
             state.offset = 0;
             state.read = DefaultHasher::default();
             state.carry.clear();
             state.mode = None;
+        }
+        if state.written != written {
+            state.since_ms = at_ms;
         }
         state.identity = identity;
         state.written = written;
@@ -193,19 +198,20 @@ impl State {
     /// grew past with the same first kilobyte (Astra and Sol on the B1 fix, twice). Its
     /// bytes are read again unless its time is the one the last look found and was
     /// [`settled`] then: on Windows a log rewritten within the clock's tick keeps its
-    /// time (main's Windows CI, run 38942619741).
+    /// time (main's Windows CI, run 38942619741). A look that began at `now_ms` asks.
     fn replaced(
         &self,
         file: &mut File,
         size: u64,
         identity: Option<Identity>,
         written: Option<f64>,
+        now_ms: i64,
     ) -> Result<bool, String> {
         if size < self.offset || identity != self.identity {
             return Ok(true);
         }
         if let Some(written) = written.filter(|written| Some(*written) == self.written) {
-            if settled(written, self.looked_ms) {
+            if settled(written, self.since_ms, self.looked_ms, now_ms) {
                 return Ok(false);
             }
         }

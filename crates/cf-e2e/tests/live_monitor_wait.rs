@@ -107,21 +107,12 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 /// The folder of the check, below the live folders.
 const FOLDER: &str = "monitor-wait";
 
-/// The variables a Claude Code session gives its children, which a run started from
-/// inside one would hand the window: with them it keeps no transcript.
-const SESSION_IDENTITY: [&str; 11] = [
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_CODE_SESSION_ID",
-    "CLAUDE_CODE_CHILD_SESSION",
-    "CLAUDE_CODE_SESSION_ATTENDED",
-    "CLAUDE_CODE_MESSAGING_SOCKET",
-    "CLAUDE_CODE_MESSAGING_TOKEN",
-    "CLAUDE_CODE_BRIDGE_SESSION_ID",
-    "CLAUDE_CODE_EXECPATH",
-    "CLAUDE_PID",
-    "CLAUDE_EFFORT",
-];
+/// The variables of a session a run started from inside one would hand the window, which
+/// the window is opened without: the one list (`parent_session_variables`), Claude Code's
+/// among them, with which it keeps no transcript.
+fn session_identity() -> impl Iterator<Item = &'static str> {
+    cf_proto::agents::parent_session_variables()
+}
 
 /// The words the agent is asked to answer each wake-up with.
 const ARMED: &str = "WAITING";
@@ -730,7 +721,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         .claude_alone_with_hooks(hooks())
         .mcp_config(server.config())
         .seed(&live::ask::window_text(ARM)?);
-    for name in SESSION_IDENTITY {
+    for name in session_identity() {
         open = open.without(name);
     }
     let window = open.open_telling(&log, "claude")?;
@@ -1093,6 +1084,17 @@ fn host_can_answer(checks: Vec<Check>, groups: bool) -> Vec<Check> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window is opened without every variable of Claude Code's session the build
+    /// knows, the one list's: a copy of its own once held eleven, and no `AI_AGENT` or
+    /// `TRACEPARENT` (T-1024).
+    #[test]
+    fn the_window_is_opened_without_every_variable_of_claudes_session_the_build_knows() {
+        let without: Vec<&str> = session_identity().collect();
+        for name in cf_proto::agents::Harness::Claude.session_variables() {
+            assert!(without.contains(name), "{name}");
+        }
+    }
 
     fn look(settled: bool, jobs: u64, last: &str) -> Look {
         Look {

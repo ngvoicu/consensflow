@@ -122,6 +122,46 @@ fn every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its
     );
 }
 
+/// A terminal asked inside an agent's shell has its session's variables, every harness's
+/// (T-971): the app names them with the rest it took, and no window is given one, which it
+/// would be taken for. The pane host takes them out of what a pane inherits.
+#[test]
+fn no_window_is_given_a_harness_session_a_terminal_was_asked_in() {
+    let scene = scene();
+    let marked: Vec<&str> = Harness::ALL
+        .into_iter()
+        .flat_map(Harness::session_variables)
+        .copied()
+        .collect();
+    let mut named = vec!["LANG"];
+    named.extend(&marked);
+    let mut vars = vec![
+        (
+            TERMINAL_ENV.to_owned(),
+            serde_json::to_string(&named).unwrap(),
+        ),
+        ("LANG".to_owned(), "en_GB.UTF-8".to_owned()),
+    ];
+    vars.extend(
+        marked
+            .iter()
+            .map(|name| ((*name).to_owned(), "the-parent's".to_owned())),
+    );
+    let window = WindowEnv::new(&Env::from_vars(vars), "http://127.0.0.1:1", "/bundle/bin");
+    let started = window.env(participant(&scene.project, "zeus"), &scene.project);
+    let names: Vec<&str> = started.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "LANG",
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_PROJECT",
+            "CONSENSFLOW_PARTICIPANT",
+            "PATH"
+        ]
+    );
+}
+
 #[test]
 fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
     let scene = scene();

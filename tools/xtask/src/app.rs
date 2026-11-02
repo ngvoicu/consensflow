@@ -102,9 +102,10 @@ fn run_fresh(context: &Context, args: &[OsString], console: &mut Console) -> Res
     Ok(1)
 }
 
-/// The app's tests built and not run: `cargo test --offline --no-run`, in the app's folder.
+/// The app's tests built and not run: `cargo test --offline --no-run`, in the app's folder,
+/// into the folder [`test`] builds them in ([`on_the_real_target`]).
 fn test_build(context: &Context) -> Invocation {
-    in_the_app(context).args(["test", "--offline", "--no-run"])
+    on_the_real_target(context, in_the_app(context)).args(["test", "--offline", "--no-run"])
 }
 
 /// The lines of a verbose cargo build that say a part is made again, and why
@@ -292,6 +293,8 @@ mod tests {
             Some(real.into_os_string()),
         ));
         assert_eq!(test(&context, &[]).vars, expected);
+        // `app fresh` builds the same tests, into the same folder (T-1024: on main since).
+        assert_eq!(test_build(&context).vars, expected);
         // The lint runs no test binary, and the link serves it as it is.
         assert_eq!(clippy(&context, &[]).vars, resources_left_out());
     }

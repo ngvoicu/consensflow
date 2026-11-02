@@ -131,20 +131,32 @@ pub fn mtime_ms(metadata: &Metadata) -> io::Result<f64> {
 /// kernel's tick.
 pub const WRITE_TIME_STEP_MS: f64 = 2_000.0;
 
-/// Whether a file last written at `written_ms`, as a look that began at
-/// `looked_ms` found it, was written before that look by more than
-/// [`WRITE_TIME_STEP_MS`]: while its time stays, it holds what that look read.
-/// One written within the step may have been written again after the look in
-/// the same step, its time unmoved (on Windows, a log rewritten within one
-/// tick), so only its bytes tell: git's racily clean entry, told by its file
-/// time against the index's (git's `Documentation/technical/racy-git`). A time
-/// after the look is never
-/// settled.
-pub fn settled(written_ms: f64, looked_ms: i64) -> bool {
+/// Whether a file found at the time `written_ms`, and at it still, holds what was read of
+/// it: no write since can have kept that time. `since_ms` is when the look began that
+/// first found it at that time, `checked_ms` the last look that read or checked its bytes,
+/// and `now_ms` this look, all by this machine's clock.
+///
+/// A file written before the checking look by more than [`WRITE_TIME_STEP_MS`] is
+/// settled: a write since would have a later time. One written within the step may have
+/// been written again after the look in the same step, its time unmoved (on Windows, a
+/// log rewritten within one tick), so only its bytes tell: git's racily clean entry, told
+/// by its file time against the index's (git's `Documentation/technical/racy-git`).
+///
+/// A file whose time is after this look (a writer's clock ahead of this one, or a time set
+/// by hand) is settled once a step has passed between the look that first found it so and
+/// the last that checked it, for as long as its time stays more than a step ahead of the
+/// look: until then a write could still have kept it, and it is checked at every look
+/// (T-971). Before, nothing settled it until the clock passed its time, so a file dated a
+/// day ahead was checked at every look for a day; now its bytes are checked for a step
+/// after it is first found so, and again for the steps its time takes to pass. A writer's
+/// clock behind this one is beyond what a time can tell: its fresh write looks settled at
+/// once (the issue `record-readers-trust-what-a-file-time-cannot-prove`, limit 3).
+pub fn settled(written_ms: f64, since_ms: i64, checked_ms: i64, now_ms: i64) -> bool {
     // A clock reading is within the 53 bits of a double for millions of years.
     #[allow(clippy::cast_precision_loss)]
-    let looked = looked_ms as f64;
-    written_ms + WRITE_TIME_STEP_MS < looked
+    let (since, checked, now) = (since_ms as f64, checked_ms as f64, now_ms as f64);
+    written_ms + WRITE_TIME_STEP_MS < checked
+        || (since + WRITE_TIME_STEP_MS < checked && now + WRITE_TIME_STEP_MS < written_ms)
 }
 
 /// `path` by its real one, its links resolved: a program that takes a folder reached
@@ -268,13 +280,35 @@ mod tests {
     #[test]
     fn a_file_time_is_settled_only_when_older_than_the_look_by_more_than_its_step() {
         let looked = 1_790_000_000_000;
-        assert!(settled(1_789_999_997_999.0, looked));
-        assert!(!settled(1_789_999_998_000.0, looked), "a step before");
-        assert!(!settled(1_789_999_999_000.0, looked), "within the step");
+        let settled = |written| settled(written, looked, looked, looked);
+        assert!(settled(1_789_999_997_999.0));
+        assert!(!settled(1_789_999_998_000.0), "a step before");
+        assert!(!settled(1_789_999_999_000.0), "within the step");
+        assert!(!settled(1_790_000_000_000.0), "in the look's own tick");
+        assert!(!settled(1_790_000_005_000.0), "after it");
+    }
+
+    /// T-971: a file dated ahead of the clock was checked at every look until the clock
+    /// passed its time. It is settled a step after the look that first found it so, while
+    /// its time stays more than a step ahead of the look.
+    #[test]
+    fn a_file_dated_ahead_of_the_clock_is_settled_a_step_after_it_was_first_found_so() {
+        let found = 1_790_000_000_000;
+        // A day ahead of the look that found it.
+        let (ahead, at) = (1_790_086_400_000.0, 1_790_086_400_000);
+        assert!(!settled(ahead, found, found, found + 10), "found just now");
         assert!(
-            !settled(1_790_000_000_000.0, looked),
-            "in the look's own tick"
+            !settled(ahead, found, found + 2_000, found + 2_010),
+            "a step to the checking look"
         );
-        assert!(!settled(1_790_000_005_000.0, looked), "after it");
+        assert!(settled(ahead, found, found + 2_001, found + 2_010));
+        assert!(
+            settled(ahead, found, found + 2_001, found + 3_600_000),
+            "an hour on"
+        );
+        // Its time comes: a write within its step could keep it, and a time does not tell.
+        assert!(!settled(ahead, found, at - 2_001, at - 2_000));
+        assert!(!settled(ahead, found, at, at + 1));
+        assert!(settled(ahead, found, at + 2_001, at + 2_002), "passed");
     }
 }

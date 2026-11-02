@@ -12,7 +12,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use super::homes::Homes;
-use super::install::{environment, var, write_fake_install, write_roster};
+use super::install::{environment, own_commands, var, write_fake_install, write_roster};
 use super::route::Shared;
 use super::stranger::Stranger;
 use super::{Config, Rig};
@@ -81,6 +81,8 @@ impl Rig {
         let workspace = root.join("workspace");
         files::make_dir(&workspace)?;
         let fake_bin = write_fake_install(&root, &config)?;
+        let muse_launcher = matches!(config.muse, Some((_, crate::muse::Run::Live { .. })))
+            .then(|| own_commands(&root, &config).join("muse"));
         let env = environment(&root, &fake_bin, &config, &home_vars);
         // A restart over the same home keeps its roster, as the app's does: the
         // agents a case wrote are still the ones its chief and staff run on.
@@ -116,6 +118,7 @@ impl Rig {
             daemon,
             host,
             cf,
+            muse_launcher,
             stranger,
             homes,
             masker: config.masker,

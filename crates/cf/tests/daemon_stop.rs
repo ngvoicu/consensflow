@@ -506,7 +506,16 @@ fn a_window_s_cf_ui_is_the_board_and_never_the_daemon() {
         .stdin(std::process::Stdio::null())
         .output()
         .expect("cf runs");
-    assert_ne!(ran.status.code(), Some(0), "the board has no such command");
+    assert_eq!(ran.status.code(), Some(1), "the board has no such command");
+    assert!(ran.stdout.is_empty());
+    // Not "unknown command": it says the token is set, and what to do (T-868).
+    let stderr = String::from_utf8_lossy(&ran.stderr);
+    assert!(
+        stderr.starts_with("cf: `cf ui` starts ConsensFlow's own daemon, and this is a window")
+            && stderr.contains("CONSENSFLOW_TOKEN is set")
+            && !stderr.contains("a-windows-token"),
+        "{stderr}"
+    );
     assert!(!root.home().join("daemon.log").exists(), "no daemon ran");
 }
 

@@ -208,6 +208,27 @@ fn a_home_is_set_by_an_entry_of_code_and_a_name_in_a_comment_or_a_test_is_none()
     assert!(!copies("// a CodexHome of the run's own", "CodexHome"));
 }
 
+/// A harness's server a live case starts itself, outside a rig (`AppServer::start`, Codex's
+/// app-server), is given the run's own home by the kit (`Installed::home_outside_a_rig`), as a
+/// rig gives its windows theirs: on the case's own environment it ran on the person's `~/.codex`
+/// (T-1039, `live_codex_interrupt`).
+#[test]
+fn a_harness_server_a_live_case_starts_itself_runs_on_the_runs_own_home() -> Outcome {
+    let mut on_the_persons = Vec::new();
+    for file in &sources()? {
+        let own = code(&text(file));
+        if own.contains("AppServer::start(") && !own.contains("home_outside_a_rig()") {
+            on_the_persons.push(file.clone());
+        }
+    }
+    assert!(
+        on_the_persons.is_empty(),
+        "these start a harness's server on the case's own environment, the person's home: give \
+         it `install.home_outside_a_rig()?`: {on_the_persons:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn no_live_source_makes_the_home_of_a_real_harness_by_hand() -> Outcome {
     let sources = sources()?;
