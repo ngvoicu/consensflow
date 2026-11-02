@@ -1,0 +1,386 @@
+# A temporary model error failed the task (T-1112, Gabriel's field report, 2026-11-02): a
+# designer's Codex window ended on "Selected model is at capacity. Please try a different
+# model." (`codex_error_info` `server_overloaded`), and ConsensFlow failed its task, though its
+# work was saved. A model overloaded or at capacity, a server's error (a 5xx, Anthropic's 529),
+# is a refusal of its provider for a moment: waiting cures it.
+#
+# The rules: each harness's reader reads such a refusal from its own record as
+# `Quota::Busy` (`crates/cf-harness/src/shared/quota.rs`'s `busy_refusal`, called by the readers
+# of Claude Code, Codex, Pi, Devin and Muse), after a quota (a 429) and an account's refusal (a
+# 401, a 402), which stay theirs. The engine takes it as it takes a refusal, never as the
+# turn's failure: the task is held with its window and its member is out until a backoff, a
+# minute, then two, then four (`crates/cf-engine/src/scheduler.rs`, `BUSY_BACKOFF_MS`,
+# `busy_reset`, `hold_busy`); once those tries are refused too, a task given by tier goes to
+# another free member of its tier, or is held on and tried every five minutes while none is
+# free (`BUSY_HOLD_MS`). Its requester is told once, plainly (`note_hold_busy`), and told again
+# only where that note was withdrawn before it was given. A turn through begins the tries
+# again. A chief's busy turn is still the human's to hear. The lane and the board say the
+# model is busy. The engine's tests are `crates/cf-engine/tests/dispatcher/busy_models.rs`; the
+# readers' are beside each reader.
+#
+# Every name holds `busy-models`, so `cargo xtask plants daemon busy-models` runs them all.
+
+[run]
+busy-models-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "busy_models::"]
+busy-models-readers = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib"]
+
+[[plant]]
+name = "busy-models: a busy model's refusal is the turn's failure"
+meant = "busy_models::a_busy_model_holds_the_task_with_its_window_and_tries_it_again_after_a_minute"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = '''
+            | Quota::Moved { .. }
+            | Quota::Busy { .. } => Level::Exhausted,
+'''
+replace = '''
+            | Quota::Moved { .. } => Level::Exhausted,
+            Quota::Busy { .. } => Level::Ok,
+'''
+
+[[plant]]
+name = "busy-models: a busy model waits as long as a quota that names no reset"
+meant = "busy_models::a_busy_model_holds_the_task_with_its_window_and_tries_it_again_after_a_minute"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        let reset = if let Some(Unwell::Busy(_)) = unwell {
+'''
+replace = '''
+        let reset = if false {
+'''
+
+[[plant]]
+name = "busy-models: each try waits as long as the first"
+meant = "busy_models::each_try_waits_longer_and_once_three_are_refused_the_task_goes_to_another_free_member"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+const BUSY_BACKOFF_MS: [i64; 3] = [60_000, 120_000, 240_000];
+'''
+replace = '''
+const BUSY_BACKOFF_MS: [i64; 3] = [60_000, 60_000, 60_000];
+'''
+
+[[plant]]
+name = "busy-models: the task never goes to another free member"
+meant = "busy_models::each_try_waits_longer_and_once_three_are_refused_the_task_goes_to_another_free_member"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if tries > BUSY_BACKOFF_MS.len() && self.another_is_free(project, owner, task)? {
+'''
+replace = '''
+        if false && tries > BUSY_BACKOFF_MS.len() && self.another_is_free(project, owner, task)? {
+'''
+
+[[plant]]
+name = "busy-models: the task goes to another member at the first refusal"
+meant = "busy_models::each_try_waits_longer_and_once_three_are_refused_the_task_goes_to_another_free_member"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if tries > BUSY_BACKOFF_MS.len() && self.another_is_free(project, owner, task)? {
+'''
+replace = '''
+        if tries > 0 && self.another_is_free(project, owner, task)? {
+'''
+
+[[plant]]
+name = "busy-models: a task given by name goes to another member"
+meant = "busy_models::a_task_given_by_name_stays_with_its_member_whoever_else_is_free"
+runs = ["busy-models-engine"]
+
+# A task given by name has no tier, so no candidates, and the ledger would not release it:
+# both guards go.
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            .check_release(project.id, task.number)
+            .is_err()
+'''
+replace = '''
+            .check_release(project.id, task.number)
+            .is_err()
+            && false
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none()))
+'''
+replace = '''
+            .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none())
+            || project.participants.iter().any(|other| other.handle.starts_with("diana")))
+'''
+
+[[plant]]
+name = "busy-models: with nobody else free the tries stop at the last backoff's length"
+meant = "busy_models::with_nobody_else_free_the_task_is_held_on_and_tried_every_five_minutes"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+const BUSY_HOLD_MS: i64 = 5 * 60_000;
+'''
+replace = '''
+const BUSY_HOLD_MS: i64 = 4 * 60_000;
+'''
+
+[[plant]]
+name = "busy-models: the requester is told at every try"
+meant = "busy_models::with_nobody_else_free_the_task_is_held_on_and_tried_every_five_minutes"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if !self.told_busy(project, task)? {
+'''
+replace = '''
+        if !self.told_busy(project, task)? || tries > 0 {
+'''
+
+[[plant]]
+name = "busy-models: a note withdrawn before it was given is taken for told"
+meant = "busy_models::a_note_withdrawn_before_it_was_given_is_told_again_at_the_next_try"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    && message.state != "cancelled"
+'''
+replace = "\n"
+
+[[plant]]
+name = "busy-models: a turn through does not begin the tries again"
+meant = "busy_models::a_turn_through_after_a_try_begins_the_tries_again"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        self.busy_over(task.id);
+'''
+replace = "\n"
+
+[[plant]]
+name = "busy-models: a chief's busy turn is held and nobody hears it"
+meant = "busy_models::a_chiefs_busy_turn_is_the_humans_to_hear_and_holds_nothing"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        let chief_busy = participant.role == "chief" && busy_turn(&observed);
+'''
+replace = '''
+        let chief_busy = participant.role == "chief" && busy_turn(&observed) && false;
+'''
+
+[[plant]]
+name = "busy-models: the lane says out of quota"
+meant = "busy_models::the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        Some(Unwell::Busy(because)) => format!("model busy, tried again at {until}: {because}"),
+'''
+replace = '''
+        Some(Unwell::Busy(_)) => format!("out of quota until {until}"),
+'''
+
+[[plant]]
+name = "busy-models: the board says out of quota"
+meant = "busy_models::the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            self.marked_busy(owner.id, &until);
+'''
+replace = "\n"
+
+[[plant]]
+name = "busy-models: the note does not say what comes after the tries"
+meant = "busy_models::a_busy_model_holds_the_task_with_its_window_and_tries_it_again_after_a_minute"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+    let then = if tiered {
+'''
+replace = '''
+    let then = if false {
+'''
+
+[[plant]]
+name = "busy-models: the human is told a busy model needs them"
+meant = "busy_models::a_busy_model_holds_the_task_with_its_window_and_tries_it_again_after_a_minute"
+runs = ["busy-models-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if let Unwell::Busy(_) = unwell {
+            return Ok(());
+        }
+'''
+replace = "\n"
+
+[[plant]]
+name = "busy-models: Anthropic's 529 is no refusal for a moment"
+meant = "claude::record::tests::refusals::a_server_error_or_an_overloaded_model_is_a_refusal_for_a_moment_and_no_quota"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = '''
+const BUSY_STATUSES: [f64; 5] = [500.0, 502.0, 503.0, 504.0, 529.0];
+'''
+replace = '''
+const BUSY_STATUSES: [f64; 4] = [500.0, 502.0, 503.0, 504.0];
+'''
+
+[[plant]]
+name = "busy-models: a model at capacity in a provider's words is the turn's failure"
+meant = "pi::record::tests::steps::a_providers_refusal_for_a_moment_is_busy_and_no_quota"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = '''
+        r"(?i-u:overloaded|at capacity|server(?:s)? (?:is |are )?busy|server_busy|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
+'''
+replace = '''
+        r"(?i-u:overloaded|server(?:s)? (?:is |are )?busy|server_busy|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
+'''
+
+[[plant]]
+name = "busy-models: Claude Code's busy refusal is the turn's failure"
+meant = "claude::record::tests::refusals::a_server_error_or_an_overloaded_model_is_a_refusal_for_a_moment_and_no_quota"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+        busy: refused
+'''
+replace = '''
+        busy: false && refused
+'''
+
+[[plant]]
+name = "busy-models: Claude Code's server_error is the turn's failure"
+meant = "claude::record::tests::refusals::a_server_error_or_an_overloaded_model_is_a_refusal_for_a_moment_and_no_quota"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+            && (record.get("error").and_then(Value::as_str) == Some("server_error")
+'''
+replace = '''
+            && (record.get("error").and_then(Value::as_str) == Some("no such error")
+'''
+
+[[plant]]
+name = "busy-models: Codex's server_overloaded is the turn's failure"
+meant = "records::thread::fixtures::a_recorded_refusal_of_a_busy_model_reads_as_one_for_a_moment"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+        Some(Value::String(info)) => BUSY.contains(&info.as_str()),
+'''
+replace = '''
+        Some(Value::String(_)) => false,
+'''
+
+[[plant]]
+name = "busy-models: a request Codex gave up on with a server's status is the turn's failure"
+meant = "codex::record::tests::refusals::a_turn_its_server_refused_for_a_moment_is_busy_and_no_quota"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+        Some(Value::Object(kinds)) => GAVE_UP.iter().any(|kind| {
+'''
+replace = '''
+        Some(Value::Object(kinds)) => false && GAVE_UP.iter().any(|kind| {
+'''
+
+[[plant]]
+name = "busy-models: Pi's busy refusal is the turn's failure"
+meant = "pi::record::tests::steps::a_providers_refusal_for_a_moment_is_busy_and_no_quota"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+                let busy = busy_refusal(&failure, None);
+'''
+replace = '''
+                let busy = false && busy_refusal(&failure, None);
+'''
+
+[[plant]]
+name = "busy-models: Devin's busy refusal is the turn's failure"
+meant = "devin::record::tests::logs::a_turn_its_provider_refused_for_a_moment_is_busy_dated_by_its_chain"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''
+        .filter(|said| busy_refusal(said, None))
+'''
+replace = '''
+        .filter(|said| false && busy_refusal(said, None))
+'''
+
+[[plant]]
+name = "busy-models: Devin's busy refusal is undated, the same at every try"
+meant = "devin::record::tests::logs::a_turn_its_provider_refused_for_a_moment_is_busy_dated_by_its_chain"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''
+        let at = last.and_then(|at| time_of(record.items[at].at.as_ref()));
+'''
+replace = '''
+        let at = last.and_then(|at| time_of(record.items[at].at.as_ref())).filter(|_| false);
+'''
+
+[[plant]]
+name = "busy-models: Muse's busy refusal is the turn's failure"
+meant = "muse::record::tests::provisional::a_turn_refused_for_the_accounts_limits_says_the_quota_spent_at_its_time"
+runs = ["busy-models-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+    busy_refusal(reason, api_status(&lower)).then_some(Refused::Busy)
+'''
+replace = '''
+    busy_refusal(reason, api_status(&lower)).then_some(Refused::Limit)
+'''

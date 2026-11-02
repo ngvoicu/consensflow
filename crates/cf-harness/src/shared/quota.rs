@@ -35,7 +35,7 @@ use jiff::tz::TimeZone;
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
-use patterns::{BILLING, CREDENTIALS, REFUSED, SPENT};
+use patterns::{BILLING, BUSY, CREDENTIALS, REFUSED, SPENT};
 
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +62,12 @@ pub enum Quota {
     /// an unavailable account is, and released by the human's word for that member alone,
     /// never by a teammate's turn or an allowance (T-816).
     Moved { at: Option<String>, because: String },
+    /// A request the provider refused for a moment, which is no failure of the turn and no
+    /// quota: its model at capacity or overloaded (Anthropic's 529), a server error (a 5xx),
+    /// its server busy (T-1112). The harness gave up retrying it itself; when it happened, if
+    /// the record says, and what it said, held to a line's length. It names no reset: the
+    /// engine holds the task and tries it again after a backoff of its own.
+    Busy { at: Option<String>, because: String },
 }
 
 /// What an account refused for that is no usage limit: nothing resets it.
@@ -87,9 +93,10 @@ impl Quota {
     /// exhausted, a count says its own level.
     pub fn level(&self) -> Level {
         match self {
-            Quota::Exhausted { .. } | Quota::Unavailable { .. } | Quota::Moved { .. } => {
-                Level::Exhausted
-            }
+            Quota::Exhausted { .. }
+            | Quota::Unavailable { .. }
+            | Quota::Moved { .. }
+            | Quota::Busy { .. } => Level::Exhausted,
             Quota::Usage { level, .. } => *level,
         }
     }
@@ -100,7 +107,8 @@ impl Quota {
         match self {
             Quota::Exhausted { at, .. }
             | Quota::Unavailable { at, .. }
-            | Quota::Moved { at, .. } => at.as_deref(),
+            | Quota::Moved { at, .. }
+            | Quota::Busy { at, .. } => at.as_deref(),
             Quota::Usage { .. } => None,
         }
     }
@@ -111,7 +119,7 @@ impl Quota {
             Quota::Exhausted { resets_at, .. } | Quota::Usage { resets_at, .. } => {
                 resets_at.as_deref()
             }
-            Quota::Unavailable { .. } | Quota::Moved { .. } => None,
+            Quota::Unavailable { .. } | Quota::Moved { .. } | Quota::Busy { .. } => None,
         }
     }
 
@@ -124,6 +132,12 @@ impl Quota {
     /// an unavailable account is, and released by their word for that member alone.
     pub fn moved(&self) -> bool {
         matches!(self, Quota::Moved { .. })
+    }
+
+    /// Whether the provider refused for a moment (T-1112): a model at capacity, a server
+    /// error. Held and tried again after a backoff, never a failure.
+    pub fn busy(&self) -> bool {
+        matches!(self, Quota::Busy { .. })
     }
 
     /// Whether no time and no teammate cures it: an unavailable account, or a moved
@@ -145,7 +159,8 @@ impl Level {
 
 impl Serialize for Quota {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(3 + usize::from(self.held_for_the_human())))?;
+        let because = self.held_for_the_human() || self.busy();
+        let mut map = serializer.serialize_map(Some(3 + usize::from(because)))?;
         match self {
             Quota::Exhausted { at, resets_at } => {
                 map.serialize_entry("state", "exhausted")?;
@@ -163,6 +178,12 @@ impl Serialize for Quota {
             }
             Quota::Unavailable { at, because } | Quota::Moved { at, because } => {
                 map.serialize_entry("state", if self.moved() { "moved" } else { "unavailable" })?;
+                map.serialize_entry("at", at)?;
+                map.serialize_entry("resetsAt", &Option::<&str>::None)?;
+                map.serialize_entry("because", because)?;
+            }
+            Quota::Busy { at, because } => {
+                map.serialize_entry("state", "busy")?;
                 map.serialize_entry("at", at)?;
                 map.serialize_entry("resetsAt", &Option::<&str>::None)?;
                 map.serialize_entry("because", because)?;
@@ -241,6 +262,37 @@ pub(crate) fn unavailable_quota(at_ms: f64, refusal: Refusal, said: &str) -> Res
     Ok(Quota::Unavailable {
         at,
         because: format!("{what}: {said}"),
+    })
+}
+
+/// The statuses of a request a provider refused for a moment: a server error, its gateway's,
+/// a service unavailable, and Anthropic's 529 `overloaded_error` (T-1112).
+const BUSY_STATUSES: [f64; 5] = [500.0, 502.0, 503.0, 504.0, 529.0];
+
+/// Whether a provider's refusal is one for a moment, which waiting cures (T-1112): a
+/// server error or its model overloaded or at capacity, by `status` where the record names
+/// one, else by the status the text opens on (`refused_for_quota`'s two shapes), or by its
+/// words (`BUSY`). Asked only of a refusal that is no quota and no account's
+/// (`refused_for_quota`, [`account_refusal`]): those come first, as a 429 resets at its own
+/// time and a 401 or 402 at the human's word. A request the provider refused as wrong (a
+/// 400, a model not found) is the turn's failure, and none of these.
+pub(crate) fn busy_refusal(text: &str, status: Option<f64>) -> bool {
+    let status = status.or_else(|| REFUSED.captures(text).map(|found| js::number(&found[1])));
+    status.is_some_and(|status| BUSY_STATUSES.contains(&status)) || BUSY.is_match(text)
+}
+
+/// A request the provider refused for a moment at `at_ms` (none when it is no number), told
+/// as the harness said it (`said`, held to a line's length). Fails where `toISOString`
+/// throws.
+pub(crate) fn busy_quota(at_ms: f64, said: &str) -> Result<Quota, String> {
+    let at = if at_ms.is_finite() {
+        Some(date(at_ms)?)
+    } else {
+        None
+    };
+    Ok(Quota::Busy {
+        at,
+        because: said.trim().chars().take(300).collect(),
     })
 }
 

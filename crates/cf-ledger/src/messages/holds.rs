@@ -55,6 +55,32 @@ fn render(number: i64, handle: &str, until: &str) -> String {
     format!("T-{number} waits with @{handle}: out of quota until {until}{TAIL}")
 }
 
+/// What a hold note of a window whose model was busy says of it (T-1112): its provider
+/// refused for a moment, which waiting cures, and no failure.
+const BUSY: &str = ": its model is busy, a refusal of its provider for a moment and no failure";
+
+/// The words of a hold note of a window whose model was busy, `because` (the harness's own
+/// words): T-`number` is held with `handle` and tried again after a backoff, a few times;
+/// one given by tier (`tiered`) then goes to another free member of its tier, if there is
+/// one. The requester is told once: neither a try nor the task going on is told again, and
+/// it is no hold note `tell_goes_on` corrects (`is_hold_note`).
+fn render_busy(number: i64, handle: &str, because: &str, tiered: bool) -> String {
+    let then = if tiered {
+        "then gives it to another free member of its tier, or tries every 5 minutes while none is free"
+    } else {
+        "then every 5 minutes"
+    };
+    format!(
+        "T-{number} waits with @{handle}{BUSY} ({because}). ConsensFlow tries it again in 1, 2 and 4 minutes, {then}; you are not told of each try."
+    )
+}
+
+/// Whether `body` is the hold note of T-`number` that its window's model was busy
+/// ([`render_busy`]): the requester was told it already, unless the note was withdrawn.
+pub fn is_busy_note(number: i64, body: &str) -> bool {
+    body.contains(BUSY) && body.starts_with(&format!("T-{number} waits with @"))
+}
+
 /// What a requester is told when a task held for its window's moved model goes on: the
 /// human said it may (MUS-24), not that an account has quota again.
 pub(super) fn goes_on_moved(number: i64) -> String {
@@ -142,6 +168,30 @@ pub(crate) fn note_hold_moved(
         &Sent {
             to,
             body: &render_moved(number, handle, because),
+            task: Some(number),
+            kind: "note",
+            ..Sent::default()
+        },
+    )
+}
+
+/// Tells `to` that T-`number` is held with `handle` because its model was busy, `because`
+/// (T-1112): it is tried again after a backoff of the daemon's, and is no failure.
+pub(crate) fn note_hold_busy(
+    store: &mut Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    handle: &str,
+    because: &str,
+    tiered: bool,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            to,
+            body: &render_busy(number, handle, because, tiered),
             task: Some(number),
             kind: "note",
             ..Sent::default()

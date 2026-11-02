@@ -41,7 +41,7 @@ use self::images::output_text;
 use self::inputs::{Inputs, Telling};
 use super::paths::transcript;
 use super::quota::codex_quota;
-use crate::shared::quota::{Level, Quota};
+use crate::shared::quota::{busy_refusal, Level, Quota};
 use crate::shared::record::cache::Look;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
@@ -84,6 +84,45 @@ fn handed_out(item: &Item) -> Item {
 /// (as Codex 0.163 names a plan or balance that has no quota too), or a rate
 /// limit it gave up retrying. The chief's rule (T-95): wait on any limit.
 const LIMITS: [&str; 2] = ["usage_limit_exceeded", "rate_limit_exceeded"];
+
+/// The `codex_error_info` of a turn its server refused for a moment (T-1112): its model at
+/// capacity ("Selected model is at capacity. Please try a different model.",
+/// `errored-task-complete.jsonl`, codex-cli 0.153.4), or the server's own error.
+const BUSY: [&str; 2] = ["server_overloaded", "internal_server_error"];
+
+/// The `codex_error_info` that name the status of a request Codex gave up on, as an object
+/// (`{"<kind>": {"http_status_code": 503}}`): a refusal for a moment where the status is a
+/// server's error.
+const GAVE_UP: [&str; 4] = [
+    "http_connection_failed",
+    "response_stream_connection_failed",
+    "response_stream_disconnected",
+    "response_too_many_failed_attempts",
+];
+
+/// Whether a turn's `error` is its server's refusal for a moment: by its `codex_error_info`,
+/// or, where that names nothing more (none, `other`), by the words every harness shares
+/// (`busy_refusal`).
+fn busy(error: Option<&Value>) -> bool {
+    match field(error, "codex_error_info") {
+        Some(Value::String(info)) if info == "other" => words_busy(error),
+        Some(Value::String(info)) => BUSY.contains(&info.as_str()),
+        Some(Value::Object(kinds)) => GAVE_UP.iter().any(|kind| {
+            kinds
+                .get(*kind)
+                .and_then(|gave_up| gave_up.get("http_status_code"))
+                .and_then(Value::as_f64)
+                .is_some_and(|status| busy_refusal("", Some(status)))
+        }),
+        None | Some(Value::Null) => words_busy(error),
+        Some(_) => false,
+    }
+}
+
+/// Whether the words of a turn's `error` say its server refused for a moment.
+fn words_busy(error: Option<&Value>) -> bool {
+    Rollout::error_words(error).is_some_and(|said| busy_refusal(&said, None))
+}
 
 /// What a rollout said so far.
 struct Rollout {
@@ -356,6 +395,19 @@ impl Rollout {
                     "its login was refused: {}",
                     Self::error_words(error).unwrap_or_default()
                 ),
+            }));
+        }
+        // A server that refused for a moment (T-1112): no failure and no quota, held and tried
+        // again by the engine. Codex gave up its own retries before it wrote this.
+        if busy(error) {
+            return Some(Arc::new(Quota::Busy {
+                at: at.as_str().and_then(time::parse).map(time::iso),
+                because: Self::error_words(error)
+                    .unwrap_or_else(|| "the server refused for a moment".to_owned())
+                    .trim()
+                    .chars()
+                    .take(300)
+                    .collect(),
             }));
         }
         if !info.is_some_and(|info| LIMITS.contains(&info)) {

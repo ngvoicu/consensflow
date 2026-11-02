@@ -94,6 +94,29 @@ impl Ledger {
         messages::note_hold_unavailable(&mut self.store, project_id, to, number, handle, because)
     }
 
+    /// ConsensFlow tells `to` that T-`number` is held with `handle` because its model was busy,
+    /// `because` (T-1112): tried again after a backoff, and handed to another free member of
+    /// its tier once the tries are spent where it was given by tier (`tiered`).
+    pub fn note_hold_busy(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        number: i64,
+        handle: &str,
+        because: &str,
+        tiered: bool,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_hold_busy(
+            &mut self.store,
+            project_id,
+            to,
+            number,
+            handle,
+            because,
+            tiered,
+        )
+    }
+
     /// ConsensFlow tells `to` that T-`number` is held with `handle` because its harness moved
     /// its window's model on its own, `because` (MUS-24): no reset, only the human's word.
     pub fn note_hold_moved(

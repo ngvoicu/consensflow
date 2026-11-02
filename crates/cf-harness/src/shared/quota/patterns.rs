@@ -54,6 +54,16 @@ pub(super) static CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 
+/// A provider's words for a request it refused for a moment (T-1112): Anthropic's
+/// `overloaded_error` ("Overloaded"), a model "at capacity", a server "busy" or
+/// "overloaded", a service "temporarily unavailable", a server error by its name. A quota
+/// ("rate limit") and an account's refusal are read before these.
+pub(super) static BUSY: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r"(?i-u:overloaded|at capacity|server(?:s)? (?:is |are )?busy|server_busy|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
+    )
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +76,6 @@ mod tests {
         assert!(SPENT.is_match("You're OUT of extra usage."));
         assert!(BILLING.is_match("... (billing_error)"));
         assert!(CREDENTIALS.is_match("Invalid API key"));
+        assert!(BUSY.is_match("Selected model is at capacity. Please try a different model."));
     }
 }

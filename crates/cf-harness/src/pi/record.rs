@@ -37,7 +37,8 @@ use serde_json::Value;
 
 use super::paths::transcript;
 use crate::shared::quota::{
-    account_refusal, exhausted_quota, refused_for_quota, unavailable_quota, Quota,
+    account_refusal, busy_quota, busy_refusal, exhausted_quota, refused_for_quota,
+    unavailable_quota, Quota,
 };
 use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::followed::{Followed, Parser};
@@ -298,11 +299,17 @@ impl Session {
                 // An account refused for its billing or its login has no reset to wait for
                 // (MUS-23); a limit that resets is the quota.
                 let refusal = account_refusal(&failure, None);
-                if refusal.is_some() || refused_for_quota(&failure) {
+                // A provider's refusal for a moment (an overloaded model, a 5xx) is held and
+                // tried again, not the turn's failure (T-1112).
+                let busy = busy_refusal(&failure, None);
+                if refusal.is_some() || refused_for_quota(&failure) || busy {
                     let at_ms = js::to_number(field("timestamp")).map_err(Stop::Failed)?;
                     let quota = match refusal {
                         Some(refusal) => unavailable_quota(at_ms, refusal, &failure),
-                        None => exhausted_quota(&failure, at_ms, &self.local),
+                        None if refused_for_quota(&failure) => {
+                            exhausted_quota(&failure, at_ms, &self.local)
+                        }
+                        None => busy_quota(at_ms, &failure),
                     }
                     .map_err(Stop::Failed)?;
                     self.quota = Some(Arc::new(quota));

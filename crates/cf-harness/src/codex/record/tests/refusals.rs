@@ -77,10 +77,82 @@ fn a_reset_the_limits_named_before_the_refusal_is_none_of_its_own() {
 
 #[test]
 fn another_error_fails_its_turn_and_says_nothing_of_quota() {
+    for info in ["context_window_exceeded", "bad_request", "sandbox_error"] {
+        let read = read(&[
+            limits(40.0, RESETS),
+            started(json!("t1")),
+            failed("t1", info, AT),
+        ])
+        .unwrap();
+        assert!(read.failed, "{info}");
+        assert_eq!(
+            read.quota.as_deref().map(Quota::level),
+            Some(Level::Ok),
+            "{info}"
+        );
+    }
+}
+
+/// A turn's end with `error` saying `message`, its `codex_error_info` `info`, at `at`.
+fn errored(info: Value, message: &str) -> Value {
+    json!({
+        "timestamp": AT,
+        "type": "event_msg",
+        "payload": {
+            "type": "task_complete",
+            "turn_id": "t1",
+            "last_agent_message": null,
+            "error": { "message": message, "codex_error_info": info },
+        },
+    })
+}
+
+#[test]
+fn a_turn_its_server_refused_for_a_moment_is_busy_and_no_quota() {
+    // T-1112: the words and kind `errored-task-complete.jsonl` recorded (codex-cli 0.153.4),
+    // a server's own error, a request Codex gave up on with a server's status, and words
+    // only.
+    let at_capacity = "Selected model is at capacity. Please try a different model.";
+    for (info, message) in [
+        (json!("server_overloaded"), at_capacity),
+        (json!("internal_server_error"), "Internal server error"),
+        (
+            json!({ "response_too_many_failed_attempts": { "http_status_code": 503 } }),
+            "exceeded retry limit, last status: 503 Service Unavailable",
+        ),
+        (
+            json!({ "http_connection_failed": { "http_status_code": 529 } }),
+            "unexpected status 529",
+        ),
+        (json!("other"), "The server is overloaded, try again later"),
+    ] {
+        let read = read(&[
+            limits(40.0, RESETS),
+            started(json!("t1")),
+            errored(info.clone(), message),
+        ])
+        .unwrap();
+        assert!(read.failed, "{info}");
+        assert_eq!(
+            read.quota.as_deref(),
+            Some(&Quota::Busy {
+                at: Some(AT.to_owned()),
+                because: message.to_owned(),
+            }),
+            "{info}"
+        );
+    }
+}
+
+#[test]
+fn a_request_codex_gave_up_on_for_no_server_error_is_no_refusal() {
     let read = read(&[
         limits(40.0, RESETS),
         started(json!("t1")),
-        failed("t1", "server_overloaded", AT),
+        errored(
+            json!({ "response_stream_disconnected": { "http_status_code": 400 } }),
+            "stream disconnected",
+        ),
     ])
     .unwrap();
     assert!(read.failed);
