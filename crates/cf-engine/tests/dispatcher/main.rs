@@ -97,6 +97,7 @@ mod receipts;
 mod restart;
 mod resumable;
 mod resume;
+mod resumed_at_work;
 mod retired_agents;
 mod review;
 mod role_change;

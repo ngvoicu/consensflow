@@ -1,0 +1,165 @@
+//! A resumed task whose window is at work on it shows working (T-1139, field bug 8; Gabriel's
+//! other board, 2026-11-02). `cf tell T-10 "…"` pauses the task and puts the words to its
+//! window; the window answered ("ok") and went straight on with its work in the same turn
+//! (T-429's and T-442's shape, `paused_answers`); the chief's `cf task resume T-10 "…"` then
+//! queued its words behind that turn, and the board read `T-10 [queued]` for as long as the
+//! window ran commands on it, because only the paste of those words moved the task to
+//! working. The board under-reported work: its label said the window had not taken the task
+//! up while its record showed it at work on nothing else.
+//!
+//! The rule (`resumed_at_work`): the words that resume a task wait for the window's rest
+//! (nothing is typed into a turn at work, `pacing`), but the task is what the window is at
+//! work on, so it reads **working** as soon as the window's record shows the window acting
+//! on it: the turn in flight, and an item of the agent's own (its words, a tool call or its
+//! result) written after the resume. A turn that reads in flight and writes nothing is no
+//! work (a Pi cut by a quit reads so for ever, T-1130), and a window at rest is given the
+//! words as before, the task working from their paste. The words stay queued, and the turn's
+//! end is still not the resumed task's result: its answer is the follow-up to them.
+
+use cf_engine::testing::Context;
+use cf_harness::records::{Item, Role};
+use cf_proto::ledger::MessageView;
+
+use crate::fixtures::given;
+use crate::paused_answers::{
+    answers_and_goes_on, kept_notes, moved_on_words, results, told_at_work, FINAL,
+};
+
+/// The agent of T-1's window writes another step of its turn: a tool call and its result, as
+/// the harness's record shows them while the turn goes on.
+fn works_on(context: &Context, step: &str) {
+    let mut call: Item = context.adapter.item(Role::Tool, step);
+    call.complete = true;
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.push(call.clone()));
+}
+
+/// The resume's words as the ledger has them: T-1's last task message to its window.
+fn resume_words(context: &Context, project: i64) -> MessageView {
+    context
+        .task(project, 1)
+        .messages
+        .into_iter()
+        .rfind(|message| message.kind == "task" && message.body.starts_with("Resumed:"))
+        .expect("the resume's words")
+}
+
+fn state(context: &Context, project: i64) -> String {
+    context.task(project, 1).task.state
+}
+
+/// The chief resumes T-1 after the window answered the tell and went on, and the window's
+/// turn goes on: two passes, the second after the record grew.
+fn resumed_while_the_turn_goes_on(context: &Context) -> (i64, MessageView, MessageView) {
+    let (project, told) = told_at_work(context);
+    answers_and_goes_on(context, &told);
+    context.pass().unwrap();
+    assert_eq!(state(context, project), "paused");
+    context.resume_task(project, 1, "Go on, or say you finished");
+    let words = resume_words(context, project);
+    (project, told, words)
+}
+
+#[test]
+fn a_task_resumed_while_its_window_goes_on_with_the_turn_on_the_tell_shows_working_and_its_words_still_go_in_at_rest(
+) {
+    let context = Context::new();
+    let (project, told, words) = resumed_while_the_turn_goes_on(&context);
+    assert_eq!(
+        state(&context, project),
+        "queued",
+        "at the resume: nothing of the window's since"
+    );
+
+    // The window goes on: the record grows after the resume.
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(
+        state(&context, project),
+        "working",
+        "the window is at work on it"
+    );
+    assert_eq!(
+        context.message(words.id).state,
+        "queued",
+        "the words wait for the window's rest, as ever"
+    );
+    assert!(
+        !given(&context, "zeus")
+            .iter()
+            .any(|text| text.contains("Go on, or say you finished")),
+        "nothing is typed into a turn at work"
+    );
+
+    // The turn on the tell ends with its answer: it is no result, the task having moved on.
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    assert_eq!(
+        kept_notes(&context, project),
+        [moved_on_words("zeus", &told)],
+        "told all the same, in the words of a task that has moved on"
+    );
+    assert_ne!(
+        state(&context, project),
+        "done",
+        "that turn is not the result"
+    );
+    assert_eq!(results(&context, project), Vec::<String>::new());
+
+    // The words go in once the window rests; the follow-up they get is the result.
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(words.id).state, "delivered");
+    context.adapter.answer("zeus", "ALREADY-FINISHED");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(state(&context, project), "done");
+    assert_eq!(results(&context, project), ["ALREADY-FINISHED"]);
+}
+
+#[test]
+fn a_task_resumed_while_its_window_rests_stays_queued_until_its_words_go_in() {
+    let context = Context::new();
+    let (project, _told) = told_at_work(&context);
+    // The turn on the tell is over: the window rests with its answer.
+    context.adapter.answer("zeus", "Answered, and stopped");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.resume_task(project, 1, "Go on");
+    let words = resume_words(&context, project);
+    assert_eq!(state(&context, project), "queued");
+
+    // At rest nothing writes: the task reads queued while its words wait for the window to
+    // rest long enough, and working from their paste.
+    for _ in 0..6 {
+        context.pass().unwrap();
+        if context.message(words.id).state == "delivered" {
+            break;
+        }
+        assert_eq!(
+            state(&context, project),
+            "queued",
+            "no work of the window's is shown while its words wait"
+        );
+    }
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn a_resumed_task_whose_window_reads_at_work_and_writes_nothing_stays_queued() {
+    // A turn that reads in flight with nothing written after the resume is no work shown:
+    // a harness cut by a quit reads so for ever (T-1130), and the task is not the window's.
+    let context = Context::new();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.advance(5_000);
+    }
+    assert_eq!(state(&context, project), "queued");
+    assert_eq!(context.message(words.id).state, "queued");
+}
