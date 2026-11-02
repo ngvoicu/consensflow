@@ -46,6 +46,9 @@
 //! answer (its TUI and its agent disagree about the folder, 2026-10-27, Devin 3000.11.92 and
 //! 3000.11.205): `live paste devin` failed on it three times and passed on the same directory
 //! spelled `/private/var/…`. A harness that wrote in `HOME` anyway is found by the hashes.
+//! The launchers are among them: a harness that installs itself writes the person's `~/.local/bin`,
+//! so every window is told to update nothing and the launcher of every harness the rig seats is hashed
+//! around the run ([`super::launcher`], T-1082).
 //!
 //! **A case that is its own home.** A case that gives its windows a `HOME` of its own, with
 //! the harness's folder in it ([`Installed::on_own_home`]), is none of this kit's: it reads

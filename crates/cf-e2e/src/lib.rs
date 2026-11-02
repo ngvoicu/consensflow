@@ -83,7 +83,9 @@
 //! words the chief gets before any resume, and finishes the paused task with,
 //! `live_pi_parity` a Pi member's window holding all that bare Pi holds in the same
 //! folder, and `live_task_working` a real worker's task working before its window runs
-//! its command). Run them with
+//! its command, and `live_launcher` the switches that keep Claude Code's updater off the
+//! owner's `~/.local/bin/claude`, shown honoured by the machine's own, and a real window that leaves
+//! the launcher as it was). Run them with
 //! `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with

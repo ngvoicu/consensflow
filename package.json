@@ -83,6 +83,7 @@
     "test:kit-paced": "CF_KIT_PACED=1 cargo test --offline -p cf-engine --test dispatcher",
     "live:stopped": "cargo xtask live stopped",
     "live:muse-window": "cargo xtask live muse-window",
+    "live:launcher": "cargo xtask live launcher",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

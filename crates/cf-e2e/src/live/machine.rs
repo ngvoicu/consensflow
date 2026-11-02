@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::isolation::Isolation;
+use super::launcher::Guard;
 use super::login::Login;
 use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config, HarnessHome};
@@ -226,9 +227,16 @@ impl Installed {
         } else {
             "--version"
         };
+        // The probe runs the owner's own program with the owner's environment, and a launcher
+        // that updates itself when it is run (Muse's, hourly) would do it here: it is told not to.
         let ran = Run::new(&self.command)
             .arg(word)
             .inheriting_env()
+            .vars(
+                super::launcher::updates_off_of(self.harness)
+                    .iter()
+                    .copied(),
+            )
             .run()
             .ok()
             .filter(|ran| ran.code == Some(0));
@@ -500,6 +508,13 @@ fn rig_keeping_claude_in(
         if let Some(isolation) = install.isolation() {
             config = config.isolated(Arc::clone(isolation) as Arc<dyn HarnessHome>);
         }
+        // The owner's launcher of every harness the rig seats is looked at when the rig starts
+        // and when it ends, whatever home the harness runs on (T-1082).
+        config = config.isolated(Arc::new(Guard::new(
+            install.harness,
+            &install.command,
+            &install.home,
+        )));
         if install.harness == Harness::Muse {
             config = config.muse_live(muse_of(install), &install.home);
         }

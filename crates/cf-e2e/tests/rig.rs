@@ -61,7 +61,9 @@
 //! checkout's daemon, which the smoke itself proves only in a built app. So is
 //! `meeting`: the human's meeting with the chief, started through the page's
 //! operation, which holds what the board has for the chief until its Stop or the
-//! app's quit.)
+//! app's quit.) So is `owner_launchers`: a live run keeps the person's `HOME`, so what it does
+//! to the launchers of their harnesses (a native updater that re-points `~/.local/bin/claude`,
+//! T-1082) fails the rig that ends it, and the windows are told to update no harness.
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -126,6 +128,9 @@ mod live_support;
 mod meeting;
 #[path = "rig/muse_window.rs"]
 mod muse_window;
+#[path = "rig/owner_launchers.rs"]
+#[cfg(unix)]
+mod owner_launchers;
 #[path = "rig/pacing.rs"]
 mod pacing;
 #[path = "rig/pending_agents.rs"]

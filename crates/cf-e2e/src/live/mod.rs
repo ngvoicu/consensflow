@@ -92,6 +92,7 @@ pub mod codex;
 pub mod guard;
 pub mod human;
 pub mod isolation;
+pub mod launcher;
 pub mod login;
 pub mod machine;
 pub mod mcp_server;
