@@ -339,8 +339,8 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
         done.is_some(),
         format!("in {} s at most", TURN.as_secs()),
     )];
-    // Whether the harness itself refused to compact (Pi: "Nothing to compact (session too
-    // small)"): its record then holds no compaction for its reader to read.
+    // Whether the harness itself refused to compact ([`refused_to_compact`]): its record then
+    // holds no compaction for its reader to read.
     let mut refused = false;
     if done.is_some() && members.chief_is_idle(log)? {
         says(&members, "/compact")?;
@@ -356,7 +356,7 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
             let pane = format!("p{}-chief", members.project_id());
             let screen = members.tail(&pane);
             log.say(format!("no compaction; the chief's screen: {screen}"));
-            refused = screen.to_lowercase().contains("nothing to compact");
+            refused = refused_to_compact(&screen);
         }
         let _ = members.chief_is_idle(log)?;
     }
@@ -368,6 +368,16 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
     keep_records(&members, harness, log);
     members.close()?;
     Ok(checks)
+}
+
+/// Whether a window's screen says its harness refused to compact, in the words each wrote
+/// live (T-728): Pi 1.4.0's "Nothing to compact (session too small)", Muse Code 1.4.14's
+/// "no compactable run is available".
+fn refused_to_compact(screen: &str) -> bool {
+    let screen = screen.to_lowercase();
+    ["nothing to compact", "no compactable run"]
+        .iter()
+        .any(|words| screen.contains(words))
 }
 
 /// The harnesses named, every one where none is.
@@ -449,6 +459,13 @@ mod tests {
             held(&judge(Harness::Devin, &plain, false)),
             [true, true, false, true, false, true]
         );
+        assert!(refused_to_compact(
+            "DONE ⏎ Error: Compaction failed: Nothing to compact (session too small)"
+        ));
+        assert!(refused_to_compact(
+            "MM8 ⏎ no compactable run is available ⏎ ❯"
+        ));
+        assert!(!refused_to_compact("Compacted. ⏎ ❯"));
         // A compaction the harness refused is no reader's to show.
         assert!(held(&judge(Harness::Pi, &plain, true))[4]);
         // Thinking taken for the agent's words is never held.
