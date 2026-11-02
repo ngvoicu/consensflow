@@ -143,6 +143,25 @@ fn message_with(members: &Members, number: i64, word: &str) -> Result<Option<(i6
         .and_then(|message| Some((message["id"].as_i64()?, live::text(&message["body"])))))
 }
 
+/// Whether the record shows the command ran: an item before the last, not a user's and not a
+/// whole context (a few hundred characters at most), that holds the command (Claude Code's and Pi's
+/// call, Codex's) or its output on a token of its own (Devin's result: `Output from command in
+/// shell …: 42 Exit code: 0`). The last item is the reply, which holds the output as the task asked.
+fn ran_the_command(items: &[(String, String)]) -> bool {
+    let Some((_, before)) = items.split_last() else {
+        return false;
+    };
+    before
+        .iter()
+        .filter(|(role, text)| role != "user" && text.len() < 2_000)
+        .any(|(_, text)| {
+            text.contains("40+2")
+                || text
+                    .split(|character: char| !character.is_alphanumeric())
+                    .any(|token| token == OUTPUT)
+        })
+}
+
 /// Muse's allowance now, on a copy of its login in a folder of the run's own: `window 4%, week
 /// 51%`, or why it cannot be read. The owner's config is read for the copy and never run.
 fn muse_allowance() -> String {
@@ -256,6 +275,12 @@ fn judge(account: &mut Account, members: &Members, number: i64, seen: &Seen, wor
             .collect::<Vec<_>>()
             .join(" ")
     ));
+    for (role, text) in items
+        .iter()
+        .filter(|(role, text)| role != "user" && text.len() < 400)
+    {
+        account.say(format!("  {role}: {}", live::cut(text, 90)));
+    }
     let users: Vec<&str> = items
         .iter()
         .filter(|(role, _)| role == "user")
@@ -294,13 +319,9 @@ fn judge(account: &mut Account, members: &Members, number: i64, seen: &Seen, wor
             .first()
             .map_or("none".to_owned(), |text| live::cut(text, 60)),
     );
-    let ran = items
-        .iter()
-        .filter(|(role, _)| role != "user")
-        .any(|(_, text)| text.contains("40+2"));
     account.check(
         "the record holds the command the seat ran",
-        ran,
+        ran_the_command(&items),
         format!("{} items after the brief", items.len().saturating_sub(1)),
     );
     Ok(())
@@ -450,5 +471,40 @@ mod tests {
             "<pasted_content id=\"1\">\n[ConsensFlow m-9 x] body\n</pasted_content id=\"1\">";
         assert_eq!(unwrapped(wrapped), "[ConsensFlow m-9 x] body");
         assert_eq!(unwrapped("  plain "), "plain");
+    }
+
+    fn items(shape: &[(&str, &str)]) -> Vec<(String, String)> {
+        shape
+            .iter()
+            .map(|(role, text)| ((*role).to_owned(), (*text).to_owned()))
+            .collect()
+    }
+
+    /// Devin's record shows the command by its output and its exit; the reply is the last item.
+    #[test]
+    fn a_record_shows_the_command_ran_by_the_command_or_by_its_output_before_the_reply() {
+        let devin = items(&[
+            ("user", "[ConsensFlow m-1 x] Run node -p 40+2"),
+            ("custom", "You are powered by SWE-2 Medium."),
+            (
+                "tool",
+                "Output from command in shell 3d3ed1: 42 Exit code: 0",
+            ),
+            ("assistant", "SEATDEVIN1 42"),
+        ]);
+        assert!(ran_the_command(&devin));
+        let called = items(&[
+            ("user", "brief"),
+            ("tool_use", "Bash: node -p 40+2"),
+            ("assistant", "SEATCLAUDE1 42"),
+        ]);
+        assert!(ran_the_command(&called));
+        // A reply alone, or a user's message that holds the command, shows nothing ran.
+        let none = items(&[("user", "Run node -p 40+2"), ("assistant", "SEATX 42")]);
+        assert!(!ran_the_command(&none));
+        assert!(!ran_the_command(&[]));
+        // A number in a token of another is no output.
+        let other = items(&[("tool", "took 142 ms"), ("assistant", "SEATX 42")]);
+        assert!(!ran_the_command(&other));
     }
 }
