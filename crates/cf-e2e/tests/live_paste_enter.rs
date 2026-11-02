@@ -349,6 +349,115 @@ fn a_prompt_the_human_pastes_and_sends_with_enter_goes_on_that_enter() -> Result
     report::conclude(&log, "how each paste went", &checks)
 }
 
+/// The gaps a probe writes Enter after its paste by, for a line and for the long paste: around
+/// where T-1084's run on Muse 1.4.14 on zeewin2 lost it (at once, at every length; a second
+/// later, the long paste) and took it (a second later, a line).
+const LINE_GAPS_MS: [u64; 4] = [30, 100, 250, 600];
+const LONG_GAPS_MS: [u64; 3] = [1_500, 3_000, 6_000];
+
+/// How long after a paste a probe writes down what the window drew, beside its Enter.
+const DRAWN_FOR: Duration = Duration::from_millis(8_000);
+
+/// A probe of the gap a harness loses an Enter in (T-954, as T-1048 and T-1086 measured Codex's
+/// and Devin's): for a line and the long paste, at each gap, the paste written, its Enter
+/// written that long after it, and whether it went, with every change the window drew and
+/// when. A paste that did not go is cleared from the box with one Ctrl-C (Muse's, Codex's and
+/// Devin's way to clear a draft), spending no turn. It judges nothing: what it says is what a
+/// harness's `silent_paste` declaration is measured by.
+#[test]
+#[ignore = "a probe: spends a few short turns of each harness named; cargo xtask live paste-enter muse -- probe_the_gap"]
+fn probe_the_gap_a_window_loses() -> Result {
+    let log = Log::begin("probe paste-enter")?;
+    let harnesses = named(
+        &live::list("harness"),
+        &Harness::ALL,
+        Harness::name,
+        "harness",
+        &DEFAULT,
+    )?;
+    for harness in harnesses {
+        let log = log.scoped(harness.name());
+        let members = Members::open(&plan(harness), Path::new(FAKE_AGENT), &log)?;
+        let mut number = 0;
+        for (length, at, gaps) in [
+            ("a line", 0, &LINE_GAPS_MS[..]),
+            ("a long paste", 2, &LONG_GAPS_MS[..]),
+        ] {
+            for &gap in gaps {
+                let word = format!("PROBE{number}");
+                number += 1;
+                let text = texts(&word, LONG).swap_remove(at).1;
+                let said = gap_case(&members, &text, &word, Duration::from_millis(gap), &log)?;
+                log.say(format!(
+                    "PROBE {length} ({} characters), gap {gap} ms: {said}",
+                    text.chars().count()
+                ));
+            }
+        }
+        members.close()?;
+    }
+    Ok(())
+}
+
+/// One probe: `text` pasted once the chief is idle, Enter written `gap` after it, and what
+/// came of it, with when the window drew each change in [`DRAWN_FOR`].
+fn gap_case(members: &Members, text: &str, word: &str, gap: Duration, log: &Log) -> Result<String> {
+    find(
+        log,
+        "the chief to be idle",
+        IDLE,
+        Duration::from_secs(1),
+        || Ok((members.lane(members.chief())?["activity"]["state"] == "idle").then_some(())),
+    )?;
+    let pane = chief_pane(members)?;
+    let mark = Trace::read(members.rig()).len();
+    let mut last = drawn(members, &pane)?;
+    let mut changes: Vec<String> = Vec::new();
+    let mut look = |last: &mut Vec<String>, since: Instant| -> Result {
+        let now = drawn(members, &pane)?;
+        if now != *last {
+            changes.push(format!(
+                "at {} ms: {}",
+                since.elapsed().as_millis(),
+                shown(&now)
+            ));
+            *last = now;
+        }
+        Ok(())
+    };
+    let pasted = Instant::now();
+    members
+        .rig()
+        .types(&pane, &writes(Shape::ThenEnter, text)[0])?;
+    while pasted.elapsed() < gap {
+        look(&mut last, pasted)?;
+    }
+    let entered = pasted.elapsed().as_millis();
+    members.rig().types(&pane, ENTER)?;
+    let mut went = None;
+    while pasted.elapsed() < gap + DRAWN_FOR {
+        look(&mut last, pasted)?;
+        if went.is_none()
+            && (Trace::read(members.rig()).worked_after(members.chief(), mark)
+                || answered(&last, word))
+        {
+            went = Some(pasted.elapsed().as_millis());
+        }
+        sleep(Duration::from_millis(20));
+    }
+    if went.is_none() {
+        members.rig().types(&pane, b"\x03")?;
+        sleep(Duration::from_secs(1));
+    }
+    let came = went.map_or("did not go: the box was cleared".to_owned(), |at| {
+        format!("went, seen at {at} ms")
+    });
+    Ok(format!(
+        "Enter written {entered} ms after the paste; {came}; drawn: {}",
+        changes.join(" || ")
+    ))
+}
+
 /// A case's line: how it went, when its Enter was written, and what the window showed when the
 /// human first pressed Enter again, where they did.
 fn outcome(went: Went, screen: &str, entered: Duration) -> String {
