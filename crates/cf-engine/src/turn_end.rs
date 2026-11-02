@@ -1116,9 +1116,9 @@ pub(crate) fn words_of(final_run: &[&Item]) -> String {
 
 /// The words a member wrote in reply to the question put to its window, before its first tool
 /// call (`Answers::reply`), in the items it was written in: each trimmed, a blank line between.
-/// Unlike [`words_of`] it keeps what a harness marks as progress (Codex marks all the text it
-/// writes before a tool call so), since the question is what that text answers. None where
-/// there are none (T-1151).
+/// Unlike [`words_of`] it keeps what a harness marks as progress (Codex marks the text it
+/// writes beside a tool call so, where its phase says `commentary`), since the question is
+/// what that text answers. None where there are none (T-1151).
 pub(crate) fn reply_of(reply: &[&Item]) -> Option<String> {
     let words: Vec<&str> = reply
         .iter()

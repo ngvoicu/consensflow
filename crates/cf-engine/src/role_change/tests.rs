@@ -478,7 +478,7 @@ fn what_a_harness_wrote_itself_is_no_reply_but_its_progress_marks_are_kept() {
         commentary: true,
         ..said_by(Role::Assistant, "No response requested.", true)
     };
-    // Codex marks all it writes before a tool call as progress.
+    // Codex marks the text it writes beside a tool call as progress, where its phase says so.
     let progress = Item {
         commentary: true,
         ..said_by(Role::Assistant, "Stopped", false)

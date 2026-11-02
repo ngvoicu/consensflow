@@ -1205,8 +1205,9 @@ fn a_turn_of_one_run_has_no_reply_apart_from_its_last_words() {
 
 #[test]
 fn a_reply_a_harness_marks_as_progress_is_still_the_reply_to_the_tell() {
-    // Codex marks the text before a tool call `commentary` (its phase), whatever it says; the
-    // chief asked a question, and that text is the first words of its answer.
+    // Codex marks the text it writes beside a tool call `commentary` where its phase says so,
+    // whatever it says; the chief asked a question, and that text is the first words of its
+    // answer.
     let context = Context::new();
     let (project, told) = told_at_work(&context);
     let mut said = context.adapter.item(Role::Assistant, WRITTEN);
