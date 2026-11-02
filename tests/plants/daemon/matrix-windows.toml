@@ -1,0 +1,209 @@
+# Every harness can sit in a seat of one rig on zeewin2, isolated (T-1136, the live matrix's prerequisites).
+# Four rules, each held by tests a Mac runs: a test machine whose Pi has no OpenRouter login runs Pi on
+# the model the kit names for that machine, says which, and chooses nothing else (`live/agents.rs`); no two
+# harness homes of one rig set one variable to two values (`rig/homes.rs`), the five harnesses' homes
+# together among them (`live/isolation/windows.rs`); the shell of every harness on Windows is named with
+# where it is known from (`live/members/descent/tests.rs`); and a seat's reply is the word and the command's
+# output (`tests/live_seat.rs`). One plant takes one rule out; a test of it fails. Every name holds `matrix`.
+
+[run]
+agents-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::agents::"]
+homes-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::homes::"]
+isolation-windows-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::windows::"]
+descent-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::"]
+seat-offline = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_seat"]
+
+# ---------------------------------------------------------------------------- Pi on a test machine
+
+[[plant]]
+name = "matrix: a Pi model the run named is replaced on a test machine"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        if self.named.contains(&Harness::Pi) || providers.iter().any(|name| name == cheap_provider)'''
+replace = '''        if providers.iter().any(|name| name == cheap_provider)'''
+
+[[plant]]
+name = "matrix: an OpenRouter login on a test machine is passed over for the machine's model"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = ''' || providers.iter().any(|name| name == cheap_provider)'''
+replace = ''''''
+
+[[plant]]
+name = "matrix: a machine the kit has no entry for gets a test machine's Pi model"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''            *on == machine && providers.iter().any(|name| name == provider)'''
+replace = '''            providers.iter().any(|name| name == provider)'''
+
+[[plant]]
+name = "matrix: any login on a test machine gets its Pi model, whatever the login is"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''            *on == machine && providers.iter().any(|name| name == provider)'''
+replace = '''            *on == machine'''
+
+[[plant]]
+name = "matrix: the owner's Mac gets a test machine's Pi model"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        let (Some(machine), Some(providers)) = (machine, pi_providers) else {
+            return self;
+        };'''
+replace = '''        let machine = machine.unwrap_or("zeewin2");
+        let Some(providers) = pi_providers else {
+            return self;
+        };'''
+
+[[plant]]
+name = "matrix: the run does not say which model Pi runs on, or why"
+meant = "a_test_machine_whose_pi_has_no_openrouter_login_runs_pi_on_the_model_the_kit_names_for_it_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        self.notes.push(format!('''
+replace = '''        let _ = (format!('''
+
+[[plant]]
+name = "matrix: the note on Pi's model leaves out that it spends no usage credits"
+meant = "a_test_machine_whose_pi_has_no_openrouter_login_runs_pi_on_the_model_the_kit_names_for_it_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''(a ChatGPT subscription's allowance, no usage credits)'''
+replace = '''(a ChatGPT subscription's allowance)'''
+
+# ---------------------------------------------------------------------------- no clobbering
+
+[[plant]]
+name = "matrix: two homes that set one variable to two values are no refusal"
+meant = "two_homes_that_set_one_variable_to_two_values_are_a_refusal_naming_both"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''                .find(|(held, _, was)| *held == key(name) && was != value)'''
+replace = '''                .find(|(held, _, was)| *held == key(name) && was != value && false)'''
+
+[[plant]]
+name = "matrix: a value two homes share is a clash"
+meant = "the_same_value_twice_and_different_variables_are_no_clash"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''                .find(|(held, _, was)| *held == key(name) && was != value)'''
+replace = '''                .find(|(held, _, _)| *held == key(name))'''
+
+[[plant]]
+name = "matrix: a rig starts though two of its homes clash"
+meant = "a_rig_whose_homes_clash_does_not_start_and_one_whose_homes_do_not_does"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''        if let Some(said) = clashing(&each, cfg!(windows)) {'''
+replace = '''        if let Some(said) = clashing(&each, cfg!(windows)).filter(|_| false) {'''
+
+[[plant]]
+name = "matrix: a Mac reads a variable's name in either case"
+meant = "windows_reads_a_variable_in_either_case_and_a_mac_does_not"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''        if case_insensitive {
+            name.to_ascii_uppercase()'''
+replace = '''        if true {
+            name.to_ascii_uppercase()'''
+
+[[plant]]
+name = "matrix: Windows reads a variable's name in one case alone"
+meant = "windows_reads_a_variable_in_either_case_and_a_mac_does_not"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''        if case_insensitive {
+            name.to_ascii_uppercase()'''
+replace = '''        if false {
+            name.to_ascii_uppercase()'''
+
+[[plant]]
+name = "matrix: Pi's home also moves the whole rig's USERPROFILE"
+meant = "the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice"
+runs = ["isolation-windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            vars: vec![("PI_CODING_AGENT_DIR", "pi/agent".into())],'''
+replace = '''            vars: vec![
+                ("PI_CODING_AGENT_DIR", "pi/agent".into()),
+                ("USERPROFILE", "pi".into()),
+            ],'''
+
+[[plant]]
+name = "matrix: Codex's home also moves the whole rig's APPDATA"
+meant = "the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice"
+runs = ["isolation-windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            vars: vec![("CODEX_HOME", "codex".into())],'''
+replace = '''            vars: vec![
+                ("CODEX_HOME", "codex".into()),
+                ("APPDATA", "codex".into()),
+            ],'''
+
+# ---------------------------------------------------------------------------- shells, seats
+
+[[plant]]
+name = "matrix: the guard knows no shell for Pi on Windows"
+meant = "every_harness_has_a_shell_on_windows_the_guard_knows_and_says_where_from"
+runs = ["descent-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/tests.rs"
+find = '''    (
+        "pi",
+        "Git Bash",'''
+replace = '''    (
+        "pi-unknown",
+        "Git Bash",'''
+
+[[plant]]
+name = "matrix: a seat that replied the word alone did the task"
+meant = "a_reply_that_holds_the_word_and_the_output_is_a_seat_that_did_the_task"
+runs = ["seat-offline"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_seat.rs"
+find = '''    body.contains(word) && body.contains(OUTPUT)'''
+replace = '''    body.contains(word)'''
+
+[[plant]]
+name = "matrix: the seat's command has a quote in it, which a shell reads its own way"
+meant = "the_command_is_one_every_shell_of_the_five_runs_as_written"
+runs = ["seat-offline"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_seat.rs"
+find = '''const COMMAND: &str = "node -p 40+2";'''
+replace = '''const COMMAND: &str = "node -p '40+2'";'''

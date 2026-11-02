@@ -177,7 +177,11 @@ pub(crate) fn clashing(
 
 #[cfg(test)]
 mod tests {
-    use super::clashing;
+    use std::sync::Arc;
+
+    use super::{clashing, HarnessHome, Homes};
+    use crate::rig::Config;
+    use crate::Result;
 
     fn home(from: &str, vars: &[(&str, &str)]) -> (String, Vec<(String, String)>) {
         (
@@ -238,5 +242,49 @@ mod tests {
         ];
         assert!(clashing(&homes, true).is_some());
         assert_eq!(clashing(&homes, false), None);
+    }
+
+    /// A home that sets what it is told to.
+    #[derive(Debug)]
+    struct Told(&'static str, Vec<(&'static str, &'static str)>);
+
+    impl HarnessHome for Told {
+        fn vars(&self) -> Result<Vec<(String, String)>> {
+            Ok(self
+                .1
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect())
+        }
+
+        fn described(&self) -> String {
+            self.0.to_owned()
+        }
+
+        fn finish(&self) -> Result {
+            Ok(())
+        }
+    }
+
+    /// The rig asks its homes for their variables when it starts, and a pair that clash is
+    /// the reason it does not: before a window opens, nothing spent.
+    #[test]
+    fn a_rig_whose_homes_clash_does_not_start_and_one_whose_homes_do_not_does() {
+        let clashing = Config::new("fake-agent")
+            .isolated(Arc::new(Told("Devin's", vec![("USERPROFILE", "/a")])))
+            .isolated(Arc::new(Told("Pi's", vec![("USERPROFILE", "/b")])));
+        let refused = Homes::start(&clashing)
+            .err()
+            .expect("a refusal")
+            .to_string();
+        assert!(
+            refused.contains("Devin's") && refused.contains("Pi's"),
+            "{refused}"
+        );
+        let apart = Config::new("fake-agent")
+            .isolated(Arc::new(Told("Devin's", vec![("USERPROFILE", "/a")])))
+            .isolated(Arc::new(Told("Pi's", vec![("PI_CODING_AGENT_DIR", "/b")])));
+        let (_, vars) = Homes::start(&apart).ok().expect("a start");
+        assert_eq!(vars.len(), 2);
     }
 }
