@@ -12,10 +12,15 @@
 use serde_json::{json, Value};
 
 use crate::live::agents::{self, STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL};
-use crate::live::members::{Members, Plan, BRIEF};
+use crate::live::members::{Members, Plan};
 use crate::live::report::Check;
 use crate::live::Harness;
 use crate::{Error, Result};
+
+/// What the project's folder tells every window (`AGENTS.md`, `CLAUDE.md`): the kit's own brief
+/// has a window run no tool that a message does not name, and a worker asked to change a file
+/// needs its tools to do it.
+pub const BRIEF: &str = "This folder is an automated ConsensFlow test. Do what each message asks, and nothing more: use your tools and run commands where the work it asks for needs them, change no file it does not ask you to change, and keep your reply short.\n";
 
 /// The tier every member of a board is at: one member to a pool, and none to fall back to.
 pub const TIER: &str = "standard";
@@ -223,8 +228,7 @@ impl Seating {
         self.seat(Role::Chief).harness.is_none()
     }
 
-    /// The project the board opens: the folder `folder`, told the kit's brief (do what each
-    /// message asks; a message that names a tool or a command is asking for it), the files
+    /// The project the board opens: the folder `folder`, told [`BRIEF`], the files
     /// `files`, and the roster of the five seats, the chief first.
     pub fn plan(&self, folder: &str, files: &[(&str, &str)]) -> Plan {
         let mut plan = Plan::new(folder, self.seat(Role::Chief).row()).told(BRIEF);
@@ -421,5 +425,8 @@ mod tests {
         );
         assert_eq!(plan.files, [("greet.cjs".to_owned(), "a".to_owned())]);
         assert_eq!(plan.brief, BRIEF);
+        assert!(
+            BRIEF.contains("use your tools and run commands where the work it asks for needs them")
+        );
     }
 }
