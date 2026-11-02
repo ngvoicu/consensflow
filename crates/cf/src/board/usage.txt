@@ -50,8 +50,8 @@ cf inside a ConsensFlow window: the board's commands.
 
 Any "…" can be - to read the text from standard input, as written:
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)
-A long one is surest in a file, which no shell cuts (task add, reopen, resume, edit and tell):
+A long one is surest in a file, which no shell cuts (every command that takes words):
   cf task add --tier standard --file brief.md
-Those five say how many characters went and how the text ends: see that it is all there.
+task add, reopen, resume, edit and tell say how many characters went and how the text ends: see that it is all there.
 
 Add --json for machine output.

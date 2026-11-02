@@ -11,7 +11,7 @@ use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks, w
 use super::usage::{task_usage, ADD_USAGE};
 use super::words::{quoted, require_text, split, task_number, task_numbers, Shape};
 use super::{brief, transcript};
-use super::{help_of, text_of, Failure, Said};
+use super::{help_of, Failure, Said};
 
 /// The flags of `cf task add`.
 const ADD: Shape = Shape {
@@ -95,12 +95,12 @@ pub fn command(
     }
 }
 
-/// The flags of the task command `verb`, after its task.
+/// The flags of the task command `verb`, after its task. Every command that
+/// moves a task takes words, so every one takes a file of them too.
 fn shape_of(verb: &str) -> Shape {
     match verb {
         "get" => GET,
-        "reopen" | "resume" | "edit" => BRIEFED,
-        _ => Shape::TEXT,
+        _ => BRIEFED,
     }
 }
 
@@ -408,11 +408,7 @@ fn moved(
 ) -> Result<Said, Failure> {
     let briefed = matches!(action, "reopen" | "resume" | "edit");
     let words = split(rest, shape_of(action));
-    let text = if briefed {
-        brief::brief_of(&words, given, input)?
-    } else {
-        text_of(words.text, input)?
-    };
+    let text = brief::brief_of(&words, given, input)?;
     if matches!(action, "done" | "reopen" | "edit" | "resume") && js::trim(&text).is_empty() {
         let what = match action {
             "done" => "your result",

@@ -22,7 +22,7 @@ use std::path::Path;
 
 use cf_daemon::api::body::MAX_JSON_BYTES;
 
-use super::words::Split;
+use super::words::{quoted, Split};
 use super::{text_of, Failure};
 
 /// The flag that names a file to read the words from.
@@ -53,6 +53,14 @@ pub fn brief_of(
     given: &[OsString],
     input: &mut dyn Read,
 ) -> Result<String, Failure> {
+    // A flag the command does not know, in front of the words, is refused: it
+    // is never kept as the words (`Split::stray`). Help is asked first.
+    if let Some(flag) = words.stray_flag() {
+        return Err(Failure::Usage(format!(
+            "unknown flag {}: write it after -- to keep it as words",
+            quoted(flag)
+        )));
+    }
     if !words.given(FILE) {
         return text_of(words.text.clone(), input);
     }

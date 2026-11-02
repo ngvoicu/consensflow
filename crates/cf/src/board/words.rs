@@ -50,6 +50,14 @@ pub struct Split {
     /// Whether a `--` ended the flags: the operands after it are text, whatever
     /// they say.
     literal: bool,
+    /// The first word that looks like a flag but is none of the command's,
+    /// stood where a flag may — in front of the text, where it would be kept
+    /// as the text's own words without a word of complaint (the field report
+    /// of 2026-11-02: `--file` on `task done`, which had no `--file`, stored
+    /// as the result itself). None after the text's first word: a flag in the
+    /// text is words. The word that asks for help is no stray: it answers
+    /// alone, and is words among others.
+    stray: Option<String>,
     /// The operands after the leading ones, joined by spaces: the command's text.
     pub text: String,
 }
@@ -91,6 +99,13 @@ impl Split {
     /// Whether the valued `flag` was given, with a word after it or not.
     pub fn given(&self, flag: &str) -> bool {
         self.values.iter().any(|(name, _)| *name == flag)
+    }
+
+    /// The flag-like word in front of the text, for the command to refuse:
+    /// it is none of this command's flags. None when the text's words come
+    /// first, or a `--` made words of it.
+    pub fn stray_flag(&self) -> Option<&str> {
+        self.stray.as_deref()
     }
 
     /// Said wrong when `flag` was given more than once: a valued flag takes
@@ -140,6 +155,10 @@ impl Split {
 /// valued one taking the word after it, whatever that word is. A `--` before
 /// any text ends the flags: the words after it are text, flags and `--help`
 /// included, and the `--` is not. A `--` after text is text, as it always was.
+/// A word that looks like a flag but is none of the shape's is an operand, as
+/// a flag in the text is words — but the first one to stand in front of the
+/// text is kept in `stray` as well ([`Split::stray_flag`]), for the command
+/// to refuse rather than store.
 pub fn split(words: &[String], shape: Shape) -> Split {
     let mut split = Split {
         leading: shape.leading,
@@ -160,6 +179,13 @@ pub fn split(words: &[String], shape: Shape) -> Split {
                 .map(|(at, value)| (value.clone(), words.len() - at));
             split.values.push((flag, value));
         } else {
+            if split.stray.is_none()
+                && word.starts_with("--")
+                && !HELP.contains(&word.as_str())
+                && split.operands.len() <= shape.leading
+            {
+                split.stray = Some(word.clone());
+            }
             split.operands.push(word.clone());
         }
     }
@@ -329,6 +355,26 @@ mod tests {
             let split = split(&words(line), FLAGS);
             assert!(split.value("--tier").is_ok(), "{line:?}");
         }
+    }
+
+    #[test]
+    fn a_flag_the_shape_has_not_is_stray_in_front_of_the_text_and_words_inside_it() {
+        let stray = |line: &[&str]| split(&words(line), FLAGS).stray_flag().map(str::to_owned);
+        assert_eq!(stray(&["--bogus", "hi"]), Some("--bogus".to_owned()));
+        assert_eq!(stray(&["--bogus"]), Some("--bogus".to_owned()));
+        assert_eq!(
+            stray(&["--bogus", "--tier", "light", "hi"]),
+            Some("--bogus".to_owned())
+        );
+        assert_eq!(stray(&["hi", "--bogus"]), None);
+        assert_eq!(stray(&["--tier", "light", "hi", "--bogus"]), None);
+        // A `--` makes words of it, and a known flag is no stray.
+        assert_eq!(stray(&["--", "--bogus"]), None);
+        assert_eq!(
+            stray(&["--tier", "--bogus"]),
+            None,
+            "--bogus is --tier's word"
+        );
     }
 
     #[test]
