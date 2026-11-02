@@ -1,9 +1,9 @@
 //! Which harnesses read a human's paste without drawing it until they have read it all
 //! (`Adapter::silent_paste`, which the pane host holds the human's keys after a paste by):
-//! Codex on Windows, measured on Codex 0.166.0 (T-1048), and Devin on Windows, measured on Devin
-//! 3000.11.234 (T-1086). Every other harness, and both elsewhere, declare nothing, and the
-//! human's keys go as they come: Claude Code and Pi on Windows were measured taking a paste and
-//! its Enter as they came.
+//! Codex on Windows, measured on Codex 0.166.0 (T-1048), and Devin on every platform, measured on
+//! Devin 3000.11.234 on Windows and the Mac (T-1086). Every other harness, and Codex elsewhere,
+//! declare nothing, and the human's keys go as they come: Claude Code and Pi on Windows were
+//! measured taking a paste and its Enter as they came.
 
 use cf_base::env::Env;
 use cf_harness::launch;
@@ -47,11 +47,16 @@ fn on_windows_codex_and_devin_read_a_paste_silently_at_their_measured_paces() {
 }
 
 #[test]
-fn elsewhere_no_harness_reads_a_paste_silently() {
+fn elsewhere_devin_alone_reads_a_paste_silently_at_the_same_pace() {
     let unix = Env::from_vars([("OS", "Darwin")]);
+    let windows = Env::from_vars([("OS", "Windows_NT")]);
     for harness in Harness::ALL {
-        let expected =
-            declares(harness, &Env::from_vars([("OS", "Windows_NT")])).filter(|_| cfg!(windows));
+        let expected = match harness {
+            // T-1086: on the Mac Devin also lost an Enter in the paste's own write.
+            Harness::Devin => declares(harness, &windows),
+            _ => declares(harness, &windows).filter(|_| cfg!(windows)),
+        };
         assert_eq!(declares(harness, &unix), expected, "{}", harness.as_str());
     }
+    assert!(declares(Harness::Devin, &unix).is_some());
 }
