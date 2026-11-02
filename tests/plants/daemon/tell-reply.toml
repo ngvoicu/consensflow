@@ -108,7 +108,7 @@ replace = "                && !thread.messages.iter().any(|message| false && {"
 
 [[plant]]
 name = "tell reply: a cf answer to another tell takes the reply from this one"
-meant = "a_reply_the_window_also_sent_with_cf_answer_is_not_told_again"
+meant = "a_cf_answer_to_an_earlier_tell_does_not_stand_for_the_reply_to_this_one"
 runs = ["tell-reply-engine"]
 
 [[plant.edit]]

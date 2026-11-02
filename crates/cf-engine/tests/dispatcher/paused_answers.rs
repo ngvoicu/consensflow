@@ -1278,6 +1278,45 @@ fn a_reply_the_window_also_sent_with_cf_answer_is_not_told_again() {
 }
 
 #[test]
+fn a_cf_answer_to_an_earlier_tell_does_not_stand_for_the_reply_to_this_one() {
+    // The first tell was answered with `cf answer`, in words that hold the line; the second
+    // tell's turn wrote the same line first and answered nothing: the chief has no message of
+    // its own for it, and the note must hold it.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    devin_turn(&context, &told, Some(&format!("Done: {WRITTEN}, and on")));
+    passes_after_the_turn(&context);
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+
+    let again = context.tell(project, "zeus", 1, "Once more");
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(again.id).state,
+        "delivering",
+        "pasted, not yet read"
+    );
+    record_of_zeus(
+        &context,
+        &[
+            (Role::Assistant, WRITTEN, false),
+            (Role::Tool, "(Bash completed)", true),
+        ],
+    );
+    context.adapter.answer("zeus", "SECOND-RESULT");
+    passes_after_the_turn(&context);
+
+    let kept = kept_notes(&context, project);
+    assert_eq!(kept.len(), 2, "{kept:?}");
+    assert!(
+        kept[1].contains(&format!(
+            "What it wrote first, before any tool:\n\n{WRITTEN}\n\nWhat it said last:\n\nSECOND-RESULT"
+        )),
+        "{}",
+        kept[1]
+    );
+}
+
+#[test]
 fn finish_takes_only_the_last_words_of_a_turn_that_wrote_a_reply_as_the_result() {
     let context = Context::new();
     let (project, told) = told_at_work(&context);

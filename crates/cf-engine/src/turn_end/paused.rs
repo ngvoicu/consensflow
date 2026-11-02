@@ -20,8 +20,18 @@
 //! as a working one is, `finish`), and a resume sends the window on. The ledger writes the
 //! note and keeps its words true as the task moves (`cf-ledger`'s `paused_answers`): a
 //! resume does not take it back unread, it says the task has moved on and that its result
-//! will be the next complete answer; Finish withdraws it. What the window wrote before its
-//! last tool call, or in an earlier turn, stays in the transcript, as everywhere else.
+//! will be the next complete answer; Finish withdraws it.
+//!
+//! **What the window wrote first** (T-1151): a window answers a question before it works, so
+//! the note also holds what it wrote after the tell and before its first tool call, where it
+//! went on to a tool and then to other last words (`Answers::reply`). `live tell devin` lost
+//! it: Devin wrote the line asked for as text, ran its command, and ended with the last
+//! line, and the note had that alone; Claude Code, Codex and Muse write the same record, and
+//! theirs reached the chief because the model also put the line into `cf answer`, or wrote
+//! it again. It is not told again when it is the last words, or when the window sent it with
+//! `cf answer` (the chief has it as a message of its own). Finish takes the last words only.
+//! What it wrote between its tools, or in an earlier turn, stays in the transcript, as
+//! everywhere else.
 //!
 //! A harness that marks the text of a turn it was stopped in complete would have a note with
 //! those cut words, after a tell as after any pause; Claude Code marks it incomplete, and
