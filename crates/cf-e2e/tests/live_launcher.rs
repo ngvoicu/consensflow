@@ -9,7 +9,8 @@
 //! installed the newest in the throwaway folder, and re-pointed the person's `claude` at it
 //! (the alpha.1 Mac release check, T-1068). The kit tells every window to update nothing
 //! (`DISABLE_AUTOUPDATER`, `DISABLE_UPDATES`), and a switch is worth what the binary does with
-//! it: 2.1.314 and 2.1.316 read both; 2.1.263 read neither (T-751). So this shows it, on the
+//! it: 2.1.263, 2.1.314 and 2.1.316 each read both, run in a pretend owner's home (a switch is not
+//! known to be ignored by any version, but a later one may be). So this shows it, on the
 //! Claude Code the machine has, in two stages:
 //!
 //! 1. **A pretend owner** (`--stage fake`): a home with a copy of the machine's binary as the

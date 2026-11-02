@@ -20,8 +20,9 @@
 //! - **Every window and every probe of the kit is told to update no harness** ([`updates_off`]):
 //!   Claude Code's two switches, `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, and Muse's launcher's
 //!   `MUSE_NO_AUTO_UPDATE`. The live case `live launcher` shows that a Claude Code honours them,
-//!   on the machine's own, in a pretend owner's home: they are honoured by 2.1.314 and 2.1.316 and
-//!   were not by 2.1.263 (T-751), so a switch that is only set proves nothing.
+//!   on the machine's own, in a pretend owner's home: they are honoured by 2.1.263, 2.1.314 and
+//!   2.1.316 (each run alone in one, T-1082), so a version that stops honouring them is found by
+//!   that case, and a switch that is only set proves nothing.
 //! - **The launchers are hashed around every run** ([`Guard`], a [`HarnessHome`] of every harness a
 //!   rig seats): where each one is, the link it reads, where it ends and the hash of the file it
 //!   ends at, the entries of the folder the harness installs its versions in, and Muse's version
