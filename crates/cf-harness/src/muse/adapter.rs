@@ -68,13 +68,16 @@ impl MuseAdapter {
 /// How Muse on Windows reads a paste (`Adapter::silent_paste`): never sooner than 0.5 ms a
 /// character (it read at 0.6 to 0.75), by what it drew from the paste's first key on, then 200 ms
 /// of nothing (it redraws every 50 to 65 ms while it reads, and took an Enter 157 ms after its last
-/// draw), at the most a second and a millisecond a character.
+/// draw), at the most a second and two milliseconds a character: in the live run it still drew
+/// the long paste at about 1 ms a character (its Enter went at 8.2 s, under a limit of 8.8 s at 1
+/// ms a character that only its fixed second kept ahead), and the Enter goes once it is quiet, so
+/// the limit only bounds a window that never goes quiet (T-1121's finding 5).
 const MUSE_ON_WINDOWS: SilentPaste = SilentPaste {
     pace_us_per_character: 500,
     drawn_after_ms: 0,
     quiet_ms: 200,
     most_ms: 1_000,
-    most_us_per_character: 1_000,
+    most_us_per_character: 2_000,
 };
 
 impl Adapter for MuseAdapter {

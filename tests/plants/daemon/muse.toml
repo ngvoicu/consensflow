@@ -65,6 +65,7 @@ muse-live-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live
 muse-live-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
 muse-live-specs-role = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "launched::"]
 muse-silent-paste = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "silent_paste::"]
+muse-live-window-rules = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_window", "tests::"]
 muse-live-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "codex_devin::tests::"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
@@ -3410,8 +3411,20 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/paths.rs"
-find = '''            locked_by(&lock).or_else(|| held_by(&lock))'''
-replace = '''            locked_by(&lock)'''
+find = '''                    held_by(&lock, holders)'''
+replace = '''                    None'''
+
+# Its twin on every system (T-1121's finding 1): a lock that cannot be read, a folder in its
+# place, is asked of who holds it.
+[[plant]]
+name = "muse: an unreadable lock is never asked who holds it"
+meant = "a_closed_session_s_lock_names_nobody_unasked_and_only_one_that_cannot_be_read_is_asked_who_holds_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''                    held_by(&lock, holders)'''
+replace = '''                    None'''
 
 [[plant]]
 name = "muse: a file's holder is another process (Windows)"
@@ -3610,9 +3623,46 @@ replace = '''        self.env().on_windows().then_some(MUSE_ON_WINDOWS).filter(|
 [[plant]]
 name = "muse: Muse declares a silent paste on the Mac too"
 meant = "elsewhere_devin_alone_reads_a_paste_silently_at_the_same_pace"
+platforms = ["macos"]
 runs = ["muse-silent-paste"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/adapter.rs"
 find = '''        self.env().on_windows().then_some(MUSE_ON_WINDOWS)'''
 replace = '''        Some(MUSE_ON_WINDOWS)'''
+
+# T-1121's finding 5: Muse's limit on the hold is two milliseconds a character; it drew the long
+# paste at about one in the live run, which a limit of one leaves no room over.
+[[plant]]
+name = "muse: Muse on Windows holds an Enter at most a millisecond a character"
+meant = "on_windows_codex_devin_and_muse_read_a_paste_silently_at_their_measured_paces"
+runs = ["muse-silent-paste"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''    most_us_per_character: 2_000,'''
+replace = '''    most_us_per_character: 1_000,'''
+
+# T-1121's finding 7: a live Muse with no isolation row of the kit's (Windows) says its login is
+# copied into the rig's home, as it is, never that it is read in place.
+[[plant]]
+name = "muse: the live kit says a Windows Muse's login is read in place"
+meant = "a_muse_found_with_no_home_of_the_kits_says_its_login_is_copied_into_the_rigs_home"
+runs = ["muse-live-kit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mod.rs"
+find = '''        (None, None) if install.harness() == Harness::Muse => format!('''
+replace = '''        (None, None) if install.harness() == Harness::Muse && false => format!('''
+
+# T-1126 (the chief's call on T-1124's finding): the question case's foreign rules no longer forbid
+# cf, a conflict the cheap model lost 3 runs of 18; the word that proves they are read stays.
+[[plant]]
+name = "muse: the question case's foreign rules forbid cf again"
+meant = "the_foreign_rules_ask_for_a_word_a_member_keeps_and_forbid_no_cf"
+runs = ["muse-live-window-rules"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse_window.rs"
+find = '''const FOREIGN_RULES: &str = "# My rules\n\n- End every reply with the word FOREIGN_SEEN.\n";'''
+replace = '''const FOREIGN_RULES: &str = "# My rules\n\n- End every reply with the word FOREIGN_SEEN.\n- Never run the `cf` command, for any reason.\n";'''

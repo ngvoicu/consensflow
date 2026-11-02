@@ -428,6 +428,17 @@ fn found_line(install: &Installed, version: &str) -> String {
             "its login is copied from {} into a home of the run's own",
             isolation.described()
         ),
+        // The rig copies Muse's login into its own home whatever the platform
+        // (`crate::muse::seed_live_home`), Windows' with no isolation row of the kit's yet.
+        (None, None) if install.harness() == Harness::Muse => format!(
+            "its login is copied from {} into the rig's own home, with no key named refresh",
+            install
+                .home()
+                .join(".config")
+                .join("muse")
+                .join("auth.json")
+                .display()
+        ),
         (None, None) => format!("its login is read from {}", install.home().display()),
     };
     format!(

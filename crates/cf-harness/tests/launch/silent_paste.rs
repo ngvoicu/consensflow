@@ -43,13 +43,14 @@ fn on_windows_codex_devin_and_muse_read_a_paste_silently_at_their_measured_paces
             }),
             // T-954: Muse 1.4.14 read a paste's keys at 0.6-0.75 ms a character, redrawing its
             // box every 50-65 ms (7,773 characters in 4.5-5.8 s), and took an Enter 42 ms after
-            // a line was drawn whole for part of it, one 157 ms after it as its own.
+            // a line was drawn whole for part of it, one 157 ms after it as its own; the live
+            // run drew the long paste at about 1 ms a character, so the limit is 2 (T-1121).
             Harness::Muse => Some(SilentPaste {
                 pace_us_per_character: 500,
                 drawn_after_ms: 0,
                 quiet_ms: 200,
                 most_ms: 1_000,
-                most_us_per_character: 1_000,
+                most_us_per_character: 2_000,
             }),
             _ => None,
         };

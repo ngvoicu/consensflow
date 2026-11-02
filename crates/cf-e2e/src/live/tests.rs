@@ -365,6 +365,22 @@ fn a_harness_found_is_said_with_its_program_its_version_and_where_its_login_is_r
     );
 }
 
+/// T-1121's finding 7: a Muse with no isolation row of the kit's (Windows, until T-1084's row
+/// lands) is not read in place: the rig copies its login into its own home, every key named
+/// `refresh` left out (`cf_e2e::muse::seed_live_home`), and its line says so.
+#[test]
+fn a_muse_found_with_no_home_of_the_kits_says_its_login_is_copied_into_the_rigs_home() {
+    let muse = Installed::at(Harness::Muse, "/m/muse.cmd", "/home/me");
+    assert_eq!(
+        found_line(&muse, "1.4.14"),
+        format!(
+            "muse is /m/muse.cmd (1.4.14); its login is copied from {} into the rig's own home, \
+             with no key named refresh",
+            Path::new("/home/me/.config/muse/auth.json").display()
+        )
+    );
+}
+
 #[derive(Debug)]
 struct Copied;
 
