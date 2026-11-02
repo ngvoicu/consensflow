@@ -255,7 +255,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 45);
+        assert_eq!(named.len(), 46);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);

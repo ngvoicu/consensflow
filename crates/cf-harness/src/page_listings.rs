@@ -55,7 +55,9 @@ fn listings() -> Vec<(&'static str, ModelListing)> {
 #[test]
 fn the_page_tests_hold_each_harness_s_recorded_listing() {
     let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../app/tests/fixtures/models");
-    let write = std::env::var_os("CF_WRITE_PAGE_LISTINGS").is_some();
+    let write = cf_base::env::Env::from_process()
+        .text("CF_WRITE_PAGE_LISTINGS")
+        .is_some();
     for (harness, listing) in listings() {
         let path = folder.join(format!("{harness}.json"));
         let text = format!("{}\n", serde_json::to_string_pretty(&listing).unwrap());

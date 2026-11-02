@@ -53,6 +53,7 @@
 //! recorded, where this ledger's has none to take out.
 
 mod chief_model;
+mod chosen_tier;
 mod compaction;
 mod described;
 mod handed;
@@ -68,6 +69,7 @@ mod specs;
 use serde_json::{Map, Value};
 
 pub use chief_model::undo_migration_0026;
+pub use chosen_tier::undo_migration_0028;
 pub use compaction::undo_migration_0020;
 pub use handed::undo_migration_0022;
 pub use history_indexes::undo_migration_0027;
@@ -126,8 +128,8 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
 /// migration 0017, the one of migration 0018, the one of migration 0020, the one
-/// of migration 0021, the one of migration 0022, the one of migration 0024 and the
-/// four of migration 0026 (their name and, in every row, the value at its place), the table
+/// of migration 0021, the one of migration 0022, the one of migration 0024, the
+/// four of migration 0026 and the one of migration 0028 (their name and, in every row, the value at its place), the table
 /// migration 0020 made (a long item's parts), the stop in the event rows that paused a
 /// task, and the look in the event rows of a delivery's begin, retry or failure.
 /// A dump from before the migrations has none of them, and is left as it is.
@@ -145,6 +147,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(pasted_into::COLUMNS)
         .chain(program_gone::COLUMNS)
         .chain(chief_model::COLUMNS)
+        .chain(chosen_tier::COLUMNS)
     {
         take_column_out(tables, table, column);
     }
@@ -194,7 +197,8 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// summary in a copy, the table and the indexes migration 0020 made, that of the
 /// mark a project's suspension leaves on the tasks it paused, that of when a
 /// message was handed to its window, that of whether the program of a
-/// conversation's last window was proven gone, nor the four of a chief's model. A dump
+/// conversation's last window was proven gone, nor the four of a chief's model, nor whether a
+/// member's tier is the human's. A dump
 /// of Node's is left as it is.
 pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     if let Some(version) = dump.get_mut("userVersion") {
@@ -223,6 +227,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             Some("participant") => {
                 *sql = sql
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
+                    .replace(chosen_tier::COLUMN_LINES, "")
                     .replace(chief_model::COLUMN_LINES, "");
             }
             Some("task") => {

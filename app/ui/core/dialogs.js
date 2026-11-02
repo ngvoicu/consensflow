@@ -1002,7 +1002,8 @@ export class ProjectSettingsDialog {
 
   /**
    * `page.board()` is the board shown, `page.selected()` the project the human
-   * has chosen and `page.agents()` the saved agents, all as they are now;
+   * has chosen, `page.agents()` the saved agents and `page.missing()` the harnesses not
+   * installed here, all as they are now;
    * `page.daemon` asks the daemon, `page.act` runs a change and redraws the
    * page, `page.note` tells the human what came of it and `page.report` says
    * a refusal. `page.specs()` is what the app says of specs as the page last
@@ -1098,17 +1099,16 @@ export class ProjectSettingsDialog {
    * dialog is up already: what was asked for is not what the human is after any more.
    */
   async open(project) {
-    const [calls, , computerUse, { agents, missing = [] }] = await Promise.all([
+    const [calls, , computerUse] = await Promise.all([
       this.#wakeUp.read(project),
       this.#page.readSpecs(),
       this.#computerUse.read(project),
-      this.#page.daemon('agents.list'),
     ])
     const board = this.#page.board()
     if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {
       return
     }
-    this.#page.onAgents?.(agents)
+    const missing = this.#page.missing()
     this.#project = project
     this.#board = board
     this.#removing = null

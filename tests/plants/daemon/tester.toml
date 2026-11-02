@@ -301,7 +301,7 @@ replace = "            } else {"
 
 [[plant]]
 name = "tester page: Project settings does not offer the tester among the roles"
-meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
@@ -312,7 +312,7 @@ replace = "const ROLES = ['worker', 'advisor', 'reviewer', 'designer']"
 
 [[plant]]
 name = "tester page: Project settings has no word for the tester"
-meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
@@ -325,7 +325,7 @@ replace = "  designer: 'Image designer',"
 
 [[plant]]
 name = "tester page: Project settings does not say what a tester is for"
-meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 

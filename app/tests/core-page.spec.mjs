@@ -3457,6 +3457,38 @@ test("adds a member on a model its harness lists, the harness's own listing, nev
   }
 })
 
+test("Refresh beside the chief's model reads the picked harness's models again, in New project and Switch chief", async ({
+  page,
+}) => {
+  await open(page)
+  for (const [button, name] of [
+    ['New project', 'New project'],
+    ['Switch the chief to another harness or model', 'Switch the chief'],
+  ]) {
+    await page.evaluate(() => {
+      window.__calls.length = 0
+    })
+    await page.getByRole('button', { name: button }).click()
+    const dialog = page.getByRole('dialog', { name })
+    const models = dialog.locator('[name="chiefModel"]')
+    await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Devin' })
+    await expect(models).toBeEnabled()
+    await page.evaluate(() => {
+      window.__model.models.devin.listing.models.push({ id: 'swe-3', label: 'SWE-3', efforts: [] })
+    })
+    await dialog.getByRole('button', { name: 'Refresh models' }).click()
+    await expect(models.locator('option')).toHaveText(['Pick a model', 'SWE-2', 'SWE-3'])
+    expect(await calls(page, 'models.get')).toEqual([
+      { harness: 'devin' },
+      { harness: 'devin', refresh: true },
+    ])
+    await page.evaluate(() => {
+      window.__model.models.devin.listing.models.pop()
+    })
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+  }
+})
+
 test("a harness whose models cannot be read leaves the chief's model unpicked, and says why", async ({
   page,
 }) => {
