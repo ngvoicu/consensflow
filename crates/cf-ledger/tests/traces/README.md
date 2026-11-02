@@ -112,3 +112,10 @@ the text of the table (`cf_ledger::testing::hold_apart_what_node_never_writes` a
 `hold_apart_what_node_never_had_in_its_schema`). No answer of Node's says anything of
 it, a message's view never holds it, and the ledger logs no event for it: such a note's
 event is any note's own.
+
+The lead a critical task is given with (`Critical work: …`) was reworded in the role
+texts' own terms (T-1060): the work changes no file and its findings go to the chief,
+where the words it replaced forbade work on specifications — which a project may not
+have — and sent the findings to `your coordinator`. `ledger-tiered-012`, the one
+recording whose `assignTask` answer holds those words, departs at that call and is in
+`DEPARTED`; the recording is not rewritten.

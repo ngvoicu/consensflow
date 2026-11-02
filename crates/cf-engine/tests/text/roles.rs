@@ -10,13 +10,8 @@ use std::path::Path;
 use cf_base::env::Env;
 use cf_catalog::WorkTier;
 use cf_engine::roles::{role_instructions, with_staff_rules, StaffRow, STAFF_RULES_HEADING};
-use regex::Regex;
 
-use super::support::staff_row;
-
-/// The commands of the transport before the board's: no text may teach them.
-const OLD_COMMANDS: &str =
-    r"(?-u:\b)cf (run|say|attach|read|results|projects|chief (send|read))(?-u:\b)";
+use super::support::{found, staff_row, MEMBER_BANS, OLD_COMMANDS};
 
 fn zeus() -> StaffRow {
     staff_row("zeus", &["worker", "reviewer"], WorkTier::Standard)
@@ -25,11 +20,6 @@ fn zeus() -> StaffRow {
 /// A role's text with no environment and no word of where its cf is.
 fn instructions(role: &str, staff: &[StaffRow]) -> String {
     role_instructions(&Env::default(), role, staff, None, None).unwrap()
-}
-
-/// Whether `pattern` (a JavaScript pattern written as a Rust one) matches `text`.
-fn found(pattern: &str, text: &str) -> bool {
-    Regex::new(pattern).unwrap().is_match(text)
 }
 
 fn teaches_only_the_boards_commands(role: &str) {
@@ -123,29 +113,19 @@ fn teaches_only_the_boards_commands(role: &str) {
         );
         assert!(text.contains("final message of your turn"));
         assert!(text.contains("Questions go to the chief, never to another member"));
-        assert!(
-            !text.contains("the human"),
-            "{role} is asked and answers only through the chief"
-        );
         assert!(found(
             r"(?i)never read another agent's\s+session files",
             &text
         ));
-        assert!(!text.contains("cf task add"));
-        assert!(
-            !found(r"PM(?-u:\b)|coordinator", &text),
-            "{role} answers to the chief"
-        );
+        for (pattern, why) in MEMBER_BANS {
+            assert!(!found(pattern, &text), "{role} {why}");
+        }
         if role == "reviewer" {
             assert!(text.contains("delivers them to the chief, who decides"));
         }
         if role == "tester" {
             assert!(text.contains("delivers it to the chief, who decides"));
         }
-        assert!(
-            !found(r"VERDICT|Review round", &text),
-            "a review is a task: no verdict line"
-        );
         if role == "advisor" {
             assert!(text.contains("You advise this project's chief"));
         }
