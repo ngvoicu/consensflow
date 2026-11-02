@@ -121,7 +121,7 @@ pub fn throwaway(seated: &Seated) -> Option<Arc<Throwaway>> {
     Login::of_machine_lasting(lasting(seated.planned)).map(|login| Arc::new(Throwaway::over(login)))
 }
 
-/// What a report says of the homes of the run's own once its rig has ended: on the floor what the
+/// What a report says of the homes of the run's own once its rig has ended: in its log what the
 /// owner's files of each harness were before the run and after it (their hashes), what the run did
 /// to the owner's setups or to the copies of their logins, if it did anything, and the check that it
 /// did not. None for a run with no such home, which had no such thing to leave.
@@ -129,12 +129,13 @@ pub fn left_as_it_was(machine: &Machine, floor: &mut Floor) -> Result<Option<Che
     if !machine.has_homes() {
         return Ok(None);
     }
+    // Noted, not only said: the report keeps the floor's notes (its `log`), and these are evidence.
     for checked in machine.homes_checked() {
-        floor.say(checked)?;
+        floor.note(checked)?;
     }
     let found = machine.homes_findings();
     if let Some(found) = &found {
-        floor.say(format!(
+        floor.note(format!(
             "the run left the owner's setup or login of a harness changed: {found}"
         ))?;
     }

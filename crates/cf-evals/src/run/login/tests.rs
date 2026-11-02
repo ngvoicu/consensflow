@@ -192,14 +192,20 @@ fn machine_on(login: Option<Arc<Throwaway>>) -> Machine {
     }
 }
 
-/// What the floor of a run says of the login, and the check the report gets.
+/// What the report keeps of the login: its check, and the lines of its log (the floor's), one to a
+/// line. A line the floor only printed is not in the report (T-785: the owner's hashes were not).
 fn reported(machine: &Machine) -> (Option<Check>, String) {
     let mut said = Vec::new();
-    let check = {
-        let mut floor = Floor::new(&mut said);
-        left_as_it_was(machine, &mut floor).unwrap()
-    };
-    (check, String::from_utf8(said).unwrap())
+    let mut floor = Floor::new(&mut said);
+    let check = left_as_it_was(machine, &mut floor).unwrap();
+    let kept: Vec<String> = floor
+        .log()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["line"].as_str().unwrap().to_owned())
+        .collect();
+    (check, kept.join("\n"))
 }
 
 #[test]

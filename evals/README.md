@@ -58,8 +58,8 @@ of the login and nothing else of the owner's. Pi is given only the entries of it
 providers (the chief's model and the staff's) that last the run's planned length and half an hour
 more, never an expired one; a login that does not is refused, in words, before the rig starts. At
 the end each home compares the owner's files with their hashes from before the run. What it finds
-does not fail the rig, which would cost the run its report: the report says the owner's hashes
-before and after (on its floor, a line for each harness), fails the check "the owner's setups and
+does not fail the rig, which would cost the run its report: the report keeps the owner's hashes
+before and after (in its `log`, a line for each harness), fails the check "the owner's setups and
 logins of the run's harnesses were left as they were" where a file changed or a copy of a login was
 written again, and keeps everything else it measured (a long run keeps them as `login` and
 `homes`). `HOME` stays the owner's: the run's folders are below it, and no harness reads its login

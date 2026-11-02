@@ -102,14 +102,24 @@ find = '''                    .filter(|found| !found.changed.is_empty())'''
 replace = '''                    .filter(|_| false)'''
 
 [[plant]]
-name = "evals isolation: the owner's hashes are not on the report's floor"
+name = "evals isolation: the owner's hashes are said and not kept in the report's log"
 meant = "a_change_to_the_owners_login_in_a_run_on_the_kits_home_fails_the_report_and_not_the_rig"
 runs = ["ei-evals-login"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/run/login.rs"
-find = '''        floor.say(checked)?;'''
-replace = '''        let _ = checked;'''
+find = '''        floor.note(checked)?;'''
+replace = '''        floor.say(checked)?;'''
+
+[[plant]]
+name = "evals isolation: what a home found is said and not kept in the report's log"
+meant = "a_change_to_the_owners_login_in_a_run_on_the_kits_home_fails_the_report_and_not_the_rig"
+runs = ["ei-evals-login"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/login.rs"
+find = '''        floor.note(format!('''
+replace = '''        floor.say(format!('''
 
 [[plant]]
 name = "evals isolation: the long run's report drops the owner's hashes"

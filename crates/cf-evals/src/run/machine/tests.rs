@@ -407,10 +407,7 @@ fn an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_h
     let owner = tempfile::tempdir().unwrap();
     let agent = owner.path().join(".pi").join("agent");
     std::fs::create_dir_all(&agent).unwrap();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap();
-    let expires = (now + Duration::from_secs(105 * 60)).as_millis();
+    let expires = jiff::Timestamp::now().as_millisecond() + 105 * 60 * 1000;
     std::fs::write(
         agent.join("auth.json"),
         format!(
