@@ -1890,6 +1890,166 @@ mod tests {
         assert_eq!(super::pasted_characters(b"tail of it\x1b[201~"), 10);
     }
 
+    /// The page sends the human's input in chunks of 32 KiB (`app/ui/terminal-link.js`), so a
+    /// big paste is several writes: the markers are in the first and the last, and the pane host
+    /// holds what follows the paste for the whole of it, not for the characters of its last chunk
+    /// (T-1127, found by T-1121).
+    #[test]
+    fn a_humans_paste_sent_in_chunks_is_held_for_all_of_its_characters() {
+        let key = PaneKey::new("pasted-in-chunks", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        // 30,000 characters at 20 µs each: 600 ms, and the window drew them at once.
+        let silent = SilentPaste {
+            pace_us_per_character: 20,
+            ..DRAWS
+        };
+        let printer = drawing(
+            &arbiter,
+            &key,
+            silent,
+            &[Duration::from_millis(20)],
+            Duration::ZERO,
+        );
+        let first = [&b"\x1b[200~"[..], &[b'x'; 30_000]].concat();
+        let last = b"tail of it\x1b[201~".to_vec();
+        for chunk in [&first[..], &last[..], b"\r"] {
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, chunk)
+                .expect("a chunk of the human's input");
+        }
+        printer.join().expect("printer");
+
+        let records = writer.records();
+        let written: Vec<&[u8]> = records.iter().map(|record| &record.bytes[..]).collect();
+        assert_eq!(written, [&first[..], &last[..], b"\r"]);
+        let waited = records[2].at.duration_since(records[1].at);
+        assert!(
+            waited >= Duration::from_millis(550),
+            "{waited:?}: held for the last chunk's ten characters, not the paste's thirty thousand"
+        );
+        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
+    }
+
+    /// A chunk can end inside the closing marker: the paste is over all the same, and what
+    /// follows it waits, in the write that completes the marker or the next.
+    #[test]
+    fn a_closing_marker_split_between_two_writes_still_holds_what_follows_the_paste() {
+        for (second, then) in [(&b"1~"[..], Some(&b"\r"[..])), (b"1~\r", None)] {
+            let key = PaneKey::new("marker-split", 1);
+            let (writer, _observed) = RecordingWriter::new(None);
+            let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+            let printer = drawing(
+                &arbiter,
+                &key,
+                DRAWS,
+                &[Duration::from_millis(300)],
+                Duration::ZERO,
+            );
+            let first = b"\x1b[200~three\x1b[20";
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, first)
+                .expect("the paste, up to part of its closing marker");
+            let completed = Instant::now();
+            for write in [Some(second), then].into_iter().flatten() {
+                arbiter
+                    .write_typed_via(writer.as_ref(), &key, write)
+                    .expect("the rest of the human's input");
+            }
+            printer.join().expect("printer");
+
+            let written: Vec<Vec<u8>> = writer
+                .records()
+                .into_iter()
+                .map(|record| record.bytes)
+                .collect();
+            assert_eq!(
+                written,
+                [first.to_vec(), b"1~".to_vec(), b"\r".to_vec()],
+                "the write that completes the marker goes as two, the paste and what follows"
+            );
+            let enter = writer.records()[2].at.duration_since(completed);
+            assert!(
+                enter >= Duration::from_millis(350),
+                "{enter:?}: the Enter went before the window drew the paste and went quiet"
+            );
+            assert!(enter < Duration::from_millis(4_000), "{enter:?}");
+        }
+    }
+
+    /// The Enter of a delivery (a brief, a note) waits for the longer of the host's wait and
+    /// what the window's harness declared of how it reads a paste, for this paste's length: a
+    /// window that redraws while it reads never goes quiet for the host's 120 ms, and its Enter
+    /// went at the host's most, while it still read (Muse on Windows, T-1127 / T-1121).
+    #[test]
+    fn a_deliverys_enter_waits_for_the_window_to_have_read_the_paste_where_it_declared_how() {
+        let host = EnterTiming {
+            least_ms: 10,
+            drawn_after_ms: 0,
+            quiet_ms: 120,
+            most_ms: 300,
+        };
+        let key = PaneKey::new("delivered-slowly", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(host);
+        // 300 characters at 4 ms each: 1.2 s of reading, drawn all the while, then quiet.
+        let silent = SilentPaste {
+            pace_us_per_character: 4_000,
+            most_ms: 5_000,
+            ..DRAWS
+        };
+        let printer = drawing(&arbiter, &key, silent, &[], Duration::from_millis(1_300));
+        let body = vec![b'x'; 300];
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, &body, None)
+            .expect("the delivery");
+        printer.join().expect("printer");
+
+        let records = writer.records();
+        assert_eq!(records.len(), 2, "{records:?}");
+        assert_eq!(records[1].bytes, b"\r");
+        let waited = between(&records);
+        assert!(
+            waited >= Duration::from_millis(1_300),
+            "{waited:?}: the Enter went while the window still read the paste"
+        );
+        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
+    }
+
+    /// A window whose harness declares nothing has its deliveries' Enter after the host's
+    /// wait alone, as it always had it, however long it goes on printing.
+    #[test]
+    fn a_deliverys_enter_in_a_window_that_declared_nothing_waits_only_the_hosts_wait() {
+        let host = EnterTiming {
+            least_ms: 10,
+            drawn_after_ms: 0,
+            quiet_ms: 120,
+            most_ms: 300,
+        };
+        let key = PaneKey::new("delivered-undeclared", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(host);
+        let clock = arbiter.register(&key).expect("register pane");
+        let printer = thread::spawn(move || {
+            let started = Instant::now();
+            while started.elapsed() < Duration::from_millis(1_300) {
+                clock.note();
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, &vec![b'x'; 300], None)
+            .expect("the delivery");
+        printer.join().expect("printer");
+
+        let waited = between(&writer.records());
+        assert!(waited >= Duration::from_millis(300), "{waited:?}");
+        assert!(
+            waited < Duration::from_millis(1_200),
+            "{waited:?}: waited on a declaration nobody made"
+        );
+    }
+
     /// The human's typing, with no paste, goes as it was written, one write.
     #[test]
     fn the_humans_typing_with_no_paste_goes_in_one_write_at_once() {
@@ -2378,6 +2538,7 @@ mod tests {
         use cf_proto::panes::SilentPaste;
 
         use super::super::{EnterTiming, InputArbiter};
+        use crate::headless::ENTER;
         use crate::pty::conpty_test::{line_echo, open, powershell, read_until, take};
         use crate::pty::{serial_pty_test, PaneTable};
 
@@ -2462,6 +2623,126 @@ mod tests {
                 .map(|(sent, _)| sent.to_owned())
                 .unwrap_or_else(|| panic!("the reader sent nothing: {seen:?}"));
             (sent, again)
+        }
+
+        /// A child that says READY and reads the console's key presses slowly, as a window does
+        /// that reads a long paste at a pace of its own (Muse on Windows, T-1121): each key takes
+        /// `pace_us` microseconds to read, and it draws a dot for each, as a window redraws while
+        /// it reads. An Enter it reads within 120 ms of the key before it is a line break in the
+        /// text, as Codex reads it ([`burst_reader`]); one it reads later sends the text, and it
+        /// says how many line breaks the text it sent held, as `SENT=[1]#`.
+        fn slow_reader(pace_us: u64) -> Vec<String> {
+            powershell(&format!(
+                "Write-Output 'READY'; $clock = [Diagnostics.Stopwatch]::StartNew(); \
+                 $pace = [long]([Diagnostics.Stopwatch]::Frequency * {pace_us} / 1000000); \
+                 $last = -1000; $breaks = 0; while ($true) {{ $k = [Console]::ReadKey($true); \
+                 $until = $clock.ElapsedTicks + $pace; while ($clock.ElapsedTicks -lt $until) {{}}; \
+                 $now = $clock.ElapsedMilliseconds; if ($k.Key -eq 'Enter') {{ \
+                 if ($now - $last -lt 120) {{ $breaks += 1; $last = $now }} \
+                 else {{ Write-Output ('SENT=[' + $breaks + ']#'); break }} }} \
+                 else {{ $last = $now }}; [Console]::Write('.') }}"
+            ))
+        }
+
+        /// What came of a brief delivered to the slow reader.
+        #[derive(Debug)]
+        struct Delivered {
+            /// How long after the brief was written its Enter was written.
+            entered: Duration,
+            /// How long after it the reader sent the text, if it did without another Enter.
+            sent: Option<Duration>,
+            /// What it sent held this many line breaks (1 where its Enter was one).
+            breaks: String,
+        }
+
+        /// Delivers `brief` into a pane running the slow reader, as the daemon does
+        /// (`write_paste`) with the host's own wait, the pane declared to read a paste as
+        /// `silent` says. A paste its window did not send is pressed Enter on again after 13 s,
+        /// as the engine does (10 s unshown, 3 s quiet: `arrival.rs`).
+        fn delivered(brief: &[u8], silent: Option<SilentPaste>, pace_us: u64) -> Delivered {
+            let _pty_guard = serial_pty_test();
+            let table = Arc::new(PaneTable::new());
+            let (key, output) = open(&table, &slow_reader(pace_us), &HashMap::new(), 1 << 20);
+            let arbiter = InputArbiter::new(ENTER);
+            let clock = arbiter
+                .register_with(&key, silent)
+                .expect("register pane");
+            read_until(&table, &key, &output, "READY");
+            let seen = Arc::new(Mutex::new(String::new()));
+            let reader = {
+                let (table, key, seen) = (Arc::clone(&table), key.clone(), Arc::clone(&seen));
+                thread::spawn(move || {
+                    while let Ok(chunk) = output.recv_timeout(Duration::from_secs(90)) {
+                        clock.note();
+                        let text = take(&table, &key, &chunk);
+                        seen.lock().expect("seen").push_str(&text);
+                    }
+                })
+            };
+            let sent_within = |from: Instant, within: Duration| {
+                while from.elapsed() < within {
+                    if seen.lock().expect("seen").contains("]#") {
+                        return Some(from.elapsed());
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                None
+            };
+            let pasted = Instant::now();
+            arbiter
+                .write_paste(&table, &key, brief, None)
+                .expect("the delivery");
+            let entered = pasted.elapsed();
+            let mut sent = sent_within(pasted, Duration::from_secs(13));
+            if sent.is_none() {
+                arbiter
+                    .write(&table, &key, b"\r")
+                    .expect("the Enter again");
+                sent_within(Instant::now(), Duration::from_secs(30));
+            }
+            table.kill(&key).expect("kill the pane");
+            reader.join().expect("the pane's reader");
+            let seen = seen.lock().expect("seen").clone();
+            let breaks = seen
+                .split_once("SENT=")
+                .and_then(|(_, rest)| rest.split_once('#'))
+                .map(|(breaks, _)| breaks.to_owned())
+                .unwrap_or_else(|| panic!("the reader sent nothing: {seen:?}"));
+            Delivered {
+                entered,
+                sent: sent.take(),
+                breaks,
+            }
+        }
+
+        /// How a window declares that it reads a paste at 0.5 ms a character, draws as it reads,
+        /// and is quiet for 200 ms when it has: Muse's measure on Windows (T-954), with a cap
+        /// that gives a slow machine's PowerShell room.
+        const SLOW: SilentPaste = SilentPaste {
+            pace_us_per_character: 500,
+            drawn_after_ms: 0,
+            quiet_ms: 200,
+            most_ms: 1_000,
+            most_us_per_character: 3_000,
+        };
+
+        /// A brief of 4,000 characters delivered into a window that reads each of them in 0.7 ms
+        /// and draws as it does: the host's wait alone sends its Enter at its most, 2 s, while the
+        /// window still reads, and it is a line break in the text. The Enter of the declaration's
+        /// wait comes once the window has read it and gone quiet, and sends it (T-1127).
+        #[test]
+        fn a_long_brief_delivered_to_a_window_that_reads_it_slowly_is_sent_by_its_enter() {
+            let brief = vec![b'x'; 4_000];
+            let delivered = delivered(&brief, Some(SLOW), 700);
+            #[allow(clippy::print_stderr)] // Said in the output of the case, with --nocapture.
+            {
+                eprintln!("delivered: {delivered:?}");
+            }
+            assert_eq!(delivered.breaks, "[0]", "{delivered:?}: the Enter was a line break");
+            assert!(
+                delivered.sent.is_some_and(|sent| sent < Duration::from_secs(12)),
+                "{delivered:?}: the brief stayed in the window's box until the Enter was pressed again"
+            );
         }
 
         /// The human's paste and its Enter in one write reach a program that reads the
