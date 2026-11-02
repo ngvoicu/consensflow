@@ -192,3 +192,16 @@ file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''                let roaming = machine("APPDATA")
                     .map_or_else(|| home.join("AppData").join("Roaming"), PathBuf::from);'''
 replace = '''                let roaming = home.join("AppData").join("Roaming");'''
+
+# ---------------------------------------------------------------------------- what a run says (Windows)
+
+[[plant]]
+name = "kit windows: a path below the owner's home is said with the system's separator"
+meant = "a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it"
+runs = ["windows-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/watch.rs"
+find = '''            format!("~/{}", parts.join("/"))'''
+replace = '''            format!("~/{}", below.display())'''
