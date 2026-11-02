@@ -476,8 +476,15 @@ fn every_case_says_writes_and_exits_as_node_did() {
     // Every case of `setup` and `doctor` was played, not left out.
     assert!(verbs["setup"] >= 17, "{} cases of setup", verbs["setup"]);
     assert!(verbs["doctor"] >= 22, "{} cases of doctor", verbs["doctor"]);
-    // What is paired holds in the cases it is meant for, and in no others.
-    assert_eq!(meant[paired::SHAPE], 13, "{meant:?}");
+    // What is paired holds in the cases it is meant for, and in no others. The 13 cases of
+    // `setup` that leave a launcher of ours leave it in the new shape; on Windows that is a launch
+    // file and the program beside it, and the case whose sentence names the file is the 14th.
+    let (launchers, why) = if cfg!(windows) {
+        (14, paired::PAIR)
+    } else {
+        (13, paired::SHAPE)
+    };
+    assert_eq!(meant.get(why).copied(), Some(launchers), "{meant:?}");
     assert_eq!(meant[paired::COPY], 1, "{meant:?}");
     assert_eq!(meant[paired::USAGE], 9, "{meant:?}");
     assert_eq!(meant.len(), 3, "{meant:?}");
