@@ -397,8 +397,8 @@ runs = ["engine-dispatcher-unfit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        } else if free && self.ready_while_drawing(record) {'''
-replace = '''        } else if false && free && self.ready_while_drawing(record) {'''
+find = '''            if free && self.ready_while_drawing(record) {'''
+replace = '''            if false && free && self.ready_while_drawing(record) {'''
 
 # An unfit member whose launch was to say its role first (Astra 1): the follow-up the role
 # went ahead of fails, and no launch follows.

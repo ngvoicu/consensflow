@@ -242,7 +242,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "tells the requester once when nobody of the tier is free, and assigns when one frees up",
-        "the daemon gives T-3 to @zeus while the note that T-3 waits for a free standard worker, which the chief had not been given, is queued: the note is withdrawn (`T-3 was taken by @zeus`), where Node leaves it queued to be pasted after the task was taken",
+        "the daemon gives T-3 to @zeus while the note that T-3 waits for a free standard worker, which the chief had not been given, is queued: the note is withdrawn (`T-3 was taken by @zeus`), where Node leaves it queued to be pasted after the task was taken; and the chief's window, at work through the two hours, holds @diana's result on T-2 (m-4) at the head of its queue, which the human is told of at ten minutes and the chief's lane says (T-958), where Node said nothing",
     ),
     (
         "closes the old window of a task the human reassigned and gives the task to another member",

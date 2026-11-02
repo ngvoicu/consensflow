@@ -209,6 +209,16 @@ pub fn parse_gate(value: Option<&Value>) -> Result<bool, LedgerError> {
     })
 }
 
+/// Whether a meeting with the chief is on: a flag, as the page sends it.
+pub fn parse_meeting(value: Option<&Value>) -> Result<bool, LedgerError> {
+    value.and_then(Value::as_bool).ok_or_else(|| {
+        LedgerError::refused(
+            "invalid-meeting",
+            "a meeting with the chief is on (true) or off (false)",
+        )
+    })
+}
+
 /// A member's roles: one or more of worker, advisor, reviewer, tester and
 /// designer, distinct, the first one leading; `offender` is how the
 /// refusal prints what was given.

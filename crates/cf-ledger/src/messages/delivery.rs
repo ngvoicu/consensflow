@@ -17,6 +17,7 @@ use super::receipt::reconcile;
 use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
 use super::{known_message, message_task, messages, require_message, settle_answered, NewNote};
 use crate::conversations::{current_conversation, set_conversation_role_text};
+use crate::meeting::held_by_meeting;
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
 use crate::tasks::{pause_again, release_ready, withdrawn_late};
@@ -54,7 +55,8 @@ pub(crate) fn with_work(store: &Store, project_id: i64) -> Result<Vec<i64>, Ledg
 /// while a task message for the window waits for the human's approval, nothing
 /// else about its task goes, whoever wrote it and in whatever order they are
 /// approved: the words that came first are not passed over. Nor are older words
-/// told to the window (`told`) that the human still holds.
+/// told to the window (`told`) that the human still holds, nor what a meeting
+/// with the chief holds (`meeting`): a closed chief window opens for none of it.
 pub(crate) fn next_delivery(
     store: &Store,
     participant_id: i64,
@@ -114,10 +116,12 @@ fn next_delivery_among(
              AND words.state = 'gated'
          ))
          AND NOT {}
+         AND NOT {}
          AND (?3 IS NULL OR m.id = ?3)
        ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id LIMIT 1",
             sql_list(&HELD_TASK_STATES),
-            behind_held_words("m")
+            behind_held_words("m"),
+            held_by_meeting("m")
         ))?
         .query_map(params![participant_id, serial, only], |row| {
             row.get::<_, i64>(0)

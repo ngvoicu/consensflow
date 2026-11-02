@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 
 use super::written_page;
 use crate::api::routes::tests::support::api;
-use crate::api::waits::WAITS;
 use crate::testing::{scene, Scene};
 
 async fn history(scene: &Scene, token: &str, query: &str) -> (u16, Value) {
@@ -118,7 +117,13 @@ async fn while_the_project_is_closed_a_page_reads_out_none_of_a_message_no_windo
 
     assert_eq!(status, 200);
     let text = said["text"].as_str().unwrap();
-    assert!(text.contains(WAITS), "{text}");
+    assert!(
+        text.contains(&format!(
+            "(m-{} waits until the human resumes the project: it comes to you then)",
+            scene.question.id
+        )),
+        "{text}"
+    );
     assert!(!text.contains("Which?"), "{text}");
 }
 
