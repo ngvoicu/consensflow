@@ -30,9 +30,8 @@
 //!
 //! **And back.** The claim is a live one, and it is withdrawn when its evidence is gone: a
 //! window that has rested for [`RESTED_MS`] with the words still not in (the human typed in the
-//! window and has not sent it; Muse's screen, which a pass of the live suite found printing
-//! for good, so its pacing gate held the words for the whole of the run's wait) is at work on
-//! nothing, and the task reads queued again until they go in (`rest_while_resumed`). A rest of
+//! window and has not sent it; a Muse window, whose pacing gate held them for the whole of a
+//! live run's wait: "its screen printed within the last 3 s") is at work on nothing, and the task reads queued again until they go in (`rest_while_resumed`). A rest of
 //! seconds is the settle and the paste, which the claim outlasts: no flicker where the words go
 //! in as they should.
 //!

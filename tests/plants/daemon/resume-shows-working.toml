@@ -149,6 +149,11 @@ file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = "                               AND json_extract(e.data, '$.from') = 'paused'"
 replace = "                               AND json_extract(e.data, '$.from') IS NOT NULL"
 
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                               AND json_extract(e.data, '$.to') = 'queued'"
+replace = "                               AND json_extract(e.data, '$.to') IS NOT NULL"
+
 [[plant]]
 name = "resume shows working: a follow-up that reopened a done task counts as the words that resumed it"
 meant = "a_follow_up_that_reopened_a_done_task_is_no_resume_words"
