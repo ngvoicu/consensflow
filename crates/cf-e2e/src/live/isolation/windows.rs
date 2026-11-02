@@ -303,3 +303,48 @@ fn on_windows_devin_has_a_home_of_the_runs_own_made_from_the_machines_roaming_fo
     let names: Vec<&str> = made.plan.vars.iter().map(|(name, _)| *name).collect();
     assert_eq!(names, ["USERPROFILE", "APPDATA", "LOCALAPPDATA"]);
 }
+
+/// The Windows twin of the Mac's rule that every harness the kit can launch has a home of the
+/// run's own or a reason it has none (T-724, T-946): the kit's Windows arms said "not known" for
+/// Devin and Muse in silence, and T-1080 found no live case could run them there.
+#[cfg(windows)]
+#[test]
+fn every_harness_the_kit_can_launch_on_windows_has_a_home_of_the_runs_own_or_a_reason_it_has_none()
+{
+    let home = Path::new(r"C:\Users\me");
+    // Claude Code's config folder is the kit's copy of the login (`super::login`).
+    let elsewhere = [Harness::Claude];
+    for harness in Harness::ALL {
+        if harness == Harness::Pi {
+            // Pi's home needs the run's model, which this test does not ask.
+            continue;
+        }
+        let made = Isolation::of_machine_lasting(harness, home, Duration::from_secs(3600)).unwrap();
+        assert_eq!(made.is_some(), !elsewhere.contains(&harness), "{harness:?}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn on_windows_muse_watches_the_owners_login_settings_trust_and_session_index() {
+    // Muse honours `XDG_CONFIG_HOME` and `XDG_DATA_HOME` on Windows, and keeps its login in
+    // `auth.json` there (`credential_backend: file`): the owner's files are the ones the Mac's row
+    // watches, below the owner's config and data folders.
+    let home = Path::new(r"C:\Users\me");
+    let made = Isolation::of_machine_lasting(Harness::Muse, home, Duration::from_secs(3600))
+        .unwrap()
+        .expect("Muse runs on a home of the run's own on Windows");
+    let var = |name: &str| crate::process::own_var(name).filter(|value| !value.is_empty());
+    let config = var("XDG_CONFIG_HOME").map_or_else(|| home.join(".config"), PathBuf::from);
+    let data =
+        var("XDG_DATA_HOME").map_or_else(|| home.join(".local").join("share"), PathBuf::from);
+    assert_eq!(
+        made.plan.watched,
+        [
+            config.join("muse").join("auth.json"),
+            config.join("muse").join("settings.json"),
+            config.join("muse").join("trust.json"),
+            data.join("muse").join("session-index.db"),
+        ]
+    );
+}
