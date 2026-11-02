@@ -170,3 +170,102 @@ fn a_pause_of_a_task_held_for_its_job_names_the_job_and_the_loop_it_left() {
     );
     context.close();
 }
+
+/// What T-1's window runs when the pause comes: the field's worker's database tests,
+/// started in WSL from its Git Bash (T-1117).
+fn running_its_tests() -> Background {
+    Background {
+        total: 1,
+        processes: vec![BackgroundProcess {
+            pid: 4711,
+            command: "wsl.exe -d Ubuntu -- bash cf-t3-check.sh".to_owned(),
+        }],
+        possibly_left: Vec::new(),
+    }
+}
+
+/// Zeus at work on T-1 while its tests run, paused, and ignoring every round of the
+/// interrupt (its turn is on a tool call that holds it): the three rounds, and the look after.
+fn ignored_while_its_work_runs(context: &Context) -> i64 {
+    context.background.leaves(Some(running_its_tests()));
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context.pause_task(project.id, 1);
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs().len(),
+        3,
+        "three rounds of the interrupt"
+    );
+    project.id
+}
+
+#[test]
+fn a_window_that_ignores_every_round_while_its_work_runs_stays_open_and_its_work_runs_on() {
+    // T-1117 (m-374, m-375): "T-3's window did not stop: it ignored the interrupt, so
+    // ConsensFlow closed it", and its close ended the worker's database tests in WSL. A
+    // pause never ends background work: the window stays open and the task paused.
+    let context = Context::new();
+    let project = ignored_while_its_work_runs(&context);
+    assert!(
+        context.host.killed().is_empty(),
+        "a pause ends none of its work"
+    );
+    let zeus = context.id(project, "zeus");
+    assert!(context.dispatcher.pane(zeus).is_some());
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    // The chief is told, once, that it did not stop, and what runs that nothing ended.
+    let told: Vec<String> = notes(&context, context.id(project, "chief"))
+        .into_iter()
+        .filter(|note| note.contains("did not stop"))
+        .collect();
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].contains("wsl.exe -d Ubuntu -- bash cf-t3-check.sh"),
+        "{told:?}"
+    );
+    assert!(!told[0].contains("closed"), "{told:?}");
+    // Still so ten minutes on: nothing closes it, and nothing is said again.
+    for _ in 0..20 {
+        context.advance(30_000);
+        context.pass().unwrap();
+    }
+    assert!(context.host.killed().is_empty());
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    context.close();
+}
+
+#[test]
+fn a_window_kept_open_for_its_work_pays_the_pause_once_its_turn_ends_and_stays_open() {
+    let context = Context::new();
+    let project = ignored_while_its_work_runs(&context);
+    let pressed = context.host.inputs().len();
+    // Its tool call returns and the turn ends: the pause is paid at rest, with no key.
+    context
+        .adapter
+        .answer("zeus", "The tests are still running in WSL");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.advance(10_000);
+    context.pass().unwrap();
+    assert!(context.host.killed().is_empty());
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    let zeus = context.id(project, "zeus");
+    assert_eq!(
+        context.dispatcher.unstopped(zeus),
+        None,
+        "paid: the board shows no stop owed"
+    );
+    assert!(
+        context.host.inputs().len() <= pressed + 1,
+        "no key into a window at rest"
+    );
+    context.close();
+}
