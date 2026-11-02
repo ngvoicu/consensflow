@@ -44,7 +44,7 @@ replace = "        per_character_ms(self.pace_us_per_character, 1)"
 
 [[plant]]
 name = "paste enter: Codex's adapter declares no silent paste on Windows"
-meant = "on_windows_codex_alone_reads_a_paste_silently_at_its_measured_pace"
+meant = "on_windows_codex_and_devin_read_a_paste_silently_at_their_measured_paces"
 runs = ["paste-enter-harness"]
 
 [[plant.edit]]
@@ -62,6 +62,27 @@ runs = ["paste-enter-harness"]
 file = "crates/cf-harness/src/codex/adapter.rs"
 find = "        self.services.env.on_windows().then_some(CODEX_ON_WINDOWS)"
 replace = "        Some(CODEX_ON_WINDOWS)"
+
+[[plant]]
+name = "paste enter: Devin's adapter declares no silent paste on Windows"
+meant = "on_windows_codex_and_devin_read_a_paste_silently_at_their_measured_paces"
+runs = ["paste-enter-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        self.services.env.on_windows().then_some(DEVIN_ON_WINDOWS)"
+replace = "        None"
+
+[[plant]]
+name = "paste enter: Devin's adapter declares a silent paste on every platform"
+meant = "elsewhere_no_harness_reads_a_paste_silently"
+platforms = ["macos"]
+runs = ["paste-enter-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        self.services.env.on_windows().then_some(DEVIN_ON_WINDOWS)"
+replace = "        Some(DEVIN_ON_WINDOWS)"
 
 [[plant]]
 name = "paste enter: the engine opens a window without its adapter's silent paste"
