@@ -69,7 +69,7 @@ use super::wire::selected_session;
 use super::wire_log::{Said, WireLog};
 use crate::contract::{
     Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, Observed, Over, Pane,
-    PaneHost, Prepared, Readiness, Records, Skill, Window, Work,
+    PaneHost, Prepared, Readiness, Records, Skill, Window, Work, STAFF_RULES_HEADING,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -230,12 +230,19 @@ const DISCOVER_FOR_MS: i64 = 60_000;
 const WINDOWS_PATHS: &str = "This machine runs Windows and your shell is Git Bash: give file tools Windows paths (C:\\Users\\…) or paths relative to the project folder, never /c/… paths, which they write under C:\\c\\.";
 
 /// The role text a Devin window gets: on Windows, with how to name a file
-/// there. A window given none gets none, and is refused as any is.
+/// there, after the role and before the project's rules for the staff where the text
+/// has them: the rules are the human's words, and this sentence is not. A window given
+/// none gets none, and is refused as any is.
 fn role_text(instructions: &str, env: &Env) -> String {
-    if env.on_windows() && !instructions.is_empty() {
-        format!("{instructions}\n\n{WINDOWS_PATHS}\n")
-    } else {
-        instructions.to_owned()
+    if !env.on_windows() || instructions.is_empty() {
+        return instructions.to_owned();
+    }
+    match instructions.find(&format!("\n{STAFF_RULES_HEADING}\n")) {
+        Some(at) => {
+            let (role, rules) = instructions.split_at(at);
+            format!("{role}\n\n{WINDOWS_PATHS}\n{rules}")
+        }
+        None => format!("{instructions}\n\n{WINDOWS_PATHS}\n"),
     }
 }
 

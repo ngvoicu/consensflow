@@ -354,7 +354,7 @@ fn a_role_told_in_part_and_not_read_by_the_next_resume_is_said_again_and_the_hum
     assert_eq!(
         board[0].body,
         format!(
-            "@chief did not read its new role before this Resume: it is too long for one message, and m-{} went in cut at 16,000 characters with `cf inbox read m-{}` for the rest. It is told again now, in m-{}.",
+            "@chief did not read its new role before this Resume: it is too long for one message, and m-{} went in cut at about 16,000 characters with `cf inbox read m-{}` for the rest. It is told again now, in m-{}.",
             note.id, note.id, notes[1].id
         )
     );

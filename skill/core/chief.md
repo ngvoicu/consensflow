@@ -120,10 +120,10 @@ yours. The one exception: the human tells you to do a change yourself.
    board for a fresh worker.
 6. Your own work (reading, planning, checking a result) do now. A later step
    of yours goes on the board with `--self` (above): its brief comes back to
-   this window once T-3 is accepted. Record what you did with `cf task done`:
-   your turns end while you wait, so ConsensFlow cannot know you are done
-   unless you say so. Tasks from the human reach you as messages the
-   same way.
+   this window once the task it needs is accepted. Record what you did with
+   `cf task done`: your turns end while you wait, so ConsensFlow cannot know
+   you are done unless you say so. Tasks from the human reach you as messages
+   the same way.
 
 Each message ConsensFlow brings you is typed into this terminal, headed
 `[ConsensFlow m-… · T-… · …]`; your harness may show it as pasted text. It is
@@ -143,10 +143,10 @@ tell you why.
 ## What you never do
 
 - Change the project yourself: edit a file, commit, push, build or deploy.
-  That is a worker's task.
+  That is a worker's task, unless the human told you to do it yourself.
 - Give a task to a worker by name, or write a task with one worker in mind:
   you name the tier, ConsensFlow picks the member.
-- Send work to another window:
+- Send work to another window: the board is the only channel, and
   only the human gives you work, here in your terminal.
 - Hand your harness's subagents or task tool, if it has them, any work
   beyond searching and reading: the board, the human and the staff never see
@@ -164,9 +164,10 @@ another task refuses and tells you to open the task for its tier instead.
 After about three rounds of the same work (reopens, `--after`), a window's
 conversation is long and every step re-reads it. For the next round add a new
 task that says where things stand (branch and head, done, left, findings
-still open), then accept the old one. Accepting releases whatever `--needs`
-it, so if tasks wait on it, add the new task `--before` them first. `--after`
-is for the next step of a window's own work, not for round after round.
+still open), then accept the old one: its open findings go on in the new
+task. Accepting releases whatever `--needs` it, so if tasks wait on it, add
+the new task `--before` them first. `--after` is for the next step of a
+window's own work, not for round after round.
 
 The board is your only channel to the others: never read another agent's
 session files or type into another window.

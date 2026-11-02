@@ -77,9 +77,10 @@
 //! ([`prelude`]).
 //!
 //! A role too long for one message (more than 16,000 units: a chief's with specs
-//! on at any staff, and one without at a staff of more than 27 rows, two roles to
+//! on at any staff, and one without at a staff of more than 24 rows, two roles to
 //! a row, on the real text; it was 37 and 65 before the chief's rules for smaller
-//! contexts, T-1009, 2 and 30 before the sentence on the staff's rules) is
+//! contexts, T-1009, 2 and 30 before the sentence on the staff's rules, T-1012,
+//! and 0 and 27 before the words the critical review asked back, T-1074) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`),
 //! and its opening says to read the rest now ([`OPENING_IN_PART`]). It is not given
 //! in several messages. Delivered so, it is a role told in part, and not recorded
@@ -87,14 +88,14 @@
 //! note whole and said so, and the ledger then records the role told, in the
 //! write that marks the note read (`receive_read`). `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 241
-//! rows with specs on, 251 without, on the same text (its lines are the bound).
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 240
+//! rows with specs on, 250 without, on the same text (its lines are the bound).
 //!
 //! The project's rules for its staff (`roles::with_staff_rules`) are part of
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
-//! the most rules and a staff of up to 86 rows (96 without specs) is read whole,
+//! the most rules and a staff of up to 85 rows (95 without specs) is read whole,
 //! a staff of 25 with 3,200 bytes and 60 lines to spare.
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
@@ -557,7 +558,9 @@ impl Dispatcher {
 
     /// The human is told on the board that `unread`, a role cut to fit in one
     /// message, was not read by its window before this Resume, which tells it the
-    /// role again in the note `again`.
+    /// role again in the note `again`. The cut is at 16,000 UTF-16 units, which a
+    /// person counts as characters but for the few that take two (an emoji), so the
+    /// line says "about 16,000 characters".
     pub(crate) fn not_read(&self, unread: &MessageView, again: i64) -> Result<(), EngineError> {
         self.seams.ledger.borrow_mut().note(
             unread.project_id,
@@ -566,7 +569,7 @@ impl Dispatcher {
                 to: "human".to_owned(),
                 task: unread.task_number,
                 body: format!(
-                    "@{} did not read its new role before this Resume: it is too long for one message, and m-{} went in cut at 16,000 characters with `cf inbox read m-{}` for the rest. It is told again now, in m-{again}.",
+                    "@{} did not read its new role before this Resume: it is too long for one message, and m-{} went in cut at about 16,000 characters with `cf inbox read m-{}` for the rest. It is told again now, in m-{again}.",
                     unread.recipient, unread.id, unread.id
                 ),
             },

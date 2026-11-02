@@ -379,8 +379,8 @@ runs = ["cc-page-suite"]
 
 [[plant.edit]]
 file = "app/ui/index.html"
-find = '''; the chief is not affected.</p>'''
-replace = '''.</p>'''
+find = ''' The chief is not affected.</p>'''
+replace = '''</p>'''
 
 [[plant]]
 name = "claude compaction: the section does not say Claude compacts a little before the size"
@@ -391,4 +391,27 @@ runs = ["cc-page-suite"]
 file = "app/ui/index.html"
 find = '''        <p class="dialog-help claude-compaction-margin">Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.</p>
 '''
+replace = ''''''
+
+# The page line says what an exported variable and the model's own window do to the size
+# (T-1074, the critical review's note 7).
+
+[[plant]]
+name = "claude compaction: the section does not say an exported variable comes first"
+meant = "Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = ''' (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first)'''
+replace = ''''''
+
+[[plant]]
+name = "claude compaction: the section does not say the model's own window is the most"
+meant = "Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = ''', and never above the model's own window'''
 replace = ''''''

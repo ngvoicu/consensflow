@@ -78,3 +78,20 @@ already has the project's rules for the staff, so a brief doesn't repeat them an
 what its task needs. Nothing else moved. The rules themselves are in no row: a row's
 project has none, and a text with none is what it was, to the byte (`with_staff_rules`).
 The rows were moved by a script that put the three lines after the last line of item 3.
+
+The chief's text, in the same 12 rows, and the reviewer's, in its 7, moved again on
+2026-11-02 for the same spec after its critical review (T-1014 notes 3 and 9, T-1074), in
+the words of `skill/core/chief.md` and `skill/core/staff.md` alone:
+- **The chief's** paragraph on a fresh window ends "then accept the old one: its open
+  findings go on in the new task", so accepting it does not read against "accepting work
+  with an open blocker needs the human's yes". Two cuts of T-1009 are back in "What you
+  never do": the exception "unless the human told you to do it yourself" (bullet 1) and the
+  reason "the board is the only channel, and" (bullet 3). Item 6 says its brief comes back
+  "once the task it needs is accepted", naming no T-3 that only the command card defines.
+- **The reviewer's** "A review changes no project file", which the line on a long log in a
+  file outside the tracked files no longer contradicts.
+The rows were moved by a script that replaced those passages, wrapped as the files wrap
+them, in each row that holds them (12, 12, 12, 12 and 7 times). The role-change budgets
+moved with the longer chief text: whole to 24 rows without specs (27 before), read whole to
+240 rows with specs on and 250 without (241 and 251), and to 85 and 95 with the most rules
+for the staff (86 and 96).

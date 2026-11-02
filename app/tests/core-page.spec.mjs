@@ -4622,7 +4622,7 @@ test("Project settings offers Claude's own point for the Claude members' compact
   await expect(section.hint).toBeHidden()
   // One line, in the section: what it does and who it leaves alone.
   await expect(section.group).toContainText(
-    "A member's Claude window compacts at about this size from its next start, whatever your own Claude setting says; the chief is not affected.",
+    "From its next start a member's Claude window compacts at about this size, in place of your Claude settings (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first), and never above the model's own window. The chief is not affected.",
   )
   // And the margin Claude keeps, which is Claude's to change: said as the version we measured it on.
   await expect(section.group).toContainText(

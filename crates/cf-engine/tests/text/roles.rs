@@ -607,9 +607,52 @@ fn tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_
         "the chief's section on continuing a window",
         &[
             "After about three rounds of the same work (reopens, `--after`), a window's conversation is long and every step re-reads it.",
-            "For the next round add a new task that says where things stand (branch and head, done, left, findings still open), then accept the old one.",
+            "For the next round add a new task that says where things stand (branch and head, done, left, findings still open), then accept the old one: its open findings go on in the new task.",
             "Accepting releases whatever `--needs` it, so if tasks wait on it, add the new task `--before` them first.",
             "`--after` is for the next step of a window's own work, not for round after round.",
+        ],
+    );
+}
+
+// What T-1009's cuts took out that the critical review (T-1014, notes 3 and 9) asked back.
+
+#[test]
+fn tells_the_chief_it_may_change_the_project_itself_when_the_human_says_so_and_why_no_work_goes_to_another_window(
+) {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you never do"),
+        "the chief's What you never do",
+        &[
+            "Change the project yourself: edit a file, commit, push, build or deploy. That is a worker's task, unless the human told you to do it yourself.",
+            "Send work to another window: the board is the only channel, and only the human gives you work, here in your terminal.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_its_own_later_step_comes_back_when_the_task_it_needs_is_accepted_naming_no_task()
+{
+    let text = instructions("chief", &[zeus()]);
+    let what_you_do = section(&text, "What you do");
+    assert_says(
+        what_you_do,
+        "the chief's What you do",
+        &["A later step of yours goes on the board with `--self` (above): its brief comes back to this window once the task it needs is accepted."],
+    );
+    // The command card defines T-3; the sentence stands alone without it.
+    assert!(!says(what_you_do, "once T-3 is accepted"));
+}
+
+#[test]
+fn tells_the_reviewer_a_review_changes_no_project_file_since_a_long_log_goes_in_a_file_of_its_own()
+{
+    assert_says(
+        &instructions("reviewer", &[zeus()]),
+        "the reviewer",
+        &[
+            "A review changes no project file: suggested fixes belong in your findings.",
+            "A long log, table or listing goes in a file outside the project's tracked files",
         ],
     );
 }

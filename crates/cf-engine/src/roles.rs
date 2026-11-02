@@ -125,7 +125,7 @@ pub fn role_instructions(
 }
 
 /// The heading of the project's rules for its staff, in every text that has them.
-pub const STAFF_RULES_HEADING: &str = "## The project's rules for the staff";
+pub use cf_harness::contract::STAFF_RULES_HEADING;
 
 /// What a member's text says before the project's rules for its staff.
 const STAFF_RULES_FOR_A_MEMBER: &str = "Every member of this project's staff is given these rules after its role, as you are. Follow them in every task, as you follow your role.";

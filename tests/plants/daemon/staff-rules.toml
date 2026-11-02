@@ -8,6 +8,7 @@
 # Every name holds `staff rules`, so `npm run plants:daemon -- "staff rules"` runs them all.
 
 [run]
+harness-devin-adapter-lib = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::adapter::tests::"]
 ledger-rules = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "described", "rules::"]
 ledger-rules-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "projects::staff_rules::"]
 ledger-testing-rules-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::staff_rules::"]
@@ -439,3 +440,28 @@ runs = ["page-rules"]
 file = "app/ui/core/staff-rules.js"
 find = '''        if (this.#page.project() === project) this.#say(words)'''
 replace = '''        if (this.#page.project() === null) this.#say(words)'''
+
+[[plant]]
+name = "staff rules: a Windows Devin's sentence on file names goes after the human's rules"
+meant = "a_windows_devin_is_told_how_to_name_files_before_the_projects_rules_for_the_staff_and_not_under_their_heading"
+runs = ["harness-devin-adapter-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''        Some(at) => {
+            let (role, rules) = instructions.split_at(at);
+            format!("{role}\n\n{WINDOWS_PATHS}\n{rules}")
+        }'''
+replace = '''        Some(_) => format!("{instructions}\n\n{WINDOWS_PATHS}\n"),'''
+
+[[plant]]
+name = "staff rules: a Windows Devin's sentence on file names goes in the middle of the human's rules"
+meant = "a_windows_devin_is_told_how_to_name_files_before_the_projects_rules_for_the_staff_and_not_under_their_heading"
+runs = ["harness-devin-adapter-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            let (role, rules) = instructions.split_at(at);
+            format!("{role}\n\n{WINDOWS_PATHS}\n{rules}")'''
+replace = '''            let (role, rules) = instructions.split_at(at + STAFF_RULES_HEADING.len() + 2);
+            format!("{role}\n\n{WINDOWS_PATHS}\n{rules}")'''

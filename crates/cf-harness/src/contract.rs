@@ -603,6 +603,12 @@ pub trait PaneHost {
     }
 }
 
+/// The heading the engine gives the project's rules for its staff in a window's role
+/// text (`cf_engine::roles::with_staff_rules`): the human's own words follow it, to the
+/// end of the text. What a harness adds to the role of its own, where it adds any, goes
+/// before it, so that nothing of ConsensFlow's reads as the human's.
+pub const STAFF_RULES_HEADING: &str = "## The project's rules for the staff";
+
 /// What a hand-over the pane host did not admit ([`PaneHost::admits`]) says:
 /// nothing of it reached the window.
 pub const NOT_ADMITTED: &str = "the window is handed nothing while its project is closed";

@@ -242,7 +242,8 @@ file = "skill/core/chief.md"
 find = '''
 For the next round add a new
 task that says where things stand (branch and head, done, left, findings
-still open), then accept the old one. '''
+still open), then accept the old one: its open findings go on in the new
+task. '''
 replace = ""
 
 [[plant]]
@@ -252,8 +253,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''then accept the old one.'''
-replace = '''then cancel the old one.'''
+find = '''then accept the old one:'''
+replace = '''then cancel the old one:'''
 
 [[plant]]
 name = "smaller contexts: the chief is not told accepting releases the tasks that wait on it"
@@ -263,8 +264,8 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
- Accepting releases whatever `--needs`
-it, so if tasks wait on it, add the new task `--before` them first.'''
+ Accepting releases whatever `--needs` it, so if tasks wait on it, add
+the new task `--before` them first.'''
 replace = ""
 
 [[plant]]
@@ -275,8 +276,8 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
- `--after`
-is for the next step of a window's own work, not for round after round.'''
+ `--after` is for the next step of a
+window's own work, not for round after round.'''
 replace = ""
 
 [[plant]]
@@ -579,3 +580,60 @@ find = '''
 fixed only in part, or newly
 broken'''
 replace = '''or fixed only in part'''
+
+# What the critical review (T-1014, notes 3 and 9) asked back or settled, T-1074 (2026-11-02).
+
+[[plant]]
+name = "smaller contexts: the chief is not told the old task's open findings go on in the new one"
+meant = "tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_rounds_of_the_same_work"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''then accept the old one: its open findings go on in the new
+task. Accepting releases'''
+replace = '''then accept the old one. Accepting releases'''
+
+[[plant]]
+name = "smaller contexts: the chief is not told it may change the project when the human says so"
+meant = "tells_the_chief_it_may_change_the_project_itself_when_the_human_says_so_and_why_no_work_goes_to_another_window"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''That is a worker's task, unless the human told you to do it yourself.'''
+replace = '''That is a worker's task.'''
+
+[[plant]]
+name = "smaller contexts: the chief is not told the board is the only channel"
+meant = "tells_the_chief_it_may_change_the_project_itself_when_the_human_says_so_and_why_no_work_goes_to_another_window"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''- Send work to another window: the board is the only channel, and
+  only the human'''
+replace = '''- Send work to another window:
+  only the human'''
+
+[[plant]]
+name = "smaller contexts: the chief's own later step names a task only the card defines"
+meant = "tells_the_chief_its_own_later_step_comes_back_when_the_task_it_needs_is_accepted_naming_no_task"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''this window once the task it needs is accepted. Record what you did with'''
+replace = '''this window once T-3 is accepted. Record what you did with'''
+
+[[plant]]
+name = "smaller contexts: the reviewer is told a review changes no file at all"
+meant = "tells_the_reviewer_a_review_changes_no_project_file_since_a_long_log_goes_in_a_file_of_its_own"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''A review changes no project file: suggested
+fixes belong in your findings.'''
+replace = '''A review changes no file: suggested fixes
+belong in your findings.'''
