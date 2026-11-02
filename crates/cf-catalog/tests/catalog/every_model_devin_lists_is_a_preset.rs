@@ -274,7 +274,7 @@ fn a_devin_model_listed_with_no_level_is_run_by_an_id_devin_lists_at_every_effor
         let no_level = ids.iter().all(|id| DevinModel::of(id).level.is_none());
         bare_families += usize::from(no_level);
         for id in &ids {
-            for level in efforts(Harness::Devin) {
+            for level in efforts(Harness::Devin).levels {
                 let kept = catalog.launch_effort(Harness::Devin, id, Some(level));
                 if no_level {
                     assert_eq!(kept, None, "{label}: {id} at {level}");

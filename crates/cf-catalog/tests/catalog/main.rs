@@ -183,7 +183,7 @@ fn offers_devin_s_swe_1_6_by_name_and_no_agent_on_devin_s_own_setting() {
     // The levels Devin writes into its model ids (claude-opus-5-5-max), for
     // an agent that names a family that has them.
     assert_eq!(
-        efforts(Harness::Devin),
+        efforts(Harness::Devin).levels,
         ["low", "medium", "high", "xhigh", "max"]
     );
 }
