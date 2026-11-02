@@ -1,5 +1,6 @@
 //! What a run keeps and says of itself, to the key and to the word.
 
+use super::super::stand_in::Taken;
 use super::*;
 use crate::measure::{MemberQuestions, OwnerQuestions};
 use crate::plan::{chief_environment, staff_for};
@@ -10,10 +11,7 @@ fn options(line: &str) -> Options {
 }
 
 fn check(name: &str, ok: bool) -> Check {
-    Check {
-        name: name.to_owned(),
-        ok,
-    }
+    Check::new(name, ok)
 }
 
 /// A run of the card arm that did what the scenario asked, in `seconds`.
@@ -67,6 +65,7 @@ fn card<'a>(
         }],
         approvals: 5,
         log: json!([{ "at": 1, "line": "x" }]),
+        scripted: None,
         path: PathBuf::from("evals/reports/r.json"),
     }
 }
@@ -230,6 +229,99 @@ fn the_verdict_is_said_on_the_console_as_it_always_was() {
          \x20 the owner was asked in the terminal: 2 questions in 1 turns, 1 in its question dialog · on the board 0 · cf ask refused 0\n\
          \x20 members asked the chief: worker/claude-code 1 (answered 1, delivered 1, longest 13)\n\
          \x20 report: evals/reports/r.json\n"
+    );
+}
+
+#[test]
+fn a_check_that_judged_nothing_is_said_unmet_and_is_no_pass_and_no_failure_of_the_chief() {
+    let options = options("--scenario round-trip --staff claude");
+    let chief = chief_environment("claude", None).unwrap();
+    let staff = staff_for(&options.staff, &options.staff_models(), Some("medium")).unwrap();
+    let mut run = card(&options, &chief, &staff, Vec::new());
+    run.checks = vec![
+        check("one task goes to a worker", true),
+        Check::unmet("it reads a second review"),
+    ];
+    let mut said = Vec::new();
+    run.say(&mut Floor::new(&mut said)).unwrap();
+    let said = String::from_utf8(said).unwrap();
+    assert!(
+        said.contains("  PASS one task goes to a worker\n  UNMET it reads a second review\n"),
+        "{said}"
+    );
+    assert!(!said.contains("FAIL"), "{said}");
+    // The run did not hold: nothing was judged by the check, and the run does not pass for it.
+    assert!(!run.held());
+    // The report keeps `unmet` as a key of that check alone.
+    let value = run.value();
+    assert_eq!(
+        value["checks"][0],
+        json!({ "name": "one task goes to a worker", "ok": true })
+    );
+    assert_eq!(
+        value["checks"][1],
+        json!({ "name": "it reads a second review", "ok": false, "unmet": true })
+    );
+}
+
+#[test]
+fn a_run_with_a_scripted_worker_says_so_and_what_the_script_was_asked_that_it_holds_not() {
+    let options = options("--scenario round-trip --staff claude");
+    let chief = chief_environment("claude", None).unwrap();
+    let staff = staff_for(&options.staff, &options.staff_models(), Some("medium")).unwrap();
+    let mut run = card(&options, &chief, &staff, Vec::new());
+    // A run without one says nothing of it, and its report has no such key.
+    assert!(run.value().get("scriptedWork").is_none());
+    let mut said = Vec::new();
+    run.say(&mut Floor::new(&mut said)).unwrap();
+    assert!(!String::from_utf8(said).unwrap().contains("script"));
+    run.scripted = Some(vec![
+        Taken {
+            taken: 1,
+            given: 1,
+            brief: "Create site/en/assessment.html".to_owned(),
+            wrote: vec!["site/en/assessment.html".to_owned()],
+            unheld: Vec::new(),
+        },
+        Taken {
+            taken: 2,
+            given: 2,
+            brief: "Change site/evaluare.html and site/en/assessment.html".to_owned(),
+            wrote: vec!["site/en/assessment.html".to_owned()],
+            unheld: vec!["site/evaluare.html".to_owned()],
+        },
+    ]);
+    let mut said = Vec::new();
+    run.say(&mut Floor::new(&mut said)).unwrap();
+    let said = String::from_utf8(said).unwrap();
+    assert!(
+        said.contains("  the worker is a script: it took 2 briefs and writes the same pages whatever they say\n"),
+        "{said}"
+    );
+    assert!(
+        said.contains("  the script was asked for what it holds not (brief 2, answered with its answer 2): site/evaluare.html\n"),
+        "{said}"
+    );
+    assert!(
+        !said.contains("(brief 1,"),
+        "the first brief asked for nothing the script lacked: {said}"
+    );
+    let value = run.value();
+    assert!(value["scriptedWork"]["note"]
+        .as_str()
+        .unwrap()
+        .contains("a script"));
+    assert_eq!(
+        value["scriptedWork"]["answers"][1]["unheld"],
+        json!(["site/evaluare.html"])
+    );
+    assert_eq!(
+        value["scriptedWork"]["answers"][0]["wrote"],
+        json!(["site/en/assessment.html"])
+    );
+    assert_eq!(
+        value["scriptedWork"]["answers"][1]["brief"],
+        "Change site/evaluare.html and site/en/assessment.html"
     );
 }
 
