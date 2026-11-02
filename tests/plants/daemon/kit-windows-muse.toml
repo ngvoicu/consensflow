@@ -78,18 +78,18 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''                    ("XDG_CONFIG_HOME".to_owned(), at(self.rig_home.join(".config"))),'''
-replace = '''                    ("XDG_CONFIG_HOME".to_owned(), "C:/Users/AGV/.config".to_owned()),'''
+find = '''                        at(self.rig_home.join(".config")),'''
+replace = '''                        "C:/Users/AGV/.config".to_owned(),'''
 
 [[plant]]
-name = "kit windows muse: a live window's cache folder is left to the person's"
+name = "kit windows muse: a live window's cache folder is the person's"
 meant = "a_live_muse_on_windows_is_given_none_of_the_persons_folders"
 runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''                    ("XDG_CACHE_HOME".to_owned(), at(self.rig_home.join(".cache"))),'''
-replace = ''''''
+find = '''                        at(self.rig_home.join(".cache")),'''
+replace = '''                        at(PathBuf::from("C:/Users/AGV/.cache")),'''
 
 [[plant]]
 name = "kit windows muse: a stand-in that names no rig home is read as one"
