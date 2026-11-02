@@ -397,7 +397,11 @@ fn only_the_head_of_claude_codes_own_notification_ends_a_job_once_delivered() {
             notified(12, 4, &notice("b1", Some("completed"), "")),
         ]),
     ));
-    cases.push(("a status in the body", with(vec![notified(12, 4, &format!("<task-notification>\n<task-id>x</task-id>\n<summary>s</summary>\n</task-notification>{body}"))])));
+    // A head that names the job and says no status, and a status after its close, in what a
+    // command printed: only the head is read.
+    cases.push(("a status after the head's close", with(vec![notified(12, 4,
+        "<task-notification>\n<task-id>b1</task-id>\n</task-notification>\nthe command printed:\n<status>completed</status>\n")])));
+    cases.push(("a notification in the body", with(vec![notified(12, 4, &format!("<task-notification>\n<task-id>x</task-id>\n<summary>s</summary>\n</task-notification>{body}"))])));
     cases.push((
         "a human's words",
         with(vec![typed(12, None, &notice("b1", Some("completed"), ""))]),
@@ -445,10 +449,13 @@ fn only_the_head_of_claude_codes_own_notification_ends_a_job_once_delivered() {
 #[test]
 fn what_opens_a_turn_and_what_only_goes_into_the_record_is_read_as_the_product_reads_it() {
     let mut cases: Vec<(&str, Vec<String>)> = Vec::new();
-    // The agent's thinking alone is the agent at work.
+    // The agent's thinking alone is the agent at work: a turn that ended and the next record
+    // of the agent's a thought and nothing more.
     cases.push(("thinking alone", vec![
         typed(0, None, "Think."),
-        rec(1, json!({ "type": "assistant", "parentUuid": "u-0", "message": { "id": "m-1", "role": "assistant",
+        says(1, 0, "Thought.", "end_turn"),
+        took(2, 1, ""),
+        rec(3, json!({ "type": "assistant", "parentUuid": "u-2", "message": { "id": "m-3", "role": "assistant",
             "stop_reason": null, "content": [{ "type": "thinking", "thinking": "hm" }] } })),
     ]));
     // An interrupt is a list of one text block; the same words typed are a prompt.

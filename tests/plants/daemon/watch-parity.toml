@@ -94,6 +94,11 @@ file = "crates/cf-evals/src/long_run/invariants/work.rs"
 find = '''            if let Kind::JobEnded(id) | Kind::JobStopped(id) = &entry.kind {'''
 replace = '''            if let Kind::JobEnded(id) = &entry.kind {'''
 
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/work.rs"
+find = '''            matches!(&entry.kind, Kind::JobEnded(ended) | Kind::JobStopped(ended) if ended == id)'''
+replace = '''            matches!(&entry.kind, Kind::JobEnded(ended) if ended == id)'''
+
 [[plant]]
 name = "watch-parity: a result that answers no TaskStop call stops the job it names"
 meant = "a_job_stopped_by_taskstop_is_over_and_what_only_looks_like_a_stop_is_none"
