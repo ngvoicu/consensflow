@@ -17,6 +17,7 @@
 //! | Codex | `CODEX_HOME` | `auth.json` | `auth.json`, `config.toml` |
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
+//! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` ([`Plan::devin_on_windows`]) | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
 //!
 //! **Muse Code** sets none of these: its windows run through the rig's own launcher
 //! ([`crate::muse::write_live_stand_in`], given by [`super::machine::rig`] to every rig that
@@ -25,6 +26,14 @@
 //! alone; so Devin's XDG folders and Muse's never meet. Its row watches the owner's
 //! `~/.config/muse` (`auth.json`, `settings.json`, `trust.json`) and the index of their
 //! sessions (T-946: the members kit's live pacing run wrote the owner's `~/.config/muse`).
+//!
+//! **Devin on Windows** (T-1084) has no XDG folders: it finds its config and data in
+//! `AppData\Roaming\devin` and its cache in `AppData\Local\devin` by the system's known-folder
+//! call, which ignores `APPDATA` (T-727) and expands `%USERPROFILE%` from the window's
+//! environment. The run's home holds a profile of its own with both folders made, `USERPROFILE`
+//! names it, and `APPDATA` and `LOCALAPPDATA` follow it so that the daemon, which reads Devin's
+//! sessions by `APPDATA`, looks where Devin writes. `HOME` stays the person's (Git and Git Bash
+//! read it); `~/.agents/skills` is read where the system's profile folder is, never written.
 //!
 //! Every harness says its row, or why it has none, in [`Isolation::of_machine_lasting`], with
 //! no arm for "any other": one added later is a decision, not a silence.
@@ -59,6 +68,8 @@ mod watch;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod windows;
 
 use std::fmt;
 use std::fs;
@@ -181,6 +192,54 @@ impl Plan {
                 .into(),
             records: vec![owner.join("sessions")],
             described: owner.join("auth.json").display().to_string(),
+        }
+    }
+
+    /// Devin on Windows (T-1084): a profile of the run's own, below its home, that the system's
+    /// known folders send Devin to. Devin ignores the XDG variables and `APPDATA` (T-727: a
+    /// throwaway `APPDATA` left it on the owner's sessions) and finds its config and data in
+    /// `AppData\Roaming\devin` and its cache in `AppData\Local\devin` by the known-folder call,
+    /// which expands `%USERPROFILE%` from the window's environment (and fails with "path not
+    /// found" where the folders below it are missing: they are made first). So `USERPROFILE`
+    /// moves it. `APPDATA` and `LOCALAPPDATA` move with it, for the daemon, which reads Devin's
+    /// sessions by `APPDATA` first (`cf_harness::devin::paths`): with the owner's passed through,
+    /// it would look in the owner's Roaming for what Devin wrote in the run's (T-1081's class).
+    /// The profile holds a copy of `credentials.toml` (an API key: there is no refresh token to
+    /// strip) and `config.json` from the owner's Roaming folder `owner_roaming`, and nothing else
+    /// of the owner's. `HOME` is not set here: Git and Git Bash read it, and it stays the person's.
+    /// (Devin reads `~/.agents/skills` by the system's profile folder, not the variable, so the
+    /// owner's skills are read there, never written.)
+    fn devin_on_windows(owner_roaming: &Path) -> Self {
+        let profile = PathBuf::from("profile");
+        let roaming = profile.join("AppData").join("Roaming");
+        let local = profile.join("AppData").join("Local");
+        let owner = owner_roaming.join("devin");
+        Self {
+            folders: vec![roaming.clone(), local.clone()],
+            vars: vec![
+                ("USERPROFILE", profile),
+                ("APPDATA", roaming.clone()),
+                ("LOCALAPPDATA", local),
+            ],
+            seeds: vec![
+                Seed::Copy {
+                    from: owner.join("credentials.toml"),
+                    to: roaming.join("devin").join("credentials.toml"),
+                    login: true,
+                },
+                Seed::Copy {
+                    from: owner.join("config.json"),
+                    to: roaming.join("devin").join("config.json"),
+                    login: false,
+                },
+            ],
+            watched: vec![
+                owner.join("credentials.toml"),
+                owner.join("config.json"),
+                owner.join("cli").join("trusted_workspaces.json"),
+            ],
+            records: Vec::new(),
+            described: owner.join("credentials.toml").display().to_string(),
         }
     }
 
@@ -380,13 +439,21 @@ impl Isolation {
                 &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
                 &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),
+            // Devin on Windows keeps its folders where the system's known folders put them,
+            // below the profile (T-1084): the owner's Roaming folder is `APPDATA`, else below
+            // the profile.
+            #[cfg(not(unix))]
+            Harness::Devin => {
+                let roaming = machine("APPDATA")
+                    .map_or_else(|| home.join("AppData").join("Roaming"), PathBuf::from);
+                Some(Self::devin_on_windows(home, &roaming))
+            }
             // Every harness says its home here, so that one added later is a decision and
             // not a silence (T-946: Muse came after T-724's list and ran on the owner's):
-            // Claude Code's config folder is the kit's copy of its login (`super::login`);
-            // Devin's and Muse's folders on Windows are not known.
+            // Claude Code's config folder is the kit's copy of its login (`super::login`).
             Harness::Claude => None,
             #[cfg(not(unix))]
-            Harness::Devin | Harness::Muse => None,
+            Harness::Muse => None,
         })
     }
 
@@ -418,6 +485,12 @@ impl Isolation {
     #[cfg(unix)]
     pub fn devin(home: &Path, config: &Path, data: &Path) -> Self {
         Self::new(Harness::Devin, home, Plan::devin(config, data))
+    }
+
+    /// Devin's home on Windows, copying the login in the owner's Roaming folder `roaming` (the
+    /// owner whose profile is `home`).
+    pub fn devin_on_windows(home: &Path, roaming: &Path) -> Self {
+        Self::new(Harness::Devin, home, Plan::devin_on_windows(roaming))
     }
 
     fn new(harness: Harness, owner_home: &Path, plan: Plan) -> Self {
