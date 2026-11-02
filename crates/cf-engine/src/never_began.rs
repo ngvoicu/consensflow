@@ -22,9 +22,13 @@
 //!   ConsensFlow pauses it as a stall ([`Dispatcher::stall`]), and its requester is told
 //!   once, in the pause note the board shows too, which message stood alone since when,
 //!   what was pressed, and what the window's screen ends with (masked, as any quote of a
-//!   screen: [`Shown::after`]). `cf task resume` sends its words into the same window, where
-//!   the brief is above them; the pause asks the window's stop as any pause does, which a
-//!   window at rest pays at once.
+//!   screen: [`Shown::after`]). The pause asks the window's stop as any pause does: a window
+//!   at rest (Devin's, Muse's) pays it at once and is kept, and `cf task resume` sends its
+//!   words into it, where the brief is above them. One read in flight is pressed the stop's
+//!   rounds: a Claude Code reads at rest by the engine's own Escape (`by_press`) and is kept;
+//!   one that reads in flight still (Codex's, Pi's) is closed as any window that ignores a
+//!   pause's rounds, and the resume opens it again on its conversation. A stop paid with no
+//!   key would keep that window reading in flight, and no resume's words would go in.
 //!
 //! Limits. A window whose screen prints while it begins nothing (a status line that redraws
 //! by itself) is waited for until its screen is quiet for [`QUIET_MS`] at a look past its

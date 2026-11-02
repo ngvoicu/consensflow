@@ -23,7 +23,7 @@ use cf_engine::testing::Context;
 use regex::Regex;
 use serde_json::{json, Value};
 
-use crate::fixtures::{given, Tiers};
+use crate::fixtures::{given, native_of, Tiers};
 
 /// The kit's arrival window, and a moment past it.
 const PAST_ARRIVAL: i64 = 31_000;
@@ -110,6 +110,7 @@ fn never_begun_is_pressed_enter_once_then_paused_and_told(at_rest: bool) {
         json!({ "outputQuietMs": 600_000, "tail": ["Ready for the next step.", "❯ "] }),
     );
     let before = enters(&context);
+    let killed = context.host.killed().len();
 
     // Within its arrival window it is waited for: a model on its way to its first word.
     context.advance(10_000);
@@ -147,6 +148,13 @@ fn never_begun_is_pressed_enter_once_then_paused_and_told(at_rest: bool) {
     }
     assert_eq!(pause_notes(&tiers).len(), 1, "told once");
     assert_eq!(enters(&context), before + 1);
+    // The window is kept for the resume: nothing ran in it, and no key is owed it.
+    // A window at rest pays the pause's stop at once, and is kept for the resume. One read in
+    // flight is pressed the stop's rounds, which a Claude Code reads at rest by (`by_press`);
+    // one that reads in flight still is closed, and the resume opens it on its conversation.
+    if at_rest {
+        assert_eq!(context.host.killed().len(), killed, "the window is kept");
+    }
 }
 
 #[test]
@@ -330,5 +338,42 @@ fn a_brief_a_channel_harness_never_began_is_pressed_nothing_and_its_task_paused(
         notes[0].contains("its harness takes no Enter"),
         "{}",
         notes[0]
+    );
+}
+
+/// A window read in flight that never began, whose pause's rounds it ignored too, is closed by
+/// them, as a pause closes any such: the resume opens a window on its conversation, and the
+/// task works again there, its brief above the resume's words.
+#[test]
+fn a_task_paused_for_a_brief_its_window_read_in_flight_never_began_resumes_on_its_conversation() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    a_follow_up_whose_window_never_begins(&context, &tiers, false);
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 600_000 }));
+    for _ in 0..2 {
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "paused");
+    let session = tiers.assignee(2);
+    let native = native_of(&context, tiers.id(&session));
+    for _ in 0..6 {
+        context.advance(5_000);
+        context.pass().unwrap();
+    }
+    context.adapter.never_begins.set(None);
+    context.resume_task(tiers.project.id, 2, "Begin it now");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert_eq!(tiers.assignee(2), session, "the same session");
+    assert_eq!(
+        native_of(&context, tiers.id(&session)),
+        native,
+        "on the same conversation"
     );
 }
