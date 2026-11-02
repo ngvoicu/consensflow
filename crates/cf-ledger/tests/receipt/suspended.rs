@@ -1074,7 +1074,9 @@ fn the_chief_resumes_the_tasks_of_a_window_of_several_one_at_a_time_as_its_note_
     assert_eq!(refused.code(), Some("session-busy"));
     assert_eq!(
         refused.to_string(),
-        format!("@{session} is still on its work: wait for its result before resuming T-{second}")
+        format!(
+            "@{session}'s window holds T-{first}, queued: wait for its result, or cancel T-{first}, before resuming T-{second}"
+        )
     );
     let words = w.next(&session).expect("the words that resume it");
     w.deliver(words);

@@ -461,8 +461,8 @@ runs = ["ledger-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "    let warnings = warnings_queued(store, &task)?;"
-replace = "    let warnings = Vec::new();"
+find = "        warnings = warnings_queued(store, &task)?;"
+replace = "        warnings = Vec::new();"
 
 [[plant]]
 name = "resume tasks: a delivery that waited for its window goes into a closed project's"
@@ -1010,12 +1010,8 @@ runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = '''                sql_list(&HELD_TASK_STATES)
-            ),
-            params![participant_id, number],'''
-replace = '''                sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat())
-            ),
-            params![participant_id, number],'''
+find = "        Giving::Resumed(number) => (number, HELD_TASK_STATES.to_vec()),"
+replace = "        Giving::Resumed(number) => (number, [&HELD_TASK_STATES[..], &[\"paused\"]].concat()),"
 
 [[plant]]
 name = "resume tasks: a paused task of a session is resumed into its window at work on another"
@@ -1024,12 +1020,8 @@ runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = '''                sql_list(&HELD_TASK_STATES)
-            ),
-            params![participant_id, number],'''
-replace = '''                sql_list(&["never"])
-            ),
-            params![participant_id, number],'''
+find = "        Giving::Resumed(number) => (number, HELD_TASK_STATES.to_vec()),"
+replace = "        Giving::Resumed(number) => (number, vec![\"never\"]),"
 
 # --- a continuation dies with its task (round 8) ---
 

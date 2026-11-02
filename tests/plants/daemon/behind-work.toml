@@ -89,8 +89,8 @@ replace = "            Some(after) => [needed.as_slice(), &[after]].concat(),\n"
 
 [[plant]]
 name = "behind work: a follow-up of a task paused under an ended session brings the session back"
-meant = "every_departed_trace_is_there_and_still_departs"
-runs = ["ledger-replay"]
+meant = "a_follow_up_of_a_task_paused_under_an_ended_session_brings_the_session_back_and_is_refused_for_the_paused_task"
+runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"

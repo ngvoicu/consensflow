@@ -237,58 +237,79 @@ pub(crate) enum Giving {
 /// `session-busy` while it has a task in hand ([`has_task_in_hand`]), and so is
 /// a paused task resumed into its window while the window is at work on another,
 /// so that it is never at work on one task while the board speaks of another.
-/// The refusal says what the door can do instead (`giving`). A task that waits
+/// The refusal names the task that holds the window and its state, says how to
+/// free the window (wait for the result of one at work; resume a paused one and
+/// wait for its result; or cancel it), and what the door can do instead
+/// (`giving`). A task that waits
 /// on the board for what it needs does not make its session busy: the release
 /// (`release_ready`) gives the session's window those one at a time, each once
 /// the window is free, so a door that gives the session another task meanwhile
 /// leaves the board and the window speaking of one (the owner's report of
 /// 2026-10-14, a follow-up refused while another waited for the same idle
 /// window). The chief, the human and a member's own lane are no sessions, and
-/// are held to nothing.
+/// are held to nothing. A paused task held the window under the words "is still
+/// on its work: wait for its result", though it waits for the chief's resume (the
+/// report of 2026-11-02, T-1122).
 pub(crate) fn require_free(
     store: &Store,
     taker: &ParticipantRow,
     giving: Giving,
 ) -> Result<(), LedgerError> {
-    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {
-        let instead = match giving {
-            Giving::Task => ", or open the task for its tier".to_owned(),
-            Giving::SentBack(number) => {
-                format!(" before sending T-{number} back, or open a new task for its tier")
-            }
-            Giving::Resumed(number) => format!(" before resuming T-{number}"),
-        };
-        return Err(LedgerError::refused_with(
-            "session-busy",
-            format!(
-                "@{} is still on its work: wait for its result{instead}",
-                taker.handle
-            ),
-            409,
-        ));
+    if taker.member_id.is_none() {
+        return Ok(());
     }
-    Ok(())
+    let Some((held, state)) = holder(store, taker.id, giving)? else {
+        return Ok(());
+    };
+    let free_it = if state == "paused" {
+        format!("resume T-{held} and wait for its result, or cancel T-{held}")
+    } else {
+        format!("wait for its result, or cancel T-{held}")
+    };
+    let door = match giving {
+        Giving::Task => "giving it another task; or open the task for its tier".to_owned(),
+        Giving::SentBack(number) => {
+            format!("sending T-{number} back; or open a new task for its tier")
+        }
+        Giving::Resumed(number) => format!("resuming T-{number}"),
+    };
+    Err(LedgerError::refused_with(
+        "session-busy",
+        format!(
+            "@{}'s window holds T-{held}, {state}: {free_it}, before {door}",
+            taker.handle
+        ),
+        409,
+    ))
 }
 
-/// Whether a participant has a task in hand that is not the one `giving` gives
-/// it: any, but for a task resumed, which is its own already, and which only a
-/// task at work keeps out of its window.
-fn on_other_work(store: &Store, participant_id: i64, giving: Giving) -> Result<bool, LedgerError> {
-    let Giving::Resumed(number) = giving else {
-        return has_task_in_hand(store, participant_id);
+/// The task that keeps `giving` out of a participant's window, and its state:
+/// any it has in hand that is not the one given, but for a task resumed, which
+/// is its own already, and which only a task at work keeps out of its window.
+/// Of several (a ledger written before one task per session left some), the one
+/// at work first, which has to end before a paused one can be resumed, and the
+/// oldest of those.
+fn holder(
+    store: &Store,
+    participant_id: i64,
+    giving: Giving,
+) -> Result<Option<(i64, String)>, LedgerError> {
+    let (own, states) = match giving {
+        Giving::Resumed(number) => (number, HELD_TASK_STATES.to_vec()),
+        Giving::Task | Giving::SentBack(_) => (0, [&HELD_TASK_STATES[..], &["paused"]].concat()),
     };
     Ok(store
         .db
         .query_row(
             &format!(
-                "SELECT 1 FROM task WHERE assignee_id = ? AND number != ? AND state IN ({})",
-                sql_list(&HELD_TASK_STATES)
+                "SELECT number, state FROM task WHERE assignee_id = ? AND number != ?
+                   AND state IN ({}) ORDER BY state = 'paused', id LIMIT 1",
+                sql_list(&states)
             ),
-            params![participant_id, number],
-            |_| Ok(()),
+            params![participant_id, own],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .optional()?
-        .is_some())
+        .optional()?)
 }
 
 /// Whether a participant's window has a task in hand: queued, working or
