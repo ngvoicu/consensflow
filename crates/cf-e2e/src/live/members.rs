@@ -59,7 +59,7 @@ pub use board::{
     answer_to, brief_delivered, delivered_result, find, first_answer, first_question, is_over,
     last_result, notes_of_work, session_of, MemberWindow, Paused,
 };
-pub use command::{quiet_command, runs_command, shown, LongCommand};
+pub use command::{quiet_command, runs_command, shown, ticking_command, LongCommand};
 pub use descent::{
     descending_from, end_chosen, holding, pause_chosen, with_cygwin_parents, Ended, Identity,
     Machine, Pause, Running, ThisMachine,
