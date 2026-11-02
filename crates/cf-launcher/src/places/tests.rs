@@ -3,9 +3,36 @@ use std::fs;
 use super::*;
 
 #[test]
-fn the_names_are_the_apps_and_the_short_one_and_a_cmd_where_windows_has_them() {
+fn the_names_are_the_apps_and_the_short_one_and_a_launch_file_where_windows_has_them() {
     assert_eq!(names(false), ["consensflow", "cf"]);
-    assert_eq!(names(true), ["consensflow.cmd", "cf.cmd"]);
+    assert_eq!(names(true), ["consensflow.launch", "cf.launch"]);
+}
+
+#[test]
+fn a_status_looks_for_the_launch_file_and_on_windows_for_the_cmd_of_a_build_before_the_shim() {
+    assert_eq!(sought(false), ["consensflow"]);
+    assert_eq!(sought(true), ["consensflow.launch", "consensflow.cmd"]);
+}
+
+#[test]
+fn the_program_the_script_and_the_launch_file_of_a_windows_launcher_go_by_one_name() {
+    let launch = Path::new(r"C:\Users\me\.consensflow\bin\cf.launch");
+    assert_eq!(
+        program_of(launch),
+        Path::new(r"C:\Users\me\.consensflow\bin\cf.exe")
+    );
+    assert_eq!(
+        script_of(launch),
+        Path::new(r"C:\Users\me\.consensflow\bin\cf.cmd")
+    );
+    assert_eq!(launch_of(&program_of(launch)), launch);
+    // Every name has the one, and a folder with a dot in it does not move it.
+    let dotted = Path::new("/home/me/my.home/bin/consensflow.launch");
+    assert_eq!(
+        program_of(dotted),
+        Path::new("/home/me/my.home/bin/consensflow.exe")
+    );
+    assert_eq!(launch_of(&program_of(dotted)), dotted);
 }
 
 #[test]

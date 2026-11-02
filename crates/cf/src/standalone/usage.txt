@@ -18,4 +18,4 @@ Inside a window ConsensFlow opened, cf is the board: task add --tier <t> "…",
 task list|get|done|accept|reopen|cancel|pause|resume|finish, tell, inbox, ask,
 note, answer, staff, whoami, history (cf help there says more).
 
-A text of many lines: cmd.exe (and cf.cmd, run by it) ends an argument at its first line break; PowerShell gives it whole, and a command that takes `-` reads it from standard input.
+A text of many lines: cmd.exe ends an argument at its first line break; PowerShell gives it whole, and a command that takes `-` reads it from standard input.

@@ -116,6 +116,8 @@ fn listing(root: &Path, at: &Path, names: &Names, found: &mut Vec<Value>) {
         // repository's own bytes: the recording has neither, but their names.
         let (place, text) = match names::bundle_entry(&named(&path)) {
             Some((masked, own)) => (masked, names::payload(&own, &bytes)),
+            // The program a launcher is on Windows: the bundle's own, as the recording has it.
+            None if names.is_shim(&bytes) => (named(&path), "$SHIM".to_owned()),
             None => (
                 named(&path),
                 names.recorded(

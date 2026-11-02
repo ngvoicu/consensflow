@@ -32,7 +32,7 @@ pub fn pair(case: &Value, expected: &mut Expected) -> Option<&'static str> {
     }
     let verb = case["args"][0].as_str().unwrap_or_default();
     match (verb, case["name"].as_str().unwrap_or_default()) {
-        ("setup", _) => launchers_of_ours(&mut expected.after).then_some(SHAPE),
+        ("setup", _) => launchers_of_ours(&mut expected.after),
         ("doctor", "doctor: launchers of another runtime that is there") => {
             expected.stdout = expected.stdout.as_deref().map(this_copy);
             Some(COPY)
@@ -45,13 +45,20 @@ pub fn pair(case: &Value, expected: &mut Expected) -> Option<&'static str> {
 const USAGE_END: &str = "(cf help there says more).\n";
 
 /// What this build says after them: a text of many lines, and cmd.exe.
-const USAGE_LINE: &str = "A text of many lines: cmd.exe (and cf.cmd, run by it) ends an argument at its first line break; PowerShell gives it whole, and a command that takes `-` reads it from standard input.";
+const USAGE_LINE: &str = "A text of many lines: cmd.exe ends an argument at its first line break; PowerShell gives it whole, and a command that takes `-` reads it from standard input.";
 
 /// What the usage says besides: the line about a text of many lines (T-969: cmd.exe cuts an
-/// argument at its first line break, which a Windows user of the terminal's command is told).
+/// argument at its first line break, which a Windows user is told).
 pub const USAGE: &str = "the usage ends with a line about a text of many lines, which Node's does \
-     not: cmd.exe ends an argument at its first line break, and cf.cmd, the terminal's command on \
-     Windows, is run by it";
+     not: cmd.exe ends an argument at its first line break";
+
+/// What `setup` leaves on Windows: the terminal's command is a program and the file it reads.
+pub const PAIR: &str = "the launcher names only the native cf, and on Windows it is a launch file \
+     (cf.launch, the text Node's cf.cmd held) and the program that reads it (cf.exe, the shim the \
+     bundle carries): a cf.cmd cuts an argument at its first line break";
+
+/// What a launcher's program holds in a listing: the shim, which is the bundle's own bytes.
+const SHIM: &str = "$SHIM";
 
 /// Says the usage as this build says it, in whichever output `expected` holds it, and whether it
 /// held it.
@@ -70,18 +77,42 @@ fn usage_of_ours(expected: &mut Expected) -> Option<&'static str> {
     found.then_some(USAGE)
 }
 
-/// Makes each launcher of ours that `after` lists the one this build writes,
-/// and says whether there was one.
-fn launchers_of_ours(after: &mut Value) -> bool {
-    let mut found = false;
-    for entry in after.as_array_mut().unwrap() {
+/// Makes each launcher of ours that `after` lists the one this build writes, and says why
+/// it is not Node's, if there was one. On Windows a launcher of Node's is a `.cmd`, and this
+/// build's is the launch file with that text and the program beside it.
+fn launchers_of_ours(after: &mut Value) -> Option<&'static str> {
+    let mut reason = None;
+    let mut made = Vec::new();
+    for mut entry in std::mem::take(after.as_array_mut().unwrap()) {
         let Some(text) = entry["text"].as_str().filter(|text| text.contains(MARK)) else {
+            made.push(entry);
             continue;
         };
-        entry["text"] = Value::String(native(text));
-        found = true;
+        let text = native(text);
+        let base = entry["path"]
+            .as_str()
+            .and_then(|path| path.strip_suffix(".cmd"))
+            .map(str::to_owned);
+        if let Some(base) = base {
+            made.push(serde_json::json!({ "path": format!("{base}.launch"), "text": text }));
+            made.push(serde_json::json!({ "path": format!("{base}.exe"), "text": SHIM }));
+            reason = Some(PAIR);
+        } else {
+            entry["text"] = Value::String(text);
+            reason = reason.or(Some(SHAPE));
+            made.push(entry);
+        }
     }
-    found
+    // By path as a whole, as the recorder sorts them.
+    made.sort_by_key(|entry| {
+        entry["path"]
+            .as_str()
+            .or_else(|| entry["dir"].as_str())
+            .unwrap_or_default()
+            .to_owned()
+    });
+    *after = Value::Array(made);
+    reason
 }
 
 /// Node's launcher as this build writes it: the two lines of the comment that
@@ -172,6 +203,61 @@ mod tests {
             native(&node(true, false)),
             "@echo off\r\nREM Installed by ConsensFlow. Runs the app's own cf, so the terminal and the\r\nREM window never drift apart.\r\n\"$CF\" %*\r\n"
         );
+    }
+
+    #[test]
+    fn a_launcher_of_node_s_on_windows_is_a_launch_file_and_the_program_that_reads_it() {
+        let mut after = serde_json::json!([
+            { "path": "consensflow/bin/cf.cmd", "text": node(true, true) },
+            { "path": "consensflow/bin/consensflow.cmd", "text": node(true, false) },
+            { "path": "consensflow/bin/other.cmd", "text": "@echo someone else's\r\n" },
+            { "path": "consensflow/notes.txt", "text": "x" },
+        ]);
+
+        assert_eq!(launchers_of_ours(&mut after), Some(PAIR));
+
+        let held: Vec<(&str, &str)> = after
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|each| {
+                (
+                    each["path"].as_str().unwrap(),
+                    each["text"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            held,
+            [
+                ("consensflow/bin/cf.exe", SHIM),
+                (
+                    "consensflow/bin/cf.launch",
+                    native(&node(true, true)).as_str()
+                ),
+                ("consensflow/bin/consensflow.exe", SHIM),
+                (
+                    "consensflow/bin/consensflow.launch",
+                    native(&node(true, false)).as_str()
+                ),
+                ("consensflow/bin/other.cmd", "@echo someone else's\r\n"),
+                ("consensflow/notes.txt", "x"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_launcher_of_node_s_for_sh_keeps_its_name_and_only_its_shape_is_ours() {
+        let mut after = serde_json::json!([
+            { "path": "consensflow/bin/cf", "text": node(false, true), "executable": true },
+        ]);
+
+        assert_eq!(launchers_of_ours(&mut after), Some(SHAPE));
+
+        assert_eq!(after[0]["path"], "consensflow/bin/cf");
+        assert_eq!(after[0]["text"], native(&node(false, true)));
+        assert_eq!(after[0]["executable"], true);
+        assert_eq!(launchers_of_ours(&mut serde_json::json!([])), None);
     }
 
     #[test]

@@ -1,36 +1,28 @@
 //! The launcher run for real: a stand-in `cf` that prints what it was given,
-//! started through the command the app writes, by `sh` or by cmd.exe as the
-//! system runs it. What the text says (`terminal.rs`) is not what it does:
-//! this holds that the command forwards every argument as it was given, hands
-//! on the exit code, pins the home a terminal does not name, and still runs a
-//! program in a folder whose name a shell would read for itself.
+//! started through the command the app writes, by `sh`. What the text says
+//! (`terminal.rs`) is not what it does: this holds that the command forwards
+//! every argument as it was given, hands on the exit code, pins the home a
+//! terminal does not name, and still runs a program in a folder whose name a
+//! shell would read for itself.
 //!
-//! The `.cmd` runs on Windows only: cmd.exe is not elsewhere. Its three tests
-//! were written from another system and type-checked there (`npm run
-//! clippy:windows`); none has been run. What `%*` holds in them (each argument
-//! in the quotes `cf_process::runnable` puts round it, which the stand-in
-//! takes off) is read from that code, not seen: the first run on Windows is the
-//! proof, and a difference in it is the test's to correct, not yet the launcher's.
+//! Windows's command is a program, the shim, which this crate does not build:
+//! the `cf` crate does, and runs it the same ways (`crates/cf/tests/shim.rs`,
+//! and `windows_shells.rs` in the shells a person types in).
 
+#![cfg(unix)]
 // A test starts the command it wrote, and a failure in its own folders and
 // files is the test's.
 #![allow(clippy::unwrap_used, clippy::disallowed_methods)]
 
 mod common;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cf_base::env::Env;
-use cf_launcher::{install, Places};
-use common::{write, Home};
-// The tests that make a runtime of their own, and mend a command, are Unix's.
-#[cfg(unix)]
-use {
-    cf_launcher::repair,
-    common::{old_launcher, Bundle},
-    std::fs,
-};
+use cf_launcher::{install, repair, Places};
+use common::{old_launcher, write, Bundle, Home};
 
 /// What a run of the launcher came to.
 struct Ran {
@@ -40,7 +32,6 @@ struct Ran {
 
 /// A stand-in `cf` at `folder`, named `name`, that prints one `arg:` line for
 /// each argument it was given, the `home:` it was told, and ends with 7.
-#[cfg(unix)]
 fn stand_in(folder: &Path, name: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let file = folder.join(name);
@@ -52,29 +43,9 @@ fn stand_in(folder: &Path, name: &str) -> PathBuf {
     file
 }
 
-/// The same for cmd.exe, a `.cmd`: `%*` is every argument as it was handed
-/// over, each in the quotes the starter put round it (`cf_process::runnable`
-/// quotes them for the script), which `%%~a` takes off, one line each.
-#[cfg(windows)]
-fn stand_in(folder: &Path, name: &str) -> PathBuf {
-    let file = folder.join(format!("{name}.cmd"));
-    write(
-        &file,
-        "@echo off\r\nfor %%a in (%*) do echo arg:%%~a\r\necho home:%CONSENSFLOW_HOME%\r\nexit /b 7\r\n",
-    );
-    file
-}
-
-/// Runs `launcher` with `args`, in an environment of nothing but `vars`, and
-/// what Windows will not start a program without.
+/// Runs `launcher` with `args`, in an environment of nothing but `vars`.
 fn run(launcher: &Path, args: &[&str], vars: &[(&str, &str)]) -> Ran {
-    let process = Env::from_process();
     let mut env = vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())];
-    for name in ["SystemRoot", "ComSpec"] {
-        if let Some(value) = process.os(name) {
-            env.push((name.to_owned(), value.to_string_lossy().into_owned()));
-        }
-    }
     env.extend(
         vars.iter()
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
@@ -101,7 +72,6 @@ fn installed(home: &Home, cf: &Path, folder: &Path) -> PathBuf {
         .path
 }
 
-#[cfg(unix)]
 #[test]
 fn the_launcher_runs_the_cf_it_names_with_every_argument_as_it_was_given_and_ends_as_it_ends() {
     let home = Home::new();
@@ -142,7 +112,6 @@ fn the_launcher_runs_the_cf_it_names_with_every_argument_as_it_was_given_and_end
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn the_pin_is_the_home_a_terminal_that_names_none_gets_and_a_home_it_names_does_not_move_it() {
     let home = Home::new();
@@ -168,7 +137,6 @@ fn the_pin_is_the_home_a_terminal_that_names_none_gets_and_a_home_it_names_does_
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_program_in_a_folder_whose_name_a_shell_reads_for_itself_still_runs() {
     let home = Home::new();
@@ -194,7 +162,6 @@ fn a_program_in_a_folder_whose_name_a_shell_reads_for_itself_still_runs() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn an_old_command_repaired_runs_the_new_cf_where_it_ran_the_old_runtime() {
     // What an upgrade does, end to end: the command alpha.78 wrote, run; the
@@ -239,75 +206,6 @@ fn an_old_command_repaired_runs_the_new_cf_where_it_ran_the_old_runtime() {
         [
             "arg:doctor".to_owned(),
             format!("home:{}", home.consensflow().display())
-        ]
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn the_cmd_runs_the_cf_it_names_with_every_argument_and_ends_as_it_ends() {
-    let home = Home::new();
-    let cf = stand_in(&home.root().join("bundle"), "cf");
-    let launcher = installed(&home, &cf, &home.root().join("launchers"));
-
-    let ran = run(&launcher, &["setup", "two", "words"], &[]);
-
-    assert_eq!(ran.code, Some(7), "the exit code of cf is the command's");
-    assert_eq!(
-        ran.lines,
-        [
-            "arg:setup".to_owned(),
-            "arg:two".to_owned(),
-            "arg:words".to_owned(),
-            format!("home:{}", home.consensflow().display())
-        ]
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn the_cmd_pins_the_home_a_terminal_that_names_none_gets_and_a_home_it_names_does_not_move_it() {
-    let home = Home::new();
-    let cf = stand_in(&home.root().join("bundle"), "cf");
-    let pinned = installed(&home, &cf, &home.root().join("pinned"));
-    let plain = {
-        let places = Places::at(vec![home.root().join("plain")]);
-        install(&home.plain_env(true), &cf, &places)
-            .unwrap()
-            .unwrap()
-            .path
-    };
-    let pin = format!("home:{}", home.consensflow().display());
-
-    for vars in [&[][..], &[("CONSENSFLOW_HOME", r"C:\elsewhere")]] {
-        assert_eq!(run(&pinned, &["x"], vars).lines, ["arg:x", pin.as_str()]);
-    }
-    // A command that pins none leaves the terminal's own alone.
-    assert_eq!(
-        run(&plain, &["x"], &[("CONSENSFLOW_HOME", r"C:\elsewhere")]).lines,
-        ["arg:x", r"home:C:\elsewhere"]
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn a_cmd_runs_a_program_in_a_folder_with_a_space_and_a_percent_sign_in_its_name() {
-    let home = Home::new();
-    let folder = home.root().join("we ird 100%");
-    let cf = stand_in(&folder, "cf");
-    let odd_home = home.root().join("home 100%");
-    let places = Places::at(vec![home.root().join("launchers")]);
-    let env = home.env_with(true, &[("CONSENSFLOW_HOME", odd_home.to_str())]);
-    let launcher = install(&env, &cf, &places).unwrap().unwrap().path;
-
-    let ran = run(&launcher, &["hello"], &[]);
-
-    assert_eq!(ran.code, Some(7));
-    assert_eq!(
-        ran.lines,
-        [
-            "arg:hello".to_owned(),
-            format!("home:{}", odd_home.display())
         ]
     );
 }

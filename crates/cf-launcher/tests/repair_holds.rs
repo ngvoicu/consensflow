@@ -13,7 +13,8 @@ use std::fs;
 
 use cf_launcher::{install, repair, Places, Repair};
 use common::{
-    aged, at, expected, files, forms, launchers, old_launcher, outcomes, read, write, Bundle, Home,
+    aged, at, expected, files, forms, launchers, old_launcher, outcomes, read, with_shim, write,
+    Bundle, Home,
 };
 
 #[test]
@@ -222,7 +223,7 @@ fn an_app_opened_from_where_it_was_downloaded_leaves_the_command_as_it_is() {
         // `cf setup` is the user's own act and names what it is run from. A
         // command that names that very place is the place's, and one of
         // someone else's is no concern of the guard's.
-        install(&env, &translocated, &at(&home)).unwrap();
+        install(&env, with_shim(&translocated), &at(&home)).unwrap();
         write(&other, "someone else's\n");
         let repaired = repair(&env, &translocated, &at(&home));
         assert_eq!(outcomes(&repaired), [Repair::Current, Repair::Unmarked]);

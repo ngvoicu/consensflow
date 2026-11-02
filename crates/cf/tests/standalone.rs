@@ -97,9 +97,10 @@ impl User {
         self.root.join(name)
     }
 
-    /// The names of the launcher in its folder: `.cmd` where Windows has them.
+    /// The names of the launcher in its folder: where Windows has them, the launch file the
+    /// program beside it (`cf.exe`) reads.
     fn command(&self, name: &str) -> PathBuf {
-        let extension = if cfg!(windows) { ".cmd" } else { "" };
+        let extension = if cfg!(windows) { ".launch" } else { "" };
         self.at("consensflow/bin")
             .join(format!("{name}{extension}"))
     }

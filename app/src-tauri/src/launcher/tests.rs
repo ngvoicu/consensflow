@@ -40,6 +40,8 @@ impl Machine {
             .join(if cfg!(windows) { "cf.exe" } else { "cf" });
         fs::create_dir_all(cf.parent().expect("a folder")).expect("the bundle's folders");
         fs::write(&cf, "the program").expect("a cf");
+        // The program the terminal's command is on Windows, which a bundle carries beside its `cf`.
+        fs::write(cf.with_file_name("cf-shim.exe"), "the shim").expect("a shim");
         cf
     }
 
@@ -68,7 +70,7 @@ impl Machine {
     fn setup(&self, env: &Env, cf: &Path, home: &Path) -> PathBuf {
         let bin = home.join("bin");
         install(env, cf, &Places::at(vec![bin.clone()])).expect("a command");
-        bin.join(if cfg!(windows) { "cf.cmd" } else { "cf" })
+        bin.join(if cfg!(windows) { "cf.launch" } else { "cf" })
     }
 }
 
@@ -188,7 +190,7 @@ fn a_failure_is_one_line_of_the_log_and_the_other_name_is_repaired_all_the_same(
     let bin = machine.live_home().join("bin");
     // A folder where the app's own name of the command should be.
     let blocked = bin.join(if cfg!(windows) {
-        "consensflow.cmd"
+        "consensflow.launch"
     } else {
         "consensflow"
     });
