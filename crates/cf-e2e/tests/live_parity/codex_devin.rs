@@ -557,7 +557,8 @@ fn check(harness: Harness, log: &Log) -> Result {
     Ok(())
 }
 
-#[cfg(test)]
+// A Mac's: Muse's case runs there alone, and its hook is a shell script.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -566,7 +567,6 @@ mod tests {
     /// hook shape), and the hook prints the answer Muse reads its context from, holding the
     /// word; the skill of the human's config beside it. Muse ran the hook on the Mac in the
     /// live check (MUS-18, T-954).
-    #[cfg(unix)]
     #[test]
     fn muse_s_case_gives_the_human_s_settings_a_server_and_a_hook_that_says_its_word() {
         let case = muse_case().unwrap();
