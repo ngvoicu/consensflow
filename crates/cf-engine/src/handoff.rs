@@ -37,13 +37,12 @@ pub use viewer::{
     HISTORY_ROOM, SHOWN_FIELD,
 };
 
-/// How ConsensFlow's handoff to a chief the human switched in begins.
-pub const HANDOFF_TITLE: &str = "You are the chief now";
-
-/// The title a handoff had while the chief was called the lead. A ledger from
-/// before 2026-10-03 holds such handoffs: one may still wait for its window,
-/// and the history names one delivered.
-const LEAD_HANDOFF_TITLE: &str = "You are the lead now";
+/// How ConsensFlow's handoff to a chief the human switched in begins, and the
+/// title it had while the chief was called the lead (a ledger from before
+/// 2026-10-03 holds such handoffs: one may still wait for its window, and the
+/// history names one delivered). The ledger's words, as a meeting with the chief
+/// holds no handoff and knows one by them.
+pub use cf_ledger::{HANDOFF_TITLE, LEAD_HANDOFF_TITLE};
 
 /// A message by its id, in this project only: what a page names a delivery
 /// by. A line may name any number, and only a project's own messages are read

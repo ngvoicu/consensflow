@@ -1,0 +1,100 @@
+# The baseline that keeps the code from telling one harness from another in more places than
+# it does (T-912, ConsensFlow 3.0.7, Gabriel's ask of 2026-10-28: "code idiomatic, well
+# organized, as adapters"). Which adapter a harness has is the registry's to say
+# (`crates/cf-harness/src/launch.rs`); `crates/cf-harness/tests/dispatch` reads every crate of
+# the product as Rust syntax and holds the places that branch on a harness's identity (a
+# `match`, a `matches!`, an `if let`, a comparison, on the enum or on its id as a string, and a
+# path into a concrete adapter from the engine, the daemon or the CLI) to its list
+# (`baseline.rs`), which only gets shorter. The ceiling on `cf-harness`'s `pub` items its crate
+# does not export is `cargo xtask unreachable-pub`. A plant puts one more site in, or closes one
+# without taking it off the list; a test of it fails. Every name holds `adapter-baseline`, so
+# `npm run plants:daemon -- adapter-baseline` runs them all.
+
+[run]
+adapter-baseline-dispatch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "dispatch"]
+adapter-baseline-ceiling = ["cargo", "xtask", "unreachable-pub"]
+
+# --- the list ---
+
+[[plant]]
+name = "adapter-baseline: a match on Harness is added in the harnesses' crate outside the registry"
+meant = "a_harness_is_told_from_another_only_where_the_list_allows"
+runs = ["adapter-baseline-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/net.rs"
+find = "type Connection = Pin<Box<dyn Future<Output = hyper::Result<()>>>>;"
+replace = '''type Connection = Pin<Box<dyn Future<Output = hyper::Result<()>>>>;
+
+fn planted(harness: cf_proto::agents::Harness) -> u8 {
+    match harness {
+        cf_proto::agents::Harness::Pi => 1,
+        _ => 0,
+    }
+}'''
+
+[[plant]]
+name = "adapter-baseline: a comparison with a variant is added in the engine under another name for the enum"
+meant = "a_harness_is_told_from_another_only_where_the_list_allows"
+runs = ["adapter-baseline-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/text.rs"
+find = "/// No text on a page may read as a delivery's header."
+replace = '''fn planted(harness: cf_proto::agents::Harness) -> bool {
+    use cf_proto::agents::Harness as Kind;
+    harness == Kind::Pi
+}
+
+/// No text on a page may read as a delivery's header.'''
+
+[[plant]]
+name = "adapter-baseline: a harness's id is compared as a string in the CLI"
+meant = "a_harness_is_told_from_another_only_where_the_list_allows"
+runs = ["adapter-baseline-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf/src/hook.rs"
+find = '''pub fn run(
+    harness: Option<&str>,'''
+replace = '''fn planted(id: &str) -> bool {
+    id == "pi"
+}
+
+pub fn run(
+    harness: Option<&str>,'''
+
+[[plant]]
+name = "adapter-baseline: a concrete adapter is imported into the engine"
+meant = "a_harness_is_told_from_another_only_where_the_list_allows"
+runs = ["adapter-baseline-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = "use std::cell::RefCell;"
+replace = '''use cf_harness::pi as _;
+use std::cell::RefCell;'''
+
+[[plant]]
+name = "adapter-baseline: a site is closed and stays on the list"
+meant = "a_harness_is_told_from_another_only_where_the_list_allows"
+runs = ["adapter-baseline-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/profile.rs"
+find = '    if kind == "claude-code" {'
+replace = '    if kind.starts_with("claude-code") {'
+
+# --- the ceiling ---
+
+[[plant]]
+name = "adapter-baseline: a pub item its crate does not export is added to the harnesses' crate"
+meant = "a_crate_over_the_ceiling_fails_and_lists_every_site_in_order"
+runs = ["adapter-baseline-ceiling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/net.rs"
+find = "type Connection = Pin<Box<dyn Future<Output = hyper::Result<()>>>>;"
+replace = '''type Connection = Pin<Box<dyn Future<Output = hyper::Result<()>>>>;
+
+pub fn planted() {}'''

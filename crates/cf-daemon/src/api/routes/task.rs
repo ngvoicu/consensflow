@@ -82,12 +82,17 @@ pub(super) async fn handle(
         // unseen, and so does the brief while it is one of them, but for those
         // who wrote it. While the project is closed, so does a message no window
         // was handed yet, and the brief while it is one, but for those who wrote
-        // it: `cf` would take an answer it printed for received, so one whose text
-        // waits is not in the thread at all.
+        // it; so does one the chief's meeting holds, for the chief. A message
+        // whose text waits is in the thread as a line that says so, never its
+        // text, but for an answer, which `cf` would take for received, and a brief
+        // ([`Waits::in_thread`]).
         let waits = Waits::now(context, caller)?;
         let held_back = brief_waits(&task, &waits);
-        task.messages
-            .retain(|message| message.state != "gated" && !waits.holds(message));
+        task.messages = std::mem::take(&mut task.messages)
+            .into_iter()
+            .filter(|message| message.state != "gated")
+            .filter_map(|message| waits.in_thread(message))
+            .collect();
         if let Some(held) = held_back.filter(|_| !may_move(caller, &task.task.requester)) {
             task.task.body.clear();
             task.task.title = held.to_owned();

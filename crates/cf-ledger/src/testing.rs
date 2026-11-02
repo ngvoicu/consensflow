@@ -39,7 +39,9 @@
 //!
 //! And migration 0024's column of the `conversation` table (whether the host proved
 //! the program of the last window on one gone), which Node's conversations never
-//! had: in the rows of that table and in the text of its schema.
+//! had: in the rows of that table and in the text of its schema. And migration
+//! 0025's of the `project` table (when a meeting with the chief began), held apart
+//! as the wake-up columns are.
 //!
 //! What only Node's ledger had is held apart the other way round, on both
 //! sides: the mark that a project comes back by itself after a restart
@@ -50,6 +52,7 @@
 mod compaction;
 mod described;
 mod handed;
+mod meeting;
 mod pasted_into;
 mod paused_with_project;
 mod program_gone;
@@ -61,6 +64,7 @@ use serde_json::{Map, Value};
 
 pub use compaction::undo_migration_0020;
 pub use handed::undo_migration_0022;
+pub use meeting::undo_migration_0025;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
@@ -93,13 +97,15 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
     ("message", "door_closed_at"),
 ];
 
-/// The columns migrations 0014 and 0017 added to the `project` table, each as
-/// the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
-/// `description TEXT`, one to a line there): what Node's schema never had.
+/// The columns migrations 0014, 0017 and 0025 added to the `project` table, each
+/// as the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
+/// `description TEXT`, `meeting_at TEXT`, one to a line there): what Node's schema
+/// never had.
 fn added_columns() -> impl Iterator<Item = &'static str> {
     [
         include_str!("../migrations/0014.sql"),
         include_str!("../migrations/0017.sql"),
+        include_str!("../migrations/0025.sql"),
     ]
     .into_iter()
     .flat_map(str::lines)

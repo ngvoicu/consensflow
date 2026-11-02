@@ -55,6 +55,7 @@ fn every_command_of_the_plan_is_there_once() {
             "scrub-muse-session",
             "specmint-sync",
             "departures",
+            "unreachable-pub",
             "bench records-memory",
             "plants",
             "smoke",

@@ -399,6 +399,59 @@ fn a_box_that_still_holds_words_takes_no_paste() {
     assert_eq!(pasted(&context, "chief"), [note.id]);
 }
 
+/// A refused paste is no paste (Calliope's P3 on T-919): a window whose harness refuses
+/// every attempt for being at work holds the message on one clock, from its first
+/// refusal, and the human is told of it once at ten minutes.
+#[test]
+fn a_window_that_refuses_every_attempt_for_being_busy_is_told_at_ten_minutes() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(|_taking| {
+        Box::pin(async {
+            Ok(Admission::Busy {
+                reason: "Pi is at work".to_owned(),
+            })
+        })
+    }));
+    let note = context.note(project, "zeus", "chief", "One");
+    let human = context.id(project, "human");
+    let told = |context: &Context| -> Vec<String> {
+        crate::fixtures::notes(context, human)
+            .into_iter()
+            .filter(|said| said.contains("has waited") && said.contains("@chief's"))
+            .collect()
+    };
+    // Refused at every attempt for nine minutes: nothing told yet.
+    for _ in 0..18 {
+        context.advance(30_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).attempts, 0);
+    assert_eq!(told(&context), Vec::<String>::new());
+    for _ in 0..4 {
+        context.advance(30_000);
+        context.pass().unwrap();
+    }
+    let said = told(&context);
+    assert_eq!(
+        said.len(),
+        1,
+        "{:?}",
+        crate::fixtures::notes(&context, human)
+    );
+    assert!(
+        said[0].contains("refused it for being at work"),
+        "{}",
+        said[0]
+    );
+    for _ in 0..20 {
+        context.advance(30_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(told(&context).len(), 1, "told once");
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+}
+
 /// Pi's extension refuses a message while Pi is busy (D9): nothing went in, so the
 /// attempt is given back, and the settle starts again.
 #[test]

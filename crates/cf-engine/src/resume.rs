@@ -58,9 +58,12 @@ use std::rc::Rc;
 use std::task::{Poll, Waker};
 
 use cf_harness::contract::{Opening, TurnLeft};
+// How the chief's note that its turn was cut begins (`CHIEF_CUT`), in this build's
+// words and in those of the builds before it, which said no more: the ledger's, as
+// a meeting with the chief holds no such note and knows one by them.
 use cf_ledger::{
     continuation, continuation_in, continuation_tasks, cut_turn, ConversationView, MessageView,
-    NewNote, ParticipantView, ProjectView, Stop, RESUME_WORDS,
+    NewNote, ParticipantView, ProjectView, Stop, CHIEF_CUT, RESUME_WORDS,
 };
 
 use crate::dispatcher::Dispatcher;
@@ -147,10 +150,6 @@ pub(crate) enum Coming {
     /// ([`Dispatcher::still_coming`]).
     Member { task: i64, paid: Option<Stop> },
 }
-
-/// How the chief's note that its turn was cut begins, in this build's words and in
-/// those of the builds before it, which said no more.
-const CHIEF_CUT: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
 
 impl Coming {
     /// What the window is told when its turn was cut: the turn, where its record

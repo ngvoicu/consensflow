@@ -8,7 +8,11 @@
 //! the fixtures of `tests/fixtures/muse`, T-703):
 //!
 //! - `runtime.user_intent.accepted`: a message of the user's ([`Role::User`]), by its
-//!   `intent_id`, its words in `refill_blocks`; a message pasted while a turn runs is
+//!   `intent_id`, its words those the model was given (`model_messages`): `refill_blocks`
+//!   holds what Muse's box showed, and a paste Muse 1.4.14 folds there is
+//!   `[Pasted Content 2184 chars]` and no word of it (T-1047, T-1000's live paste-screen:
+//!   a brief of 41 lines). A log that names no `model_messages` gives `refill_blocks`'
+//!   words, as before. A message pasted while a turn runs is
 //!   one too, at once (`wake_policy: do_not_wake`), and the run that later takes it up
 //!   has its id and no prompt of its own;
 //! - a run's events (`payload_type: runtime.session`, `payload.kind: run`, by
@@ -240,10 +244,19 @@ impl Log {
         } else {
             Role::Custom
         };
-        let text = blocks_text(field(payload, "refill_blocks"));
+        let shown = blocks_text(field(payload, "refill_blocks"));
         if kind == Some("command") {
-            self.models.asked |= asks_for_a_model(Some(&text));
+            self.models.asked |= asks_for_a_model(Some(&shown));
         }
+        // The user's words are what the model was given: what the box showed of a long
+        // paste is Muse's placeholder for it, which no delivery's proof can find its
+        // header in (T-1047). A log with none of those words gives what the box showed.
+        let given = messages_text(field(payload, "model_messages"));
+        let text = if role == Role::User && !given.trim().is_empty() {
+            given
+        } else {
+            shown
+        };
         if text.trim().is_empty() {
             return Ok(());
         }
@@ -568,6 +581,19 @@ fn blocks_text(blocks: Option<&Value>) -> String {
         .flatten()
         .filter(|block| field(Some(block), "kind").and_then(Value::as_str) == Some("text"))
         .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The words of a list of messages (`model_messages`): each one's content's words
+/// ([`blocks_text`]), on a line of its own.
+fn messages_text(messages: Option<&Value>) -> String {
+    messages
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|message| blocks_text(message.get("content")))
+        .filter(|words| !words.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
 }
