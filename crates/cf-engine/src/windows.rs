@@ -269,6 +269,12 @@ pub(crate) struct WindowPart {
     /// forget the first's, and be interrupted for it again on going back to
     /// it: only a member's own lane, given tasks by name, can.
     pub(crate) stopped: Option<(i64, i64)>,
+    /// The stop it paid at rest with its turn's message not yet taken back: a harness that
+    /// takes the message back writes so a moment after the turn's end (Muse's
+    /// `run_retracted`, 5–11 ms after its `terminal cancelled`), and a look between the two
+    /// pays the stop (`stops`). A later look that reads the message taken back takes it
+    /// back then.
+    pub(crate) paid_untaken: Option<Stop>,
     /// The rounds the stop it owes has had.
     pub(crate) interrupted: Option<Interrupted>,
     /// The stop it ignored in every round, while it lasts.
@@ -340,6 +346,7 @@ impl Default for WindowPart {
             trust_keys: 0,
             trust_sure: false,
             stopped: None,
+            paid_untaken: None,
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
@@ -744,7 +751,7 @@ impl Dispatcher {
         // the host's answer.
         let opened = returning(self.seams.host.open(OpenPane {
             pane: pane.clone(),
-            cwd: project.directory.clone(),
+            cwd: workspace(project),
             argv: planned.argv.clone(),
             env,
             drop_env: planned.drop_env.clone(),
@@ -867,6 +874,7 @@ impl Dispatcher {
             part.harness.clone_from(&planned.harness);
             part.pane = Some(pane.clone());
             part.opened_at = Some(asked_at);
+            part.paid_untaken = None;
             record.quota.borrow_mut().drifts_told.clear();
             part.launch_id = Some(launch_id);
             part.token = Some(token);
@@ -1088,6 +1096,8 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
+        // The folder the window works in, as the system names it.
+        let directory = workspace(project);
         // The program of the last window on its conversation was proven gone: nothing
         // of it writes on.
         let previous_gone = match &conversation {
@@ -1099,7 +1109,7 @@ impl Dispatcher {
             project: project.id,
             handle: &participant.handle,
             role: &participant.role,
-            directory: &project.directory,
+            directory: &directory,
             resume,
             previous_gone,
             message: text.as_deref().filter(|_| !delivered),
@@ -1767,6 +1777,21 @@ impl Dispatcher {
         }
         Ok(true)
     }
+}
+
+/// The folder a window of `project` works in: the project's, as the system names it, its
+/// links resolved (a Mac's `/var/folders/…` is `/private/var/folders/…`, and `/tmp` is
+/// `/private/tmp`). ConsensFlow's folder for a window is so the folder its harness has:
+/// a window's program is given its folder only as its working folder, which the system
+/// resolves (no `PWD` reaches it), so every harness already saw, and wrote in its records,
+/// the real path (T-783, T-1036). The launch is prepared for that folder too. It changes
+/// nothing a harness sees, and fixes no screen of Devin's (T-724's finding 1, T-1038). On
+/// Windows a folder is as the project names it, its real path being a verbatim one
+/// programs do not take (`cf_base::file::real_path`).
+fn workspace(project: &ProjectView) -> String {
+    cf_base::file::real_path(std::path::Path::new(&project.directory))
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]

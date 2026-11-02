@@ -6,7 +6,9 @@
 //! received, because its marker showed there; so it is told, in the step that
 //! pays the stop: the message is kept for the window again, as a task paused
 //! before its brief arrived keeps the brief, and the words that resume the
-//! task carry it.
+//! task carry it. Muse says it a moment after the turn's end, on a line of its
+//! own: a take-back read after the look that paid the stop is told then, where
+//! nothing went into the window since (`stops`, T-1056).
 
 use cf_harness::contract::Observed;
 use cf_harness::records::Role;

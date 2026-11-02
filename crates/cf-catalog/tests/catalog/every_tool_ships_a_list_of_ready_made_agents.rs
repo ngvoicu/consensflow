@@ -69,7 +69,7 @@ fn uses_only_efforts_its_harness_actually_accepts() {
             continue;
         };
         assert!(
-            efforts(harness).contains(&effort),
+            efforts(harness).levels.contains(&effort),
             "{}: {} has no effort {}",
             entry.name,
             harness.as_str(),
@@ -111,7 +111,7 @@ fn names_an_effort_wherever_its_harness_has_one_or_is_a_listed_exception() {
     .collect();
     let catalog = catalog();
     for (harness, entry) in entries(&catalog) {
-        if efforts(harness).is_empty() {
+        if efforts(harness).levels.is_empty() {
             continue;
         }
         assert!(
@@ -261,11 +261,11 @@ fn finds_an_entry_by_name_whatever_tool_it_belongs_to() {
 #[test]
 fn records_the_effort_levels_each_cli_accepts_as_its_own_help_states_them() {
     assert_eq!(
-        efforts(Harness::Claude),
+        efforts(Harness::Claude).levels,
         ["low", "medium", "high", "xhigh", "max"]
     );
-    assert!(efforts(Harness::Codex).contains(&"ultra"));
-    assert!(efforts(Harness::Pi).contains(&"off"));
+    assert!(efforts(Harness::Codex).levels.contains(&"ultra"));
+    assert!(efforts(Harness::Pi).levels.contains(&"off"));
 }
 
 #[test]

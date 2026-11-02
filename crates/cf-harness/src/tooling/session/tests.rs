@@ -179,3 +179,139 @@ fn claude_and_pi_open_on_an_id_they_are_given_so_there_is_none_to_find() {
         );
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_folder_reached_through_a_link_is_the_same_folder_a_store_names_by_its_real_path() {
+    // T-783: a Mac's temporary folders are reached through `/var`, a link to `/private/var`,
+    // and a window opens in the folder as the system names it. A store that names either
+    // spelling is of the folder asked for by the other.
+    let root = tempfile::tempdir().unwrap();
+    let real = root.path().join("real");
+    fs::create_dir(&real).unwrap();
+    let linked = root.path().join("linked");
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+    let (real, linked) = (text(&fs::canonicalize(&real).unwrap()), text(&linked));
+    let elsewhere = text(&fs::canonicalize(root.path()).unwrap());
+
+    let data = tempfile::tempdir().unwrap();
+    let store = data.path().join("devin").join("cli").join("sessions.db");
+    fs::create_dir_all(store.parent().unwrap()).unwrap();
+    let db = Connection::open(&store).unwrap();
+    db.execute(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, working_directory TEXT, created_at INTEGER)",
+        [],
+    )
+    .unwrap();
+    for (id, folder, at) in [
+        ("real", &real, 10),
+        ("linked", &linked, 20),
+        ("other", &elsewhere, 30),
+    ] {
+        db.execute("INSERT INTO sessions VALUES (?1, ?2, ?3)", (id, folder, at))
+            .unwrap();
+    }
+    drop(db);
+    let devin_data = text(data.path());
+    let devin_env = env(&[("XDG_DATA_HOME", &devin_data), ("APPDATA", &devin_data)]);
+    for asked in [&real, &linked] {
+        assert_eq!(
+            newest(Harness::Devin, "devin", asked, 0, &devin_env)
+                .unwrap()
+                .as_deref(),
+            Some("linked"),
+            "Devin, asked by {asked}"
+        );
+    }
+
+    let home = tempfile::tempdir().unwrap();
+    let day = home
+        .path()
+        .join("sessions")
+        .join("2026")
+        .join("10")
+        .join("31");
+    rollout(&day, "rollout-1-real.jsonl", "codex-real", &real, 10);
+    let codex_home = text(home.path());
+    let codex_env = env(&[("CODEX_HOME", &codex_home)]);
+    assert_eq!(
+        newest(Harness::Codex, "codex", &linked, ago(100), &codex_env)
+            .unwrap()
+            .as_deref(),
+        Some("codex-real"),
+        "Codex, its rollout naming the real folder, asked by the link"
+    );
+}
+
+/// A Muse session's folder in the data folder under `data`, named by a UUIDv7 begun
+/// `seconds_ago`, whose log's head names `workspace` as Muse 1.4.14 writes it
+/// (`runtime.session.metadata`'s `workspace_root`, after its frame). Its id.
+fn muse_session(data: &Path, seconds_ago: i64, workspace: &str, tail: u16) -> String {
+    let ms = ago(seconds_ago);
+    let id = format!(
+        "{:08x}-{:04x}-7000-8000-{:012x}",
+        ms >> 16,
+        ms & 0xffff,
+        tail
+    );
+    let folder = data
+        .join("muse")
+        .join("sessions")
+        .join("2026")
+        .join("11")
+        .join("02")
+        .join(&id);
+    fs::create_dir_all(&folder).unwrap();
+    let lines = [
+        json!({ "retained_frame": "session_permission_transaction", "children": [] }),
+        json!({ "schema_version": 1, "id": "r3", "sequence": 3,
+                "stream": { "kind": "session", "id": id },
+                "payload_type": "runtime.session.metadata",
+                "payload": { "kind": "metadata",
+                             "record": { "workspace_root": workspace, "model_id": "muse-spark-1.3" } } }),
+    ];
+    let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    fs::write(folder.join("session.jsonl"), text).unwrap();
+    id
+}
+
+#[test]
+fn muses_newest_session_of_a_folder_since_a_time_is_the_one_its_log_says_was_opened_there() {
+    // T-1056: the live kit's Muse window opens on no id of its own, and was answered
+    // "opens no window yet: none to find", so `live resume-cut`'s early case never read
+    // its record. A session's log names its folder in its head.
+    let data = tempfile::tempdir().unwrap();
+    let ours = muse_session(data.path(), 30, "/work/a", 1);
+    let older = muse_session(data.path(), 40, "/work/a", 2);
+    let _elsewhere = muse_session(data.path(), 10, "/work/b", 3);
+    let _before = muse_session(data.path(), 3_600, "/work/a", 4);
+    let found = |since_ms: i64, workspace: &str| {
+        let data = text(data.path());
+        newest(
+            Harness::Muse,
+            "muse",
+            workspace,
+            since_ms,
+            &env(&[("XDG_DATA_HOME", &data), ("HOME", "/nowhere")]),
+        )
+    };
+    assert_eq!(
+        found(ago(120), "/work/a"),
+        Ok(Some(ours.clone())),
+        "the newest of the folder"
+    );
+    assert_eq!(
+        found(ago(120), "/work/c"),
+        Ok(None),
+        "none of a folder no log names"
+    );
+    assert_eq!(found(ago(5), "/work/a"), Ok(None), "none begun since");
+    // A log whose head has not named its folder yet is none.
+    let bare = data
+        .path()
+        .join("muse/sessions/2026/11/02")
+        .join(&ours)
+        .join("session.jsonl");
+    fs::write(&bare, "").unwrap();
+    assert_eq!(found(ago(120), "/work/a"), Ok(Some(older)));
+}

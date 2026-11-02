@@ -24,6 +24,7 @@ use cf_base::env::Env;
 use cf_base::path;
 use serde_json::Value;
 
+use crate::shared::directory::real_path;
 use crate::shared::record::home;
 use crate::shared::trust::trusts;
 
@@ -107,7 +108,9 @@ fn configuration_file(env: &Env) -> Option<PathBuf> {
     Some(PathBuf::from(path::join(&[&folder, ".claude.json"])))
 }
 
-/// The folders whose project entry in `configuration` enables the server.
+/// The folders whose project entry in `configuration` enables the server, each as the
+/// system names it, as the folder asked of is ([`trusts`]): an entry Claude Code keeps
+/// under a folder spelled through a link is the real folder's (T-783).
 fn enabled(configuration: &Value) -> HashSet<String> {
     configuration["projects"]
         .as_object()
@@ -119,7 +122,7 @@ fn enabled(configuration: &Value) -> HashSet<String> {
                         .as_array()
                         .is_some_and(|servers| servers.iter().any(|server| server == SERVER))
                 })
-                .map(|(folder, _)| folder.clone())
+                .map(|(folder, _)| real_path(folder).unwrap_or_else(|_| folder.clone()))
                 .collect()
         })
         .unwrap_or_default()

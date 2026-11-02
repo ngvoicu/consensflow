@@ -194,6 +194,16 @@ impl Installed {
         self.isolation.as_ref()
     }
 
+    /// This harness, whose home of the run's own, if it has one, is made in `folder` as
+    /// `folder` spells it ([`Isolation::made_in`]).
+    pub fn with_homes_in(mut self, folder: &Path) -> Result<Self> {
+        if self.isolation.is_some() {
+            self.isolation = Isolation::of_machine(self.harness, &self.home)?
+                .map(|isolation| Arc::new(isolation.made_in(folder)));
+        }
+        Ok(self)
+    }
+
     /// This harness, whose windows are given no home of the run's own: for a case that is
     /// its own home, whose rig is given a `HOME` with the harness's folder in it, made for the
     /// case, and none of the person's is read or written. The case says why it is its own.

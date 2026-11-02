@@ -251,6 +251,11 @@ impl Dispatcher {
                 .borrow_mut()
                 .release_claims(participant.id, because)?;
         }
+        // A take-back the record writes a moment after the turn's end, read once the stop
+        // was paid between the two, is a take-back still (T-1056).
+        if look == Look::Rest && observed.took_back {
+            self.taken_back_since_paid(participant, record, observed)?;
+        }
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
         if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {
             let look = if look == Look::Work && past_its_turn(record, &stop, observed) {
@@ -260,6 +265,8 @@ impl Dispatcher {
             };
             return match look {
                 Look::Rest => {
+                    // Not taken back yet: the record may say so at the next look.
+                    record.window.borrow_mut().paid_untaken = (!observed.took_back).then_some(stop);
                     // What the ledger is told is written first: a failure leaves
                     // the stop owed, and the next look at rest tells it again.
                     if observed.took_back {
@@ -282,6 +289,29 @@ impl Dispatcher {
                 .await?;
         }
         Ok(())
+    }
+
+    /// The look at rest reads the window's turn taken back (`Observed::took_back`) after a
+    /// look paid the stop it was pressed for with the turn not yet taken back: Muse writes
+    /// `run_retracted` 5 to 11 ms after the `terminal cancelled` of a turn stopped before a
+    /// word, a line of its own, and a look between the two read the turn over and nothing
+    /// taken back (T-995's A/B: `muse_window`'s tell case red 2 runs in 5 on main). Its
+    /// brief stayed delivered while Muse put it back in its box, which the next paste
+    /// empties: the resume never gave it again. So it is taken back now, by the rule the
+    /// paying look's is ([`Dispatcher::take_back`]): the record's last message of the
+    /// user's is the task's message still delivered, so one taken back already, or a turn
+    /// some other message began, takes nothing back.
+    fn taken_back_since_paid(
+        &self,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        let paid = record.window.borrow_mut().paid_untaken.take();
+        match paid {
+            Some(stop) => self.take_back(participant, &stop, observed),
+            None => Ok(()),
+        }
     }
 
     /// Whether the window owes the stop: it has not paid one of this task
