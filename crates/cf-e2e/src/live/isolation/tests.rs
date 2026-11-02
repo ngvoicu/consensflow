@@ -135,6 +135,14 @@ impl Owner {
         made
     }
 
+    /// Pi's, on the models `models`, for a run of `run`.
+    fn pi_on(&self, models: &[&str], run: Duration) -> Isolation {
+        let models: Vec<String> = models.iter().map(|model| (*model).to_owned()).collect();
+        let mut made = Isolation::pi_on(self.home.path(), &self.path(".pi/agent"), &models, run);
+        made.parent = self.parent.path().to_path_buf();
+        made
+    }
+
     fn codex(&self) -> Isolation {
         let mut made = Isolation::codex(self.home.path(), &self.path(".codex"));
         made.parent = self.parent.path().to_path_buf();
@@ -378,6 +386,102 @@ fn a_login_that_is_too_short_is_refused_before_anything_is_made_and_one_that_fit
     assert!(!said_anywhere(&said), "{said}");
     // Only the home that fit is on disk.
     assert_eq!(owner.made(), 1);
+}
+
+/// An eval's chief and staff may be on Pi models of two providers (T-785): the home holds the
+/// login of each, and a run is refused where one of them does not last it. A model that names no
+/// provider leaves it to Pi, which gets every login that is fit.
+#[test]
+fn a_pi_run_on_models_of_two_providers_needs_the_login_of_each_and_is_refused_where_one_ends_in_it()
+{
+    let owner = Owner::new();
+    write(&owner.path(".pi/agent/auth.json"), &auth(hours(2)));
+    let both = owner.pi_on(&["openrouter/deepseek/v4", "openai/gpt-6-luna"], hours(1));
+    let home = both.made_at(at(NOW)).unwrap();
+    let copied: Value =
+        serde_json::from_str(&fs::read_to_string(home.join("pi/agent/auth.json")).unwrap())
+            .unwrap();
+    let mut providers: Vec<&String> = copied.as_object().unwrap().keys().collect();
+    providers.sort();
+    assert_eq!(providers, ["openai", "openrouter"]);
+    assert!(!copied.to_string().contains(OTHER), "{copied}");
+    // The `openai` login lasts two hours: a run of two, and its margin, is refused for it.
+    let longer = owner.pi_on(&["openrouter/deepseek/v4", "openai/gpt-6-luna"], hours(2));
+    let said = longer.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` expires in 2 h"), "{said}");
+    assert!(!said.contains("`openrouter`"), "{said}");
+    // One model that names no provider: every fit login, the short one left out.
+    let any = owner.pi_on(&["openai/gpt-6-luna", "deepseek-v4"], hours(2));
+    let home = any.made_at(at(NOW)).unwrap();
+    let copied = fs::read_to_string(home.join("pi/agent/auth.json")).unwrap();
+    assert!(
+        copied.contains("openrouter") && !copied.contains(ACCESS),
+        "{copied}"
+    );
+}
+
+/// A home that keeps what it finds (an eval's, T-785) never fails the rig that ends on it: each
+/// change is kept once, however many rigs end (a long run restarts the app), with the owner's
+/// hashes before the run and after it, and none of what a file holds.
+#[test]
+fn a_home_that_keeps_what_it_finds_never_fails_the_rig_and_keeps_each_change_once_with_the_hashes()
+{
+    for which in ["pi", "codex", "devin", "muse"] {
+        let owner = Owner::new();
+        let isolation = isolation_of(&owner, which).keeping_what_it_finds();
+        assert_eq!(isolation.found(), Some(Found::default()), "{which}");
+        isolation.made_at(at(NOW)).unwrap();
+        assert!(isolation.finish().is_ok(), "{which}");
+        let found = isolation.found().unwrap();
+        assert!(found.changed.is_empty(), "{which}: {found:?}");
+        let checked = found.checked.unwrap();
+        assert!(
+            checked.contains("before the run and after it: ~/"),
+            "{which}: {checked}"
+        );
+        let file = watched(&owner, which).remove(0);
+        let shown = format!(
+            "~/{}",
+            file.strip_prefix(owner.home.path()).unwrap().display()
+        );
+        fs::write(&file, format!("{SENTINEL}-written-by-the-run")).unwrap();
+        for _ in 0..2 {
+            assert!(isolation.finish().is_ok(), "{which}: kept, not failed");
+        }
+        let found = isolation.found().unwrap();
+        assert_eq!(
+            found.changed,
+            [format!("{shown} is not as it was")],
+            "{which}"
+        );
+        let checked = found.checked.unwrap();
+        let (before, after) = checked
+            .strip_prefix(&format!(
+                "the owner's {} setup before the run: ",
+                proper(isolation.harness())
+            ))
+            .and_then(|hashes| hashes.split_once("; after it: "))
+            .unwrap_or_else(|| panic!("{which}: {checked}"));
+        let hash_of = |summary: &str| {
+            summary
+                .split(", ")
+                .find_map(|entry| entry.strip_prefix(&format!("{shown} ")))
+                .map(str::to_owned)
+        };
+        assert_ne!(hash_of(before), hash_of(after), "{which}: {checked}");
+        assert!(hash_of(before).is_some(), "{which}: {checked}");
+        assert!(
+            !checked.contains(SENTINEL) && !said_anywhere(&checked),
+            "{checked}"
+        );
+    }
+    // A home that does not keep them fails the rig, as it always has.
+    let owner = Owner::new();
+    let plain = owner.codex();
+    assert_eq!(plain.found(), None);
+    plain.made_at(at(NOW)).unwrap();
+    fs::write(owner.path(".codex/config.toml"), "written").unwrap();
+    assert!(plain.finish().is_err());
 }
 
 #[test]

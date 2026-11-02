@@ -95,6 +95,7 @@ fn kept<'a>(scene: &'a Scene, breaks: &'a [Break], error: Option<String>) -> Kep
         ending: "the project is done".to_owned(),
         error,
         login: None,
+        homes: Vec::new(),
         log: json!([]),
     }
 }
@@ -153,7 +154,7 @@ fn a_run_with_nothing_broken_and_something_unjudged_is_unresolved_never_a_pass()
 }
 
 #[test]
-fn a_run_that_changed_the_owners_claude_setup_or_refreshed_its_login_fails_with_what_it_did_and_keeps_its_report(
+fn a_run_that_changed_the_owners_setup_of_a_harness_or_refreshed_its_login_fails_with_what_it_did_and_keeps_its_report(
 ) {
     let mut scene = scene();
     scene.schedule.played(
@@ -162,9 +163,13 @@ fn a_run_that_changed_the_owners_claude_setup_or_refreshed_its_login_fails_with_
         "loose".to_owned(),
     );
     let found = "~/.claude/settings.json is not as it was; \
-                 the run's Claude Code wrote a different login in the folder's .credentials.json";
+                 the run's Claude Code wrote a different login in the folder's .credentials.json; \
+                 ~/.pi/agent/auth.json is not as it was";
+    let checked = "the owner's Pi setup before the run: ~/.pi/agent/auth.json 0123456789ab; \
+                   after it: ~/.pi/agent/auth.json ba9876543210";
     let kept = Kept {
         login: Some(found.to_owned()),
+        homes: vec![checked.to_owned()],
         ..kept(&scene, &[], None)
     };
     assert!(!kept.held());
@@ -173,16 +178,18 @@ fn a_run_that_changed_the_owners_claude_setup_or_refreshed_its_login_fails_with_
     assert_eq!(
         kept.why(),
         [format!(
-            "the owner's Claude setup or login was not left as it was: {found}"
+            "the owner's setup or login of a harness was not left as it was: {found}"
         )]
     );
     assert_eq!(
         kept.said_why(),
-        ["the owner's Claude setup or login was not left as it was (what changed is in the report)"]
+        ["the owner's setup or login of a harness was not left as it was (what changed is in the report)"]
     );
     let value = kept.value();
     assert_eq!(value["verdict"], "FAIL");
     assert_eq!(value["login"], found);
+    // The hashes the end checked, before the run and after it, are kept with it.
+    assert_eq!(value["homes"], json!([checked]));
     // The run's evidence is all there: the failure does not take the report from it.
     assert_eq!(value["disruptions"][0]["state"], "played");
     assert_eq!(value["seconds"], 5400);

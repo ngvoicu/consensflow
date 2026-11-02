@@ -50,6 +50,22 @@ either, the live throwaway or the kept copy. The
 dry runs, on the stand-in's models, start no real Claude Code and have no such folder. A test
 holds `cf-evals` to never setting or clearing `CLAUDE_CONFIG_DIR` (`tests/claude_config.rs`).
 
+**Nor do Codex, Pi, Devin or Muse Code run on the owner's logins** (T-785, the class T-724
+closed for the live suites). Every harness with a real window in the run (a model that is not
+the stand-in's) runs on the kit's home of the run's own (`cf_e2e::live::isolation`): `CODEX_HOME`,
+`PI_CODING_AGENT_DIR` or Devin's XDG folders, set by the rig over everything else, holding a copy
+of the login and nothing else of the owner's. Pi is given only the entries of its windows'
+providers (the chief's model and the staff's) that last the run's planned length and half an hour
+more, never an expired one; a login that does not is refused, in words, before the rig starts. At
+the end each home compares the owner's files with their hashes from before the run. What it finds
+does not fail the rig, which would cost the run its report: the report says the owner's hashes
+before and after (on its floor, a line for each harness), fails the check "the owner's setups and
+logins of the run's harnesses were left as they were" where a file changed or a copy of a login was
+written again, and keeps everything else it measured (a long run keeps them as `login` and
+`homes`). `HOME` stays the owner's: the run's folders are below it, and no harness reads its login
+by it. `tests/cli/live_homes.rs` (cf-e2e) holds the evals to setting no variable a harness reads its
+login by.
+
 A run against the stand-in agent, which spends nothing, holds that a run gets to its
 end and says and keeps what it always does (the daemon it ran on, the verdict, a
 report), on a home of its own: `cargo test -p cf-evals --test dry_run -- --ignored

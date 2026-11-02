@@ -308,6 +308,22 @@ pub struct Isolation {
     /// Where the home is made.
     parent: PathBuf,
     made: Mutex<Option<Made>>,
+    /// What `finish` found, kept for the run's report in place of failing the rig, where the run
+    /// keeps it ([`Isolation::keeping_what_it_finds`]); none where it fails the rig.
+    kept: Option<Mutex<Found>>,
+}
+
+/// What the ends of the rigs that used a home found, for a run that keeps it in its report
+/// ([`Isolation::keeping_what_it_finds`]): an eval's, hours of evidence that a finding at its end
+/// is not to cost.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Found {
+    /// What the run did that it was not to, a line each and each once: a file of the owner's not
+    /// as it was, the copy of the login written again. Never what a login holds.
+    pub changed: Vec<String>,
+    /// What the last end checked: the owner's files, each with the first twelve digits of its
+    /// hash. None before a rig that used the home has ended.
+    pub checked: Option<String>,
 }
 
 impl Isolation {
@@ -316,15 +332,23 @@ impl Isolation {
     /// folder is [`super::login`]'s, and where the platform's layout
     /// is not known (Devin's on Windows).
     pub fn of_machine(harness: Harness, home: &Path) -> Result<Option<Self>> {
-        Self::of_machine_lasting(harness, home, RUN)
+        // Pi's home holds the login of the provider of the model the run asked for.
+        let pi = if harness == Harness::Pi {
+            vec![agents::asked()?.of(Harness::Pi).name.clone()]
+        } else {
+            Vec::new()
+        };
+        Self::of_machine_lasting(harness, home, RUN, &pi)
     }
 
-    /// [`Isolation::of_machine`], for a run that takes `run` (an eval states its own length): a
-    /// login that would end before it and [`MARGIN`] is refused when the home is made.
+    /// [`Isolation::of_machine`], for a run that takes `run` (an eval states its own length) and
+    /// whose Pi windows are on the models `pi` (an eval names its own): a login that would end
+    /// before the run and [`MARGIN`] is refused when the home is made.
     pub fn of_machine_lasting(
         harness: Harness,
         home: &Path,
         run: Duration,
+        pi: &[String],
     ) -> Result<Option<Self>> {
         let machine = |name: &str| own_var(name).filter(|value| !value.is_empty());
         // Codex's home is its own folder; the owner's home, which a run says its paths below as
@@ -335,8 +359,7 @@ impl Isolation {
             Harness::Pi => {
                 let agent = machine("PI_CODING_AGENT_DIR")
                     .map_or_else(|| home.join(".pi").join("agent"), PathBuf::from);
-                let model = agents::asked()?.of(Harness::Pi).name.clone();
-                Some(Self::pi(home, &agent, &model, run))
+                Some(Self::pi_on(home, &agent, pi, run))
             }
             #[cfg(unix)]
             Harness::Devin => Some(Self::devin(
@@ -379,7 +402,21 @@ impl Isolation {
     /// Pi's home, copying the login in `agent`, the owner's Pi folder (in the home `home`), that
     /// the Pi model `model` needs, if it lasts a run of `run` and [`MARGIN`].
     pub fn pi(home: &Path, agent: &Path, model: &str, run: Duration) -> Self {
-        let providers = pi::provider_of(model).map(|provider| vec![provider]);
+        Self::pi_on(home, agent, &[model.to_owned()], run)
+    }
+
+    /// [`Isolation::pi`], for a run whose Pi windows are on the models `models` (an eval's chief
+    /// and staff may be on two): the logins of each one's provider, or every login that is fit
+    /// where one of them names none.
+    pub fn pi_on(home: &Path, agent: &Path, models: &[String], run: Duration) -> Self {
+        let mut providers: Option<Vec<String>> = Some(Vec::new());
+        for model in models {
+            match (pi::provider_of(model), providers.as_mut()) {
+                (Some(provider), Some(held)) if !held.contains(&provider) => held.push(provider),
+                (Some(_), _) => {}
+                (None, _) => providers = None,
+            }
+        }
         Self::new(Harness::Pi, home, Plan::pi(agent, providers, run + MARGIN))
     }
 
@@ -397,7 +434,30 @@ impl Isolation {
             plan,
             parent: std::env::temp_dir(),
             made: Mutex::new(None),
+            kept: None,
         }
+    }
+
+    /// This home, whose end keeps what it found ([`Isolation::found`]) in place of failing the
+    /// rig: for a run whose report is hours of evidence, which says the finding and fails there
+    /// (an eval's). The banner is said all the same.
+    #[must_use]
+    pub fn keeping_what_it_finds(mut self) -> Self {
+        self.kept = Some(Mutex::new(Found::default()));
+        self
+    }
+
+    /// The harness whose home this is.
+    pub fn harness(&self) -> Harness {
+        self.harness
+    }
+
+    /// What the ends of the rigs that used the home found, where it keeps that
+    /// ([`Isolation::keeping_what_it_finds`]); none where it fails the rig instead.
+    pub fn found(&self) -> Option<Found> {
+        self.kept
+            .as_ref()
+            .map(|kept| kept.lock().unwrap_or_else(PoisonError::into_inner).clone())
     }
 
     /// The home, made as the clock says `now` is (milliseconds since the epoch): its path.
@@ -525,6 +585,25 @@ impl Isolation {
             proper(self.harness),
             now.summary(&self.owner_home)
         ))
+    }
+
+    /// The owner's files when the home was made and now, each with the first twelve digits of its
+    /// hash, once where they are the same: what a run that keeps its findings has in its report
+    /// whatever they are. None where the home was never made.
+    fn checked(&self) -> Option<String> {
+        let made = self.made.lock().unwrap_or_else(PoisonError::into_inner);
+        let made = made.as_ref()?;
+        let now = Seen::look(&self.plan.watched, &self.plan.records);
+        let (before, after) = (
+            made.owner.summary(&self.owner_home),
+            now.summary(&self.owner_home),
+        );
+        let name = proper(self.harness);
+        Some(if before == after {
+            format!("the owner's {name} setup, before the run and after it: {after}")
+        } else {
+            format!("the owner's {name} setup before the run: {before}; after it: {after}")
+        })
     }
 
     /// What the run did to the owner's setup, and what became of the copies of the login.
@@ -661,6 +740,17 @@ impl HarnessHome for Isolation {
 
     fn finish(&self) -> Result {
         let (touched, refreshed) = self.findings();
+        if let Some(kept) = &self.kept {
+            let mut kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
+            for change in touched.iter().chain(&refreshed) {
+                if !kept.changed.contains(change) {
+                    kept.changed.push(change.clone());
+                }
+            }
+            if let Some(checked) = self.checked() {
+                kept.checked = Some(checked);
+            }
+        }
         if touched.is_empty() && refreshed.is_empty() {
             if let Some(evidence) = self.evidence() {
                 let _ = writeln!(std::io::stderr(), "{evidence}");
@@ -668,8 +758,12 @@ impl HarnessHome for Isolation {
             return Ok(());
         }
         let said = said(self.harness, &touched, &refreshed);
-        // The error is the case's to fail with; the banner is for whoever reads the output.
+        // The error is the case's to fail with; the banner is for whoever reads the output. A
+        // home that keeps what it found has it in the run's report, which fails there.
         let _ = writeln!(std::io::stderr(), "{said}");
+        if self.kept.is_some() {
+            return Ok(());
+        }
         Err(Error::Daemon(said))
     }
 }

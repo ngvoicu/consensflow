@@ -68,9 +68,12 @@ pub struct Kept<'a> {
     pub ending: String,
     /// What stopped the run before its end, if anything did.
     pub error: Option<String>,
-    /// What the run did to the owner's Claude setup, or to the copy of the login its Claude Code
-    /// windows ran on (refreshed: the owner's may be stale), if it did anything.
+    /// What the run did to the owner's setup of a harness, or to the copy of the login its windows
+    /// ran on (refreshed: the owner's may be stale), if it did anything.
     pub login: Option<String>,
+    /// What the end checked of the owner's files of each harness on a home of the kit's: their
+    /// hashes before the run and after it, a line each.
+    pub homes: Vec<String>,
     pub log: Value,
 }
 
@@ -165,9 +168,9 @@ impl Kept<'_> {
         }
         if let Some(login) = &self.login {
             why.push(if words {
-                format!("the owner's Claude setup or login was not left as it was: {login}")
+                format!("the owner's setup or login of a harness was not left as it was: {login}")
             } else {
-                "the owner's Claude setup or login was not left as it was (what changed is in the report)"
+                "the owner's setup or login of a harness was not left as it was (what changed is in the report)"
                     .to_owned()
             });
         }
@@ -283,6 +286,7 @@ impl Kept<'_> {
             "ending": self.ending,
             "error": self.error(),
             "login": self.login,
+            "homes": self.homes,
             "daemon": self.daemon,
             "home": self.home,
             "ask": options.ask.name(),

@@ -555,6 +555,7 @@ fn a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_r
         ending: DONE.to_owned(),
         error: None,
         login: None,
+        homes: Vec::new(),
         log: serde_json::Value::Null,
     };
     let value = kept.value();
@@ -670,6 +671,7 @@ fn a_findings_screen_and_words_stay_in_the_local_report_and_the_console_says_its
         ending: DONE.to_owned(),
         error: Some(format!("the rig could not close: {secret}")),
         login: None,
+        homes: Vec::new(),
         log,
     };
     let folder = tempfile::tempdir().unwrap();
