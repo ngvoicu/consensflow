@@ -371,3 +371,62 @@ fn the_variables_the_words_set_are_the_ones_the_live_tests_read() {
         "the rule that makes the variable of a flag is not the one xtask has"
     );
 }
+
+/// The live tests of this checkout, as `cargo xtask live` finds them.
+fn checkout_tests() -> Vec<String> {
+    tests(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn every_run_of_every_set_names_a_live_test_of_the_checkout_and_reads_as_its_words_say() {
+    let names = checkout_tests();
+    for (set, lines) in SETS {
+        let (name, runs) = set_runs(&words(&format!("--set {set}")), &names).unwrap();
+        assert_eq!(name, *set);
+        assert_eq!(runs.len(), lines.len());
+        for ((line, asked), given) in runs.iter().zip(lines.iter()) {
+            assert_eq!(line, given);
+            assert_eq!(asked, &parse(&words(given), &names).unwrap());
+        }
+    }
+}
+
+#[test]
+fn the_windows_set_holds_the_typed_marks_of_parity_for_codex_and_devin() {
+    let (_, lines) = SETS.iter().find(|(set, _)| *set == "windows").unwrap();
+    assert!(lines.contains(&"parity codex devin"), "{lines:?}");
+    let (_, runs) = set_runs(&words("--set windows"), &checkout_tests()).unwrap();
+    let (_, parity) = runs
+        .iter()
+        .find(|(line, _)| line.starts_with("parity"))
+        .unwrap();
+    assert_eq!(parity.test, "parity");
+    assert_eq!(
+        parity.vars,
+        [var("CONSENSFLOW_LIVE_HARNESS", "codex,devin")]
+    );
+}
+
+#[test]
+fn a_set_that_is_none_or_words_after_its_name_are_refused_saying_which_sets_there_are() {
+    let names = checkout_tests();
+    let refused = |line: &str| match set_runs(&words(line), &names) {
+        Err(Failure::Usage(said)) => said,
+        other => panic!("{line}: {other:?}"),
+    };
+    assert_eq!(refused("--set mac"), "no set is called mac: windows");
+    assert_eq!(
+        refused("--set"),
+        "--set takes the name of a set, and nothing after it: windows"
+    );
+    assert_eq!(
+        refused("--set windows codex"),
+        "--set takes the name of a set, and nothing after it: windows"
+    );
+}

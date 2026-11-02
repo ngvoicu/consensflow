@@ -263,43 +263,137 @@ fn the_complex_launch_wants_tasks_in_parallel_advice_a_review_questions_a_note_a
     );
 }
 
-#[test]
-fn the_conversation_wants_changes_on_the_board_the_english_page_a_workers_and_the_work_done() {
-    let english = Task {
-        title: "Translate the evaluation page to English".to_owned(),
+fn titled(pool: Option<&str>, title: &str) -> Task {
+    Task {
+        pool: pool.map(str::to_owned),
+        title: title.to_owned(),
+        state: "accepted".to_owned(),
         ..Task::default()
-    };
+    }
+}
+
+#[test]
+fn the_conversation_wants_the_owners_changes_on_the_board_the_english_page_a_workers_the_work_done_and_no_edit_of_the_chiefs(
+) {
     let good = Metrics {
-        tasks: vec![task(None, "accepted"), task(None, "accepted"), english],
+        tasks: vec![
+            titled(Some("worker"), "Corectează ghidul: scorul de la 0 la 10"),
+            titled(
+                Some("worker"),
+                "Move the colours of style.css into CSS variables",
+            ),
+            titled(Some("worker"), "Translate the evaluation page to English"),
+        ],
         files_changed: vec!["site/en/evaluare.html".to_owned()],
+        chief_edits: Some(0),
         ..Metrics::default()
     };
     assert!(failing("conversation", &good).is_empty());
-    assert_eq!(
-        failing(
-            "conversation",
-            &Metrics {
-                tasks: vec![task(None, "accepted"); 3],
-                files_changed: Vec::new(),
-                ..Metrics::default()
-            }
-        ),
-        [
-            "the English page is a worker’s (a translation runs on its own)",
-            "the work is done: the English evaluation page exists",
-        ]
-    );
-    // The title may name the file instead of the language.
-    let by_file = Task {
-        title: "Create en/evaluare.html".to_owned(),
-        ..Task::default()
-    };
-    let titled = Metrics {
-        tasks: vec![task(None, "x"), task(None, "x"), by_file],
-        files_changed: good.files_changed,
+    // A chief whose edits are not counted (not Claude's) is not held to them.
+    assert!(failing(
+        "conversation",
+        &Metrics {
+            chief_edits: None,
+            ..good.clone()
+        }
+    )
+    .is_empty());
+    // Three tasks of the chief's own plan carry none of the owner's changes; the English
+    // page's task must name the evaluation page; a chief's edit is a change it made itself.
+    let planned = Metrics {
+        tasks: vec![
+            titled(
+                Some("worker"),
+                "Create \"Despre noi\" (About us) pages in both Romanian and English.",
+            ),
+            titled(
+                Some("worker"),
+                "Create \"FAQ\" pages in both Romanian and English.",
+            ),
+            titled(
+                Some("worker"),
+                "Create \"Contact\" pages in both Romanian and English.",
+            ),
+        ],
+        files_changed: good.files_changed.clone(),
+        chief_edits: Some(1),
         ..Metrics::default()
     };
-    assert!(failing("conversation", &titled).is_empty());
+    assert_eq!(
+        failing("conversation", &planned),
+        [
+            "at least three of the owner's changes go to the board",
+            "the English evaluation page is a worker’s task (a translation runs on its own)",
+            "the chief makes no change itself: its own edits are 0 (counted for a Claude chief only)",
+        ]
+    );
+    // An advisor's or a reviewer's task is no worker's, and two changes are not three.
+    let advised = Metrics {
+        tasks: vec![
+            titled(
+                Some("advisor"),
+                "Should the English evaluation page be a copy?",
+            ),
+            titled(Some("worker"), "Add the evaluation link to the footer"),
+            titled(Some("worker"), "Update the README"),
+        ],
+        ..good.clone()
+    };
+    assert_eq!(
+        failing("conversation", &advised),
+        ["the English evaluation page is a worker’s task (a translation runs on its own)"]
+    );
+    let two = Metrics {
+        tasks: vec![
+            titled(Some("worker"), "Create en/evaluare.html"),
+            titled(Some("worker"), "Titlul paginii principale"),
+            titled(Some("worker"), "Check every internal link"),
+        ],
+        ..good.clone()
+    };
+    assert_eq!(
+        failing("conversation", &two),
+        ["at least three of the owner's changes go to the board"]
+    );
+    // The title may name the file instead of the language.
+    let by_file = Metrics {
+        tasks: vec![
+            titled(None, "Create en/evaluare.html"),
+            titled(None, "Ghidul managerului: 0 la 10"),
+            titled(None, "README: ce s-a schimbat azi"),
+        ],
+        ..good
+    };
+    assert!(failing("conversation", &by_file).is_empty());
+}
+
+/// The live run that found the conversation's expectations too weak (T-972, 2026-10-31,
+/// `cargo xtask eval chiefs --chiefs claude`: Claude Code 2.1.316 on Haiku 4.5, effort medium,
+/// 910 s), recorded whole (`eval-conversation-haiku`): the chief put three tasks of its own plan
+/// on the board, made all seven of the owner's changes itself and wrote the English evaluation
+/// page itself. The three expectations of the time all held on it; it now reads as the bug.
+#[test]
+fn the_haiku_chief_that_did_every_change_itself_reads_as_the_bug_and_not_as_held() {
+    let mut metrics = crate::support::measured("eval-conversation-haiku");
+    // The files a run changed are measured from its workspace, which a recording does not keep:
+    // the run's report had `site/en/evaluare.html` among its 17.
+    assert!(metrics.files_changed.is_empty());
+    metrics.files_changed = vec!["site/en/evaluare.html".to_owned()];
+    // What held the old expectations: three tasks, each with "English" in its title, the page there.
+    assert_eq!(metrics.tasks.len(), 3);
+    assert!(metrics
+        .tasks
+        .iter()
+        .all(|task| task.title.contains("English")));
+    assert_eq!(metrics.chief_edits, Some(19));
+    assert_eq!(
+        failing("conversation", &metrics),
+        [
+            "at least three of the owner's changes go to the board",
+            "the English evaluation page is a worker’s task (a translation runs on its own)",
+            "the chief makes no change itself: its own edits are 0 (counted for a Claude chief only)",
+        ]
+    );
 }
 
 #[test]

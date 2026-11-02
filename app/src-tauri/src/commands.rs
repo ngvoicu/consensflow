@@ -108,7 +108,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
         id,
         generation,
         sequence,
-        InputWork::Write(bytes),
+        InputWork::Reply(bytes),
         false,
     )
 }
@@ -696,6 +696,130 @@ mod tests {
             .map(|byte| u8::from_str_radix(std::str::from_utf8(byte).unwrap(), 16).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(actual, b"KC");
+
+        drop(webview);
+        drop(app);
+    }
+
+    /// The page's terminal answers what the program asked of it (where its cursor is) past
+    /// the human's keys held after their paste (T-1048): Codex on Windows asks as a paste comes
+    /// and reads none of it until it has the answer, and the page's answer waited behind the
+    /// human's held Enter. Here the program records what it reads: the answer, sent once the
+    /// paste and its Enter were admitted, comes back at once and is read before the Enter.
+    #[cfg(unix)]
+    #[test]
+    fn the_pages_reply_goes_past_the_humans_keys_held_after_their_paste() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("replied-command", 1);
+        let paste: &[u8] = b"\x1b[200~ab\x1b[201~";
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "/bin/stty raw -echo; printf ready; /usr/bin/od -An -tx1 -N {}",
+                        paste.len() + 2
+                    ),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open the replied pane");
+        // Held until the window draws the paste, which the recorder never does: at the most.
+        let silent = cf_proto::panes::SilentPaste {
+            pace_us_per_character: 0,
+            drawn_after_ms: 0,
+            quiet_ms: 100,
+            most_ms: 1_500,
+            most_us_per_character: 0,
+        };
+        arbiter
+            .register_with(&key, Some(silent))
+            .expect("register the replied pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut ready = [0; 5];
+        reader
+            .read_exact(&mut ready)
+            .expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+
+        let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .invoke_handler(tauri::generate_handler![
+                pane_input_enqueue,
+                pane_reply_enqueue,
+                pane_input_wait
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build mock webview");
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: command.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().expect("invoke URL"),
+                    body: tauri::ipc::InvokeBody::Json(args),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .expect("command succeeds")
+            .deserialize::<Value>()
+            .expect("command response JSON")
+        };
+
+        let pasted = [paste, b"\r"].concat();
+        let typed = invoke(
+            "pane_input_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":1,"bytes":pasted}),
+        );
+        assert_eq!(typed["ok"], true, "{typed}");
+        thread::sleep(Duration::from_millis(200));
+        let replied = invoke(
+            "pane_reply_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":2,"bytes":[82]}),
+        );
+        assert_eq!(replied["ok"], true, "{replied}");
+        let asked = std::time::Instant::now();
+        let answered = invoke("pane_input_wait", json!({"ticket":replied["ticket"]}));
+        assert_eq!(answered["ok"], true, "{answered}");
+        assert!(
+            asked.elapsed() < Duration::from_millis(1_000),
+            "{:?}: the page's answer waited behind the human's held Enter",
+            asked.elapsed()
+        );
+        let sent = invoke("pane_input_wait", json!({"ticket":typed["ticket"]}));
+        assert_eq!(sent["ok"], true, "{sent}");
+        let mut output = Vec::new();
+        reader
+            .read_to_end(&mut output)
+            .expect("read the replied bytes");
+        let actual = output
+            .split(|byte| byte.is_ascii_whitespace())
+            .filter(|field| !field.is_empty())
+            .map(|byte| u8::from_str_radix(std::str::from_utf8(byte).unwrap(), 16).unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            actual.ends_with(b"R\r"),
+            "the answer came after the Enter: {actual:?}"
+        );
 
         drop(webview);
         drop(app);

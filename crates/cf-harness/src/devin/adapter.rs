@@ -55,7 +55,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
-use cf_proto::panes::HumanInput;
+use cf_proto::panes::{HumanInput, SilentPaste};
 use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
@@ -260,6 +260,17 @@ impl DevinAdapter {
 /// Devin 3000.11.92 on macOS and on Windows, 2026-10-21).
 const CLEAR_INPUT: [u8; 1] = [0x03];
 
+/// How Devin reads a paste ([`DevinAdapter::silent_paste`]), on every platform: about 20 µs a
+/// character; its draw of the paste is the first thing it prints after it; then 80 ms of quiet;
+/// and at the most a second and 0.1 ms a character.
+const DEVIN_PASTE: SilentPaste = SilentPaste {
+    pace_us_per_character: 20,
+    drawn_after_ms: 0,
+    quiet_ms: 80,
+    most_ms: 1_000,
+    most_us_per_character: 100,
+};
+
 impl Adapter for DevinAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
@@ -359,6 +370,20 @@ impl Adapter for DevinAdapter {
                 Reading::Unknown(_) => None,
             }
         })
+    }
+
+    /// Devin loses an Enter that comes before it has drawn a paste: the paste stays in its box.
+    /// A measured heuristic (T-1086, Devin 3000.11.234, 2026-11-02), on every platform:
+    /// - on Windows (zeewin2) it reads the paste's key presses and draws what it read only once it
+    ///   has read it all: a line about 10 ms after the paste, 7,775 characters (`[Pasted text #1
+    ///   +114 lines]`) at about 140-160 ms, about 0.02 ms a character, printing nothing before. An
+    ///   Enter in the paste's own write was lost at every length, and one 59 ms after the long
+    ///   paste, while one 56 ms after the line and 153 ms after the long paste went;
+    /// - on the Mac the terminal hands it the paste whole and it draws it at once (0-10 ms at
+    ///   either length), yet it lost an Enter in the paste's own write at every length, while one
+    ///   64 ms after the paste went.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        Some(DEVIN_PASTE)
     }
 
     /// Devin's own status line says it: "esc twice to interrupt". The same

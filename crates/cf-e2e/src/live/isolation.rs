@@ -422,6 +422,12 @@ impl Isolation {
         self
     }
 
+    /// The owner's home: the person's, whatever folder of it the harness reads its login from
+    /// (Codex's is `~/.codex`).
+    pub fn owner_home(&self) -> &Path {
+        &self.owner_home
+    }
+
     /// The home, made as the clock says `now` is (milliseconds since the epoch): its path.
     fn made_at(&self, now: i64) -> Result<PathBuf> {
         let mut made = self.made.lock().unwrap_or_else(PoisonError::into_inner);

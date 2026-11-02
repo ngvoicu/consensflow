@@ -1,0 +1,317 @@
+# A human's paste into a Codex window on Windows stayed in its box after Enter (T-1025, T-1048;
+# `codex-windows-ignores-enter-after-paste` in consensflow-sme). On Windows the console hands a
+# paste on to the program as key presses, and Codex reads them without drawing anything (a
+# 7,775-character paste for about 4.5 s on zeewin2), taking an Enter that comes meanwhile for a
+# line break in the paste. Its adapter declares it (`Adapter::silent_paste`, Codex on Windows
+# alone); the engine opens the window with it, the daemon says it in `pane.open`'s
+# `silentPaste`, and the pane host holds the human's keys after their paste in that window
+# until it has drawn it: never sooner than its pace, by a print 50 ms or more after the paste,
+# then 120 ms of quiet, at the most a second and a millisecond a character; and the terminal's
+# replies go past that hold on a worker of their own (Codex asks where the cursor is as a paste
+# comes, and read nothing of it while the answer waited behind the held Enter). A window whose
+# harness declares nothing has the human's keys as they come. The live suite types as the page
+# does (`pane.typed`, line breaks as carriage returns), judges a paste by the trace or the
+# chief's answer drawn, and says when each Enter was written.
+#
+# One plant takes one rule out; a test fails. The Windows ones (`platforms = ["windows"]`) run
+# the console tests on a Windows machine. Every name holds `paste enter`, so
+# `npm run plants:daemon -- "paste enter"` runs them all.
+
+[run]
+paste-enter-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "panes::tests::a_silent_paste_says_its_read_time_and_its_cap_for_a_pastes_length"]
+paste-enter-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "silent_paste::"]
+paste-enter-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "background::a_window_is_opened_with_how_its_harness_reads_a_paste_where_it_reads_one_silently"]
+paste-enter-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests::an_open_of_a_harness_that_reads_a_paste_silently_says_how"]
+paste-enter-open = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::the_daemons_own_keys_hold_no_paste_and_no_claim"]
+paste-enter-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::"]
+paste-enter-bridge-reply = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste"]
+paste-enter-page-reply = ["cargo", "test", "--offline", "-p", "app", "--lib", "commands::tests::the_pages_reply_goes_past_the_humans_keys_held_after_their_paste"]
+paste-enter-replies = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_terminals_reply_goes_past_the_humans_keys_held_after_their_paste"]
+paste-enter-console = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::windows::"]
+paste-enter-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter", "tests::"]
+
+# --- the declaration ---
+
+[[plant]]
+name = "paste enter: a silent paste's wait is not for the paste's length"
+meant = "a_silent_paste_says_its_read_time_and_its_cap_for_a_pastes_length"
+runs = ["paste-enter-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/panes.rs"
+find = "        per_character_ms(self.pace_us_per_character, characters)"
+replace = "        per_character_ms(self.pace_us_per_character, 1)"
+
+[[plant]]
+name = "paste enter: Codex's adapter declares no silent paste on Windows"
+meant = "on_windows_codex_and_devin_read_a_paste_silently_at_their_measured_paces"
+runs = ["paste-enter-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "        self.services.env.on_windows().then_some(CODEX_ON_WINDOWS)"
+replace = "        None"
+
+[[plant]]
+name = "paste enter: Codex's adapter declares a silent paste on every platform"
+meant = "elsewhere_devin_alone_reads_a_paste_silently_at_the_same_pace"
+platforms = ["macos"]
+runs = ["paste-enter-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "        self.services.env.on_windows().then_some(CODEX_ON_WINDOWS)"
+replace = "        Some(CODEX_ON_WINDOWS)"
+
+[[plant]]
+name = "paste enter: Devin's adapter declares no silent paste"
+meant = "on_windows_codex_and_devin_read_a_paste_silently_at_their_measured_paces"
+runs = ["paste-enter-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        Some(DEVIN_PASTE)"
+replace = "        None"
+
+[[plant]]
+name = "paste enter: Devin's adapter declares a silent paste on Windows alone"
+meant = "elsewhere_devin_alone_reads_a_paste_silently_at_the_same_pace"
+platforms = ["macos"]
+runs = ["paste-enter-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        Some(DEVIN_PASTE)"
+replace = "        self.services.env.on_windows().then_some(DEVIN_PASTE)"
+
+[[plant]]
+name = "paste enter: the engine opens a window without its adapter's silent paste"
+meant = "a_window_is_opened_with_how_its_harness_reads_a_paste_where_it_reads_one_silently"
+runs = ["paste-enter-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            silent_paste: adapter.silent_paste(),"
+replace = "            silent_paste: None,"
+
+[[plant]]
+name = "paste enter: the daemon's pane.open says nothing of a silent paste"
+meant = "an_open_of_a_harness_that_reads_a_paste_silently_says_how"
+runs = ["paste-enter-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''            body["silentPaste"] = json!(silent);'''
+replace = '''            let _ = silent;'''
+
+[[plant]]
+name = "paste enter: the pane host opens a pane without its silent paste"
+meant = "the_daemons_own_keys_hold_no_paste_and_no_claim"
+platforms = ["macos"]
+runs = ["paste-enter-open"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "            .register_with(&streamed.key, request.silent_paste)"
+replace = "            .register_with(&streamed.key, None)"
+
+[[plant]]
+name = "paste enter: a pane's generation keeps no word on how it reads a paste"
+meant = "a_panes_word_on_how_it_reads_a_paste_is_its_generations"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            state.silent_paste = silent_paste;"
+replace = "            let _ = silent_paste;"
+
+# --- the pane host's hold ---
+
+[[plant]]
+name = "paste enter: the human's paste and its Enter in one write go as one"
+meant = "a_humans_paste_and_its_enter_in_one_write_go_as_two_the_enter_once_the_window_took_it"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            for part in pasted_parts(bytes) {"
+replace = "            for part in [bytes] {"
+
+[[plant]]
+name = "paste enter: the human's keys after their paste go at once"
+meant = "a_humans_enter_while_the_window_still_reads_their_paste_waits_until_it_drew_it"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            timing.wait(&output, at);"
+replace = "            drop((output, at, timing));"
+
+[[plant]]
+name = "paste enter: no paste of the human's is marked to wait on"
+meant = "a_humans_enter_while_the_window_still_reads_their_paste_waits_until_it_drew_it"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                        state.human_pasted = Some((Instant::now(), timing));"
+replace = "                        let _ = timing;"
+
+[[plant]]
+name = "paste enter: the wait for the human's paste starts when their Enter comes"
+meant = "a_humans_enter_after_the_window_took_their_paste_goes_at_once"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """
+    fn wait(&self, output: &OutputClock, pasted: Instant) {
+        loop {"""
+replace = """
+    fn wait(&self, output: &OutputClock, pasted: Instant) {
+        let _ = pasted;
+        let pasted = Instant::now();
+        loop {"""
+
+[[plant]]
+name = "paste enter: a window's answer to the paste's first key is taken for its draw"
+meant = "a_print_at_once_after_the_paste_is_not_its_draw_and_the_enter_waits_for_the_draw"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                .filter(|quiet| *quiet < since && since - quiet >= self.drawn_after_ms);"
+replace = "                .filter(|quiet| *quiet < since);"
+
+[[plant]]
+name = "paste enter: the human's Enter goes before the window could have read the paste"
+meant = "a_humans_enter_waits_at_least_as_long_as_the_window_takes_to_read_the_paste"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            least_ms: silent.read_ms(characters),"
+replace = "            least_ms: 0,"
+
+[[plant]]
+name = "paste enter: the cap on the human's wait is not for the paste's length"
+meant = "a_window_that_never_draws_the_paste_has_the_enter_at_its_cap_for_the_pastes_length"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            most_ms: silent.most_ms(characters),"
+replace = "            most_ms: silent.most_ms,"
+
+[[plant]]
+name = "paste enter: a paste's characters are counted with its markers"
+meant = "a_pastes_characters_are_counted_between_its_markers"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "        .map_or(body, |start| &body[start + PASTE_START.len()..]);"
+replace = "        .map_or(body, |_| body);"
+
+[[plant]]
+name = "paste enter: a window that declares nothing has the human's keys held"
+meant = "a_window_whose_harness_declares_no_silent_paste_has_the_humans_keys_as_they_came"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "        if let Some(silent) = silent {"
+replace = "        if let Some(silent) = silent.or(Some(SilentPaste { pace_us_per_character: 0, drawn_after_ms: 0, quiet_ms: 0, most_ms: 20, most_us_per_character: 0 })) {"
+
+[[plant]]
+name = "paste enter windows: an Enter pressed while the console still hands on the paste goes at once"
+meant = "a_humans_enter_pressed_while_their_long_paste_is_read_sends_it_through_the_console"
+platforms = ["windows"]
+runs = ["paste-enter-console"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            timing.wait(&output, at);"
+replace = "            drop((output, at, timing));"
+
+[[plant]]
+name = "paste enter windows: the human's paste and its Enter in one write reach the console as one"
+meant = "a_humans_paste_and_its_enter_in_one_write_send_it_through_the_console"
+platforms = ["windows"]
+runs = ["paste-enter-console"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            for part in pasted_parts(bytes) {"
+replace = "            for part in [bytes] {"
+
+# --- the terminal's replies ---
+
+[[plant]]
+name = "paste enter: the terminal's replies wait behind the human's held keys"
+meant = "a_terminals_reply_goes_past_the_humans_keys_held_after_their_paste"
+platforms = ["macos"]
+runs = ["paste-enter-replies"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "            InputWork::Reply(_) => &route.replies,"
+replace = "            InputWork::Reply(_) => &route.sender,"
+
+[[plant]]
+name = "paste enter: the pane host takes the bridge's pane.reply for the daemon's keys"
+meant = "a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste"
+platforms = ["macos"]
+runs = ["paste-enter-bridge-reply"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "            if reply {"
+replace = "            if false {"
+
+[[plant]]
+name = "paste enter: the page's reply is enqueued as the human's keys' worker's"
+meant = "the_pages_reply_goes_past_the_humans_keys_held_after_their_paste"
+platforms = ["macos"]
+runs = ["paste-enter-page-reply"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = """        InputWork::Reply(bytes),
+        false,"""
+replace = """        InputWork::Write(bytes),
+        false,"""
+
+# --- the live suite ---
+
+[[plant]]
+name = "paste enter: the live paste's line breaks are written as line feeds"
+meant = "a_pastes_line_breaks_are_written_as_the_pages_terminal_sends_them"
+runs = ["paste-enter-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = """    let typed = text.replace("\\r\\n", "\\r").replace('\\n', "\\r");"""
+replace = """    let typed = text.to_owned();"""
+
+[[plant]]
+name = "paste enter: a live case's line does not say when its Enter was written"
+meant = "a_cases_line_says_when_its_enter_was_written_and_the_screen_where_it_was_kept"
+runs = ["paste-enter-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = "        entered.as_millis()"
+replace = "        0"
+
+[[plant]]
+name = "paste enter: a live case takes the paste still in the box for the chief's answer"
+meant = "a_window_answered_where_it_drew_the_word_alone_and_not_where_the_paste_holds_it"
+runs = ["paste-enter-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_enter.rs"
+find = """        line.trim_start_matches(|character: char| !character.is_alphanumeric())
+            .trim_end()
+            == word"""
+replace = """        line.contains(word)"""
