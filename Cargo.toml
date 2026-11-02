@@ -152,3 +152,8 @@ unwrap_used = "deny"
 expect_used = "deny"
 print_stdout = "deny"
 print_stderr = "deny"
+
+# The live kit hashes the owner's launchers around every run (`cf_e2e::live::launcher`, T-1082): a
+# Claude Code is 310 MB, a Muse 423 MB, and the hash of one took 12 s unoptimized in a test build.
+[profile.dev.package.sha2]
+opt-level = 3
