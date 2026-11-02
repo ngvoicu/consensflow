@@ -8,7 +8,8 @@ use cf_e2e::live::members::{member, named, stand_in_chief, Plan};
 use cf_e2e::live::Harness;
 use cf_e2e::Result;
 
-use crate::{midturn, slow, stuck};
+use crate::midturn::{self, tool};
+use crate::{slow, stuck};
 
 /// A case of the check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,12 +136,20 @@ pub fn plan_of(case: Case, harness: Harness, options: &Options) -> Plan {
             .with_file(stuck::SCRIPT, stuck::script_text()),
         // Their folders tell a window to do what each message asks, and run no tools but
         // the one a message tells it to.
-        Case::MidTurn | Case::MidTool | Case::MidWsl | Case::MidBg => Plan::new(
+        Case::MidTurn | Case::MidWsl => Plan::new(
             &format!("stops-{name}-{}", harness.name()),
             stand_in_chief(),
         )
         .with(member(harness))
         .told(midturn::FOLDER_BRIEF),
+        // The command they run is the project's ticker.
+        Case::MidTool | Case::MidBg => Plan::new(
+            &format!("stops-{name}-{}", harness.name()),
+            stand_in_chief(),
+        )
+        .with(member(harness))
+        .told(midturn::FOLDER_BRIEF)
+        .with_file(tool::TICKER, tool::ticker_text().to_owned()),
         _ => Plan::new(&format!("stops-{name}"), stand_in_chief()).with(member(harness)),
     }
 }
@@ -237,7 +246,7 @@ mod tests {
         assert_eq!(folder(Case::MidTool, Harness::Devin), "stops-midtool-devin");
         let midtool = plan_of(Case::MidTool, Harness::Codex, &options);
         assert_eq!(midtool.brief, midturn::FOLDER_BRIEF);
-        assert!(midtool.files.is_empty());
+        assert_eq!(midtool.files[0].0, "tick-cf-stops-live.cjs");
         assert_eq!(midtool.roster[1]["kind"], "codex");
         let stuck = plan_of(Case::Stuck, Harness::Codex, &options);
         assert_eq!(stuck.files[0].0, "ignore-signals-cf-stops-live.cjs");
