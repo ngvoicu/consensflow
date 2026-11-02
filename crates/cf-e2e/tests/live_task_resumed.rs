@@ -245,10 +245,11 @@ fn deliveries_since(members: &Members, since_ms: i64) -> Vec<String> {
         })
         .map(|event| {
             format!(
-                "+{:.1} s {} {}",
+                "+{:.1} s {} {}{}",
                 (at_ms(event).unwrap_or(since_ms) - since_ms) as f64 / 1000.0,
                 text(&event["kind"]),
-                format!("{}{}", event["data"], held_reason(event))
+                event["data"],
+                held_reason(event)
             )
         })
         .collect()

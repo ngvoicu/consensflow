@@ -171,8 +171,8 @@ runs = ["engine-dispatcher-resumed-at-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = '        let Some((words, state)) = waiting.filter(|(_, state)| state != "delivering") else {'
-replace = '        let Some((words, state)) = waiting.filter(|_| true) else {'
+find = '        let Some((words, _)) = waiting.filter(|(_, state)| state != "delivering") else {'
+replace = '        let Some((words, _)) = waiting.filter(|_| true) else {'
 
 [[plant]]
 name = "resume shows working: the queue holds the task's own words back for its being at work"

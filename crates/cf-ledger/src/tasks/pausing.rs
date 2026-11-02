@@ -651,14 +651,13 @@ pub(crate) fn work_while_resumed(
             "queued" => resume_words(store, &task)?,
             _ => None,
         };
-        let Some((words, state)) = waiting.filter(|(_, state)| state != "delivering") else {
+        let Some((words, _)) = waiting.filter(|(_, state)| state != "delivering") else {
             return Err(LedgerError::refused_with(
                 "not-resumed",
                 format!("T-{number} is not waiting for the words that resume it"),
                 409,
             ));
         };
-        debug_assert_ne!(state, "delivering");
         store.move_task(
             &task,
             "working",
