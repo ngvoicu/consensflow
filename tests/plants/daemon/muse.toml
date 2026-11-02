@@ -62,6 +62,7 @@ muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claud
 muse-tui-probes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_posture", "off_a_mac"]
 muse-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes::"]
 muse-live-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_notes", "tests::"]
+muse-live-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
 muse-live-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "codex_devin::tests::"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
@@ -3547,3 +3548,16 @@ runs = ["muse-live-parity"]
 file = "crates/cf-e2e/tests/live_parity/codex_devin.rs"
 find = '''        "hooks": { "SessionStart": [ { "matcher": "", "hooks": [ {'''
 replace = '''        "no_hooks": { "SessionStart": [ { "matcher": "", "hooks": [ {'''
+
+# MUS-17 (T-954): live stops' midtool told the member to run `ping` by name because the run found
+# it on its own PATH; Muse's shell on the Mac had no /sbin, and its member's "ping: command not
+# found" read as a member that never ran its command. The ping is told by the path it was found at.
+[[plant]]
+name = "muse: live stops' midtool tells the member a ping by name its shell may not find"
+meant = "the_command_of_this_machine_is_its_own_ping_or_a_sleep_of_the_same_time"
+runs = ["muse-live-stops-tool"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
+find = '''            Ok(at) => Self::ping_at(&at),'''
+replace = '''            Ok(_) => Self::ping(false),'''

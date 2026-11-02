@@ -53,6 +53,9 @@ pub const SECONDS: u64 = 60;
 pub struct Command {
     /// The command line, as the member is told to run it.
     text: String,
+    /// The program's name, where `text` names it by a path: what the line of its process
+    /// ends its program's word with ([`runs_command`]).
+    program: Option<String>,
     /// What the line of its process holds, and nothing else of the machine's does.
     mark: String,
     /// What it prints as it goes, which no other thing on the screen says.
@@ -69,8 +72,22 @@ impl Command {
         let mark = format!("{flag} {} 127.0.0.1", SECONDS + 1);
         Self {
             text: format!("ping {mark}"),
+            program: None,
             mark,
             replies: Some("from 127.0.0.1"),
+        }
+    }
+
+    /// [`Command::ping`] elsewhere than Windows, its program named by the path `at` the run
+    /// found it at: a window's shell need not have the run's `PATH`. Muse's on the Mac had no
+    /// `/sbin`, where `ping` is, and its member answered `ping: command not found` (T-954's
+    /// `live stops muse --case midtool`), which read as a member that never ran its command.
+    pub fn ping_at(at: &std::path::Path) -> Self {
+        let bare = Self::ping(false);
+        Self {
+            text: format!("{} {}", at.display(), bare.mark),
+            program: Some("ping".to_owned()),
+            ..bare
         }
     }
 
@@ -82,6 +99,7 @@ impl Command {
         let mark = text.strip_prefix("ping ").unwrap_or(&text).to_owned();
         Self {
             text,
+            program: None,
             mark,
             replies: None,
         }
@@ -91,11 +109,12 @@ impl Command {
     /// a `ping` to run (Windows has, and elsewhere the program is looked for on the `PATH`
     /// of the run), and else a `sleep` of the same time, which says nothing as it goes.
     pub fn here() -> Self {
-        let windows = cfg!(windows);
-        if windows || command("ping").is_ok() {
-            Self::ping(windows)
-        } else {
-            Self::quiet(SECONDS, false)
+        if cfg!(windows) {
+            return Self::ping(true);
+        }
+        match command("ping") {
+            Ok(at) => Self::ping_at(&at),
+            Err(_) => Self::quiet(SECONDS, false),
         }
     }
 
@@ -116,7 +135,10 @@ impl Command {
     /// command: as it was told, or by its program's path as PowerShell starts it
     /// ([`runs_command`]).
     pub fn runs_in(&self, line: &str) -> bool {
-        runs_command(line, &self.text)
+        match &self.program {
+            Some(program) => runs_command(line, &format!("{program} {}", self.mark)),
+            None => runs_command(line, &self.text),
+        }
     }
 }
 
@@ -334,13 +356,34 @@ mod tests {
     #[test]
     fn the_command_of_this_machine_is_its_own_ping_or_a_sleep_of_the_same_time() {
         let here = Command::here();
-        let ping = Command::ping(cfg!(windows));
+        let ping = match command("ping") {
+            Ok(at) if !cfg!(windows) => Command::ping_at(&at),
+            _ => Command::ping(cfg!(windows)),
+        };
         let sleep = Command::quiet(SECONDS, false);
         assert!(here == ping || here == sleep, "{here:?}");
         // Windows has a ping, whatever its PATH.
         if cfg!(windows) {
             assert_eq!(here, ping);
         }
+    }
+
+    /// Elsewhere than Windows the member is told the ping by the path the run found it at, for
+    /// a window's shell need not have the run's `PATH` (Muse's on the Mac had no `/sbin`:
+    /// T-954); its process is the command's whether its line names it by that path or bare.
+    #[test]
+    fn a_ping_found_on_the_runs_path_is_told_by_its_path_and_known_in_the_tree_by_its_name() {
+        let ping = Command::ping_at(std::path::Path::new("/sbin/ping"));
+        assert_eq!(ping.text(), "/sbin/ping -c 61 127.0.0.1");
+        assert_eq!(
+            ping.brief(),
+            "Run exactly this one shell command, wait for it to end, then stop: /sbin/ping -c 61 127.0.0.1"
+        );
+        assert!(ping.runs_in("/sbin/ping -c 61 127.0.0.1"));
+        assert!(ping.runs_in("ping -c 61 127.0.0.1"));
+        assert!(!ping.runs_in("/sbin/ping -c 60 127.0.0.1"));
+        assert_eq!(ping.mark, Command::ping(false).mark);
+        assert_eq!(ping.replies, Command::ping(false).replies);
     }
 
     #[test]
