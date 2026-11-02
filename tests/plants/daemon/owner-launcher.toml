@@ -7,6 +7,8 @@
 # every launcher of a harness the rig seats is hashed around the run, as the link it reads, where
 # it ends, the bytes of the file it ends at, and the entries of the folder the harness installs
 # its versions in. One plant takes one rule out; a test of it fails. Every name holds `owner launcher`.
+# The tests are the Unix machines' (links, a shell updater), so the plants are run on those: on Windows
+# the same cases would run no test and every plant would read as missed.
 
 [run]
 launcher-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::launcher"]
@@ -16,6 +18,7 @@ launcher-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "
 name = "owner launcher: the windows of a rig are told to update no harness"
 meant = "the_windows_of_a_rig_are_told_to_update_no_harness"
 runs = ["launcher-rig"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/install.rs"
@@ -29,6 +32,7 @@ replace = '''        crate::live::launcher::updates_off()
 name = "owner launcher: a rig told to update no harness is no help to a Claude that updates when nothing tells it not to"
 meant = "a_claude_that_updates_itself_unless_it_is_told_not_to_leaves_the_launcher_alone_in_the_rig_and_is_caught_in_one_that_does_not_tell_it"
 runs = ["launcher-rig"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/install.rs"
@@ -42,6 +46,7 @@ replace = '''        crate::live::launcher::updates_off()
 name = "owner launcher: Claude Code is told one switch of its two as off, and the other as on"
 meant = "the_switches_are_claude_codes_two_and_muses_one_and_every_window_has_all_three"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -52,6 +57,7 @@ replace = '''    [("DISABLE_AUTOUPDATER", "1"), ("DISABLE_UPDATES", "0")];'''
 name = "owner launcher: Muse's launcher is told to check for an update as it always did"
 meant = "a_version_probe_is_run_with_the_switches_of_its_harness"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -62,6 +68,7 @@ replace = '''pub const MUSE_UPDATES_OFF: [(&str, &str); 1] = [("MUSE_NO_AUTO_UPD
 name = "owner launcher: the probe of a version runs the owner's launcher with the owner's environment alone"
 meant = "a_version_probe_is_run_with_the_switches_of_its_harness"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
@@ -77,6 +84,7 @@ replace = '''                super::launcher::updates_off_of(self.harness)
 name = "owner launcher: a rig seats no guard of the launchers of the harnesses it runs"
 meant = "a_run_that_re_points_the_owners_launcher_at_a_copy_of_the_same_binary_fails_the_rig_that_ends"
 runs = ["launcher-rig"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
@@ -91,6 +99,7 @@ replace = '''        let _ = Guard::new(install.harness, &install.command, &inst
 name = "owner launcher: the guard is seated only where the kit made the harness a home of its own"
 meant = "a_case_that_gives_the_rig_a_claude_folder_of_its_own_is_held_to_the_launcher_all_the_same"
 runs = ["launcher-rig"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
@@ -111,6 +120,7 @@ replace = '''        if install.claude_config().is_some() || install.isolation()
 name = "owner launcher: a rig that ends with a launcher moved ends clean"
 meant = "a_run_that_installs_a_version_among_the_owners_fails_the_rig_that_ends_and_names_it"
 runs = ["launcher-rig"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -122,6 +132,7 @@ replace = '''        let _ = Error::Daemon(said);
 name = "owner launcher: the link a launcher reads is not compared, and the copy of the same binary is the same file"
 meant = "a_link_taken_to_a_copy_of_the_same_binary_is_a_change_whatever_the_bytes_say"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -132,6 +143,7 @@ replace = '''                (Some(old), Some(new)) if old != new && false => fo
 name = "owner launcher: where a launcher ends is not compared when the link it reads is the same"
 meant = "devin_is_watched_through_its_current_link_and_its_versions"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -142,6 +154,7 @@ replace = '''            if was.link == now.link && was.ends_at != now.ends_at &
 name = "owner launcher: the bytes of the file a launcher ends at are not compared"
 meant = "a_binary_replaced_in_place_is_a_change_though_the_link_is_the_same"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -152,6 +165,7 @@ replace = '''            } else if was.ends_at == now.ends_at && was.bytes != no
 name = "owner launcher: a version installed among the owner's is not named"
 meant = "a_version_installed_among_the_owners_is_named"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -162,6 +176,7 @@ replace = '''                    for gained in now.difference(was).take(0) {'''
 name = "owner launcher: a launcher that is gone is not named"
 meant = "a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_it_became"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -172,6 +187,7 @@ replace = '''                    let _ = &name;'''
 name = "owner launcher: a link that dangles after the run is the same launcher"
 meant = "a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_it_became"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -182,6 +198,7 @@ replace = '''        let ends_at = fs::canonicalize(path).ok().or_else(|| fs::re
 name = "owner launcher: the guard looks again at the start of every rig, and so holds the look of the last"
 meant = "the_guard_fails_what_ends_with_the_way_back_and_is_silent_before_it_looked"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -192,6 +209,7 @@ replace = '''        if before.is_none() || true {'''
 name = "owner launcher: Muse's binaries are not watched beside its launcher"
 meant = "muses_launcher_binaries_and_version_line_are_watched_beside_it"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -202,6 +220,7 @@ replace = '''                    folders.push((install.clone(), Some("not-muse")
 name = "owner launcher: Muse's version line is not watched"
 meant = "muses_launcher_binaries_and_version_line_are_watched_beside_it"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -212,6 +231,7 @@ replace = '''                    let _ = install.join(".muse-version");'''
 name = "owner launcher: Devin's folder of versions is not watched"
 meant = "devin_is_watched_through_its_current_link_and_its_versions"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -222,6 +242,7 @@ replace = '''                folders.push((data.join("devin").join("cli").join("
 name = "owner launcher: Claude Code's folder of versions is not watched"
 meant = "a_version_installed_among_the_owners_is_named"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -232,6 +253,7 @@ replace = '''                folders.push((data.join("claude").join("versions_")
 name = "owner launcher: the link the harness's own installer re-points is not watched, only the program the kit runs"
 meant = "codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_folder"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
@@ -242,6 +264,7 @@ replace = '''        if harness != Harness::Codex && false {'''
 name = "owner launcher: the link of a Codex whose home is its own folder is looked for in it"
 meant = "codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_folder"
 runs = ["launcher-unit"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
