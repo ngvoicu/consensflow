@@ -1,5 +1,5 @@
 //! A live run on a test machine renews the logins of Claude Code and Pi before it copies
-//! them (T-1067, Gabriel's decision of 2026-11-01).
+//! them (T-1067, the owner's decision of 2026-11-01).
 //!
 //! **The problem.** On zeewin2 the owner rarely uses Claude Code or Pi himself. Their access
 //! tokens end between his visits, and the kit refused a live run on a login that "has expired"
