@@ -114,13 +114,13 @@ fn add(
     if words.asks_for_help() {
         return Ok(help_of(&["task", "add"]));
     }
-    let tier = words.value("--tier");
+    let tier = words.value("--tier")?;
     let after = words
-        .value("--after")
+        .value("--after")?
         .map(|after| task_number(Some(after)))
         .transpose()?;
-    let needs = task_numbers(words.value("--needs"))?;
-    let before = task_numbers(words.value("--before"))?;
+    let needs = task_numbers(words.each("--needs"))?;
+    let before = task_numbers(words.each("--before"))?;
     let mine = words.on("--self");
     // Your own work needs no board while you are at it; on the board it is a
     // wake-up: the brief comes back to this window when what it waits for is accepted.
@@ -156,7 +156,7 @@ fn add(
         if words.on("--test") {
             body.insert("test".into(), true.into());
         }
-        if let Some(purpose) = words.value("--purpose") {
+        if let Some(purpose) = words.value("--purpose")? {
             body.insert("purpose".into(), purpose.into());
         }
     }

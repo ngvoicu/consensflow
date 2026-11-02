@@ -37,15 +37,15 @@ pub(super) enum Asked {
 /// the rest, so not with them; a page is a whole number from 1, and a search
 /// has words.
 pub(super) fn asked(words: &Split) -> Result<Asked, Failure> {
-    let (page, find) = (words.value("--page"), words.value("--find"));
+    let (page, find) = (words.value("--page")?, words.value("--find")?);
     if page.is_none() && find.is_none() {
-        let last = words.value("--last").map_or(10.0, js::number);
+        let last = words.value("--last")?.map_or(10.0, js::number);
         if last.fract() != 0.0 || !last.is_finite() || last < 1.0 {
             return Err(Failure::Usage("--last takes a number of items".into()));
         }
         return Ok(Asked::Last(last));
     }
-    if words.value("--last").is_some() {
+    if words.value("--last")?.is_some() {
         return Err(Failure::Usage(
             "--last gives the newest items, and --page and --find the rest: give one or the other"
                 .into(),

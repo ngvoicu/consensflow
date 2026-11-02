@@ -57,7 +57,7 @@ pub fn brief_of(
         return text_of(words.text.clone(), input);
     }
     let name = words
-        .value_back(FILE)
+        .value_back(FILE)?
         .and_then(|back| given.len().checked_sub(back))
         .and_then(|at| given.get(at))
         .filter(|name| !name.is_empty())

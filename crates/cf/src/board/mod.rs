@@ -386,10 +386,10 @@ fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
         return Ok(help_of(&["history"]));
     }
     let mut query = form_urlencoded::Serializer::new(String::new());
-    if let Some(page) = words.value("--page") {
+    if let Some(page) = words.value("--page")? {
         query.append_pair("page", page);
     }
-    if let Some(find) = words.value("--find") {
+    if let Some(find) = words.value("--find")? {
         query.append_pair("find", find);
     }
     if words.on("--tools") {
