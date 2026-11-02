@@ -675,6 +675,42 @@ pub(crate) fn work_while_resumed(
     })
 }
 
+/// The reverse of [`work_while_resumed`]: the window has rested and the words that resumed
+/// the task have still not gone in (the human typed in the window and has not sent it, a
+/// screen that never goes quiet), so no window is at work on it, and it reads queued again
+/// until they are in. Refused for any other task, and for words already being pasted.
+pub(crate) fn rest_while_resumed(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<TaskView, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let waiting = match task.state.as_str() {
+            "working" => resume_words(store, &task)?,
+            _ => None,
+        };
+        let Some((words, _)) = waiting.filter(|(_, state)| state != "delivering") else {
+            return Err(LedgerError::refused_with(
+                "not-resumed",
+                format!("T-{number} is not working with the words that resume it waiting"),
+                409,
+            ));
+        };
+        store.move_task(
+            &task,
+            "queued",
+            json!({
+                "by": null,
+                "because": format!(
+                    "its window is at rest, and m-{words}, the words that resumed it, have not gone in"
+                ),
+            }),
+        )?;
+        task_by_id(store, task.id)
+    })
+}
+
 /// A task the daemon resumed went on: its window got a turn through after the
 /// words that resumed it. Its requester, told it waits, is told once it goes on.
 pub(crate) fn tell_it_goes_on(

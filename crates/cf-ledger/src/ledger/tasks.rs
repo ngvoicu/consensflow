@@ -210,6 +210,16 @@ impl Ledger {
         tasks::work_while_resumed(&mut self.store, project_id, number)
     }
 
+    /// A task that read working for the words that resumed it ([`Ledger::work_while_resumed`])
+    /// reads queued again: its window rested and they have not gone in. Refused for any other.
+    pub fn rest_while_resumed(
+        &mut self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::rest_while_resumed(&mut self.store, project_id, number)
+    }
+
     /// The words that resumed the task of a participant's window, if they are on their way
     /// to it still (queued, held for the human or being pasted): their message. None for a
     /// task that was not resumed by words, or whose window has them. The daemon's own bare

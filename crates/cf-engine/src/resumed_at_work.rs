@@ -28,6 +28,14 @@
 //! request, a compaction) shows the task queued until its first line, which is at most
 //! the length of that wait.
 //!
+//! **And back.** The claim is a live one, and it is withdrawn when its evidence is gone: a
+//! window that has rested for [`RESTED_MS`] with the words still not in (the human typed in the
+//! window and has not sent it; Muse's screen, which a pass of the live suite found printing
+//! for good, so its pacing gate held the words for the whole of the run's wait) is at work on
+//! nothing, and the task reads queued again until they go in (`rest_while_resumed`). A rest of
+//! seconds is the settle and the paste, which the claim outlasts: no flicker where the words go
+//! in as they should.
+//!
 //! **What it does not touch.** The daemon's own bare words that resume a task held for quota
 //! are none of these ([`cf_ledger::Ledger::resume_words_waiting`]): a window that goes on by
 //! itself withdraws them (`went_on_by_itself`). A window at rest is given the words as before,
@@ -78,6 +86,24 @@ fn in_flight(observed: &Observed) -> bool {
         && observed.switched.is_none()
 }
 
+/// How long a window must have rested, with the words that resumed its task still not in,
+/// for the task to read queued again. The settle and the paste take a few seconds, so only
+/// words that are held (the human typed in the window and has not sent it, a screen that
+/// never goes quiet) show it.
+const RESTED_MS: i64 = 10_000;
+
+/// Whether the look reads the window's turn over, by its record whole: the window is at rest
+/// or may be given words (a dialog of its own, another conversation, a record that could
+/// not be read, and a turn that failed are none).
+fn at_rest(observed: &Observed) -> bool {
+    matches!(observed.reading.as_deref(), Some(Reading::Known(_)))
+        && (observed.settled || observed.over == Over::Held)
+        && !observed.failed
+        && !observed.unnamed
+        && observed.waiting.is_none()
+        && observed.switched.is_none()
+}
+
 /// Whether an item is the agent's own work: its words or a tool, not what the harness writes
 /// in its place (Claude Code's close of a cut turn) or a compaction's summary.
 fn is_work(item: &Item) -> bool {
@@ -107,7 +133,7 @@ impl Dispatcher {
         let task = self.seams.ledger.borrow().task_in_hand(participant.id)?;
         let words = task
             .as_ref()
-            .filter(|thread| thread.task.state == "queued")
+            .filter(|thread| matches!(thread.task.state.as_str(), "queued" | "working"))
             .map(|thread| {
                 self.seams
                     .ledger
@@ -122,6 +148,25 @@ impl Dispatcher {
         };
         // Their paste is begun: its arrival moves the task, as it moves any.
         if record.delivery.borrow().delivering.is_some() {
+            return Ok(());
+        }
+        // Shown working for them, and the window has rested without them going in: no
+        // window is at work on it, and it reads queued until they are.
+        if thread.task.state == "working" {
+            record.delivery.borrow_mut().resumed = None;
+            let rested = self.rested_for(record).is_some_and(|ms| ms >= RESTED_MS);
+            if rested && at_rest(observed) && project.state == "open" {
+                match self
+                    .seams
+                    .ledger
+                    .borrow_mut()
+                    .rest_while_resumed(project.id, thread.task.number)
+                {
+                    Ok(_) => self.changed(),
+                    Err(cf_ledger::LedgerError::Refused(_)) => {}
+                    Err(failed) => return Err(failed.into()),
+                }
+            }
             return Ok(());
         }
         if !matches!(observed.reading.as_deref(), Some(Reading::Known(_))) {

@@ -18,6 +18,8 @@
 # - the daemon's own bare words that resume a held task count as the chief's;
 # - a first brief counts as the words that resumed a task;
 # - words already being pasted can be shown as work;
+# - a task shown working never reads queued again for a window at rest with the words held;
+#   it reads queued again at the first look at rest, though the words go in as they should;
 # - what the task needs once it reads working with its words waiting: the one-task rules of
 #   the queue and of the begin of a delivery hold its own words back; the turn before the words
 #   is taken for its result; the note of what that turn ended with is not told; the words that
@@ -231,3 +233,23 @@ runs = ["engine-dispatcher-resumed-at-work"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = "                        \"UPDATE message SET state = 'cancelled', reason = ? WHERE id = ?\","
 replace = "                        \"UPDATE message SET state = 'queued', reason = ? WHERE id = ?\","
+
+[[plant]]
+name = "resume shows working: a task shown working never reads queued again for a window at rest with the words held"
+meant = "a_task_shown_working_reads_queued_again_once_its_window_has_rested_with_the_words_held"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = '            if rested && at_rest(observed) && project.state == "open" {'
+replace = '            if false && rested && at_rest(observed) && project.state == "open" {'
+
+[[plant]]
+name = "resume shows working: a task shown working reads queued again at the first look at rest"
+meant = "a_task_shown_working_does_not_read_queued_while_its_words_go_in_at_the_settle"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "const RESTED_MS: i64 = 10_000;"
+replace = "const RESTED_MS: i64 = 0;"

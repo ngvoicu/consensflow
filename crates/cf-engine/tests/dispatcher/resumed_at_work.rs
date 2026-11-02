@@ -16,11 +16,12 @@
 //! words as before, the task working from their paste. The words stay queued, and the turn's
 //! end is still not the resumed task's result: its answer is the follow-up to them.
 
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Made};
 use cf_harness::contract::Over;
 use cf_harness::records::{Item, Role};
 use cf_ledger::GivenUp;
 use cf_proto::ledger::{Claim, MessageView};
+use serde_json::json;
 
 use crate::fixtures::given;
 use crate::paused_answers::{
@@ -437,4 +438,71 @@ fn a_turn_the_record_says_is_over_but_has_not_said_so_a_moment_shows_no_work() {
     context.adapter.with("zeus", |agent| agent.over = Over::No);
     context.pass().unwrap();
     assert_eq!(state(&context, project), "working");
+}
+
+/// A context whose windows are given a message only after the settle, as a live daemon's are.
+fn paced() -> Context {
+    Context::made(Made {
+        settle_ms: 3_000,
+        ..Made::default()
+    })
+}
+
+#[test]
+fn a_task_shown_working_reads_queued_again_once_its_window_has_rested_with_the_words_held() {
+    // The window's turn ends, and the words that resumed the task do not go in (the human
+    // typed in the window and has not sent it; Muse's screen that never went quiet): no
+    // window is at work on it, and the board must not say one is.
+    let context = paced();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    context.advance(5_000);
+    context.pass().unwrap();
+    assert_eq!(
+        state(&context, project),
+        "working",
+        "a rest of seconds is the settle and the paste, not a hold"
+    );
+    context.advance(6_000);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    assert_eq!(context.message(words.id).state, "queued");
+
+    // The hold ends: the words go in, and the task reads working from their paste.
+    context.host.set_snapshot(json!({}));
+    for _ in 0..6 {
+        context.advance(3_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn a_task_shown_working_does_not_read_queued_while_its_words_go_in_at_the_settle() {
+    let context = paced();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+    context.adapter.answer("zeus", FINAL);
+    for _ in 0..8 {
+        context.advance(1_500);
+        context.pass().unwrap();
+        assert_eq!(
+            state(&context, project),
+            "working",
+            "the words are {}",
+            context.message(words.id).state
+        );
+    }
+    assert_eq!(context.message(words.id).state, "delivered");
 }

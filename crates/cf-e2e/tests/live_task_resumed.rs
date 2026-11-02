@@ -214,6 +214,26 @@ fn paused(run: &Run<'_>, number: i64, handle: &str, case: &mut Account) -> Resul
     Ok(())
 }
 
+/// The last task message of the thread whose words begin `Resumed:`: the words a resume of
+/// the task queued for its window.
+fn resume_words_of(thread: &serde_json::Value) -> Option<i64> {
+    thread["messages"]
+        .as_array()?
+        .iter()
+        .rfind(|message| {
+            message["kind"] == "task"
+                && message["body"]
+                    .as_str()
+                    .is_some_and(|body| body.starts_with("Resumed:"))
+        })
+        .and_then(|message| message["id"].as_i64())
+}
+
+/// Whether `event` is about message `words`: any event, where the resume queued no words.
+fn is_of(event: &serde_json::Value, words: Option<i64>) -> bool {
+    words.is_none_or(|words| event["data"]["message"].as_i64() == Some(words))
+}
+
 /// The events the daemon wrote since `since_ms` about deliveries, as lines.
 fn deliveries_since(members: &Members, since_ms: i64) -> Vec<String> {
     members
@@ -228,7 +248,7 @@ fn deliveries_since(members: &Members, since_ms: i64) -> Vec<String> {
                 "+{:.1} s {} {}",
                 (at_ms(event).unwrap_or(since_ms) - since_ms) as f64 / 1000.0,
                 text(&event["kind"]),
-                event["data"]
+                format!("{}{}", event["data"], held_reason(event))
             )
         })
         .collect()
@@ -250,6 +270,10 @@ fn goes_on(
 ) -> Result<Option<Duration>> {
     let mut series: Vec<String> = Vec::new();
     let mut working_while_waiting: Option<Duration> = None;
+    // The words the resume queued, where it queued some: it is their confirmation that the
+    // window took them, not a delivery to anyone else (the chief is given the answer to a tell
+    // and the note of a task that moved on meanwhile).
+    let resume_words = resume_words_of(&run.members.task(number)?);
     let mut last = String::new();
     let mut looks: Vec<(Duration, String)> = Vec::new();
     let mut confirmed: Option<Duration> = None;
@@ -268,6 +292,7 @@ fn goes_on(
             && run.members.events().iter().any(|event| {
                 event["kind"] == "delivery.confirmed"
                     && at_ms(event).is_some_and(|at| at >= since_ms)
+                    && is_of(event, resume_words)
             })
         {
             confirmed = Some(since.elapsed());
@@ -685,6 +710,15 @@ fn tell(run: &Run<'_>, case: &mut Account) -> Result<()> {
     Ok(())
 }
 
+/// Why a delivery is held, where an event of the trace says: `delivery.held` keeps it beside
+/// its data, not in it (T-1139: a Muse window at rest held the resume's words for good).
+fn held_reason(event: &serde_json::Value) -> String {
+    match event["reason"].as_str() {
+        Some(reason) => format!(" ({reason})"),
+        None => String::new(),
+    }
+}
+
 /// The messages of a thread, as `m-id kind state`.
 fn messages(thread: &serde_json::Value) -> String {
     thread["messages"]
@@ -722,7 +756,7 @@ fn say_events(members: &Members, since_ms: i64, case: &mut Account) {
                 "+{:.1} s {} {}",
                 (at_ms(event).unwrap_or(since_ms) - since_ms) as f64 / 1000.0,
                 text(&event["kind"]),
-                cut(&event["data"].to_string(), 200)
+                cut(&format!("{}{}", event["data"], held_reason(event)), 300)
             )
         })
         .collect();
@@ -956,6 +990,28 @@ mod tests {
         assert!(words.contains("each in a tool call of its own"));
         assert!(words.contains(&SHORT.text()));
         assert!(words.ends_with("reply with exactly one line: TELL_TURN_DONE"));
+    }
+
+    #[test]
+    fn the_words_a_resume_queued_are_the_last_task_message_that_begins_resumed() {
+        let thread = json!({ "messages": [
+            { "id": 1, "kind": "task", "body": "Run the command" },
+            { "id": 4, "kind": "task", "body": "Resumed: Go on" },
+            { "id": 5, "kind": "note", "body": "Resumed: not a task" },
+            { "id": 6, "kind": "task", "body": "Resumed: Go on again" },
+        ] });
+        assert_eq!(resume_words_of(&thread), Some(6));
+        assert_eq!(resume_words_of(&json!({ "messages": [] })), None);
+        assert_eq!(resume_words_of(&json!({})), None);
+    }
+
+    #[test]
+    fn a_confirmation_is_the_resumes_only_where_it_names_the_message_of_the_words() {
+        let confirmed =
+            |message: i64| json!({ "kind": "delivery.confirmed", "data": { "message": message } });
+        assert!(is_of(&confirmed(4), Some(4)));
+        assert!(!is_of(&confirmed(5), Some(4)));
+        assert!(is_of(&confirmed(5), None));
     }
 
     #[test]

@@ -60,3 +60,25 @@ runs = ["resumed-suite"]
 file = "crates/cf-e2e/tests/live_task_resumed.rs"
 find = '''run this command six times, one after the other'''
 replace = '''run this command once, one after the other'''
+
+[[plant]]
+name = "live task-resumed: the resume's words are the first task message that begins resumed"
+meant = "the_words_a_resume_queued_are_the_last_task_message_that_begins_resumed"
+runs = ["resumed-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_task_resumed.rs"
+find = '''        .rfind(|message| {
+            message["kind"] == "task"'''
+replace = '''        .find(|message| {
+            message["kind"] == "task"'''
+
+[[plant]]
+name = "live task-resumed: any confirmation is taken for the resume's words"
+meant = "a_confirmation_is_the_resumes_only_where_it_names_the_message_of_the_words"
+runs = ["resumed-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_task_resumed.rs"
+find = '''    words.is_none_or(|words| event["data"]["message"].as_i64() == Some(words))'''
+replace = '''    words.is_none_or(|words| event["data"]["message"].as_i64().is_some() || words < 0)'''
