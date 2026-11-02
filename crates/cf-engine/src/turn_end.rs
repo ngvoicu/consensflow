@@ -260,7 +260,16 @@ impl Dispatcher {
             .ledger
             .borrow()
             .active_task(participant.id, false)?;
-        let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
+        // A task that reads working while the words that resumed it wait for the window's
+        // rest (`resumed_at_work`) takes no result: the turn at work is the one before them,
+        // and the answer to them is the result. It is handled as the queued task it was.
+        let waiting = match &task {
+            Some(thread) if thread.task.state == "working" => {
+                self.resume_words_wait(project.id, thread.task.number)?
+            }
+            _ => false,
+        };
+        let Some(thread) = task.filter(|thread| thread.task.state == "working" && !waiting) else {
             record.held.borrow_mut().drop_hold();
             if observed.failed {
                 self.tell_failed_turn(project, participant, record, observed)

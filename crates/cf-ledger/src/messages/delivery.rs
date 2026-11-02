@@ -50,7 +50,8 @@ pub(crate) fn with_work(store: &Store, project_id: i64) -> Result<Vec<i64>, Ledg
 /// The head of a participant's queue that may go now, or none. A member's
 /// session is its task's: a row of its goes only for a task it holds (queued,
 /// working or waiting), a tell for the window goes whatever its task, and a
-/// task message waits while it holds one at work. A row that rides in another
+/// task message waits while it holds another task at work: not its own, whose resume's
+/// words wait for the window's rest while it reads working (`work_while_resumed`). A row that rides in another
 /// message's paste, or that a door took for its harness, is not the head; and
 /// while a task message for the window waits for the human's approval, nothing
 /// else about its task goes, whoever wrote it and in whatever order they are
@@ -106,6 +107,7 @@ fn next_delivery_among(
          AND m.carried_by IS NULL AND m.claimed_at IS NULL
          AND (m.kind != 'task' OR ?2 = 0 OR NOT EXISTS (
            SELECT 1 FROM task WHERE assignee_id = ?1 AND state IN ('working', 'waiting')
+             AND id IS NOT m.task_id
          ))
          AND (?2 = 0 OR m.urgent = 1 OR m.task_id IN (
            SELECT id FROM task WHERE assignee_id = ?1 AND state IN ({})
@@ -297,14 +299,17 @@ pub(crate) fn begin_delivery(
             .db
             .prepare("SELECT id FROM message WHERE recipient_id = ? AND state = 'delivering'")?
             .exists([message.recipient_id])?;
+        // At work on another task: the words that resume a task its window is at work on
+        // (`work_while_resumed`) are its own.
         let working = message.kind == "task"
             && MEMBER_ROLES.contains(&message.recipient_role.as_str())
             && store
                 .db
                 .prepare(
-                    "SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')",
+                    "SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')
+                       AND id IS NOT (SELECT task_id FROM message WHERE id = ?)",
                 )?
-                .exists([message.recipient_id])?;
+                .exists(params![message.recipient_id, message.id])?;
         if busy || working {
             return Err(LedgerError::refused_with(
                 "recipient-busy",

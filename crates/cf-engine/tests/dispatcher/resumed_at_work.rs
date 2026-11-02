@@ -18,7 +18,8 @@
 
 use cf_engine::testing::Context;
 use cf_harness::records::{Item, Role};
-use cf_proto::ledger::MessageView;
+use cf_ledger::GivenUp;
+use cf_proto::ledger::{Claim, MessageView};
 
 use crate::fixtures::given;
 use crate::paused_answers::{
@@ -162,4 +163,141 @@ fn a_resumed_task_whose_window_reads_at_work_and_writes_nothing_stays_queued() {
     }
     assert_eq!(state(&context, project), "queued");
     assert_eq!(context.message(words.id).state, "queued");
+}
+
+#[test]
+fn a_pause_the_window_did_not_heed_resumed_while_it_works_on_shows_working_too() {
+    // The class, not the tell: a window that goes on through its pause (T-1117's kept
+    // window) and a resume that finds it at work.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context.pause_task(project.id, 1);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project.id), "paused");
+    context.resume_task(project.id, 1, "Carry on");
+    let words = resume_words(&context, project.id);
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo build)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project.id), "working");
+    assert_eq!(context.message(words.id).state, "queued");
+}
+
+#[test]
+fn the_words_of_a_task_shown_working_that_never_reach_its_window_pause_it_again() {
+    let context = Context::new();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+
+    // The paste begins and the window is lost: the words are given up.
+    context
+        .ledger
+        .borrow_mut()
+        .begin_delivery(words.id)
+        .unwrap();
+    let (failed, came_to) = context
+        .ledger
+        .borrow_mut()
+        .give_up_delivery(words.id, "the window closed")
+        .unwrap();
+    assert_eq!(came_to, GivenUp::Paused);
+    assert_eq!(failed.state, "failed");
+    assert_eq!(
+        state(&context, project),
+        "paused",
+        "the task is not left working with nothing in its window"
+    );
+}
+
+#[test]
+fn finish_takes_the_turn_on_the_tell_as_the_result_of_a_task_shown_working_and_its_words_never_go_in(
+) {
+    let context = Context::new();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+    // The turn on the tell ends, and the chief takes its answer before the words go in.
+    context.adapter.answer("zeus", FINAL);
+    let finished = context.finish_task(project, 1, "chief").expect("finished");
+    assert_eq!(finished.task.state, "done");
+    assert!(results(&context, project)
+        .iter()
+        .any(|result| result.starts_with(FINAL)));
+    // Nothing is pasted for a task that is done: its words are withdrawn.
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(words.id).state, "cancelled");
+    assert_eq!(state(&context, project), "done");
+}
+
+#[test]
+fn a_question_the_window_asks_while_its_resume_words_wait_is_born_with_its_door_shut() {
+    // Its turn is the one before the words: the answer comes with them, as a message, when
+    // the words go in (`door_born_closed`), exactly as for the queued task it was.
+    let context = Context::new();
+    let (project, _told, _words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+    let question = context.ask(project, "zeus", "chief", 1, "Which grammar?");
+    let zeus = context.id(project, "zeus");
+    let claim = context
+        .ledger
+        .borrow_mut()
+        .claim_answer(question.id, zeus)
+        .unwrap();
+    assert!(matches!(claim, Claim::Closed), "{claim:?}");
+}
+
+#[test]
+fn the_window_cannot_finish_a_task_shown_working_before_it_has_read_the_words_that_resumed_it() {
+    // What it would finish is the task without them, as for a note on its way.
+    let context = Context::new();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+    let refused = context
+        .ledger
+        .borrow_mut()
+        .record_result(project, 1, "All done")
+        .expect_err("refused");
+    assert!(
+        refused.to_string().contains("words on their way"),
+        "{refused}"
+    );
+    assert_eq!(state(&context, project), "working");
+    assert_eq!(context.message(words.id).state, "queued");
+}
+
+#[test]
+fn a_turn_that_ends_after_the_resume_shows_nothing_of_work_and_the_task_is_working_from_its_words_paste(
+) {
+    // The record grew after the resume, but the window is at rest now: no turn is in
+    // flight to be at work on it. Its words go in, and the task reads queued until they
+    // are in the window.
+    let context = Context::new();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    assert_ne!(context.message(words.id).state, "delivered");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(state(&context, project), "working");
 }

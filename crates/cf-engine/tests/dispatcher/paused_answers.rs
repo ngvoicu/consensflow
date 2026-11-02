@@ -399,6 +399,8 @@ fn a_resume_while_the_window_is_still_at_work_on_its_answer_loses_nothing_of_the
         .answer(told.id, told.recipient_id, Some(&json!(ANSWER)), None)
         .unwrap();
     context.resume_task(project, 1, "Go on, or say you finished");
+    // Queued at the resume, and for as long as the window's record shows no work of its
+    // own after it (`resumed_at_work`: with some, the task reads working meanwhile).
     assert_eq!(context.task(project, 1).task.state, "queued");
     context.adapter.answer("zeus", FINAL);
     context.pass().unwrap();

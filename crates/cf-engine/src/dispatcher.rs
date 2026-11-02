@@ -1349,6 +1349,9 @@ impl Dispatcher {
             }
             // A held task's window that went on with it by itself: its task goes on.
             self.went_on_by_itself(project, participant, &observed)?;
+            // A resumed task whose window is at work on it reads working while its words
+            // wait for the window's rest.
+            self.show_resumed_at_work(project, participant, record, &observed)?;
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.

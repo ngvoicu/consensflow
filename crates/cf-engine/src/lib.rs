@@ -29,6 +29,7 @@ mod ownership;
 mod pacing;
 mod record;
 mod resume;
+mod resumed_at_work;
 mod role_change;
 pub mod roles;
 pub mod runtime;

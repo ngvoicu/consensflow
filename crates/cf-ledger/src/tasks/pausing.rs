@@ -461,7 +461,8 @@ pub(crate) fn pause_again(
     task: &TaskRow,
     reason: &str,
 ) -> Result<bool, LedgerError> {
-    if message.kind != "task" || task.state != "queued" {
+    // Queued, or at work already while the words wait (`work_while_resumed`).
+    if message.kind != "task" || !matches!(task.state.as_str(), "queued" | "working") {
         return Ok(false);
     }
     let resumed = store
@@ -587,6 +588,88 @@ pub(crate) fn go_on_in_window(
             }
             _ => return Err(not_going_on(number)),
         }
+        reconcile(store, task.id)?;
+        task_by_id(store, task.id)
+    })
+}
+
+/// The words that resumed `task`, still waiting for its window: the task message that
+/// `resume_task` queued as it moved the task from paused to queued, not yet pasted
+/// (`queued` or `gated`) or being pasted (`delivering`), with its state. None where
+/// they are in already, or the task was not resumed by words: the daemon's own bare
+/// ones are none ([`go_on_in_window`] withdraws those when the window goes on by
+/// itself, a turn that got through). Every other task message waiting for a task at
+/// work is a brief or a follow-up of a done task, which are not these.
+pub(crate) fn resume_words(
+    store: &Store,
+    task: &TaskRow,
+) -> Result<Option<(i64, String)>, LedgerError> {
+    let Some(window) = task.assignee_id else {
+        return Ok(None);
+    };
+    let fixed = format!("Resumed: {RESUME_WORDS}");
+    Ok(store
+        .db
+        .prepare(
+            "SELECT m.id, m.state FROM message m
+              WHERE m.task_id = ?1 AND m.recipient_id = ?2 AND m.kind = 'task'
+                AND m.state IN ('queued', 'gated', 'delivering')
+                AND NOT (m.sender_id IS NULL AND m.body = ?3
+                         AND NOT EXISTS (SELECT 1 FROM message c WHERE c.carried_by = m.id))
+                AND EXISTS (SELECT 1 FROM event e
+                             WHERE e.project_id = ?4 AND e.kind = 'task.state'
+                               AND json_extract(e.data, '$.task') = ?5
+                               AND json_extract(e.data, '$.from') = 'paused'
+                               AND json_extract(e.data, '$.to') = 'queued'
+                               AND json_extract(e.data, '$.message') = m.id)
+              ORDER BY m.id DESC LIMIT 1",
+        )?
+        .query_row(
+            params![task.id, window, fixed, task.project_id, task.number],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
+/// A resumed task whose window is at work on it: it reads working, and the words that
+/// resumed it stay queued for the window's rest, as ever. The words wait for the window
+/// to rest (nothing is typed into a turn at work), and until they were pasted the task
+/// read queued, which said the window had not taken it up while it ran commands on it
+/// (T-1139, field bug 8: `cf tell`, the window's answer, `cf task resume`, and the
+/// window going on with the turn the tell began). Only the engine knows the window is at
+/// work on it (its record shows the agent acting after the resume, `resumed_at_work`),
+/// and says so here. Refused for any other task, and for words already being pasted: their
+/// arrival moves the task ([`reconcile`]).
+pub(crate) fn work_while_resumed(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<TaskView, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let waiting = match task.state.as_str() {
+            "queued" => resume_words(store, &task)?,
+            _ => None,
+        };
+        let Some((words, state)) = waiting.filter(|(_, state)| state != "delivering") else {
+            return Err(LedgerError::refused_with(
+                "not-resumed",
+                format!("T-{number} is not waiting for the words that resume it"),
+                409,
+            ));
+        };
+        debug_assert_ne!(state, "delivering");
+        store.move_task(
+            &task,
+            "working",
+            json!({
+                "by": null,
+                "because": format!(
+                    "its window is at work on it; m-{words}, the words that resumed it, wait for its rest"
+                ),
+            }),
+        )?;
+        // A question its window asked that nobody answered still makes it wait.
         reconcile(store, task.id)?;
         task_by_id(store, task.id)
     })
