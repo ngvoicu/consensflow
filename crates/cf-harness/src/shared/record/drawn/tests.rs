@@ -189,6 +189,34 @@ fn a_call_to_a_tool_this_module_does_not_know_is_headed_by_what_it_was_given() {
         guessed("shell", json!({ "command": ["git", "status"] })),
         "$ git status"
     );
+    // The shells of Windows, as a harness there gives them their script.
+    assert_eq!(
+        guessed("shell", json!({ "command": ["cmd.exe", "/c", "dir"] })),
+        "$ dir"
+    );
+    assert_eq!(
+        guessed(
+            "shell",
+            json!({ "command": ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-NoProfile", "-Command", "Get-ChildItem"] })
+        ),
+        "$ Get-ChildItem"
+    );
+    assert_eq!(
+        guessed("shell", json!({ "command": ["pwsh", "-c", "ls"] })),
+        "$ ls"
+    );
+    assert_eq!(
+        guessed(
+            "shell",
+            json!({ "command": ["/bin/zsh", "-c", "cat notes.txt"] })
+        ),
+        "$ cat notes.txt"
+    );
+    // A program that is no shell keeps its words.
+    assert_eq!(
+        guessed("shell", json!({ "command": ["python3", "-c", "print(1)"] })),
+        "$ python3 -c print(1)"
+    );
     // Arguments as JSON text, as Codex writes them.
     assert_eq!(guessed("exec_command", json!("{\"cmd\":\"pwd\"}")), "$ pwd");
     assert_eq!(

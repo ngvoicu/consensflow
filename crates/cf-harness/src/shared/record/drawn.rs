@@ -237,13 +237,38 @@ pub fn guess(name: &str, arguments: Option<&Value>) -> Arc<str> {
     header(action)
 }
 
-/// A command given as its words: what a shell runs of `sh -c`, `bash -lc` and the like
-/// (its last word), else the words with a space between.
+/// A command given as its words: the script a shell is given to run (`sh -c`, `bash -lc`,
+/// `/bin/zsh -c` on the Mac; `cmd.exe /c`, `powershell.exe -NoProfile -Command`, `pwsh -c`
+/// on Windows: its last word, after a flag that runs it), else the words with a space
+/// between.
 fn shell_words(words: &[Value]) -> String {
+    const SHELLS: [&str; 8] = [
+        "sh",
+        "bash",
+        "zsh",
+        "dash",
+        "fish",
+        "cmd",
+        "powershell",
+        "pwsh",
+    ];
+    const RUNS: [&str; 6] = ["-c", "-lc", "-ic", "/c", "-command", "-encodedcommand"];
     let words: Vec<&str> = words.iter().filter_map(Value::as_str).collect();
+    let shell = words.first().map(|first| {
+        let name = first
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(first)
+            .to_ascii_lowercase();
+        name.strip_suffix(".exe").map(str::to_owned).unwrap_or(name)
+    });
     match words.as_slice() {
-        [shell, flag, script]
-            if shell.ends_with("sh") && flag.starts_with('-') && flag.ends_with('c') =>
+        [.., flag, script]
+            if words.len() >= 3
+                && shell
+                    .as_deref()
+                    .is_some_and(|shell| SHELLS.contains(&shell))
+                && RUNS.contains(&flag.to_ascii_lowercase().as_str()) =>
         {
             (*script).to_owned()
         }

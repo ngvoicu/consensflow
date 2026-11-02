@@ -1738,3 +1738,13 @@ runs = ["it-evals"]
 file = "crates/cf-evals/src/measure.rs"
 find = '    Ok(if has { " AND t.drawn_only = 0" } else { "" })'
 replace = '    Ok(if has { "" } else { "" })'
+
+[[plant]]
+name = "items: a Windows shell's script is headed by the shell's words"
+meant = "a_call_to_a_tool_this_module_does_not_know_is_headed_by_what_it_was_given"
+runs = ["it-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/drawn.rs"
+find = '    const RUNS: [&str; 6] = ["-c", "-lc", "-ic", "/c", "-command", "-encodedcommand"];'
+replace = '    const RUNS: [&str; 6] = ["-c", "-lc", "-ic", "-c", "-c", "-encodedcommand"];'
