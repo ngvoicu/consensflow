@@ -21,6 +21,9 @@ pub enum Case {
     Stuck,
     MidTurn,
     MidTool,
+    /// `midtool` with the field's command (T-1117): a sleep in WSL's Ubuntu, through
+    /// `wsl.exe`. Windows only, and run only when named.
+    MidWsl,
     Tell,
 }
 
@@ -38,6 +41,20 @@ impl Case {
         Case::Tell,
     ];
 
+    /// Every case a command line may name: [`Case::ALL`], and those run only when named.
+    pub const NAMED: [Case; 10] = [
+        Case::Command,
+        Case::Early,
+        Case::Hook,
+        Case::Escape,
+        Case::SlowHook,
+        Case::Stuck,
+        Case::MidTurn,
+        Case::MidTool,
+        Case::MidWsl,
+        Case::Tell,
+    ];
+
     pub const fn name(self) -> &'static str {
         match self {
             Case::Command => "command",
@@ -48,13 +65,17 @@ impl Case {
             Case::Stuck => "stuck",
             Case::MidTurn => "midturn",
             Case::MidTool => "midtool",
+            Case::MidWsl => "midwsl",
             Case::Tell => "tell",
         }
     }
 
     /// Whether the case runs on any harness, the ones the command line names.
     pub const fn on_any_harness(self) -> bool {
-        matches!(self, Case::Stuck | Case::MidTurn | Case::MidTool)
+        matches!(
+            self,
+            Case::Stuck | Case::MidTurn | Case::MidTool | Case::MidWsl
+        )
     }
 }
 
@@ -76,7 +97,7 @@ pub fn options(
     transcripts: Option<String>,
 ) -> Result<Options> {
     Ok(Options {
-        cases: named(cases, &Case::ALL, Case::name, "case", &Case::ALL)?,
+        cases: named(cases, &Case::NAMED, Case::name, "case", &Case::ALL)?,
         hook: slow::variant(hook.unwrap_or("stop"))?,
         harnesses: named(
             harnesses,
@@ -109,7 +130,7 @@ pub fn plan_of(case: Case, harness: Harness, options: &Options) -> Plan {
             .with_file(stuck::SCRIPT, stuck::script_text()),
         // Their folders tell a window to do what each message asks, and run no tools but
         // the one a message tells it to.
-        Case::MidTurn | Case::MidTool => Plan::new(
+        Case::MidTurn | Case::MidTool | Case::MidWsl => Plan::new(
             &format!("stops-{name}-{}", harness.name()),
             stand_in_chief(),
         )

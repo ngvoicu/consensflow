@@ -65,6 +65,9 @@
 //!   rested (`REST`) or `STUCK_WATCH` is up, so that when a turn that waits for its tool
 //!   ends is told. Written for the Devin window of T-5 (3000.10.21, Windows), which was
 //!   running a command.
+//! - `midwsl`    `midtool` with the field's command of T-1117, run only when named and
+//!   on Windows only: a sleep in WSL's Ubuntu through `wsl.exe` (a worker's database
+//!   tests ran so when a pause closed its window, and ended them).
 //!
 //! ```text
 //! cargo xtask live stops                                  every case, `stuck`, `midturn` and `midtool` on Devin
@@ -72,6 +75,7 @@
 //! cargo xtask live stops --case stuck codex
 //! cargo xtask live stops --case midturn devin
 //! cargo xtask live stops --case midtool devin
+//! cargo xtask live stops --case midwsl claude                (Windows, with WSL's Ubuntu)
 //! cargo xtask live stops --case slowhook --hook prompt
 //! cargo xtask live stops --case early --transcripts /tmp/stops    each Claude transcript is copied there
 //! ```
@@ -111,6 +115,7 @@ use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, Harness, Log};
 use cf_e2e::{files, Result};
 
+use midturn::tool::Command;
 use options::{options, plan_of, runs_on, Case, Options};
 
 /// The stand-in for the chief's window.
@@ -210,7 +215,8 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
         Case::SlowHook => slow::run(&ctx, &mut account, &options.hook),
         Case::Stuck => stuck::run(&ctx, &mut account, harness.name()),
         Case::MidTurn => midturn::run(&ctx, &mut account, harness),
-        Case::MidTool => midturn::tool::run(&ctx, &mut account, harness),
+        Case::MidTool => midturn::tool::run(&ctx, &mut account, harness, Command::here()),
+        Case::MidWsl => midturn::tool::run(&ctx, &mut account, harness, Command::wsl()),
         Case::Tell => tell::tell(&ctx, &mut account),
     };
     if let Some(folder) = &options.transcripts {

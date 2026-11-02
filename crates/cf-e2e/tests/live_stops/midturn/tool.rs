@@ -89,13 +89,37 @@ impl Command {
 
     /// The command for the machine this runs on: a ping of its own address where it has
     /// a `ping` to run (Windows has, and elsewhere the program is looked for on the `PATH`
-    /// of the run), and else a `sleep` of the same time, which says nothing as it goes.
+    /// of the run, and named by the path it was found at), and else a `sleep` of the same
+    /// time, which says nothing as it goes. The Mac's `ping` is in `/sbin`, which the
+    /// `PATH` of this run has and the member's shell has not (T-1117: Claude's shell said
+    /// `command not found: ping`, and Claude Code 2.1.316 refuses a standalone `sleep`).
     pub fn here() -> Self {
-        let windows = cfg!(windows);
-        if windows || command("ping").is_ok() {
-            Self::ping(windows)
-        } else {
-            Self::quiet(SECONDS, false)
+        if cfg!(windows) {
+            return Self::ping(true);
+        }
+        match command("ping") {
+            Ok(path) => Self::ping_at(&path.display().to_string()),
+            Err(_) => Self::quiet(SECONDS, false),
+        }
+    }
+
+    /// The field's command of T-1117 (a worker's database tests in WSL, run through
+    /// `wsl.exe` from Claude's Git Bash): a quiet sleep of [`SECONDS`] in WSL's Ubuntu.
+    pub fn wsl() -> Self {
+        let mark = format!("-d Ubuntu -- sleep {SECONDS}");
+        Self {
+            text: format!("wsl {mark}"),
+            mark,
+            replies: None,
+        }
+    }
+
+    /// [`Command::ping`] of a Unix machine, the program named by `program`.
+    fn ping_at(program: &str) -> Self {
+        let ping = Self::ping(false);
+        Self {
+            text: format!("{program} {}", ping.mark),
+            ..ping
         }
     }
 
@@ -264,14 +288,13 @@ pub fn hold(command: &Command, listed: bool) -> Hold<'_> {
 }
 
 /// The case, on the harness the member `ctx.agent` runs on.
-pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness) -> Result<()> {
+pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) -> Result<()> {
     let devin = harness == Harness::Devin;
     if devin {
         // What the daemon's reader makes of Devin's store is asked of the product's own
         // code, built before anything is spent.
         ask::prepare()?;
     }
-    let command = Command::here();
     let Some(begun) = begin(
         ctx,
         case,
@@ -332,15 +355,31 @@ mod tests {
     }
 
     #[test]
+    fn the_fields_command_is_a_quiet_sleep_in_wsl_found_in_a_tree_by_wsls_path() {
+        let wsl = Command::wsl();
+        assert_eq!(wsl.text(), "wsl -d Ubuntu -- sleep 60");
+        assert!(wsl.runs_in(r#""C:\WINDOWS\system32\wsl.exe" -d Ubuntu -- sleep 60"#));
+        assert!(!wsl.runs_in("sleep 60"));
+        assert_eq!(wsl.replies, None);
+    }
+
+    #[test]
     fn the_command_of_this_machine_is_its_own_ping_or_a_sleep_of_the_same_time() {
         let here = Command::here();
-        let ping = Command::ping(cfg!(windows));
-        let sleep = Command::quiet(SECONDS, false);
-        assert!(here == ping || here == sleep, "{here:?}");
-        // Windows has a ping, whatever its PATH.
         if cfg!(windows) {
-            assert_eq!(here, ping);
+            assert_eq!(
+                here,
+                Command::ping(true),
+                "Windows has a ping, whatever its PATH"
+            );
+            return;
         }
+        let sleep = Command::quiet(SECONDS, false);
+        assert!(
+            here == sleep || here.text.ends_with("/ping -c 61 127.0.0.1"),
+            "{here:?}"
+        );
+        assert!(here == sleep || here.mark == "-c 61 127.0.0.1", "{here:?}");
     }
 
     #[test]
