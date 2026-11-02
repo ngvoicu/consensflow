@@ -33,6 +33,7 @@ fn the_tree_is_unpacked_by_tar_with_each_file_given_the_time_of_the_unpack() {
         command: "x",
         env: &[],
         node: r"C:\Program Files\nodejs",
+        machine: "zeewin2",
         limits: None,
     });
     assert!(

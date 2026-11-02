@@ -17,7 +17,9 @@
 //! outputs, `node_modules` and the Rust build among them: `script::KEPT`), so that
 //! cargo builds what a switch of
 //! the checkout changed, whatever time the Mac kept of it. The command then runs
-//! in that folder with Node and Cargo on PATH, its output streamed back; its exit
+//! in that folder with Node and Cargo on PATH, and `CONSENSFLOW_TEST_MACHINE` set to the machine's
+//! name (the one signal that a program was started by this runner, on a machine to test on: the live
+//! kit renews the logins of Claude Code and Pi where it is set, T-1067), its output streamed back; its exit
 //! status is this one's, as the machine says it in the last line of the output
 //! (below). One run at a time: a second is refused
 //! while the first goes on there (the machine says "A run is still going on this

@@ -257,7 +257,8 @@ fn a_pi_login_that_will_not_last_the_run_stops_the_rig_before_anything_starts() 
     };
     let failed = failed.to_string();
     assert!(failed.contains("`openai` expires in"), "{failed}");
-    assert!(failed.contains("at least 1 h 30 min more"), "{failed}");
+    // An hour's run and the margin (ten minutes): the Pi login that ends in ten does not last it.
+    assert!(failed.contains("at least 1 h 10 min more"), "{failed}");
     assert!(
         !failed.contains("\"A\"") && !failed.contains("refresh\":"),
         "{failed}"

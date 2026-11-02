@@ -9,12 +9,12 @@
 //! on 2026-10-22). `cf-evals` already depends on `cf-e2e`, and the rig is the kit's,
 //! so the login is the kit's too: this adds what an eval needs of it.
 //!
-//! **How long.** The kit refuses a login with less than two hours left, for a live suite
-//! that is shorter. An eval states its own length, `--timeout-min` times `--repeat` or
-//! `--hours`, and the login must last that much more and [`MARGIN`]: Claude Code
-//! refreshes a token when five minutes of it are left, and a refresh in the copy leaves the
-//! owner's Keychain item with a refresh token that no longer works. A login that would end
-//! before the run does is refused before anything is spent, saying how long the run needs.
+//! **How long.** The kit asks a live case for the length it plans for itself and its own
+//! margin, which is minutes. An eval states its own length, `--timeout-min` times `--repeat` or
+//! `--hours`, and the login must last that much more and [`MARGIN`]: the copy holds no refresh
+//! token (T-1067), so it cannot use up the owner's Keychain item's, but it cannot renew its
+//! access token either. A login that would end before the run does is refused before anything
+//! is spent, saying how long the run needs.
 //! Claude Code refreshes a token only when five minutes of it are left, so the way on is to run
 //! again after the owner's own Claude Code has refreshed it (a fresh token lasts hours, and the
 //! window in which a run of hours fits comes just after a refresh), or to make the run shorter:
@@ -22,10 +22,11 @@
 //! Nothing here refreshes it, by hand or otherwise, nor writes the Keychain.
 //!
 //! **A token that ends in the run anyway** (a run that went on past its budget, or a login
-//! that cannot cover a run as long as the one asked for) is refreshed by Claude Code
-//! itself, in the copy, and the run goes on. What the kit finds out when the run ends (the
-//! copy changed, a Keychain item gained, or the owner's setup touched) must not cost the run
-//! its report, which may be hours of evidence: [`Throwaway`] keeps it and says it in the
+//! that cannot cover a run as long as the one asked for) is not renewed: the copy holds no
+//! refresh token, so Claude Code goes on with the access token until the server refuses it, and
+//! then fails loudly (a 401), the owner's login untouched. What the kit finds out when the run
+//! ends (the copy changed, a Keychain item gained, or the owner's setup touched) must not cost
+//! the run its report, which may be hours of evidence: [`Throwaway`] keeps it and says it in the
 //! report, where it fails the run, instead of ending the rig in an error.
 //!
 //! **A run with no real Claude Code** (the dry runs, on the stand-in agent's models) has no

@@ -12,8 +12,12 @@
 //! Windows, of `~/.claude/.credentials.json`), which is removed when the run is over,
 //! `--keep` or not (`--keep` copies the conversations and sessions it kept into the kept
 //! home first, never the login). A run refuses to start when the login's
-//! access token expires within two hours (Claude Code refreshes it only when five minutes of
-//! it are left: run again after that), and fails if the owner's `settings.json`
+//! access token expires within the case's planned length (ten minutes unless the case says
+//! more: `cf_e2e::live::Log::lasting`) and ten minutes more (Claude Code refreshes a token only when five
+//! minutes of it are left, so on a machine the Windows runner started the command on, `cargo xtask
+//! windows` gives it `CONSENSFLOW_TEST_MACHINE` and the kit runs the harness once as the owner to
+//! renew a login that has run short, T-1067; elsewhere run again after the owner's own Claude
+//! Code has), and fails if the owner's `settings.json`
 //! changed or `~/.claude.json`, `history.jsonl` or `projects` gained anything of its
 //! folders (`cf_e2e::live::login`).
 //!

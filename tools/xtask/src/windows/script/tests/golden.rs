@@ -130,6 +130,7 @@ fn sent(run: &Recorded) -> [(String, String); 2] {
         command: &command_line(run.words),
         env: &env,
         node: r"C:\Program Files\nodejs",
+        machine: "zeewin",
         // The runs recorded are zeewin's (its Node), which takes less at once than it has.
         limits: crate::windows::machine::Machine::named("zeewin")
             .unwrap()
