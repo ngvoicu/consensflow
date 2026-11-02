@@ -232,6 +232,17 @@ impl Ledger {
         tasks::edit_task(&mut self.store, project_id, number, by, body)
     }
 
+    /// The title of a task in any state is `title`; the old one stays in the log.
+    pub fn retitle_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        title: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::retitle_task(&mut self.store, project_id, number, by, title)
+    }
+
     /// `from` tells an open task `words`, which no window has yet: they are added
     /// to its brief and go to whichever window takes the task, once, with it.
     pub fn tell_open(

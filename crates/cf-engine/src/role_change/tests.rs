@@ -171,8 +171,8 @@ fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
-    assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
+    assert_eq!(rows_whole(true), 35, "docs: whole to 35 rows with specs on");
+    assert_eq!(rows_whole(false), 64, "docs: whole to 64 rows without");
 }
 
 /// An item of a conversation's record, from `role`, saying `text`.

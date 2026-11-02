@@ -85,7 +85,7 @@ const BOARD: [(&[&str], &str); 19] = [
             "                                    to use as reference, where to save it\n",
             "  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n",
             "                                    keeps its context; only when that context matters;\n",
-            "                                    while T-3 is at work it waits for T-3's acceptance\n",
+            "                                    until T-3 is accepted it waits, at work or done\n",
             "  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n",
             "  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n",
             "  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n",
@@ -120,11 +120,19 @@ const BOARD: [(&[&str], &str); 19] = [
     ),
     (
         &["task", "reopen"],
-        "  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n",
+        concat!(
+            "  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n",
+            "  cf task edit|reopen|resume T-3 … --title \"…\"\n",
+            "                                    a new title, in any state (else the brief's first line); edit takes it alone\n",
+        ),
     ),
     (
         &["task", "edit"],
-        "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, queued, or paused)\n",
+        concat!(
+            "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, queued, or paused)\n",
+            "  cf task edit|reopen|resume T-3 … --title \"…\"\n",
+            "                                    a new title, in any state (else the brief's first line); edit takes it alone\n",
+        ),
     ),
     (
         &["task", "pause"],
@@ -135,7 +143,11 @@ const BOARD: [(&[&str], &str); 19] = [
     ),
     (
         &["task", "resume"],
-        "  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n",
+        concat!(
+            "  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n",
+            "  cf task edit|reopen|resume T-3 … --title \"…\"\n",
+            "                                    a new title, in any state (else the brief's first line); edit takes it alone\n",
+        ),
     ),
     (
         &["task", "finish"],

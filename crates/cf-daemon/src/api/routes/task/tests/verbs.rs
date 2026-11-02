@@ -722,3 +722,169 @@ async fn the_chief_replaces_the_brief_of_a_task_no_window_has_and_is_refused_for
     );
     assert_eq!(scene.kicks.get(), kicks);
 }
+
+/// T-1118: the title is the brief's first line, and a reopen or a resume adds words but
+/// keeps it. `title` sets it with any of the three, and `edit` takes it alone, in any
+/// state, the brief as it is.
+#[tokio::test]
+async fn the_chief_gives_a_task_a_new_title_alone_with_edit_in_any_state_and_the_brief_stays() {
+    let scene = scene();
+    let working = working_task(&scene);
+    let kicks = scene.kicks.get();
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{working}/edit"),
+        r#"{"title":"Parser, and the lexer too"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "Parser, and the lexer too");
+    assert_eq!(said["task"]["state"], "working", "the state is as it was");
+    assert_eq!(scene.kicks.get(), kicks + 1);
+    let (_, read) = get(&scene, &scene.chief, &working.to_string()).await;
+    assert_eq!(read["task"]["title"], "Parser, and the lexer too");
+    assert_eq!(read["task"]["body"], "Parser", "its brief is as it was");
+
+    // A task that is over is retitled too.
+    post(
+        &scene,
+        &scene.zeus,
+        &format!("{working}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    post(&scene, &scene.chief, &format!("{working}/accept"), "{}").await;
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{working}/edit"),
+        r#"{"title":"Parser, the lexer and the docs"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "Parser, the lexer and the docs");
+    assert_eq!(said["task"]["state"], "accepted");
+}
+
+#[tokio::test]
+async fn a_new_brief_with_a_title_is_titled_so_and_without_one_by_its_first_line() {
+    let scene = scene();
+    let open = open_task(&scene);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"body":"A new brief\nin two lines","title":"The new scope"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "The new scope");
+    let (_, read) = get(&scene, &scene.chief, &open.to_string()).await;
+    assert_eq!(read["task"]["body"], "A new brief\nin two lines");
+
+    let (_, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"body":"Another brief\nin two lines"}"#,
+    )
+    .await;
+    assert_eq!(
+        said["task"]["title"], "Another brief",
+        "the first line, as it was"
+    );
+
+    // A brief a window has is not replaced, and its title is not changed by the refusal.
+    let working = working_task(&scene);
+    let said = post(
+        &scene,
+        &scene.chief,
+        &format!("{working}/edit"),
+        r#"{"body":"Another","title":"Not this"}"#,
+    )
+    .await;
+    assert_eq!(said.1["error"], "already-given");
+    let (_, read) = get(&scene, &scene.chief, &working.to_string()).await;
+    assert_eq!(read["task"]["title"], "Parser");
+}
+
+#[tokio::test]
+async fn a_reopen_and_a_resume_take_a_title_and_keep_the_brief() {
+    let scene = scene();
+    let number = working_task(&scene);
+    post(
+        &scene,
+        &scene.zeus,
+        &format!("{number}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/reopen"),
+        r#"{"body":"Also the lexer","title":"Parser and lexer"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_ne!(said["task"]["state"], "done");
+    assert_eq!(said["task"]["title"], "Parser and lexer");
+
+    post(&scene, &scene.chief, &format!("{number}/pause"), "{}").await;
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/resume"),
+        r#"{"body":"Go on, with the docs too","title":"Parser, lexer and docs"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "Parser, lexer and docs");
+    let (_, read) = get(&scene, &scene.chief, &number.to_string()).await;
+    assert_eq!(read["task"]["body"], "Parser", "the brief is as it was");
+}
+
+#[tokio::test]
+async fn a_title_that_says_nothing_is_refused_and_moves_nothing() {
+    let scene = scene();
+    let number = working_task(&scene);
+    post(
+        &scene,
+        &scene.zeus,
+        &format!("{number}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    let kicks = scene.kicks.get();
+    for title in [r#""""#, r#""  ""#, "5", "null", "[]"] {
+        let said = post(
+            &scene,
+            &scene.chief,
+            &format!("{number}/reopen"),
+            &format!(r#"{{"body":"More","title":{title}}}"#),
+        )
+        .await;
+        assert_eq!(said.1["error"], "invalid-text", "{title}");
+        assert_eq!(state_of(&scene, number), "done", "{title}: nothing moved");
+    }
+    let said = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/edit"),
+        r#"{"title":"  "}"#,
+    )
+    .await;
+    assert_eq!(said.1["error"], "invalid-text");
+    assert_eq!(scene.kicks.get(), kicks);
+
+    // And a window that is no coordinator does not retitle.
+    let said = post(
+        &scene,
+        &scene.zeus,
+        &format!("{number}/edit"),
+        r#"{"title":"Mine"}"#,
+    )
+    .await;
+    assert_eq!(said.1["error"], "not-a-coordinator");
+}

@@ -32,6 +32,7 @@ reply does nothing.
     cf task edit T-3 "…"          replace the brief of a task no window has yet (open, queued, or paused)
     cf task pause T-3             stop a worker's task: its window waits; background work runs on
     cf task resume T-3 "…"        go on with it: the same window, with your words
+    cf task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it alone, in any state
     cf tell T-3 "…"               stop T-3 and put this to its window: its answer arrives as a message; then resume it
     cf task get T-3 · cf task list · cf inbox · cf inbox read m-12
     cf task get T-3 --transcript  what its window did so far (the last 10 items; --last 30 for more)
@@ -149,9 +150,9 @@ tell you why.
 A worker's window closes when its task is done, but its session keeps its
 conversation. When a follow-up needs what that window already knows, give it
 with `cf task add --after T-3 "…"`: the same window comes back on its own
-conversation, and only the follow-up goes in. A window still at work on T-3
-takes it too: it waits for T-3 to be accepted and goes in then. A window on
-another task refuses and tells you to open the task for its tier instead.
+conversation, and only the follow-up goes in. It waits for T-3 to be accepted,
+at work or done, and goes in then. A window on another task refuses and tells
+you to open the task for its tier instead.
 
 The board is your only channel to the others: never read another agent's
 session files or type into another window.
