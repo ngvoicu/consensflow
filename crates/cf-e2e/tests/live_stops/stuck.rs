@@ -22,12 +22,14 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use cf_e2e::live::claude::Process;
+use cf_e2e::live::codex::kept_commands;
 use cf_e2e::live::members::{
     descending_from, end_chosen, find, plus, shown, Account, Identity, Machine, MemberWindow,
     Members, Running, ThisMachine,
 };
 use cf_e2e::live::tree;
 use cf_e2e::live::until;
+use cf_e2e::live::Harness;
 use cf_e2e::{pattern, Result};
 use regex::Regex;
 use serde_json::Value;
@@ -149,6 +151,35 @@ fn names_the_script(tree: &tree::Tree) -> bool {
     tree.processes
         .iter()
         .any(|process| script_pattern().is_match(&process.command))
+}
+
+/// What Codex's broker says Codex keeps running for the window (`GET /terminals`, which
+/// asks Codex's server for its background terminals): what the daemon asks before it closes
+/// a window that did not stop for a pause, since the host lists no command Codex starts with
+/// no shell (T-1137). Where the script still `runs` after the stop, Codex kept it, and the
+/// list must name it.
+fn kept_by_codex(case: &mut Account, window: &MemberWindow, runs: bool) {
+    let listed = window
+        .open
+        .as_ref()
+        .ok_or_else(|| "the window's pane.open was not seen".to_owned())
+        .and_then(|open| kept_commands(open).map_err(|failed| failed.to_string()));
+    let names_it = listed
+        .as_ref()
+        .is_ok_and(|commands| commands.iter().any(|command| command.contains(SCRIPT)));
+    case.check(
+        "Codex's broker lists the command Codex kept running, as a close's check asks it",
+        !runs || names_it,
+        format!(
+            "the script {}; the broker's list: {}",
+            if runs { "still runs" } else { "has ended" },
+            match &listed {
+                Ok(commands) if commands.is_empty() => "none".to_owned(),
+                Ok(commands) => commands.join("; "),
+                Err(failed) => format!("not read: {failed}"),
+            }
+        ),
+    );
 }
 
 /// What the pane host finds under the window (`pane.background`: its tree's processes
@@ -376,6 +407,9 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
             |gone| format!("gone at {}", plus(gone, made))
         )
     ));
+    if name == Harness::Codex.name() {
+        kept_by_codex(case, &window, !now.command.is_empty());
+    }
     case.say(format!(
         "     what the pane host finds under the window: {}",
         host_view(members, &window)
