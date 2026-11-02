@@ -222,6 +222,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
 /// The folders a Muse keeps under the XDG folders, each by the variable that moves it and
 /// where it is below the home: its settings, and its sessions, which the daemon reads to
 /// learn the session a window opened (`cf_harness::muse::paths`).
+#[cfg(unix)]
 const MUSE_FOLDERS: [(&str, &str); 2] = [
     ("XDG_CONFIG_HOME", ".config"),
     ("XDG_DATA_HOME", ".local/share"),
