@@ -86,12 +86,15 @@ pub enum PageOperation {
     /// from the harness at the first ask of the daemon's life, and again at the human's
     /// Refresh (CHF-03). For the chief's picker and the staff chains' editor.
     ModelsGet,
+    /// Edit member: a member runs on another harness, model and effort from its next window,
+    /// in the tier the human chose (T-1143).
+    MemberEdit,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 45] = [
+    pub const ALL: [PageOperation; 46] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -137,6 +140,7 @@ impl PageOperation {
         Self::ComputerUseGet,
         Self::ComputerUseOpen,
         Self::ModelsGet,
+        Self::MemberEdit,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -187,6 +191,7 @@ impl PageOperation {
             Self::ComputerUseGet => "computer_use.get",
             Self::ComputerUseOpen => "computer_use.open",
             Self::ModelsGet => "models.get",
+            Self::MemberEdit => "member.edit",
         }
     }
 
@@ -305,7 +310,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 17] = [
+        const ADDED: [&str; 18] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -323,6 +328,7 @@ mod tests {
             "computer_use.get",
             "computer_use.open",
             "models.get",
+            "member.edit",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);

@@ -137,6 +137,23 @@ struct ModelProfile {
 }
 
 impl Catalog {
+    /// The tier the presets' rules give `model` on `harness` (its CLI's name, `claude`) at
+    /// `effort` (Pi's thinking level for Pi), where a preset runs that model on that
+    /// harness; none where none does, whatever the effort: a model the presets do not
+    /// know has no tier of theirs. What Add member and Edit member start their tier select
+    /// on (T-1143), the human picking where this is none.
+    pub fn preset_tier(&self, harness: &str, model: &str, effort: Option<&str>) -> Option<WorkTier> {
+        self.known.named(Some(harness), Some(model))?;
+        let settings = Settings {
+            harness: Some(harness),
+            model: Some(model),
+            effort,
+            thinking: effort.filter(|_| harness == "pi"),
+            ..Settings::default()
+        };
+        Some(self.profile(&settings).work_tier)
+    }
+
     /// `agentProfile`: what an agent's model and route are called, and the work
     /// it suits. Work tiers express the owner's allocation policy, not
     /// benchmark or price ranks: the tier is read from the model's key (after

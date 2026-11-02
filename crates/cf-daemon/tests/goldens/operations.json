@@ -44,7 +44,8 @@
     "history.part",
     "computer_use.get",
     "computer_use.open",
-    "models.get"
+    "models.get",
+    "member.edit"
   ],
   "ping": "{\"ok\":true}"
 }

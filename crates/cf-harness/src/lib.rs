@@ -24,6 +24,8 @@ pub mod pi;
 pub mod prepare;
 pub mod records;
 pub mod seams;
+#[cfg(test)]
+mod page_listings;
 mod shared;
 
 pub use devin::forget_kept;

@@ -1,0 +1,132 @@
+{
+  "models": [
+    {
+      "id": "adaptive",
+      "label": "Adaptive",
+      "efforts": []
+    },
+    {
+      "id": "swe-2",
+      "label": "SWE-2",
+      "efforts": [
+        "medium",
+        "high",
+        "max"
+      ],
+      "launchIds": {
+        "high": "swe-2-high",
+        "max": "swe-2-max",
+        "medium": "swe-2-medium"
+      }
+    },
+    {
+      "id": "swe-2-lightning",
+      "label": "SWE-2 Lightning",
+      "efforts": [
+        "medium",
+        "high",
+        "max"
+      ],
+      "launchIds": {
+        "high": "swe-2-high-lightning",
+        "max": "swe-2-max-lightning",
+        "medium": "swe-2-medium-lightning"
+      }
+    },
+    {
+      "id": "claude-opus-5-5",
+      "label": "Claude Opus 5.5",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "launchIds": {
+        "high": "claude-opus-5-5-high",
+        "low": "claude-opus-5-5-low",
+        "max": "claude-opus-5-5-max",
+        "medium": "claude-opus-5-5-medium",
+        "xhigh": "claude-opus-5-5-xhigh"
+      }
+    },
+    {
+      "id": "claude-opus-5-5-fast",
+      "label": "Claude Opus 5.5 Fast",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "launchIds": {
+        "high": "claude-opus-5-5-high-fast",
+        "low": "claude-opus-5-5-low-fast",
+        "max": "claude-opus-5-5-max-fast",
+        "medium": "claude-opus-5-5-medium-fast",
+        "xhigh": "claude-opus-5-5-xhigh-fast"
+      }
+    },
+    {
+      "id": "gpt-6-sol",
+      "label": "GPT-6 Sol",
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "launchIds": {
+        "high": "gpt-6-sol-high",
+        "low": "gpt-6-sol-low",
+        "max": "gpt-6-sol-max",
+        "medium": "gpt-6-sol-medium",
+        "none": "gpt-6-sol-none",
+        "xhigh": "gpt-6-sol-xhigh"
+      }
+    },
+    {
+      "id": "gpt-6-sol-priority",
+      "label": "GPT-6 Sol Fast",
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "launchIds": {
+        "high": "gpt-6-sol-high-priority",
+        "low": "gpt-6-sol-low-priority",
+        "max": "gpt-6-sol-max-priority",
+        "medium": "gpt-6-sol-medium-priority",
+        "none": "gpt-6-sol-none-priority",
+        "xhigh": "gpt-6-sol-xhigh-priority"
+      }
+    },
+    {
+      "id": "kimi-k3",
+      "label": "Kimi K3",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "launchIds": {
+        "high": "kimi-k3-high",
+        "low": "kimi-k3-low",
+        "max": "kimi-k3-max"
+      }
+    }
+  ],
+  "readAt": 1793000000000,
+  "freshness": {
+    "state": "fresh"
+  },
+  "how": "devin models list --format json"
+}

@@ -38,6 +38,9 @@ pub(crate) struct NewParticipant<'a> {
     pub(crate) harness: Option<&'a str>,
     pub(crate) designer: bool,
     pub(crate) tier: Option<&'a str>,
+    /// Whether the tier is the human's (T-1143): one the start's following of the agents'
+    /// tiers passes by.
+    pub(crate) tier_chosen: bool,
 }
 
 impl<'a> NewParticipant<'a> {
@@ -51,6 +54,7 @@ impl<'a> NewParticipant<'a> {
             harness,
             designer: false,
             tier: None,
+            tier_chosen: false,
         }
     }
 }
@@ -83,8 +87,8 @@ pub(crate) fn add_participant(
     }
     let at = store.at();
     store.db.execute(
-        "INSERT INTO participant (project_id, handle, role, roles, agent, harness, designer, tier, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO participant (project_id, handle, role, roles, agent, harness, designer, tier, tier_chosen, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             project_id,
             joining.handle,
@@ -94,6 +98,7 @@ pub(crate) fn add_participant(
             joining.harness,
             i64::from(joining.designer),
             joining.tier,
+            i64::from(joining.tier_chosen),
             at,
         ],
     )?;
@@ -109,11 +114,13 @@ pub(crate) fn add_participant(
 }
 
 /// A member joins the staff, or rejoins it in the roles, harness, designer
-/// flag and tier given now.
+/// flag and tier given now; `tier_chosen` where the tier is the human's (T-1143), which
+/// [`refresh_member_tiers`] then passes by.
 pub(crate) fn add_member(
     store: &mut Store,
     project_id: i64,
     member: &NewMember,
+    tier_chosen: bool,
 ) -> Result<ParticipantView, LedgerError> {
     let roles = member.check()?;
     store.write(|store| {
@@ -137,12 +144,13 @@ pub(crate) fn add_member(
                     harness: Some(&member.harness),
                     designer: member.designer,
                     tier: Some(&member.tier),
+                    tier_chosen,
                 },
             );
         };
         store.db.execute(
             "UPDATE participant SET role = ?, roles = ?, harness = ?, designer = ?, tier = ?,
-           left_at = NULL
+           tier_chosen = ?, left_at = NULL
          WHERE id = ?",
             params![
                 roles[0],
@@ -150,6 +158,7 @@ pub(crate) fn add_member(
                 member.harness,
                 i64::from(member.designer),
                 member.tier,
+                i64::from(tier_chosen),
                 id
             ],
         )?;
@@ -165,7 +174,9 @@ pub(crate) fn add_member(
 /// Members follow the roster: each active member's tier (and its
 /// sessions') becomes what its saved agent has now, since the app's catalog
 /// may have moved the model. Says which members changed; an agent the
-/// roster no longer has (`tier_of` answers none) leaves its member as it is.
+/// roster no longer has (`tier_of` answers none) leaves its member as it is,
+/// and so does a tier the human chose (`tier_chosen`, T-1143): the human picked it
+/// for a model the catalog's rules may not know, and only the human changes it.
 pub(crate) fn refresh_member_tiers(
     store: &mut Store,
     mut tier_of: impl FnMut(&str) -> Option<String>,
@@ -176,6 +187,7 @@ pub(crate) fn refresh_member_tiers(
             .prepare(
                 "SELECT id, project_id, handle, agent, tier FROM participant
          WHERE agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL AND role != 'chief'
+           AND tier_chosen = 0
          ORDER BY id",
             )?
             .query_map([], |row| {
@@ -252,6 +264,67 @@ pub(crate) fn set_roles<S: AsRef<str>>(
             project_id,
             "member.roles",
             json!({ "handle": handle, "roles": roles }),
+        )?;
+        participant_view(&store.participant_row(member.id)?)
+    })
+}
+
+/// What Edit member changes of a member (T-1143): the saved agent it runs on (its harness,
+/// model and effort), whether that agent draws, and the tier the human chose for it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemberEdit {
+    pub agent: String,
+    pub harness: String,
+    pub designer: bool,
+    pub tier: String,
+}
+
+/// A member runs on another saved agent from its next window, in the tier the human chose
+/// (T-1143), and so do its sessions: a window open now keeps what it runs on. Its handle,
+/// roles and work stay. The roles it holds must fit the agent.
+pub(crate) fn edit_member(
+    store: &mut Store,
+    project_id: i64,
+    handle: &str,
+    edit: &MemberEdit,
+) -> Result<ParticipantView, LedgerError> {
+    model::require_agent_id(&edit.agent, &model::COORDINATOR_HANDLES)?;
+    model::require_harness(&edit.harness)?;
+    model::require_tier(&edit.tier)?;
+    store.write(|store| {
+        let member = store.participant_by_handle(project_id, handle)?;
+        require_member_row(store, member.id, "is edited")?;
+        require_staff_role(handle, &member)?;
+        if member.left_at.is_some() {
+            return Err(LedgerError::refused_with(
+                "not-a-member",
+                format!("{handle} has left the staff: add it again instead"),
+                409,
+            ));
+        }
+        let held: Vec<String> = serde_json::from_str(&member.roles)?;
+        let held: Vec<&str> = held.iter().map(String::as_str).collect();
+        model::require_fitting_roles(&edit.agent, edit.designer, &held)?;
+        store.db.execute(
+            "UPDATE participant SET agent = ?, harness = ?, designer = ?, tier = ?, tier_chosen = 1
+             WHERE id = ? OR member_id = ?",
+            params![
+                edit.agent,
+                edit.harness,
+                i64::from(edit.designer),
+                edit.tier,
+                member.id,
+                member.id
+            ],
+        )?;
+        store.log(
+            project_id,
+            "member.edited",
+            json!({
+                "handle": handle,
+                "from": { "agent": member.agent, "harness": member.harness, "tier": member.tier },
+                "to": { "agent": edit.agent, "harness": edit.harness, "tier": edit.tier },
+            }),
         )?;
         participant_view(&store.participant_row(member.id)?)
     })

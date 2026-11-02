@@ -272,6 +272,7 @@ pub(crate) fn create_project(
                     harness: Some(&member.harness),
                     designer: member.designer,
                     tier: Some(&member.tier),
+                    tier_chosen: false,
                 },
             )?;
         }
