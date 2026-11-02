@@ -258,17 +258,24 @@ async fn what_a_window_declared_is_for_its_paste_and_its_generation_alone() {
             })
             .await
             .unwrap();
+            // A request that is not a paste has the bridge's, whatever it says of the pane (a
+            // body as long as a brief would give a paste 38 s).
             let snapshot = host
-                .request(
-                    "pane.snapshot",
-                    json!({ "id": "p1-chief", "generation": 1 }),
-                )
+                .request("pane.snapshot", a_paste_of(16_000))
                 .await
                 .unwrap();
             assert_eq!(snapshot, json!({ "ok": false, "error": "deadline" }));
             let newer = json!({ "id": "p1-chief", "generation": 2, "body": "x".repeat(16_000) });
             let answer = host.request("pane.write_paste", newer).await.unwrap();
             assert_eq!(answer, json!({ "ok": false, "error": "deadline" }));
+            // And what the last open of a pane said is what it declares: opened again with
+            // nothing, the pane has the bridge's.
+            host.open(open(&[])).await.unwrap();
+            let again = host
+                .request("pane.write_paste", a_paste_of(16_000))
+                .await
+                .unwrap();
+            assert_eq!(again, json!({ "ok": false, "error": "deadline" }));
         })
         .await;
 }

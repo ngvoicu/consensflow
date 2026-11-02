@@ -28,6 +28,7 @@ paste-enter-bridge-reply = ["cargo", "test", "--offline", "-p", "cf-panes", "--l
 paste-enter-page-reply = ["cargo", "test", "--offline", "-p", "app", "--lib", "commands::tests::the_pages_reply_goes_past_the_humans_keys_held_after_their_paste"]
 paste-enter-replies = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_terminals_reply_goes_past_the_humans_keys_held_after_their_paste"]
 paste-enter-console = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::windows::"]
+paste-enter-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests::"]
 paste-enter-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_enter", "tests::"]
 
 # --- the declaration ---
@@ -134,7 +135,7 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "            for (part, ended) in parts_ending_pastes(bytes, &ends) {"
+find = "            for (part, ended) in parts_ending_pastes(bytes, &fed.ends) {"
 replace = "            for (part, ended) in [(bytes, None)] {"
 
 [[plant]]
@@ -210,8 +211,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                            characters: characters + characters_in(&rest[..end]),"
-replace = "                            characters: characters + end,"
+find = "                        let content = characters_in(&rest[..end]);"
+replace = "                        let content = end;"
 
 [[plant]]
 name = "paste enter: a window that declares nothing has the human's keys held"
@@ -242,7 +243,7 @@ runs = ["paste-enter-console"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "            for (part, ended) in parts_ending_pastes(bytes, &ends) {"
+find = "            for (part, ended) in parts_ending_pastes(bytes, &fed.ends) {"
 replace = "            for (part, ended) in [(bytes, None)] {"
 
 # --- a delivery's own paste, and a human's paste over several writes (T-1127; T-1121's findings 2
@@ -351,8 +352,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                state.paste.feed(bytes)"
-replace = "                {\n                    state.paste = PasteWatch::default();\n                    state.paste.feed(bytes)\n                }"
+find = "                state.paste.feed(bytes, Instant::now())"
+replace = "                {\n                    state.paste = PasteWatch::default();\n                    state.paste.feed(bytes, Instant::now())\n                }"
 
 [[plant]]
 name = "paste enter: the characters of a paste before its last write are dropped"
@@ -361,8 +362,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                            characters: characters + characters_in(&rest[..end]),"
-replace = "                            characters: characters_in(&rest[..end]),"
+find = "                            characters: characters + content,"
+replace = "                            characters: content,"
 
 [[plant]]
 name = "paste enter: a paste still open at the end of a write keeps none of its characters"
@@ -371,7 +372,7 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                        self.open = Some(characters + characters_in(&rest[..rest.len() - held]));"
+find = "                        self.open = Some(characters + content);"
 replace = "                        self.open = Some(characters);"
 
 [[plant]]
@@ -401,8 +402,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                        self.open = Some(characters + characters_in(&rest[..rest.len() - held]));"
-replace = "                        self.open = Some(characters + characters_in(rest));"
+find = "                        let content = characters_in(&rest[..rest.len() - held]);"
+replace = "                        let content = characters_in(rest);"
 
 [[plant]]
 name = "paste enter: an opening marker in a paste does not start it again"
@@ -412,11 +413,193 @@ runs = ["paste-enter-arbiter"]
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
 find = """
-                        // cut off and began another would.
+                            .push(Segment::Pasted(characters_in(&rest[..start])));
                         self.open = Some(0);"""
 replace = """
-                        // cut off and began another would.
+                            .push(Segment::Pasted(characters_in(&rest[..start])));
                         self.open = Some(characters + characters_in(&rest[..start]));"""
+
+# --- the unsent count knows a paste across the writes it comes in (T-1127, second part). It read
+# a paste inside one write alone: the later chunks of a big paste, with no opening marker, were
+# keys typed, and a line break among them was the Enter that sends it, so a paste of 40,000
+# characters in lines left nothing unsent and a delivery went in over it. The pane host's watch of
+# the paste (`PasteWatch`) says which bytes of each write are keys and how many characters are a
+# paste's; a paste cut off is forgotten once the pane has taken nothing for ten seconds. ---
+
+[[plant]]
+name = "paste enter: the characters of a paste are not counted as unsent"
+meant = "a_paste_in_chunks_with_line_breaks_leaves_every_character_of_it_unsent_and_holds_a_delivery"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                keys.unsent += characters;"
+replace = "                keys.unsent += 0 * characters;"
+
+[[plant]]
+name = "paste enter: a chunk of a paste is no key of the human's"
+meant = "a_later_chunk_of_a_paste_is_a_paste_and_a_key_of_the_humans"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                keys.keyed = true;"
+replace = "                keys.keyed |= false;"
+
+[[plant]]
+name = "paste enter: a chunk of a paste is not said to be a paste"
+meant = "a_later_chunk_of_a_paste_is_a_paste_and_a_key_of_the_humans"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''                keys.classes.with("paste");'''
+replace = '''                keys.classes.with("text");'''
+
+[[plant]]
+name = "paste enter: the pane host reads each of the human's writes alone for its keys"
+meant = "a_paste_in_chunks_with_line_breaks_leaves_every_character_of_it_unsent_and_holds_a_delivery"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            let read = keys_of(state.unsent, bytes, &fed.segments);"
+replace = "            let read = keys_of(state.unsent, bytes, &[Segment::Typed(0..bytes.len())]);"
+
+[[plant]]
+name = "paste enter: the end of an opening marker a write cuts is typed"
+meant = "a_marker_cut_by_the_end_of_a_write_leaves_no_characters_unsent"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''
+                    fed.segments.push(Segment::Pasted(0));
+'''
+replace = '''
+                    fed.typed(in_write(at + start), in_write(at + start + PASTE_START.len()));
+                    fed.segments.push(Segment::Pasted(0));
+'''
+
+[[plant]]
+name = "paste enter: a paste cut off is never forgotten"
+meant = "a_paste_cut_off_does_not_swallow_the_keys_typed_after_it"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "        if cut_off {"
+replace = "        if cut_off && cut_off != cut_off {"
+
+[[plant]]
+name = "paste enter: the quiet that forgets a paste starts when the pane's write begins"
+meant = "the_quiet_that_forgets_a_paste_starts_when_the_panes_last_write_ends"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            state.paste.idle(Instant::now());"
+replace = "            let _ = &state.paste;"
+
+# --- a paste's time to be answered (T-1127, second part). `pane.write_paste` had the bridge's
+# 30 s whatever the pane host holds a delivery's Enter for: into a window like Muse's on Windows
+# (a second and 2 ms a character at the most), a brief of 14,500 characters or more was cut off
+# and read as uncertain. The daemon notes what each pane declared as it is opened, and gives a
+# paste into it the harness's cap for the paste's length and five seconds more, 30 s at the least. ---
+
+[[plant]]
+name = "paste enter: a paste into a window that declared its read has the bridge's thirty seconds"
+meant = "a_paste_into_a_window_that_declared_its_read_is_answered_after_the_hosts_own_cap"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        Some(cap.saturating_add(PASTE_MARGIN).max(PASTE_DEADLINE))"
+replace = "        Some(cap.saturating_sub(cap).saturating_add(PASTE_DEADLINE))"
+
+[[plant]]
+name = "paste enter: a paste's time past the host's cap has no margin"
+meant = "a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_the_hosts_cap"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        Some(cap.saturating_add(PASTE_MARGIN).max(PASTE_DEADLINE))"
+replace = "        Some(cap.max(PASTE_DEADLINE))"
+
+[[plant]]
+name = "paste enter: a short paste into a window that declared its read has less than thirty seconds"
+meant = "a_short_paste_into_a_window_that_declared_its_read_has_thirty_seconds_at_the_least"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        Some(cap.saturating_add(PASTE_MARGIN).max(PASTE_DEADLINE))"
+replace = "        Some(cap.saturating_add(PASTE_MARGIN))"
+
+[[plant]]
+name = "paste enter: a paste's time past the host's cap is worked out for no characters"
+meant = "a_paste_into_a_window_that_declared_its_read_is_answered_after_the_hosts_own_cap"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        let cap = Duration::from_millis(silent.most_ms(characters));"
+replace = "        let cap = Duration::from_millis(silent.most_ms(0 * characters));"
+
+[[plant]]
+name = "paste enter: a window that declared nothing has a long time for a paste"
+meant = "a_paste_into_a_window_that_declared_nothing_has_the_bridges_thirty_seconds"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        let deadline = self.deadline_of(op, &body);"
+replace = '''        let deadline = self
+            .deadline_of(op, &body)
+            .or_else(|| (op == "pane.write_paste").then_some(Duration::from_secs(600)));'''
+
+[[plant]]
+name = "paste enter: every request of a window that declared its read has the longer time"
+meant = "what_a_window_declared_is_for_its_paste_and_its_generation_alone"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''        if op != "pane.write_paste" {'''
+replace = '''        if op != "pane.write_paste" && op != "pane.snapshot" {'''
+
+[[plant]]
+name = "paste enter: a paste has the longer time in any generation of the pane"
+meant = "what_a_window_declared_is_for_its_paste_and_its_generation_alone"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "            (*opened == generation).then_some(*silent)?"
+replace = "            Some(*silent).filter(|_| *opened > 0 || generation > 0)?"
+
+[[plant]]
+name = "paste enter: an open with no declaration leaves the one before it"
+meant = "what_a_window_declared_is_for_its_paste_and_its_generation_alone"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        self.declare(&open.pane, open.silent_paste);"
+replace = '''        if open.silent_paste.is_some() {
+            self.declare(&open.pane, open.silent_paste);
+        }'''
+
+[[plant]]
+name = "paste enter: the open of a window does not note what its harness declared"
+meant = "a_paste_into_a_window_that_declared_its_read_is_answered_after_the_hosts_own_cap"
+runs = ["paste-enter-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        self.declare(&open.pane, open.silent_paste);"
+replace = "        self.declare(&open.pane, None);"
 
 # --- the terminal's replies ---
 

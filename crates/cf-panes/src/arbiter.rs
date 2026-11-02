@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -509,21 +510,24 @@ impl InputArbiter {
         pane: &PaneKey,
         bytes: &[u8],
     ) -> Result<(), ArbiterError> {
-        // Where this write ends a paste of the human's, which may have begun in an earlier one.
-        let (silent, ends) = {
+        // What this write holds of keys and of paste, a paste of the human's that may have
+        // begun in an earlier write, and where it ends a paste.
+        let (silent, fed) = {
             let state = self.pane_state(pane)?;
             let mut state = lock_state(&state)?;
             let silent = state.silent_paste;
-            let current = state.generation == pane.generation;
-            let ends = if silent.is_some() && current {
-                state.paste.feed(bytes)
+            let fed = if state.generation == pane.generation {
+                state.paste.feed(bytes, Instant::now())
             } else {
-                Vec::new()
+                Fed {
+                    ends: Vec::new(),
+                    segments: vec![Segment::Typed(0..bytes.len())],
+                }
             };
-            (silent, ends)
+            (silent, fed)
         };
         if let Some(silent) = silent {
-            for (part, ended) in parts_ending_pastes(bytes, &ends) {
+            for (part, ended) in parts_ending_pastes(bytes, &fed.ends) {
                 if !part.is_empty() {
                     self.settle_human_paste(pane)?;
                 }
@@ -543,8 +547,9 @@ impl InputArbiter {
         let state = self.pane_state(pane)?;
         let mut state = lock_state(&state)?;
         if state.generation == pane.generation {
-            let read = keys_of(state.unsent, bytes);
+            let read = keys_of(state.unsent, bytes, &fed.segments);
             state.unsent = read.unsent;
+            state.paste.idle(Instant::now());
             // What came, and when, and never a byte of it (`HumanWrite`).
             if state.writes.len() == HUMAN_WRITES {
                 state.writes.pop_front();
@@ -718,7 +723,8 @@ struct Keys {
 /// box, as near as keys tell ([`keys_of`]).
 #[cfg(test)]
 fn unsent_after(unsent: usize, bytes: &[u8]) -> usize {
-    keys_of(unsent, bytes).unsent
+    let fed = PasteWatch::default().feed(bytes, Instant::now());
+    keys_of(unsent, bytes, &fed.segments).unsent
 }
 
 /// How a bracketed paste begins and ends.
@@ -739,13 +745,40 @@ fn characters_in(text: &[u8]) -> usize {
 /// and the last bytes of the writes so far when they could begin the marker looked for next.
 /// Those bytes are scan state alone: they went to the window with their write, and are
 /// counted as characters of the paste only once it is known they are none of a marker's.
-#[derive(Debug, Default)]
+///
+/// What it says of each write serves two readers: where a paste ends in it, for the hold of
+/// the keys that follow it ([`Fed::ends`]), and which of its bytes are typed keys and how
+/// many characters are a paste's, for the count of what is unsent ([`Fed::segments`]): text
+/// inside a paste is never keys, whatever write it is in.
+#[derive(Debug)]
 struct PasteWatch {
     /// The characters of the open paste so far; none while no paste is open.
     open: Option<usize>,
     /// The end of the last write, when it could be the beginning of a marker.
     carried: Vec<u8>,
+    /// When the pane last took a write of the human's.
+    idle_since: Option<Instant>,
+    /// How long it takes nothing before a paste left open is forgotten.
+    abandoned_after: Duration,
 }
+
+impl Default for PasteWatch {
+    fn default() -> Self {
+        Self {
+            open: None,
+            carried: Vec::new(),
+            idle_since: None,
+            abandoned_after: PASTE_ABANDONED_AFTER,
+        }
+    }
+}
+
+/// A paste cut off, its closing marker never sent (a page that went, a chunk it could not
+/// send), is forgotten once the pane has taken nothing of the human's for this long: a chunk
+/// of a paste follows the one before it within the time of a call, and otherwise what the
+/// human types next would be taken for the rest of the paste, and an Enter among it would
+/// send nothing.
+const PASTE_ABANDONED_AFTER: Duration = Duration::from_secs(10);
 
 /// A paste that ends in a write: where in it (just after the closing marker), and how many
 /// characters the paste held, all of it, whatever writes it came in.
@@ -755,11 +788,46 @@ struct PasteEnd {
     characters: usize,
 }
 
+/// A piece of a write of the human's, in order.
+#[derive(Debug, PartialEq, Eq)]
+enum Segment {
+    /// Keys typed: these bytes of the write.
+    Typed(Range<usize>),
+    /// A paste, or part of one: the characters of it that came in this write, markers left
+    /// out. None where only a marker came, which is the human's input all the same.
+    Pasted(usize),
+}
+
+/// What a write of the human's holds, as [`PasteWatch::feed`] reads it against the paste the
+/// writes before it left open.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Fed {
+    ends: Vec<PasteEnd>,
+    segments: Vec<Segment>,
+}
+
+impl Fed {
+    fn typed(&mut self, from: usize, to: usize) {
+        if from < to {
+            self.segments.push(Segment::Typed(from..to));
+        }
+    }
+}
+
 impl PasteWatch {
-    /// The pastes that end in `bytes`, the human's next write, in order. A paste that began
-    /// in an earlier write is counted from its opening marker; one still open at the end of
-    /// `bytes` goes on in the next write; a marker split by the end of a write is found.
-    fn feed(&mut self, bytes: &[u8]) -> Vec<PasteEnd> {
+    /// The pastes that end in `bytes`, the human's next write, in order, and what it holds
+    /// of keys and of paste. A paste that began in an earlier write is counted from its
+    /// opening marker; one still open at the end of `bytes` goes on in the next write; a
+    /// marker split by the end of a write is found.
+    fn feed(&mut self, bytes: &[u8], now: Instant) -> Fed {
+        let cut_off = self
+            .idle_since
+            .is_some_and(|since| now.saturating_duration_since(since) > self.abandoned_after);
+        if cut_off {
+            self.open = None;
+            self.carried.clear();
+        }
+        self.idle_since = Some(now);
         let carried = self.carried.len();
         let stream = if carried == 0 {
             Cow::Borrowed(bytes)
@@ -767,7 +835,9 @@ impl PasteWatch {
             Cow::Owned([&self.carried[..], bytes].concat())
         };
         self.carried.clear();
-        let mut ends = Vec::new();
+        // Where a place in the stream is in `bytes`: what was carried was in the write before.
+        let in_write = |index: usize| index.saturating_sub(carried);
+        let mut fed = Fed::default();
         let mut at = 0;
         loop {
             let rest = &stream[at..];
@@ -775,8 +845,11 @@ impl PasteWatch {
                 None => {
                     let Some(start) = position_of(rest, PASTE_START) else {
                         self.carry(rest, &[PASTE_START]);
-                        return ends;
+                        fed.typed(in_write(at), bytes.len());
+                        return fed;
                     };
+                    fed.typed(in_write(at), in_write(at + start));
+                    fed.segments.push(Segment::Pasted(0));
                     self.open = Some(0);
                     at += start + PASTE_START.len();
                 }
@@ -786,25 +859,37 @@ impl PasteWatch {
                     if let Some(end) =
                         closing.filter(|end| opening.is_none_or(|start| *end < start))
                     {
+                        let content = characters_in(&rest[..end]);
                         at += end + PASTE_END.len();
-                        ends.push(PasteEnd {
-                            at: at.saturating_sub(carried),
-                            characters: characters + characters_in(&rest[..end]),
+                        fed.segments.push(Segment::Pasted(content));
+                        fed.ends.push(PasteEnd {
+                            at: in_write(at),
+                            characters: characters + content,
                         });
                         self.open = None;
                     } else if let Some(start) = opening {
                         // An opening marker in a paste starts it again, as a terminal that was
                         // cut off and began another would.
+                        fed.segments
+                            .push(Segment::Pasted(characters_in(&rest[..start])));
                         self.open = Some(0);
                         at += start + PASTE_START.len();
                     } else {
                         let held = self.carry(rest, &[PASTE_END, PASTE_START]);
-                        self.open = Some(characters + characters_in(&rest[..rest.len() - held]));
-                        return ends;
+                        let content = characters_in(&rest[..rest.len() - held]);
+                        fed.segments.push(Segment::Pasted(content));
+                        self.open = Some(characters + content);
+                        return fed;
                     }
                 }
             }
         }
+    }
+
+    /// The pane has taken the human's last write now, whatever came of it: a paste cut off
+    /// is forgotten once it has taken nothing for long.
+    fn idle(&mut self, now: Instant) {
+        self.idle_since = Some(now);
     }
 
     /// Keeps the end of `rest` that could begin one of `markers`, as many bytes as it can, and
@@ -857,10 +942,35 @@ fn parts_ending_pastes<'a>(bytes: &'a [u8], ends: &[PasteEnd]) -> Vec<(&'a [u8],
 /// nothing. What the terminal reports of itself is no key (T-839): a string
 /// (OSC, DCS, APC, PM, SOS), to its BEL or ST; a mouse report (`CSI <`, and the
 /// legacy `CSI M` with its three bytes); a focus report (`CSI I`, `CSI O`).
-fn keys_of(mut unsent: usize, bytes: &[u8]) -> Keys {
-    let characters = |text: &[u8]| text.iter().filter(|byte| *byte & 0xC0 != 0x80).count();
-    let mut keyed = false;
-    let mut classes = Classes::default();
+///
+/// `segments` say which of `bytes` are keys and which a paste ([`PasteWatch::feed`]): a paste
+/// is its characters whatever write it is in, line breaks and control bytes among them, and
+/// only the bytes outside it are read as keys.
+fn keys_of(unsent: usize, bytes: &[u8], segments: &[Segment]) -> Keys {
+    let mut keys = Keys {
+        unsent,
+        keyed: false,
+        classes: Classes::default(),
+    };
+    for segment in segments {
+        match segment {
+            Segment::Typed(range) => typed_keys(&mut keys, &bytes[range.clone()]),
+            Segment::Pasted(characters) => {
+                keys.classes.with("paste");
+                keys.keyed = true;
+                keys.unsent += characters;
+            }
+        }
+    }
+    keys
+}
+
+/// What the keys `bytes` leave unsent, added to `keys` ([`keys_of`]): none of them is in a
+/// paste.
+fn typed_keys(keys: &mut Keys, bytes: &[u8]) {
+    let mut unsent = keys.unsent;
+    let mut keyed = keys.keyed;
+    let mut classes = keys.classes;
     let mut at = 0;
     while at < bytes.len() {
         let rest = &bytes[at..];
@@ -906,17 +1016,6 @@ fn keys_of(mut unsent: usize, bytes: &[u8]) -> Keys {
                 classes.with("control");
                 unsent += 1;
             }
-            0x1b if rest.starts_with(PASTE_START) => {
-                classes.with("paste");
-                let text = &rest[PASTE_START.len()..];
-                let end = text
-                    .windows(PASTE_END.len())
-                    .position(|window| window == PASTE_END)
-                    .unwrap_or(text.len());
-                unsent += characters(&text[..end]);
-                at += PASTE_START.len() + (end + PASTE_END.len()).min(text.len());
-                continue;
-            }
             0x1b => {
                 classes.with("escape");
                 at += match rest.get(1) {
@@ -936,11 +1035,11 @@ fn keys_of(mut unsent: usize, bytes: &[u8]) -> Keys {
         }
         at += 1;
     }
-    Keys {
+    *keys = Keys {
         unsent,
         keyed,
         classes,
-    }
+    };
 }
 
 /// How many bytes of `rest`, which begins with a CSI (`ESC [`), are that sequence:
@@ -1446,7 +1545,7 @@ mod tests {
     }
 
     /// The count of what is unsent knows a paste across the writes it comes in (T-1127, found
-    /// by T-1127's sibling check): the later chunks have no opening marker, and their line
+    /// by the check of the first part): the later chunks have no opening marker, and their line
     /// breaks were taken for the Enter that sends it, so a paste of 40,000 characters in lines
     /// left nothing unsent, and a delivery went in over it (the owner's rule of 2026-10-03).
     #[test]
@@ -1503,6 +1602,79 @@ mod tests {
         let snapshot = arbiter.snapshot(&key).expect("snapshot");
         assert_eq!(snapshot.human_writes[1].classes, ["paste"]);
         assert_eq!(snapshot.typed, typed + 1);
+    }
+
+    /// Sets how long the pane takes nothing of the human's before it forgets a paste left open.
+    fn forgetting_a_paste_after(arbiter: &InputArbiter, key: &PaneKey, quiet: Duration) {
+        let state = arbiter.pane_state(key).expect("the pane");
+        super::lock_state(&state)
+            .expect("the pane's state")
+            .paste
+            .abandoned_after = quiet;
+    }
+
+    /// A paste whose closing marker never came (the page went, a chunk it could not send) does not
+    /// make what the human types after it a paste for good: its Enter sends it, and a delivery
+    /// goes in after.
+    #[test]
+    fn a_paste_cut_off_does_not_swallow_the_keys_typed_after_it() {
+        let key = PaneKey::new("cut-off", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        forgetting_a_paste_after(&arbiter, &key, Duration::from_millis(100));
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"\x1b[200~half")
+            .expect("half of a paste");
+        assert_eq!(unsent_of(&arbiter, &key), 4);
+        thread::sleep(Duration::from_millis(150));
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"typed\r")
+            .expect("what the human typed after");
+        assert_eq!(
+            unsent_of(&arbiter, &key),
+            0,
+            "the Enter sent what was typed, and what was cut off with it"
+        );
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, b"result", None)
+            .expect("a delivery after the Enter");
+    }
+
+    /// The quiet a cut-off paste is forgotten after counts from the end of the pane's last write,
+    /// not from its beginning: a chunk that waited behind the hold on the keys before it (the
+    /// human's earlier paste) is followed by the next within the time of a call.
+    #[test]
+    fn the_quiet_that_forgets_a_paste_starts_when_the_panes_last_write_ends() {
+        let key = PaneKey::new("slow-chunk", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        // 300 characters at 1 ms each: the keys after a paste of them wait 300 ms.
+        let silent = SilentPaste {
+            pace_us_per_character: 1_000,
+            quiet_ms: 0,
+            ..DRAWS
+        };
+        let printer = drawing(
+            &arbiter,
+            &key,
+            silent,
+            &[Duration::from_millis(20)],
+            Duration::ZERO,
+        );
+        forgetting_a_paste_after(&arbiter, &key, Duration::from_millis(100));
+        let first = [&b"\x1b[200~"[..], &[b'x'; 300], b"\x1b[201~"].concat();
+        for chunk in [&first[..], b"\x1b[200~y", b"z\n\x1b[201~"] {
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, chunk)
+                .expect("a chunk of the human's input");
+        }
+        printer.join().expect("printer");
+        assert_eq!(
+            unsent_of(&arbiter, &key),
+            300 + 3,
+            "the second paste went on across its chunks, though the first waited 300 ms"
+        );
     }
 
     /// A marker the end of a write cuts is no characters, nor is it typed: the bytes of a
@@ -2110,7 +2282,11 @@ mod tests {
     /// What the pastes that end in each of `writes` (in order, to one watch) held.
     fn ended_in(writes: &[&[u8]]) -> Vec<Vec<super::PasteEnd>> {
         let mut watch = super::PasteWatch::default();
-        writes.iter().map(|write| watch.feed(write)).collect()
+        let now = Instant::now();
+        writes
+            .iter()
+            .map(|write| watch.feed(write, now).ends)
+            .collect()
     }
 
     fn ending(at: usize, characters: usize) -> super::PasteEnd {
@@ -2188,6 +2364,56 @@ mod tests {
             ended_in(&[&accents[..cut], &accents[cut..]]),
             [vec![], vec![ending(accents.len() - cut, 1)]]
         );
+    }
+
+    /// What a write holds of keys and of paste, by the places of its bytes: the text of a paste
+    /// is its characters, in the write that has its opening marker and in every other, and only
+    /// the bytes outside a paste are keys.
+    #[test]
+    fn a_write_is_keys_and_a_pastes_characters_wherever_the_paste_began() {
+        use super::Segment::{Pasted, Typed};
+        let mut watch = super::PasteWatch::default();
+        let now = Instant::now();
+        let mut read = |write: &[u8]| watch.feed(write, now).segments;
+        assert_eq!(
+            read(b"ab\x1b[200~cd\x1b[201~ef"),
+            [Typed(0..2), Pasted(0), Pasted(2), Typed(16..18)]
+        );
+        // A paste of three writes: the markers in the first and the last, lines in all.
+        assert_eq!(read(b"\x1b[200~one\ntwo\n"), [Pasted(0), Pasted(8)]);
+        assert_eq!(read(b"three\n\r\x03"), [Pasted(8)]);
+        assert_eq!(read(b"four\n\x1b[201~\rx"), [Pasted(5), Typed(11..13)]);
+        // Keys typed with the beginning of a marker at the end of the write are keys, and what
+        // completes the marker is no characters.
+        assert_eq!(read(b"ab\x1b[20"), [Typed(0..6)]);
+        assert_eq!(read(b"0~xy\x1b[20"), [Pasted(0), Pasted(2)]);
+        assert_eq!(read(b"1~"), [Pasted(0)]);
+        // Bytes that began a marker and were none: the paste's own once known.
+        assert_eq!(read(b"\x1b[200~ab\x1b[20"), [Pasted(0), Pasted(2)]);
+        assert_eq!(read(b"0 and\x1b[201~"), [Pasted(4 + 5)]);
+    }
+
+    /// A paste whose closing marker never came (the page went, a chunk it could not send) does
+    /// not make the keys typed after it a paste for good: the pane forgets it once it has taken
+    /// nothing of the human's for ten seconds, and an Enter then sends what is typed.
+    #[test]
+    fn a_paste_cut_off_is_forgotten_once_the_pane_has_taken_nothing_for_long() {
+        use super::Segment::{Pasted, Typed};
+        let cut_off = Instant::now();
+        let mut watch = super::PasteWatch::default();
+        let _ = watch.feed(b"\x1b[200~half of it", cut_off);
+        // A chunk within the time of a call goes on with the paste.
+        let soon = cut_off + Duration::from_secs(5);
+        assert_eq!(watch.feed(b"more\r", soon).segments, [Pasted(5)]);
+        // After a long quiet, the keys are keys.
+        let later = soon + Duration::from_secs(11);
+        assert_eq!(watch.feed(b"typed\r", later).segments, [Typed(0..6)]);
+        // And the pane's own end of a write, when it is slow to finish (a hold on the keys
+        // before it), starts the quiet from there.
+        let _ = watch.feed(b"\x1b[200~again", later);
+        watch.idle(later + Duration::from_secs(40));
+        let after = later + Duration::from_secs(45);
+        assert_eq!(watch.feed(b"rest\x1b[201~", after).ends.len(), 1);
     }
 
     /// A paste that is cut off and a new one begun counts from the new one, as one paste of a
