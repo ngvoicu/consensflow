@@ -1429,6 +1429,100 @@ mod tests {
         );
     }
 
+    /// The characters the pane counts as left unsent in its window's input box.
+    fn unsent_of(arbiter: &InputArbiter, key: &PaneKey) -> usize {
+        let state = arbiter.pane_state(key).expect("the pane");
+        let unsent = super::lock_state(&state).expect("the pane's state").unsent;
+        unsent
+    }
+
+    /// A paste of the human's of 40,000 characters in 400 lines, as the page sends it: its
+    /// opening marker and the first 32 KiB, then the rest and its closing marker.
+    fn a_paste_in_chunks_of_lines() -> (Vec<Vec<u8>>, usize) {
+        let text = ("x".repeat(99) + "\n").repeat(400);
+        let paste = [&b"\x1b[200~"[..], text.as_bytes(), b"\x1b[201~"].concat();
+        let chunks = paste.chunks(32 * 1024).map(<[u8]>::to_vec).collect();
+        (chunks, text.chars().count())
+    }
+
+    /// The count of what is unsent knows a paste across the writes it comes in (T-1127, found
+    /// by T-1127's sibling check): the later chunks have no opening marker, and their line
+    /// breaks were taken for the Enter that sends it, so a paste of 40,000 characters in lines
+    /// left nothing unsent, and a delivery went in over it (the owner's rule of 2026-10-03).
+    #[test]
+    fn a_paste_in_chunks_with_line_breaks_leaves_every_character_of_it_unsent_and_holds_a_delivery()
+    {
+        let key = PaneKey::new("pasted-lines-in-chunks", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        let (chunks, characters) = a_paste_in_chunks_of_lines();
+        assert_eq!(chunks.len(), 2, "the page's two chunks");
+        assert_eq!(characters, 40_000);
+        for chunk in &chunks {
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, chunk)
+                .expect("a chunk of the human's paste");
+        }
+        assert_eq!(unsent_of(&arbiter, &key), 40_000);
+        assert!(arbiter.snapshot(&key).expect("snapshot").unsent);
+        assert!(
+            matches!(
+                arbiter.write_paste_via(writer.as_ref(), &key, b"result", None),
+                Err(ArbiterError::Unsent)
+            ),
+            "a delivery goes in over text the human has not sent"
+        );
+
+        // Their Enter sends it, and a delivery goes in after.
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"\r")
+            .expect("the human's Enter");
+        assert_eq!(unsent_of(&arbiter, &key), 0);
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, b"result", None)
+            .expect("a delivery after the Enter");
+    }
+
+    /// A later chunk of a paste is a paste in what the pane says of the human's writes, and
+    /// the human's own key: the wait the adapter makes for their last key starts from it.
+    #[test]
+    fn a_later_chunk_of_a_paste_is_a_paste_and_a_key_of_the_humans() {
+        let key = PaneKey::new("chunk-kinds", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        let (chunks, _) = a_paste_in_chunks_of_lines();
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, &chunks[0])
+            .expect("the first chunk");
+        let typed = arbiter.snapshot(&key).expect("snapshot").typed;
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, &chunks[1])
+            .expect("the last chunk");
+        let snapshot = arbiter.snapshot(&key).expect("snapshot");
+        assert_eq!(snapshot.human_writes[1].classes, ["paste"]);
+        assert_eq!(snapshot.typed, typed + 1);
+    }
+
+    /// A marker the end of a write cuts is no characters, nor is it typed: the bytes of a
+    /// closing marker that the next write completes are not the paste's, and the opening
+    /// marker one write begins and the next ends is the paste's beginning.
+    #[test]
+    fn a_marker_cut_by_the_end_of_a_write_leaves_no_characters_unsent() {
+        let key = PaneKey::new("markers-cut", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        for write in [&b"typed\x1b[2"[..], b"00~abc\x1b[20", b"1~"] {
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, write)
+                .expect("the human's input");
+        }
+        // Five typed, three pasted.
+        assert_eq!(unsent_of(&arbiter, &key), 8);
+    }
+
     /// What a terminal reports of itself on the human's path is no key either: the count
     /// of the human's writes stays, and so does the time since their last key, which an
     /// adapter waits a second past. A program that asks its terminal every few seconds
