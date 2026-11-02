@@ -704,9 +704,14 @@ mod tests {
 
     #[test]
     fn the_efforts_a_harness_takes_are_the_ones_the_products_catalog_has() {
-        let catalog =
-            std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/src/catalog.rs"))
-                .unwrap();
+        // The catalog's `efforts()` says each harness's levels with whether its model's id
+        // holds the level (`Harness::Claude => (&[…], false),`, T-1078), in a layout rustfmt
+        // chooses by length: read with the whitespace left out.
+        let squeezed = |text: &str| text.split_whitespace().collect::<String>();
+        let catalog = squeezed(
+            &std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/src/catalog.rs"))
+                .unwrap(),
+        );
         for harness in Harness::ALL {
             // The catalog's own name of the harness.
             let name = harness.name();
@@ -715,8 +720,11 @@ mod tests {
                 .iter()
                 .map(|effort| format!("\"{effort}\""))
                 .collect();
-            let line = format!("Harness::{variant} => &[{}],", quoted.join(", "));
-            assert!(catalog.contains(&line), "the catalog has no {line}");
+            let line = format!("Harness::{variant}=>(&[{}],", quoted.join(","));
+            assert!(
+                catalog.contains(&line),
+                "the catalog's efforts() has no {line} (whitespace left out)"
+            );
         }
     }
 
