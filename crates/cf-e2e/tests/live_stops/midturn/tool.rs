@@ -358,15 +358,25 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
     )?;
     if let (Some(mark), Some(before)) = (background, before) {
         let after = holding(&tree::read(ctx.members.rig(), &begun.window.pane), mark);
-        case.check(
-            "the pause left the work started in the background running",
-            !before.is_empty() && !after.is_empty(),
-            format!(
-                "before the pause: {}; after the watch: {}",
-                said(&before),
+        if before.is_empty() {
+            // A harness that starts a program with no shell (Codex), or a job the agent
+            // detached (`&` in Pi's and Devin's shells), is no work the host can name.
+            case.say(format!(
+                "the host's tree never listed the command started in the background, so \
+                 whether the pause left it is not said; after the watch: {}",
                 said(&after)
-            ),
-        );
+            ));
+        } else {
+            case.check(
+                "the pause left the work started in the background running",
+                !after.is_empty(),
+                format!(
+                    "before the pause: {}; after the watch: {}",
+                    said(&before),
+                    said(&after)
+                ),
+            );
+        }
     }
     Ok(())
 }
