@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -190,7 +191,7 @@ impl OutputClock {
 /// of it, and an Enter before that finds nothing to send. What a window prints
 /// sooner than `drawn_after_ms` after the paste is its answer to the paste's
 /// first key, not its draw of the paste (Codex on Windows, [`SilentPaste`]).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnterTiming {
     pub least_ms: u64,
     pub drawn_after_ms: u64,
@@ -218,6 +219,29 @@ impl EnterTiming {
             drawn_after_ms: silent.drawn_after_ms,
             quiet_ms: silent.quiet_ms,
             most_ms: silent.most_ms(characters),
+        }
+    }
+
+    /// The longer of two waits: each of its four numbers is the greater of the two's, so the
+    /// Enter goes no sooner than either would have it.
+    fn longer_of(self, other: Self) -> Self {
+        Self {
+            least_ms: self.least_ms.max(other.least_ms),
+            drawn_after_ms: self.drawn_after_ms.max(other.drawn_after_ms),
+            quiet_ms: self.quiet_ms.max(other.quiet_ms),
+            most_ms: self.most_ms.max(other.most_ms),
+        }
+    }
+
+    /// When the Enter of a delivery of `body` goes, this being the host's wait: that wait, and
+    /// where the window's harness declared how it reads a paste, no sooner than that says for
+    /// this paste's length. A window that redraws while it reads a long paste never goes quiet
+    /// for the host's 120 ms, and its Enter went at the host's most (2 s) while it still read
+    /// (Muse on Windows, T-1127). A window that declared nothing has the host's wait alone.
+    fn for_delivery(self, silent: Option<SilentPaste>, body: &[u8]) -> Self {
+        match silent {
+            Some(silent) => self.longer_of(Self::of_silent_paste(silent, characters_in(body))),
+            None => self,
         }
     }
 
@@ -270,6 +294,9 @@ struct PaneInputState {
     /// When the human's last paste was written, and when their keys after it may go, while
     /// those keys have not gone ([`InputArbiter::write_typed`]).
     human_pasted: Option<(Instant, EnterTiming)>,
+    /// Where the human's input stands in a paste, across the writes it comes in
+    /// ([`InputArbiter::write_typed`]), in a window that reads a paste silently.
+    paste: PasteWatch,
     /// The human's last writes into this generation, oldest first ([`HUMAN_WRITES`]).
     writes: VecDeque<Written>,
 }
@@ -290,6 +317,7 @@ impl PaneInputState {
             pasted: None,
             silent_paste: None,
             human_pasted: None,
+            paste: PasteWatch::default(),
             writes: VecDeque::new(),
         }
     }
@@ -461,8 +489,9 @@ impl InputArbiter {
 
     /// The human's own keys, counted for what they leave unsent in the window's input box.
     /// They go at once, but in a window whose harness reads a paste silently
-    /// ([`SilentPaste`]), where a write ends a paste of theirs, what comes after it, in that
-    /// write or a later one, waits until the window has taken the paste in: on Windows the
+    /// ([`SilentPaste`]), where a write ends a paste of theirs (one that began in an earlier
+    /// write, or ends in a marker split by a write's end: [`PasteWatch`]), what comes after
+    /// it, in that write or a later one, waits until the window has taken the paste in: on Windows the
     /// console hands a paste on as key presses, and Codex took an Enter that came while it
     /// was still reading them for a line break in the paste (T-1025, T-1048).
     pub(crate) fn write_typed(
@@ -480,19 +509,27 @@ impl InputArbiter {
         pane: &PaneKey,
         bytes: &[u8],
     ) -> Result<(), ArbiterError> {
-        let silent = {
+        // Where this write ends a paste of the human's, which may have begun in an earlier one.
+        let (silent, ends) = {
             let state = self.pane_state(pane)?;
-            let state = lock_state(&state)?;
-            state.silent_paste
+            let mut state = lock_state(&state)?;
+            let silent = state.silent_paste;
+            let current = state.generation == pane.generation;
+            let ends = if silent.is_some() && current {
+                state.paste.feed(bytes)
+            } else {
+                Vec::new()
+            };
+            (silent, ends)
         };
         if let Some(silent) = silent {
-            for part in pasted_parts(bytes) {
+            for (part, ended) in parts_ending_pastes(bytes, &ends) {
                 if !part.is_empty() {
                     self.settle_human_paste(pane)?;
                 }
                 self.write_via(writer, pane, part)?;
-                if part.ends_with(PASTE_END) {
-                    let timing = EnterTiming::of_silent_paste(silent, pasted_characters(part));
+                if let Some(characters) = ended {
+                    let timing = EnterTiming::of_silent_paste(silent, characters);
                     let state = self.pane_state(pane)?;
                     let mut state = lock_state(&state)?;
                     if state.generation == pane.generation {
@@ -608,7 +645,7 @@ impl InputArbiter {
     ) -> Result<(), ArbiterError> {
         let body = sanitize(body)?;
         let state = self.pane_state(pane)?;
-        let output = {
+        let (output, enter) = {
             let mut state = lock_state(&state)?;
             validate_admission(&state, pane)?;
             if state.unsent > 0 {
@@ -618,13 +655,18 @@ impl InputArbiter {
                 state.unsent = 0;
             }
             state.paste_in_flight = true;
-            Arc::clone(&state.output)
+            // The host's wait, or the longer of it and how the window's harness reads a paste of
+            // this length where it declared that.
+            (
+                Arc::clone(&state.output),
+                self.enter.for_delivery(state.silent_paste, &body),
+            )
         };
         // The Enter's wait begins once the paste itself is written.
         let mut pasted = false;
         let written = write_paste_via(writer, pane, &body, || {
             pasted = true;
-            self.enter.wait(&output, Instant::now());
+            enter.wait(&output, Instant::now());
         });
         // A paste is answered as it went: a lock poisoned meanwhile fails the
         // pane's next admission, never what this paste already wrote.
@@ -683,34 +725,126 @@ fn unsent_after(unsent: usize, bytes: &[u8]) -> usize {
 const PASTE_START: &[u8] = b"\x1b[200~";
 const PASTE_END: &[u8] = b"\x1b[201~";
 
-/// `bytes`, a write of the human's path, in parts that each end where a paste ends, and what
-/// follows the last: one part, `bytes` itself, where it ends no paste (or is empty).
-fn pasted_parts(bytes: &[u8]) -> Vec<&[u8]> {
-    let mut parts = Vec::new();
-    let mut rest = bytes;
-    while let Some(end) = rest
-        .windows(PASTE_END.len())
-        .position(|window| window == PASTE_END)
-    {
-        let (part, after) = rest.split_at(end + PASTE_END.len());
-        parts.push(part);
-        rest = after;
-    }
-    if !rest.is_empty() || parts.is_empty() {
-        parts.push(rest);
-    }
-    parts
+/// How many characters `text` holds: its bytes that begin one, which is every one but a
+/// UTF-8 continuation byte, so that a character split between two writes is counted once.
+fn characters_in(text: &[u8]) -> usize {
+    text.iter().filter(|byte| **byte & 0xC0 != 0x80).count()
 }
 
-/// How many characters the paste that `part` ends holds: what follows its opening marker, or
-/// all of it where the paste began in an earlier write, to its closing one.
-fn pasted_characters(part: &[u8]) -> usize {
-    let body = part.strip_suffix(PASTE_END).unwrap_or(part);
-    let body = body
-        .windows(PASTE_START.len())
-        .rposition(|window| window == PASTE_START)
-        .map_or(body, |start| &body[start + PASTE_START.len()..]);
-    body.iter().filter(|byte| **byte & 0xC0 != 0x80).count()
+/// Where the human's input stands in a bracketed paste, across the writes it comes in. The
+/// page sends input in chunks of 32 KiB (`app/ui/terminal-link.js`), so a big paste is
+/// several writes, with its opening marker in the first and its closing marker in the last,
+/// and a chunk can end inside a marker. It keeps the characters of the paste now open,
+/// counted from after its opening marker to its closing one over all the writes it takes,
+/// and the last bytes of the writes so far when they could begin the marker looked for next.
+/// Those bytes are scan state alone: they went to the window with their write, and are
+/// counted as characters of the paste only once it is known they are none of a marker's.
+#[derive(Debug, Default)]
+struct PasteWatch {
+    /// The characters of the open paste so far; none while no paste is open.
+    open: Option<usize>,
+    /// The end of the last write, when it could be the beginning of a marker.
+    carried: Vec<u8>,
+}
+
+/// A paste that ends in a write: where in it (just after the closing marker), and how many
+/// characters the paste held, all of it, whatever writes it came in.
+#[derive(Debug, PartialEq, Eq)]
+struct PasteEnd {
+    at: usize,
+    characters: usize,
+}
+
+impl PasteWatch {
+    /// The pastes that end in `bytes`, the human's next write, in order. A paste that began
+    /// in an earlier write is counted from its opening marker; one still open at the end of
+    /// `bytes` goes on in the next write; a marker split by the end of a write is found.
+    fn feed(&mut self, bytes: &[u8]) -> Vec<PasteEnd> {
+        let carried = self.carried.len();
+        let stream = if carried == 0 {
+            Cow::Borrowed(bytes)
+        } else {
+            Cow::Owned([&self.carried[..], bytes].concat())
+        };
+        self.carried.clear();
+        let mut ends = Vec::new();
+        let mut at = 0;
+        loop {
+            let rest = &stream[at..];
+            match self.open {
+                None => {
+                    let Some(start) = position_of(rest, PASTE_START) else {
+                        self.carry(rest, &[PASTE_START]);
+                        return ends;
+                    };
+                    self.open = Some(0);
+                    at += start + PASTE_START.len();
+                }
+                Some(characters) => {
+                    let closing = position_of(rest, PASTE_END);
+                    let opening = position_of(rest, PASTE_START);
+                    if let Some(end) =
+                        closing.filter(|end| opening.is_none_or(|start| *end < start))
+                    {
+                        at += end + PASTE_END.len();
+                        ends.push(PasteEnd {
+                            at: at.saturating_sub(carried),
+                            characters: characters + characters_in(&rest[..end]),
+                        });
+                        self.open = None;
+                    } else if let Some(start) = opening {
+                        // An opening marker in a paste starts it again, as a terminal that was
+                        // cut off and began another would.
+                        self.open = Some(0);
+                        at += start + PASTE_START.len();
+                    } else {
+                        let held = self.carry(rest, &[PASTE_END, PASTE_START]);
+                        self.open = Some(characters + characters_in(&rest[..rest.len() - held]));
+                        return ends;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Keeps the end of `rest` that could begin one of `markers`, as many bytes as it can, and
+    /// says how many it kept.
+    fn carry(&mut self, rest: &[u8], markers: &[&[u8]]) -> usize {
+        let held = (1..PASTE_END.len())
+            .rev()
+            .find(|held| {
+                rest.len() >= *held
+                    && markers
+                        .iter()
+                        .any(|marker| marker.starts_with(&rest[rest.len() - held..]))
+            })
+            .unwrap_or(0);
+        self.carried = rest[rest.len() - held..].to_vec();
+        held
+    }
+}
+
+/// Where `marker` first is in `bytes`.
+fn position_of(bytes: &[u8], marker: &[u8]) -> Option<usize> {
+    bytes
+        .windows(marker.len())
+        .position(|window| window == marker)
+}
+
+/// `bytes`, a write of the human's path, in parts that each end where a paste ends (`ends`,
+/// from [`PasteWatch::feed`]), each with the characters of the paste it ends; and what follows
+/// the last, if anything does. One part, `bytes` itself, where it ends no paste (or is empty).
+fn parts_ending_pastes<'a>(bytes: &'a [u8], ends: &[PasteEnd]) -> Vec<(&'a [u8], Option<usize>)> {
+    let mut parts = Vec::new();
+    let mut from = 0;
+    for end in ends {
+        parts.push((&bytes[from..end.at], Some(end.characters)));
+        from = end.at;
+    }
+    if from < bytes.len() || parts.is_empty() {
+        parts.push((&bytes[from..], None));
+    }
+    parts
 }
 
 /// What `bytes`, a write of the human's path, hold, `unsent` characters left unsent
@@ -1879,15 +2013,97 @@ mod tests {
         assert!(waited < Duration::from_millis(3_000), "{waited:?}");
     }
 
-    /// The characters of a paste, not its bytes or its markers, are what its wait is for.
+    /// What the pastes that end in each of `writes` (in order, to one watch) held.
+    fn ended_in(writes: &[&[u8]]) -> Vec<Vec<super::PasteEnd>> {
+        let mut watch = super::PasteWatch::default();
+        writes.iter().map(|write| watch.feed(write)).collect()
+    }
+
+    fn ending(at: usize, characters: usize) -> super::PasteEnd {
+        super::PasteEnd { at, characters }
+    }
+
+    /// The characters of a paste, not its bytes or its markers, are what its wait is for: all
+    /// of them, from its opening marker to its closing one, in however many writes it came.
     #[test]
     fn a_pastes_characters_are_counted_between_its_markers() {
-        assert_eq!(super::pasted_characters(b"\x1b[200~abc\x1b[201~"), 3);
+        assert_eq!(ended_in(&[b"\x1b[200~abc\x1b[201~"]), [vec![ending(15, 3)]]);
+        let accents = "typed\x1b[200~ăî—\x1b[201~".as_bytes();
+        assert_eq!(ended_in(&[accents]), [vec![ending(accents.len(), 3)]]);
+        // What follows the closing marker is no part of the paste.
         assert_eq!(
-            super::pasted_characters("typed\x1b[200~ăî—\x1b[201~".as_bytes()),
-            3
+            ended_in(&[b"\x1b[200~abc\x1b[201~\r"]),
+            [vec![ending(15, 3)]]
         );
-        assert_eq!(super::pasted_characters(b"tail of it\x1b[201~"), 10);
+        // The paste of several writes, of which the old count saw the last alone: ten.
+        assert_eq!(
+            ended_in(&[
+                b"\x1b[200~the head of it, ",
+                b"and the middle, ",
+                b"tail of it\x1b[201~"
+            ]),
+            [vec![], vec![], vec![ending(16, 16 + 16 + 10)]],
+        );
+        // Typing outside a paste is not counted, and a paste after a paste is counted afresh.
+        assert_eq!(
+            ended_in(&[b"typed\x1b[200~ab\x1b[201~more\x1b[200~cde\x1b[201~"]),
+            [vec![ending(19, 2), ending(38, 3)]]
+        );
+    }
+
+    /// A chunk can end inside a marker: its bytes are no characters of the paste, the marker
+    /// is found whole when the next write completes it, and bytes that only looked like the
+    /// start of one are counted when the next write shows they were none.
+    #[test]
+    fn a_marker_split_between_writes_is_found_and_none_of_it_is_counted() {
+        // The closing marker, split at every place.
+        for split in 1..6 {
+            let marker = b"\x1b[201~";
+            let (first, second) = marker.split_at(split);
+            assert_eq!(
+                ended_in(&[
+                    &[&b"\x1b[200~abc"[..], first].concat(),
+                    &[second, b"\r"].concat()
+                ]),
+                [vec![], vec![ending(6 - split, 3)]],
+                "split after {split} bytes"
+            );
+        }
+        // The opening marker, split at every place.
+        for split in 1..6 {
+            let marker = b"\x1b[200~";
+            let (first, second) = marker.split_at(split);
+            assert_eq!(
+                ended_in(&[
+                    &[&b"typed"[..], first].concat(),
+                    &[second, b"abc\x1b[201~"].concat()
+                ]),
+                [vec![], vec![ending(6 - split + 3 + 6, 3)]],
+                "split after {split} bytes"
+            );
+        }
+        // Bytes that began a marker and were none: the paste's own, once known.
+        assert_eq!(
+            ended_in(&[b"\x1b[200~ab\x1b[20", b"0 and more\x1b[201~"]),
+            [vec![], vec![ending(16, 2 + 4 + 10)]]
+        );
+        // A character of several bytes cut between two writes is one.
+        let accents = "\x1b[200~ă\x1b[201~".as_bytes();
+        let cut = 6 + 1;
+        assert_eq!(
+            ended_in(&[&accents[..cut], &accents[cut..]]),
+            [vec![], vec![ending(accents.len() - cut, 1)]]
+        );
+    }
+
+    /// A paste that is cut off and a new one begun counts from the new one, as one paste of a
+    /// single write always did.
+    #[test]
+    fn a_paste_begun_again_is_counted_from_its_last_opening_marker() {
+        assert_eq!(
+            ended_in(&[b"\x1b[200~lost\x1b[200~ab", b"c\x1b[201~"]),
+            [vec![], vec![ending(7, 3)]]
+        );
     }
 
     /// The page sends the human's input in chunks of 32 KiB (`app/ui/terminal-link.js`), so a
@@ -2014,6 +2230,53 @@ mod tests {
             "{waited:?}: the Enter went while the window still read the paste"
         );
         assert!(waited < Duration::from_millis(4_000), "{waited:?}");
+    }
+
+    /// The wait of a delivery is the host's and the declared one's longer, each of its four
+    /// numbers: a short brief to a window like Devin changes nothing of it, a long one lets it
+    /// read, and what is counted is the paste's characters, not its bytes.
+    #[test]
+    fn a_deliverys_wait_is_the_longer_of_the_hosts_and_the_declared_one_in_each_of_its_numbers() {
+        use crate::headless::ENTER;
+
+        let devin = SilentPaste {
+            pace_us_per_character: 20,
+            drawn_after_ms: 0,
+            quiet_ms: 80,
+            most_ms: 1_000,
+            most_us_per_character: 100,
+        };
+        // The 252 characters of the longest brief the live suites send: the host's wait as it is.
+        assert_eq!(ENTER.for_delivery(Some(devin), &[b'x'; 252]), ENTER);
+        assert_eq!(ENTER.for_delivery(None, &[b'x'; 100_000]), ENTER);
+        // 20,000 characters: Devin's cap (1 s and 0.1 ms each: 3 s) is past the host's 2 s.
+        assert_eq!(
+            ENTER.for_delivery(Some(devin), &[b'x'; 20_000]),
+            EnterTiming {
+                least_ms: 400,
+                drawn_after_ms: 0,
+                quiet_ms: 120,
+                most_ms: 3_000,
+            }
+        );
+        // A window that reads at 0.5 ms a character, is quiet 200 ms and may take a second and
+        // a millisecond a character, and 4,000 characters of two bytes each.
+        let slow = SilentPaste {
+            pace_us_per_character: 500,
+            drawn_after_ms: 50,
+            quiet_ms: 200,
+            most_ms: 1_000,
+            most_us_per_character: 1_000,
+        };
+        assert_eq!(
+            ENTER.for_delivery(Some(slow), "ă".repeat(4_000).as_bytes()),
+            EnterTiming {
+                least_ms: 2_000,
+                drawn_after_ms: 50,
+                quiet_ms: 200,
+                most_ms: 5_000,
+            }
+        );
     }
 
     /// A window whose harness declares nothing has its deliveries' Enter after the host's
@@ -2664,9 +2927,7 @@ mod tests {
             let table = Arc::new(PaneTable::new());
             let (key, output) = open(&table, &slow_reader(pace_us), &HashMap::new(), 1 << 20);
             let arbiter = InputArbiter::new(ENTER);
-            let clock = arbiter
-                .register_with(&key, silent)
-                .expect("register pane");
+            let clock = arbiter.register_with(&key, silent).expect("register pane");
             read_until(&table, &key, &output, "READY");
             let seen = Arc::new(Mutex::new(String::new()));
             let reader = {
@@ -2695,9 +2956,7 @@ mod tests {
             let entered = pasted.elapsed();
             let mut sent = sent_within(pasted, Duration::from_secs(13));
             if sent.is_none() {
-                arbiter
-                    .write(&table, &key, b"\r")
-                    .expect("the Enter again");
+                arbiter.write(&table, &key, b"\r").expect("the Enter again");
                 sent_within(Instant::now(), Duration::from_secs(30));
             }
             table.kill(&key).expect("kill the pane");
@@ -2738,10 +2997,19 @@ mod tests {
             {
                 eprintln!("delivered: {delivered:?}");
             }
-            assert_eq!(delivered.breaks, "[0]", "{delivered:?}: the Enter was a line break");
+            assert_eq!(
+                delivered.breaks, "[0]",
+                "{delivered:?}: the Enter was a line break"
+            );
             assert!(
                 delivered.sent.is_some_and(|sent| sent < Duration::from_secs(12)),
                 "{delivered:?}: the brief stayed in the window's box until the Enter was pressed again"
+            );
+            // Never sooner than the window could have read it at its declared pace: 4,000
+            // characters at 0.5 ms each.
+            assert!(
+                delivered.entered >= Duration::from_secs(2),
+                "{delivered:?}: the Enter went before the window could have read the brief"
             );
         }
 
