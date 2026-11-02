@@ -251,13 +251,17 @@ fn a_change_to_the_owners_login_in_a_run_on_the_kits_home_fails_the_report_and_n
     assert_eq!(home[0].0, "CODEX_HOME");
     HarnessHome::finish(&*isolation).unwrap();
     let name = "the owner's setups and logins of the run's harnesses were left as they were";
+    // The kit says a file below the home as `~/` and the path as the platform spells it.
+    let auth = format!("~/{}", Path::new(".codex").join("auth.json").display());
     let (check, said) = reported(&machine);
     assert_eq!(
         check.map(|check| (check.name, check.ok)),
         Some((name.to_owned(), true))
     );
     assert!(
-        said.contains("the owner's Codex setup, before the run and after it: ~/.codex/auth.json "),
+        said.contains(&format!(
+            "the owner's Codex setup, before the run and after it: {auth} "
+        )),
         "{said}"
     );
     // The run's Codex refreshed the owner's login: the rig ends as it did, the report fails.
@@ -266,13 +270,13 @@ fn a_change_to_the_owners_login_in_a_run_on_the_kits_home_fails_the_report_and_n
     let (check, said) = reported(&machine);
     assert_eq!(check.map(|check| check.ok), Some(false));
     assert!(
-        said.contains(
-            "the run left the owner's setup or login of a harness changed: ~/.codex/auth.json is not as it was"
-        ),
+        said.contains(&format!(
+            "the run left the owner's setup or login of a harness changed: {auth} is not as it was"
+        )),
         "{said}"
     );
     assert!(
-        said.contains("the owner's Codex setup before the run: ~/.codex/auth.json "),
+        said.contains(&format!("the owner's Codex setup before the run: {auth} ")),
         "{said}"
     );
     assert!(
