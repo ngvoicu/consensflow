@@ -26,6 +26,11 @@
 //! alone; so Devin's XDG folders and Muse's never meet. Its row watches the owner's
 //! `~/.config/muse` (`auth.json`, `settings.json`, `trust.json`) and the index of their
 //! sessions (T-946: the members kit's live pacing run wrote the owner's `~/.config/muse`).
+//! On Windows (T-1084) the row is the same, below the owner's profile: Muse honours
+//! `XDG_CONFIG_HOME` and `XDG_DATA_HOME` there, and its login is `auth.json` itself
+//! (`credential_backend: file`) with an access token and an API key in it and no refresh token, so
+//! the launcher's copy of it can use up nothing of the owner's (a run of `muse usage` on copies
+//! left the owner's three files as they were, and the copies worked after one another's runs).
 //!
 //! **Devin on Windows** (T-1084) has no XDG folders: it finds its config and data in
 //! `AppData\Roaming\devin` and its cache in `AppData\Local\devin` by the system's known-folder
@@ -246,7 +251,6 @@ impl Plan {
     /// Muse Code: nothing of the run's own, for the rig's launcher gives its windows their
     /// folders; the owner's login metadata, settings and trust, and the index of their
     /// sessions, which a session of the run's would be written into, are watched.
-    #[cfg(unix)]
     fn muse(config: &Path, data: &Path) -> Self {
         let config = config.join("muse");
         Self {
@@ -320,7 +324,6 @@ impl Plan {
 }
 
 /// The owner's folder `variable` names, or `below` in their `home` where it names none.
-#[cfg(unix)]
 fn xdg(home: &Path, variable: &str, below: &[&str]) -> PathBuf {
     own_var(variable)
         .filter(|value| !value.is_empty())
@@ -433,7 +436,8 @@ impl Isolation {
                 &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
                 &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),
-            #[cfg(unix)]
+            // Muse honours `XDG_CONFIG_HOME` and `XDG_DATA_HOME` on Windows too, and keeps its
+            // login in `auth.json` there: the same row, below the owner's profile (T-1084).
             Harness::Muse => Some(Self::muse(
                 home,
                 &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
@@ -452,8 +456,6 @@ impl Isolation {
             // not a silence (T-946: Muse came after T-724's list and ran on the owner's):
             // Claude Code's config folder is the kit's copy of its login (`super::login`).
             Harness::Claude => None,
-            #[cfg(not(unix))]
-            Harness::Muse => None,
         })
     }
 
@@ -462,7 +464,6 @@ impl Isolation {
     /// [`super::machine::rig`]), so this home holds nothing and sets nothing; it watches the
     /// owner's Muse files in `config` and `data` (the XDG folders of the owner whose home is
     /// `home`), and fails a run that changed them.
-    #[cfg(unix)]
     pub fn muse(home: &Path, config: &Path, data: &Path) -> Self {
         Self::new(Harness::Muse, home, Plan::muse(config, data))
     }
