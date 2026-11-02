@@ -5,9 +5,10 @@
 //! with no `JOB_OBJECT_LIMIT_BREAKAWAY_OK` refuses (this one has only kill-on-close),
 //! and a job object made inside it holds its processes in this one too: a job an
 //! agent detached from a shell that ended (`Start-Process`, `start`) is in the job
-//! still, with no parent, which the window's close ends and the host does not name as
-//! the turn's work: a job with no parent is no proof of whose work it is
-//! ([`crate::background`]). What the job does not hold, and a close does not end:
+//! still, with no parent, which the window's close ends. The host does not call it the turn's work
+//! (a job with no parent is no proof of whose it is: [`crate::background`]) and names it as
+//! detached work all the same, for the pause that keeps the window and the note of the close
+//! (T-1145). What the job does not hold, and a close does not end:
 //! - what another program starts for the harness: a service (`schtasks`, a WMI
 //!   `Win32_Process.Create`), the shell or COM activating a program, UAC starting one
 //!   elevated; none of it is a child of the pane's;

@@ -27,20 +27,24 @@
 //! is not mistaken for it; everything the host does to a process it does to the one
 //! it chose, by that, never to the number a later look finds.
 //!
-//! **When in doubt the host names less.** Of what began after the mark it calls the
-//! turn's only what a chain of processes that run proves it: a shell the harness
-//! started, and what descends from it ([`work`]). A process whose chain is broken (a
-//! job an agent detached with `nohup … &` or `Start-Process` from a shell that then
-//! ended) has no chain to look at, and its being a shell, or having no parent, is no
-//! proof of whose it is: it is left running, not ended and not named, until its window
-//! closes, which ends it where the tree finds it the window's (always on Windows; on
-//! the Mac not a command left by a shell that leads a session of its own, Pi's, which
-//! runs on after the close too). Nor is anything the host can tell the harness's own
-//! ever the turn's, by where the harness keeps its servers or by the programs it is
-//! named for ([`harness`] says how); and what it has seen to be the harness's it keeps
-//! for its own as long as it runs ([`Baseline::turn_work`] remembers it), whatever
-//! becomes of the process that started it. So what is listed and named is the turn's
-//! work and nothing of the rest, and a process that cannot be told is not named.
+//! **When in doubt the host names less, and says what it names.** Of what began after the
+//! mark it calls the turn's only what a chain of processes that run proves it: a shell the
+//! harness started, and what descends from it ([`work`]). A process whose chain is broken (a
+//! job an agent detached with `nohup … &` or `Start-Process` from a shell that then ended)
+//! has no chain to look at, and its being a shell, or having no parent, is no proof of
+//! whose it is. It is not the turn's, and the host does not end it. It is the **window's**
+//! where the tree holds it (always on Windows, where the pane's job holds what any process
+//! starts; on the Mac what is under the window's program or in the session it leads), and the
+//! window's close ends it: so a pause that kept the window for the work it would end, and a
+//! close that named what it ended, left it out, and the chief heard of it never (T-1145).
+//! [`Baseline::detached`] names it, apart from the turn's work: a process of the tree that
+//! began after the mark, is none of the harness's own and has lost the process that started
+//! it, with what descends from it. Nor is anything the host can tell the harness's own
+//! ever named, by where the harness keeps its servers or by the programs it is named for
+//! ([`harness`] says how); and what it has seen to be the harness's it keeps for its own as
+//! long as it runs ([`Baseline::turn_work`] remembers it), whatever becomes of the process
+//! that started it. So what is listed and named is the turn's work, the detached work of
+//! the window, and nothing of the rest, and a process that cannot be told is not named.
 //!
 //! **A moment later.** A harness runs short commands of its own at any time, and the
 //! host cannot tell one from the agent's by anything it is. Claude Code runs its status
@@ -282,10 +286,63 @@ impl Baseline {
         self.before.is_some()
     }
 
-    /// What `tree`, the pane's tree now, has that its turn started, as the daemon is
-    /// told of it.
+    /// What `tree`, the pane's tree now, has that its turn started, and the work the window
+    /// would end that was detached from it, as the daemon is told of it
+    /// ([`Baseline::named`], where every process of the tree is one a close ends).
+    #[cfg(test)]
     pub fn left_running(&self, tree: &[Member]) -> Background {
-        listed(self.turn_work(tree))
+        let named = self
+            .named(tree, || Ok(None))
+            .expect("a look that cannot fail");
+        listed(named)
+    }
+
+    /// What the host names of `tree`, oldest first: the turn's work ([`Baseline::turn_work`])
+    /// and the work detached from it ([`Baseline::detached`]) that a close of the window ends.
+    /// `closing` says which processes a close ends, when there are any detached to ask of: none
+    /// where it ends them all (Windows, where the pane's job holds the whole tree), else the set
+    /// it names (on the Mac, what the tree selects and the bound allows: a process that only the
+    /// window's marker ties to it is not one, and is `possibly_left`, which no close ends).
+    pub fn named(
+        &self,
+        tree: &[Member],
+        closing: impl FnOnce() -> std::io::Result<Option<HashSet<ProcessKey>>>,
+    ) -> std::io::Result<Vec<Member>> {
+        let mut named = self.turn_work(tree);
+        let detached = self.detached(tree);
+        if !detached.is_empty() {
+            let closing = closing()?;
+            named.extend(detached.into_iter().filter(|member| {
+                closing
+                    .as_ref()
+                    .is_none_or(|ends| ends.contains(&member.key))
+            }));
+            named.sort_by_key(|member| (member.key.began, member.key.pid));
+        }
+        Ok(named)
+    }
+
+    /// The work of `tree` that was detached from the turn, oldest first: a process that began
+    /// after the mark, is none of the harness's own and has lost the process that started it,
+    /// with what descends from it ([`work::detached`], which says what it cannot tell). It is the
+    /// window's where the tree holds it and not the turn's by a chain; nothing ends it but the
+    /// window's close. The host names none where no turn was marked.
+    pub fn detached(&self, tree: &[Member]) -> Vec<Member> {
+        let Some(before) = &self.before else {
+            return Vec::new();
+        };
+        let protected = self.protected(tree);
+        // What the tree had when the turn began, and what began after.
+        let (_, started): (Vec<&Member>, Vec<&Member>) =
+            tree.iter().partition(|member| before.contains(&member.key));
+        let detached = work::detached(&started, &protected);
+        let mut jobs: Vec<Member> = started
+            .into_iter()
+            .filter(|member| detached.contains(&member.key))
+            .cloned()
+            .collect();
+        jobs.sort_by_key(|member| (member.key.began, member.key.pid));
+        jobs
     }
 
     /// The members of `tree` that are the turn's work, all of them, oldest first:

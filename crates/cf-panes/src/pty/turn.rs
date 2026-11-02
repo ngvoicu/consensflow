@@ -103,26 +103,52 @@ impl Tree {
         }
     }
 
-    /// The turn's work that `baseline` proves, and still is [`SETTLE`] after it was
-    /// first found ([`steady`]): looked at again when the first look finds any, so that
-    /// a run of the harness's own, which has ended by then, is none of it.
+    /// The processes of the tree that a close of the window ends, when they are not all of them:
+    /// none where it ends every one (Windows: the pane's job is ended whole, whatever started
+    /// what in it), else the numbers it ends. On the Mac that is what the tree selects and the
+    /// bound allows (`ProcessTree::closing`), which a close attempts: a process that only the
+    /// window's marker ties to it, or one that left the window's session after a look saw it, is
+    /// left running, and is not the work a close ends.
+    fn closing(
+        &self,
+    ) -> io::Result<Option<std::collections::HashSet<crate::background::ProcessKey>>> {
+        #[cfg(target_os = "macos")]
+        {
+            self.tree.closing().map(Some)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(None)
+        }
+    }
+
+    /// What the host names of the tree now: the turn's work that `baseline` proves, and the
+    /// work detached from it that a close of the window ends ([`Baseline::named`]).
+    fn named(&self, baseline: &Baseline) -> io::Result<Vec<Member>> {
+        baseline.named(&self.members()?, || self.closing())
+    }
+
+    /// What the host names of the tree, and still is [`SETTLE`] after it was first found
+    /// ([`steady`]): looked at again when the first look finds any, so that a run of the
+    /// harness's own, which has ended by then, is none of it.
     fn steady_work(&self, baseline: &Baseline) -> io::Result<Vec<Member>> {
-        let first = baseline.turn_work(&self.members()?);
+        let first = self.named(baseline)?;
         if first.is_empty() {
             return Ok(first);
         }
         thread::sleep(SETTLE);
-        Ok(steady(&first, baseline.turn_work(&self.members()?)))
+        Ok(steady(&first, self.named(baseline)?))
     }
 }
 
-/// What `tree` has running that is the turn's work, where the turn `baseline` was
-/// marked at began. A pane never marked has none, and its tree is not looked at.
+/// What `tree` has running that the host names, where the turn `baseline` was marked at
+/// began: the turn's work, and the work detached from it that a close would end. A pane
+/// never marked has none, and its tree is not looked at.
 fn looked_at(baseline: &Baseline, tree: &Tree) -> io::Result<Background> {
     if !baseline.is_marked() {
         return Ok(Background::default());
     }
-    Ok(baseline.left_running(&tree.members()?))
+    Ok(listed(tree.named(baseline)?))
 }
 
 /// [`looked_at`], and what it finds is looked for again [`SETTLE`] later: what is still

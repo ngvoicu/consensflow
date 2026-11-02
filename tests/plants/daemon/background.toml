@@ -1434,7 +1434,7 @@ runs = ["panes-lib-turn"]
 file = "crates/cf-panes/src/pty/turn.rs"
 find = '''
         thread::sleep(SETTLE);
-        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+        Ok(steady(&first, self.named(baseline)?))'''
 replace = '''
         let _ = SETTLE;
         Ok(first)'''
@@ -1492,7 +1492,7 @@ builds = true
 file = "crates/cf-panes/src/pty/turn.rs"
 find = '''
         thread::sleep(SETTLE);
-        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+        Ok(steady(&first, self.named(baseline)?))'''
 replace = '''
         let _ = SETTLE;
         Ok(first)'''
@@ -1530,7 +1530,7 @@ replace = '''
 file = "crates/cf-panes/src/pty/turn.rs"
 find = '''
         thread::sleep(SETTLE);
-        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+        Ok(steady(&first, self.named(baseline)?))'''
 replace = '''
         let _ = SETTLE;
         Ok(first)'''

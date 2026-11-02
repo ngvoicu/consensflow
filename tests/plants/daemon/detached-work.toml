@@ -1,0 +1,198 @@
+# A job the agent detached from its shell is seen (T-1145: Muse on Windows detached a `ping` with
+# `Start-Process`, and the chief was told nothing, T-1126; Pi and Devin detach with `&`, the limit
+# T-1117 wrote down: a paused window with only that running was closed, and the close ended it
+# unnamed). The pane host's tree holds the job (the pane's job object on Windows, the window's
+# session on the Mac), but only a chain of processes that run, up to a shell the harness started,
+# made a process the turn's work, and a detached job has lost the shell. The host now names it as
+# **detached work** (`Baseline::detached`, `work::detached`): a process of the tree that began after
+# the mark, is none of the harness's own, and has lost the process that started it, with what
+# descends from it, if a close of the window ends it. So a pause keeps the window for it (T-1117's
+# rule, which reads `pane.background`), the chief is told it runs, and a close names what it ended.
+# The rules, each with its plant:
+#
+# - a process whose starter has gone, and what descends from it, is detached work;
+# - a process whose parent began before the mark (the harness's own child) is not;
+# - what the harness's own is, with what descends from it, is not;
+# - what the tree had when the turn began is not;
+# - the host is asked what a close ends only when there is a detached job to ask of;
+# - only a detached job a close ends is named, and the turn's work always;
+# - what a close ends on the Mac is what the selection names and the bound allows;
+# - a look names it, and so does the second look a close keeps for its exit;
+# - on Windows a close ends the whole job, so every detached job is named;
+# - the stand-in's `--detach-here` keeps the shell in the window's session.
+#
+# The tests are `crates/cf-panes` (the rule, the baseline, the made-up machine, the real panes of
+# `pty::turn::leaving_tests` and the headless host) and the rig's cases in
+# `crates/cf-e2e/tests/regressions/a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed.rs`.
+# Every name holds `detached work`, so `cargo xtask plants daemon "detached work"` runs them all.
+
+[run]
+dw-panes-work = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::work::"]
+dw-panes-baseline = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::tests::"]
+dw-panes-leaving = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::turn::leaving_tests::"]
+dw-panes-machine = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::machine_tests::"]
+dw-rig-regression = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_the_agent_detached_was_never_seen"], builds = true }
+
+[[plant]]
+name = "detached work: a process whose starter has gone is not named"
+meant = "a_process_whose_starter_has_gone_is_detached_work_with_whatever_descends_from_it"
+runs = ["dw-panes-work"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = "            None => return true,"
+replace = "            None => return false,"
+
+[[plant]]
+name = "detached work: a child of the harness's own, from before the mark, is named"
+meant = "what_a_process_from_before_the_mark_started_is_never_detached_work"
+runs = ["dw-panes-work"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = "                None => return false,"
+replace = "                None => return true,"
+
+[[plant]]
+name = "detached work: what the harness's own is, is named"
+meant = "what_is_the_harnesss_own_is_never_detached_work_nor_is_what_descends_from_it"
+runs = ["dw-panes-work"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = "        if protected.contains(&at.key) {"
+replace = "        if false && protected.contains(&at.key) {"
+
+[[plant]]
+name = "detached work: what the tree had when the turn began is named"
+meant = "a_job_that_lost_its_starter_before_the_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work"
+runs = ["dw-panes-baseline"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = "            tree.iter().partition(|member| before.contains(&member.key));"
+replace = "            tree.iter().partition(|member| before.contains(&member.key) && false);"
+
+[[plant]]
+name = "detached work: a window never marked names detached work"
+meant = "a_job_that_lost_its_starter_before_the_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work"
+runs = ["dw-panes-baseline"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '''    pub fn detached(&self, tree: &[Member]) -> Vec<Member> {
+        let Some(before) = &self.before else {
+            return Vec::new();
+        };'''
+replace = '''    pub fn detached(&self, tree: &[Member]) -> Vec<Member> {
+        let empty = HashSet::new();
+        let before = self.before.as_ref().unwrap_or(&empty);'''
+
+[[plant]]
+name = "detached work: the host is asked what a close ends when nothing is detached"
+meant = "the_host_is_asked_what_a_close_ends_only_when_a_job_lost_its_starter"
+runs = ["dw-panes-baseline"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = "        if !detached.is_empty() {"
+replace = "        if true {"
+
+[[plant]]
+name = "detached work: a detached job a close does not end is named"
+meant = "the_names_are_the_turns_work_and_the_detached_work_that_a_close_ends_oldest_first"
+runs = ["dw-panes-baseline"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = "                    .is_none_or(|ends| ends.contains(&member.key))"
+replace = "                    .is_none_or(|ends| ends.contains(&member.key) || true)"
+
+[[plant]]
+name = "detached work: a process the selection names that the bound refuses is a close's"
+meant = "a_process_the_selection_names_that_the_bound_refuses_is_not_one_a_close_ends"
+runs = ["dw-panes-machine"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            .filter(|p| self.bound.allows(&table, p.identity))"
+replace = "            .filter(|_| true)"
+
+[[plant]]
+name = "detached work: a job the bound allows and the selection does not name is a close's"
+meant = "a_job_seen_under_the_program_that_left_the_session_with_its_shell_gone_is_not_one_a_close_ends_unless_the_selection_names_it"
+runs = ["dw-panes-machine"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            .filter(|p| chosen.contains_key(&p.identity.pid))"
+replace = "            .filter(|_| true)"
+
+[[plant]]
+name = "detached work: a look names the turn's work alone"
+meant = "a_job_the_agent_detached_from_a_shell_that_ended_is_named_as_work_the_window_left_and_the_close_ends_it_and_names_it"
+runs = ["dw-panes-leaving"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = "    Ok(listed(tree.named(baseline)?))"
+replace = "    Ok(listed(baseline.turn_work(&tree.members()?)))"
+
+[[plant]]
+name = "detached work: the look a close keeps for its exit names the turn's work alone"
+meant = "a_job_the_agent_detached_from_a_shell_that_ended_is_named_as_work_the_window_left_and_the_close_ends_it_and_names_it"
+runs = ["dw-panes-leaving"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = "        let first = self.named(baseline)?;"
+replace = "        let first = baseline.turn_work(&self.members()?);"
+
+[[plant]]
+name = "detached work: a look names the turn's work alone, on the rig"
+meant = "a_busy_worker_that_detached_a_job_and_ignores_its_pause_keeps_its_window_and_the_job_and_the_chief_is_told"
+runs = ["dw-rig-regression"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = "    Ok(listed(tree.named(baseline)?))"
+replace = "    Ok(listed(baseline.turn_work(&tree.members()?)))"
+
+[[plant]]
+name = "detached work: the look a close keeps for its exit names the turn's work alone, on the rig"
+meant = "a_workers_close_names_the_job_it_ended_that_the_agent_had_detached_before_its_turn_ended"
+runs = ["dw-rig-regression"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = "        let first = self.named(baseline)?;"
+replace = "        let first = baseline.turn_work(&self.members()?);"
+
+[[plant]]
+name = "detached work: the stand-in's --detach-here leaves its shell in a session of its own"
+meant = "a_busy_worker_that_detached_a_job_and_ignores_its_pause_keeps_its_window_and_the_job_and_the_chief_is_told"
+runs = ["dw-rig-regression"]
+platforms = ["macos"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = '    if flags.contains("--detach-here") {'
+replace = '    if false && flags.contains("--detach-here") {'
+
+[[plant]]
+name = "detached work: on Windows a close that ends the whole job names no detached job"
+meant = "a_job_whose_shell_has_ended_is_in_the_pane_job_still_with_no_parent_and_the_host_names_it_as_work_the_close_ends"
+runs = ["dw-panes-leaving"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = "            Ok(None)"
+replace = "            Ok(Some(std::collections::HashSet::new()))"

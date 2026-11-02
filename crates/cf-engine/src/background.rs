@@ -29,20 +29,26 @@
 //!
 //! Limits.
 //!
-//! **What escapes.** A command whose shell has ended is not named by the host,
-//! whichever way the agent made it outlive the shell (`nohup … &`, `setsid`,
-//! `disown`, a double fork, `Start-Process`): no chain of processes that run leads
-//! from it to a shell the harness started, and it being a job without a parent proves
-//! nothing of whose it is. The window's close ends it where it can be told to be the
-//! window's, and not otherwise: the pane host signals only the pane's program, what runs
-//! under it by the process that started each, what is in the session the program leads
-//! while it runs, and what a look saw so, however the tree is selected. A job in the
-//! window's session is ended with the window; one that left it (`setsid`, and the shells
-//! of Claude Code and Pi, which lead sessions of their own) with its shell gone, which no
-//! look saw under the shell, is left running, and so is one that only the marker in its
-//! environment says is the window's. On Windows the pane's job object holds what a process
-//! starts wherever it goes, and the close ends it, unless a service made it for it:
-//! `schtasks`, a WMI call. Closing a window does not prove every process it started died.
+//! **What escapes, and what is named though no chain proves it (T-1145).** A command whose shell
+//! has ended (`nohup … &`, `setsid`, `disown`, a double fork, `Start-Process`) is no work of the
+//! *turn* by a chain of processes that run, and the host does not end it as the turn's: but where
+//! the window's tree holds it, the host **names** it as work the window's close ends, so that a
+//! pause keeps the window for it, the chief is told it runs, and a close says what it ended.
+//! The tree holds it on Windows always (the pane's job holds what a process starts wherever it
+//! goes), and on the Mac when it is in the session the window's program leads or under the program
+//! by the process that started each. Before T-1145 neither Muse's `Start-Process` ping on Windows
+//! (T-1126) nor a job detached with `&` in a window's own session was named, a paused window with
+//! only that running was closed, and the close ended it unnamed. **What is still not named** is a
+//! job on the Mac that left the window's session (`setsid`, and the shells of Claude Code and Pi,
+//! which lead sessions of their own) with its shell gone, whose program is a system binary: it has
+//! no marker the host can read, no session and no parent that tie it to the window (`cf-panes`'
+//! `background::work` says what was tried), and no close of the window ends it either: it runs on
+//! orphaned, as it did before. The window's close ends it where the tree finds it the window's,
+//! and not otherwise: the pane host signals only the pane's program, what runs under it by the
+//! process that started each, what is in the session the program leads while it runs, and what a
+//! look saw so, however the tree is selected. On Windows the pane's job holds what a process starts
+//! wherever it goes, and the close ends it, unless a service made it for it: `schtasks`, a WMI
+//! call. Closing a window does not prove every process it started died.
 //!
 //! **What keeps a window working.** A worker's answer is its result when its window's
 //! turn has settled, which each harness's reader says of its own record. A Devin
@@ -255,12 +261,13 @@ fn paused_leaving(number: i64, left: &Background) -> String {
 /// tree need show (Claude's background agents). What the host names as possibly the window's
 /// is no part of it: a close does not end that (`PaneExit::possibly_left`).
 ///
-/// **What this cannot see** (T-1117): a program a harness starts with no shell (Codex 0.166
-/// runs a bare `ping` as a child of its own), and a job an agent detached (`&`, `nohup`, as
-/// Pi's and Devin's shells leave one): the host names neither as the turn's work
-/// (`cf-panes`' `background`), and a harness's record that says nothing of them leaves them
-/// unsaid. A window that ignored a pause with only such work running is closed, and the close
-/// ends it.
+/// **What this cannot see** (T-1117, narrowed by T-1145): a program a harness starts with no shell
+/// (Codex 0.166 runs a bare `ping` as a child of its own: T-1137 reads Codex's own count of its
+/// "background terminals"), and a job detached on the Mac that left the window's session, which
+/// nothing ties to the window and which no close ends either (`cf-panes`' `background::work`).
+/// A job an agent detached that the window's tree holds (`&`, `nohup`, `Start-Process`) is named
+/// now, with the turn's work (`pane.background`): a window that ignored a pause with only that
+/// running is kept. A harness's record that says nothing of the rest leaves it unsaid.
 pub(crate) fn close_would_end(left: Option<&Background>, pending: Pending) -> Option<String> {
     let mut said = Vec::new();
     match left {

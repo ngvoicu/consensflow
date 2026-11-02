@@ -194,13 +194,15 @@ fn what_was_seen_to_be_the_turns_work_is_still_it_when_the_shell_that_started_it
 }
 
 #[test]
-fn a_job_that_has_lost_its_shell_is_no_work_of_the_turn_and_is_not_named() {
+fn a_job_that_has_lost_its_shell_is_not_the_turns_work_by_a_chain_and_is_named_as_work_left_running(
+) {
     let baseline = marked(&[program()], None, None);
     let tree = vec![
         program(),
         // `nohup sleep 600 &` from a shell that ended, and a shell that lost its own
         // parent with what it runs: no chain of processes that run leads to a shell the
-        // harness started.
+        // harness started, so none of them is the turn's by a chain (T-1145: they are
+        // named all the same, as the work a pause or a close would end).
         member(70, "sleep 600", "sleep", None),
         member(71, "bash -c sleep 700", "bash", None),
         member(72, "sleep 700", "sleep", of(71)),
@@ -208,9 +210,11 @@ fn a_job_that_has_lost_its_shell_is_no_work_of_the_turn_and_is_not_named() {
         member(40, "/bin/bash -c sleep 800", "bash", of(10)),
         member(41, "sleep 800", "sleep", of(40)),
     ];
-    assert_eq!(turns(&baseline, &tree), [40, 41]);
+    assert_eq!(turns(&baseline, &tree), [40, 41], "by a chain");
     let left = baseline.left_running(&tree);
-    assert_eq!(left.total, 2, "the others are not even named");
+    assert_eq!(left.total, 5, "the job that lost its shell is named");
+    let named: Vec<u32> = left.processes.iter().map(|process| process.pid).collect();
+    assert_eq!(named, [40, 41, 70, 71, 72]);
 }
 
 #[test]
@@ -831,4 +835,133 @@ fn a_command_begun_after_its_call_while_the_clock_was_set_back_is_counted() {
         Some(vec![11, 41]),
         "the command runs, and the server cannot be told from one"
     );
+}
+
+/// The numbers of the detached work in `tree`, as `baseline` tells it.
+fn detached(baseline: &Baseline, tree: &[Member]) -> Vec<u32> {
+    baseline
+        .detached(tree)
+        .iter()
+        .map(|member| member.key.pid)
+        .collect()
+}
+
+#[test]
+fn a_job_that_lost_its_starter_before_the_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work(
+) {
+    let orphan = |pid| member(pid, "sleep 600", "sleep", None);
+    let baseline = marked(&[program(), orphan(30)], None, None);
+    let tree = vec![program(), orphan(30), orphan(31)];
+
+    // The one the window had when the turn began is not the turn's to name; the one that
+    // began after is.
+    assert_eq!(detached(&baseline, &tree), [31]);
+    // And a window never marked names none: nothing says where its turn began.
+    assert_eq!(detached(&Baseline::default(), &tree), Vec::<u32>::new());
+}
+
+#[test]
+fn a_job_that_lost_its_starter_is_not_named_where_the_harness_keeps_it_as_a_server_or_names_it_for_its_own(
+) {
+    let at = |exe: &str, member: Member| Member {
+        exe: exe.to_owned(),
+        ..member
+    };
+    let codex = at("/opt/codex/bin/codex", member(11, "codex", "codex", of(10)));
+    let helper = at(
+        "/opt/codex/bin/codex-code-mode-host",
+        member(50, "codex-code-mode-host", "codex-code-mode-host", None),
+    );
+    let tree = vec![
+        program(),
+        codex.clone(),
+        helper,
+        member(51, "sleep 5", "sleep", of(50)),
+        // The agent's job, which lost its starter.
+        member(70, "sleep 600", "sleep", None),
+    ];
+    let before = [program(), codex];
+
+    // Where the harness is named, the helper that lost its starter, and what it runs, are the
+    // harness's own; the job is not.
+    assert_eq!(detached(&marked(&before, None, Some("codex")), &tree), [70]);
+    // Where it is not, nothing tells the helper from the agent's job.
+    assert_eq!(detached(&marked(&before, None, None), &tree), [50, 51, 70]);
+}
+
+#[test]
+fn a_server_in_the_windows_group_that_lost_its_starter_is_the_harnesss_and_not_detached_work() {
+    let in_group = |member: Member| Member {
+        group: Some(10),
+        ..member
+    };
+    let baseline = marked(&[program()], Kept::of(Servers::InGroup, Some(10)), None);
+    let tree = vec![
+        program(),
+        // A server the harness started late, in the window's group, whose starter has gone.
+        in_group(member(20, "node server.js", "node", None)),
+        // A job the agent detached, in a group of its own.
+        Member {
+            group: Some(70),
+            ..member(70, "sleep 600", "sleep", None)
+        },
+    ];
+    assert_eq!(detached(&baseline, &tree), [70]);
+}
+
+#[test]
+fn the_names_are_the_turns_work_and_the_detached_work_that_a_close_ends_oldest_first() {
+    let baseline = marked(&[program()], None, None);
+    let tree = vec![
+        program(),
+        member(40, "/bin/bash -c sleep 800", "bash", of(10)),
+        member(41, "sleep 800", "sleep", of(40)),
+        member(30, "sleep 600", "sleep", None),
+        member(31, "sleep 601", "sleep", None),
+    ];
+    let named = |closing: &[u32]| -> Vec<u32> {
+        baseline
+            .named(&tree, || {
+                Ok(Some(closing.iter().map(|pid| key(*pid)).collect()))
+            })
+            .expect("named")
+            .iter()
+            .map(|member| member.key.pid)
+            .collect()
+    };
+
+    // Where a close ends every one (a Windows job), all of them.
+    let every = baseline.named(&tree, || Ok(None)).expect("named");
+    assert_eq!(
+        every
+            .iter()
+            .map(|member| member.key.pid)
+            .collect::<Vec<_>>(),
+        [30, 31, 40, 41]
+    );
+    // Where it ends the ones it names, only those of the detached work, and always the turn's.
+    assert_eq!(named(&[31]), [31, 40, 41]);
+    assert_eq!(named(&[]), [40, 41]);
+}
+
+#[test]
+fn the_host_is_asked_what_a_close_ends_only_when_a_job_lost_its_starter() {
+    let baseline = marked(&[program()], None, None);
+    let calls = std::cell::Cell::new(0);
+    let counting = || {
+        calls.set(calls.get() + 1);
+        Ok(None)
+    };
+
+    // The turn's work alone: a look at the system's table to ask is a cost of every look.
+    let tree = vec![
+        program(),
+        member(40, "/bin/bash -c sleep 800", "bash", of(10)),
+    ];
+    assert_eq!(baseline.named(&tree, counting).expect("named").len(), 1);
+    assert_eq!(calls.get(), 0, "nothing detached: nothing to ask");
+
+    let tree = vec![program(), member(30, "sleep 600", "sleep", None)];
+    assert_eq!(baseline.named(&tree, counting).expect("named").len(), 1);
+    assert_eq!(calls.get(), 1);
 }

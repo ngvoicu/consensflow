@@ -176,18 +176,18 @@ fn a_workers_close_names_the_job_it_ended_that_the_agent_had_detached_before_its
         Ok(!project.lane("worker")?["pane"].is_object())
     })?;
     rig.wait_for("the job to be ended", secs(60), || Ok(!is_alive(job.pid())))?;
+    let names_the_job = |message: &Value| {
+        let body = message["body"].as_str().unwrap_or_default();
+        message["kind"] == "note"
+            && body.starts_with(
+                "T-1's window closed with background work running, which its close ended: ",
+            )
+            && body.contains("--background-job")
+    };
     rig.wait_for(
         "the chief to be told what the close ended",
         secs(30),
-        || {
-            Ok(project.inbox("chief")?.iter().any(|message| {
-                message["kind"] == "note" && message["body"].as_str().is_some_and(|body| {
-                    body.starts_with(
-                        "T-1's window closed with background work running, which its close ended: ",
-                    ) && body.contains("--background-job")
-                })
-            }))
-        },
+        || Ok(project.inbox("chief")?.iter().any(names_the_job)),
     )?;
     rig.close()?;
     Ok(())
