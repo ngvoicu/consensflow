@@ -85,7 +85,7 @@ const BOARD: [(&[&str], &str); 19] = [
             "                                    to use as reference, where to save it\n",
             "  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n",
             "                                    keeps its context; only when that context matters;\n",
-            "                                    until T-3 is accepted it waits, at work or done\n",
+            "                                    until T-3 and the window's done tasks are accepted it waits\n",
             "  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n",
             "  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n",
             "  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n",

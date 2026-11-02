@@ -98,14 +98,25 @@ fn a_follow_up_is_refused_while_its_session_is_on_its_work_and_goes_once_it_is_f
         "nothing of the refused task is left"
     );
 
+    // Its result is in: the window takes nothing new until the chief has decided it
+    // (T-1118), so a follow-up waits for it, and goes when it is accepted.
     w.ledger
         .record_result(w.project, b, "Tests, done")
         .expect("a result");
     let more = w
         .follow_up(a, "More tests", &[])
-        .expect("the session is free");
+        .expect("it waits for the result");
+    assert_eq!(more.task.state, "open");
+    assert_eq!(more.task.blocked_by, [b]);
+    assert!(more.message.is_none());
+    w.ledger
+        .accept_task(w.project, b, "chief")
+        .expect("accepted");
     assert_eq!(w.state(more.task.number), "queued");
-    assert_eq!(w.next(&session), Some(more.message.expect("its brief").id));
+    assert_eq!(
+        w.next(&session).map(|head| w.message(head).task_number),
+        Some(Some(more.task.number))
+    );
 }
 
 #[test]
@@ -446,12 +457,21 @@ fn second_goes(w: &mut World, session: &str, second: i64) {
 }
 
 #[test]
-fn a_release_to_a_session_that_has_another_in_hand_waits_and_goes_with_that_tasks_result() {
+fn a_release_to_a_session_that_has_another_in_hand_waits_and_goes_once_that_tasks_result_is_accepted(
+) {
     let mut w = world();
     let (session, first, second) = second_waits_behind_the_first(&mut w);
     w.ledger
         .record_result(w.project, first, "First, done")
         .expect("a result");
+    assert_eq!(
+        w.state(second),
+        "open",
+        "the window takes nothing new while the first result waits for the chief (T-1118)"
+    );
+    w.ledger
+        .accept_task(w.project, first, "chief")
+        .expect("accepted");
     second_goes(&mut w, &session, second);
 }
 
@@ -640,51 +660,49 @@ fn each_stop_says_who_asked_it_and_one_consensflow_asked_says_nobody() {
     );
 }
 
-/// A session that did a task and another, the second done and not decided, and a third
-/// task paused in its window: the session, the first (accepted), the done one and the
-/// paused one. A follow-up
-/// of a done task waits for its acceptance (T-1118), so the paused task is the follow-up
-/// of the first, which the chief accepted: the window was free as the second had its
-/// result in, and took it. A window that holds a paused task is spoken for, and what the
-/// refusals say of it is not "still on its work".
-fn done_beside_a_paused_task(w: &mut World, body: &str) -> (String, i64, i64, i64) {
-    let (session, first) = done_by_a_session(w);
-    let done = at_work_on_a_follow_up(w, first, "Parser, again");
-    w.ledger
-        .record_result(w.project, done, "Parser, again, done")
-        .expect("a result");
-    assert_eq!(w.state(done), "done");
-    let paused = at_work_on_a_follow_up(w, first, body);
+/// A session with a task done and not decided, and another task paused in its window:
+/// the session, the done one and the paused one. A follow-up goes into no window that
+/// holds a result the chief has not decided (T-1118), so the paused task is one named
+/// for the session, the door that gives a window a task whatever it holds (`cf` names the
+/// chief itself only, so this is a ledger's caller). A window that holds a paused task is
+/// spoken for, and what the refusals say of it is not "still on its work".
+fn done_beside_a_paused_task(w: &mut World, body: &str) -> (String, i64, i64) {
+    let (session, done) = done_by_a_session(w);
+    let named = w
+        .give_to(&session, &[], body)
+        .expect("a task named for the session, which holds nothing");
+    w.deliver(named.message.expect("its brief").id);
+    let paused = named.task.number;
     w.pause(paused);
     assert_eq!(w.state(paused), "paused");
-    (session, first, done, paused)
+    (session, done, paused)
 }
 
 /// The report of 2026-11-02: T-8, a follow-up of the done T-6, was paused in
 /// T-6's window, and the chief, sending T-6 back, was told the window "is still
 /// on its work: wait for its result". It was not: it held a paused task, which
 /// waits for the chief's resume. Every door says which task holds the window,
-/// in which state, and how the chief frees it.
+/// in which state, and how the chief frees it. A follow-up is not one of them while
+/// T-6 is undecided: it waits for T-6.
 #[test]
 fn every_door_names_the_paused_task_that_holds_the_window_and_how_to_free_it() {
     let mut w = world();
-    let (session, first, a, b) = done_beside_a_paused_task(&mut w, "Tests");
+    let (session, a, b) = done_beside_a_paused_task(&mut w, "Tests");
 
     let reopened = w
         .ledger
         .reopen_task(w.project, a, "chief", "More")
         .expect_err("the window holds a paused task");
-    // A follow-up of the done T-a would wait for its acceptance; one of the accepted
-    // first task goes to the window now, and is refused while it holds a paused task.
-    let followed = w
-        .follow_up(first, "More tests", &[])
-        .expect_err("the window holds a paused task");
     let named = w
         .give_to(&session, &[], "More tests")
         .expect_err("the window holds a paused task");
     assert_busy(reopened, &session, (b, "paused"), &sending_back(a));
-    assert_busy(followed, &session, (b, "paused"), GIVING_ANOTHER);
     assert_busy(named, &session, (b, "paused"), GIVING_ANOTHER);
+    // A follow-up waits for the result the chief has not decided; it is not refused.
+    let followed = w
+        .follow_up(a, "More tests", &[])
+        .expect("a follow-up of a done task waits");
+    assert_eq!(followed.task.state, "open");
     assert_eq!(
         w.state(a),
         "done",
@@ -708,10 +726,27 @@ fn every_door_names_the_paused_task_that_holds_the_window_and_how_to_free_it() {
     assert_eq!(words.recipient, session, "to the window that did it");
 }
 
+/// The follow-up door of the same refusal: the window of an accepted task holds a
+/// follow-up that was paused, and another follow-up of the task is refused in the words
+/// that name it.
+#[test]
+fn a_follow_up_for_a_window_that_holds_a_paused_task_is_refused_naming_it() {
+    let mut w = world();
+    let (session, a) = done_by_a_session(&mut w);
+    let b = at_work_on_a_follow_up(&mut w, a, "Tests");
+    w.pause(b);
+    assert_eq!(w.state(b), "paused");
+
+    let refused = w
+        .follow_up(a, "More tests", &[])
+        .expect_err("the window holds a paused task");
+    assert_busy(refused, &session, (b, "paused"), GIVING_ANOTHER);
+}
+
 #[test]
 fn a_task_cancelled_frees_the_window_a_door_refused_for_it() {
     let mut w = world();
-    let (session, _, a, b) = done_beside_a_paused_task(&mut w, "Tests");
+    let (session, a, b) = done_beside_a_paused_task(&mut w, "Tests");
     w.ledger
         .reopen_task(w.project, a, "chief", "More")
         .expect_err("the window holds a paused task");
@@ -735,7 +770,7 @@ fn the_refusal_names_the_task_that_is_at_work_before_one_that_waits_for_its_resu
     // A ledger written before one task per session left a window with two: one
     // paused, and one at work. Resuming the paused one is refused while the other
     // is at work, so that is the one to wait for, though the paused one is older.
-    let (session, _, a, paused) = done_beside_a_paused_task(&mut w, "Lexer");
+    let (session, a, paused) = done_beside_a_paused_task(&mut w, "Lexer");
     let working = w.open("Tests").task.number;
     let holder = w.id(&session);
     w.edit(|db| {

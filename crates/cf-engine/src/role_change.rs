@@ -77,7 +77,7 @@
 //! ([`prelude`]).
 //!
 //! A role too long for one message (more than 16,000 units: a staff of more than
-//! 35 rows with specs on, 64 without, two roles to a row, on the real text) is
+//! 35 rows with specs on, 63 without, two roles to a row, on the real text) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`).
 //! That is a role told in part: it is not recorded as told, and the human has a
 //! line on the board that says so. The role is said again at every Resume, and

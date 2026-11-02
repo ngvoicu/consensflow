@@ -132,6 +132,89 @@ fn a_follow_up_of_a_task_with_its_result_in_waits_for_its_acceptance_and_goes_to
     assert_eq!(tiers.task(2).task.state, "working");
 }
 
+/// A window takes nothing new while a task of it has its result in and waits for the
+/// chief's decision, which could send it back: a follow-up of an older, accepted task
+/// waits for that result too (T-1118).
+#[test]
+fn a_follow_up_of_an_older_accepted_task_waits_while_the_window_holds_a_result_the_chief_has_not_decided(
+) {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let native = native_of(&context, tiers.id(&session));
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(project, 1, "chief")
+        .unwrap();
+    // T-2 follows the accepted T-1 and has its result in.
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "Now the lexer".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.adapter.answer("zeus-amber-pine", "Lexer done");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        tiers.task(2).task.state,
+        "done",
+        "its result is in, undecided"
+    );
+    let launches = context.adapter.prepared().len();
+
+    // T-3 follows T-1 too: the window holds T-2's result, so it waits for T-2.
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "And the docs".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    let waiting = tiers.task(3).task;
+    assert_eq!(
+        (waiting.state.as_str(), waiting.blocked_by),
+        ("open", vec![2])
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "no window was opened for it before the chief decided T-2"
+    );
+
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(project, 2, "chief")
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(last_launch(&context), (session, native));
+    assert_match(
+        &last_message(&context),
+        r"^\[ConsensFlow m-\d+ · T-3 · task from @chief\]\nAnd the docs$",
+    );
+}
+
 /// A follow-up that waited for what it needs while its session was at work on
 /// another, given since, is released when that one is called off, in the same
 /// step: the window is still at work on the task it was given, which the pass

@@ -10,6 +10,9 @@
 
 [run]
 bcr-ledger-follow-up = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "follow_up_of_a_done_task"]
+bcr-rig-done-task = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_follow_up_waits_for_the_done_task"]
+bcr-ledger-receipt-decided = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "decided::"]
+bcr-ledger-receipt-behind-work = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "behind_work::"]
 bcr-ledger-receipt-sessions = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "sessions::"]
 bcr-daemon-routes-tasks = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::tasks"]
 bcr-engine-follow-ups = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "follow_ups"]
@@ -29,10 +32,10 @@ runs = ["bcr-ledger-follow-up"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-    let behind = at_work || previous.state == "done";
+    for number in undecided_results(store, session.id)? {
 '''
 replace = '''
-    let behind = at_work;
+    for number in Vec::<i64>::new() {
 '''
 
 [[plant]]
@@ -43,10 +46,10 @@ runs = ["bcr-daemon-routes-tasks"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-    let behind = at_work || previous.state == "done";
+    for number in undecided_results(store, session.id)? {
 '''
 replace = '''
-    let behind = at_work;
+    for number in Vec::<i64>::new() {
 '''
 
 [[plant]]
@@ -57,10 +60,10 @@ runs = ["bcr-engine-follow-ups"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-    let behind = at_work || previous.state == "done";
+    for number in undecided_results(store, session.id)? {
 '''
 replace = '''
-    let behind = at_work;
+    for number in Vec::<i64>::new() {
 '''
 
 [[plant]]
@@ -71,10 +74,10 @@ runs = ["bcr-ledger-receipt-sessions"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-    let behind = at_work || previous.state == "done";
+    if behind.is_empty() {
 '''
 replace = '''
-    let behind = true;
+    if false {
 '''
 
 [[plant]]
@@ -100,10 +103,10 @@ runs = ["bcr-ledger-follow-up"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-    let behind = at_work || previous.state == "done";
+    for number in undecided_results(store, session.id)? {
 '''
 replace = '''
-    let behind = at_work;
+    for number in Vec::<i64>::new() {
 '''
 
 [[plant]]
@@ -113,7 +116,7 @@ runs = ["bcr-cf-help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
-find = "until T-3 is accepted it waits, at work or done"
+find = "until T-3 and the window's done tasks are accepted it waits"
 replace = "while T-3 is at work it waits for T-3's acceptance"
 
 [[plant]]
@@ -377,3 +380,74 @@ find = '''
     cf task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it alone, in any state
 '''
 replace = ""
+
+[[plant]]
+name = "cli reports 1118 follow-up: the engine opens the window for a follow-up of an older accepted task while the window holds a result the chief has not decided"
+meant = "a_follow_up_of_an_older_accepted_task_waits_while_the_window_holds_a_result_the_chief_has_not_decided"
+runs = ["bcr-engine-follow-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    for number in undecided_results(store, session.id)? {
+'''
+replace = '''
+    for number in Vec::<i64>::new() {
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: a follow-up already waiting is released into a window that holds a result the chief has not decided"
+meant = "follow_ups_wait_for_every_task_of_the_window_that_is_done_and_go_in_their_order"
+runs = ["bcr-ledger-follow-up"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+                || !undecided_results(store, assignee.id)?.is_empty())
+'''
+replace = '''
+                || false)
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: the chief's rig case sees a follow-up of a done task go into its window"
+meant = "a_follow_up_waits_for_the_done_task_the_chief_decides_and_that_task_is_sent_back_or_cancelled"
+runs = ["bcr-rig-done-task"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    for number in undecided_results(store, session.id)? {
+'''
+replace = '''
+    for number in Vec::<i64>::new() {
+'''
+
+[[plant]]
+name = "cli reports 1118 waited-for: a done task is told to let it finish, though it has finished"
+meant = "a_done_task_other_tasks_wait_for_is_not_cancelled_until_they_are"
+runs = ["bcr-ledger-receipt-decided"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        Ending::Cancelled if task.state == "done" => {
+'''
+replace = '''
+        Ending::Cancelled if false && task.state == "done" => {
+'''
+
+[[plant]]
+name = "cli reports 1118 waited-for: a task still at work is told to accept it"
+meant = "a_task_with_a_follow_up_waiting_is_not_cancelled_until_the_follow_up_is"
+runs = ["bcr-ledger-receipt-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        Ending::Cancelled => format!("cancel {them} first, or let T-{number} finish"),
+'''
+replace = '''
+        Ending::Cancelled => format!("accept T-{number}, or cancel {them} first"),
+'''

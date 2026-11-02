@@ -344,7 +344,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r"It waits for T-3 to be accepted,\s+at work or done, and goes in then\.",
+        r"It waits for T-3 and for the\s+window's other done tasks to be accepted, and goes in then\.",
         &text
     ));
     assert!(
@@ -352,7 +352,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         "a follow-up of a task with its result in waits too"
     );
     assert!(found(
-        r"A window on\s+another task refuses and tells\s+you to open the task for its tier instead\.",
+        r"A window on\s+another\s+task refuses and tells\s+you to open the task for its tier instead\.",
         &text
     ));
     assert!(found(

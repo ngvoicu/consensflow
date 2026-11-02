@@ -397,7 +397,7 @@ fn a_done_task_other_tasks_wait_for_is_not_cancelled_until_they_are() {
     assert_eq!(refused.code(), Some("waited-for"));
     assert_eq!(
         refused.to_string(),
-        "T-1 cannot be cancelled while T-2 waits for it: cancel T-2 first, or let T-1 finish"
+        "T-1 cannot be cancelled while T-2 waits for it: accept T-1, or cancel T-2 first"
     );
     assert_eq!(w.state(task), "done", "nothing of it is touched");
     assert_eq!(w.state(waiting), "open", "and nothing is released");
@@ -425,6 +425,11 @@ fn a_done_task_whose_follow_up_waits_for_its_acceptance_is_not_cancelled_until_t
 
     let refused = cancel(&mut w, task, "chief").expect_err("T-2 waits for it");
     assert_eq!(refused.code(), Some("waited-for"));
+    assert_eq!(
+        refused.to_string(),
+        "T-1 cannot be cancelled while T-2 waits for it: accept T-1, or cancel T-2 first",
+        "a done task has nothing left to finish: it is accepted or its waiters go first"
+    );
     assert_eq!(w.state(task), "done", "nothing of it is touched");
     assert_eq!(w.state(waiting), "open", "and nothing is released");
 
@@ -436,27 +441,19 @@ fn a_done_task_whose_follow_up_waits_for_its_acceptance_is_not_cancelled_until_t
 /// The report of 2026-11-02: T-6 was done, and T-8 went into its window before T-6 was
 /// decided, and was paused. T-6 could be neither sent back (the window holds T-8) nor
 /// cancelled (it is done), so the only decision left was to accept work that was never
-/// done. A follow-up of a done task waits for its acceptance now (T-1118), so T-8 cannot
-/// go in that way; it can as the follow-up of an older task the chief accepted, when the
-/// window is free because T-6 has its result in. The case is that shape: T-1 is accepted,
-/// T-2 follows it and is done, T-3 follows T-1 too, goes in and is paused.
+/// done. A follow-up goes into no window that holds an undecided result now (T-1118), so
+/// T-8 cannot go in that way; a task named for the session still can, and the case is
+/// that shape: T-1 is done, T-2 is named for its session, goes in and is paused.
 #[test]
-fn a_done_task_is_cancelled_while_its_window_holds_a_paused_follow_up_of_an_older_task_and_the_window_goes_on_with_it(
-) {
+fn a_done_task_is_cancelled_while_its_window_holds_a_paused_task_and_the_window_goes_on_with_it() {
     let mut w = world();
-    let (first, result) = finished(&mut w, "zeus", "Parser");
+    let (task, result) = finished(&mut w, "zeus", "Parser");
     w.deliver(result.id);
-    let session = session_of(&w, first);
-    accept(&mut w, first);
-    let again = w.follow_up(first, "Tests", &[]).expect("a follow-up");
-    let (task, brief) = (again.task.number, again.message.expect("its brief").id);
-    w.deliver(brief);
-    w.ledger
-        .record_result(w.project, task, "Tests, done")
-        .expect("a result");
-    assert_eq!(w.state(task), "done", "its result is in, and not decided");
-    let second = w.follow_up(first, "Lexer", &[]).expect("another follow-up");
-    let (second, brief) = (second.task.number, second.message.expect("its brief").id);
+    let session = session_of(&w, task);
+    let named = w
+        .give_to(&session, &[], "Tests")
+        .expect("a task named for the session, which holds nothing");
+    let (second, brief) = (named.task.number, named.message.expect("its brief").id);
     w.deliver(brief);
     w.pause(second);
     assert_eq!(w.state(second), "paused");
@@ -471,7 +468,7 @@ fn a_done_task_is_cancelled_while_its_window_holds_a_paused_follow_up_of_an_olde
     cancel(&mut w, task, "chief").expect("a done task is called off");
 
     assert_eq!(w.state(task), "cancelled");
-    assert_eq!(w.state(second), "paused", "the follow-up is as it was");
+    assert_eq!(w.state(second), "paused", "the paused task is as it was");
     assert!(
         w.ledger.has_task_in_hand(w.id(&session)).expect("a read"),
         "the window still holds it"

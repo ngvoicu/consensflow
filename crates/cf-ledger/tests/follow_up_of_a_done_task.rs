@@ -255,3 +255,75 @@ fn a_follow_up_of_an_accepted_task_goes_to_its_window_at_once_as_it_always_did()
     assert!(message.is_some(), "its brief is queued for the window");
     assert_eq!(followed.blocked_by, Vec::<i64>::new());
 }
+
+#[test]
+fn a_follow_up_of_an_older_accepted_task_waits_while_another_task_of_the_window_is_done_and_undecided(
+) {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
+    let view = project(&mut ledger);
+    let first = done(&mut ledger, &view, "Parser", "Parser done");
+    ledger.accept_task(1, first, "chief").expect("accepted");
+    // T-2 follows T-1, which is accepted: it goes in, and its result is in.
+    let (second, message) = follow_up(&mut ledger, first, "Tests", &[]);
+    assert_eq!(second.state, "queued");
+    assert!(message.is_some());
+    worked(&mut ledger, second.number, "Tests done");
+    assert_eq!(task(&ledger, second.number).state, "done");
+    let window = task(&ledger, second.number).assignee.expect("a window");
+
+    // The window holds a result the chief has not decided: a follow-up of the older,
+    // accepted T-1 waits for it too, whichever task it names (T-1118).
+    let (third, message) = follow_up(&mut ledger, first, "More", &[]);
+    assert_eq!(
+        (third.state.as_str(), third.blocked_by.clone(), message),
+        ("open", vec![second.number], None),
+        "it waits for T-2, and nothing went into the window"
+    );
+    assert_eq!(third.assignee.as_deref(), Some(window.as_str()));
+    // The chief can still send T-2 back to its window.
+    let reopened = ledger
+        .reopen_task(1, second.number, "chief", "Handle empty input too")
+        .expect("the window holds nothing but T-2");
+    assert_eq!(reopened.task.state, "queued");
+
+    // T-2 is over, accepted, and the follow-up goes in.
+    worked(&mut ledger, second.number, "Tests done again");
+    ledger
+        .accept_task(1, second.number, "chief")
+        .expect("accepted");
+    assert_eq!(task(&ledger, third.number).state, "queued");
+}
+
+#[test]
+fn follow_ups_wait_for_every_task_of_the_window_that_is_done_and_go_in_their_order() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
+    let view = project(&mut ledger);
+    let first = done(&mut ledger, &view, "Parser", "Parser done");
+    ledger.accept_task(1, first, "chief").expect("accepted");
+    let (second, _) = follow_up(&mut ledger, first, "Tests", &[]);
+    worked(&mut ledger, second.number, "Tests done");
+
+    let (docs, _) = follow_up(&mut ledger, first, "Docs", &[]);
+    let (lexer, _) = follow_up(&mut ledger, first, "Lexer", &[]);
+    assert_eq!(
+        [docs.number, lexer.number].map(|number| task(&ledger, number).state),
+        ["open", "open"]
+    );
+    ledger
+        .accept_task(1, second.number, "chief")
+        .expect("accepted");
+    assert_eq!(
+        [docs.number, lexer.number].map(|number| task(&ledger, number).state),
+        ["queued", "open"],
+        "the window takes one at a time, the first given first"
+    );
+    // The first of them has its result in: the next waits for its acceptance too.
+    worked(&mut ledger, docs.number, "Docs done");
+    assert_eq!(task(&ledger, lexer.number).state, "open");
+    ledger
+        .accept_task(1, docs.number, "chief")
+        .expect("accepted");
+    assert_eq!(task(&ledger, lexer.number).state, "queued");
+}

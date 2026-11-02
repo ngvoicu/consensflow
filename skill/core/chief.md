@@ -150,9 +150,9 @@ tell you why.
 A worker's window closes when its task is done, but its session keeps its
 conversation. When a follow-up needs what that window already knows, give it
 with `cf task add --after T-3 "…"`: the same window comes back on its own
-conversation, and only the follow-up goes in. It waits for T-3 to be accepted,
-at work or done, and goes in then. A window on another task refuses and tells
-you to open the task for its tier instead.
+conversation, and only the follow-up goes in. It waits for T-3 and for the
+window's other done tasks to be accepted, and goes in then. A window on another
+task refuses and tells you to open the task for its tier instead.
 
 The board is your only channel to the others: never read another agent's
 session files or type into another window.

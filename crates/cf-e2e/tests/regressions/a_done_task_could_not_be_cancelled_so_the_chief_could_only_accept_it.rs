@@ -16,13 +16,16 @@
 //! The case is that shape on the rig, with the chief's own `cf` in its window: T-1
 //! and T-2 are done, each by a session of its own, and the chief cancels T-1.
 //!
-//! The report's own window is the second case. A follow-up of a done task waits for
-//! its acceptance since T-1118, so the follow-up that went into T-6's window before
-//! T-6 was decided cannot be given that way any more. It can be given as the follow-up
-//! of an older task the chief accepted, when the window is free because the newer task
-//! has its result in: T-1 is accepted, T-2 follows it and is done, T-3 follows T-1 too,
-//! goes into the window and is paused. T-2 cannot be sent back (the window holds T-3,
-//! and the refusal names it), and the chief cancels it, T-3 staying as it was.
+//! The report's own window is the second case. T-6's window held a paused follow-up
+//! (T-8, `--after T-6`), which went in before T-6 was decided, and the chief could
+//! neither send T-6 back nor cancel it. That shape cannot arise through a follow-up
+//! now (T-1118): a follow-up goes into no window that holds a result the chief has not
+//! decided, whichever task it names, so T-2 (`--after T-1`) waits for T-1 and nothing
+//! enters T-1's window. No door of `cf` builds it otherwise: a task named for a window is
+//! the ledger's, and a follow-up resumed early still needs T-1, so T-1 is refused its
+//! cancel (`waited-for`) until that follow-up is cancelled. The case pins that: T-2
+//! waits; T-1 cannot be cancelled while it does, in words that say what to do; T-1 is
+//! sent back to its window; and with T-2 cancelled, T-1 is cancelled.
 
 use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::Error;
@@ -80,15 +83,14 @@ fn a_done_task_is_cancelled_by_the_chiefs_cf_and_no_other_is_touched() -> Outcom
 }
 
 #[test]
-fn a_done_task_is_cancelled_while_its_window_holds_a_paused_follow_up_of_an_older_task() -> Outcome
-{
+fn a_follow_up_waits_for_the_done_task_the_chief_decides_and_that_task_is_sent_back_or_cancelled(
+) -> Outcome {
     let rig = Rig::start(config())?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"].as_str().unwrap_or_default();
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
 
-    // T-1 is accepted; T-2 follows it and is done, its result not decided.
     cf(
         &rig,
         &chief,
@@ -101,52 +103,44 @@ fn a_done_task_is_cancelled_while_its_window_holds_a_paused_follow_up_of_an_olde
         .as_str()
         .unwrap_or_default()
         .to_owned();
-    cf(&rig, &chief, &["task", "accept", "T-1"])?;
-    cf(
+
+    // T-2 follows T-1, whose result is in and not decided: it waits, and the window
+    // takes nothing (what 3.0.7-alpha.1 did: T-2 went in, and could be paused there).
+    let said = cf(
         &rig,
         &chief,
         &["task", "add", "--after", "T-1", "Reply with exactly: TWO"],
     )?;
-    rig.wait_for("T-2 to be done", secs(180), || {
-        Ok(state(&project, 2)? == "done")
-    })?;
+    assert!(said.contains("It waits until T-1 is accepted."), "{said}");
+    assert_eq!(project.task(2)?["state"], "open");
+    assert_eq!(project.task(2)?["assignee"], session.as_str());
 
-    // T-3 follows T-1 too: the window is free, as T-2 has its result in, so it goes in
-    // at once, and is paused. (A follow-up of T-2 would wait for its acceptance.)
-    cf(
-        &rig,
-        &chief,
-        &[
-            "task",
-            "add",
-            "--after",
-            "T-1",
-            "SLEEP 120 Reply with exactly: THREE",
-        ],
-    )?;
-    rig.wait_for("T-3 to be at work", secs(120), || {
-        Ok(state(&project, 3)? == "working")
-    })?;
-    cf(&rig, &chief, &["task", "pause", "T-3"])?;
-    rig.wait_for("T-3 to be paused", secs(60), || {
-        Ok(state(&project, 3)? == "paused")
-    })?;
-
-    // T-2 cannot be sent back: the window holds T-3, and the words name it.
-    let ran = rig.cf_in_window(&chief, ["task", "reopen", "T-2", "Again"])?;
+    // T-1 cannot be cancelled while T-2 waits for it, and the words say what to do.
+    let ran = rig.cf_in_window(&chief, ["task", "cancel", "T-1"])?;
     assert_eq!(ran.code, Some(1), "{ran}");
     assert_eq!(
         ran.stderr,
-        format!(
-            "cf: @{session}'s window holds T-3, paused: resume T-3 and wait for its result, or cancel T-3, before sending T-2 back; or open a new task for its tier\n"
-        )
+        "cf: T-1 cannot be cancelled while T-2 waits for it: accept T-1, or cancel T-2 first\n"
     );
 
-    // What 3.0.7-alpha.1 refused: "cannot cancel T-2: it is done". The window keeps T-3.
-    let said = cf(&rig, &chief, &["task", "cancel", "T-2"])?;
-    assert!(said.contains("T-2 [cancelled]"), "{said}");
-    assert_eq!(state(&project, 2)?, "cancelled");
-    assert_eq!(state(&project, 3)?, "paused", "T-3 is as it was");
+    // The window holds nothing, so T-1 goes back to it; T-2 still waits.
+    cf(
+        &rig,
+        &chief,
+        &["task", "reopen", "T-1", "Reply with exactly: AGAIN"],
+    )?;
+    assert_ne!(state(&project, 1)?, "done", "T-1 went back to its window");
+    rig.wait_for("T-1 to be done again", secs(180), || {
+        Ok(state(&project, 1)? == "done")
+    })?;
+    assert_eq!(project.task(1)?["assignee"], session.as_str());
+    assert_eq!(project.task(2)?["state"], "open", "T-2 still waits");
+
+    // With the waiter cancelled, T-1 is cancelled: a done task is decided by cancel.
+    cf(&rig, &chief, &["task", "cancel", "T-2"])?;
+    let said = cf(&rig, &chief, &["task", "cancel", "T-1"])?;
+    assert!(said.contains("T-1 [cancelled]"), "{said}");
+    assert_eq!(state(&project, 1)?, "cancelled");
     rig.close()?;
     Ok(())
 }

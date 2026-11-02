@@ -36,7 +36,9 @@ use crate::model::{
     MAX_BODY, MEMBER_ROLES,
 };
 use crate::queue::{drop_queued, queue, send, withdraw_gated, withdraw_result, Queued, Sent};
-use crate::staff::{bring_back, can_continue, has_task_in_hand, require_free, Giving};
+use crate::staff::{
+    bring_back, can_continue, has_task_in_hand, require_free, undecided_results, Giving,
+};
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
@@ -239,7 +241,12 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
                 continue;
             }
         }
-        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {
+        // A window takes nothing new while a task of it is in hand, nor while one has its
+        // result in and waits for the chief's decision, which could send it back (T-1118).
+        if assignee.member_id.is_some()
+            && (has_task_in_hand(store, assignee.id)?
+                || !undecided_results(store, assignee.id)?.is_empty())
+        {
             continue;
         }
         let body = delivery_body(&task);
@@ -571,8 +578,9 @@ fn task_numbers(numbers: &[i64]) -> String {
 /// A task an open task waits for is not called off: the waiter is released
 /// when the task is accepted, so it would read "blocked by" it for good and
 /// nothing would tell anyone. Whoever cancels names the waiters to cancel
-/// first, or lets the task finish; the human who declines its brief, which
-/// never started, passes it on.
+/// first, or lets the task finish, or accepts it where it is done and has no
+/// finishing left; the human who declines its brief, which never started, passes
+/// it on.
 fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<(), LedgerError> {
     let waiting = waiters(store, task)?;
     if waiting.is_empty() {
@@ -583,14 +591,18 @@ fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<()
         _ => ("wait", "them".to_owned()),
     };
     let number = task.number;
-    let otherwise = match ending {
-        Ending::Cancelled => format!("let T-{number} finish"),
-        Ending::Declined => format!("pass T-{number} on"),
+    // What a done task has left to do is to be accepted, not to finish.
+    let says = match ending {
+        Ending::Cancelled if task.state == "done" => {
+            format!("accept T-{number}, or cancel {them} first")
+        }
+        Ending::Cancelled => format!("cancel {them} first, or let T-{number} finish"),
+        Ending::Declined => format!("cancel {them} first, or pass T-{number} on"),
     };
     Err(LedgerError::refused_with(
         "waited-for",
         format!(
-            "T-{number} cannot be cancelled while {names} {verb} for it: cancel {them} first, or {otherwise}",
+            "T-{number} cannot be cancelled while {names} {verb} for it: {says}",
             names = task_numbers(&waiting),
         ),
         409,

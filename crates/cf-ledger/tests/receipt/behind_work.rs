@@ -114,9 +114,13 @@ fn two_follow_ups_of_one_window_at_work_go_to_it_in_order() {
         .expect("a result");
     assert_eq!(
         w.state(c.number),
-        "queued",
-        "the second goes with its result"
+        "open",
+        "the window takes nothing new while the first has its result in and undecided"
     );
+    w.ledger
+        .accept_task(w.project, b.number, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(c.number), "queued", "the second goes when it is");
     let head = w.next(&session).expect("the second");
     assert_eq!(w.message(head).task_number, Some(c.number));
 }
@@ -576,9 +580,13 @@ fn a_follow_up_added_after_the_result_but_before_the_acceptance_lines_up_behind_
         .expect("a result");
     assert_eq!(
         w.state(c),
-        "queued",
-        "the second goes with the first's result"
+        "open",
+        "the second waits for the first to be accepted: its result is the chief's to decide"
     );
+    w.ledger
+        .accept_task(w.project, b, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(c), "queued", "and goes when it is");
 }
 
 #[test]

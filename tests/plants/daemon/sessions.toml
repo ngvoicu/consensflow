@@ -21,7 +21,7 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-    if !behind {
+    if behind.is_empty() {
         require_free(store, &session, Giving::Task)?;
     }
 '''
@@ -84,13 +84,13 @@ replace = "        &HELD_TASK_STATES[..],"
 
 [[plant]]
 name = "session: a release goes to a session that has a task in hand"
-meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_with_that_tasks_result"
+meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_once_that_tasks_result_is_accepted"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {"
-replace = "        if assignee.member_id.is_some() && false && has_task_in_hand(store, assignee.id)? {"
+find = "            && (has_task_in_hand(store, assignee.id)?\n                || !undecided_results(store, assignee.id)?.is_empty())\n"
+replace = "            && (false\n                || !undecided_results(store, assignee.id)?.is_empty())\n"
 
 [[plant]]
 name = "session: a task waiting for its session is not released when its need is accepted"
@@ -103,18 +103,6 @@ find = '''
         store.move_task(&task, "accepted", json!({ "by": by }))?;
         release_ready(store, project_id)?;'''
 replace = '        store.move_task(&task, "accepted", json!({ "by": by }))?;'
-
-[[plant]]
-name = "session: a task waiting for its session is not released with its result"
-meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_with_that_tasks_result"
-runs = ["ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''
-        store.move_task(&task, "done", json!({ "result": message_id }))?;
-        release_ready(store, project_id)?;'''
-replace = '        store.move_task(&task, "done", json!({ "result": message_id }))?;'
 
 [[plant]]
 name = "session: a task waiting for its session is not released when the task is called off"

@@ -121,25 +121,28 @@ pub(crate) fn bring_back(
     store.participant_row(session.id)
 }
 
-/// The session that did T-`after`, and whether a follow-up for it goes behind
-/// that task.
+/// The session that did T-`after`, and the tasks a follow-up for it waits for.
 pub(crate) struct FollowUp {
     pub session: ParticipantRow,
-    /// T-`after` is not accepted and may still be the window's (it is at work, will
-    /// be, is paused, or its result is in and waits for the chief): the follow-up
-    /// waits for it to be accepted, as it would for any task it needs, and goes
-    /// into the window then.
-    pub behind: bool,
+    /// The tasks the follow-up waits to be accepted, as it would for any task it
+    /// needs, and goes into the window then: T-`after` while it is not accepted and
+    /// may still be the window's (it is at work, will be, is paused, or its result is
+    /// in and waits for the chief), and every task of the session whose result is in
+    /// and is not decided, whichever task the follow-up names. In the order of their
+    /// numbers; none when the window may take it now.
+    pub behind: Vec<i64>,
 }
 
 /// The session that did T-`after`, on the board (brought back if the human had
-/// deleted it) for a follow-up. A follow-up of a task the chief has not decided,
-/// whether it is still on its work or its result is in (`done`), goes behind it
-/// (`FollowUp::behind`) and asks nothing of the session: the window takes it when
-/// the task is accepted (T-1118: a follow-up of a done task went into the window
-/// before the chief had decided the task). One of a task that is accepted, failed
-/// or cancelled goes to the session now, and is refused while the session has
-/// another task in hand (`require_free`).
+/// deleted it) for a follow-up. A window takes nothing new while a task of it waits
+/// for the chief's decision, so that the chief can send that task back to it: a
+/// follow-up waits behind T-`after` when that is at work or its result is in, and
+/// behind every task of the session whose result is in and not decided, whichever
+/// task it names (`FollowUp::behind`; T-1118: a follow-up of a done task went into the
+/// window before the chief had decided the task, and so did one of an older task).
+/// It asks nothing of the session then; the window takes it when they are accepted.
+/// A follow-up that waits for none goes to the session now, and is refused while the
+/// session has another task in hand (`require_free`).
 pub(crate) fn follow_up_session(
     store: &mut Store,
     project_id: i64,
@@ -193,17 +196,40 @@ pub(crate) fn follow_up_session(
     let at_work = session.left_at.is_none()
         && (HELD_TASK_STATES.contains(&previous.state.as_str())
             || matches!(previous.state.as_str(), "open" | "paused"));
-    // A task whose result is in and not accepted is the chief's to decide (it may
-    // be reopened), so a follow-up waits for its acceptance as one of a task at
-    // work does, and the follow-ups of a task go in the order they were given.
-    let behind = at_work || previous.state == "done";
-    if !behind {
+    // The follow-up waits for T-`after` while it is at work, as for any task it needs.
+    let mut behind = Vec::new();
+    if at_work {
+        behind.push(after);
+    }
+    // And for every task of the window whose result is in and not accepted, T-`after`
+    // among them: the chief may send it back to the window, which takes nothing new
+    // meanwhile. The follow-ups of a window go in the order they were given.
+    for number in undecided_results(store, session.id)? {
+        if !behind.contains(&number) {
+            behind.push(number);
+        }
+    }
+    behind.sort_unstable();
+    if behind.is_empty() {
         require_free(store, &session, Giving::Task)?;
     }
     Ok(FollowUp {
         session: bring_back(store, session)?,
         behind,
     })
+}
+
+/// The numbers of the tasks of a session whose result is in and not decided,
+/// oldest first.
+pub(crate) fn undecided_results(store: &Store, session_id: i64) -> Result<Vec<i64>, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT number FROM task WHERE assignee_id = ? AND state = 'done' AND deleted_at IS NULL
+         ORDER BY number",
+        )?
+        .query_map([session_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// How a task comes to a session, which is what a refusal can tell it to do
