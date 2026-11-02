@@ -463,6 +463,57 @@ fn what_the_harness_writes_in_the_users_place_is_no_news_and_what_the_user_types
     assert_eq!(given(&context), 2, "what the human typed is news");
 }
 
+/// How many wake-ups the log says were skipped for a chief that waits on the human.
+fn waited_on(context: &Context, project: &ProjectView) -> usize {
+    context
+        .ledger
+        .borrow()
+        .events(project.id, 0, 5000)
+        .unwrap()
+        .iter()
+        .filter(|event| {
+            event.kind == "project.wake_up_skipped" && !event.data["waitingOnTheHuman"].is_null()
+        })
+        .count()
+}
+
+#[test]
+fn a_chief_that_waits_on_the_human_is_not_woken_for_three_intervals_and_then_is() {
+    // The field board of 2026-11-02 (T-1113): the chief told the human what it waited for, the
+    // human read nothing, and the calls came every two hours all the same.
+    let context = Context::new();
+    let project = at_rest(&context);
+    set(&context, &project, true, 1, WakeUpUnit::Minutes);
+    context.advance(MINUTE);
+    woken(&context, &project);
+    assert_eq!(given(&context), 1);
+    // The chief puts its questions to the human and tells a member to go on; the staff's work moves.
+    context.note(
+        project.id,
+        "chief",
+        "human",
+        "Waiting for your decisions on A and B",
+    );
+    context.note(project.id, "chief", "zeus", "Go on with the parser");
+    context.note(project.id, "zeus", "chief", "The parser is done");
+    passes(&context);
+    context.adapter.answer("chief", "Noted.");
+    passes(&context);
+    for interval in 1..=3 {
+        context.advance(MINUTE);
+        passes(&context);
+        assert_eq!(given(&context), 1, "skipped, interval {interval}");
+    }
+    assert_eq!(waited_on(&context, &project), 3);
+    context.advance(MINUTE);
+    passes(&context);
+    assert_eq!(
+        given(&context),
+        2,
+        "a board nobody reads is not silenced for good"
+    );
+}
+
 #[test]
 fn the_first_wake_up_after_the_calls_are_turned_on_again_goes_on_a_quiet_board() {
     let context = Context::new();

@@ -16,9 +16,13 @@
 //! answer on its way, one held for its member's quota, one open behind those).
 //! What waits for the chief, a question it has not answered among it, is no
 //! such work. A call held back for work is logged (`project.wake_up_skipped`)
-//! and is not owed.
+//! and is not owed. A call is held back too for a chief that waits on the human, its
+//! newest note to them unread, at most three intervals in a row; the human typing to
+//! the chief restarts the interval; and the interval doubles for each call the chief
+//! answered only by writing to the human (`waiting`).
 
 mod due;
+mod waiting;
 
 use cf_proto::wake_ups::WakeUpView;
 use rusqlite::{OptionalExtension, Row};

@@ -14,5 +14,6 @@ mod due;
 mod migration;
 mod moved;
 mod setting;
+mod waiting;
 mod withdrawn;
 mod world;
