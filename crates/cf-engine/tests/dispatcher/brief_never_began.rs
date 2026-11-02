@@ -79,7 +79,11 @@ fn a_follow_up_whose_window_never_begins(context: &Context, tiers: &Tiers, at_re
     for _ in 0..3 {
         context.pass().unwrap();
     }
-    assert_eq!(tiers.task(2).task.state, "working", "its record shows the brief");
+    assert_eq!(
+        tiers.task(2).task.state,
+        "working",
+        "its record shows the brief"
+    );
     let brief = given(context, "zeus")
         .into_iter()
         .rev()
@@ -102,9 +106,9 @@ fn never_begun_is_pressed_enter_once_then_paused_and_told(at_rest: bool) {
     let tiers = Tiers::new(&context, &["zeus"]);
     let brief = a_follow_up_whose_window_never_begins(&context, &tiers, at_rest);
     // The window printed nothing since long before.
-    context
-        .host
-        .set_snapshot(json!({ "outputQuietMs": 600_000, "tail": ["Ready for the next step.", "❯ "] }));
+    context.host.set_snapshot(
+        json!({ "outputQuietMs": 600_000, "tail": ["Ready for the next step.", "❯ "] }),
+    );
     let before = enters(&context);
 
     // Within its arrival window it is waited for: a model on its way to its first word.
