@@ -219,6 +219,14 @@ impl<'a> Driver<'a> {
         Ok(observe::user_item_with(&items, marker))
     }
 
+    /// Whether the chief's record has an item of the assistant's after the user item that holds
+    /// `marker`: its turn on the ask began, whatever the board's looks at its activity caught.
+    fn answered_in_record(&self, marker: &str) -> Result<bool> {
+        let events = self.members.events();
+        let items = observe::record(self.members, &events, self.chief_kind, "chief")?;
+        Ok(observe::answered_after(&items, marker))
+    }
+
     /// When the chief's window went to `working` at or after `since_ms`, as the events say.
     fn turn_since(&self, since_ms: i64) -> Option<i64> {
         self.members.events().iter().find_map(|event| {
@@ -301,7 +309,14 @@ impl<'a> Driver<'a> {
         }
         said.in_record_ms = Some(jiff::Timestamp::now().as_millisecond());
         let turn = self.wait("the chief's turn after the ask", TURN_BEGUN, || {
-            Ok(self.turn_since(said.typed_ms))
+            // The board's look at the window, or else the record: a turn of a second can fall
+            // between two of the board's looks, and its answer is in the record all the same.
+            if let Some(at) = self.turn_since(said.typed_ms) {
+                return Ok(Some(at));
+            }
+            Ok(self
+                .answered_in_record(marker)?
+                .then(|| jiff::Timestamp::now().as_millisecond()))
         })?;
         match turn {
             Waited::Found(at) => said.turn_ms = Some(at),

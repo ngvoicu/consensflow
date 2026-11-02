@@ -276,6 +276,12 @@ pub fn user_item_with(items: &[Item], words: &str) -> Option<usize> {
         .position(|item| item.role == "user" && item.text.contains(words))
 }
 
+/// Whether `items` have an item of the assistant's after the first user item holding `words`.
+pub fn answered_after(items: &[Item], words: &str) -> bool {
+    user_item_with(items, words)
+        .is_some_and(|at| items[at + 1..].iter().any(|item| item.role == "assistant"))
+}
+
 /// The header ConsensFlow writes at the top of the brief of task `number` given by the chief.
 pub fn brief_header(number: i64) -> String {
     format!(" · T-{number} · task from @chief]")
@@ -417,5 +423,15 @@ mod tests {
         assert_eq!(user_item_with(&items, "[matrix ask 1/4]"), None);
         assert_eq!(user_item_with(&items, &brief_header(2)), Some(2));
         assert_eq!(user_item_with(&items, &brief_header(12)), None);
+        // The assistant's item before the user's is no answer to it, and one after it is.
+        assert!(!answered_after(&items, "[matrix ask 1/4]"));
+        assert!(!answered_after(&items, &brief_header(2)));
+        let answered = [
+            item("user", "[m] ask"),
+            item("user", "more"),
+            item("assistant", "done"),
+        ];
+        assert!(answered_after(&answered, "[m]"));
+        assert!(!answered_after(&answered[..2], "[m]"));
     }
 }
