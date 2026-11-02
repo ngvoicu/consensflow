@@ -158,3 +158,47 @@ fn a_compaction_stands_beside_the_items_with_its_tokens_and_summary() {
         serde_json::to_value(Stage::with(&records[..3]).at(0)).unwrap()
     );
 }
+
+/// The live run's session (T-728: Pi 1.4.0 on openrouter/meta/muse-spark-1.3, a read, a
+/// command that fails and an edit; its thinking blocks hold no words), its system prompt
+/// left out and the folders replaced.
+#[test]
+fn a_live_chiefs_session_reads_as_the_live_check_read_it() {
+    let records: Vec<Value> = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/history-items/pi.jsonl"
+    ))
+    .unwrap()
+    .lines()
+    .map(|line| serde_json::from_str(line).unwrap())
+    .collect();
+    let record = Stage::with(&records).at(0);
+    let tools: Vec<(Option<String>, Option<Status>, Option<u64>, bool)> = record
+        .items
+        .iter()
+        .filter(|item| item.kind() == Kind::Tool)
+        .map(|item| {
+            let detail = item.detail.as_deref().unwrap();
+            (
+                detail.header.as_deref().map(str::to_owned),
+                detail.status,
+                detail.took_ms,
+                detail.diff.is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(tools.len(), 3);
+    assert_eq!(tools[0].0.as_deref(), Some("read notes.txt:1-50"));
+    assert_eq!(
+        (tools[1].0.as_deref(), tools[1].1),
+        (Some("$ ls no-such-folder"), Some(Status::Failed))
+    );
+    assert_eq!(
+        (tools[2].0.as_deref(), tools[2].3),
+        (Some("edit notes.txt"), true)
+    );
+    // Pi says each result's time.
+    assert!(tools.iter().all(|(_, _, took, _)| took.is_some()));
+    // Its thinking blocks hold no words: no thinking to show.
+    assert!(record.beside.is_empty());
+}

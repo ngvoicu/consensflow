@@ -185,3 +185,75 @@ fn an_edit_codex_completed_stands_beside_the_items_with_its_change() {
         Some("@@ -1,2 +1,2 @@\n-The light is red.\n+The light is blue.")
     );
 }
+
+/// The live run's rollout (T-728: Codex 0.166.0 on gpt-5.6-luna, its calls made through
+/// `exec` scripts, a command that fails, a patch and `/compact`), with what its reader
+/// reads alone kept and the folders replaced.
+#[test]
+fn a_live_chiefs_rollout_reads_as_the_live_check_read_it() {
+    let records: Vec<Value> = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/history-items/codex.jsonl"
+    ))
+    .unwrap()
+    .lines()
+    .map(|line| serde_json::from_str(line).unwrap())
+    .collect();
+    let record = read(&records).unwrap();
+    let drawn: Vec<(Kind, Option<String>, Option<Status>, bool)> = Timeline::of(&record)
+        .from(0)
+        .filter(|(item, _)| matches!(item.kind(), Kind::Tool | Kind::Compaction))
+        .map(|(item, _)| {
+            let detail = item.detail.as_deref();
+            (
+                item.kind(),
+                detail.and_then(|detail| detail.header.as_deref().map(str::to_owned)),
+                detail.and_then(|detail| detail.status),
+                detail.is_some_and(|detail| detail.diff.is_some()),
+            )
+        })
+        .collect();
+    let header = |said: &str| Some(said.to_owned());
+    assert_eq!(
+        drawn,
+        [
+            (
+                Kind::Tool,
+                header("$ sed -n '1,200p' notes.txt"),
+                Some(Status::Ok),
+                false
+            ),
+            (
+                Kind::Tool,
+                header("$ sed -n '1,200p' notes.txt"),
+                Some(Status::Ok),
+                false
+            ),
+            (
+                Kind::Tool,
+                header("$ ls no-such-folder"),
+                Some(Status::Failed),
+                false
+            ),
+            (
+                Kind::Tool,
+                header("$ ls no-such-folder"),
+                Some(Status::Ok),
+                false
+            ),
+            (
+                Kind::Tool,
+                header("edit /work/app/notes.txt"),
+                Some(Status::Ok),
+                true
+            ),
+            (
+                Kind::Tool,
+                header("edit /work/app/notes.txt"),
+                Some(Status::Ok),
+                true
+            ),
+            (Kind::Compaction, None, None, false),
+        ]
+    );
+}

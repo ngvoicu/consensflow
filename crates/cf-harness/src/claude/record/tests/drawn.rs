@@ -372,3 +372,52 @@ fn the_items_ids_are_those_they_had_and_thinking_ids_hold_from_look_to_look() {
     assert_eq!(first[..2], second[..2]);
     assert_eq!(first[1].0, "a1:thinking:0");
 }
+
+/// The live run's transcript (T-728: Claude Code 2.1.316 on Sonnet 5.5, a read, a command
+/// that fails, an edit and `/compact`), made a fixture by `cargo xtask scrub-transcript`.
+#[test]
+fn a_live_chiefs_transcript_reads_as_the_live_check_read_it() {
+    let text = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/history-items/claude.jsonl"
+    ))
+    .unwrap()
+    .replace("$SESSION", SESSION);
+    let records: Vec<Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let record = record_of(&records);
+    let tools: Vec<(Option<&str>, Option<Status>, bool)> = record
+        .items
+        .iter()
+        .filter(|item| item.kind() == Kind::Tool)
+        .map(|item| {
+            let detail = item.detail.as_deref().unwrap();
+            (
+                detail.header.as_deref(),
+                detail.status,
+                detail.diff.is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            (Some("read /work/app/notes.txt"), Some(Status::Ok), false),
+            (Some("$ ls no-such-folder"), Some(Status::Failed), false),
+            (Some("edit /work/app/notes.txt"), Some(Status::Ok), true),
+        ]
+    );
+    let compacted = record
+        .items
+        .iter()
+        .find(|item| item.kind() == Kind::Compaction)
+        .unwrap();
+    assert_eq!(compacted.detail.as_deref().unwrap().tokens, Some(43_079));
+    // Nothing running is left beside the items once every call was answered.
+    assert!(record
+        .beside
+        .iter()
+        .all(|(_, item)| item.kind() != Kind::Tool));
+}
