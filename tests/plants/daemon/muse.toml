@@ -62,6 +62,7 @@ muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claud
 muse-tui-probes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_posture", "off_a_mac"]
 muse-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes::"]
 muse-live-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_notes", "tests::"]
+muse-live-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "codex_devin::tests::"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
 muse-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_teammates_turn"]
@@ -3533,3 +3534,16 @@ runs = ["muse-live-notes"]
 file = "crates/cf-e2e/tests/live_notes.rs"
 find = '''            Some(harness @ (Harness::Claude | Harness::Devin | Harness::Muse)) => harness,'''
 replace = '''            Some(harness @ (Harness::Claude | Harness::Devin)) => harness,'''
+
+# MUS-18 (T-954): live parity's Muse worker runs on the human's own Muse settings, whose
+# SessionStart hook ConsensFlow's launch merges with its own: the case gives those settings
+# the hook whose word the worker must say.
+[[plant]]
+name = "muse: live parity's Muse case gives the human's settings no hook"
+meant = "muse_s_case_gives_the_human_s_settings_a_server_and_a_hook_that_says_its_word"
+runs = ["muse-live-parity"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/codex_devin.rs"
+find = '''        "hooks": { "SessionStart": [ { "matcher": "", "hooks": [ {'''
+replace = '''        "no_hooks": { "SessionStart": [ { "matcher": "", "hooks": [ {'''

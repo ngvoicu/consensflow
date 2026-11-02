@@ -21,6 +21,19 @@
 //!   on Windows, where Devin keeps its config with its login and sessions, the server is
 //!   the project's (`.devin/mcp_config.json`). The project has a skill of its own and its
 //!   `AGENTS.md` a word. The worker calls the tool, names its skills and says the word.
+//! - **Muse Code's own setup** (MUS-18, T-954). A Muse member runs on the human's own Muse
+//!   config, as their terminal's Muse does: its `settings.json` (MCP servers, hooks), its
+//!   skills folder, and the project's `.agents/skills` and `AGENTS.md`; ConsensFlow adds its
+//!   SessionStart hook to the human's (`-c hooks=` replaces them for the run, so the launch
+//!   merges them). The run's Muse config is the rig's home's (its launcher gives every Muse
+//!   window the rig's XDG folders, [`cf_e2e::live::isolation`]), written once the project is
+//!   open and before the worker's window: the run's MCP server, a skill, and a SessionStart
+//!   hook of the human's that gives the session a word. The project has a skill of its own.
+//!   The worker calls the tool, names its skills and says the words: the hook's word proves
+//!   the human's hooks ran beside ConsensFlow's. Plugins are said (the built-in plugins'
+//!   skills it names), not judged; computer use needs macOS grants of Muse's own, which a
+//!   run never gives, and is left unproven. A Mac's alone: on Windows the live kit's Muse is
+//!   T-1084's.
 //! - **What the human types, and the interrupt after it.** While the worker's next task
 //!   waits in a long command, marks no key of a layout types (— → € «) and a letter are
 //!   typed into its box as the page writes them (as they were typed, `terminals.js`), and
@@ -84,6 +97,9 @@ const GLOBAL_SKILL: &str = "cf-parity-global";
 /// The skill of the project's own folder (Devin's `.devin/skills`).
 const PROJECT_SKILL: &str = "cf-parity-project";
 
+/// The word the human's own SessionStart hook gives a Muse session (its `settings.json`).
+const HOOK_WORD: &str = "CF-PARITY-HOOK";
+
 /// The word of the human's own `AGENTS.md` (Codex's home), and of the project's.
 const GLOBAL_WORD: &str = "CF-PARITY-GLOBAL";
 const PROJECT_WORD: &str = "CF-PARITY-PROJECT";
@@ -116,6 +132,9 @@ const DOUBLE_PRESS: Duration = Duration::from_millis(150);
 struct Case {
     plan: Plan,
     words: Vec<(&'static str, &'static str)>,
+    /// Files written in the rig's home once the project is open, before the worker's
+    /// window: each by its path below the home.
+    rig_files: Vec<(String, String)>,
     _folders: Vec<TempDir>,
 }
 
@@ -125,7 +144,7 @@ pub fn run(log: &Log, harnesses: &[Harness]) -> Result {
     for harness in harnesses
         .iter()
         .copied()
-        .filter(|harness| matches!(harness, Harness::Codex | Harness::Devin))
+        .filter(|harness| matches!(harness, Harness::Codex | Harness::Devin | Harness::Muse))
     {
         check(harness, &log.scoped(harness.name()))?;
     }
@@ -203,6 +222,7 @@ fn codex_case(log: &Log) -> Result<Case> {
             (GLOBAL_WORD, "the AGENTS.md of its home"),
             (PROJECT_WORD, "the project's AGENTS.md"),
         ],
+        rig_files: Vec::new(),
         _folders: vec![server],
     })
 }
@@ -251,6 +271,63 @@ fn devin_case() -> Result<Case> {
     Ok(Case {
         plan,
         words,
+        rig_files: Vec::new(),
+        _folders: vec![server],
+    })
+}
+
+/// Muse Code's check: the human's Muse config is the rig's home's (`.config/muse`), holding
+/// the run's MCP server, a skill and a SessionStart hook that gives the session a word; the
+/// project has a skill of its own (`.agents/skills`) and its `AGENTS.md` a word.
+fn muse_case() -> Result<Case> {
+    let (server, program) = server_folder()?;
+    let hook = server.path().join("hook.sh");
+    files::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nprintf '%s' '{{\"hookSpecificOutput\":{{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"The parity word of the human hook is {HOOK_WORD}.\"}}}}'\n"
+        ),
+    )?;
+    let settings = serde_json::json!({
+        "schema_version": 1,
+        "mcp_servers": { "cf-parity": {
+            "transport": "stdio",
+            "command": "node",
+            "args": [program.to_string_lossy()],
+            "mode": "optional",
+        } },
+        "hooks": { "SessionStart": [ { "matcher": "", "hooks": [ {
+            "type": "command",
+            "command": format!("/bin/sh {}", quoted(&hook)),
+            "timeout": 10,
+        } ] } ] },
+    });
+    let plan = Plan::new("parity-muse", members::stand_in_chief())
+        .told(PARITY_BRIEF)
+        .with(members::member(Harness::Muse))
+        .with_file(
+            &format!(".agents/skills/{PROJECT_SKILL}/SKILL.md"),
+            skill(PROJECT_SKILL),
+        );
+    Ok(Case {
+        plan,
+        words: vec![
+            (TOOLS_WORD, "the MCP server of the human's settings.json"),
+            (GLOBAL_SKILL, "the skill of the human's Muse config"),
+            (PROJECT_SKILL, "the project's skill"),
+            (HOOK_WORD, "the human's own SessionStart hook"),
+            (PROJECT_WORD, "the project's AGENTS.md"),
+        ],
+        rig_files: vec![
+            (
+                ".config/muse/settings.json".to_owned(),
+                format!("{settings:#}\n"),
+            ),
+            (
+                format!(".config/muse/skills/{GLOBAL_SKILL}/SKILL.md"),
+                skill(GLOBAL_SKILL),
+            ),
+        ],
         _folders: vec![server],
     })
 }
@@ -437,9 +514,17 @@ fn typed_into(members: &Members, window: &members::MemberWindow, log: &Log) -> R
 fn check(harness: Harness, log: &Log) -> Result {
     let case = match harness {
         Harness::Codex => codex_case(log)?,
+        Harness::Muse => muse_case()?,
         _ => devin_case()?,
     };
     let mut members = Members::open(&case.plan, Path::new(FAKE_AGENT), log)?;
+    let home = files::real_path(&members.rig().home());
+    for (name, text) in &case.rig_files {
+        files::write(&home.join(name), text)?;
+        log.say(format!(
+            "the human's own {name} is written in the rig's home"
+        ));
+    }
     let said = answer(&mut members, harness, log);
     if said.is_err() {
         failure(&members, harness, log);
@@ -470,4 +555,48 @@ fn check(harness: Harness, log: &Log) -> Result {
     let named: Vec<&str> = case.words.iter().map(|(word, _)| *word).collect();
     log.say(format!("ok: the worker names {}", named.join(", ")));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The human's own Muse setup the case writes: the run's MCP server and a SessionStart
+    /// hook in `settings.json`, as Muse reads them (`mcp_servers.<name>.transport`, Claude's
+    /// hook shape), and the hook prints the answer Muse reads its context from, holding the
+    /// word; the skill of the human's config beside it. Muse ran the hook on the Mac in the
+    /// live check (MUS-18, T-954).
+    #[cfg(unix)]
+    #[test]
+    fn muse_s_case_gives_the_human_s_settings_a_server_and_a_hook_that_says_its_word() {
+        let case = muse_case().unwrap();
+        let settings: serde_json::Value = serde_json::from_str(
+            &case
+                .rig_files
+                .iter()
+                .find(|(name, _)| name == ".config/muse/settings.json")
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        assert_eq!(settings["mcp_servers"]["cf-parity"]["transport"], "stdio");
+        let command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let ran = cf_e2e::process::Run::new("/bin/sh")
+            .args(["-c", &command])
+            .run()
+            .unwrap();
+        let said: serde_json::Value = serde_json::from_str(&ran.stdout).unwrap();
+        assert!(said["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains(HOOK_WORD));
+        assert!(case
+            .rig_files
+            .iter()
+            .any(|(name, _)| name.ends_with(&format!("skills/{GLOBAL_SKILL}/SKILL.md"))));
+        assert!(case.words.iter().any(|(word, _)| *word == HOOK_WORD));
+    }
 }
