@@ -177,3 +177,37 @@ find = '''
    `cf task accept T-3 "what I checked"`.'''
 replace = '''
    undecided stays Done, and any task that needs it stays blocked.'''
+
+# The notes that tell the chief what to do with a failed task offer the accept as well as the
+# reopen (T-1111: the field chief read "cancel T-w, or reopen T-n" and cancelled the task that
+# waited for a failed one whose work was done).
+
+[[plant]]
+name = "accept failed: the note to whoever a failed task is waited for by does not offer the accept"
+meant = "a_task_that_fails_leaves_its_follow_up_waiting_and_the_chief_is_told_once"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''cancel T-{waiting}, reopen T-{number} and let it finish, or accept T-{number} with what you checked: cf task accept T-{number} \"…\""'''
+replace = '''cancel T-{waiting}, or reopen T-{number} and let it finish."'''
+
+[[plant]]
+name = "accept failed: the give-up note does not offer the accept"
+meant = "a_task_whose_harness_failed_keeps_the_words_still_on_their_way_for_its_reopen_and_whoever_told_them_hears_they_wait"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''" Reopen it with: cf task reopen T-{number} \"…\", or accept it with what you checked: cf task accept T-{number} \"…\""'''
+replace = '''" Reopen it with: cf task reopen T-{number} \"…\""'''
+
+[[plant]]
+name = "accept failed: the engine's note of a delivery that failed its task does not offer the accept"
+meant = "a_members_unfit_window_whose_kill_is_refused_goes_with_its_message_and_whoever_is_told_hears_why"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                    reopen_or_accept(task.number)"
+replace = '''                    format!(" Reopen it with: cf task reopen T-{} \"…\"", task.number)'''

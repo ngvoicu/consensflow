@@ -710,6 +710,17 @@ pub(crate) fn note_stranded_waits(store: &mut Store) -> Result<(), LedgerError> 
     })
 }
 
+/// What a failed task's requester is told to do with it, in one sentence: reopen it, or
+/// accept it with what they checked (T-1111), which the chief does when the work it
+/// reports is done though the window died. One fate, said in these words wherever a
+/// task is said to have failed: the ledger's give-up and the engine's note of a delivery
+/// that failed its task.
+pub fn reopen_or_accept(number: i64) -> String {
+    format!(
+        " Reopen it with: cf task reopen T-{number} \"…\", or accept it with what you checked: cf task accept T-{number} \"…\""
+    )
+}
+
 /// A task fails: its pane died, or its launch never came up. Words told to its
 /// window that it never had go with what was queued, and whoever told them hears
 /// which, as a cancel tells it (T-389), but its requester. The tasks that wait for
@@ -717,7 +728,7 @@ pub(crate) fn note_stranded_waits(store: &mut Store) -> Result<(), LedgerError> 
 /// are released when it is accepted, which a reopening can still bring about, or
 /// the chief's word on its work (`accept_failed_task`). Each
 /// one's requester is told once that it waits for a failed task, and what to do:
-/// cancel the waiter, or reopen the task. This is Node's ledger's `failTask`, which
+/// cancel the waiter, reopen the task, or accept it on what they checked. This is Node's ledger's `failTask`, which
 /// its recordings call, and only they: the daemon gives up with [`give_up_task`].
 pub(crate) fn fail_task(
     store: &mut Store,
@@ -771,8 +782,12 @@ fn fail(
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
         release_ready(store, project_id)?;
         let requester = store.participant_row(task.requester_id)?;
-        let reopen = format!(" Reopen it with: cf task reopen T-{number} \"…\"");
-        let failed = |waiting: String| format!("T-{number} failed: {reason}{waiting}.{reopen}");
+        let failed = |waiting: String| {
+            format!(
+                "T-{number} failed: {reason}{waiting}.{}",
+                reopen_or_accept(number)
+            )
+        };
         if given_up {
             told.tell_each(store, &task, &[&requester.handle], |teller| {
                 failed(told.waiting_for_the_reopen(Some(teller)))
@@ -797,7 +812,7 @@ fn fail(
                     task: Some(waiting),
                     kind: "note",
                     body: &format!(
-                        "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, or reopen T-{number} and let it finish."
+                        "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, reopen T-{number} and let it finish, or accept T-{number} with what you checked: cf task accept T-{number} \"…\""
                     ),
                     ..Sent::default()
                 },

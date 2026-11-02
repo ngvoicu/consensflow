@@ -15,8 +15,8 @@ use cf_harness::contract::{
 use cf_harness::records::{Reading, Role};
 use cf_ledger::model::MAX_BODY;
 use cf_ledger::{
-    is_told, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver, MessageView, NewNote,
-    ParticipantView, ProjectView, TaskView,
+    is_told, reopen_or_accept, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver,
+    MessageView, NewNote, ParticipantView, ProjectView, TaskView,
 };
 use cf_proto::panes::HumanInput;
 use cf_proto::trace::WindowEvent;
@@ -1935,7 +1935,7 @@ impl Dispatcher {
     /// `to` hears that `task` failed, `because`, which of the words `told` its window
     /// wait for the reopen, `to`'s own where `of` names it (`waiting_for_the_reopen`,
     /// the words the ledger's give-up says them in: one fate, Calliope's P3-4 of T-414
-    /// and of T-446), and how to reopen it.
+    /// and of T-446), and how to reopen it or accept it (`reopen_or_accept`).
     #[allow(clippy::too_many_arguments)]
     fn tell_failed(
         &self,
@@ -1955,8 +1955,9 @@ impl Dispatcher {
                 to: to.to_owned(),
                 task: Some(task.number),
                 body: format!(
-                    "T-{0} failed: {because}{waiting}. Reopen it with: cf task reopen T-{0} \"…\"{words}",
-                    task.number
+                    "T-{0} failed: {because}{waiting}.{1}{words}",
+                    task.number,
+                    reopen_or_accept(task.number)
                 ),
             },
         )?;

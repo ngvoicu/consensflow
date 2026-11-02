@@ -20,6 +20,7 @@ use crate::store::Store;
 use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT};
 
 pub(crate) use editing::{edit_task, tell_open};
+pub use finishing::reopen_or_accept;
 pub(crate) use finishing::{
     accept_failed_task, accept_task, call_off, cancel_task, delete_tasks, fail_task, give_up_task,
     note_stranded_waits, record_finished, record_result, release_ready, reopen_task,
