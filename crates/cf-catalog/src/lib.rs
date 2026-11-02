@@ -22,7 +22,7 @@ mod roster;
 
 use std::collections::BTreeMap;
 
-pub use catalog::{efforts, Group};
+pub use catalog::{efforts, Efforts, Group};
 pub use cf_proto::agents::{
     AgentView, CatalogEntry, FoundEntry, Harness, Preferences, Profile, WorkTier, WorkTierInfo,
 };

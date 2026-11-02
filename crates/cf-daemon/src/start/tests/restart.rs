@@ -528,9 +528,13 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
                 .map(String::as_str)
                 .collect();
             assert_eq!(keys, ["id", "generation", "cwd", "argv", "env", "dropEnv"]);
+            // The project's folder as the system names it: a temporary folder on a Mac is
+            // reached through `/var`, a link to `/private/var` (T-783).
             assert_eq!(
                 open["cwd"],
-                root.path().join("workspace").to_string_lossy().as_ref()
+                cf_base::file::real_path(&root.path().join("workspace"))
+                    .to_string_lossy()
+                    .as_ref()
             );
             // The chief's role text names the cf of this window.
             let argv: Vec<&str> = open["argv"]
