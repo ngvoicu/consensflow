@@ -9,8 +9,12 @@
 //! On Windows (zeewin2, MUS-20) the rig's Muse is the `muse-stand-in` program, which runs
 //! the machine's Muse as its child (`cf_e2e::muse::StandIn`).
 
+#[cfg(unix)]
+use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(unix)]
+use cf_e2e::live::isolation::Isolation;
 use cf_e2e::muse::members::{
     echo_worker, in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
 };
@@ -110,6 +114,54 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
                 .is_some_and(|text| text.contains("ConsensFlow"))
     }));
     rig.close()?;
+    Ok(())
+}
+
+/// T-1081: a Muse window beside a Devin home. Devin's home moves the XDG folders over
+/// everything the rig set, and the rig's Muse keeps its sessions in the rig's home, as the live
+/// one does: the daemon looked for the window's session in Devin's data folder, never found
+/// it, and the window read "starting" for good with its brief never pasted (alpha.1's release
+/// check: a Muse advisor under a Devin chief, 2 runs of 2). The window names its session and
+/// takes its brief, and the owner's Muse, which Devin's home reached through a link, gains
+/// nothing.
+#[cfg(unix)]
+#[test]
+fn a_muse_window_beside_a_devin_home_names_its_session_and_takes_its_brief() -> Outcome {
+    let Some(config) = muse_rig() else {
+        return Ok(());
+    };
+    // A pretend owner, with a Devin login and a Muse of their own.
+    let owner = tempfile::tempdir()?;
+    let at = |below: &str| owner.path().join(below);
+    for file in [
+        ".local/share/devin/credentials.toml",
+        ".config/devin/config.json",
+        ".config/muse/settings.json",
+        ".local/share/muse/session-index.db",
+    ] {
+        let file = at(file);
+        std::fs::create_dir_all(file.parent().ok_or("a file has a folder")?)?;
+        std::fs::write(&file, "the owner's own")?;
+    }
+    std::fs::create_dir_all(at(".local/share/muse/sessions"))?;
+    let devin = Isolation::devin(owner.path(), &at(".config"), &at(".local/share"));
+    let rig = Rig::start(config.isolated(Arc::new(devin)))?;
+    let project = project(&rig, &echo_worker())?;
+    rig.tell(
+        project.id(),
+        "DISPATCH --tier standard Reply with exactly: T1_DONE",
+    )?;
+    rig.wait_for("T-1 to be answered", secs(120), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let task = project.task(1)?;
+    assert!(task.to_string().contains("T1_DONE"), "{task}");
+    rig.close()?;
+    let owners: Vec<_> = std::fs::read_dir(at(".local/share/muse/sessions"))?
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect();
+    assert!(owners.is_empty(), "the owner's Muse gained {owners:?}");
     Ok(())
 }
 

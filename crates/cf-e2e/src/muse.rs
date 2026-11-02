@@ -280,8 +280,16 @@ fn write_windows(dir: &Path, install: &Installed, run: Run, argv: &Path) -> Resu
 /// Writes the rig's Muse in `dir`: its launcher, the version line, and the binary that
 /// runs `install`'s on echo, each turn `delay_ms` long, writing each command line it
 /// is given to `argv` (its words split by a unit separator, each line ended by a record
-/// separator: a first message has lines of its own).
-pub fn write_stand_in(dir: &Path, install: &Installed, delay_ms: u64, argv: &Path) -> Result {
+/// separator: a first message has lines of its own). Its settings and sessions are in the
+/// rig's home (`rig_home`, by its real path), as the live one's are
+/// ([`write_live_stand_in`]), whatever folders a harness's home gives the rig's windows.
+pub fn write_stand_in(
+    dir: &Path,
+    install: &Installed,
+    delay_ms: u64,
+    rig_home: &Path,
+    argv: &Path,
+) -> Result {
     if cfg!(windows) {
         let run = Run::Echo { turn_ms: delay_ms };
         return write_windows(dir, install, run, argv);
@@ -297,6 +305,7 @@ pub fn write_stand_in(dir: &Path, install: &Installed, delay_ms: u64, argv: &Pat
 # The rig's Muse: the machine's, on its fake model. Echo takes no model or effort.
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
 printf '%s %s\n' $$ $$ >> '{pids}'
+export XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
 words=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -308,6 +317,7 @@ exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{dela
 "#,
         argv = argv.display(),
         pids = pids_beside(argv).display(),
+        rig = rig_home.display(),
         binary = install.binary.display(),
     );
     files::write_executable(&pinned, script)
@@ -756,6 +766,48 @@ mod tests {
         assert!(found
             .binary
             .starts_with(std::fs::canonicalize(real.path()).unwrap()));
+    }
+
+    /// T-1081: the rig's Muse on echo keeps its settings and sessions in the rig's home, as
+    /// the live one does, whatever XDG folders the windows were given (a Devin home moves them
+    /// all): a rig case on echo then meets the folders the live kit's Muse does.
+    #[cfg(unix)]
+    #[test]
+    fn the_rigs_muse_on_echo_keeps_its_folders_in_the_rigs_home_as_the_live_one_does() {
+        let folder = tempfile::tempdir().unwrap();
+        let said = folder.path().join("said");
+        let binary = folder.path().join("real-muse");
+        files::write_executable(
+            &binary,
+            format!(
+                "#!/bin/sh\nprintf '%s %s' \"$XDG_CONFIG_HOME\" \"$XDG_DATA_HOME\" > '{}'\n",
+                said.display()
+            ),
+        )
+        .unwrap();
+        let install = super::Installed {
+            binary,
+            version: "1.4.14-R7309.1".to_owned(),
+            stand_in: None,
+        };
+        let rig = folder.path().join("rig-home");
+        let bin = folder.path().join("bin");
+        files::make_dir(&bin).unwrap();
+        let argv = folder.path().join("argv.log");
+        let ran = |launcher: &Path| {
+            let ran = crate::process::Run::new(launcher)
+                .var("XDG_CONFIG_HOME", "/a-home/config")
+                .var("XDG_DATA_HOME", "/a-home/data")
+                .run()
+                .unwrap();
+            assert_eq!(ran.code, Some(0), "{ran}");
+            std::fs::read_to_string(&said).unwrap()
+        };
+        let wanted = format!("{0}/.config {0}/.local/share", rig.display());
+        super::write_stand_in(&bin, &install, 10, &rig, &argv).unwrap();
+        assert_eq!(ran(&bin.join("muse")), wanted, "on echo");
+        super::write_live_stand_in(&bin, &install, folder.path(), &rig, &argv).unwrap();
+        assert_eq!(ran(&bin.join("muse")), wanted, "live");
     }
 
     /// T-829's live run (Muse 1.4.14, 2026-10-28): a window of the subscription in which
