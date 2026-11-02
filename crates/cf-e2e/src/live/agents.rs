@@ -704,9 +704,13 @@ mod tests {
 
     #[test]
     fn the_efforts_a_harness_takes_are_the_ones_the_products_catalog_has() {
-        let catalog =
+        // Its declaration of each harness's levels, read with no space in it: rustfmt lays a
+        // long one over lines (`Harness::Pi => (\n &[…],\n false,\n)`, T-1078's shape).
+        let catalog: String =
             std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/src/catalog.rs"))
-                .unwrap();
+                .unwrap()
+                .split_whitespace()
+                .collect();
         for harness in Harness::ALL {
             // The catalog's own name of the harness.
             let name = harness.name();
@@ -715,7 +719,7 @@ mod tests {
                 .iter()
                 .map(|effort| format!("\"{effort}\""))
                 .collect();
-            let line = format!("Harness::{variant} => &[{}],", quoted.join(", "));
+            let line = format!("Harness::{variant}=>(&[{}],", quoted.join(","));
             assert!(catalog.contains(&line), "the catalog has no {line}");
         }
     }
