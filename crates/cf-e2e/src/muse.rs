@@ -304,8 +304,8 @@ pub fn write_stand_in(
         r#"#!/bin/bash
 # The rig's Muse: the machine's, on its fake model. Echo takes no model or effort.
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
-printf '%s %s\n' $$ $$ >> '{pids}'
 export XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
+printf '%s %s\n' $$ $$ >> '{pids}'
 words=()
 while [ $# -gt 0 ]; do
   case "$1" in
