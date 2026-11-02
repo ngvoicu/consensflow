@@ -318,7 +318,7 @@ pub(crate) struct WindowPart {
     /// ([`Dispatcher::still_drawing`]). None until then, again once a task of the window's
     /// is in hand (the wait is over, the next time it is done is a wait of its own), and
     /// once the window closes.
-    pub(crate) free_since: Option<i64>,
+    pub(crate) found_free: Option<i64>,
     /// The window of its last launch whose open the host never answered by the open's
     /// deadline: the host may have started its program since, or may yet, and it would
     /// run on the conversation the next window goes on with (a Codex thread one client
@@ -373,7 +373,7 @@ impl Default for WindowPart {
             unproven: false,
             owner: None,
             told_waiting: None,
-            free_since: None,
+            found_free: None,
             abandoned: None,
         }
     }
@@ -518,7 +518,7 @@ impl Dispatcher {
             window.conversation = None;
             window.unproven = false;
             window.told_waiting = None;
-            window.free_since = None;
+            window.found_free = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
             window.trust_keys = 0;
@@ -1649,7 +1649,7 @@ impl Dispatcher {
             // the window was given is still done: what keeps it is the next task of its
             // session, queued behind it, which waits for the same screen (`ownership`).
             if !self.given_task_finished(record)? {
-                record.window.borrow_mut().free_since = None;
+                record.window.borrow_mut().found_free = None;
             }
             return Ok(false);
         }
@@ -1694,7 +1694,7 @@ impl Dispatcher {
         let now = self.now();
         let (since, pane) = {
             let mut part = record.window.borrow_mut();
-            (*part.free_since.get_or_insert(now), part.pane.clone())
+            (*part.found_free.get_or_insert(now), part.pane.clone())
         };
         let Some(pane) = pane else {
             return Ok(false);

@@ -135,9 +135,9 @@ runs = ["cwd-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''            if !self.given_task_finished(record)? {
-                record.window.borrow_mut().free_since = None;
+                record.window.borrow_mut().found_free = None;
             }'''
-replace = "            record.window.borrow_mut().free_since = None;"
+replace = "            record.window.borrow_mut().found_free = None;"
 
 [[plant]]
 name = "close when drawn: a task in hand again leaves the wait running"
@@ -146,7 +146,7 @@ runs = ["cwd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "                record.window.borrow_mut().free_since = None;"
+find = "                record.window.borrow_mut().found_free = None;"
 replace = "                let _ = &record;"
 
 [[plant]]
@@ -156,7 +156,7 @@ runs = ["cwd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "            window.free_since = None;"
+find = "            window.found_free = None;"
 replace = "            let _ = &window;"
 
 [[plant]]
