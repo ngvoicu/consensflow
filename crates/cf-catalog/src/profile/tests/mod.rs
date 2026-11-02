@@ -44,7 +44,10 @@ fn the_preset_tier_is_the_rules_tier_of_a_model_the_presets_run_on_that_harness_
         Some(WorkTier::Complex),
         "Pi's effort is its thinking"
     );
-    assert_eq!(catalog.preset_tier("claude", "claude-mythos-5", Some("max")), None);
+    assert_eq!(
+        catalog.preset_tier("claude", "claude-mythos-5", Some("max")),
+        None
+    );
     assert_eq!(
         catalog.preset_tier("muse", "muse-spark-1.3", Some("max")),
         None,

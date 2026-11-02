@@ -68,9 +68,19 @@ fn a_tier_the_human_chose_survives_the_agents_tiers_being_followed_and_one_that_
     let changed = ledger
         .refresh_member_tiers(|_| Some("light".to_owned()))
         .expect("the tiers followed");
-    let moved: Vec<&str> = changed.iter().map(|change| change.handle.as_str()).collect();
-    assert_eq!(moved, ["zeus"], "only the member whose tier follows its agent's");
-    assert_eq!(tier_of(&ledger, project, "claude-mythos-high").as_deref(), Some("critical"));
+    let moved: Vec<&str> = changed
+        .iter()
+        .map(|change| change.handle.as_str())
+        .collect();
+    assert_eq!(
+        moved,
+        ["zeus"],
+        "only the member whose tier follows its agent's"
+    );
+    assert_eq!(
+        tier_of(&ledger, project, "claude-mythos-high").as_deref(),
+        Some("critical")
+    );
     assert_eq!(tier_of(&ledger, project, "zeus").as_deref(), Some("light"));
 }
 
@@ -103,7 +113,10 @@ fn an_edited_member_runs_on_its_new_agent_in_the_tier_chosen_and_keeps_it_from_t
         .refresh_member_tiers(|_| Some("light".to_owned()))
         .expect("the tiers followed");
     assert!(changed.is_empty(), "{changed:?}");
-    assert_eq!(tier_of(&ledger, project, "zeus").as_deref(), Some("complex"));
+    assert_eq!(
+        tier_of(&ledger, project, "zeus").as_deref(),
+        Some("complex")
+    );
 }
 
 #[test]
@@ -123,7 +136,10 @@ fn an_edit_is_refused_for_the_chief_and_for_a_tier_or_an_agent_the_ledger_does_n
     let chief = ledger
         .edit_member(project, "chief", &edit("complex", "zeus"))
         .expect_err("the chief is no member");
-    assert!(chief.to_string().contains("not a member of its staff"), "{chief}");
+    assert!(
+        chief.to_string().contains("not a member of its staff"),
+        "{chief}"
+    );
     let tier = ledger
         .edit_member(project, "zeus", &edit("huge", "zeus"))
         .expect_err("no such tier");
@@ -132,5 +148,8 @@ fn an_edit_is_refused_for_the_chief_and_for_a_tier_or_an_agent_the_ledger_does_n
         .edit_member(project, "zeus", &edit("complex", "Not An Agent"))
         .expect_err("no agent id");
     assert!(agent.to_string().contains("Not An Agent"), "{agent}");
-    assert_eq!(tier_of(&ledger, project, "zeus").as_deref(), Some("standard"));
+    assert_eq!(
+        tier_of(&ledger, project, "zeus").as_deref(),
+        Some("standard")
+    );
 }

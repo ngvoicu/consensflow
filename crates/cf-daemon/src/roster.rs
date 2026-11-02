@@ -54,13 +54,23 @@ impl Agents {
                 && agent.effort.as_deref() == wanted.effort
                 && agent.designer == wanted.designer
         };
-        if let Some(name) = agents.iter().find(runs_it).and_then(|agent| agent.name.clone()) {
+        if let Some(name) = agents
+            .iter()
+            .find(runs_it)
+            .and_then(|agent| agent.name.clone())
+        {
             return Ok(name);
         }
         let base = member_agent_name(wanted.harness, wanted.model, wanted.effort);
         let taken = |name: &str| {
-            agents.iter().any(|agent| agent.name.as_deref() == Some(name))
-                || self.catalog.presets().iter().any(|preset| preset.id == name)
+            agents
+                .iter()
+                .any(|agent| agent.name.as_deref() == Some(name))
+                || self
+                    .catalog
+                    .presets()
+                    .iter()
+                    .any(|preset| preset.id == name)
         };
         let name = std::iter::once(base.clone())
             .chain((2..).map(|n| format!("{base}-{n}")))

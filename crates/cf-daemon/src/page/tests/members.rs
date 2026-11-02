@@ -439,7 +439,11 @@ fn a_member_agent_s_name_is_its_harness_model_and_effort() {
         "codex-gpt-6-1-sol-ultra"
     );
     assert_eq!(
-        member_agent_name(Harness::Pi, "openrouter/~unbiased/pareto-latest", Some("off")),
+        member_agent_name(
+            Harness::Pi,
+            "openrouter/~unbiased/pareto-latest",
+            Some("off")
+        ),
         "pi-openrouter-unbiased-pareto-latest-off"
     );
     let long = member_agent_name(Harness::Pi, &"a-very-long-model-name/".repeat(6), None);

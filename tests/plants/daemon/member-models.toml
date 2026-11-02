@@ -114,8 +114,8 @@ runs = ["mm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/roster.rs"
-find = "        if let Some(name) = agents.iter().find(runs_it).and_then(|agent| agent.name.clone()) {"
-replace = "        if let Some(name) = agents.iter().find(runs_it).filter(|_| false).and_then(|agent| agent.name.clone()) {"
+find = "            .find(runs_it)\n"
+replace = "            .find(runs_it)\n            .filter(|_| false)\n"
 
 [[plant]]
 name = "member models: Edit member leaves the member on its agent"

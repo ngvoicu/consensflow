@@ -15,7 +15,9 @@ use serde_json::Value;
 const AT: i64 = 1_793_000_000_000;
 
 fn recorded(path: &str) -> Value {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(path);
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(path);
     serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
 }
 
@@ -37,8 +39,7 @@ fn listings() -> Vec<(&'static str, ModelListing)> {
         ),
         (
             "pi",
-            crate::pi::models::parse(&recorded("models/pi-get-available-models.json"), AT)
-                .unwrap(),
+            crate::pi::models::parse(&recorded("models/pi-get-available-models.json"), AT).unwrap(),
         ),
         (
             "devin",

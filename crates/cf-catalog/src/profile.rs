@@ -142,7 +142,12 @@ impl Catalog {
     /// harness; none where none does, whatever the effort: a model the presets do not
     /// know has no tier of theirs. What Add member and Edit member start their tier select
     /// on (T-1143), the human picking where this is none.
-    pub fn preset_tier(&self, harness: &str, model: &str, effort: Option<&str>) -> Option<WorkTier> {
+    pub fn preset_tier(
+        &self,
+        harness: &str,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Option<WorkTier> {
         self.known.named(Some(harness), Some(model))?;
         let settings = Settings {
             harness: Some(harness),

@@ -43,7 +43,11 @@ pub(super) fn preset_tiers(catalog: &Catalog, harness: Harness, listing: &ModelL
         let efforts: Vec<Option<&str>> = if model.efforts.is_empty() {
             vec![None]
         } else {
-            model.efforts.iter().map(|effort| Some(effort.as_str())).collect()
+            model
+                .efforts
+                .iter()
+                .map(|effort| Some(effort.as_str()))
+                .collect()
         };
         let mut by_effort = Map::new();
         for effort in efforts {

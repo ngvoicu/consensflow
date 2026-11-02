@@ -93,7 +93,9 @@ fn add_picked(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let agent = saved(&page.env)?.member_agent(&picked.agent(designer))?;
     let kind = picked.harness.kind().to_owned();
     let tier = picked.tier.as_str().to_owned();
-    let on_it = active_member(page, project, |member| member.agent.as_deref() == Some(&agent))?;
+    let on_it = active_member(page, project, |member| {
+        member.agent.as_deref() == Some(&agent)
+    })?;
     let mut ledger = page.ledger.borrow_mut();
     let Some(member) = on_it else {
         let member = NewMember {
@@ -103,7 +105,10 @@ fn add_picked(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             roles: roles.into_iter().map(str::to_owned).collect(),
             tier,
         };
-        return one("member", ledger.add_member_in_chosen_tier(project, &member)?);
+        return one(
+            "member",
+            ledger.add_member_in_chosen_tier(project, &member)?,
+        );
     };
     let mut held = member.roles.clone();
     held.extend(
@@ -119,7 +124,10 @@ fn add_picked(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         designer,
         tier,
     };
-    one("member", ledger.edit_member(project, &member.handle, &edit)?)
+    one(
+        "member",
+        ledger.edit_member(project, &member.handle, &edit)?,
+    )
 }
 
 /// `member.edit`: Edit member (T-1143). The member `member` names runs from its next window
@@ -205,7 +213,11 @@ fn picked(page: &Page, body: Body<'_>) -> Result<Picked, Said> {
     let effort = match body.get("effort") {
         None | Some(Value::Null) => None,
         Some(Value::String(effort)) if !effort.is_empty() => Some(effort.as_str()),
-        Some(_) => return Err(Said::from("an effort is one of the words its harness lists")),
+        Some(_) => {
+            return Err(Said::from(
+                "an effort is one of the words its harness lists",
+            ))
+        }
     };
     let tier = match validate_work_tier(body.get("tier")) {
         Ok(Some(tier)) => tier,
