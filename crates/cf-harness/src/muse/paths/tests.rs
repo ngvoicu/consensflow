@@ -326,6 +326,45 @@ fn a_session_of_a_process_the_window_s_process_started_is_its_own_where_none_nam
     child.wait().unwrap();
 }
 
+/// A closed session's lock is readable and names nobody: it is that, and Windows' Restart
+/// Manager is never asked who holds it, at any look (T-985 P2-2: a query of hundreds of
+/// milliseconds per closed session begun since the launch, at every readiness look, for
+/// a window's life). Only a lock whose words cannot be read (Muse holds it so on Windows)
+/// is asked of it; one not there at all names nobody.
+#[test]
+fn a_closed_session_s_lock_names_nobody_unasked_and_only_one_that_cannot_be_read_is_asked_who_holds_it(
+) {
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("muse").join("sessions");
+    let day = "2026/10/27";
+    let asked = std::cell::Cell::new(0);
+    let holders = |_: &Path| {
+        asked.set(asked.get() + 1);
+        vec![4_242]
+    };
+    let closed = "01a17bc7-6ab1-7000-8000-000000000003";
+    locked(&sessions, day, closed, "");
+    let log = |id: &str| sessions.join(day).join(id).join(LOG);
+    for _ in 0..2 {
+        assert_eq!(head_by(&log(closed), &holders).pid, None);
+    }
+    assert_eq!(asked.get(), 0, "a closed session's lock is asked of no one");
+    let gone = "01a17bc7-6ab2-7000-8000-000000000004";
+    locked(&sessions, day, gone, "");
+    fs::remove_file(sessions.join(day).join(gone).join(LOCK)).unwrap();
+    assert_eq!(head_by(&log(gone), &holders).pid, None);
+    assert_eq!(asked.get(), 0, "nor is a lock not there");
+    // A lock that cannot be read: here a folder in its place, which no system reads as a
+    // file.
+    let held = "01a17bc7-6ab3-7000-8000-000000000005";
+    locked(&sessions, day, held, "");
+    let lock = sessions.join(day).join(held).join(LOCK);
+    fs::remove_file(&lock).unwrap();
+    fs::create_dir(&lock).unwrap();
+    assert_eq!(head_by(&log(held), &holders).pid, Some(4_242));
+    assert_eq!(asked.get(), 1);
+}
+
 /// Muse on Windows keeps its lock's words from every other reader while it holds it
 /// (T-792's probe: "another process has locked a portion of the file"): the process that
 /// holds the lock open is the session's. Here a child of the test's holds it, as Muse does
@@ -344,8 +383,17 @@ fn on_windows_a_lock_whose_words_cannot_be_read_is_named_by_the_process_that_hol
     locked(&sessions, "2026/10/27", held, "");
     let lock = sessions.join("2026/10/27").join(held).join(".session.lock");
     // One process holds it, as Muse alone holds its lock: no shell with a child that
-    // would hold it too.
-    let file = fs::OpenOptions::new().append(true).open(&lock).unwrap();
+    // would hold it too. Shared with no reader, so its words cannot be read, as Muse's
+    // byte-range lock keeps them: a lock that can be read is a closed session's.
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .append(true)
+            .share_mode(0)
+            .open(&lock)
+            .unwrap()
+    };
+    assert!(fs::read_to_string(&lock).is_err(), "its words cannot be read");
     let mut child = std::process::Command::new(r"C:\Windows\System32\PING.EXE")
         .args(["-n", "30", "127.0.0.1"])
         .stdout(file)

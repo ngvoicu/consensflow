@@ -274,33 +274,47 @@ pub(crate) fn begun_ms(id: &str) -> Option<i64> {
 /// What the head of the log `log` says ([`Head`]), its process the one the session's
 /// lock beside it names where the log names none: nothing where neither can be read.
 fn head(log: &Path) -> Head {
+    head_by(log, &cf_process::holders)
+}
+
+/// [`head`], asking `holders` which processes hold a lock open.
+fn head_by(log: &Path, holders: &dyn Fn(&Path) -> Vec<u32>) -> Head {
     let mut head = logged(log);
     if head.pid.is_none() {
         head.pid = log.parent().and_then(|folder| {
             let lock = folder.join(LOCK);
-            locked_by(&lock).or_else(|| held_by(&lock))
+            match locked_by(&lock) {
+                Ok(named) => named,
+                // Muse on Windows keeps its open lock's words from every reader: only
+                // then is the process that holds it asked for.
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    held_by(&lock, holders)
+                }
+                Err(_) => None,
+            }
         });
     }
     head
 }
 
 /// The one process that holds the lock `lock` open (Windows', whose words it keeps from
-/// being read): none where none does, as of a closed session's, or where more than one
-/// does, which no one Muse's is.
-fn held_by(lock: &Path) -> Option<u64> {
-    match cf_process::holders(lock).as_slice() {
+/// being read), as `holders` says: none where none does, as of a closed session's, or
+/// where more than one does, which no one Muse's is.
+fn held_by(lock: &Path, holders: &dyn Fn(&Path) -> Vec<u32>) -> Option<u64> {
+    match holders(lock).as_slice() {
         [one] => Some(u64::from(*one)),
         _ => None,
     }
 }
 
-/// The process the session lock `lock` names (`pid=<pid>`): none where it names none,
-/// as a closed session's lock, or cannot be read.
-fn locked_by(lock: &Path) -> Option<u64> {
-    let text = fs::read_to_string(lock).ok()?;
-    text.lines()
+/// The process the session lock `lock` names (`pid=<pid>`): none where it names none, as
+/// a closed session's lock, which Muse empties; why not where it cannot be read.
+fn locked_by(lock: &Path) -> std::io::Result<Option<u64>> {
+    let text = fs::read_to_string(lock)?;
+    Ok(text
+        .lines()
         .find_map(|line| line.trim().strip_prefix("pid="))
-        .and_then(|pid| pid.trim().parse().ok())
+        .and_then(|pid| pid.trim().parse().ok()))
 }
 
 /// What the head of the log `log` itself says ([`Head`]): nothing where it cannot be read.

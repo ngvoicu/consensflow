@@ -3472,3 +3472,18 @@ runs = ["muse-e2e-reads"]
 file = "crates/cf-e2e/src/muse.rs"
 find = '''                .filter(|tool| tool.starts_with("request_user_input"))'''
 replace = '''                .filter(|tool| *tool == "request_user_input")'''
+
+# T-954, Calliope's T-985 on Muse on Windows (MUS-20). P2-2: a closed session's lock is read and
+# names nobody; only a lock whose words cannot be read (Muse holds it so on Windows) is asked of
+# Restart Manager, never at every look for every closed session begun since the launch.
+[[plant]]
+name = "muse: a closed session's readable lock is asked of Restart Manager at every look"
+meant = "a_closed_session_s_lock_names_nobody_unasked_and_only_one_that_cannot_be_read_is_asked_who_holds_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''            match locked_by(&lock) {
+                Ok(named) => named,'''
+replace = '''            match locked_by(&lock) {
+                Ok(named) => named.or_else(|| held_by(&lock, holders)),'''
