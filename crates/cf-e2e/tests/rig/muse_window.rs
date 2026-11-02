@@ -14,7 +14,7 @@ use std::time::Duration;
 use cf_e2e::muse::members::{
     echo_worker, in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
 };
-use cf_e2e::muse::{self, deliveries, has, messages, terminals};
+use cf_e2e::muse::{self, deliveries, has, messages, question_tools, terminals};
 use cf_e2e::process::{is_alive, signal, Signal};
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::json;
@@ -83,6 +83,13 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
     assert!(argv
         .iter()
         .any(|word| word.starts_with("hooks=") && word.contains("hook muse-session")));
+    // A member has no question tool: it asks with `cf ask` (MUS-13, T-790), and Muse
+    // offered none in its request.
+    assert!(
+        argv.iter()
+            .any(|word| word == "--disable-request-user-input"),
+        "{argv:?}"
+    );
     assert!(
         !argv.iter().any(|word| word.contains("T1_DONE")),
         "{argv:?}"
@@ -90,6 +97,11 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
     // Its session: one turn, its role text given by the hook, ended.
     let (_, log) = the_session(&rig);
     assert_eq!(terminals(&log), ["completed"]);
+    let offered = question_tools(&log);
+    assert!(
+        !offered.is_empty() && offered.iter().all(Vec::is_empty),
+        "{offered:?}"
+    );
     assert!(log.iter().any(|record| {
         muse::kind(record) == "run/context_block_updated"
             && record["payload"]["event"]["id"] == "hook:session_start:session:0"

@@ -117,6 +117,7 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no
             "--yolo",
             "--contributor-mode",
             "off",
+            "--disable-request-user-input",
         ]
     );
     assert_eq!(
@@ -184,6 +185,35 @@ fn a_resumed_window_opens_on_its_session_with_no_message_on_its_command_line() {
     );
     assert_eq!(prepared.native_session.as_deref(), Some(session));
     assert_eq!(adapter(&env).first_message(), FirstMessage::Delivered);
+    assert_eq!(
+        prepared.argv.last().map(String::as_str),
+        Some("--disable-request-user-input")
+    );
+}
+
+/// MUS-13 (T-790): Muse sends no `PreToolUse` for its question tools (T-705, 1.4.13),
+/// so no hook can answer one from the board, and nobody watches a member's window to
+/// answer its dialog. A member is launched without them and asks with `cf ask`, as Pi's
+/// is; the chief keeps its dialog, which the human answers in its window.
+#[test]
+fn a_members_window_has_no_question_tool_and_the_chiefs_keeps_its_own() {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.13-R6996.1"));
+    let id = LaunchId::new(LAUNCH).unwrap();
+    let withheld = |role: &str| {
+        let launch = Launch {
+            role,
+            ..launch(&id, None)
+        };
+        let prepared = finished(adapter(&env).prepare(&launch)).unwrap();
+        prepared
+            .argv
+            .iter()
+            .any(|word| word == "--disable-request-user-input")
+    };
+    assert!(withheld("worker"));
+    assert!(withheld("reviewer"));
+    assert!(!withheld("chief"));
 }
 
 /// T-931 P3-2: Muse 1.4.14 takes a data folder reached through a link for unsafe
