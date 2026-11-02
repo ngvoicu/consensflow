@@ -555,16 +555,38 @@ fn question_case(live: &Live) -> Result<String> {
 /// What the worker did, as a red case says it: its task as the board has it, the last lines its
 /// window drew, and the shape of its session.
 fn what_the_worker_did(rig: &Rig, project: &Project<'_>) -> String {
-    let task = project
-        .task(1)
-        .map_or_else(|failed| failed.to_string(), |task| task.to_string());
+    let task = project.task(1).map_or_else(
+        |failed| failed.to_string(),
+        |task| {
+            let messages: Vec<String> = task["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|message| {
+                    format!(
+                        "{} {} from {}: {}",
+                        message["kind"],
+                        message["state"],
+                        message["sender"],
+                        live::cut(message["body"].as_str().unwrap_or_default(), 300)
+                    )
+                })
+                .collect();
+            format!("T-1 {}; {}", task["state"], messages.join(" | "))
+        },
+    );
+    let read = rig.muse_sessions().iter().any(|(_, log)| {
+        records(log).iter().any(|record| {
+            muse::kind(record) == "run/model_request_configured"
+                && record.to_string().contains("FOREIGN_SEEN")
+        })
+    });
     let screen = pane_of(project)
         .ok()
         .and_then(|pane| pane["id"].as_str().map(|id| rig.screen(id)))
         .map_or_else(String::new, |screen| live::last_lines(&screen));
     format!(
-        "the task: {}\nits window last drew:\n{screen}\nits session: {}",
-        live::cut(&task, 1_500),
+        "the task: {task}\nthe foreign rules were read: {read}\nits window last drew:\n{screen}\nits session: {}",
         shape_of(rig)
     )
 }
