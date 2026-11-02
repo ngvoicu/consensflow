@@ -61,6 +61,7 @@ muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claud
 # T-954 (T-985 on T-790): the live TUI probes refuse off a Mac; the rule of the kit's homes.
 muse-tui-probes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_posture", "off_a_mac"]
 muse-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes::"]
+muse-live-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_notes", "tests::"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
 muse-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_teammates_turn"]
@@ -3520,3 +3521,15 @@ find = '''        "crates/cf-e2e/tests/live_muse_window.rs",
         "CODEX_HOME",'''
 replace = '''        "crates/cf-e2e/tests/live_muse_window.rs",
         "CODEX_HOMES",'''
+
+# MUS-17 (T-954): the live notes check refused a Muse chief as a harness of its own queue; Muse
+# is pasted into as Claude is, so it is a chief there, and one of the check's own when none is named.
+[[plant]]
+name = "muse: the live notes check refuses a Muse chief as one that queues its messages"
+meant = "devin_claude_and_muse_are_the_chiefs_unless_told_and_those_told_run_once_each_in_the_order_given"
+runs = ["muse-live-notes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_notes.rs"
+find = '''            Some(harness @ (Harness::Claude | Harness::Devin | Harness::Muse)) => harness,'''
+replace = '''            Some(harness @ (Harness::Claude | Harness::Devin)) => harness,'''

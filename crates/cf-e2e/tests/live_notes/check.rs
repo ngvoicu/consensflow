@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn the_chief_is_a_real_harness_on_its_cheap_model_the_member_the_stand_in_and_no_variable_the_daemons(
     ) {
-        for chief in [Harness::Claude, Harness::Devin] {
+        for chief in [Harness::Claude, Harness::Devin, Harness::Muse] {
             let plan = plan(chief);
             assert_eq!(plan.folder, "notes");
             assert_eq!(plan.chief, "chief");

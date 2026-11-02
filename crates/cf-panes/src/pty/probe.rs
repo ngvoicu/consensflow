@@ -99,9 +99,10 @@ fn expand(text: &str, temp: &str) -> String {
 /// What `${name}` stands for in a case: `TEMP` the case's folder `temp`, `LAST_SESSION`
 /// the newest Muse session in its data folder (`data/muse/sessions/YYYY/MM/DD/<id>`),
 /// `MUSE_BIN` the machine's Muse binary ([`muse_bin`]), `TOUCH` a command that makes the
-/// file it is given, in a folder with a blank ([`touch_in`]), `CF_BLANK_WORD` a program
-/// in a folder with a blank as the product names `cf` on a Muse hook's line
-/// ([`cf_blank_word`]), and every other name the test's own variable.
+/// file it is given, in a folder with a blank ([`touch_in`]), `CF_IN_<BLANK|PLAIN>_<FORWARD|BACK>`
+/// a program in a folder with a blank or none, as the product names `cf` on a Muse hook's
+/// line, its path given with forward slashes or backslashes ([`cf_copy`]), and every
+/// other name the test's own variable.
 fn value(name: &str, temp: &str) -> String {
     let folder = std::path::Path::new(temp);
     match name {
@@ -109,7 +110,10 @@ fn value(name: &str, temp: &str) -> String {
         "LAST_SESSION" => last_session(folder).unwrap_or_default(),
         "MUSE_BIN" => muse_bin(std::env::var("LOCALAPPDATA").ok().as_deref()).unwrap_or_default(),
         "TOUCH" => touch_in(folder),
-        "CF_BLANK_WORD" => cf_blank_word(folder),
+        "CF_IN_BLANK_FORWARD" => cf_copy(folder, "cf blank", true),
+        "CF_IN_BLANK_BACK" => cf_copy(folder, "cf blank", false),
+        "CF_IN_PLAIN_FORWARD" => cf_copy(folder, "cfplain", true),
+        "CF_IN_PLAIN_BACK" => cf_copy(folder, "cfplain", false),
         _ => std::env::var(name).unwrap_or_default(),
     }
 }
@@ -135,21 +139,35 @@ fn touch_in(temp: &std::path::Path) -> String {
     touch.to_string_lossy().into_owned()
 }
 
-/// A copy of the system's `cmd.exe` as `cf.exe` in `temp`'s folder `cf blank`, named as
-/// the product names its `cf` on a Muse hook's line: its path written with forward slashes
-/// (`pane_cf`, `cf-daemon/src/machine.rs`), as one quote-free word of cmd.exe's
-/// (`cf_process::cmd_word`, its short form for the blank). `NO-WORD` where there is none,
-/// as on a volume with 8.3 names off (T-985 P2-3).
-fn cf_blank_word(temp: &std::path::Path) -> String {
-    let folder = temp.join("cf blank");
+/// A copy of the system's `whoami.exe` as `cf.exe` in `temp`'s folder `folder` (a program
+/// that prints a line and is no cmd.exe, which reads its own path's slashes as switches:
+/// a copy of cmd.exe named with forward slashes failed where `cf` did not), named as the
+/// product names its `cf` on a Muse hook's line (`cf_process::cmd_word`, its short form
+/// where the folder has a blank), its path written with forward slashes as the product's
+/// `pane_cf` is (`cf-daemon/src/machine.rs`) where `forward` says so, with backslashes
+/// otherwise. `NO-WORD` where there is none, as on a volume with 8.3 names off (T-985
+/// P2-3).
+fn cf_copy(temp: &std::path::Path, folder: &str, forward: bool) -> String {
+    let folder = temp.join(folder);
     std::fs::create_dir_all(&folder).expect("the cf folder");
     let cf = folder.join("cf.exe");
-    let system =
-        std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned());
-    std::fs::copy(system, &cf).expect("a copy of cmd.exe");
-    let forward = cf.to_string_lossy().replace('\\', "/");
-    println!("cf in a folder with a blank: {forward}");
-    cf_process::cmd_word(std::path::Path::new(&forward)).unwrap_or_else(|| "NO-WORD".to_owned())
+    if !cf.is_file() {
+        let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
+        let whoami = std::path::Path::new(&system)
+            .join("System32")
+            .join("whoami.exe");
+        std::fs::copy(whoami, &cf).expect("a copy of whoami.exe");
+    }
+    let given = cf.to_string_lossy().into_owned();
+    let given = if forward {
+        given.replace('\\', "/")
+    } else {
+        given
+    };
+    let word =
+        cf_process::cmd_word(std::path::Path::new(&given)).unwrap_or_else(|| "NO-WORD".to_owned());
+    println!("cf.exe as given {given:?}: the hook's word {word:?}");
+    word
 }
 
 /// The newest session Muse began in `temp`'s data folder, by its id (a UUIDv7, which
