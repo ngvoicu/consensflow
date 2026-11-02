@@ -32,7 +32,10 @@ pub fn pair(case: &Value, expected: &mut Expected) -> Option<&'static str> {
     }
     let verb = case["args"][0].as_str().unwrap_or_default();
     match (verb, case["name"].as_str().unwrap_or_default()) {
-        ("setup", _) => launchers_of_ours(&mut expected.after),
+        ("setup", _) => {
+            let launchers = launchers_of_ours(&mut expected.after);
+            launchers.or(launch_file_in_errors(expected))
+        }
         ("doctor", "doctor: launchers of another runtime that is there") => {
             expected.stdout = expected.stdout.as_deref().map(this_copy);
             Some(COPY)
@@ -113,6 +116,18 @@ fn launchers_of_ours(after: &mut Value) -> Option<&'static str> {
     });
     *after = Value::Array(made);
     reason
+}
+
+/// What `setup` says when it cannot make the launcher on Windows, with the name Node's sentence
+/// gives the file ([`PAIR`]): `consensflow.cmd` was the file, and `consensflow.launch` is.
+fn launch_file_in_errors(expected: &mut Expected) -> Option<&'static str> {
+    const SAID: &str = "The cf launcher could not be installed: ";
+    let stdout = expected.stdout.as_mut()?;
+    if !stdout.contains(SAID) || !stdout.contains("consensflow.cmd'") {
+        return None;
+    }
+    *stdout = stdout.replace("consensflow.cmd'", "consensflow.launch'");
+    Some(PAIR)
 }
 
 /// Node's launcher as this build writes it: the two lines of the comment that
@@ -244,6 +259,30 @@ mod tests {
                 ("consensflow/notes.txt", "x"),
             ]
         );
+    }
+
+    #[test]
+    fn the_sentence_of_a_launcher_that_could_not_be_made_names_the_launch_file_on_windows() {
+        let said = |out: &str| Expected {
+            stdout: Some(out.to_owned()),
+            stderr: String::new(),
+            code: 0,
+            after: serde_json::json!([]),
+        };
+        let mut expected = said("The cf launcher could not be installed: ENOENT: no such file or directory, open '$ROOT\\consensflow\\bin\\consensflow.cmd'\nharnesses: none\n");
+
+        assert_eq!(launch_file_in_errors(&mut expected), Some(PAIR));
+
+        assert_eq!(
+            expected.stdout.as_deref(),
+            Some("The cf launcher could not be installed: ENOENT: no such file or directory, open '$ROOT\\consensflow\\bin\\consensflow.launch'\nharnesses: none\n")
+        );
+        // Another sentence, or none, is left as it is.
+        for out in ["harnesses: none\n", "open 'a\\consensflow.cmd'\n"] {
+            let mut same = said(out);
+            assert_eq!(launch_file_in_errors(&mut same), None);
+            assert_eq!(same.stdout.as_deref(), Some(out));
+        }
     }
 
     #[test]
