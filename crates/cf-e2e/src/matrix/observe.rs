@@ -115,6 +115,7 @@ impl Snapshot {
         let mut was: BTreeMap<&str, &str> = BTreeMap::new();
         let mut working: BTreeMap<String, u32> = BTreeMap::new();
         let mut recipient: BTreeMap<i64, String> = BTreeMap::new();
+        let mut assignees: BTreeMap<i64, String> = BTreeMap::new();
         for message in &self.chief_inbox {
             if let Some(id) = message["id"].as_i64() {
                 recipient.insert(id, "chief".to_owned());
@@ -143,6 +144,18 @@ impl Snapshot {
                         (data["message"].as_i64(), data["assignee"].as_str())
                     {
                         recipient.insert(id, assignee.to_owned());
+                        if let Some(task) = data["task"].as_i64() {
+                            assignees.insert(task, assignee.to_owned());
+                        }
+                    }
+                }
+                Some("task.state") => {
+                    // A task sent back (`cf task reopen`) goes to the window that did it, with
+                    // the chief's words.
+                    let data = &event["data"];
+                    let window = data["task"].as_i64().and_then(|task| assignees.get(&task));
+                    if let (Some(id), Some(window)) = (data["message"].as_i64(), window) {
+                        recipient.insert(id, window.clone());
                     }
                 }
                 Some("delivery.confirmed") => {
@@ -321,6 +334,8 @@ mod tests {
                 confirmed(4),
                 confirmed(5),
                 confirmed(9),
+                json!({ "kind": "task.state", "data": { "task": 1, "to": "queued", "by": "chief", "message": 12 } }),
+                confirmed(12),
                 activity("chief", "working"),
                 activity("matrix-worker-a", "closed"),
             ],
@@ -335,15 +350,15 @@ mod tests {
             snapshot.turns(1),
             BTreeMap::from([
                 ("chief".to_owned(), 3),
-                ("matrix-worker-a".to_owned(), 1),
+                ("matrix-worker-a".to_owned(), 2),
                 ("unknown".to_owned(), 1)
             ])
         );
         assert_eq!(snapshot.turns(0)["chief"], 2);
-        assert_eq!(snapshot.total_turns(1), 5);
+        assert_eq!(snapshot.total_turns(1), 6);
         assert_eq!(
             snapshot.turns_by_seat(&Seating::stand_ins(), 1),
-            BTreeMap::from([("chief", 3), ("worker", 1), ("unseated", 1)])
+            BTreeMap::from([("chief", 3), ("worker", 2), ("unseated", 1)])
         );
     }
 

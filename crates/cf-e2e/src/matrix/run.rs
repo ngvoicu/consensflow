@@ -310,8 +310,29 @@ fn bindings_of(snapshot: &Snapshot, bindings: &Bindings) -> Value {
     json!({ "bound": bindings.manifest(), "tasks": tasks })
 }
 
-/// Each window's last lines, a file to each pane the daemon opened.
+/// How many of the daemon's last lines the evidence keeps.
+const DAEMON_LINES: usize = 400;
+
+/// Each window's last lines, a file to each pane the daemon opened; how each was opened (its
+/// pane, generation and command line: never its environment, which holds the board's tokens);
+/// and the daemon's last lines.
 fn windows(members: &Members, evidence: &Evidence) -> Result {
+    let opens: Vec<Value> = members
+        .rig()
+        .open_frames()
+        .iter()
+        .map(|frame| json!({ "id": frame["id"], "generation": frame["generation"], "argv": frame["argv"] }))
+        .collect();
+    evidence.json("opens.json", &Value::Array(opens))?;
+    let log = members.rig().log();
+    let lines: Vec<&str> = log.lines().collect();
+    evidence.text(
+        "daemon-tail.log",
+        &format!(
+            "{}\n",
+            lines[lines.len().saturating_sub(DAEMON_LINES)..].join("\n")
+        ),
+    )?;
     let mut ids: Vec<String> = members
         .rig()
         .open_frames()

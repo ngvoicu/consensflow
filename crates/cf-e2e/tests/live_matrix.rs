@@ -193,6 +193,8 @@ mod tests {
             "events.jsonl",
             "checks.json",
             "verdict.txt",
+            "opens.json",
+            "daemon-tail.log",
         ] {
             assert!(
                 outcome.evidence.folder.join(file).is_file(),
