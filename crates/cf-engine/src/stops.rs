@@ -265,13 +265,13 @@ impl Dispatcher {
             };
             return match look {
                 Look::Rest => {
+                    // Not taken back yet: the record may say so at the next look.
+                    record.window.borrow_mut().paid_untaken = (!observed.took_back).then_some(stop);
                     // What the ledger is told is written first: a failure leaves
                     // the stop owed, and the next look at rest tells it again.
                     if observed.took_back {
                         self.take_back(participant, &stop, observed)?;
                     }
-                    // Not taken back yet: the record may say so at the next look.
-                    record.window.borrow_mut().paid_untaken = (!observed.took_back).then_some(stop);
                     self.pay(record, &stop);
                     // The window stays: what its turn left runs on, named and never ended.
                     self.tell_paused_left_running(project, record, stop.number)
