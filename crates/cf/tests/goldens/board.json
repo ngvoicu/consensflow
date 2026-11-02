@@ -865,7 +865,7 @@
         "body": "{\"tier\":\"standard\",\"body\":\"Write the --force parser\"}"
       }
     ],
-    "stdout": "T-3 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox.\nSent: 24 characters, ending \"Write the --force parser\".\n",
+    "stdout": "T-3 is on the board for a standard worker; it starts in a new window of one, and its result arrives in your inbox.\nSent: 24 characters, ending \"Write the --force parser\".\n",
     "stderr": "",
     "code": 0
   },
@@ -900,7 +900,7 @@
         "body": "{\"tier\":\"critical\",\"purpose\":\"x\",\"needs\":[1],\"before\":[9,10],\"body\":\"go\"}"
       }
     ],
-    "stdout": "T-3 is on the board for a complex worker (no critical worker is on the staff, so the nearest tier); the first free one gets it, and its result arrives in your inbox. It waits until T-1 is accepted. T-9, T-10 wait for it. The human approves each message before it moves.\nSent: 2 characters, ending \"go\".\n",
+    "stdout": "T-3 is on the board for a complex worker (no critical worker is on the staff, so the nearest tier); it starts in a new window of one, and its result arrives in your inbox. It waits until T-1 is accepted. T-9, T-10 wait for it. The human approves each message before it moves.\nSent: 2 characters, ending \"go\".\n",
     "stderr": "",
     "code": 0
   },
@@ -932,7 +932,7 @@
         "body": "{\"tier\":\"complex\",\"advice\":true,\"before\":[9],\"body\":\"which?\"}"
       }
     ],
-    "stdout": "T-3 is on the board for a complex advisor; the first free one gets it, and its result arrives in your inbox. T-9 waits for it.\nSent: 6 characters, ending \"which?\".\n",
+    "stdout": "T-3 is on the board for a complex advisor; it starts in a new window of one, and its result arrives in your inbox. T-9 waits for it.\nSent: 6 characters, ending \"which?\".\n",
     "stderr": "",
     "code": 0
   },
@@ -962,7 +962,7 @@
         "body": "{\"tier\":\"light\",\"review\":true,\"body\":\"look\"}"
       }
     ],
-    "stdout": "T-3 is on the board for a light reviewer; the first free one gets it, and its result arrives in your inbox.\nSent: 4 characters, ending \"look\".\n",
+    "stdout": "T-3 is on the board for a light reviewer; it starts in a new window of one, and its result arrives in your inbox.\nSent: 4 characters, ending \"look\".\n",
     "stderr": "",
     "code": 0
   },
@@ -991,7 +991,7 @@
         "body": "{\"design\":true,\"body\":\"a logo\"}"
       }
     ],
-    "stdout": "T-3 is on the board for an image designer; the first free one gets it, and its result arrives in your inbox.\nSent: 6 characters, ending \"a logo\".\n",
+    "stdout": "T-3 is on the board for an image designer; it starts in a new window of one, and its result arrives in your inbox.\nSent: 6 characters, ending \"a logo\".\n",
     "stderr": "",
     "code": 0
   },

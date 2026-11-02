@@ -9,10 +9,16 @@
 # needs what its window knows, and that anything else starts at once beside that window's work. One
 # plant takes one of the three out (or puts the old word back), and a pin of the chief's text fails.
 #
+# The receipt of `cf task add`, which the chief reads after every task it adds, said "the first free
+# one gets it" (T-1134); it says now that the task starts in a new window of a member of its role and
+# tier. A plant puts the old words back, and one takes the sentence out; the board's trace of Node's
+# receipt departs on purpose (RECEIPT_NEW_WINDOW in cf-daemon's api test).
+#
 # Every name holds `chief parallel`, so `npm run plants:daemon -- "chief parallel"` runs them all.
 
 [run]
 engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles"]
+cf-lib-receipt = ["cargo", "test", "--offline", "-p", "cf", "--lib", "a_task_added_is_never_said"]
 
 [[plant]]
 name = "chief parallel: a task is said to go to a free member again"
@@ -73,3 +79,23 @@ runs = ["engine-text-roles"]
 file = "skill/core/chief.md"
 find = "stay fresh, and start at once beside that window's work\n"
 replace = "stay fresh\n"
+
+[[plant]]
+name = "chief parallel: the receipt of a task added says the first free one gets it again"
+meant = "a_task_added_is_never_said_to_wait_for_a_free_member_and_goes_to_a_new_window"
+runs = ["cf-lib-receipt"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "; it starts in a new window of one, and its result arrives in your inbox.{waits}{holds}{gated}"
+replace = "; the first free one gets it, and its result arrives in your inbox.{waits}{holds}{gated}"
+
+[[plant]]
+name = "chief parallel: the receipt of a task added says nothing of where it goes"
+meant = "a_task_added_is_never_said_to_wait_for_a_free_member_and_goes_to_a_new_window"
+runs = ["cf-lib-receipt"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "; it starts in a new window of one, and its result arrives in your inbox.{waits}{holds}{gated}"
+replace = "; its result arrives in your inbox.{waits}{holds}{gated}"
