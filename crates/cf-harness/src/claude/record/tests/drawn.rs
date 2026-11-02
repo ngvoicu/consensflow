@@ -142,6 +142,31 @@ fn thinking_stands_beside_the_items_before_the_words_of_its_message() {
 }
 
 #[test]
+fn thinking_said_in_the_record_of_its_words_stands_before_them() {
+    // A message written whole in one record (no streaming): its thinking still stands
+    // before its words, as it was thought before them.
+    let records = vec![
+        hello(),
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([thinking("First this."), text(json!("Done."))]),
+            json!("end_turn"),
+        ),
+    ];
+    let record = record_of(&records);
+    assert_eq!(
+        timeline(&record),
+        [
+            ("u1".to_owned(), Kind::Prompt, false),
+            ("a1:thinking:0".to_owned(), Kind::Thinking, true),
+            ("m1".to_owned(), Kind::Text, false),
+        ]
+    );
+}
+
+#[test]
 fn a_message_that_only_thought_answers_with_no_words_as_it_did() {
     let records = vec![
         hello(),

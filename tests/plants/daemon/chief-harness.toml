@@ -1338,7 +1338,7 @@ replace = '''const MODEL_SET: &str = "<command-name>/model</command-name>";'''
 
 [[plant]]
 name = "items: a message's thinking stands after its words"
-meant = "thinking_stands_beside_the_items_before_the_words_of_its_message"
+meant = "thinking_said_in_the_record_of_its_words_stands_before_them"
 runs = ["it-claude"]
 
 [[plant.edit]]
@@ -1659,14 +1659,14 @@ find = '        if drawn_only {'
 replace = '        if drawn_only && false {'
 
 [[plant]]
-name = 'items: the copy counts the items and not the timeline'
+name = 'items: the copy passes over the items beside the reading'
 meant = "a_look_copies_the_timeline_its_items_and_those_beside_them_each_where_it_stands"
 runs = ["it-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/transcripts.rs"
-find = '            count: timeline.len(),'
-replace = '            count: observed.items().len(),'
+find = '                .map(|(item, drawn_only)| to_copy(item, drawn_only))'
+replace = '                .filter(|(_, drawn_only)| !drawn_only).map(|(item, drawn_only)| to_copy(item, drawn_only))'
 
 [[plant]]
 name = 'items: a search finds no call by its header'
