@@ -405,8 +405,9 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '            .retain(|message| message.state != "gated" && !waits.holds(message));'
-replace = '            .retain(|message| !waits.holds(message));'
+find = '''            .filter(|message| message.state != "gated")
+            .filter_map(|message| waits.in_thread(message))'''
+replace = '''            .filter_map(|message| waits.in_thread(message))'''
 
 # --- the stand-in agent: how long it waits, as its variables tell it ---
 # (the knob a case sets to have a turn cut by the app's quit, on any machine; the

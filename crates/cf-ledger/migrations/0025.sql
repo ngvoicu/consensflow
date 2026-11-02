@@ -1,0 +1,13 @@
+-- When the human began a meeting with the project's chief (3.0.7 chief-meeting,
+-- CMT-11), or NULL while none is on. While it is set, what is queued for the chief
+-- waits, queued, and is held: nothing of it is typed into the chief's window, read
+-- through the chief's `cf`, or opens a closed chief window, and no wake-up is queued.
+-- What a launch owes the chief's window (the role it was to say, a handoff, the note
+-- that its turn was cut) and the note that asks it where things stand before a
+-- Switch chief are not held. The human's Stop clears it, and so does the project's
+-- Close and the daemon's start after a quit; the held messages then go in as any
+-- queued message does, at the Resume after a Close. No message changes its state
+-- for a meeting. Numbered 0025, after the exit proof's 0024. The column is one line:
+-- the test players that hold a database this ledger left to what Node's did read the
+-- line to know what Node's schema never had.
+  ALTER TABLE project ADD COLUMN meeting_at TEXT;

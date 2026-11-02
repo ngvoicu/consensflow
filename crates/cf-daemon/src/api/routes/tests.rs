@@ -267,6 +267,8 @@ async fn every_route_is_answered_by_a_handler_of_its_own() {
 
 /// What the route tests stand on: the API as a client reaches it, and the
 /// board's state to start from.
+mod meeting;
+
 pub(super) mod support {
 
     use bytes::Bytes;

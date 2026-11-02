@@ -1246,6 +1246,17 @@ impl Dispatcher {
                     None if state == ActivityState::Idle && !self.idle_word(record) => {
                         Activity::because(state, pacing::FALLBACK)
                     }
+                    // A chief read at work while a message has waited ten minutes for it: its
+                    // lane says so, as the human is told (`held_not_at_rest`, T-958).
+                    None if state == ActivityState::Working && participant.role == "chief" => {
+                        match self.held_long(record) {
+                            Some(message) => Activity::because(
+                                state,
+                                format!("m-{message} has waited ten minutes or more for this window, which reads at work: the human is told"),
+                            ),
+                            None => Activity::of(state),
+                        }
+                    }
                     None => Activity::of(state),
                 }
             };
@@ -1444,16 +1455,23 @@ impl Dispatcher {
                 self.act(record, async move { this.deliver(&held, next).await })
                     .await;
             }
-        } else if free && self.ready_while_drawing(record) {
-            // Nothing goes into a window that has not drawn, but one whose readiness
-            // has a bound of its own is asked, and given up where it says it never
-            // will be fit (`give_up_unfit_drawing`).
-            if let Some(next) = self.next_in_line(record)? {
-                let (this, held) = (Rc::clone(self), Rc::clone(record));
-                self.act(record, async move {
-                    this.give_up_unfit_drawing(&held, next).await
-                })
-                .await;
+        } else {
+            // A chief's window not at rest holds its queue: from ten minutes on, the human
+            // is told what waits and why, and its lane says it (`held_not_at_rest`, T-958).
+            if participant.role == "chief" && project.state == "open" {
+                self.held_not_at_rest(record, &observed, drawing).await?;
+            }
+            if free && self.ready_while_drawing(record) {
+                // Nothing goes into a window that has not drawn, but one whose readiness
+                // has a bound of its own is asked, and given up where it says it never
+                // will be fit (`give_up_unfit_drawing`).
+                if let Some(next) = self.next_in_line(record)? {
+                    let (this, held) = (Rc::clone(self), Rc::clone(record));
+                    self.act(record, async move {
+                        this.give_up_unfit_drawing(&held, next).await
+                    })
+                    .await;
+                }
             }
         }
         Ok(())

@@ -26,7 +26,9 @@
 #   never at the agent's level (Claude Opus 4.6, listed with no level; GLM 5.2, bare and at
 #   max) is launched bare, not at an id Devin has not (`cf-catalog/src/catalog.rs`,
 #   `launch_effort`, read by the daemon's roster, `cf-daemon/src/roster.rs`); its family is
-#   found by the parts of a Devin id (`cf-proto/src/agents.rs`, `DevinModel`).
+#   found by the parts of a Devin id (`cf-proto/src/agents.rs`, `DevinModel`). That the level
+#   goes into the model's id is Devin's declaration in the catalog's `efforts`
+#   (`Efforts::in_the_model_id`, T-1078): no harness is named in `launch_effort`.
 #
 # - T-724's finding 1 as an A/B (T-1038, Zeus's note 2): `live linked-folder` makes the
 #   harness's home of the run's own in the Mac's temporary folder spelled through its link
@@ -51,6 +53,7 @@ devin-round-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "-
 devin-round-paste-screen = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
 devin-round-roster = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "roster::tests::"]
 devin-round-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::tests::"]
+devin-round-catalog-lib = ["cargo", "test", "--offline", "-p", "cf-catalog", "--lib", "catalog::tests::"]
 devin-round-catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--test", "catalog", "every_model_devin_lists_is_a_preset::"]
 
 [[plant]]
@@ -228,3 +231,13 @@ platforms = ["macos", "linux"]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''        self.parent = folder.to_path_buf();'''
 replace = '''        self.parent = files::real_path(folder);'''
+
+[[plant]]
+name = "devin round: Devin declares it takes the effort as a flag of its own, not in the model's id"
+meant = "devin_alone_writes_the_level_into_the_model_id_and_every_other_harness_takes_a_flag"
+runs = ["devin-round-catalog-lib", "devin-round-catalog", "devin-round-roster"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/catalog.rs"
+find = '''        Harness::Devin => (&["low", "medium", "high", "xhigh", "max"], true),'''
+replace = '''        Harness::Devin => (&["low", "medium", "high", "xhigh", "max"], false),'''

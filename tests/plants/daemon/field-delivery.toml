@@ -1,0 +1,280 @@
+# Two delivery bugs from Gabriel's other Mac (T-958, issues/a-chiefs-queue-held-silently-
+# while-its-window-read-at-work.md and issues/a-tells-answer-and-the-result-carry-one-report.md
+# in consensflow-sme).
+#
+# 1. On 3.0.6-alpha.2 the chief's window, opened again at a Resume with no proof that the
+#    program before it was gone, read at work for 54 hours while its record answered the
+#    human: the closing Claude Code had queued the notification of the job it ended, and
+#    seven results waited, queued, with no word to anyone. A notification of a job Claude
+#    Code ended begins no turn (T-814), at the reopen too; and a chief's window not at rest
+#    holds the head of its queue on the clock every hold of it runs on, told to the human
+#    once at ten minutes, in words that say what holds it and whether its record answered
+#    since or its harness says it waits at its prompt, and said on the chief's lane.
+# 2. The answer of a window's turn on a tell, given in a note, and the result of the turn
+#    its resume began each carried the report: the note says it is not the result and that
+#    the result comes as its own message, and the result's paste names the note and says it
+#    is the one to decide.
+#
+# One plant takes one rule out; a test of it fails. Every name holds `field delivery`, so
+# `npm run plants:daemon -- "field delivery"` runs them all.
+
+[run]
+fd-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "held_at_work::"]
+fd-reopen = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::relaunched::a_window_opened_again_without_a_proof_reads_its_turns_at_rest_after_the_closing_process_queued_a_killed_job"]
+fd-answers = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_answers::"]
+fd-ledger-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::paused_answers"]
+fd-ledger-notes = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "pause_notes"]
+
+# --- 1: a chief's queue held while its window is not at rest ---
+
+[[plant]]
+name = "field delivery: a chief's window not at rest holds nothing of its queue"
+meant = "a_chief_read_at_work_while_its_record_answers_tells_the_human_what_waits_for_it"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                self.held_not_at_rest(record, &observed, drawing).await?;'''
+replace = ""
+
+[[plant]]
+name = "field delivery: a chief's head held at work is never told"
+meant = "a_chief_at_work_on_a_long_turn_tells_the_human_once_that_a_result_waits"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''            if self.now() - since_ms < HELD_TOLD_MS {
+                part.held = Some(HeldBack {'''
+replace = '''            if self.now() - since_ms < HELD_TOLD_MS || true {
+                part.held = Some(HeldBack {'''
+
+[[plant]]
+name = "field delivery: a chief's head held at work starts its clock again at every look"
+meant = "a_chief_at_work_on_a_long_turn_tells_the_human_once_that_a_result_waits"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''            let since_ms = was.as_ref().map_or_else(|| self.now(), |was| was.since_ms);'''
+replace = '''            let since_ms = self.now();'''
+
+[[plant]]
+name = "field delivery: a record that answered since the head came is not said"
+meant = "a_chief_read_at_work_while_its_record_answers_tells_the_human_what_waits_for_it"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''            .is_some_and(answered)
+        {'''
+replace = '''            .is_some_and(|_| false)
+        {'''
+
+[[plant]]
+name = "field delivery: what the record held when the head came is read again at every look"
+meant = "a_chief_read_at_work_while_its_record_answers_tells_the_human_what_waits_for_it"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                Some((message, from)) if message == next.id => Some(from),'''
+replace = '''                Some((message, _)) if message == next.id => Some(items.len()),'''
+
+[[plant]]
+name = "field delivery: an answer needs no user's words before it"
+meant = "a_chief_at_work_on_a_long_turn_tells_the_human_once_that_a_result_waits"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        .position(|item| item.role == Role::User && !item.synthetic && !item.compaction)'''
+replace = '''        .position(|item| item.role != Role::Tool && !item.synthetic && !item.compaction)'''
+
+[[plant]]
+name = "field delivery: a harness that says its window waits at its prompt is not said"
+meant = "a_chief_read_at_work_at_its_prompt_tells_the_human_it_may_be_misread"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        } else if observed.at_prompt {'''
+replace = '''        } else if false && observed.at_prompt {'''
+
+[[plant]]
+name = "field delivery: a dialog of the harness's own is said as work"
+meant = "a_chief_held_by_a_dialog_of_its_own_tells_the_human_what_it_shows"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        } else if let Some(waiting) = &observed.waiting {
+            let shows = waiting'''
+replace = '''        } else if let Some(waiting) = observed.waiting.as_ref().filter(|_| false) {
+            let shows = waiting'''
+
+[[plant]]
+name = "field delivery: a chief's lane says nothing of a head held long"
+meant = "a_chief_read_at_work_while_its_record_answers_tells_the_human_what_waits_for_it"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        (self.now() - held.since_ms >= HELD_TOLD_MS).then_some(held.message)'''
+replace = '''        (self.now() - held.since_ms >= HELD_TOLD_MS && false).then_some(held.message)'''
+
+[[plant]]
+name = "field delivery: a chief's lane says a held head from its first look"
+meant = "a_chief_read_at_work_while_its_record_answers_tells_the_human_what_waits_for_it"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        (self.now() - held.since_ms >= HELD_TOLD_MS).then_some(held.message)'''
+replace = '''        (self.now() - held.since_ms >= 0).then_some(held.message)'''
+
+# --- 1: the reopen of a window whose closing process queued a killed job's notification ---
+
+[[plant]]
+name = "field delivery: a killed job's notification holds the turns of a window opened again (alpha.2's rule)"
+meant = "a_window_opened_again_without_a_proof_reads_its_turns_at_rest_after_the_closing_process_queued_a_killed_job"
+runs = ["fd-reopen"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '''    head(text).status == Some("killed")'''
+replace = '''    head(text).status == Some("killed") && false'''
+
+# --- 2: the note of a tell's turn and the result ---
+
+[[plant]]
+name = "field delivery: the note of a task that moved on says its old words"
+meant = "the_result_after_a_note_of_the_turn_on_a_tell_says_it_is_the_one_to_decide"
+runs = ["fd-answers", "fd-ledger-lib", "fd-ledger-notes"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = '''        Then::Moved => format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON}{words}"),'''
+replace = '''        Then::Moved => format!("T-{number}{WAS_PAUSED}{handle}{TURN_ON}{tell}{MOVED_ON_BEFORE}{words}"),'''
+
+[[plant]]
+name = "field delivery: a note in the words written before is no note of a turn on a tell"
+meant = "a_note_is_read_back_as_it_was_written_in_each_of_its_words"
+runs = ["fd-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = '''        (rest.strip_prefix(MOVED_ON_BEFORE)?, Then::MovedBefore)'''
+replace = '''        (rest.strip_prefix(MOVED_ON_BEFORE).filter(|_| false)?, Then::MovedBefore)'''
+
+[[plant]]
+name = "field delivery: a result's paste names no note of its task's turn on a tell"
+meant = "the_result_after_a_note_of_the_turn_on_a_tell_says_it_is_the_one_to_decide"
+runs = ["fd-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''            ("result", Some(number)) => self'''
+replace = '''            ("never", Some(number)) => self'''
+
+[[plant]]
+name = "field delivery: a note given before the result is not named"
+meant = "the_result_after_a_note_of_the_turn_on_a_tell_says_it_is_the_one_to_decide"
+runs = ["fd-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = '''    for state in ["queued", "delivering", "delivered", "read"] {'''
+replace = '''    for state in ["queued", "delivering"] {'''
+
+[[plant]]
+name = "field delivery: a result's paste names a note though there is none"
+meant = "a_result_with_no_note_of_a_turn_on_a_tell_says_only_how_to_decide"
+runs = ["fd-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''            let beside = told_in.map_or_else(String::new, |note| {'''
+replace = '''            let beside = Some(told_in.unwrap_or(0)).map_or_else(String::new, |note| {'''
+
+# --- Calliope's review of T-958 (T-987, fixed in T-988) ---
+
+[[plant]]
+name = "field delivery: a head first looked at with no record read is counted from nothing"
+meant = "a_head_first_looked_at_with_no_record_read_says_nothing_of_answers_since"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                _ if read => {'''
+replace = '''                _ => {'''
+
+[[plant]]
+name = "field delivery: a record that says its turn is over is not said"
+meant = "a_chief_whose_record_says_its_turn_is_over_tells_the_human_it_may_be_misread"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        } else if observed.over == Over::Held {'''
+replace = '''        } else if false && observed.over == Over::Held {'''
+
+[[plant]]
+name = "field delivery: the human is sent to a command for what waits"
+meant = "the_note_of_a_misread_window_sends_the_human_to_the_board"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''ConsensFlow may be misreading it, and the chief's inbox on the board shows what waits")'''
+replace = '''ConsensFlow may be misreading it, and `cf inbox` shows what waits")'''
+
+[[plant]]
+name = "field delivery: a hold at the bound is told in the words of a settle that passes"
+meant = "a_hold_at_the_bound_is_not_told_in_the_words_of_a_settle_that_passes"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if crate::pacing::passing(&held.reason) && waited < 2 * HELD_TOLD_MS {'''
+replace = '''        if false && crate::pacing::passing(&held.reason) && waited < 2 * HELD_TOLD_MS {'''
+
+[[plant]]
+name = "field delivery: a settle that never passes is never told"
+meant = "a_settle_that_never_passes_is_told_past_twice_the_bound"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if crate::pacing::passing(&held.reason) && waited < 2 * HELD_TOLD_MS {'''
+replace = '''        if crate::pacing::passing(&held.reason) {'''
+
+[[plant]]
+name = "field delivery: no reason passes by itself"
+meant = "a_hold_at_the_bound_is_not_told_in_the_words_of_a_settle_that_passes"
+runs = ["fd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = '''    reason.starts_with(NOT_RESTED)'''
+replace = '''    reason.starts_with(NOT_RESTED) && false'''
+
+[[plant]]
+name = "field delivery: a result names a note an earlier result already named"
+meant = "a_result_after_a_reopen_names_no_note_of_an_earlier_round"
+runs = ["fd-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = '''            if id < result && earlier.is_none_or(|earlier| id > earlier) {'''
+replace = '''            if id < result {'''
+
+[[plant]]
+name = "field delivery: the note of a task taken back to the board says only its resume"
+meant = "a_task_taken_back_to_the_board_keeps_the_note_the_chief_has_not_read_in_the_words_of_a_task_that_moved_on"
+runs = ["fd-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = '''const MOVED_ON: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins,'''
+replace = '''const MOVED_ON: &str = ") began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume begins,'''

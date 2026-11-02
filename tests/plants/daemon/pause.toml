@@ -241,7 +241,9 @@ replace = '''
 
 # Chief-meeting's Phase 1 asks again after its fresh look before the paste (f86a072c2, T-794), which
 # holds the window alone and left the edit above an equivalent plant (integration D1's plants, T-946):
-# both asks are taken out.
+# both asks are taken out. Re-aimed in integration D2b (T-996): chief-meeting's T-920 took out the
+# `held = None` that followed the second ask (a busy refusal keeps its hold's clock), so the find ends
+# at the window it asks for next.
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''        if !self.in_open_project(message.project_id)?
@@ -251,11 +253,11 @@ find = '''        if !self.in_open_project(message.project_id)?
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 replace = '''        if !self.in_open_project(message.project_id)? {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;'''
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
 
 [[plant]]
 name = "pause: what the activity says gates the interrupt again"
@@ -333,8 +335,9 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '            .retain(|message| message.state != "gated" && !waits.holds(message));'
-replace = "            .retain(|message| !waits.holds(message));"
+find = '''            .filter(|message| message.state != "gated")
+            .filter_map(|message| waits.in_thread(message))'''
+replace = '''            .filter_map(|message| waits.in_thread(message))'''
 
 [[plant]]
 name = "pause: a lane says nothing of a stop its window ignores"

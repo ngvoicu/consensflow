@@ -202,10 +202,10 @@ runs = ["daemon-screens"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/screens/agents.rs"
-find = "            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))"
+find = "            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness).levels)))"
 replace = '''
             .filter(|harness| *harness != Harness::Devin)
-            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))'''
+            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness).levels)))'''
 
 [[plant]]
 name = "screens: a check is looked at again for any refresh"

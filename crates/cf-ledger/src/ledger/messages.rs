@@ -154,6 +154,18 @@ impl Ledger {
         messages::note_paused_answer(&mut self.store, project_id, number, handle, tell, words)
     }
 
+    /// The newest note that gave T-`number`'s requester the answer of its window's turn on a
+    /// tell, or is to give it, its words not taken as the result, since the task's last result
+    /// to that requester before `result`: what `result`'s paste names. None where there is none.
+    pub fn paused_answer_given(
+        &self,
+        project_id: i64,
+        number: i64,
+        result: i64,
+    ) -> Result<Option<i64>, LedgerError> {
+        messages::paused_answer_given(&self.store, project_id, number, result)
+    }
+
     /// Whether the chief's tell to a participant's window about a task is still on its way to
     /// it: what the window said last is not the answer to it until it is in.
     pub fn tell_on_its_way(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
