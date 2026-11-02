@@ -2,8 +2,8 @@
 //! (`cargo xtask live muse-window`): it spends the Muse account's allowance on a worker of
 //! Muse's cheap model, `muse-spark-1.3` at `minimal` (contributor mode off; `--models
 //! muse=<model>:<effort>` names another), and needs Muse Code installed and
-//! logged in, so it is ignored unless asked for and is no part of `check` or of CI. Mac
-//! only for now: no Windows machine has Muse yet (MUS-20).
+//! logged in, so it is ignored unless asked for and is no part of `check` or of CI. On a
+//! Mac and on Windows (MUS-20, T-792: Muse runs there as the rig's stand-in's child).
 //!
 //! The rig's cases (`tests/rig/muse_window.rs`) run the same windows on Muse's fake model,
 //! which repeats each message after a delay: it never calls a tool, and its timing is no
@@ -46,6 +46,9 @@ use serde_json::{json, Value};
 
 /// The stand-in for the chief's window, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
+
+/// The rig's Muse on Windows, which runs the machine's ([`muse::StandIn`]).
+const MUSE_STAND_IN: &str = env!("CARGO_BIN_EXE_muse-stand-in");
 
 /// The cases, in the order they run.
 const CASES: [&str; 8] = [
@@ -459,8 +462,10 @@ fn rest_case(live: &Live) -> Result<String> {
 #[ignore = "opt-in: spends the Muse account's allowance; cargo xtask live muse-window"]
 fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
     let log = Log::begin("live muse-window")?;
-    let install = muse::installed().map_err(Error::Daemon)?;
-    let home = PathBuf::from(own_var("HOME").ok_or_else(|| Error::Daemon("no home".to_owned()))?);
+    let install = muse::installed()
+        .map_err(Error::Daemon)?
+        .through(MUSE_STAND_IN);
+    let home = muse::real_home().map_err(Error::Daemon)?;
     let agent = agents::agent(Harness::Muse);
     log.launched(&agents::row(Harness::Muse, "standard"));
     let model = agents::model(Harness::Muse).name;

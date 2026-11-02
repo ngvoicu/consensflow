@@ -5,14 +5,19 @@ use super::*;
 /// A machine's Muse install: the launcher and, beside it, `.muse-version` naming
 /// `line` and the binaries in `binaries`.
 fn install(dir: &Path, line: &str, binaries: &[&str]) -> String {
+    install_as(dir, "muse", line, binaries)
+}
+
+/// [`install`], its launcher named `launcher` (Windows' is `muse.cmd`).
+fn install_as(dir: &Path, launcher: &str, line: &str, binaries: &[&str]) -> String {
     let bin = dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
-    fs::write(bin.join("muse"), "#!/bin/sh\n").unwrap();
+    fs::write(bin.join(launcher), "#!/bin/sh\n").unwrap();
     fs::write(bin.join(".muse-version"), format!("{line}\n")).unwrap();
     for binary in binaries {
         fs::write(bin.join(binary), "binary").unwrap();
     }
-    bin.join("muse").to_string_lossy().into_owned()
+    bin.join(launcher).to_string_lossy().into_owned()
 }
 
 /// The environment of this machine's kind: Windows' says so.
@@ -78,6 +83,42 @@ fn a_window_runs_the_binary_its_launcher_names_and_never_the_launcher_where_it_i
     assert_eq!(pinned(&program, &here()).unwrap(), program);
 }
 
+/// Windows' launcher is `muse.cmd`, which `cmd.exe` runs: the binary beside it is run,
+/// and where there is none the window is refused in plain words, never opened through
+/// `cmd.exe`, which would mangle the hooks' JSON (Calliope, T-824 P2-4).
+#[test]
+fn a_batch_file_launcher_with_no_binary_beside_it_is_refused_in_plain_words_and_never_run() {
+    let windows = Env::from_vars([("USERPROFILE", r"C:\Users\a"), ("OS", "Windows_NT")]);
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = install_as(
+        dir.path(),
+        "muse.cmd",
+        "1.4.13-R6996.1",
+        &["muse-bin-1.4.13-R6996.1.exe"],
+    );
+    let binary = dir.path().join("bin").join("muse-bin-1.4.13-R6996.1.exe");
+    assert_eq!(
+        pinned(&launcher, &windows).unwrap(),
+        binary.to_string_lossy()
+    );
+    for (named, line) in [("muse.cmd", Some("1.4.14-R7309.1")), ("MUSE.BAT", None)] {
+        let other = tempfile::tempdir().unwrap();
+        let launcher = match line {
+            Some(line) => install_as(other.path(), named, line, &[]),
+            None => {
+                let program = other.path().join(named);
+                fs::write(&program, "@echo off\r\n").unwrap();
+                program.to_string_lossy().into_owned()
+            }
+        };
+        let refused = pinned(&launcher, &windows).unwrap_err();
+        assert!(
+            refused.contains("is a batch file") && refused.contains(&launcher),
+            "{refused}"
+        );
+    }
+}
+
 #[test]
 fn an_older_muse_than_consensflow_reads_is_refused_in_the_words_of_the_version_floor() {
     let dir = tempfile::tempdir().unwrap();
@@ -94,7 +135,13 @@ fn configured(dir: &Path) -> Env {
 }
 
 fn ours() -> Value {
-    added_hook("/app/cf", "/launch/role/SKILL.md", "/launch/sessions.jsonl")
+    added_hook(
+        "/app/cf",
+        "/launch/role/SKILL.md",
+        "/launch/sessions.jsonl",
+        false,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -165,10 +212,43 @@ fn the_hook_names_its_files_on_its_command_line_quoted_for_the_hook_s_shell() {
         "/Apps/Consens Flow/cf",
         "/l/it's/SKILL.md",
         "/l/sessions.jsonl",
-    );
+        false,
+    )
+    .unwrap();
     assert_eq!(
         hook["hooks"][0]["command"],
         r"'/Apps/Consens Flow/cf' hook muse-session '/l/it'\''s/SKILL.md' '/l/sessions.jsonl'"
     );
     assert_eq!(hook["matcher"], "");
+}
+
+/// Muse runs a hook's `commandWindows` on Windows in cmd.exe, through Rust's quoting, so
+/// every `"` of it reaches cmd.exe as `\"` (T-792's probe on zeewin2, after Calliope's
+/// T-824 P2-4 took it for PowerShell's): the line has no quote, each word a path cmd.exe
+/// takes as it is (its short form where it holds a blank), and a launch whose path has
+/// none is refused in plain words. Off Windows there is no Windows form.
+#[test]
+fn on_windows_the_hook_is_a_cmd_line_of_words_with_no_quote_and_a_path_cmd_cannot_take_is_refused()
+{
+    let hook = added_hook(
+        r"C:\Apps\ConsensFlow\cf.exe",
+        r"C:\Users\Zoë\l\it's\SKILL.md",
+        r"C:\Users\Zoë\l\sessions.jsonl",
+        true,
+    )
+    .unwrap();
+    assert_eq!(
+        hook["hooks"][0]["commandWindows"],
+        r"C:\Apps\ConsensFlow\cf.exe hook muse-session C:\Users\Zoë\l\it's\SKILL.md C:\Users\Zoë\l\sessions.jsonl"
+    );
+    assert_eq!(hook["hooks"][0]["timeout"], 10);
+    let off = added_hook("/a/cf", "/l/SKILL.md", "/l/sessions.jsonl", false).unwrap();
+    assert!(off["hooks"][0].get("commandWindows").is_none(), "{off}");
+    for unsayable in [r"Z:\no such folder\cf.exe", r"Z:\a&b\cf.exe"] {
+        let refused = added_hook(unsayable, r"C:\l\SKILL.md", r"C:\l\s.jsonl", true).unwrap_err();
+        assert!(
+            refused.contains("cmd.exe") && refused.contains(unsayable),
+            "{refused}"
+        );
+    }
 }

@@ -122,8 +122,11 @@ impl Adapter for MuseAdapter {
     /// turn, each a child of its own process in a group of its own, and the human's
     /// `!` command likewise (the research of T-700, Muse 1.4.13 on macOS): Codex's
     /// shape. Where the agent's own tool calls run (its managed shell, in a sandbox
-    /// where one is on) needs a model's turn to see, and is not seen yet. Linux and
-    /// Windows have not been probed.
+    /// where one is on) needs a model's turn to see, and is not seen yet. On Windows
+    /// it is not known (T-792): that shape is told by process groups, which Windows has
+    /// none of, and a server and the agent's shell are both children of Muse's process
+    /// in the window's job, which nothing here tells apart; so the host leaves them
+    /// alone and tells the turn no command of Muse's there. Linux has not been probed.
     fn servers(&self) -> Servers {
         if cfg!(target_os = "macos") && !self.env().on_windows() {
             Servers::AtLaunch

@@ -1,0 +1,84 @@
+{
+ "cases": [
+  {
+   "name": "muse-hooks-cmd",
+   "argv": [
+    "${LOCALAPPDATA}\\Programs\\muse\\muse-bin-1.4.13-R6996.1.exe",
+    "-c",
+    "hooks={\"SessionStart\":[{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"echo %CMDCMDLINE%> \\\"${TEMP_JSON}\\\\cmdline.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"C:\\\\Program Files\\\\Git\\\\usr\\\\bin\\\\touch.exe\\\" \\\"${TEMP_JSON}\\\\four quotes.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"\\\"C:\\\\Program Files\\\\Git\\\\usr\\\\bin\\\\touch.exe\\\" \\\"${TEMP_JSON}\\\\wrapped quotes.txt\\\"\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"set > \\\"${TEMP_JSON}\\\\env.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"findstr \\\"^\\\" > \\\"${TEMP_JSON}\\\\stdin.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo posix-form-unused\",\"commandWindows\":\"\\\"C:\\\\Program Files\\\\Git\\\\usr\\\\bin\\\\touch.exe\\\" \\\"${TEMP_JSON}\\\\per%%cent.txt\\\"\",\"timeout\":10},{\"type\":\"command\",\"command\":\"echo %CMDCMDLINE%> \\\"${TEMP_JSON}\\\\posix-cmdline.txt\\\"\",\"timeout\":10}]}]}",
+    "--provider",
+    "echo",
+    "--echo-delay-ms",
+    "3000",
+    "--yolo",
+    "--contributor-mode",
+    "off"
+   ],
+   "env": {
+    "MUSE_NO_AUTO_UPDATE": "1",
+    "MUSE_LOGIN": "0",
+    "XDG_CONFIG_HOME": "${TEMP}\\config",
+    "XDG_DATA_HOME": "${TEMP}\\data",
+    "HTTPS_PROXY": "http://127.0.0.1:9",
+    "HTTP_PROXY": "http://127.0.0.1:9"
+   },
+   "steps": [
+    {
+     "after_ms": 8000,
+     "note": "up"
+    },
+    {
+     "paste": "probe nine: cmd hooks",
+     "enter_after_ms": 400,
+     "note": "the first prompt fires SessionStart"
+    },
+    {
+     "after_ms": 8000,
+     "note": "done"
+    }
+   ]
+  },
+  {
+   "name": "claude",
+   "argv": [
+    "${USERPROFILE}\\.local\\bin\\claude.exe"
+   ],
+   "env": {
+    "USERPROFILE": "${TEMP}",
+    "HOME": "${TEMP}",
+    "APPDATA": "${TEMP}",
+    "LOCALAPPDATA": "${TEMP}",
+    "CLAUDE_CONFIG_DIR": "${TEMP}",
+    "DISABLE_AUTOUPDATER": "1"
+   },
+   "steps": [
+    {
+     "after_ms": 12000,
+     "mode": true,
+     "note": "up"
+    }
+   ]
+  },
+  {
+   "name": "codex",
+   "argv": [
+    "${SystemRoot}\\System32\\cmd.exe",
+    "/d",
+    "/c",
+    "${APPDATA}\\npm\\codex.cmd"
+   ],
+   "env": {
+    "USERPROFILE": "${TEMP}",
+    "HOME": "${TEMP}",
+    "CODEX_HOME": "${TEMP}"
+   },
+   "steps": [
+    {
+     "after_ms": 12000,
+     "mode": true,
+     "note": "up"
+    }
+   ]
+  }
+ ]
+}

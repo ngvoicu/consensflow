@@ -522,14 +522,22 @@ fn rig_keeping_claude_in(
 /// the person's own `~/.config/muse` and `~/.local/share/muse` (T-946: the members kit's live
 /// pacing run wrote them). A Muse the launcher cannot be made for stops the run before anything
 /// is spent.
+///
+/// On Windows the rig's Muse is the `muse-stand-in` a case names (`CARGO_BIN_EXE_muse-stand-in`,
+/// [`crate::muse::Installed::through`]), which this kit has none of: a rig that seats Muse there
+/// is refused in plain words before anything is spent (T-985).
 fn muse_of(install: &Installed) -> crate::muse::Installed {
+    assert!(
+        !cfg!(windows),
+        "a members-kit rig seats Muse on a Mac only: on Windows the rig's Muse runs through the `muse-stand-in` a case names, which this kit has none of"
+    );
     let folder = install
         .command
         .parent()
         .map(|folder| folder.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let home = install.home.to_string_lossy();
-    crate::muse::installed_on(&folder, Some(&home)).unwrap_or_else(|why| {
+    let place = install.home.join(".local").join("bin");
+    crate::muse::installed_on(&folder, Some(&place)).unwrap_or_else(|why| {
         panic!("a rig that seats Muse runs it through its own launcher, and {why}")
     })
 }

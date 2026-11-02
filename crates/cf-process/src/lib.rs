@@ -5,7 +5,8 @@
 //! something and letting it go (`hand_over`), starting one with a command of
 //! the caller's own, its streams and its console (`start_owned`), ending one
 //! (one it did not keep the handle of by its number and when it began:
-//! `Started`), whether one is alive, and how much memory this one holds.
+//! `Started`), whether one is alive, which process started one and which hold
+//! a file, and how much memory this one holds.
 
 #![deny(unsafe_code)]
 #![deny(clippy::undocumented_unsafe_blocks)]
@@ -13,15 +14,18 @@
 mod alive;
 mod capture;
 mod child;
+mod cmd_word;
 mod descriptors;
 mod execute;
 mod grants;
 mod group;
 mod hand_over;
+mod holders;
 mod job;
 mod live;
 mod memory;
 mod owned;
+mod parent;
 mod runnable;
 mod search;
 mod spawning;
@@ -37,13 +41,16 @@ mod testing;
 pub use alive::alive;
 pub use capture::{capture, capture_whole, CaptureFailed, Captured, LEFT_RUNNING};
 pub use child::{spawn, Child, Ender, Streams};
+pub use cmd_word::cmd_word;
 pub use descriptors::{close_all_on_exec, hold_only_the_streams};
 pub use execute::{execute, Failed, Limits};
 pub use grants::{screen_grants, ScreenGrants};
 pub use hand_over::{hand_over, Handed};
+pub use holders::holders;
 pub use job::with_required;
 pub use memory::{megabytes, rss};
 pub use owned::{start_owned, Owned};
+pub use parent::parent;
 pub use runnable::{pane_argv, runnable, Run};
 pub use search::{find_in, on_path, on_search_path};
 pub use started::Started;

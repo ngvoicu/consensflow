@@ -1,12 +1,13 @@
 //! A Muse window: the TUI in a pane, its words pasted, its record its session's log.
 //!
 //! Muse names its session itself, and a launch cannot give it one (`--session-id` is
-//! refused in the TUI). The log of the session the window's process opened says which,
-//! about a second in (`runtime.session.route_facts` names the process: [`opened_by`]);
+//! refused in the TUI). The folder of the session the window's process opened says which,
+//! about a second in (its log's `runtime.session.route_facts` names the process, or on
+//! Windows, where the log names none, the session's lock does: [`opened_by`]);
 //! its SessionStart hook says it too, but only at the session's first prompt. No window
 //! opens with a message on its command line, so a fresh window's first prompt comes
 //! only after its first message is pasted, and that only once the window is ready,
-//! which waits for its session: the log naming the process is the one way a fresh
+//! which waits for its session: the folder naming the process is the one way a fresh
 //! window learns it (Muse 1.4.13 writes it about a second in). A session the
 //! window resumes from inside (`/resume`) is the hook's word, written down at its first
 //! prompt (`session_hook`); one a `/clear` starts is said by its log alone, which names
