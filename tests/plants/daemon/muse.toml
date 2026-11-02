@@ -63,6 +63,7 @@ muse-tui-probes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live
 muse-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes::"]
 muse-live-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_notes", "tests::"]
 muse-live-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
+muse-live-specs-role = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "launched::"]
 muse-live-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "codex_devin::tests::"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
@@ -3561,3 +3562,21 @@ runs = ["muse-live-stops-tool"]
 file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
 find = '''            Ok(at) => Self::ping_at(&at),'''
 replace = '''            Ok(_) => Self::ping(false),'''
+
+# MUS-17 (T-954): live specs read a window's role where Claude, Pi, Codex and Devin are given it,
+# and not where Muse is (the role file of its SessionStart hook, in its -c hooks=): a Muse
+# chief's "launch says nothing of specs" and "has the section of specs" read as no role at all.
+[[plant]]
+name = "muse: live specs reads no role of a Muse window's"
+meant = "each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_finds_it_there"
+runs = ["muse-live-specs-role"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/launched.rs"
+find = '''    argv.iter()
+        .find_map(|word| muse_role_file(word))
+        .map(RoleText::File)'''
+replace = '''    argv.iter()
+        .find_map(|word| muse_role_file(word))
+        .map(RoleText::File)
+        .filter(|_| false)'''
