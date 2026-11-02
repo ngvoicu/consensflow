@@ -18,7 +18,7 @@ use cf_ledger::{
     is_told, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver, MessageView, NewNote,
     ParticipantView, ProjectView, TaskView,
 };
-use cf_proto::panes::HumanInput;
+use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
@@ -536,7 +536,7 @@ impl Dispatcher {
                 self.changed();
                 return Ok(());
             }
-            // The key that empties it goes only into a window that printed nothing
+            // The key that empties it goes only into a window whose screen held still
             // for a while and holds nothing the human typed since it was read ready:
             // a second Control-C in a row ends Claude Code (the same review, round 11).
             let quiet = self.may_press(&pane).await;
@@ -1297,8 +1297,8 @@ impl Dispatcher {
         (self.now() - held.since_ms >= HELD_TOLD_MS).then_some(held.message)
     }
 
-    /// Whether a key may be pressed into `pane` now: its screen says it printed
-    /// nothing for [`ENTER_AGAIN_QUIET_MS`] and holds nothing the human typed.
+    /// Whether a key may be pressed into `pane` now: what its screen shows held still for
+    /// [`ENTER_AGAIN_QUIET_MS`] and it holds nothing the human typed.
     async fn may_press(&self, pane: &Pane) -> bool {
         let body = json!({ "id": pane.id, "generation": pane.generation });
         let snapshot = returning(self.seams.host.request("pane.snapshot", body))
@@ -1308,7 +1308,7 @@ impl Dispatcher {
             snapshot.get("ok") == Some(&Value::Bool(true))
                 && !js::truthy(snapshot.get("unsent"))
                 && snapshot
-                    .get("outputQuietMs")
+                    .get(SCREEN_QUIET_MS)
                     .and_then(Value::as_f64)
                     .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS)
         })

@@ -55,7 +55,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
-use cf_proto::panes::HumanInput;
+use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
 use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
@@ -110,8 +110,8 @@ const NORMAL: &str = "normal";
 const SWITCHING: &str =
     "Devin's window is in its normal permission mode, and /bypass was sent to switch it to full permission";
 
-/// How long a window's output holds still before `/bypass` is pasted into it:
-/// what the engine takes for a screen that is drawn. A host that cannot tell is
+/// How long what a window's screen shows holds still before `/bypass` is pasted into it:
+/// what the engine takes for a screen that is drawn (`screenQuietMs`, T-1083). A host that cannot tell is
 /// taken as drawn, as the engine takes it.
 const DRAWN_QUIET_MS: f64 = 1_500.0;
 
@@ -523,7 +523,7 @@ impl DevinWindow {
             return Readiness::Unfit(stayed_in_normal());
         }
         let drawn = snapshot
-            .get("outputQuietMs")
+            .get(SCREEN_QUIET_MS)
             .is_none_or(|quiet| quiet.as_f64().is_some_and(|ms| ms >= DRAWN_QUIET_MS));
         let due = switch
             .entered

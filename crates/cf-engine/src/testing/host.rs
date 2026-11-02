@@ -119,7 +119,7 @@ impl FakeHost {
     }
 
     /// What `pane.snapshot` answers besides `ok` from now on
-    /// (`host.snapshot = { outputQuietMs: 300 }`).
+    /// (`host.snapshot = { screenQuietMs: 300 }`).
     pub fn set_snapshot(&self, answer: Value) {
         let Value::Object(fields) = answer else {
             panic!("a snapshot is an object");
@@ -455,7 +455,7 @@ impl EngineHost for FakeHost {
         })
     }
 
-    /// The `outputQuietMs` the test set ([`FakeHost::set_snapshot`]), none where it set
+    /// The `screenQuietMs` the test set ([`FakeHost::set_snapshot`]), none where it set
     /// none or null, which is a host that does not say. Answered at once, in no turn of its
     /// own, and written down nowhere: Node's host had no such look, and the traces hold
     /// every call the engine makes of it.
@@ -464,7 +464,7 @@ impl EngineHost for FakeHost {
         let quiet = self
             .snapshot
             .borrow()
-            .get("outputQuietMs")
+            .get(cf_proto::panes::SCREEN_QUIET_MS)
             .and_then(Value::as_f64);
         Box::pin(async move { Ok(quiet) })
     }

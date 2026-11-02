@@ -91,7 +91,7 @@ fn never_pastes_again_a_message_while_every_look_cannot_read_its_record() {
     });
     context
         .host
-        .set_snapshot(json!({ "ok": true, "outputQuietMs": 5_000 }));
+        .set_snapshot(json!({ "ok": true, "screenQuietMs": 5_000 }));
     context.advance(11_000);
     context.pass().unwrap();
     for _ in 0..8 {
@@ -143,7 +143,7 @@ fn presses_no_enter_and_pastes_nothing_again_while_the_pane_host_cannot_say_what
     // still does not show after a whole arrival window of rest goes again.
     context
         .host
-        .set_snapshot(json!({ "ok": true, "outputQuietMs": 5_000 }));
+        .set_snapshot(json!({ "ok": true, "screenQuietMs": 5_000 }));
     context.advance(ARRIVAL_MS + 1_000);
     context.pass().unwrap();
     assert_eq!(where_is(&context, &note), ("delivering".to_owned(), 2));
@@ -175,7 +175,7 @@ fn pastes_nothing_again_while_the_pane_host_answers_too_late_and_confirms_what_t
     }));
     context
         .host
-        .set_snapshot(json!({ "ok": true, "outputQuietMs": 60_000 }));
+        .set_snapshot(json!({ "ok": true, "screenQuietMs": 60_000 }));
     context.advance(11_000);
     context.pass().unwrap();
     for _ in 0..6 {
@@ -275,7 +275,7 @@ fn counts_no_rest_before_a_snapshot_for_the_enter_that_failed() {
     context.pass().unwrap();
     context
         .host
-        .set_snapshot(json!({ "ok": true, "outputQuietMs": 5_000 }));
+        .set_snapshot(json!({ "ok": true, "screenQuietMs": 5_000 }));
     context.advance(1_000);
     context.pass().unwrap();
     // Past an arrival window from the hand-over, but not from the look after the

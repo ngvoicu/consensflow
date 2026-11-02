@@ -203,7 +203,7 @@ fn an_item_that_came_between_the_hand_over_and_the_enter_pressed_again_holds_the
     let (_, note) = a_note_that_never_shows(&context);
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 60_000 }));
+        .set_snapshot(json!({ "screenQuietMs": 60_000 }));
     context.advance(1_000);
     header_behind_words(&context, note);
     context.pass().unwrap();

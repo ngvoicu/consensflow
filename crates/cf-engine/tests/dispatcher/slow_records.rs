@@ -239,14 +239,14 @@ fn presses_no_enter_again_after_the_arrival_window_for_a_message_its_window_goes
     // The chief is in a turn and printing when the paste has been waited for the
     // arrival window: the one Enter the paste is given is not pressed into it.
     context.adapter.busy("chief");
-    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 500 }));
     context.advance(ARRIVAL_MS);
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "not into a window that just printed");
 
     // Quiet at last, minutes on, and the record is still waited for: that window
     // is past, and no Enter is pressed into a turn for the paste it holds.
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     for _ in 0..6 {
         context.advance(ARRIVAL_MS);
         context.pass().unwrap();

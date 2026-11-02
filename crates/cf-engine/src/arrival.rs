@@ -91,7 +91,7 @@ use cf_harness::contract::{Input, InputBox, Observed, Pane};
 use cf_harness::records::{Reading, Role, Settlement};
 use cf_ledger::NewNote;
 use cf_proto::ledger::MessageView;
-use cf_proto::panes::TAIL_LINES;
+use cf_proto::panes::{SCREEN_QUIET_MS, TAIL_LINES};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
@@ -108,8 +108,9 @@ use crate::trust::Trusting;
 const ENTER: u8 = 13;
 /// How long a paste may go unshown in the record before its window gets that Enter.
 const ENTER_AGAIN_MS: i64 = 10_000;
-/// How long the window must have printed nothing first: one being typed into,
-/// or drawing, is left be.
+/// How long what the window's screen shows must have held still first: one being typed
+/// into, or drawing, is left be; one that only prints its screen again as it is, is not
+/// (T-1083).
 pub(crate) const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 /// How long a read of the window may take and still say what the window does now:
 /// a pane host answers a snapshot at once, so one that took longer stalled, and what
@@ -149,9 +150,9 @@ pub(crate) struct Watched {
     last: i64,
     /// The longest time between two looks at it: a loaded machine's.
     longest_pass: i64,
-    /// How long the window's screen had printed nothing, as the pane host said before
-    /// it was to go again.
-    output_quiet_ms: Option<i64>,
+    /// How long what the window's screen showed had held still, as the pane host said
+    /// before it was to go again.
+    screen_quiet_ms: Option<i64>,
 }
 
 impl Dispatcher {
@@ -407,7 +408,7 @@ impl Dispatcher {
     /// Whether the paste of `message`, which the record never showed in its whole wait,
     /// is still there for the window (3.0.7 chief-meeting, CMT-24, T-760's F4: on a loaded
     /// Mac, m-3093 and m-4273 had no record of their paste for 177 s and 196 s, and were
-    /// pasted again). It is where the window's screen printed within the last
+    /// pasted again). It is where what the window's screen shows changed within the last
     /// [`ENTER_AGAIN_QUIET_MS`] (a window that draws is at work, or taking the paste in), and
     /// where its input box holds it: then an Enter is pressed once more, as the hand-over's
     /// is ([`Dispatcher::enter_again`], whose guards keep the human's own words from going
@@ -438,7 +439,7 @@ impl Dispatcher {
             .watched
             .filter(|watched| watched.message == message);
         let printing = watched
-            .and_then(|watched| watched.output_quiet_ms)
+            .and_then(|watched| watched.screen_quiet_ms)
             .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);
         let boxed = if printing {
             None
@@ -497,7 +498,7 @@ impl Dispatcher {
                     message,
                     last: now,
                     longest_pass: now - delivering.since,
-                    output_quiet_ms: None,
+                    screen_quiet_ms: None,
                 },
                 |watched| Watched {
                     last: now,
@@ -539,7 +540,7 @@ impl Dispatcher {
             "lastItem": items.last().map(|item| &*item.id),
             "restMs": rested,
             "longestPassMs": watched.map(|watched| watched.longest_pass),
-            "outputQuietMs": watched.and_then(|watched| watched.output_quiet_ms),
+            "screenQuietMs": watched.and_then(|watched| watched.screen_quiet_ms),
         })
     }
 
@@ -901,7 +902,7 @@ impl Dispatcher {
         let snapshot = Some(snapshot);
         let quiet = snapshot
             .as_ref()
-            .and_then(|snapshot| snapshot.get("outputQuietMs"))
+            .and_then(|snapshot| snapshot.get(SCREEN_QUIET_MS))
             .and_then(Value::as_f64);
         // What the human has typed since would go with it: they send both.
         let ready = snapshot
@@ -1047,8 +1048,8 @@ impl Dispatcher {
             .as_mut()
             .filter(|watched| watched.message == message)
         {
-            watched.output_quiet_ms = snapshot
-                .get("outputQuietMs")
+            watched.screen_quiet_ms = snapshot
+                .get(SCREEN_QUIET_MS)
                 .and_then(Value::as_f64)
                 .map(|quiet| quiet as i64);
         }

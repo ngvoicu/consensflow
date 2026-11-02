@@ -24,6 +24,7 @@ use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::{Role, DEADLINE};
 use cf_proto::panes::{
     Background, CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
+    SCREEN_QUIET_MS,
 };
 use serde_json::{json, Map, Value};
 
@@ -121,11 +122,11 @@ impl EngineHost for BridgeHost {
     }
 }
 
-/// How long the host says a pane has printed nothing: its `pane.snapshot`'s
-/// `outputQuietMs`, none where the pane has printed nothing (null) or the answer has no
-/// such field.
+/// How long the host says what a pane's screen shows has not changed: its `pane.snapshot`'s
+/// `screenQuietMs`, none where its screen has shown nothing (null) or the answer has no such
+/// field.
 fn quiet_ms(answer: &Value) -> Option<f64> {
-    answer.get("outputQuietMs").and_then(Value::as_f64)
+    answer.get(SCREEN_QUIET_MS).and_then(Value::as_f64)
 }
 
 impl BackgroundWork for BridgeHost {

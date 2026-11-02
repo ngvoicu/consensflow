@@ -167,7 +167,9 @@ fn enter_is_pressed_again_after_the_snapshot_and_the_key_each_a_request_whose_ca
         let context = Context::new();
         let project = context.with_staff(&["zeus"]);
         context.adapter.with("chief", |agent| agent.arrive = false);
-        context.host.set_snapshot(json!({ "outputQuietMs": 5000 }));
+        context
+            .host
+            .set_snapshot(json!({ "outputQuietMs": 5000, "screenQuietMs": 5000 }));
         context.note(project.id, "human", "chief", "hello");
         context.pass().unwrap();
         context.advance(11_000);

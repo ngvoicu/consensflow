@@ -25,6 +25,16 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The field of a `pane.snapshot` answer that says how long, in milliseconds, what the
+/// pane's screen shows has not changed: null where its screen has shown nothing yet. This,
+/// not how long the pane has printed nothing (`outputQuietMs`), is how a window's screen is
+/// read at rest or still being drawn: a harness can print without end and change nothing a
+/// person sees (Muse Code 1.4.14 at rest after a command it ran in the background was
+/// stopped, T-1083). What still asks for the output's own quiet is a paste's Enter, which
+/// waits for the window to have done with the paste, and a reader of an input box asking
+/// whether the window answered the human's last key at all.
+pub const SCREEN_QUIET_MS: &str = "screenQuietMs";
+
 /// The kinds of bytes a write of the human's path into a pane can hold, as the host
 /// names them in a snapshot's `humanWrites`: characters typed; a bracketed paste; Enter;
 /// Backspace or Ctrl+U; another control key; an escape sequence (an arrow, a function key,

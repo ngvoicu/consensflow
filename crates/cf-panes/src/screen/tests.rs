@@ -413,3 +413,68 @@ fn the_cursor_says_how_much_after_it_is_drawn_plain_and_a_hint_drawn_faint_or_gr
         Some(0)
     );
 }
+
+/// What Muse Code 1.4.14 printed every 50 ms at rest, once a command it ran in the
+/// background was stopped (T-1081's pty probe, `probe_bg.out`): colour resets and a move of
+/// the cursor to where it was, three times over.
+const MUSE_REPAINT: &str = "\x1b[39m\x1b[49m\x1b[59m\x1b[0m\x1b[18;3H\
+                            \x1b[39m\x1b[49m\x1b[59m\x1b[0m\x1b[18;3H\
+                            \x1b[39m\x1b[49m\x1b[59m\x1b[0m\x1b[18;3H";
+
+/// A screen at rest that is printed to without end shows the same, and says so: Muse's
+/// repaint, text drawn again over the same text in the same pen, the cursor moved, hidden
+/// and shown, and a frame that hides the cursor, draws its box again and puts the cursor
+/// back. What a person would see change is a change: a character, one drawn styled where it
+/// was plain, the alternate screen (T-1083).
+#[test]
+fn a_screen_printed_again_as_it_is_shows_no_change_and_what_a_person_sees_change_is_one() {
+    let mut screen = Screen::new(24, 80);
+    assert!(
+        screen.feed("\x1b[17;1H❯ \x1b[2mAsk anything\x1b[0m\x1b[18;3H".as_bytes()),
+        "the first frame"
+    );
+    for (what, printed) in [
+        ("Muse's repaint", MUSE_REPAINT),
+        ("its first piece, read alone", "\x1b[39m\x1b[49m"),
+        ("its last piece, read alone", "\x1b[59m\x1b[0m\x1b[18;3H"),
+        (
+            "the box drawn again",
+            "\x1b[17;1H❯ \x1b[2mAsk anything\x1b[0m\x1b[18;3H",
+        ),
+        ("the cursor moved", "\x1b[3;9H"),
+        ("the cursor hidden and shown", "\x1b[?25l\x1b[?25h"),
+        (
+            "a frame",
+            "\x1b[?25l\x1b[17;1H❯ \x1b[2mAsk anything\x1b[0m\x1b[18;3H\x1b[?25h",
+        ),
+        (
+            "a colour of the same plainness",
+            "\x1b[17;3H\x1b[2;90mAsk\x1b[0m",
+        ),
+    ] {
+        assert!(
+            !screen.feed(printed.as_bytes()),
+            "{what} changed nothing shown"
+        );
+    }
+    for (what, printed) in [
+        ("a character", "\x1b[17;3Hb"),
+        ("a character drawn plain where it was styled", "\x1b[17;4Hs"),
+        ("the alternate screen", "\x1b[?1049h"),
+        ("the main one back", "\x1b[?1049l"),
+        ("a line blanked", "\x1b[17;1H\x1b[2K"),
+    ] {
+        assert!(screen.feed(printed.as_bytes()), "{what} is a change");
+    }
+}
+
+/// The host's resize is no change of the program's: the screen it resized shows no change
+/// until the program draws something other than what it showed.
+#[test]
+fn a_resize_is_no_change_and_what_is_drawn_after_it_is() {
+    let mut screen = Screen::new(4, 20);
+    assert!(screen.feed(b"hello\r\nworld"));
+    screen.resize(3, 10);
+    assert!(!screen.feed(b"\x1b[1;1Hhello"), "the same text drawn again");
+    assert!(screen.feed(b"\x1b[3;1Hnew"), "new text");
+}

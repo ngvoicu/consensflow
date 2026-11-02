@@ -15,23 +15,48 @@ const SUITES: &[&str] = &["the dispatcher"];
 #[test]
 fn keeps_a_fresh_window_starting_until_its_screen_is_drawn() {
     let context = Context::new();
-    context.host.set_snapshot(json!({ "outputQuietMs": null }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": null, "screenQuietMs": null }));
     let project = context.with_staff(&["zeus"]);
     let chief = context.id(project.id, "chief");
     context.pass().unwrap();
     context.pass().unwrap();
     let state = || context.dispatcher.activity(chief).state;
     assert_eq!(state(), ActivityState::Starting, "nothing printed yet");
-    context.host.set_snapshot(json!({ "outputQuietMs": 300 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 300, "screenQuietMs": 300 }));
     context.pass().unwrap();
     assert_eq!(state(), ActivityState::Starting, "still drawing");
-    context.host.set_snapshot(json!({ "outputQuietMs": 2_000 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 2_000, "screenQuietMs": 2_000 }));
     context.pass().unwrap();
     assert_eq!(state(), ActivityState::Idle);
     held_to(
         context.close(),
         SUITES,
         "keeps a fresh window starting until its screen is drawn: printed, then still a moment",
+    );
+}
+
+/// T-1083: a fresh window whose harness prints and changes nothing it shows is drawn once
+/// what it shows has held still: how long it has printed nothing is not asked.
+#[test]
+fn a_fresh_window_that_prints_and_shows_the_same_is_drawn_by_its_screen() {
+    let context = Context::new();
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 20, "screenQuietMs": 2_000 }));
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.dispatcher.activity(chief).state,
+        ActivityState::Idle
     );
 }
 
@@ -124,7 +149,9 @@ fn reads_a_window_that_has_not_named_its_first_conversation_as_starting_its_mess
 #[test]
 fn reads_a_window_that_names_no_conversation_as_starting_while_it_still_draws_its_screen() {
     let context = Context::new();
-    context.host.set_snapshot(json!({ "outputQuietMs": 300 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 300, "screenQuietMs": 300 }));
     let project = context.with_staff(&["zeus"]);
     let chief = context.id(project.id, "chief");
     let earlier = [
@@ -148,7 +175,9 @@ fn reads_a_window_that_names_no_conversation_as_starting_while_it_still_draws_it
         context.dispatcher.activity(chief),
         Activity::of(ActivityState::Starting)
     );
-    context.host.set_snapshot(json!({ "outputQuietMs": 2_000 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 2_000, "screenQuietMs": 2_000 }));
     context.pass().unwrap();
     assert_eq!(
         context.dispatcher.activity(chief),
