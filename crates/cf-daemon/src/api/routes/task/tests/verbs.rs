@@ -177,6 +177,110 @@ async fn the_chief_moves_a_task_with_the_verbs_and_each_wakes_the_dispatcher_onc
 }
 
 #[tokio::test]
+async fn the_chief_accepts_a_failed_task_on_the_words_of_what_it_checked_and_they_are_its_result() {
+    // T-1111: a designer's session died after it had saved both files, and `cf task accept`
+    // was refused. The ledger decides on the task as it is when the verb comes: a failed one
+    // takes the words, a done one is accepted as it was.
+    let scene = scene();
+    let number = working_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .fail_task(scene.project.id, number, "Selected model is at capacity")
+        .unwrap();
+    let route = format!("{number}/accept");
+
+    // Without words it is refused in the words that say what to type, and wakes nothing.
+    for body in ["{}", r#"{"body":"  "}"#] {
+        let said = post(&scene, &scene.chief, &route, body).await;
+        assert_eq!(
+            refused(&said),
+            (
+                400,
+                "checked-needed",
+                format!(
+                    "T-{number} failed: accepting it takes the words of what you checked, which are its result: cf task accept T-{number} \"what I checked\""
+                )
+                .as_str()
+            ),
+            "{body}"
+        );
+    }
+    assert_eq!(state_of(&scene, number), "failed");
+    assert_eq!(scene.kicks.get(), 0);
+
+    // A window that is no coordinator may not, with or without words.
+    let said = post(&scene, &scene.zeus, &route, r#"{"body":"It is fine"}"#).await;
+    assert_eq!(said.0, 403, "{said:?}");
+    assert_eq!(state_of(&scene, number), "failed");
+
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &route,
+        r#"{"body":"Both files are saved and whole"}"#,
+    )
+    .await;
+    assert_eq!(
+        (status, said["task"]["state"].clone()),
+        (200, json!("accepted")),
+        "{said}"
+    );
+    assert_eq!(scene.kicks.get(), 1, "what waits for it is woken");
+    let (status, thread) = get(&scene, &scene.chief, &number.to_string()).await;
+    assert_eq!(status, 200);
+    let results: Vec<_> = thread["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["kind"] == "result")
+        .collect();
+    assert_eq!(results.len(), 1, "{thread}");
+    assert_eq!(results[0]["body"], "Both files are saved and whole");
+    assert_eq!(results[0]["sender"], "chief");
+}
+
+#[tokio::test]
+async fn a_done_tasks_accept_is_as_it_was_whatever_words_come_with_it() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let (status, _) = post(
+        &scene,
+        &scene.zeus,
+        &format!("{number}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/accept"),
+        r#"{"body":"Looks right"}"#,
+    )
+    .await;
+    assert_eq!(
+        (status, said["task"]["state"].clone()),
+        (200, json!("accepted")),
+        "{said}"
+    );
+    let (_, thread) = get(&scene, &scene.chief, &number.to_string()).await;
+    let results: Vec<_> = thread["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["kind"] == "result")
+        .map(|message| message["body"].clone())
+        .collect();
+    assert_eq!(
+        results,
+        [json!("Done.")],
+        "the worker's result stays the result"
+    );
+}
+
+#[tokio::test]
 async fn the_chief_asks_the_engine_to_finish_a_task_and_what_it_refuses_is_refused_in_its_words() {
     // Only the engine reads the window: it is asked, in the chief's name, and the route
     // answers with the task done, the dispatcher woken for what follows.

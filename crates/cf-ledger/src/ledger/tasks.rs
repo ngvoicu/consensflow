@@ -72,6 +72,17 @@ impl Ledger {
         tasks::accept_task(&mut self.store, project_id, number, by)
     }
 
+    /// A coordinator accepts a failed task on `checked`, the words of what they checked.
+    pub fn accept_failed_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        checked: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::accept_failed_task(&mut self.store, project_id, number, by, checked)
+    }
+
     /// A worker's task stops without ending; `by` none when ConsensFlow pauses it.
     pub fn pause_task(
         &mut self,

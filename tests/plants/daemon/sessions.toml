@@ -95,9 +95,9 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        store.move_task(&task, "accepted", json!({ "by": by }))?;
-        release_ready(store, project_id)?;'''
-replace = '        store.move_task(&task, "accepted", json!({ "by": by }))?;'
+    store.move_task(task, "accepted", detail)?;
+    release_ready(store, project_id)?;'''
+replace = '    store.move_task(task, "accepted", detail)?;'
 
 [[plant]]
 name = "session: a task waiting for its session is not released with its result"

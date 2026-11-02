@@ -384,7 +384,17 @@ fn moved(
     let mut ledger = context.ledger.borrow_mut();
     let mut dropped = Vec::new();
     let moved = match action {
-        TaskAction::Accept => ledger.accept_task(project, number, by)?,
+        TaskAction::Accept => {
+            // Read in the same borrow as the accept: nothing moves between.
+            let failed = ledger
+                .task(project, number)?
+                .is_some_and(|thread| thread.task.state == "failed");
+            if failed {
+                ledger.accept_failed_task(project, number, by, words)?
+            } else {
+                ledger.accept_task(project, number, by)?
+            }
+        }
         TaskAction::Cancel => {
             // Read in the same borrow as the cancel: nothing is pasted between.
             dropped = ledger

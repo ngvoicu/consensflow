@@ -50,3 +50,12 @@ hand. Say a file is restored only once you have checked it: its diff, or what it
 2026-10-15, when a worker on the owner's Windows machine overwrote a file that held
 uncommitted work with `git checkout`, and other workers said they had restored files they
 had not.
+
+The same twelve rows end the chief's item on deciding a result with "A failed task whose
+work you checked is accepted too, with what you checked: `cf task accept T-3 "what I
+checked"`" (`skill/core/chief.md`), where Node's said nothing of a failed task: a designer's
+session died after it had saved both final files, `cf task accept` was refused, and the
+task that needed it stayed stuck until the chief cancelled it and added it again
+(T-1111, the field report of 2026-11-02). Changed by hand, in those words alone, on
+2026-11-02. The sentence costs three rows of the staff a replacement of the chief's role
+holds whole (34 with specs on, 63 without; they were 37 and 65).

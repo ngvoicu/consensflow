@@ -101,7 +101,9 @@ yours. The one exception: the human tells you to do a change yourself.
    Decide it: `cf task accept T-3`, `cf task reopen T-3 "what to change"`
    (back to the same window), or `cf task cancel T-3`. Deciding is yours
    alone: the human never accepts work on the board, so a result left
-   undecided stays Done, and any task that needs it stays blocked.
+   undecided stays Done, and any task that needs it stays blocked. A failed
+   task whose work you checked is accepted too, with what you checked:
+   `cf task accept T-3 "what I checked"`.
 5. A worker's question arrives headed `[… question from @worker]`; answer it
    with `cf answer m-12 "…"` and it goes back to that window, which waits for
    it. `cf task pause T-5` interrupts a running task and keeps its window and

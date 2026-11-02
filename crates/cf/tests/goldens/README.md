@@ -133,3 +133,14 @@ result`, in the six prints of `board.json` that hold it (`cf`, `cf help`, `cf --
 script from the binary's own output, and nothing else in them moved. The daemon's traces
 hold no `cf task finish` line (`cf-board-028` and `-029` are departed for that, and are not
 played), so none was changed.
+
+## `cf task accept` of a failed task
+
+Board task T-1111 (3.0.7-alpha.2): the chief accepts a failed task whose work it checked,
+with the words of what it checked, which are the task's result (a designer's session had
+died after it saved both final files, and `cf task accept` was refused). The usage has a
+line for it after `accept|cancel`, `cf task accept T-3 "…"  accept a failed task you
+checked; your words are its result`, in the six prints of `board.json` that hold it (`cf`,
+`cf help`, `cf --help`, `cf -h --json`, `cf task --help`, `cf task help`): each is what the
+built `cf` prints from `crates/cf/src/board/usage.txt`, changed by hand in those words
+alone, and nothing else in them moved.
