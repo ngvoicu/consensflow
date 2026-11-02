@@ -137,6 +137,8 @@ fn the_requesters_of_the_other_waiters_are_told_in_notes_of_their_own_and_the_na
 fn a_task_that_has_not_failed_has_no_waiter_told_of_it() {
     let mut w = world();
     let (a, _, _) = given_with_a_waiter(&mut w);
+    // A task of the human's waits for it too, whom the chief's note would not name.
+    human_waits_for(&mut w, a);
     let (chief, human) = (notes_of(&w, "chief"), notes_of(&w, "human"));
 
     w.ledger
