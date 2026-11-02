@@ -116,9 +116,9 @@ replace = "SET seq = excluded.seq, role = excluded.role, text = excluded.text, c
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = '''            OR transcript.role != excluded.role
+find = '''            OR transcript.drawn_only != excluded.drawn_only
        RETURNING rowid, compaction",'''
-replace = '''            OR transcript.role != excluded.role OR transcript.compaction != excluded.compaction
+replace = '''            OR transcript.drawn_only != excluded.drawn_only OR transcript.compaction != excluded.compaction
        RETURNING rowid, compaction",'''
 
 [[plant.edit]]
@@ -155,9 +155,9 @@ runs = ["viewer-ledger-held-apart"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
 find = '''    let made: Vec<&str> = compaction::made("TABLE")
-        .chain([model_list::TABLE])
+        .chain([model_list::TABLE, drawn_items::TABLE])
         .collect();'''
-replace = '''    let made: Vec<&str> = [model_list::TABLE].into_iter().collect();'''
+replace = '''    let made: Vec<&str> = [model_list::TABLE, drawn_items::TABLE].into_iter().collect();'''
 
 [[plant]]
 name = "session viewer: the players of Node's recordings keep the indexes of migration 0020 in the schema they compare"
@@ -633,10 +633,12 @@ runs = ["viewer-harness-claude"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = '''        if record.summary {
-            self.items.summary(id, &record.text, at, seq);
+            self.items
+                .summary(id, &record.text, at, seq, self.compacted_from.take());
         } else if record.transcript_only {'''
 replace = '''        if false {
-            self.items.summary(id, &record.text, at, seq);
+            self.items
+                .summary(id, &record.text, at, seq, self.compacted_from.take());
         } else if record.transcript_only {'''
 
 # The page's operations. Round 2, P2 1: another participant's message read out through a header.

@@ -83,6 +83,7 @@ it-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--feature
 it-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "transcripts::"]
 it-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::tests::depth::"]
 it-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "transcript_pages"]
+it-viewer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::"]
 
 [[plant]]
 name = 'listing: a stale listing gives a default'
@@ -331,8 +332,8 @@ runs = ["ch-ledger-testing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
-find = '        .chain([model_list::TABLE])'
-replace = '        .chain(["no such table"])'
+find = '        .chain([model_list::TABLE, drawn_items::TABLE])'
+replace = '        .chain(["no such table", drawn_items::TABLE])'
 
 [[plant]]
 name = 'listing: daemon: every ask reads the harness again'
@@ -1686,3 +1687,43 @@ runs = ["it-cf"]
 file = "crates/cf/src/board/transcript.rs"
 find = '                Some("tool") => tool(item).into(),'
 replace = '                Some("tool") => "Tool output".into(),'
+
+[[plant]]
+name = 'items: the page says nothing of what the history draws of an item'
+meant = "says_what_the_history_draws_of_an_item_and_nothing_of_one_its_reader_said_nothing_more_of"
+runs = ["it-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = '        detail: item.detail.clone(),'
+replace = '        detail: None,'
+
+[[plant]]
+name = "items: Devin's answer says no end of its call"
+meant = "a_tools_answer_says_how_its_call_ended_and_how_long_it_took_where_devin_says"
+runs = ["it-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '        (Some(code), _) if code != 0 => Some(Status::Failed),'
+replace = '        (Some(code), _) if code > 1 => Some(Status::Failed),'
+
+[[plant]]
+name = "items: Codex's exec script is headed by its tool's name"
+meant = "a_script_of_codexs_exec_is_headed_by_the_command_it_runs_or_the_patch_it_applies"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/drawn.rs"
+find = '        (None, Some(script)) => scripted(script),'
+replace = '        (None, Some(_)) => (drawn::guess(name, None), None),'
+
+[[plant]]
+name = "items: Codex's file change is passed over"
+meant = "an_edit_codex_completed_stands_beside_the_items_with_its_change"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '            Some("FileChange") if completed => {'
+replace = '            Some("FileChanges") if completed => {'

@@ -421,3 +421,86 @@ fn a_live_chiefs_transcript_reads_as_the_live_check_read_it() {
         .iter()
         .all(|(_, item)| item.kind() != Kind::Tool));
 }
+
+/// What the history adds to ConsensFlow's copy of a real transcript (CHF-18, "the ledger's
+/// growth measured on a real long chief"): run by hand on a transcript named by
+/// `CF_MEASURE_TRANSCRIPT`, read where it is (a second name of it in a folder of the test's own),
+/// it prints counts and sizes alone, never a word of it.
+#[test]
+#[ignore = "by hand: CF_MEASURE_TRANSCRIPT=<a Claude transcript> cargo test -p cf-harness --lib measure -- --ignored --nocapture"]
+fn measure_what_the_history_adds_to_a_real_transcripts_copy() {
+    let Some(path) = std::env::var_os("CF_MEASURE_TRANSCRIPT") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let session = path.file_stem().unwrap().to_string_lossy().into_owned();
+    let root = tempfile::tempdir().unwrap();
+    let projects = root.path().join("projects").join("measured");
+    fs::create_dir_all(&projects).unwrap();
+    // A second name of the same file (a link is passed over by the search), which goes with
+    // the folder.
+    fs::hard_link(&path, projects.join(format!("{session}.jsonl"))).unwrap();
+    let env = Env::from_vars([("CLAUDE_CONFIG_DIR", root.path().as_os_str())]);
+    let started = std::time::Instant::now();
+    let reading = reader(&session, &env, &local()).look(&Options::default(), 0);
+    let took = started.elapsed();
+    let Reading::Known(record) = &*reading else {
+        panic!("unread: {:?}", reading.reason());
+    };
+    let cut = |text: &str, max: usize| text.chars().take(max).map(char::len_utf8).sum::<usize>();
+    const MAX: usize = 64_000;
+    let words: usize = record
+        .items
+        .iter()
+        .map(|item| {
+            if item.role == Role::Tool {
+                cut(&item.text, MAX)
+            } else {
+                item.text.len()
+            }
+        })
+        .sum();
+    let detail_bytes = |item: &crate::shared::record::reading::Item| {
+        item.detail.as_deref().map_or(0, |detail| {
+            [detail.name.as_deref(), detail.header.as_deref()]
+                .into_iter()
+                .flatten()
+                .map(str::len)
+                .sum::<usize>()
+                + detail.diff.as_deref().map_or(0, |diff| cut(diff, MAX))
+                + 48
+        })
+    };
+    let details: usize = record.items.iter().map(detail_bytes).sum();
+    let thinking: Vec<&crate::shared::record::reading::Item> = record
+        .beside
+        .iter()
+        .map(|(_, item)| item)
+        .filter(|item| item.kind() == Kind::Thinking)
+        .collect();
+    let thought: usize = thinking.iter().map(|item| cut(&item.text, MAX)).sum();
+    let diffs = record
+        .items
+        .iter()
+        .filter(|item| {
+            item.detail
+                .as_deref()
+                .is_some_and(|detail| detail.diff.is_some())
+        })
+        .count();
+    println!(
+        "{}",
+        serde_json::json!({
+            "file_bytes": fs::metadata(&path).unwrap().len(),
+            "read_ms": took.as_millis(),
+            "items": record.items.len(),
+            "item_bytes": words,
+            "tools": record.items.iter().filter(|item| item.kind() == Kind::Tool).count(),
+            "detail_bytes": details,
+            "diffs": diffs,
+            "thinking_items": thinking.len(),
+            "thinking_bytes": thought,
+            "beside": record.beside.len(),
+        })
+    );
+}
