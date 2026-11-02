@@ -99,6 +99,8 @@ mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
 mod a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
+#[path = "regressions/a_task_waiting_for_a_failed_one_was_told_to_the_chief_before_the_failure.rs"]
+mod a_task_waiting_for_a_failed_one_was_told_to_the_chief_before_the_failure;
 #[path = "regressions/a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good.rs"]
 mod a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good;
 #[path = "regressions/a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief.rs"]

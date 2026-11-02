@@ -1,0 +1,167 @@
+# What the chief is told of a task that failed, and in what order (3.0.7-alpha.2, T-1148; the
+# field board of 2026-11-02, where "T-303 waits for T-302, which failed" reached the chief before
+# "T-302 failed", T-1113 having fixed the ledger's own failure of a turn). The chief is given its
+# notes one at a time, the oldest first, so the order they are written in is the order it reads
+# them in. A task failed by a delivery that did not arrive (a launch that did not come up or never
+# showed its first message, a brief or told words that never reached the window) was told to the
+# chief with no word of the tasks that wait for it, and now:
+#
+# - the engine's note to the task's requester names the tasks that requester asked for that wait
+#   for it, after the words of the failure, as the ledger's own note of a turn that failed does;
+# - the requesters of the other waiters are told last, each in a note of its own, after every word
+#   of the failure, the human's included.
+#
+# The engine's cases are `crates/cf-engine/tests/dispatcher/failure_first.rs`; the ledger's are
+# `crates/cf-ledger/tests/receipt/waiting_after_failure.rs`; the rig's case is
+# `crates/cf-e2e/tests/regressions/a_task_waiting_for_a_failed_one_was_told_to_the_chief_before_the_failure.rs`,
+# whose run builds the native `cf` from the sources as they are planted.
+#
+# One plant takes one rule out; a test of it fails. Every name holds `failure first:`, so
+# `npm run plants:daemon -- "failure first:"` runs them all.
+
+[run]
+ff-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "failure_first"]
+ff-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "waiting_after_failure"]
+ff-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_waiting_for_a_failed_one_was_told_to_the_chief_before_the_failure::"], builds = true }
+
+# --- the engine: the failure's words, then what it left behind ---
+
+[[plant]]
+name = "failure first: the tasks that wait for a task a delivery failed are told before the words of the failure"
+meant = "a_task_the_human_asked_for_that_waits_for_a_failed_launch_is_told_to_the_human_after_its_cause"
+runs = ["ff-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        self.tell_given_up(message, because)?;\n"
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                &thread.task.requester,\n            )?;\n        }\n        Ok(())\n    }\n"
+replace = "                &thread.task.requester,\n            )?;\n        }\n        self.tell_given_up(message, because)?;\n        Ok(())\n    }\n"
+
+[[plant]]
+name = "failure first: the requesters of the other waiters of a task a delivery failed are never told"
+meant = "a_task_the_human_asked_for_that_waits_for_a_failed_launch_is_told_to_the_human_after_its_cause"
+runs = ["ff-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            self.seams.ledger.borrow_mut().tell_waiting_for_failed(\n                project.id,\n                number,\n                &thread.task.requester,\n            )?;\n"
+replace = "            let _ = (&thread, number);\n"
+
+[[plant]]
+name = "failure first: the note of a failed delivery does not name the tasks its requester asked for that wait for it"
+meant = "the_one_note_of_a_failed_launch_names_the_tasks_the_chief_asked_for_that_wait_for_it"
+runs = ["ff-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                let waits = self.seams.ledger.borrow().waiting_for_it(\n                    project.id,\n                    number,\n                    &task.requester,\n                )?;\n"
+replace = "                let waits = String::new();\n"
+
+[[plant]]
+name = "failure first: the tasks named in the requester's note of a failed delivery are told again in notes of their own"
+meant = "the_one_note_of_a_failed_launch_names_the_tasks_the_chief_asked_for_that_wait_for_it"
+runs = ["ff-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        tell_other_waiters(store, &task, Some(named))\n"
+replace = "        tell_other_waiters(store, &task, None)\n"
+
+[[plant]]
+name = "failure first: a task that failed through a delivery reaches the chief with no word of the task that waits for it (the field's launch)"
+meant = "a_launch_that_did_not_come_up_is_told_to_the_chief_before_the_task_that_waits_for_it"
+runs = ["ff-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                let waits = self.seams.ledger.borrow().waiting_for_it(\n                    project.id,\n                    number,\n                    &task.requester,\n                )?;\n"
+replace = "                let waits = String::new();\n"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            self.seams.ledger.borrow_mut().tell_waiting_for_failed(\n                project.id,\n                number,\n                &thread.task.requester,\n            )?;\n"
+replace = "            let _ = (&thread, number);\n"
+
+[[plant]]
+name = "failure first: the words of a failure that never reached the window leave the waiting task out of the chief's note"
+meant = "words_that_never_reached_the_window_are_told_to_the_chief_before_the_task_that_waits_for_it"
+runs = ["ff-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                    &format!(\"{waits}{}\", theirs(&task.requester)),\n"
+replace = "                    theirs(&task.requester),\n"
+
+# --- the ledger: what the engine asks for ---
+
+[[plant]]
+name = "failure first: the ledger names the tasks of every requester in the note of a failure, not the requester's own"
+meant = "a_delivery_given_up_tells_no_waiter_and_the_requesters_note_names_the_ones_it_asked_for"
+runs = ["ff-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if store.participant_row(waiter.requester_id)?.handle == requester {"
+replace = "        if true {"
+
+[[plant]]
+name = "failure first: the ledger tells the requester it named a second time, in a note of its own"
+meant = "the_requesters_of_the_other_waiters_are_told_in_notes_of_their_own_and_the_named_one_is_not"
+runs = ["ff-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if named == Some(requester.handle.as_str()) {"
+replace = "        if false {"
+
+[[plant]]
+name = "failure first: the ledger tells the waiters of a task that has not failed"
+meant = "a_task_that_has_not_failed_has_no_waiter_told_of_it"
+runs = ["ff-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        let task = store.task_row(project_id, number)?;\n        if task.state != \"failed\" {\n            return Ok(());\n        }\n        tell_other_waiters(store, &task, Some(named))"
+replace = "        let task = store.task_row(project_id, number)?;\n        tell_other_waiters(store, &task, Some(named))"
+
+[[plant]]
+name = "failure first: the ledger says tasks wait for a task that has not failed"
+meant = "a_task_that_has_not_failed_has_no_waiter_told_of_it"
+runs = ["ff-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    let task = store.task_row(project_id, number)?;\n    if task.state != \"failed\" {\n        return Ok(String::new());\n    }\n    waiting_for_it(store, &task, requester)"
+replace = "    let task = store.task_row(project_id, number)?;\n    waiting_for_it(store, &task, requester)"
+
+# --- the rig: the field's shape, on the native daemon ---
+
+[[plant]]
+name = "failure first: a turn that failed is told to the chief after the task that waits for it (the field's)"
+meant = "a_task_that_waits_for_a_failed_one_is_named_in_the_note_that_says_it_failed"
+runs = ["ff-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if store.participant_row(waiter.requester_id)?.handle == requester {"
+replace = "        if false && store.participant_row(waiter.requester_id)?.handle == requester {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if named == Some(requester.handle.as_str()) {"
+replace = "        if false {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if given_up {\n            let words = failed(told.waiting_for_the_reopen(None));"
+replace = "        if given_up && false {\n            let words = failed(told.waiting_for_the_reopen(None));"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        task_by_id(store, task.id)\n    })\n}\n\n/// The human takes finished tasks off the board for good"
+replace = "        if given_up {\n            send(\n                store,\n                project_id,\n                &Sent {\n                    to: &requester.handle,\n                    task: Some(number),\n                    kind: \"note\",\n                    body: &failed(told.waiting_for_the_reopen(None)),\n                    ..Sent::default()\n                },\n            )?;\n        }\n        task_by_id(store, task.id)\n    })\n}\n\n/// The human takes finished tasks off the board for good"

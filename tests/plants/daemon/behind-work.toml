@@ -126,8 +126,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        for waiting in waiters(store, &task)? {\n"
-replace = "        for waiting in Vec::<i64>::new() {\n"
+find = "    let number = task.number;\n    for waiting in waiters(store, task)? {\n"
+replace = "    let number = task.number;\n    for waiting in Vec::<i64>::new() {\n"
 
 [[plant]]
 name = "behind work: the chief is told twice of a follow-up that waits for a task that failed"
@@ -136,8 +136,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        for waiting in waiters(store, &task)? {\n"
-replace = "        for waiting in waiters(store, &task)?.into_iter().chain(waiters(store, &task)?) {\n"
+find = "    let number = task.number;\n    for waiting in waiters(store, task)? {\n"
+replace = "    let number = task.number;\n    for waiting in waiters(store, task)?.into_iter().chain(waiters(store, task)?) {\n"
 
 [[plant]]
 name = "behind work: a task that fails frees its follow-up, which goes to the window though the task never finished"
@@ -402,8 +402,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        for waiting in waiters(store, &task)? {\n"
-replace = "        let mut fresh = Vec::new();\n        for each in waiters(store, &task)? {\n            let told = store.db.prepare(\"SELECT 1 FROM message m JOIN task t ON t.id = m.task_id WHERE t.project_id = ? AND t.number = ? AND m.kind = 'note'\")?.exists(params![project_id, each])?;\n            if !told {\n                fresh.push(each);\n            }\n        }\n        for waiting in fresh {\n"
+find = "    let number = task.number;\n    for waiting in waiters(store, task)? {\n"
+replace = "    let number = task.number;\n    let mut fresh = Vec::new();\n    for each in waiters(store, task)? {\n        let told = store.db.prepare(\"SELECT 1 FROM message m JOIN task t ON t.id = m.task_id WHERE t.project_id = ? AND t.number = ? AND m.kind = 'note'\")?.exists(params![task.project_id, each])?;\n        if !told {\n            fresh.push(each);\n        }\n    }\n    for waiting in fresh {\n"
 
 # Round 2 (T-158): Calliope's review of the merge (T-154).
 

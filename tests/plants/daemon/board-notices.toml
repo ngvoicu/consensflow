@@ -29,8 +29,13 @@ runs = ["bn-ledger-cause-first"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "            if given_up && waiter.requester_id == task.requester_id {"
-replace = "            if false {"
+find = "        if store.participant_row(waiter.requester_id)?.handle == requester {"
+replace = "        if false && store.participant_row(waiter.requester_id)?.handle == requester {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if named == Some(requester.handle.as_str()) {"
+replace = "        if false {"
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
@@ -49,8 +54,13 @@ runs = ["bn-ledger-cause-first"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "            if given_up && waiter.requester_id == task.requester_id {"
-replace = "            if false {"
+find = "        if store.participant_row(waiter.requester_id)?.handle == requester {"
+replace = "        if false && store.participant_row(waiter.requester_id)?.handle == requester {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if named == Some(requester.handle.as_str()) {"
+replace = "        if false {"
 
 [[plant]]
 name = "board notices: several tasks that wait for a task given up on are not named together in its note"
