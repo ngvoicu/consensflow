@@ -91,6 +91,7 @@ fn look(id: &str, env: &BTreeMap<String, String>, ended: usize) -> Result<Option
 #[test]
 #[ignore = "live: one real Muse turn on the owner's login (cargo xtask live muse-background)"]
 fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcome {
+    tui::on_a_mac()?;
     // Its one window runs the model the owner chose for Muse's live runs, never the
     // shared models of `--models`, which no Muse window is asked for yet.
     let log = Log::own_agents(

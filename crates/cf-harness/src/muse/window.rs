@@ -3,7 +3,8 @@
 //! Muse names its session itself, and a launch cannot give it one (`--session-id` is
 //! refused in the TUI). The folder of the session the window's process opened says which,
 //! about a second in (its log's `runtime.session.route_facts` names the process, or on
-//! Windows, where the log names none, the session's lock does: [`opened_by`]);
+//! Windows, where the log names none at a session's start, the session's lock does:
+//! [`opened_by`]);
 //! its SessionStart hook says it too, but only at the session's first prompt. No window
 //! opens with a message on its command line, so a fresh window's first prompt comes
 //! only after its first message is pasted, and that only once the window is ready,

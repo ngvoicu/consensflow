@@ -299,6 +299,7 @@ fn watch(window: &mut Window, root: &Path) -> Result<bool, String> {
 #[ignore = "live: one real Muse turn per posture on the owner's login (cargo xtask live muse-posture)"]
 fn only_full_permission_lets_a_muse_member_reach_the_daemon_commit_and_write_outside_its_project(
 ) -> Outcome {
+    tui::on_a_mac()?;
     let log = Log::own_agents(
         "live muse-posture",
         "it runs Muse on muse-spark-1.3 at minimal",

@@ -147,7 +147,8 @@ const LOCK: &str = ".session.lock";
 
 /// What the head of a session's log says of where the session came from: the Muse
 /// process that opened it (`runtime.session.route_facts`, or else the process its
-/// [`LOCK`] names: Muse on Windows writes no route facts, T-708 and T-792), and the
+/// [`LOCK`] names: Muse on Windows writes none at a session's start, T-708 and T-792, and
+/// only at its end, before a resume reopens it, T-985), and the
 /// session it was started from, by a `/clear` in its window (`session.started`'s
 /// `previous_session_stream`).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -208,7 +209,11 @@ fn begun_since(launched_ms: i64, env: &Env, heads: &Heads) -> Vec<(String, Head)
 /// it: the newest whose route facts, or else whose lock, name `pid` ([`begun_since`],
 /// [`Head`]); where none does, the newest such of a process `pid` started. Windows has no
 /// `exec`, so a launcher runs Muse as its child, and the window's process is the
-/// launcher's (a wrapper of the human's own, or the rig's stand-in). Muse writes both as
+/// launcher's. The product runs Muse's own `muse-bin-<v>.exe` (`launch::pinned`), whose
+/// pid is the window's: this second rule serves a launcher that wraps Muse with no
+/// `.muse-version` beside it (a shim on the PATH, which no Muse install ships today) and
+/// the rig's stand-in on Windows, its one user now (T-985 P3-1). It is kept because the
+/// stand-in, on a system with no `exec`, has no other way to be the window's process. Muse writes both as
 /// its TUI opens, a second in, and its SessionStart hook only at the window's first
 /// prompt (Muse 1.4.13, T-787's probe): a window opened with no first message would say
 /// nothing of itself until one came.

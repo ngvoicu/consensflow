@@ -51,7 +51,7 @@ const KIT: [&str; 4] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 11] = [
+const BY_HAND: [(&str, &str, &str); 12] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -86,20 +86,28 @@ const BY_HAND: [(&str, &str, &str); 11] = [
         "the same read of the machine's Devin config, as Windows names its folder",
     ),
     (
-        "crates/cf-e2e/tests/live_muse_background.rs",
+        "crates/cf-e2e/tests/live_muse/tui.rs",
         "HOME",
-        "it runs Muse alone, in no window of the kit's: the owner's home for the keychain, which \
-         holds the login, and nothing else of it (Muse finds its keychain by HOME, T-705)",
+        "what `live_muse_background` and `live_muse_posture` share (T-790 moved it there): they run \
+         Muse alone, in no window of the kit's, on a Mac only: the owner's home for the keychain, \
+         which holds the login, and nothing else of it (Muse finds its keychain by HOME, T-705)",
     ),
     (
-        "crates/cf-e2e/tests/live_muse_background.rs",
+        "crates/cf-e2e/tests/live_muse/tui.rs",
         "XDG_CONFIG_HOME",
-        "the same run's config folder, a throwaway of its own: nothing of the owner's is read there",
+        "the same runs' config folder, a throwaway of their own: nothing of the owner's is read there",
     ),
     (
-        "crates/cf-e2e/tests/live_muse_background.rs",
+        "crates/cf-e2e/tests/live_muse/tui.rs",
         "XDG_DATA_HOME",
-        "the same run's data folder, a throwaway of its own, where Muse writes its sessions",
+        "the same runs' data folder, a throwaway of their own, where Muse writes its sessions",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_window.rs",
+        "CODEX_HOME",
+        "the question case gives its window a throwaway folder holding one AGENTS.md, the foreign \
+         rules Muse reads as the person's where they have no ~/.claude/CLAUDE.md (T-790); no Codex \
+         runs, and nothing of the owner's Codex is read or written",
     ),
     (
         "crates/cf-e2e/tests/live_muse_reads.rs",

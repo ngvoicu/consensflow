@@ -23,6 +23,29 @@ pub const EFFORT: &str = "minimal";
 
 pub type Outcome = Result<(), String>;
 
+/// These probes run Muse on a Mac alone, saying so plainly elsewhere before anything is made
+/// or spent: they copy the person's Muse login (`auth.json`) into the run's folder, which on
+/// a Mac is the login's metadata (its secret stays in the keychain), and on Windows the
+/// whole login, which a copy would refresh apart from the person's (T-792; T-985 P3-2).
+pub fn on_a_mac() -> Outcome {
+    refused_off_a_mac(cfg!(target_os = "macos"))
+}
+
+/// [`on_a_mac`], on a Mac where `mac` says so.
+fn refused_off_a_mac(mac: bool) -> Outcome {
+    if mac {
+        return Ok(());
+    }
+    Err("this live probe runs Muse on a Mac only: it copies the person's Muse login (auth.json) into its own folder, and off a Mac that file is the whole login, which a copy would refresh apart from theirs".to_owned())
+}
+
+#[test]
+fn off_a_mac_the_muse_tui_probes_refuse_plainly_before_anything_is_made() {
+    assert_eq!(refused_off_a_mac(true), Ok(()));
+    let refused = refused_off_a_mac(false).unwrap_err();
+    assert!(refused.contains("on a Mac only"), "{refused}");
+}
+
 pub fn home() -> PathBuf {
     machine::home().unwrap_or_default()
 }

@@ -58,6 +58,9 @@ muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared
 muse-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record_state"]
 muse-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+# T-954 (T-985 on T-790): the live TUI probes refuse off a Mac; the rule of the kit's homes.
+muse-tui-probes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_posture", "off_a_mac"]
+muse-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes::"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
 muse-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_teammates_turn"]
@@ -3487,3 +3490,33 @@ find = '''            match locked_by(&lock) {
                 Ok(named) => named,'''
 replace = '''            match locked_by(&lock) {
                 Ok(named) => named.or_else(|| held_by(&lock, holders)),'''
+
+# T-985 P3-2 on T-790: the live probes that run Muse's TUI alone copy the person's auth.json,
+# which off a Mac is the whole login: they refuse there, before anything is made or spent.
+[[plant]]
+name = "muse: the live TUI probes run off a Mac on a copy of the whole login"
+meant = "off_a_mac_the_muse_tui_probes_refuse_plainly_before_anything_is_made"
+runs = ["muse-tui-probes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse/tui.rs"
+find = '''    if mac {
+        return Ok(());
+    }'''
+replace = '''    if mac || !mac {
+        return Ok(());
+    }'''
+
+# The table of homes made by hand follows T-790's move of the TUI probes' folders into
+# `live_muse/tui.rs`, and names the question case's throwaway CODEX_HOME with its reason.
+[[plant]]
+name = "muse: the question case's CODEX_HOME is excused with no reason"
+meant = "no_live_source_makes_the_home_of_a_real_harness_by_hand"
+runs = ["muse-live-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/live_homes.rs"
+find = '''        "crates/cf-e2e/tests/live_muse_window.rs",
+        "CODEX_HOME",'''
+replace = '''        "crates/cf-e2e/tests/live_muse_window.rs",
+        "CODEX_HOMES",'''

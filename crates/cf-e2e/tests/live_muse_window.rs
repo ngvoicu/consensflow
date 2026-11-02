@@ -516,8 +516,18 @@ fn question_case(live: &Live) -> Result<String> {
             && record.to_string().contains("FOREIGN_SEEN")
     });
     still_on(&rig, &live.model)?;
+    // Muse reads the person's `~/.claude/CLAUDE.md` before `$CODEX_HOME/AGENTS.md`, and a
+    // live window's home is the person's (T-985 P3-1 on T-790): where they have one, the
+    // rules this case gives are never read, and that check is skipped, saying why.
+    let owners = owners_claude_rules(&live.home);
+    let skipped = owners.as_ref().map_or(String::new(), |path| {
+        format!(
+            "; the foreign rules' check is skipped: the person has {}, which Muse reads before $CODEX_HOME/AGENTS.md",
+            path.display()
+        )
+    });
     let said = format!(
-        "the question from {} ({:?}), the answer {} ({}), the result {result}, question tools offered {offered:?}, a dialog {dialog}, the foreign rules read {read}, turns {:?}\n{}",
+        "the question from {} ({:?}), the answer {} ({}), the result {result}, question tools offered {offered:?}, a dialog {dialog}, the foreign rules read {read}{skipped}, turns {:?}\n{}",
         question["sender"], question["body"], answer["state"], answer["body"], terminals(&log), shape_of(&rig)
     );
     rig.close()?;
@@ -540,8 +550,16 @@ fn question_case(live: &Live) -> Result<String> {
         !offered.is_empty() && offered.iter().all(Vec::is_empty) && !dialog,
         format!("Muse offered a question tool: {said}"),
     )?;
-    held(read, format!("the foreign rules were not read: {said}"))?;
+    if owners.is_none() {
+        held(read, format!("the foreign rules were not read: {said}"))?;
+    }
     Ok(said)
+}
+
+/// The person's own Claude Code rules in the home `home`, which Muse reads as theirs before
+/// any other harness's: none where they have none.
+fn owners_claude_rules(home: &std::path::Path) -> Option<PathBuf> {
+    Some(home.join(".claude").join("CLAUDE.md")).filter(|path| path.is_file())
 }
 
 #[test]
