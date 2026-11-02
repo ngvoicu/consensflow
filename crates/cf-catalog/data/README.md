@@ -200,6 +200,34 @@ three levels. Pi's one-shots got OpenRouter's 402 (Pi asks for the model's whole
 942k output tokens, beyond the account's credits) and a hang, the account's and
 Pi's, not the rows'.
 
+Probed again on 2026-11-01 (T-612; Pi 1.4.0 in a throwaway home holding only the
+`openrouter` entry of the owner's `auth.json`, one probe at a time, each a one-shot
+`pi --print --no-extensions --model <id> "Reply with ok"`, about $0.001 each):
+- **The 402 is Argon's, not Kimi's.** `openrouter/google/gemini-4-argon` answered
+  `402: This request requires more credits, or fewer max_tokens. You requested up to
+  942219 tokens, but can only afford 739015` in 1.1 s: Pi 1.4.0's catalog gives it
+  943.7K output tokens (`pi --list-models gemini-4`). `openrouter/moonshotai/kimi-k3`
+  has 131.1K there and answered `ok` in 2.4 s; `kimi-k3.1-pro` is not in Pi 1.4.0's
+  catalog ("Using custom model id", Pi's default of 16K) and answered `ok` in 3.5 s.
+  The 942k that T-553 saw on K3.1 Pro was Argon's. Whether the 402 comes is the
+  account's: OpenRouter refuses a request whose `max_tokens` at the model's price is
+  more than the credits left (739,015 tokens of Argon on that day), so another balance
+  or another day answers.
+- **The hang did not come back.** Argon answered the 402 at once, and `ok` in 2.9 s
+  with the override below; nothing waited.
+- **Pi's one lever is a file.** There is no flag, variable or setting for the output
+  limit (`pi --help`, `docs/environment-variables.md`, `docs/settings.md`); the model's
+  `maxTokens` is set in `models.json` of Pi's agent folder, as a model of the
+  provider's own or a `modelOverrides` entry
+  (`{"providers":{"openrouter":{"modelOverrides":{"google/gemini-4-argon":{"maxTokens":32768}}}}}`,
+  which turned the 402 into `ok` and the catalog's 943.7K into 32.8K). The owner's own
+  `models.json` already does it for Kimi K3. A ConsensFlow window runs on the person's
+  Pi folder as a terminal Pi does, so their override reaches it; ConsensFlow would have
+  to write the person's `models.json` or give Pi a folder of its own to pass one, and it
+  does neither. A 402 that Pi reports is read as the billing refusal it is (`Quota::
+  Unavailable`, "its billing was refused", with Pi's words, MUS-23), so the window is
+  marked out for the human and not retried.
+
 Khnum (Devin SWE-1.6 Slow) went: Devin no longer lists `swe-1-6-slow`. The data
 keeps it under `retired`, with why, so a project whose staff or chief still
 names it says so in plain words (the board's row, the staff in Project settings,
