@@ -163,3 +163,178 @@ fn a_launch_that_never_showed_its_first_message_is_told_to_the_chief_before_the_
         "and is told T-2 waits for it: {told:?}"
     );
 }
+
+/// T-3, asked for by the human, waits for T-1 on the board.
+fn human_waits_for_t1(tiers: &Tiers<'_>) {
+    tiers.context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "human".to_owned(),
+            pool: Some("worker".to_owned()),
+            tier: Some("standard".to_owned()),
+            body: "Docs of the parser".to_owned(),
+            needs: vec![1],
+            ..NewTask::default()
+        },
+    );
+    assert_eq!(tiers.task(3).task.state, "open", "T-3 waits for T-1");
+}
+
+/// What `handle` was sent about T-1 or the tasks that wait for it, oldest first, with the
+/// order the board wrote it in.
+fn sent(tiers: &Tiers<'_>, handle: &str) -> Vec<(i64, String)> {
+    let mut all: Vec<_> = tiers
+        .context
+        .inbox(tiers.id(handle))
+        .into_iter()
+        .filter(|message| message.kind == "note")
+        .filter(|message| message.body.contains("T-1") || message.body.contains("T-3"))
+        .map(|message| (message.id, message.body))
+        .collect();
+    all.sort();
+    all
+}
+
+/// zeus's window exits right after its start, its brief on its way.
+fn the_launch_fails(context: &Context) {
+    context.host.exits_showing(Some(3), None, None);
+    context.exit("zeus");
+}
+
+const REOPEN: &str = r#"Reopen it with: cf task reopen T-1 "…""#;
+
+#[test]
+fn the_one_note_of_a_failed_launch_names_the_tasks_the_chief_asked_for_that_wait_for_it() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    waits_for_t1(&tiers);
+    the_launch_fails(&context);
+
+    assert_eq!(
+        about_the_two(&tiers),
+        [format!(
+            "T-1 failed: @{}'s window closed (exit code 3). {REOPEN} T-2 waits for it: cancel T-2, or reopen T-1 and let it finish.",
+            tiers.assignee(1)
+        )]
+    );
+}
+
+#[test]
+fn a_task_the_human_asked_for_that_waits_for_a_failed_launch_is_told_to_the_human_after_its_cause()
+{
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    waits_for_t1(&tiers);
+    human_waits_for_t1(&tiers);
+    the_launch_fails(&context);
+
+    let session = tiers.assignee(1);
+    let because = format!("@{session}'s window closed (exit code 3)");
+    // The chief reads the failure with the task it asked for in it, and nothing of the human's.
+    let chief = sent(&tiers, "chief");
+    assert_eq!(
+        chief.iter().map(|(_, body)| body.as_str()).collect::<Vec<_>>(),
+        [format!(
+            "T-1 failed: {because}. {REOPEN} T-2 waits for it: cancel T-2, or reopen T-1 and let it finish."
+        )]
+    );
+    // The human reads that the brief did not reach the window, then that T-3 waits for T-1.
+    let human = sent(&tiers, "human");
+    let bodies: Vec<&str> = human.iter().map(|(_, body)| body.as_str()).collect();
+    assert_eq!(
+        bodies,
+        [
+            format!(
+                "m-{}, a task from @chief on T-1, did not reach @{session}: {because}.",
+                tiers.task(1).messages[0].id
+            ),
+            "T-3 waits for T-1, which failed: cancel T-3, or reopen T-1 and let it finish."
+                .to_owned()
+        ]
+    );
+    assert!(
+        human[0].0 < human[1].0 && chief[0].0 < human[1].0,
+        "the cause first, in the order the board wrote them: {human:?} {chief:?}"
+    );
+}
+
+#[test]
+fn a_task_the_human_asked_for_that_waits_for_a_failed_turn_is_told_to_the_human_after_the_chiefs_note(
+) {
+    let context = Context::new();
+    let tiers = working(&context);
+    waits_for_t1(&tiers);
+    human_waits_for_t1(&tiers);
+    context.adapter.with("zeus", |agent| {
+        agent.failed = true;
+        agent.failure = Some("Selected model is at capacity.".to_owned());
+    });
+    context.adapter.answer("zeus", "Starting on the parser");
+    context.pass().unwrap();
+
+    let session = tiers.assignee(1);
+    let because = format!(
+        "@{session}'s harness reported a failure; it said: \"Selected model is at capacity.\""
+    );
+    let chief = sent(&tiers, "chief");
+    assert_eq!(
+        chief.iter().map(|(_, body)| body.as_str()).collect::<Vec<_>>(),
+        [format!(
+            "T-1 failed: {because}. {REOPEN} T-2 waits for it: cancel T-2, or reopen T-1 and let it finish."
+        )]
+    );
+    let human = sent(&tiers, "human");
+    assert_eq!(
+        human
+            .iter()
+            .map(|(_, body)| body.as_str())
+            .collect::<Vec<_>>(),
+        ["T-3 waits for T-1, which failed: cancel T-3, or reopen T-1 and let it finish."]
+    );
+    assert!(chief[0].0 < human[0].0, "{chief:?} {human:?}");
+}
+
+#[test]
+fn a_task_the_human_gave_that_failed_is_told_to_the_human_before_the_tasks_the_chief_asked_for_that_wait_for_it(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "human".to_owned(),
+            pool: Some("worker".to_owned()),
+            tier: Some("standard".to_owned()),
+            body: "Write the parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    waits_for_t1(&tiers);
+    the_launch_fails(&context);
+
+    let session = tiers.assignee(1);
+    let because = format!("@{session}'s window closed (exit code 3)");
+    // The human's own task: their note is the failure, and the chief's waiter comes after it.
+    let human = sent(&tiers, "human");
+    assert_eq!(
+        human
+            .iter()
+            .map(|(_, body)| body.as_str())
+            .collect::<Vec<_>>(),
+        [format!("T-1 failed: {because}. {REOPEN}")]
+    );
+    let chief = sent(&tiers, "chief");
+    assert_eq!(
+        chief
+            .iter()
+            .map(|(_, body)| body.as_str())
+            .collect::<Vec<_>>(),
+        ["T-2 waits for T-1, which failed: cancel T-2, or reopen T-1 and let it finish."]
+    );
+    assert!(human[0].0 < chief[0].0, "{human:?} {chief:?}");
+}

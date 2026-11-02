@@ -532,6 +532,92 @@ fn wait_for_it(number: i64, waiting: &[i64]) -> String {
     }
 }
 
+/// What the note of the failed `task` to the requester `requester` adds of the tasks that wait
+/// for it and were asked for by that requester ([`wait_for_it`]): a sentence led by a space,
+/// none where nothing of theirs waits.
+pub(crate) fn waiting_for_it(
+    store: &Store,
+    task: &TaskRow,
+    requester: &str,
+) -> Result<String, LedgerError> {
+    let mut here = Vec::new();
+    for waiting in waiters(store, task)? {
+        let waiter = store.task_row(task.project_id, waiting)?;
+        if store.participant_row(waiter.requester_id)?.handle == requester {
+            here.push(waiting);
+        }
+    }
+    Ok(wait_for_it(task.number, &here))
+}
+
+/// The requester of each task that waits for the failed `task` is told, in a note of its own
+/// about the waiter, that it waits for a failed task and what to do: cancel the waiter, or
+/// reopen the task. Not `named`, whose note of the failure names the tasks it asked for
+/// ([`waiting_for_it`]). Called after the words of the failure, which the requester is given
+/// first.
+fn tell_other_waiters(
+    store: &mut Store,
+    task: &TaskRow,
+    named: Option<&str>,
+) -> Result<(), LedgerError> {
+    let number = task.number;
+    for waiting in waiters(store, task)? {
+        let waiter = store.task_row(task.project_id, waiting)?;
+        let requester = store.participant_row(waiter.requester_id)?;
+        if named == Some(requester.handle.as_str()) {
+            continue;
+        }
+        send(
+            store,
+            task.project_id,
+            &Sent {
+                to: &requester.handle,
+                task: Some(waiting),
+                kind: "note",
+                body: &format!(
+                    "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, or reopen T-{number} and let it finish."
+                ),
+                ..Sent::default()
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// A task the daemon gave up on through a delivery that did not arrive
+/// (`give_up_delivery`), whose requester the engine has told why in the words of the
+/// delivery: the requester `named` there has the tasks that wait for it in that note
+/// ([`waiting_for_it`]), and the other requesters of waiters are told now, each in a note of
+/// its own, after those words.
+pub(crate) fn tell_waiting_for_failed(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    named: &str,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        if task.state != "failed" {
+            return Ok(());
+        }
+        tell_other_waiters(store, &task, Some(named))
+    })
+}
+
+/// [`waiting_for_it`] of task `number`, for a note the engine writes to `requester`.
+pub(crate) fn waiting_for_it_of(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+    requester: &str,
+) -> Result<String, LedgerError> {
+    let task = store.task_row(project_id, number)?;
+    if task.state != "failed" {
+        return Ok(String::new());
+    }
+    waiting_for_it(store, &task, requester)
+}
+
 /// A task an open task waits for is not called off: the waiter is released
 /// when the task is accepted, so it would read "blocked by" it for good and
 /// nothing would tell anyone. Whoever cancels names the waiters to cancel
@@ -742,18 +828,9 @@ fn fail(
         // written a millisecond apart). The tasks that wait for it and were asked for by the
         // same requester are named in that note; the others' requesters are told after it, each
         // in a note of its own.
-        let mut here = Vec::new();
-        let mut elsewhere = Vec::new();
-        for waiting in waiters(store, &task)? {
-            let waiter = store.task_row(project_id, waiting)?;
-            if given_up && waiter.requester_id == task.requester_id {
-                here.push(waiting);
-            } else {
-                elsewhere.push((waiting, waiter));
-            }
-        }
         if given_up {
             let words = failed(told.waiting_for_the_reopen(None));
+            let waiting = waiting_for_it(store, &task, &requester.handle)?;
             send(
                 store,
                 project_id,
@@ -761,27 +838,12 @@ fn fail(
                     to: &requester.handle,
                     task: Some(number),
                     kind: "note",
-                    body: &format!("{words}{}", wait_for_it(number, &here)),
+                    body: &format!("{words}{waiting}"),
                     ..Sent::default()
                 },
             )?;
         }
-        for (waiting, waiter) in elsewhere {
-            let requester = store.participant_row(waiter.requester_id)?;
-            send(
-                store,
-                project_id,
-                &Sent {
-                    to: &requester.handle,
-                    task: Some(waiting),
-                    kind: "note",
-                    body: &format!(
-                        "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, or reopen T-{number} and let it finish."
-                    ),
-                    ..Sent::default()
-                },
-            )?;
-        }
+        tell_other_waiters(store, &task, given_up.then_some(requester.handle.as_str()))?;
         task_by_id(store, task.id)
     })
 }

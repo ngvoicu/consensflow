@@ -1654,7 +1654,9 @@ impl Dispatcher {
     /// What the ledger withdrew did not fail, and nobody hears of it. The words that
     /// resume a paused task paused it again: its requester hears why in the note of the
     /// pause (the ledger's), and the human, once, that they did not reach the window.
-    /// The ledger says which it did ([`GivenUp`]): no state is read for it.
+    /// The ledger says which it did ([`GivenUp`]): no state is read for it. The tasks that
+    /// wait for a task this failed are told last, after the words of the failure, and the
+    /// requester's note names the ones it asked for (T-1148).
     fn fail_delivery(
         &self,
         message: &MessageView,
@@ -1688,6 +1690,31 @@ impl Dispatcher {
                 return self.words_back(&project, message, because, true);
             }
         }
+        self.tell_given_up(message, because)?;
+        // Last, what the failure left behind: the tasks that wait for the task it failed are
+        // told to their requesters after the words of the failure, which the chief is given
+        // first (it is given its notes one at a time, the oldest first), the human's
+        // included. The requester of the task has them in its note, as the ledger's give-up
+        // says them (the field board of 2026-11-02: T-303 waits for T-302, which failed,
+        // reached the chief before T-302 failed; T-1148).
+        let Some(number) = message.task_number else {
+            return Ok(());
+        };
+        let project = self.known_project(message.project_id)?;
+        let task = self.seams.ledger.borrow().task(project.id, number)?;
+        if let Some(thread) = task.filter(|thread| thread.task.state == "failed") {
+            self.seams.ledger.borrow_mut().tell_waiting_for_failed(
+                project.id,
+                number,
+                &thread.task.requester,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The words of a delivery that failed for good: whoever gave the task and whoever told
+    /// the words hear why, and the human, once, what it was.
+    fn tell_given_up(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
         let project = self.known_project(message.project_id)?;
         // The human's own words that wait for the reopen of the task this failed, where
         // the human is not its requester, said in the note of what did not reach the
@@ -1736,6 +1763,13 @@ impl Dispatcher {
                         ""
                     }
                 };
+                // The tasks that wait for it and were asked for by its requester are named
+                // in the requester's note, after the words of the failure.
+                let waits = self.seams.ledger.borrow().waiting_for_it(
+                    project.id,
+                    number,
+                    &task.requester,
+                )?;
                 self.tell_failed(
                     &project,
                     task,
@@ -1743,7 +1777,7 @@ impl Dispatcher {
                     &because,
                     &told,
                     None,
-                    theirs(&task.requester),
+                    &format!("{waits}{}", theirs(&task.requester)),
                 )?;
                 if let Some(teller) = teller.filter(|teller| *teller != task.requester) {
                     self.tell_failed(

@@ -22,7 +22,8 @@ use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT
 pub(crate) use editing::{edit_task, tell_open};
 pub(crate) use finishing::{
     accept_task, call_off, cancel_task, delete_tasks, fail_task, give_up_task, note_stranded_waits,
-    record_finished, record_result, release_ready, reopen_task, tell_stranded_waiters, Ending,
+    record_finished, record_result, release_ready, reopen_task, tell_stranded_waiters,
+    tell_waiting_for_failed, waiting_for_it_of, Ending,
 };
 pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};
