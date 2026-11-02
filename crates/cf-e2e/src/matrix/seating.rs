@@ -41,6 +41,11 @@ impl Role {
     ];
 
     /// Its name, as the evidence says it (and as the ledger names a member's role).
+    /// The position called `name`, as [`Role::name`] says it.
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|role| role.name() == name)
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Self::Chief => "chief",
@@ -166,6 +171,38 @@ impl Seating {
                 })
                 .collect(),
         }
+    }
+
+    /// The same seating with the members of `roles` played by the rig's stand-in: a seat whose
+    /// harness cannot be real on this machine today (Pi with no login of its model's
+    /// provider), which the run says it does not cover. The chief is the board's own harness
+    /// or nothing: a stand-in chief is the control's, told what to do in its own words.
+    pub fn with_stand_ins(mut self, roles: &[Role]) -> Result<Self> {
+        if roles.contains(&Role::Chief) {
+            return Err(Error::Daemon(
+                "--stand-in takes a member's position (worker, reviewer, advisor, tester), not the chief's"
+                    .to_owned(),
+            ));
+        }
+        for seat in &mut self.seats {
+            if roles.contains(&seat.role) {
+                seat.harness = None;
+            }
+        }
+        Ok(self)
+    }
+
+    /// The positions the stand-in plays where the board seats a real harness: what the run
+    /// covers none of.
+    pub fn not_covered(&self) -> Vec<Role> {
+        if self.board.is_none() {
+            return Vec::new();
+        }
+        self.seats
+            .iter()
+            .filter(|seat| seat.harness.is_none())
+            .map(|seat| seat.role)
+            .collect()
     }
 
     /// The seat of `role`.
@@ -299,6 +336,33 @@ mod tests {
         }
         // The kit's own model for Devin carries its effort, and Pi's none.
         assert_eq!(board.seat(Role::Advisor).row()["effort"], "medium");
+    }
+
+    #[test]
+    fn a_member_the_machine_cannot_seat_today_is_played_by_the_stand_in_and_is_not_covered() {
+        let board = Seating::board(0)
+            .unwrap()
+            .with_stand_ins(&[Role::Reviewer])
+            .unwrap();
+        assert_eq!(board.seat(Role::Reviewer).who(), "stand-in");
+        assert_eq!(
+            board.seat(Role::Reviewer).row()["model"],
+            STAND_IN_WORKER_MODEL
+        );
+        assert_eq!(board.seat(Role::Chief).who(), "claude");
+        assert!(!board.chief_is_stand_in());
+        assert_eq!(board.not_covered(), [Role::Reviewer]);
+        assert!(Seating::board(0).unwrap().not_covered().is_empty());
+        // The control covers nothing and claims nothing.
+        assert!(Seating::stand_ins().not_covered().is_empty());
+        let refused = Seating::board(0)
+            .unwrap()
+            .with_stand_ins(&[Role::Chief])
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("not the chief's"), "{refused}");
+        assert_eq!(Role::named("tester"), Some(Role::Tester));
+        assert_eq!(Role::named("designer"), None);
     }
 
     #[test]

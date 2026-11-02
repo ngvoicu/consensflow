@@ -85,6 +85,7 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
             "deadlineSeconds": scenario.deadline.as_secs(),
             "turnCeiling": scenario.turns,
         },
+        "notCovered": seating.not_covered().into_iter().map(Role::name).collect::<Vec<_>>(),
         "ownerBefore": owner.manifest(),
         "startedAt": jiff::Timestamp::now().to_string(),
     });
@@ -93,6 +94,16 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
         "the run's evidence goes to {}",
         evidence.folder.display()
     ));
+    let not_covered: Vec<&str> = seating.not_covered().into_iter().map(Role::name).collect();
+    if !not_covered.is_empty() {
+        evidence.text(
+            "NOT-COVERED.txt",
+            &format!(
+                "The rig's stand-in played {} in this run: it covers no harness there.\n",
+                not_covered.join(", ")
+            ),
+        )?;
+    }
 
     let folder_name = format!("matrix-{id}");
     let plan = seating.plan(&folder_name, &scenario.fixture);

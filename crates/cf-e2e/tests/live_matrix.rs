@@ -20,7 +20,7 @@ use cf_e2e::live::{self, Log};
 use cf_e2e::matrix::evidence::{Owner, REPORTS};
 use cf_e2e::matrix::run::{run, Matrix};
 use cf_e2e::matrix::scenario::Scenario;
-use cf_e2e::matrix::seating::Seating;
+use cf_e2e::matrix::seating::{Role, Seating};
 use cf_e2e::{Error, Result};
 
 /// The stand-in agent's program: the stand-in seats' windows, and the one a rig has where no
@@ -28,10 +28,14 @@ use cf_e2e::{Error, Result};
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The board and the scenario the words ask for: `--board` (0 where none is said) and
-/// `--scenario` (`smoke`). The harnesses are the board's; a harness named besides is refused.
+/// `--scenario` (`smoke`), with `--stand-in` naming the members' positions the rig's stand-in
+/// plays where this machine cannot seat the board's harness today (`--stand-in reviewer`: Pi
+/// with no login of its model's provider), which the run says it covers none of. The harnesses
+/// are the board's; a harness named besides is refused.
 fn asked(
     board: Option<&str>,
     scenario: Option<&str>,
+    stand_in: Option<&str>,
     harnesses: &[String],
 ) -> Result<(Seating, Scenario)> {
     if !harnesses.is_empty() {
@@ -44,8 +48,20 @@ fn asked(
     let board = number
         .parse::<u8>()
         .map_err(|_| Error::Daemon(format!("--board takes a board's number, not {number}")))?;
+    let roles = stand_in
+        .unwrap_or_default()
+        .split(',')
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            Role::named(word).ok_or_else(|| {
+                Error::Daemon(format!(
+                    "--stand-in takes worker, reviewer, advisor or tester, not {word}"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok((
-        Seating::board(board)?,
+        Seating::board(board)?.with_stand_ins(&roles)?,
         Scenario::named(scenario.unwrap_or("smoke"))?,
     ))
 }
@@ -58,8 +74,16 @@ fn a_board_of_real_harnesses_goes_through_its_scenario_as_the_ledger_and_the_rec
     let (seating, scenario) = asked(
         live::option("board").as_deref(),
         live::option("scenario").as_deref(),
+        live::option("stand-in").as_deref(),
         &live::list("harness"),
     )?;
+    let not_covered: Vec<&str> = seating.not_covered().into_iter().map(Role::name).collect();
+    if !not_covered.is_empty() {
+        log.say(format!(
+            "THE STAND-IN PLAYS {}: this run covers no harness there",
+            not_covered.join(", ").to_uppercase()
+        ));
+    }
     let matrix = Matrix {
         seating,
         scenario,
@@ -69,11 +93,16 @@ fn a_board_of_real_harnesses_goes_through_its_scenario_as_the_ledger_and_the_rec
     };
     let outcome = run(&matrix, &log)?;
     log.say(format!(
-        "{} s, {} turns: {:?}; the evidence is in {}",
+        "{} s, {} turns: {:?}; the evidence is in {}{}",
         outcome.elapsed.as_secs(),
         outcome.total_turns,
         outcome.turns,
-        outcome.evidence.folder.display()
+        outcome.evidence.folder.display(),
+        if not_covered.is_empty() {
+            String::new()
+        } else {
+            format!("; NOT COVERED (the stand-in): {}", not_covered.join(", "))
+        }
     ));
     report::conclude(
         &log,
@@ -88,10 +117,23 @@ mod tests {
 
     #[test]
     fn the_words_ask_for_board_0_and_smoke_and_nothing_else_yet() {
-        let (seating, scenario) = asked(None, None, &[]).unwrap();
+        let (seating, scenario) = asked(None, None, None, &[]).unwrap();
         assert_eq!((seating.board, scenario.name), (Some(0), "smoke"));
+        assert!(seating.not_covered().is_empty());
+        let (seating, _) = asked(Some("0"), None, Some("reviewer"), &[]).unwrap();
+        assert_eq!(seating.not_covered(), [Role::Reviewer]);
+        assert!(asked(None, None, Some("chief"), &[])
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("not the chief's"));
+        assert!(asked(None, None, Some("judge"), &[])
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("not judge"));
         let refused = |board, scenario, harnesses: &[String]| {
-            asked(board, scenario, harnesses)
+            asked(board, scenario, None, harnesses)
                 .err()
                 .map(|failed| failed.to_string())
                 .unwrap_or_default()
