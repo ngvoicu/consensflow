@@ -288,6 +288,12 @@ pub(crate) struct WindowPart {
     /// forget the first's, and be interrupted for it again on going back to
     /// it: only a member's own lane, given tasks by name, can.
     pub(crate) stopped: Option<(i64, i64)>,
+    /// The stop it paid at rest with its turn's message not yet taken back: a harness that
+    /// takes the message back writes so a moment after the turn's end (Muse's
+    /// `run_retracted`, 5–11 ms after its `terminal cancelled`), and a look between the two
+    /// pays the stop (`stops`). A later look that reads the message taken back takes it
+    /// back then.
+    pub(crate) paid_untaken: Option<Stop>,
     /// The rounds the stop it owes has had.
     pub(crate) interrupted: Option<Interrupted>,
     /// The stop it ignored in every round, while it lasts.
@@ -365,6 +371,7 @@ impl Default for WindowPart {
             trust_keys: 0,
             trust_sure: false,
             stopped: None,
+            paid_untaken: None,
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
@@ -894,6 +901,7 @@ impl Dispatcher {
             part.harness.clone_from(&planned.harness);
             part.pane = Some(pane.clone());
             part.opened_at = Some(asked_at);
+            part.paid_untaken = None;
             record.quota.borrow_mut().drifts_told.clear();
             part.launch_id = Some(launch_id);
             part.token = Some(token);

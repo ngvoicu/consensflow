@@ -242,3 +242,76 @@ fn a_folder_reached_through_a_link_is_the_same_folder_a_store_names_by_its_real_
         "Codex, its rollout naming the real folder, asked by the link"
     );
 }
+
+/// A Muse session's folder in the data folder under `data`, named by a UUIDv7 begun
+/// `seconds_ago`, whose log's head names `workspace` as Muse 1.4.14 writes it
+/// (`runtime.session.metadata`'s `workspace_root`, after its frame). Its id.
+fn muse_session(data: &Path, seconds_ago: i64, workspace: &str, tail: u16) -> String {
+    let ms = ago(seconds_ago);
+    let id = format!(
+        "{:08x}-{:04x}-7000-8000-{:012x}",
+        ms >> 16,
+        ms & 0xffff,
+        tail
+    );
+    let folder = data
+        .join("muse")
+        .join("sessions")
+        .join("2026")
+        .join("11")
+        .join("02")
+        .join(&id);
+    fs::create_dir_all(&folder).unwrap();
+    let lines = [
+        json!({ "retained_frame": "session_permission_transaction", "children": [] }),
+        json!({ "schema_version": 1, "id": "r3", "sequence": 3,
+                "stream": { "kind": "session", "id": id },
+                "payload_type": "runtime.session.metadata",
+                "payload": { "kind": "metadata",
+                             "record": { "workspace_root": workspace, "model_id": "muse-spark-1.3" } } }),
+    ];
+    let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    fs::write(folder.join("session.jsonl"), text).unwrap();
+    id
+}
+
+#[test]
+fn muses_newest_session_of_a_folder_since_a_time_is_the_one_its_log_says_was_opened_there() {
+    // T-1056: the live kit's Muse window opens on no id of its own, and was answered
+    // "opens no window yet: none to find", so `live resume-cut`'s early case never read
+    // its record. A session's log names its folder in its head.
+    let data = tempfile::tempdir().unwrap();
+    let ours = muse_session(data.path(), 30, "/work/a", 1);
+    let older = muse_session(data.path(), 40, "/work/a", 2);
+    let _elsewhere = muse_session(data.path(), 10, "/work/b", 3);
+    let _before = muse_session(data.path(), 3_600, "/work/a", 4);
+    let found = |since_ms: i64, workspace: &str| {
+        let data = text(data.path());
+        newest(
+            Harness::Muse,
+            "muse",
+            workspace,
+            since_ms,
+            &env(&[("XDG_DATA_HOME", &data), ("HOME", "/nowhere")]),
+        )
+    };
+    assert_eq!(
+        found(ago(120), "/work/a"),
+        Ok(Some(ours.clone())),
+        "the newest of the folder"
+    );
+    assert_eq!(
+        found(ago(120), "/work/c"),
+        Ok(None),
+        "none of a folder no log names"
+    );
+    assert_eq!(found(ago(5), "/work/a"), Ok(None), "none begun since");
+    // A log whose head has not named its folder yet is none.
+    let bare = data
+        .path()
+        .join("muse/sessions/2026/11/02")
+        .join(&ours)
+        .join("session.jsonl");
+    fs::write(&bare, "").unwrap();
+    assert_eq!(found(ago(120), "/work/a"), Ok(Some(older)));
+}
