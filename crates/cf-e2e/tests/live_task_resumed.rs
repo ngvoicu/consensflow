@@ -31,6 +31,12 @@
 //!   `project.resume`): the task the Close paused goes on with the project
 //! - `pause-close`  the task is paused, the project closed and resumed (the task stays
 //!   paused), and then the chief resumes the task with words
+//! - `tell`         the chief tells the window (`cf tell T-n "…"`, which pauses the task and puts
+//!   the words to its window); the window answers and is told to go on with its work in the same
+//!   turn; the chief resumes the task as soon as it has the answer (T-1139, field bug 8). A
+//!   harness that keeps working after the tell has its words wait behind the turn, and the
+//!   task must read working while they wait; one that stops after the answer is given the words
+//!   at rest as in the other shapes. What each did is in the run's report.
 //!
 //! ```text
 //! cargo xtask live task-resumed                       Devin, every shape
@@ -71,6 +77,11 @@ const ENDS: Duration = Duration::from_secs(240);
 const CHIEF_UP: Duration = Duration::from_secs(90);
 /// How often the board is looked at.
 const LOOK: Duration = Duration::from_millis(250);
+/// How long the window has to answer a tell.
+const ANSWERS: Duration = Duration::from_secs(120);
+/// A short command the window is told to run, again and again, in the turn of the tell: its
+/// record grows with each (T-1139).
+const SHORT: LongCommand = LongCommand::lasting("cf-task-resumed-short-command", 8);
 
 /// The first look, among `looks` (what the board read of the task, and how long after the
 /// resume), that reads it `working` within `within` of the resume: the moment the task went
@@ -103,6 +114,14 @@ fn first() -> String {
 
 /// What the lead task asks: a word, and nothing else.
 const LEAD: &str = "Reply with exactly one line: RESUMED_LEAD_DONE";
+
+/// The chief's tell: the answer, and the work to go on with in the same turn.
+fn tell_words() -> String {
+    format!(
+        "Stop what you are doing and answer this question with the cf answer command, with exactly the word ok. Then, without waiting for anything, go on with your work: run this command six times, one after the other, each in a tool call of its own (never chained in one):\n{}\nThen reply with exactly one line: TELL_TURN_DONE",
+        SHORT.text()
+    )
+}
 
 /// The chief's words that resume the task.
 const WORDS: &str =
@@ -217,6 +236,10 @@ fn deliveries_since(members: &Members, since_ms: i64) -> Vec<String> {
 
 /// The task looked at from the resume (`since`, `since_ms`): when it first read
 /// "working", the series of what it read, and what the daemon said of the deliveries.
+///
+/// Returns when the task first read working while the words that resumed it had not been
+/// confirmed in the window, if it did: a window at work on it when it was resumed is
+/// the case where it must (T-1139).
 fn goes_on(
     run: &Run<'_>,
     number: i64,
@@ -224,8 +247,9 @@ fn goes_on(
     since: Instant,
     since_ms: i64,
     case: &mut Account,
-) -> Result<()> {
+) -> Result<Option<Duration>> {
     let mut series: Vec<String> = Vec::new();
+    let mut working_while_waiting: Option<Duration> = None;
     let mut last = String::new();
     let mut looks: Vec<(Duration, String)> = Vec::new();
     let mut confirmed: Option<Duration> = None;
@@ -247,6 +271,14 @@ fn goes_on(
             })
         {
             confirmed = Some(since.elapsed());
+        }
+        // The state was read before the events: working with no confirmation after it was
+        // working with the words still waiting.
+        if working_while_waiting.is_none()
+            && confirmed.is_none()
+            && looks.last().is_some_and(|(_, state)| state == "working")
+        {
+            working_while_waiting = Some(since.elapsed());
         }
         sleep(LOOK);
     }
@@ -310,7 +342,7 @@ fn goes_on(
                 .join("; ")
         ));
     }
-    Ok(())
+    Ok(working_while_waiting)
 }
 
 /// The resumed task ends with a result.
@@ -582,6 +614,77 @@ fn window_cut(run: &Run<'_>, case: &mut Account) -> Result<()> {
     Ok(())
 }
 
+/// The chief tells the task's window while it is inside its command: the window answers the
+/// tell and is asked to go on with its work in the same turn, and the chief resumes the task
+/// as soon as it has the answer. A window that keeps working then has the resume's words wait
+/// behind its turn, and the task must read working meanwhile; one that stopped has them at rest.
+fn tell(run: &Run<'_>, case: &mut Account) -> Result<()> {
+    let given_ms = jiff::Timestamp::now().as_millisecond();
+    let (number, handle) = inside_the_command(run)?;
+    let told = run
+        .members
+        .as_chief(["tell", &format!("T-{number}"), &tell_words()])?;
+    case.say(format!(
+        "cf tell T-{number}: exit {:?}, {}",
+        told.code,
+        told.stdout.trim()
+    ));
+    case.require(told.code == Some(0));
+    let answered = find(
+        run.log,
+        &format!("the window's answer to the tell of T-{number}"),
+        ANSWERS,
+        Duration::from_secs(1),
+        || {
+            let thread = run.members.task(number)?;
+            Ok(thread["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|message| message["kind"] == "answer")
+                .then_some(()))
+        },
+    )?;
+    case.check(
+        "the window answered the tell",
+        answered.is_some(),
+        messages(&run.members.task(number)?),
+    );
+    // Does the window go on with its turn after the answer? Looked at twice, three
+    // seconds apart: a window at work on both is one that keeps working.
+    let first = text(&run.members.lane(&handle)?["activity"]["state"]);
+    sleep(Duration::from_secs(3));
+    let second = text(&run.members.lane(&handle)?["activity"]["state"]);
+    let keeps_working = first == "working" && second == "working";
+    case.say(format!(
+        "after the answer the window's lane read {first}, then {second}: it {} after the tell; T-{number} reads {}",
+        if keeps_working {
+            "KEEPS WORKING"
+        } else {
+            "STOPPED"
+        },
+        text(&run.members.task(number)?["state"])
+    ));
+    let (since, since_ms) = chief_resumes(run, number, case)?;
+    let waiting = goes_on(run, number, &handle, since, since_ms, case)?;
+    if keeps_working {
+        case.check(
+            "the window kept working after the tell, and the task read working while the words that resumed it waited",
+            waiting.is_some(),
+            match waiting {
+                Some(at) => format!("working {:.1} s after the resume, before the words were in", at.as_secs_f64()),
+                None => "it read working only once the words were in the window, or never".to_owned(),
+            },
+        );
+    }
+    if !case.held() {
+        say_events(run.members, given_ms, case);
+    }
+    ends(run, number, case)?;
+    tidy(run, &handle);
+    Ok(())
+}
+
 /// The messages of a thread, as `m-id kind state`.
 fn messages(thread: &serde_json::Value) -> String {
     thread["messages"]
@@ -629,7 +732,7 @@ fn say_events(members: &Members, since_ms: i64, case: &mut Account) {
     ));
 }
 
-const SHAPES: [(&str, &str, Shape); 6] = [
+const SHAPES: [(&str, &str, Shape); 7] = [
     (
         "cut",
         "its window ended, then resumed by the chief with words",
@@ -651,6 +754,11 @@ const SHAPES: [(&str, &str, Shape); 6] = [
         "pause-close",
         "paused, the project closed and resumed, then the chief's resume",
         pause_close,
+    ),
+    (
+        "tell",
+        "told by the chief, the window's answer, then the chief's resume",
+        tell,
     ),
 ];
 
@@ -837,6 +945,17 @@ mod tests {
             .map(|ms| (*ms).to_owned())
             .collect();
         assert_eq!(moments(&named), [500, 2000]);
+    }
+
+    #[test]
+    fn the_tell_asks_for_its_answer_by_cf_answer_and_six_short_commands_each_in_a_tool_call_of_its_own(
+    ) {
+        let words = tell_words();
+        assert!(words.contains("cf answer command, with exactly the word ok"));
+        assert!(words.contains("run this command six times"));
+        assert!(words.contains("each in a tool call of its own"));
+        assert!(words.contains(&SHORT.text()));
+        assert!(words.ends_with("reply with exactly one line: TELL_TURN_DONE"));
     }
 
     #[test]

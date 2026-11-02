@@ -50,3 +50,13 @@ runs = ["resumed-suite"]
 file = "crates/cf-e2e/tests/live_task_resumed.rs"
 find = '''        vec![0, 1000, 3000, 6000, 10_000, 20_000]'''
 replace = '''        vec![0]'''
+
+[[plant]]
+name = "live task-resumed: the tell asks for the six short commands once"
+meant = "the_tell_asks_for_its_answer_by_cf_answer_and_six_short_commands_each_in_a_tool_call_of_its_own"
+runs = ["resumed-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_task_resumed.rs"
+find = '''run this command six times, one after the other'''
+replace = '''run this command once, one after the other'''
