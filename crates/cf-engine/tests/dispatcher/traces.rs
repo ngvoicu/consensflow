@@ -386,7 +386,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "lets go of its participant: its next step runs, the failure is written down, and an operation waiting on it ends",
-        TAKEN_AS_IT_WENT,
+        "the window goes with a paste on its way into it that its harness took and its record shows: the record is read (`record`) and the paste confirmed, where Node gave it back to its queue to be pasted again into the conversation that held it; and the Close comes while the session's window holds T-2's brief, read as the window opened and not confirmed yet: the window closed with its project, so its record is read and the brief, which it shows, is confirmed, and T-2 pauses with the Close (T-1076), where Node failed the brief and T-2 and told the chief (`@zeus-amber-pine's window closed`), as the alpha.1 release check saw a Devin worker's task fail at a Close",
     ),
     (
         "gives the new chief its handoff again when its first window closes before showing it",

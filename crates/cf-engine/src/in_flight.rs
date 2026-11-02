@@ -169,9 +169,12 @@ impl Dispatcher {
     /// (its handoff, and what its launch put ahead of its queue), which `otherwise`
     /// gives back to wait for its next window, on the same conversation: one its
     /// record shows went there was given again (a review of 2026-10-16: a Codex chief
-    /// that recorded its handoff and closed before a look was given it twice). A
-    /// member's launch's first message is `otherwise`'s alone: it fails with the
-    /// launch, and is never pasted again. The message is read
+    /// that recorded its handoff and closed before a look was given it twice). So is a
+    /// member's launch's first message whose window closed `with_project`, which
+    /// `otherwise` gives back for the Resume: one its record shows is the conversation's
+    /// already, and the Resume goes on there without it (T-1076). Any other member's
+    /// launch's first message is `otherwise`'s alone: it fails with the launch, and is
+    /// never pasted again. The message is read
     /// again once the record is: one that is on its way no more (its task cancelled
     /// meanwhile, or taken back) is left as it is, and the window's end goes on (a
     /// review of 2026-10-16: a confirm of a message cancelled meanwhile failed, and the
@@ -181,9 +184,10 @@ impl Dispatcher {
     pub(crate) async fn settle_gone(
         self: &Rc<Self>,
         delivering: Delivering,
+        with_project: bool,
         otherwise: impl FnOnce(Delivering) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
-        if delivering.launch && !delivering.chief {
+        if delivering.launch && !delivering.chief && !with_project {
             return otherwise(delivering);
         }
         let Some(message) = self.still_delivering(delivering.message)? else {

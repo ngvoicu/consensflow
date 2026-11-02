@@ -572,6 +572,43 @@ pub fn used_percent(usage: &Value) -> Option<(u64, u64)> {
     ))
 }
 
+/// The share of its window or of its week at which a live run spends nothing more of Muse's
+/// allowance: every rig that runs the machine's Muse asks first ([`guard_allowance`]), so no
+/// case starts on an allowance at its end (T-1076: `live close-early` had no such check, ran
+/// at 99% of the week, and its task never finished; only `live muse-window` asked).
+pub const STOP_AT_PERCENT: u64 = 90;
+
+/// What `usage` (`muse usage --json`) says is left of the allowance, in words, or why a live
+/// run spends none of it: [`STOP_AT_PERCENT`] reached in its window or its week, with when
+/// each resets, or no allowance at all.
+pub fn allowance_left(usage: &Value) -> std::result::Result<String, String> {
+    match used_percent(usage) {
+        Some((window, weekly)) if window >= STOP_AT_PERCENT || weekly >= STOP_AT_PERCENT => {
+            Err(format!(
+                "the Muse allowance is at {window}% of its window and {weekly}% of its week, and a live run stops at {STOP_AT_PERCENT}% before it spends any (resets: {} and {})",
+                usage["allowance"]["window"]["resetsAtMs"], usage["allowance"]["weekly"]["resetsAtMs"]
+            ))
+        }
+        Some((window, weekly)) => Ok(format!("{window}% of the window, {weekly}% of the week")),
+        None => Err(format!("Muse says no allowance: {usage}")),
+    }
+}
+
+/// The allowance a live rig's Muse windows would spend, asked of `install` with the person's
+/// login (found by `real_home`) and the settings in `config_home` before any window opens
+/// ([`usage`], no model turn): what is left, in words, or the refusal that stops the run
+/// ([`allowance_left`]). The rig asks it as it writes its live launcher
+/// ([`crate::rig::Config::muse_live`]), so every case that runs Muse is guarded without
+/// asking for it.
+pub fn guard_allowance(
+    install: &Installed,
+    real_home: &Path,
+    config_home: &Path,
+) -> Result<String> {
+    let usage = usage(install, real_home, config_home)?;
+    allowance_left(&usage).map_err(Error::Daemon)
+}
+
 /// The model a log says Muse moved its session to on its own, away from `launched`
 /// (`runtime.model_reconfigure.completed`, whose `effective` is another model): what T-705
 /// saw after a refusal, to a contributor model. None where it never moved.
@@ -712,7 +749,7 @@ mod tests {
 
     #[cfg(unix)]
     use super::installed_on;
-    use super::{question_tools, used_percent, Run, StandIn};
+    use super::{allowance_left, question_tools, used_percent, Run, StandIn};
     #[cfg(unix)]
     use crate::files;
 
@@ -920,5 +957,32 @@ mod tests {
                 Vec::new(),
             ]
         );
+    }
+
+    /// T-1076: a live run stops at 90% of the window or of the week, before it spends any,
+    /// and says when each resets; under it, and on a window nothing was spent of yet, it runs.
+    #[test]
+    fn a_live_run_stops_at_ninety_percent_of_the_window_or_the_week_and_runs_under_it() {
+        let at = |window: u64, weekly: u64| {
+            json!({ "schemaVersion": 1, "allowance": {
+                "window": { "usedPercent": window, "resetsAtMs": 1 },
+                "weekly": { "usedPercent": weekly, "resetsAtMs": 2 },
+            } })
+        };
+        let refused = allowance_left(&at(10, 95)).unwrap_err();
+        assert!(refused.contains("95% of its week"), "{refused}");
+        assert!(refused.contains("resets: 1 and 2"), "{refused}");
+        assert!(allowance_left(&at(90, 0)).is_err(), "90% of the window");
+        assert!(allowance_left(&at(0, 90)).is_err(), "90% of the week");
+        assert_eq!(
+            allowance_left(&at(50, 50)).unwrap(),
+            "50% of the window, 50% of the week"
+        );
+        assert!(allowance_left(&at(89, 89)).is_ok());
+        let fresh =
+            json!({ "schemaVersion": 1, "allowance": null, "reason": "server_sent_no_usage" });
+        assert!(allowance_left(&fresh).is_ok());
+        let none = json!({ "schemaVersion": 1, "allowance": null, "reason": "no_allowance" });
+        assert!(allowance_left(&none).is_err());
     }
 }

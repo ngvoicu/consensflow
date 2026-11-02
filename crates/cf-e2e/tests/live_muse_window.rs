@@ -60,9 +60,6 @@ const CASES: [&str; 9] = [
     "result", "early", "tell", "steer", "cut", "after", "restart", "rest", "question",
 ];
 
-/// The most of its window or week of allowance a run spends: at this, it stops.
-const STOP_AT_PERCENT: u64 = 90;
-
 /// A brief whose turn runs a shell command a while before it answers: a turn a stop,
 /// a tell or a quit can find at work after the model's first output.
 const LONG: &str =
@@ -119,16 +116,8 @@ impl Live {
         let usage = muse::usage(&self.install, &self.home, &folder.path().join(".config"))?;
         let said = usage["allowance"].to_string();
         log.say(format!("allowance: {said}"));
-        match muse::used_percent(&usage) {
-            Some((window, weekly)) if window >= STOP_AT_PERCENT || weekly >= STOP_AT_PERCENT => {
-                Err(Error::Daemon(format!(
-                    "the Muse allowance is at {window}% of its window and {weekly}% of its week: the run stops (resets: {} and {})",
-                    usage["allowance"]["window"]["resetsAtMs"], usage["allowance"]["weekly"]["resetsAtMs"]
-                )))
-            }
-            Some((window, weekly)) => Ok(format!("{window}% of the window, {weekly}% of the week")),
-            None => Err(Error::Daemon(format!("Muse says no allowance: {usage}"))),
-        }
+        // The kit's stop, which every rig that seats Muse asks as it starts too.
+        muse::allowance_left(&usage).map_err(Error::Daemon)
     }
 }
 
