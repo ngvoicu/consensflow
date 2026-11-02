@@ -891,3 +891,79 @@ fn an_interrupt_is_claude_codes_record_of_one_and_what_a_person_typed_is_a_promp
         );
     }
 }
+
+#[test]
+fn a_job_the_process_that_started_it_was_proved_gone_from_is_retired_and_one_started_after_is_not()
+{
+    // The product's reader retires the jobs of a process ConsensFlow saw gone before it opened
+    // the conversation again (`Options::relaunched`): their notifications went with it.
+    let started = |second: u32, id: &str| {
+        line(
+            second,
+            json!({ "type": "user", "toolUseResult": { "backgroundTaskId": id },
+                "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id,
+                "content": "running" }] } }),
+        )
+    };
+    let mut record = record(&[started(10, "b1"), started(40, "b2")]);
+    assert_eq!(record.jobs_pending_at(at(60)).len(), 2);
+    // The process that wrote the record was gone at 20 s: b1 was its, b2 the next process's.
+    record.gone_at(at(20));
+    let pending: Vec<&Kind> = record
+        .jobs_pending_at(at(60))
+        .iter()
+        .map(|entry| &entry.kind)
+        .collect();
+    assert_eq!(pending, [&Kind::JobStarted("b2".to_owned())]);
+    // Before the moment it was proved gone, b1 still ran.
+    assert_eq!(record.jobs_pending_at(at(15)).len(), 1);
+}
+
+#[test]
+fn the_watch_reads_a_compaction_cancelled_with_escape_at_rest_as_the_products_fixture_does() {
+    // The product's own fixture of a live run (Claude Code 2.1.310, the suite `commands-at-rest`):
+    // the bare `/compact` as it was typed and, at the Escape, the words before a command, a
+    // sibling of it, and nothing more. The product reads the turn ended there; the watch read it
+    // at work for good, and a long run with a cancel would have logged a false stall (T-483).
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../cf-harness/tests/fixtures/claude/compact-cancelled.jsonl"
+    ))
+    .unwrap()
+    .replace("$SESSION", "s1");
+    assert_eq!(
+        Record::claude(&text).stood_at(i64::MAX).unwrap().0,
+        Stood::AtRest
+    );
+    // Before the cancel, the compaction is under way: the turn the bare command began is at work.
+    let before_the_cancel: Vec<&str> = text.lines().take(30).collect();
+    assert_eq!(
+        Record::claude(&before_the_cancel.join("\n"))
+            .stood_at(i64::MAX)
+            .unwrap()
+            .0,
+        Stood::InFlight
+    );
+}
+
+#[test]
+fn a_message_taken_into_a_turn_under_way_is_the_records_last_word_and_moves_no_turn() {
+    // A human's message Claude Code took into a turn under way is an attachment, with no user's
+    // record of it: it begins no turn and ends none, and is what the record last said all the
+    // same (the watch judges a record read through a delivery's time by it).
+    let absorbed = line(
+        30,
+        json!({ "type": "attachment", "uuid": "a1", "attachment": { "type": "queued_command",
+            "commandMode": "prompt", "prompt": "And this", "origin": { "kind": "human" } } }),
+    );
+    let at_rest = record(&[
+        prompt(0, "Work."),
+        answer(10, "Done.", "end_turn"),
+        duration(11),
+        absorbed.clone(),
+    ]);
+    assert_eq!(at_rest.last_said(), Some(at(30)));
+    assert_eq!(at_rest.stood_at(at(60)).unwrap().0, Stood::AtRest);
+    let at_work = record(&[prompt(0, "Work."), absorbed]);
+    assert_eq!(at_work.stood_at(at(60)).unwrap().0, Stood::InFlight);
+}
