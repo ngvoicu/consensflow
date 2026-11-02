@@ -716,3 +716,16 @@ fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
     let codex = Installed::at(Harness::Codex, "/bin/echo", "/home/me");
     assert_eq!(rig(&[codex], "/the/stand-in").muse_live_home(), None);
 }
+
+/// On Windows the rig's Muse is the stand-in program cargo builds beside the tests, one folder
+/// above the test program's own (T-1084).
+#[test]
+fn the_rig_s_muse_on_windows_is_the_stand_in_cargo_built_beside_the_tests() {
+    let exe = std::env::consts::EXE_SUFFIX;
+    let test =
+        Path::new("/t/target/debug/deps").join(format!("live_paste_enter-4234f6de7b1954fd{exe}"));
+    assert_eq!(
+        muse_stand_in_beside(&test),
+        Path::new("/t/target/debug").join(format!("muse-stand-in{exe}"))
+    );
+}
