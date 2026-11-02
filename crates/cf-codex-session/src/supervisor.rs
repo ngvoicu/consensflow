@@ -215,9 +215,10 @@ struct Children {
 
 /// What the window's sub-agents start with, which `env` names: the file in
 /// [`SUBAGENT_VARIABLE`], none where the variable is not set, and the types in
-/// [`SUBAGENT_TYPES_VARIABLE`], each of Codex's own where it is not set. A variable set
-/// to nothing is refused, as a file that cannot be read or holds nothing is, and a type
-/// that is none of Codex's own.
+/// [`SUBAGENT_TYPES_VARIABLE`], each of Codex's own where it is not set and none where it
+/// is set to nothing (the owner defines every one; a launch then names no file at all). The
+/// file's variable set to nothing is refused, as a file that cannot be read or holds
+/// nothing is, and a type that is none of Codex's own.
 fn children_of(env: &Env) -> Result<Option<Children>, SessionError> {
     if env.os(SUBAGENT_VARIABLE).is_none() {
         return Ok(None);
