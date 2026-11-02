@@ -523,16 +523,24 @@ impl Dispatcher {
     }
 
     /// What closing the window would end of what it started, as a note says it: what the
-    /// host lists of its turn's work, and what its harness's record says it runs
+    /// host lists of its turn's work, what its harness says it keeps running
+    /// (`Window::kept_commands`), and what its harness's record says it runs
     /// ([`close_would_end`], which says what neither can see); none where it would end
     /// nothing.
     async fn close_would_end(&self, record: &Record, observed: &Observed) -> Option<String> {
-        let pane = record.window.borrow().pane.clone();
+        let (pane, window) = {
+            let part = record.window.borrow();
+            (part.pane.clone(), part.window.clone())
+        };
         let left = match pane {
             Some(pane) => self.seams.background.left_running(&pane).await,
             None => Some(Default::default()),
         };
-        close_would_end(left.as_ref(), observed.pending())
+        let kept = match window {
+            Some(window) => window.kept_commands().await,
+            None => Some(Vec::new()),
+        };
+        close_would_end(left.as_ref(), observed.pending(), kept.as_deref())
     }
 
     /// Every round of the stop was ignored, and the window is kept open, for the

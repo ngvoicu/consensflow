@@ -15,6 +15,7 @@ mod lifecycle;
 mod questions;
 mod role;
 mod switching;
+mod terminals;
 mod transport;
 
 pub(crate) use hold::{Held, Hold};

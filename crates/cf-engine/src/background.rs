@@ -252,21 +252,34 @@ fn paused_leaving(number: i64, left: &Background) -> String {
 /// it; none where it would end nothing. `left` is what the host lists of the window's turn
 /// (`pane.background`; none where it did not answer, which is no word that nothing runs), and
 /// `pending` the jobs and agents its harness's record says it runs, which no process of the
-/// tree need show (Claude's background agents). What the host names as possibly the window's
-/// is no part of it: a close does not end that (`PaneExit::possibly_left`).
+/// tree need show (Claude's background agents), and `kept` the commands its harness says it
+/// keeps running (`Window::kept_commands`: Codex's background terminals, which it starts with
+/// no shell, so that the host names none of them, T-1137; none where it could not say). What
+/// the host names as possibly the window's is no part of it: a close does not end that
+/// (`PaneExit::possibly_left`).
 ///
-/// **What this cannot see** (T-1117): a program a harness starts with no shell (Codex 0.166
-/// runs a bare `ping` as a child of its own), and a job an agent detached (`&`, `nohup`, as
-/// Pi's and Devin's shells leave one): the host names neither as the turn's work
-/// (`cf-panes`' `background`), and a harness's record that says nothing of them leaves them
-/// unsaid. A window that ignored a pause with only such work running is closed, and the close
-/// ends it.
-pub(crate) fn close_would_end(left: Option<&Background>, pending: Pending) -> Option<String> {
+/// **What this cannot see** (T-1117): a job an agent detached (`&`, `nohup`, as Pi's, Devin's
+/// and Codex's shells leave one): the host names none as the turn's work (`cf-panes`'
+/// `background`), and a harness that says nothing of them leaves them unsaid. A window that
+/// ignored a pause with only such work running is closed, and the close ends it.
+pub(crate) fn close_would_end(
+    left: Option<&Background>,
+    pending: Pending,
+    kept: Option<&[String]>,
+) -> Option<String> {
     let mut said = Vec::new();
     match left {
         None => said.push("what the host could not list (it gave no answer)".to_owned()),
         Some(left) if left.total > 0 => said.push(quote_of(&left.processes, left.total)),
         Some(_) => {}
+    }
+    match kept {
+        None => said.push("what its harness could not list (it gave no answer)".to_owned()),
+        Some([]) => {}
+        Some(commands) => said.push(format!(
+            "the commands its harness keeps running: {}",
+            quote_commands(commands)
+        )),
     }
     if pending.jobs > 0 {
         said.push(counted(
@@ -279,6 +292,20 @@ pub(crate) fn close_would_end(left: Option<&Background>, pending: Pending) -> Op
         said.push(counted(pending.agents, "agent", "of its harness's own"));
     }
     (!said.is_empty()).then(|| said.join("; "))
+}
+
+/// The command lines `commands`, as a note quotes them: the first few, each held to one line
+/// and a few characters, what looks like a key or a token hidden, as [`quote`] does.
+fn quote_commands(commands: &[String]) -> String {
+    let listed: Vec<BackgroundProcess> = commands
+        .iter()
+        .take(QUOTED)
+        .map(|command| BackgroundProcess {
+            pid: 0,
+            command: command.clone(),
+        })
+        .collect();
+    quote_of(&listed, commands.len())
 }
 
 /// `count` of `what`, then `whose`: "1 job its harness started", "2 jobs …".

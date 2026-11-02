@@ -76,6 +76,21 @@ impl Stage {
             .serve("GET /session", [Served::Head { status, body }]);
     }
 
+    /// The broker answers the next question of what Codex keeps running with `body`.
+    fn says_terminals(&self, body: &str, status: u16) {
+        let body = Sent::Now(body.as_bytes().to_vec());
+        self.fakes
+            .loopback
+            .serve("GET /terminals", [Served::Head { status, body }]);
+    }
+
+    fn terminals(&self) -> Option<Vec<String>> {
+        finished(Box::pin(
+            self.channel
+                .terminals(&*self.fakes.time, &*self.fakes.loopback),
+        ))
+    }
+
     fn shown(&self) -> Option<Shown> {
         finished(Box::pin(
             self.channel.shown(&*self.fakes.time, &*self.fakes.loopback),
@@ -345,4 +360,38 @@ fn the_broker_has_a_second_for_its_head_and_its_body_together() {
         .loopback
         .release_body("GET /session", Err(BodyFailed::Cut)));
     assert_eq!(driver.run(), [(2, None)]);
+}
+
+#[test]
+fn what_codex_keeps_running_is_the_brokers_list_for_this_launch_and_nothing_else_is() {
+    let stage = Stage::new();
+    let list = |launch: &str, commands: serde_json::Value| {
+        json!({ "launchId": launch, "commands": commands }).to_string()
+    };
+    stage.says_terminals(
+        &list(LAUNCH, json!(["sh ./x.sh", "ping -n 61 127.0.0.1"])),
+        200,
+    );
+    assert_eq!(
+        stage.terminals(),
+        Some(vec![
+            "sh ./x.sh".to_owned(),
+            "ping -n 61 127.0.0.1".to_owned()
+        ])
+    );
+    let asked = stage.fakes.loopback.take_asked();
+    assert_eq!(asked[0].url, "http://127.0.0.1:41000/terminals");
+    assert_eq!(asked[0].method, Method::Get);
+    stage.says_terminals(&list(LAUNCH, json!([])), 200);
+    assert_eq!(stage.terminals(), Some(Vec::new()), "none runs");
+    // No word: another launch's, a refusal, a list with no command line in it, no list.
+    for (body, status) in [
+        (list("another", json!([])), 200),
+        (list(LAUNCH, json!([])), 503),
+        (list(LAUNCH, json!([7])), 200),
+        (json!({ "launchId": LAUNCH }).to_string(), 200),
+    ] {
+        stage.says_terminals(&body, status);
+        assert_eq!(stage.terminals(), None, "{body} {status}");
+    }
 }

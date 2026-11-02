@@ -429,6 +429,13 @@ impl Window for CodexWindow {
         })
     }
 
+    /// Codex's background terminals, as its broker asks its server for them: a command it
+    /// started with no shell, or kept when a pause interrupted it, is no process the host
+    /// names as the turn's work (T-1137). None where the broker gave no list.
+    fn kept_commands(&self) -> Work<'_, Option<Vec<String>>> {
+        Box::pin(async move { self.channel.terminals(&*self.time, &*self.loopback).await })
+    }
+
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
             let thread = self.thread.borrow().clone();
