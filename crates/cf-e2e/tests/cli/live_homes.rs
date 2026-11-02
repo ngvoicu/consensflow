@@ -42,9 +42,10 @@ const LOOKED_IN: [&str; 3] = [
 ];
 
 /// The kit itself, which sets these by design.
-const KIT: [&str; 4] = [
+const KIT: [&str; 5] = [
     "crates/cf-e2e/src/live/machine.rs",
     "crates/cf-e2e/src/live/isolation.rs",
+    "crates/cf-e2e/src/live/isolation/windows.rs",
     "crates/cf-e2e/src/live/login.rs",
     "crates/cf-e2e/src/live/members.rs",
 ];

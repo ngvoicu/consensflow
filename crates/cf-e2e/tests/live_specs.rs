@@ -130,11 +130,15 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
     })
 }
 
+/// How long this run is planned to take, a chief of each harness: a board of ten minutes and
+/// a plan carried out in twenty-five (`planning`), in each.
+const PLANNED: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a chief of each harness; cargo xtask live specs (npm run live:specs)"]
 fn a_chief_of_every_harness_is_told_of_specs_where_they_are_on_plans_one_and_carries_it_to_the_board(
 ) -> Result {
-    let log = Log::begin("live specs")?;
+    let log = Log::begin("live specs")?.lasting(PLANNED);
     let (chiefs, steps, options) = limits()?;
     // A harness the run was limited to, or named a model for, is asked for: a machine
     // that lacks it is the error. Any other it lacks is left out, and the report says so.

@@ -110,7 +110,15 @@ fn run_entries(folder: &Path) -> BTreeSet<String> {
 /// `path` as a run says it: below `~` where it is below the owner's `home`.
 pub fn shown(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
-        Ok(below) => format!("~/{}", below.display()),
+        // With `/` between the parts, where the system's separator is another: a path on Windows
+        // is said `~/AppData/Roaming/devin/…`, not `~/AppData/Roaming\devin\…`.
+        Ok(below) => {
+            let parts: Vec<_> = below
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect();
+            format!("~/{}", parts.join("/"))
+        }
         Err(_) => path.display().to_string(),
     }
 }
