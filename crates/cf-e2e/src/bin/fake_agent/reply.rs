@@ -1,6 +1,9 @@
 //! What the window answers a message with. Every message is one turn.
 //!
 //! - `Reply with exactly: X` answers X.
+//! - A line `SAY <words>` answers the words as they stand, with their spaces, in one
+//!   line: a worker whose last words are any words a case needs (T-1119: a question,
+//!   a wait), where `Reply with exactly` answers one word.
 //! - A line `SAVED <file>[,<file>...] <words>` is an image designer's turn: it saves a
 //!   picture under each name in the window's folder and answers the absolute path of
 //!   each, a line apiece, and then the words, as the designer's role asks its result
@@ -289,6 +292,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SAVED: OnceLock<Regex> = OnceLock::new();
     static LONG: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static SAY: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
 
     if spent(window) {
@@ -482,6 +486,9 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
         return saved_in(&folder, &saved[1], &saved[2]).map(Reply::Text);
     }
+    if let Some(said) = pattern::once(&SAY, r"(?m)^SAY (.+)$").captures(text) {
+        return Ok(Reply::Text(said[1].trim_end().to_owned()));
+    }
     if let Some(exact) = pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(text) {
         return Ok(Reply::Text(exact[1].to_owned()));
     }
@@ -625,6 +632,15 @@ mod tests {
             &window(),
         );
         assert_eq!(text(reply), "ONE_DONE");
+    }
+
+    #[test]
+    fn a_line_that_says_words_is_answered_with_them_whole() {
+        let reply = reply_to(
+            "[ConsensFlow m-4 · T-1 · task from @chief]\nSAY Should I continue, or stop here?",
+            &window(),
+        );
+        assert_eq!(text(reply), "Should I continue, or stop here?");
     }
 
     #[test]

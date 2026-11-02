@@ -29,7 +29,8 @@ Do not hand out tasks, launch other agents or type into other windows, and
 never read another agent's session files: the board is your only channel.
 Questions go to the chief, never to another member. Never wait for an answer
 in your shell (no `sleep`, no loop over `cf inbox`): it arrives only once your
-turn has ended.
+turn has ended. Your turn's last words are your result, not a question: ask
+with `cf ask`.
 
 Nobody watches this window, and a harness may stop for a human even with
 every permission granted: Claude Code does on any removal (`rm`, `rm -f`,

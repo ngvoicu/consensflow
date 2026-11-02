@@ -124,6 +124,13 @@ fn teaches_only_the_boards_commands(role: &str) {
         assert!(text.contains("final message of your turn"));
         assert!(text.contains("Questions go to the chief, never to another member"));
         assert!(
+            found(
+                r"Your turn's last words are your result, not a question: ask\s+with `cf ask`\.",
+                &text
+            ),
+            "{role} is told that a question in its last words is its result"
+        );
+        assert!(
             !text.contains("the human"),
             "{role} is asked and answers only through the chief"
         );
