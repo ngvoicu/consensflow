@@ -43,6 +43,9 @@ impl Owner {
             ".local/share/devin/credentials.toml",
             ".local/share/devin/cli/trusted_workspaces.json",
             ".local/share/devin/cli/sessions.db",
+            ".config/muse/auth.json",
+            ".config/muse/settings.json",
+            ".local/share/muse/session-index.db",
         ] {
             owner.write(file, SENTINEL)?;
         }
@@ -261,6 +264,66 @@ fn a_pi_login_that_will_not_last_the_run_stops_the_rig_before_anything_starts() 
     assert!(
         !failed.contains("\"A\"") && !failed.contains("refresh\":"),
         "{failed}"
+    );
+    Ok(())
+}
+
+/// T-1081: Devin's home moves the XDG folders (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`), which Muse
+/// reads its settings and keeps its sessions by too, and a home's variables are the rig's last
+/// word. The rig's Muse keeps its folders in the rig's home, so with Devin seated beside it the
+/// daemon looked for a Muse window's session in Devin's data folder, where the owner's Muse was
+/// reached through a link, and never found it: the window read "starting" for good and its brief
+/// was never pasted (alpha.1's release check, a Muse advisor under a Devin chief, 2 runs of 2).
+/// Where the daemon reads Muse's folders is where the rig's Muse writes them, and no home
+/// reaches the owner's Muse.
+#[test]
+fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() -> Outcome {
+    let owner = Owner::new()?;
+    let before = owner.everything()?;
+    let muse = cf_e2e::muse::Installed {
+        binary: PathBuf::from("/nowhere/muse-bin-1.4.14-R7309.1"),
+        version: "1.4.14-R7309.1".to_owned(),
+    };
+    let config = live::rig(&owner.installs(), FAKE_AGENT).muse_live(muse, owner.home.path());
+    let rig = Rig::start(config)?;
+    let root = rig.home();
+    let root = root
+        .parent()
+        .ok_or("the daemon's home is in the rig's folder")?;
+    let own = fs::canonicalize(root.join("home"))?;
+    for (name, below) in [
+        ("XDG_CONFIG_HOME", ".config"),
+        ("XDG_DATA_HOME", ".local/share"),
+    ] {
+        // Devin's home still holds the folder the variable names.
+        let given = named(&rig, name);
+        assert!(
+            !given.starts_with(own.as_path()),
+            "{name} is {}",
+            given.display()
+        );
+        let read = fs::canonicalize(given.join("muse"))
+            .map_err(|failed| format!("{name}'s muse folder: {failed}"))?;
+        assert_eq!(read, own.join(below).join("muse"), "{name}");
+    }
+    // The daemon finds the session a window of the rig's Muse writes.
+    let session = "01a19a82-dd62-7210-add6-a1f89c2624bc";
+    let log = own
+        .join(".local/share/muse/sessions/2026/11/02")
+        .join(session)
+        .join("session.jsonl");
+    fs::create_dir_all(log.parent().ok_or("a log has a folder")?)?;
+    fs::write(&log, "{}\n")?;
+    let found = named(&rig, "XDG_DATA_HOME")
+        .join("muse/sessions/2026/11/02")
+        .join(session)
+        .join("session.jsonl");
+    assert!(found.is_file(), "{}", found.display());
+    rig.close()?;
+    assert_eq!(
+        owner.everything()?,
+        before,
+        "the owner's files and folders are as they were"
     );
     Ok(())
 }

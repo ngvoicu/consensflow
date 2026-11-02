@@ -99,8 +99,16 @@ pub(crate) fn installed_on(
 /// Writes the rig's Muse in `dir`: its launcher, the version line, and the binary that
 /// runs `install`'s on echo, each turn `delay_ms` long, writing each command line it
 /// is given to `argv` (its words split by a unit separator, each line ended by a record
-/// separator: a first message has lines of its own).
-pub fn write_stand_in(dir: &Path, install: &Installed, delay_ms: u64, argv: &Path) -> Result {
+/// separator: a first message has lines of its own). Its settings and sessions are in the
+/// rig's home (`rig_home`, by its real path), as the live one's are
+/// ([`write_live_stand_in`]), whatever folders a harness's home gives the rig's windows.
+pub fn write_stand_in(
+    dir: &Path,
+    install: &Installed,
+    delay_ms: u64,
+    rig_home: &Path,
+    argv: &Path,
+) -> Result {
     let pinned = dir.join(format!("muse-bin-{}", install.version));
     files::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
     files::write_executable(
@@ -111,6 +119,7 @@ pub fn write_stand_in(dir: &Path, install: &Installed, delay_ms: u64, argv: &Pat
         r#"#!/bin/bash
 # The rig's Muse: the machine's, on its fake model. Echo takes no model or effort.
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
+export XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
 words=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -121,6 +130,7 @@ done
 exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{delay_ms}}}" "${{words[@]}}"
 "#,
         argv = argv.display(),
+        rig = rig_home.display(),
         binary = install.binary.display(),
     );
     files::write_executable(&pinned, script)
