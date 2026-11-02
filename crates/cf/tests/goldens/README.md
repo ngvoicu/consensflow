@@ -133,3 +133,12 @@ result`, in the six prints of `board.json` that hold it (`cf`, `cf help`, `cf --
 script from the binary's own output, and nothing else in them moved. The daemon's traces
 hold no `cf task finish` line (`cf-board-028` and `-029` are departed for that, and are not
 played), so none was changed.
+
+## The usage after `cf task edit` took a tier, needs and before
+
+The entry of `cf task edit` in the usage (the six prints of `board.json` that hold it, `cf
+task --help` among them) is three lines: `cf task edit T-3 "…" [--tier <tier>] [--needs
+T-4,T-5|+T-5|-T-5] [--before …]`, and what it changes, the brief, the tier, the tasks the
+task needs and the tasks that wait for it, of a task no window has yet (T-1108): a list
+replaces, `+T-5` adds, `-T-5` removes. Changed by hand, in those words alone, as
+`crates/cf/src/board/usage.txt` has it.

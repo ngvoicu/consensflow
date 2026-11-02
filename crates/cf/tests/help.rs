@@ -124,7 +124,11 @@ const BOARD: [(&[&str], &str); 19] = [
     ),
     (
         &["task", "edit"],
-        "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, queued, or paused)\n",
+        concat!(
+            "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n",
+            "                                    change the brief, tier, needs or before of a task no window has yet\n",
+            "                                    (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n",
+        ),
     ),
     (
         &["task", "pause"],

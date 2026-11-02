@@ -188,8 +188,8 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "            params![body, title_of(body), at, task.id],\n"
-replace = "            params![body, task.title, at, task.id],\n"
+find = "        params![body, title_of(body), at, task.id],\n"
+replace = "        params![body, task.title, at, task.id],\n"
 
 [[plant]]
 name = "brief edit: the old brief is not kept"
@@ -198,8 +198,8 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "            \"task.edited\",\n"
-replace = "            \"task.edit\",\n"
+find = "        \"task.edited\",\n"
+replace = "        \"task.edit\",\n"
 
 [[plant]]
 name = "brief edit: the log keeps the new brief, not the one it replaced"
@@ -208,8 +208,8 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "            json!({ \"task\": number, \"by\": by, \"from\": task.body }),\n"
-replace = "            json!({ \"task\": number, \"by\": by, \"from\": body }),\n"
+find = "        json!({ \"task\": number, \"by\": by, \"from\": task.body }),\n"
+replace = "        json!({ \"task\": number, \"by\": by, \"from\": body }),\n"
 
 [[plant]]
 name = "brief edit: a task a window has is edited"
@@ -278,7 +278,7 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "        TaskAction::Edit => ledger.edit_task(project, number, by, words)?,\n"
+find = "        TaskAction::Edit => edit(context, caller, &task, &body),\n"
 replace = ""
 
 [[plant]]
@@ -289,8 +289,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "            params![body, title_of(body), at, task.id],\n"
-replace = "            params![task.body, title_of(body), at, task.id],\n"
+find = "        params![body, title_of(body), at, task.id],\n"
+replace = "        params![task.body, title_of(body), at, task.id],\n"
 
 [[plant]]
 name = "brief edit: a task at work is edited, in the field's shape"
@@ -320,8 +320,8 @@ runs = ["cf-lib-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "    if matches!(action, \"done\" | \"reopen\" | \"edit\" | \"resume\") && js::trim(&text).is_empty() {\n"
-replace = "    if matches!(action, \"done\" | \"reopen\" | \"resume\") && js::trim(&text).is_empty() {\n"
+find = "    if matches!(action, \"done\" | \"reopen\" | \"edit\" | \"resume\")\n"
+replace = "    if matches!(action, \"done\" | \"reopen\" | \"resume\")\n"
 
 [[plant]]
 name = "brief edit: the usage of `cf` does not list `cf task edit`"
@@ -330,7 +330,7 @@ runs = ["cf-help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
-find = "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, queued, or paused)\n"
+find = "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n                                    change the brief, tier, needs or before of a task no window has yet\n                                    (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n"
 replace = ""
 
 [[plant]]
@@ -340,7 +340,7 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "    cf task edit T-3 \"…\"          replace the brief of a task no window has yet (open, queued, or paused)\n"
+find = "    cf task edit T-3 \"…\" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task no window has yet (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
 replace = ""
 
 [[plant]]
@@ -484,8 +484,8 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "            let renewed = if row == old {\n"
-replace = "            let renewed = if true {\n"
+find = "        let renewed = if row == old {\n"
+replace = "        let renewed = if true {\n"
 
 [[plant]]
 name = "behind work: an edit leaves the brief of a resume that carries it as it was"
@@ -494,8 +494,8 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "                row.strip_prefix(old.as_str())\n"
-replace = "                None::<&str>\n"
+find = "            row.strip_prefix(old.as_str())\n"
+replace = "            None::<&str>\n"
 
 [[plant]]
 name = "behind work: a release names no follow-up still bound to the window that lost the task"
@@ -534,8 +534,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "replace the brief of a task no window has yet (open, queued, or paused)"
-replace = "replace the brief of a task no window has yet (open, blocked or queued)"
+find = "or before of a task no window has yet (open, queued, or paused)"
+replace = "or before of a task no window has yet (open, blocked or queued)"
 
 # Round 3 (T-170): Calliope's check of round 2 (T-159).
 

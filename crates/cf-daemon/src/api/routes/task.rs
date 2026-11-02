@@ -21,7 +21,7 @@
 mod pages;
 
 use cf_base::js;
-use cf_ledger::{NewQuestion, TaskThread, TaskView};
+use cf_ledger::{Links, NewQuestion, TaskEdit, TaskThread, TaskView};
 use hyper::Method;
 use serde_json::{json, Map, Value};
 
@@ -125,6 +125,7 @@ pub(super) async fn handle(
         )),
         TaskAction::Tell => tell(context, caller, &task, words),
         TaskAction::Finish => finish(context, caller, &task).await,
+        TaskAction::Edit => edit(context, caller, &task, &body),
         _ => moved(context, caller, &task, action, words.unwrap_or_default()),
     }
 }
@@ -395,7 +396,6 @@ fn moved(
                 .collect();
             ledger.cancel_task(project, number, by)?
         }
-        TaskAction::Edit => ledger.edit_task(project, number, by, words)?,
         TaskAction::Pause => ledger.pause_task(project, number, Some(by), None)?,
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
         // `reopen`; and what Node's last branch took any other word for, which
@@ -410,6 +410,80 @@ fn moved(
         answer.insert("dropped".to_owned(), json!(dropped));
     }
     Ok(Answer::ok(Value::Object(answer)))
+}
+
+/// `edit`: the brief, the tier, or both of a task no window has yet, in one step. A
+/// tier is read as `cf task add` reads one, and a task whose tier nobody holds goes to
+/// the nearest, which is said (`asked`, and `heldBy`, the members of the tier it went
+/// to). Whatever is no text is no words and no tier: the ledger refuses it in its own
+/// words.
+fn edit(
+    context: &Context,
+    caller: &Caller,
+    task: &TaskThread,
+    request: &Map<String, Value>,
+) -> Result<Answer, Failure> {
+    // A brief that is no text is no words: the ledger refuses it as it refuses an empty one.
+    let words = match request.get("body") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(words)) => Some(words.clone()),
+        Some(_) => Some(String::new()),
+    };
+    let tier = match request.get("tier") {
+        None | Some(Value::Null) => None,
+        Some(tier) => Some(cf_ledger::model::parse_tier(Some(tier))?.to_owned()),
+    };
+    let edit = TaskEdit {
+        body: words,
+        tier,
+        needs: links(request.get("needs"), "needs")?,
+        before: links(request.get("before"), "before")?,
+    };
+    let edited = context.ledger.borrow_mut().edit_task_with(
+        caller.project.id,
+        task.task.number,
+        caller.participant.handle.as_str(),
+        &edit,
+    )?;
+    (context.kick)();
+    let mut answer = Map::new();
+    answer.insert("task".to_owned(), value(&TaskSummary::from(&edited.task))?);
+    if let Some(asked) = &edited.asked {
+        answer.insert("asked".to_owned(), json!(asked));
+        answer.insert("heldBy".to_owned(), json!(edited.holders));
+    }
+    if let Some(waiting) = &edited.waiting {
+        answer.insert("waiting".to_owned(), json!(waiting));
+    }
+    Ok(Answer::ok(Value::Object(answer)))
+}
+
+/// A list of task numbers to change as `cf task edit` asks: the list itself replaces
+/// the one the task has, `{"add": [5], "remove": [6]}` changes it. Whatever else is no
+/// list of task numbers, and the ledger's words for it are `invalid-needs`.
+fn links(asked: Option<&Value>, field: &str) -> Result<Option<Links>, Failure> {
+    let numbers = |list: Option<&Value>, field: &str| -> Result<Vec<i64>, Failure> {
+        Ok(
+            cf_ledger::model::parse_numbers(list.or(Some(&Value::Null)), field)?
+                .into_iter()
+                .filter_map(|number| i64::try_from(number).ok())
+                .collect(),
+        )
+    };
+    Ok(match asked {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(change)) => Some(Links::Change {
+            add: match change.get("add") {
+                None => Vec::new(),
+                add => numbers(add, field)?,
+            },
+            remove: match change.get("remove") {
+                None => Vec::new(),
+                remove => numbers(remove, field)?,
+            },
+        }),
+        Some(list) => Some(Links::Set(numbers(Some(list), field)?)),
+    })
 }
 
 /// Whether the window may do what only the chief or the one who gave the task

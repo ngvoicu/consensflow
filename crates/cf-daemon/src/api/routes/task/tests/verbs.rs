@@ -722,3 +722,180 @@ async fn the_chief_replaces_the_brief_of_a_task_no_window_has_and_is_refused_for
     );
     assert_eq!(scene.kicks.get(), kicks);
 }
+
+/// A light worker joins the scene's staff, which has zeus, a standard one.
+fn hera_joins(scene: &crate::testing::Scene) {
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .add_member(
+            scene.project.id,
+            &cf_ledger::NewMember {
+                agent: "hera".to_owned(),
+                harness: "claude-code".to_owned(),
+                designer: false,
+                roles: vec!["worker".to_owned()],
+                tier: "light".to_owned(),
+            },
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn the_chief_changes_the_tier_of_a_task_no_window_has_with_the_brief_or_without_it() {
+    let scene = scene();
+    hera_joins(&scene);
+    let open = open_task(&scene);
+    // The tier alone: its brief stays.
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"light"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["tier"], "light");
+    assert_eq!(said["task"]["title"], "Lexer");
+    assert!(said.get("asked").is_none(), "{said}");
+    assert_eq!(
+        scene.kicks.get(),
+        1,
+        "the board is woken: a member may be free for it"
+    );
+    // The brief too, in the same command.
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"standard","body":"Lexer, the new way"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (
+            said["task"]["tier"].as_str(),
+            said["task"]["title"].as_str()
+        ),
+        (Some("standard"), Some("Lexer, the new way"))
+    );
+}
+
+#[tokio::test]
+async fn a_tier_nobody_holds_is_the_nearest_and_the_answer_says_which_and_whose() {
+    let scene = scene();
+    hera_joins(&scene);
+    let open = open_task(&scene);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"critical"}"#,
+    )
+    .await;
+    // The task has no purpose, which critical work names.
+    assert_eq!(refused(&(status, said)).1, "purpose-required");
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"complex"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["tier"], "standard");
+    assert_eq!(said["asked"], "complex");
+    assert_eq!(said["heldBy"], json!(["zeus"]));
+}
+
+#[tokio::test]
+async fn a_tier_that_is_no_tier_and_a_brief_that_is_no_words_are_refused_before_anything_changes() {
+    let scene = scene();
+    let open = open_task(&scene);
+    for (body, code) in [
+        (r#"{"tier":"huge"}"#, "invalid-tier"),
+        (r#"{"tier":5}"#, "invalid-tier"),
+        (r#"{"tier":"light","body":5}"#, "invalid-text"),
+        (r#"{"tier":"light","body":"  "}"#, "invalid-text"),
+        (r#"{"tier":null}"#, "invalid-text"),
+    ] {
+        let said = post(&scene, &scene.chief, &format!("{open}/edit"), body).await;
+        assert_eq!(said.1["error"], code, "{body}: {said:?}");
+    }
+    assert_eq!(scene.kicks.get(), 0);
+    let (_, read) = get(&scene, &scene.chief, &open.to_string()).await;
+    assert_eq!(
+        (read["task"]["tier"].as_str(), read["task"]["body"].as_str()),
+        (Some("standard"), Some("Lexer"))
+    );
+}
+
+#[tokio::test]
+async fn the_chief_changes_what_a_task_needs_and_what_waits_for_it_by_a_list_or_by_adding_and_removing(
+) {
+    let scene = scene();
+    let (a, b, c) = (open_task(&scene), open_task(&scene), open_task(&scene));
+    let edit = format!("{c}/edit");
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &edit,
+        &format!(r#"{{"needs":[{a},{b}]}}"#),
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["blockedBy"], json!([a, b]));
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &edit,
+        &format!(r#"{{"needs":{{"remove":[{a}]}}}}"#),
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["blockedBy"], json!([b]));
+    // What waits for it, said back.
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{a}/edit"),
+        &format!(r#"{{"before":{{"add":[{b}]}}}}"#),
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["waiting"], json!([b]));
+    assert_eq!(scene.kicks.get(), 3);
+}
+
+#[tokio::test]
+async fn a_list_that_is_none_a_task_not_there_and_a_circle_are_refused_in_the_ledgers_words() {
+    let scene = scene();
+    let (a, b) = (open_task(&scene), open_task(&scene));
+    post(
+        &scene,
+        &scene.chief,
+        &format!("{a}/edit"),
+        &format!(r#"{{"needs":[{b}]}}"#),
+    )
+    .await;
+    for (route, body, status, code) in [
+        (a, r#"{"needs":"T-2"}"#.to_owned(), 400, "invalid-needs"),
+        (
+            a,
+            r#"{"before":{"add":"T-2"}}"#.to_owned(),
+            400,
+            "invalid-needs",
+        ),
+        (a, r#"{"needs":[0]}"#.to_owned(), 400, "invalid-needs"),
+        (a, r#"{"needs":[99]}"#.to_owned(), 404, "unknown-task"),
+        (b, format!(r#"{{"needs":[{a}]}}"#), 409, "circular-needs"),
+    ] {
+        let said = post(&scene, &scene.chief, &format!("{route}/edit"), &body).await;
+        assert_eq!(
+            (said.0, said.1["error"].as_str()),
+            (status, Some(code)),
+            "{body}"
+        );
+    }
+}

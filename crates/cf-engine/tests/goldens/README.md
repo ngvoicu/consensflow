@@ -50,3 +50,11 @@ hand. Say a file is restored only once you have checked it: its diff, or what it
 2026-10-15, when a worker on the owner's Windows machine overwrote a file that held
 uncommitted work with `git checkout`, and other workers said they had restored files they
 had not.
+
+The chief's text, in each of the twelve `roleInstructions` rows that hold it, says two
+things more (T-1108, `skill/core/chief.md`): after "goes to the nearest one somebody does,
+the next one up first" it says "you are told whose" (the note and the reply that say which
+member's tier took a task); and its line of `cf task edit` says what the command changes
+now, the brief, the tier, the tasks it needs and the tasks that wait for it: `cf task edit
+T-3 "…" [--tier <tier>] [--needs …] [--before …]`, with how a list is written. Changed by
+hand, in those words alone, on 2026-11-02.

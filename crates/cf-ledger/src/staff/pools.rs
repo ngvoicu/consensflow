@@ -59,6 +59,20 @@ pub(crate) fn has_members_of_tier(
     Ok(found)
 }
 
+/// The handles of the active members of `pool` at `tier`, in join order.
+pub(crate) fn holders_of_tier(
+    store: &Store,
+    project_id: i64,
+    pool: &str,
+    tier: &str,
+) -> Result<Vec<String>, LedgerError> {
+    Ok(members(store, project_id, Some(pool))?
+        .into_iter()
+        .filter(|member| member.tier.as_deref() == Some(tier))
+        .map(|member| member.handle)
+        .collect())
+}
+
 /// The active members an open task may go to, with what the daemon ranks them by.
 pub(crate) fn candidates(
     store: &Store,

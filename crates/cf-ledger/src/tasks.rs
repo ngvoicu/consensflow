@@ -19,13 +19,15 @@ use crate::model::LedgerError;
 use crate::store::Store;
 use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT};
 
-pub(crate) use editing::{edit_task, tell_open};
+pub(crate) use editing::{edit_task, edit_task_with, tell_open};
 pub(crate) use finishing::{
     accept_task, call_off, cancel_task, delete_tasks, fail_task, give_up_task, note_stranded_waits,
     record_finished, record_result, release_ready, reopen_task, tell_stranded_waiters, Ending,
 };
 pub use giving::NewTask;
-pub(crate) use giving::{assign_task, check_release, create_task, release_task};
+pub(crate) use giving::{
+    assign_task, check_release, create_task, release_inside, release_task, retier_open_task,
+};
 pub(crate) use own_steps::withdrawn_late;
 pub use pausing::resumed_in_vain;
 pub(crate) use pausing::{

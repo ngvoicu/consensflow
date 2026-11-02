@@ -20,7 +20,7 @@ use crate::store::Store;
 use crate::tasks::tell_stranded_waiters;
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
-pub(crate) use pools::{candidates, has_members_of_tier, members, nearest_tier};
+pub(crate) use pools::{candidates, has_members_of_tier, holders_of_tier, members, nearest_tier};
 pub(crate) use quota::{mark_back, mark_out};
 use sessions::close_session;
 pub(crate) use sessions::{

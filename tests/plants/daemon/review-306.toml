@@ -398,8 +398,8 @@ runs = ["cf-lib-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '        "reopen" | "resume" | "edit" => BRIEFED,'
-replace = '        "reopen" | "resume" => BRIEFED,'
+find = '        "edit" => EDIT,'
+replace = '        "edit" => Shape::TEXT,'
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"

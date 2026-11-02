@@ -1,0 +1,645 @@
+# A tier nobody on the staff holds goes to the nearest one somebody does, the next one up first,
+# for every role that has tiers, as `cf task add` does and now at every moment the task is open
+# (T-1108, a field report: `cf task add --test --tier complex` with a standard tester on the
+# staff; the staff had changed under the task, and it waited "for a free complex tester: ." with
+# no reason, for good). A waiting task says why; a role nobody holds is refused at add; the
+# requester is told once whose tier took the task; and `cf task edit T-3 --tier … --needs …
+# --before …` changes a task no window has yet, with the brief or without it, all or none.
+# The tests are the engine's (`crates/cf-engine/tests/dispatcher/tier_fallback.rs`), the ledger's
+# (`crates/cf-ledger/tests/edit_tier.rs`, `edit_links.rs`), the route's
+# (`crates/cf-daemon/src/api/routes/task/tests/verbs.rs`, `tasks/tests.rs`), `cf`'s
+# (`crates/cf/src/board/task.rs`, `crates/cf/tests/help.rs`) and the role text's
+# (`crates/cf-engine/tests/text/roles.rs`). Every name holds `tier fallback`, so
+# `cargo xtask plants daemon "tier fallback"` runs them all.
+
+[run]
+tf-engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "tier_fallback::"]
+tf-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
+tf-ledger-edit-tier = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "edit_tier"]
+tf-ledger-edit-links = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "edit_links"]
+tf-cf-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
+
+[[plant]]
+name = "tier fallback: an open task whose tier lost its last member is never moved to the nearest"
+meant = "a_task_open_when_the_last_member_of_its_tier_leaves_goes_to_the_nearest"
+runs = ["tf-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            let retiered = self
+                .seams
+                .ledger
+                .borrow_mut()
+                .retier_open_task(project.id, task.number)?;
+'''
+replace = '''
+            let retiered: Option<cf_ledger::TaskRetiered> = None;
+'''
+
+[[plant]]
+name = "tier fallback: the nearest tier is the next one down before the next one up"
+meant = "the_nearest_tier_is_the_next_one_up_before_the_next_one_down"
+runs = ["tf-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = '''
+    near.sort_by_key(|(index, _)| (index.abs_diff(at), *index));
+'''
+replace = '''
+    near.sort_by_key(|(index, _)| (index.abs_diff(at), usize::MAX - *index));
+'''
+
+[[plant]]
+name = "tier fallback: a task for a tier somebody holds is moved too, though that member is out of quota"
+meant = "a_task_for_a_tier_somebody_holds_is_never_moved_though_that_member_is_out_of_quota"
+runs = ["tf-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+        if tier == asked || !has_members_of_tier(store, project_id, pool, Some(&tier))? {
+'''
+replace = '''
+        if !has_members_of_tier(store, project_id, pool, Some(&tier))? {
+'''
+
+[[plant]]
+name = "tier fallback: a task given now for a tier nobody holds waits for it, as before"
+meant = "a_tier_nobody_holds_goes_to_the_nearest_for_every_role_and_every_tier"
+runs = ["tf-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+            None => nearest_tier(store, project_id, pool, asked.as_deref())?,
+'''
+replace = '''
+            None => asked.clone(),
+'''
+
+[[plant]]
+name = "tier fallback: a task that waits is told why with an empty reason"
+meant = "a_task_for_a_role_nobody_holds_any_more_waits_and_says_so"
+runs = ["tf-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                if why.is_empty() {
+'''
+replace = '''
+                if false {
+'''
+
+[[plant]]
+name = "tier fallback: the requester is never told that the tier moved"
+meant = "the_requester_is_told_once_which_tier_took_a_task_that_lost_the_one_it_asked"
+runs = ["tf-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                self.tell_retiered(project, &task, &moved.from, &moved.to, &moved.holders)?;
+'''
+replace = '''
+                let _ = (&moved.from, &moved.holders);
+'''
+
+[[plant]]
+name = "tier fallback: the requester is told that the tier moved but not whose it is"
+meant = "the_requester_is_told_once_which_tier_took_a_task_that_lost_the_one_it_asked"
+runs = ["tf-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    members.join(", ")
+'''
+replace = '''
+                    members.len()
+'''
+
+[[plant]]
+name = "tier fallback: a role nobody holds is not refused at add"
+meant = "a_role_nobody_holds_is_refused_at_add_for_every_pool_in_the_words_the_chief_is_told"
+runs = ["tf-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+        if assignee.is_none() && !has_members_of_tier(store, project_id, pool, tier.as_deref())? {
+'''
+replace = '''
+        if false && assignee.is_none() && !has_members_of_tier(store, project_id, pool, tier.as_deref())? {
+'''
+
+[[plant]]
+name = "tier fallback: edit takes a tier of a role nobody holds"
+meant = "a_role_nobody_holds_is_refused_in_the_words_of_task_add_and_nothing_changes"
+runs = ["tf-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+    if !has_members_of_tier(store, project_id, pool, Some(&tier))? {
+'''
+replace = '''
+    if false && !has_members_of_tier(store, project_id, pool, Some(&tier))? {
+'''
+
+[[plant]]
+name = "tier fallback: edit asks the tier as it was named when nobody holds it"
+meant = "a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_and_whose_it_went_to"
+runs = ["tf-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+    let tier =
+        nearest_tier(store, project_id, pool, Some(wanted))?.unwrap_or_else(|| wanted.to_owned());
+'''
+replace = '''
+    let tier = wanted.to_owned();
+'''
+
+[[plant]]
+name = "tier fallback: edit makes a task critical with no purpose"
+meant = "a_tier_that_is_none_is_refused_and_critical_work_needs_its_purpose"
+runs = ["tf-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+    if wanted == "critical"
+'''
+replace = '''
+    if false && wanted == "critical"
+'''
+
+[[plant]]
+name = "tier fallback: edit gives the designer's task a tier"
+meant = "a_task_given_by_name_or_for_the_designer_has_no_tier_to_change"
+runs = ["tf-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        Some("designer") => {
+'''
+replace = '''
+        Some("designer") if false => {
+'''
+
+[[plant]]
+name = "tier fallback: a task queued for a member of another tier stays queued for it"
+meant = "a_task_queued_for_a_member_of_another_tier_goes_back_to_the_board_and_one_for_its_own_stays"
+runs = ["tf-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+                    if window.tier.as_deref() != Some(tier.as_str()) {
+'''
+replace = '''
+                    if false {
+'''
+
+[[plant]]
+name = "tier fallback: a task taken back by an edit warns of partial changes nobody made"
+meant = "a_task_queued_for_a_member_of_another_tier_goes_back_to_the_board_and_one_for_its_own_stays"
+runs = ["tf-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+            (Some(_), Some(carried)) if untouched => format!("{}{}", task.body, carried.kept),
+'''
+replace = '''
+            (Some(_), Some(carried)) if untouched && false => format!("{}{}", task.body, carried.kept),
+'''
+
+[[plant]]
+name = "tier fallback: a task a window has begun is edited for its tier"
+meant = "a_task_a_window_has_is_not_edited_for_its_tier_either"
+runs = ["tf-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        require_not_given(store, &task)?;
+'''
+replace = '''
+        let _ = require_not_given(store, &task);
+'''
+
+[[plant]]
+name = "tier fallback: a task a window has begun is edited for what it needs"
+meant = "a_task_a_window_has_begun_is_not_edited_for_what_it_needs_either"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        require_not_given(store, &task)?;
+'''
+replace = '''
+        let _ = require_not_given(store, &task);
+'''
+
+[[plant]]
+name = "tier fallback: a refused tier is let through with the brief changed"
+meant = "a_role_nobody_holds_is_refused_in_the_words_of_task_add_and_nothing_changes"
+runs = ["tf-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+            Some(wanted) => Some(tier_for(store, project_id, &task, wanted)?),
+'''
+replace = '''
+            Some(wanted) => tier_for(store, project_id, &task, wanted).ok(),
+'''
+
+[[plant]]
+name = "tier fallback: a list of needs adds to what a task needs instead of replacing it"
+meant = "a_list_replaces_what_a_task_needs_and_a_signed_one_adds_and_removes"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+            Links::Set(set) => sorted(set.clone()),
+'''
+replace = '''
+            Links::Set(set) => sorted(held.iter().chain(set).copied().collect()),
+'''
+
+[[plant]]
+name = "tier fallback: a removed need is kept"
+meant = "a_list_replaces_what_a_task_needs_and_a_signed_one_adds_and_removes"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+                    .filter(|number| !remove.contains(number) || add.contains(number))
+'''
+replace = '''
+                    .filter(|_| true)
+'''
+
+[[plant]]
+name = "tier fallback: a task may need what needs it, or itself"
+meant = "a_circle_is_refused_near_or_far_and_a_task_cannot_wait_for_itself"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        if need.id == task.id || upstream(store, need.id, task.id)? {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "tier fallback: a task may be waited for by what it waits for, or by itself"
+meant = "a_circle_is_refused_near_or_far_and_a_task_cannot_wait_for_itself"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        if waits.id == task.id || upstream(store, task.id, waits.id)? {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "tier fallback: a need that is no task is skipped"
+meant = "a_task_that_is_not_there_or_cannot_be_waited_for_is_refused"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        let need = store.task_row(project_id, *added)?;
+'''
+replace = '''
+        let Ok(need) = store.task_row(project_id, *added) else {
+            continue;
+        };
+'''
+
+[[plant]]
+name = "tier fallback: a waiter that is no task is skipped"
+meant = "a_task_that_is_not_there_or_cannot_be_waited_for_is_refused"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        let waits = store.task_row(project_id, *added)?;
+'''
+replace = '''
+        let Ok(waits) = store.task_row(project_id, *added) else {
+            continue;
+        };
+'''
+
+[[plant]]
+name = "tier fallback: a task may wait for one that was cancelled"
+meant = "a_task_that_is_not_there_or_cannot_be_waited_for_is_refused"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        if need.state == "cancelled" {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "tier fallback: a task that is not on the board is made to wait for another"
+meant = "a_task_that_is_not_there_or_cannot_be_waited_for_is_refused"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        if waits.state != "open" {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "tier fallback: a queued task that now waits stays queued for its window"
+meant = "a_task_queued_for_a_window_that_now_waits_goes_back_to_the_board_to_wait_there"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+    if blocked && task.assignee_id.is_some() && task.state != "open" {
+'''
+replace = '''
+    if false && blocked && task.assignee_id.is_some() && task.state != "open" {
+'''
+
+[[plant]]
+name = "tier fallback: a task paused with its window that now waits is taken off its pause"
+meant = "a_task_queued_for_a_window_that_now_waits_goes_back_to_the_board_to_wait_there"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        if task.state != "queued" || task.pool.is_none() {
+'''
+replace = '''
+        if task.pool.is_none() {
+'''
+
+[[plant]]
+name = "tier fallback: what waits for a task is not said"
+meant = "the_tasks_that_wait_for_a_task_are_changed_the_same_way_and_said"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+    Ok(waiters_now)
+'''
+replace = '''
+    Ok(None)
+'''
+
+[[plant]]
+name = "tier fallback: a refusal of the lists leaves the brief and the tier changed"
+meant = "the_brief_the_tier_and_the_lists_change_together_or_not_at_all"
+runs = ["tf-ledger-edit-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+            relink(store, project_id, number, by, edit)?
+'''
+replace = '''
+            relink(store, project_id, number, by, edit).ok().flatten()
+'''
+
+[[plant]]
+name = "tier fallback: the route hands an edit to the reopening of a task"
+meant = "the_chief_replaces_the_brief_of_a_task_no_window_has_and_is_refused_for_one_that_does"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        TaskAction::Edit => edit(context, caller, &task, &body),
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tier fallback: the route drops the needs of an edit"
+meant = "the_chief_changes_what_a_task_needs_and_what_waits_for_it_by_a_list_or_by_adding_and_removing"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        needs: links(request.get("needs"), "needs")?,
+'''
+replace = '''
+        needs: None,
+'''
+
+[[plant]]
+name = "tier fallback: the route drops the waiters of an edit"
+meant = "the_chief_changes_what_a_task_needs_and_what_waits_for_it_by_a_list_or_by_adding_and_removing"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        before: links(request.get("before"), "before")?,
+'''
+replace = '''
+        before: None,
+'''
+
+[[plant]]
+name = "tier fallback: the route drops the tier of an edit"
+meant = "the_chief_changes_the_tier_of_a_task_no_window_has_with_the_brief_or_without_it"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        tier,
+        needs: links(request.get("needs"), "needs")?,
+'''
+replace = '''
+        tier: None,
+        needs: links(request.get("needs"), "needs")?,
+'''
+
+[[plant]]
+name = "tier fallback: the route takes a brief that is no text for no brief"
+meant = "a_tier_that_is_no_tier_and_a_brief_that_is_no_words_are_refused_before_anything_changes"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        Some(_) => Some(String::new()),
+'''
+replace = '''
+        Some(_) => None,
+'''
+
+[[plant]]
+name = "tier fallback: the answer to a task given says not whose the nearest tier is"
+meant = "a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_between_the_message_and_the_gate"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+        answer.insert("heldBy".to_owned(), json!(held_by));
+'''
+replace = '''
+        let _ = held_by;
+'''
+
+[[plant]]
+name = "tier fallback: the answer to an edit says not whose the nearest tier is"
+meant = "a_tier_nobody_holds_is_the_nearest_and_the_answer_says_which_and_whose"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        answer.insert("heldBy".to_owned(), json!(edited.holders));
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tier fallback: cf reads +T-5 as a removal and -T-5 as an addition"
+meant = "a_list_of_needs_replaces_and_a_signed_one_adds_and_removes"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+        match part.starts_with('+') {
+'''
+replace = '''
+        match part.starts_with('-') {
+'''
+
+[[plant]]
+name = "tier fallback: cf takes a list that adds and replaces at once"
+meant = "the_flags_and_a_brief_go_in_one_command_and_a_list_that_mixes_is_a_usage_failure"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+    if signed < parts.len() {
+'''
+replace = '''
+    if false {
+'''
+
+[[plant]]
+name = "tier fallback: cf never sends the tier of an edit"
+meant = "a_tier_alone_is_posted_with_no_brief"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+        body.insert("tier".into(), tier.as_str().into());
+'''
+replace = '''
+        let _ = &tier;
+'''
+
+[[plant]]
+name = "tier fallback: cf task add does not say whose tier the task went to"
+meant = "a_task_added_for_a_tier_nobody_holds_says_whose_tier_it_went_to"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+                held_by(created.value())
+'''
+replace = '''
+                String::new()
+'''
+
+[[plant]]
+name = "tier fallback: cf task edit does not say whose tier the task went to"
+meant = "a_tier_the_staff_does_not_hold_is_said_with_the_members_of_the_tier_it_went_to"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+            held_by(answered)
+'''
+replace = '''
+            String::new()
+'''
+
+[[plant]]
+name = "tier fallback: the chief's text does not say it is told whose tier took a task"
+meant = "teach_the_chief_only_the_board_s_commands"
+runs = ["tf-engine-text"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''
+the next one up first; you are told whose.
+'''
+replace = '''
+the next one up first.
+'''
+
+[[plant]]
+name = "tier fallback: the chief's text does not know the tier, needs and before of an edit"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+runs = ["tf-engine-text"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''
+    cf task edit T-3 "…" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task no window has yet (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
+'''
+replace = '''
+    cf task edit T-3 "…"          replace the brief of a task no window has yet (open, queued, or paused)
+'''
+
+[[plant]]
+name = "tier fallback: cf help does not know the tier, needs and before of an edit"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["tf-cf-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = '''
+  cf task edit T-3 "…" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]
+'''
+replace = '''
+  cf task edit T-3 "…"
+'''

@@ -110,7 +110,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             &text
         ));
         assert!(found(
-            r"A tier nobody on the staff holds\s+goes to the nearest one somebody does",
+            r"A tier nobody on the staff holds\s+goes to the nearest one somebody does, the next one up first; you are told\s+whose\.",
             &text
         ));
         assert!(text.contains("do not run the command to see the refusal: ask"));
@@ -352,7 +352,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r#"cf task edit T-3 "…"\s+replace the brief of a task no window has yet \(open, queued, or paused\)"#,
+        r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task no window has yet \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
         &text
     ));
     assert!(

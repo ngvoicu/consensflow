@@ -123,8 +123,8 @@ runs = ["cf-brief-file"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "        \"reopen\" | \"resume\" | \"edit\" => BRIEFED,"
-replace = "        \"edit\" => BRIEFED,"
+find = "        \"reopen\" | \"resume\" => BRIEFED,"
+replace = "        \"reopen\" | \"resume\" => Shape::TEXT,"
 
 [[plant]]
 name = "briefs: a file's Windows line ending is taken for the text's"
@@ -173,8 +173,8 @@ runs = ["cf-brief-file"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "    let sent = if briefed {"
-replace = "    let sent = if false && briefed {"
+find = "    let sent = if briefed && !text.is_empty() {"
+replace = "    let sent = if false && briefed && !text.is_empty() {"
 
 [[plant]]
 name = "briefs: a last word longer than the reply shows is shown whole"

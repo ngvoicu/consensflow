@@ -118,6 +118,7 @@ mod tasks;
 mod testers;
 mod the_dispatcher;
 mod throws_early;
+mod tier_fallback;
 mod told_once;
 mod trace_untold;
 mod traces;
