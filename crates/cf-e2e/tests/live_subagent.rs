@@ -339,7 +339,13 @@ fn child_records(harness: Harness, members: &Members) -> Vec<Record> {
                     })
             })
             .collect(),
-        Harness::Muse => files_below(&members.home())
+        // A rig that seats Muse gives it a data folder of its own (`XDG_DATA_HOME`, in the
+        // rig's home, never the person's), a child below its window's session:
+        // `<session>/subagent/<child>/session.jsonl` (Muse 1.4.13 and 1.4.14).
+        Harness::Muse => members
+            .var("XDG_DATA_HOME")
+            .map(|data| files_below(&Path::new(&data).join("muse").join("sessions")))
+            .unwrap_or_default()
             .into_iter()
             .filter(|path| {
                 path.file_name().is_some_and(|name| name == "session.jsonl")
