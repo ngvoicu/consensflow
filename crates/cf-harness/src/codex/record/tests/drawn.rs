@@ -163,3 +163,25 @@ fn a_compaction_stands_beside_the_items_where_codex_wrote_it() {
         serde_json::to_value(read(&turn()).unwrap()).unwrap()
     );
 }
+
+#[test]
+fn an_edit_codex_completed_stands_beside_the_items_with_its_change() {
+    let records = vec![
+        started(json!("t1")),
+        event(json!({ "type": "item_completed", "turn_id": "t1", "item": {
+            "type": "FileChange", "id": "exec-1", "status": "completed",
+            "stdout": "Success. Updated the following files:\nM /w/notes.txt\n",
+            "changes": { "/w/notes.txt": { "type": "update",
+                "unified_diff": "@@ -1,2 +1,2 @@\n-The light is red.\n+The light is blue.\n" } } } })),
+    ];
+    let record = read(&records).unwrap();
+    assert!(record.items.is_empty(), "no item of the reading");
+    let (_, edit) = &record.beside[0];
+    assert_eq!(edit.kind(), Kind::Tool);
+    let detail = edit.detail.as_deref().unwrap();
+    assert_eq!(detail.header.as_deref(), Some("edit /w/notes.txt"));
+    assert_eq!(
+        detail.diff.as_deref(),
+        Some("@@ -1,2 +1,2 @@\n-The light is red.\n+The light is blue.")
+    );
+}

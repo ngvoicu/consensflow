@@ -22,9 +22,13 @@ pub(super) fn called(payload: Option<&Value>) -> Detail {
     let patch = field(payload, "input")
         .and_then(Value::as_str)
         .filter(|_| name == "apply_patch");
-    let (header, diff) = match patch {
-        Some(patch) => patched(patch),
-        None => {
+    let script = field(payload, "input")
+        .and_then(Value::as_str)
+        .filter(|_| name == "exec");
+    let (header, diff) = match (patch, script) {
+        (Some(patch), _) => patched(patch),
+        (None, Some(script)) => scripted(script),
+        (None, None) => {
             let given = field(payload, "arguments").or_else(|| field(payload, "input"));
             (drawn::guess(name, given), None)
         }
@@ -32,6 +36,47 @@ pub(super) fn called(payload: Option<&Value>) -> Detail {
     Detail {
         diff,
         ..drawn::tool(name, header, Some(Status::Running))
+    }
+}
+
+/// The header of a call of Codex's `exec`, which runs JavaScript that calls its tools (Codex
+/// 0.166, as it wrote it live: `await tools.exec_command({cmd:"…", workdir:…})`, `await
+/// tools.apply_patch(patch)` with the patch a string the script holds): the first command it
+/// runs, or the patch it applies, and its change; else `exec`.
+fn scripted(script: &str) -> (Arc<str>, Option<Arc<str>>) {
+    if script.contains("apply_patch") {
+        let unescaped = script.replace("\\n", "\n").replace("\\\"", "\"");
+        if unescaped.contains("*** Update File: ") || unescaped.contains("*** Add File: ") {
+            return patched(&unescaped);
+        }
+    }
+    let command = ["cmd:", "\"cmd\":"].into_iter().find_map(|key| {
+        let after = script.split_once(key)?.1.trim_start();
+        let quoted = after.strip_prefix('"')?;
+        let mut said = String::new();
+        let mut chars = quoted.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => return Some(said),
+                '\\' => match chars.next()? {
+                    'n' => said.push('\n'),
+                    't' => said.push('\t'),
+                    other => said.push(other),
+                },
+                c => said.push(c),
+            }
+        }
+        None
+    });
+    match command {
+        Some(command) => (drawn::header(Action::Shell(&command)), None),
+        None => (
+            drawn::header(Action::Other {
+                name: "exec",
+                about: None,
+            }),
+            None,
+        ),
     }
 }
 
@@ -113,7 +158,7 @@ fn millis(seconds: f64) -> Option<u64> {
 
 /// What a `CommandExecution` Codex completed says of itself: its header (`$` its command,
 /// text or words), how it ended (`exit_code`, or a `status` of `failed`), and how long it
-/// took (`duration_ms`).
+/// took (`duration`, `{secs, nanos}` as Codex 0.166 writes it, or `duration_ms`).
 pub(super) fn command(native: Option<&Value>) -> Detail {
     let header = drawn::guess(
         "shell",
@@ -122,10 +167,56 @@ pub(super) fn command(native: Option<&Value>) -> Detail {
     let code = field(native, "exit_code").and_then(Value::as_i64);
     let failed = code.is_some_and(|code| code != 0)
         || field(native, "status").and_then(Value::as_str) == Some("failed");
+    let duration = field(native, "duration");
+    let took_ms = field(native, "duration_ms")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            let secs = field(duration, "secs").and_then(Value::as_u64)?;
+            let nanos = field(duration, "nanos")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            Some(secs.saturating_mul(1_000).saturating_add(nanos / 1_000_000))
+        });
     Detail {
-        took_ms: field(native, "duration_ms").and_then(Value::as_u64),
+        took_ms,
         ..drawn::tool(
             "shell",
+            header,
+            Some(if failed { Status::Failed } else { Status::Ok }),
+        )
+    }
+}
+
+/// What a `FileChange` Codex completed says of itself (Codex 0.166, the edit an
+/// `apply_patch` made): its header (`edit` the first file it changes, `write` one it adds),
+/// how it ended (`status`), and the change (each file's `unified_diff`).
+pub(super) fn file_change(native: Option<&Value>) -> Detail {
+    let changes = match field(native, "changes") {
+        Some(Value::Object(changes)) => changes.iter().collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let header = match changes.first() {
+        Some((path, change))
+            if field(Some(change), "type").and_then(Value::as_str) == Some("add") =>
+        {
+            drawn::header(Action::Write(path))
+        }
+        Some((path, _)) => drawn::header(Action::Edit(path)),
+        None => drawn::header(Action::Other {
+            name: "apply_patch",
+            about: None,
+        }),
+    };
+    let diff: Vec<&str> = changes
+        .iter()
+        .filter_map(|(_, change)| field(Some(change), "unified_diff").and_then(Value::as_str))
+        .map(|diff| diff.trim_end_matches('\n'))
+        .collect();
+    let failed = field(native, "status").and_then(Value::as_str) == Some("failed");
+    Detail {
+        diff: (!diff.is_empty()).then(|| Arc::from(diff.join("\n"))),
+        ..drawn::tool(
+            "apply_patch",
             header,
             Some(if failed { Status::Failed } else { Status::Ok }),
         )
@@ -167,6 +258,49 @@ mod tests {
             &json!({ "name": "apply_patch", "input": "*** Begin Patch\n*** Add File: b.md\n+hi\n*** End Patch" }),
         ));
         assert_eq!(added.header.as_deref(), Some("write b.md"));
+    }
+
+    #[test]
+    fn a_script_of_codexs_exec_is_headed_by_the_command_it_runs_or_the_patch_it_applies() {
+        // As Codex 0.166 wrote them live (T-728).
+        let script = |input: &str| {
+            called(Some(
+                &json!({ "type": "custom_tool_call", "name": "exec", "input": input }),
+            ))
+        };
+        let ran = script("const r = await tools.exec_command({cmd:\"ls no-such-folder\",workdir:\"/w\",yield_time_ms:10000}); text(r.output);\n");
+        assert_eq!(ran.header.as_deref(), Some("$ ls no-such-folder"));
+        assert_eq!(ran.name.as_deref(), Some("exec"));
+        let patch = script("const patch = \"*** Begin Patch\\n*** Update File: /w/notes.txt\\n@@\\n-The light is red.\\n+The light is blue.\\n*** End Patch\";\ntext(await tools.apply_patch(patch));\n");
+        assert_eq!(patch.header.as_deref(), Some("edit /w/notes.txt"));
+        assert_eq!(
+            patch.diff.as_deref(),
+            Some("@@\n-The light is red.\n+The light is blue.")
+        );
+        let other = script("text(await tools.view_image({path: \"a.png\"}));");
+        assert_eq!(other.header.as_deref(), Some("exec"));
+    }
+
+    #[test]
+    fn a_file_change_says_the_file_it_changed_and_its_change() {
+        let detail = file_change(Some(&json!({
+            "type": "FileChange", "id": "exec-1", "status": "completed",
+            "changes": { "/w/notes.txt": { "type": "update",
+                "unified_diff": "@@ -1,2 +1,2 @@\n-The light is red.\n+The light is blue.\n The door is shut.\n" } },
+        })));
+        assert_eq!(detail.header.as_deref(), Some("edit /w/notes.txt"));
+        assert_eq!(detail.status, Some(Status::Ok));
+        assert_eq!(
+            detail.diff.as_deref(),
+            Some("@@ -1,2 +1,2 @@\n-The light is red.\n+The light is blue.\n The door is shut.")
+        );
+        let added = file_change(Some(
+            &json!({ "status": "failed", "changes": { "b.md": { "type": "add" } } }),
+        ));
+        assert_eq!(
+            (added.header.as_deref(), added.status),
+            (Some("write b.md"), Some(Status::Failed))
+        );
     }
 
     #[test]
@@ -221,6 +355,13 @@ mod tests {
             (detail.status, detail.took_ms),
             (Some(Status::Failed), Some(40))
         );
+        // Codex 0.166's own: its words and a duration of seconds and nanoseconds.
+        let live = command(Some(
+            &json!({ "command": ["/bin/zsh", "-c", "cat notes.txt"],
+            "exit_code": 0, "duration": { "secs": 1, "nanos": 250_000_000 } }),
+        ));
+        assert_eq!(live.header.as_deref(), Some("$ cat notes.txt"));
+        assert_eq!(live.took_ms, Some(1_250));
         let words = command(Some(
             &json!({ "command": ["bash", "-lc", "pwd"], "exit_code": 0 }),
         ));

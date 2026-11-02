@@ -299,10 +299,14 @@ impl Installed {
         // live/…`), and for nothing it reads its login by. (Not a home of the rig's: Devin's
         // window, opened in a folder below one, which macOS spells through the `/var` link of its
         // temporary folder, shows no answer, 2026-10-27.)
-        if self.isolation.is_some() {
-            let mut vars = vec![("HOME".to_owned(), home.clone())];
+        // The person's home is the isolation's, not the folder the login is read from: Codex's
+        // is `~/.codex`, and a Codex window given that for its HOME had its project folders made
+        // in the owner's Codex folder (`~/.codex/.consensflow-candidate/live/…`, T-972).
+        if let Some(isolation) = &self.isolation {
+            let person = isolation.owner_home().to_string_lossy().into_owned();
+            let mut vars = vec![("HOME".to_owned(), person.clone())];
             if cfg!(windows) {
-                vars.push(("USERPROFILE".to_owned(), home));
+                vars.push(("USERPROFILE".to_owned(), person));
             }
             return vars;
         }

@@ -179,3 +179,32 @@ fn the_last_items_and_a_page_are_one_or_the_other_and_a_page_is_a_number_from_on
         assert!(api.received().is_empty(), "nothing is asked: {args:?}");
     }
 }
+
+#[test]
+fn a_tools_item_says_the_call_it_answers_how_it_ended_and_how_long_it_took() {
+    // What the readers say of a call since chief-harness CHF-15 (T-486): its header, its
+    // end and its time; an item copied before says its output alone, as it did.
+    let mut failed = item(
+        "t1",
+        "tool",
+        "ls: no-such-folder: No such file or directory",
+    );
+    failed["kind"] = json!("tool");
+    failed["header"] = json!("$ ls no-such-folder");
+    failed["status"] = json!("failed");
+    failed["tookMs"] = json!(1_234);
+    let mut ran = item("t2", "tool", "ok");
+    ran["kind"] = json!("tool");
+    ran["header"] = json!("read notes.txt");
+    ran["status"] = json!("ok");
+    let last = json!({ "total": 3, "items": [failed, ran, item("t3", "tool", "old")] });
+    let api = scripted(vec![reply(200, task()), reply(200, last)]);
+    let (code, printed, _) = window(&api, &["task", "get", "T-3", "--transcript"]);
+    assert_eq!(code, Some(0));
+    assert!(
+        printed.ends_with(
+            "[Tool output · $ ls no-such-folder · failed · took 1.2 s]\nls: no-such-folder: No such file or directory\n\n[Tool output · read notes.txt]\nok\n\n[Tool output]\nold\n"
+        ),
+        "{printed}"
+    );
+}

@@ -16,6 +16,14 @@
 # no item is passed, charged, and gone on past, and migration 0027 drops the indexes the headings
 # read. The heading plants of session-viewer.toml went with the headings.
 #
+# Phase 3's (CHF-14 to CHF-19, T-728) hold `items:`: each reader says what the history draws
+# of an item besides its words (crates/cf-harness/src/shared/record/drawn.rs and each
+# harness's reader), the items only the history shows stand beside a reading's items and
+# never among them or in its recording, the ledger keeps both (migration 0028,
+# crates/cf-ledger/src/conversations/transcripts.rs and history.rs) and its readers of words
+# leave the history's own out, the engine copies the timeline (crates/cf-engine/src/transcripts.rs)
+# and the page and `cf task get --transcript` show a call's header (T-486).
+#
 # T-995's (Calliope's re-check T-994) hold `gone:`: the adapter hears a refusal of the model
 # asked for (Pi by the id after its provider), a held chief costs a pass nothing, a default
 # that is the gone model holds the chief, and the exit's screen is read without
@@ -63,6 +71,18 @@ tl-ledger-undo = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features",
 tl-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::"]
 tl-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::history::"]
 tl-ui = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs"]
+it-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::drawn::"]
+it-shared = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::drawn::"]
+it-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::drawn::"]
+it-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record::"]
+it-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::drawn::"]
+it-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::drawn::"]
+it-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history", "drawn::"]
+it-ledger-plan = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "conversations::history::"]
+it-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--lib", "testing::drawn_items::"]
+it-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "transcripts::"]
+it-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::tests::depth::"]
+it-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "transcript_pages"]
 
 [[plant]]
 name = 'listing: a stale listing gives a default'
@@ -1314,3 +1334,355 @@ runs = ["chm-claude-used"]
 file = "crates/cf-harness/src/claude/last_used.rs"
 find = '''const MODEL_SET: &str = "<local-command-stdout>Set model to";'''
 replace = '''const MODEL_SET: &str = "<command-name>/model</command-name>";'''
+
+[[plant]]
+name = "items: a message's thinking stands after its words"
+meant = "thinking_stands_beside_the_items_before_the_words_of_its_message"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = '            stands: Stands::Before,'
+replace = '            stands: Stands::After,'
+
+[[plant]]
+name = "items: Claude's result that is an error is no failure"
+meant = "a_call_is_its_results_item_with_its_header_how_it_ended_and_how_long_it_took"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '        failed: block.get("is_error") == Some(&Value::Bool(true)),'
+replace = '        failed: false,'
+
+[[plant]]
+name = "items: Claude's call took no time its records say"
+meant = "a_call_is_its_results_item_with_its_header_how_it_ended_and_how_long_it_took"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '            .or_else(|| drawn::took(called, millis(Some(at))));'
+replace = '            .or(None);'
+
+[[plant]]
+name = "items: Claude's edit says no change"
+meant = "a_call_says_the_time_its_record_says_it_took_and_an_edits_change"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '    ("structuredPatch", &Keep::Items(&HUNK)),'
+replace = '    ("structuredPatches", &Keep::Items(&HUNK)),'
+
+[[plant]]
+name = "items: Claude's call its turn left runs on"
+meant = "a_call_its_turn_left_without_a_result_says_no_more_that_it_runs"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = '            if one.call.as_ref().is_some_and(|call| !open.contains(call)) {'
+replace = '            if one.call.as_ref().is_some_and(|call| open.contains(call) && false) {'
+
+[[plant]]
+name = "items: Claude's compaction says no tokens"
+meant = "a_compactions_summary_says_the_tokens_its_boundary_compacted_from"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '                .summary(id, &record.text, at, seq, self.compacted_from.take());'
+replace = '                .summary(id, &record.text, at, seq, None);'
+
+[[plant]]
+name = 'items: the items beside are said in a reading'
+meant = "the_items_beside_are_never_said_in_a_records_reading"
+runs = ["it-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = '''    #[serde(skip)]
+    pub beside: Vec<(usize, Item)>,'''
+replace = '    pub beside: Vec<(usize, Item)>,'
+
+[[plant]]
+name = 'items: a header holds more than 256 characters'
+meant = "a_header_says_a_call_in_one_line_of_at_most_256_characters"
+runs = ["it-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/drawn.rs"
+find = '    Arc::from(one_line(&said, HEADER_MAX))'
+replace = '    Arc::from(one_line(&said, HEADER_MAX + 1))'
+
+[[plant]]
+name = 'items: a timeline read from a place skips the items beside wrongly'
+meant = "a_timeline_merges_the_items_beside_where_they_stand_from_any_place"
+runs = ["it-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/drawn.rs"
+find = '            .take_while(|(j, (place, _))| place + j < first)'
+replace = '            .take_while(|(_, (place, _))| *place < first)'
+
+[[plant]]
+name = "items: Pi's thinking takes its step's id"
+meant = "a_steps_thinking_stands_beside_the_items_before_its_words"
+runs = ["it-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '                            let id = Arc::from(format!("{id}:thinking:{place}"));'
+replace = '                            let id = Arc::from(format!("{id}"));'
+
+[[plant]]
+name = "items: Pi's result that is an error is no failure"
+meant = "a_result_says_its_calls_header_how_it_ended_and_how_long_it_took"
+runs = ["it-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '        detail.status = Some(if field("isError") == Some(&Value::Bool(true)) {'
+replace = '        detail.status = Some(if field("isError") == Some(&Value::Bool(false)) {'
+
+[[plant]]
+name = "items: Pi's compaction is passed over"
+meant = "a_compaction_stands_beside_the_items_with_its_tokens_and_summary"
+runs = ["it-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '            Some("compaction") => self.compaction(&record, at, &seq),'
+replace = '            Some("compactions") => self.compaction(&record, at, &seq),'
+
+[[plant]]
+name = "items: Pi's edit says no change"
+meant = "a_read_and_an_edit_are_headed_by_their_file_and_an_edit_says_its_change"
+runs = ["it-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '            .and_then(|details| details.get("diff"))'
+replace = '            .and_then(|details| details.get("patch"))'
+
+[[plant]]
+name = "items: Codex's exit code 1 is no failure"
+meant = "an_output_says_how_its_call_ended_and_how_long_it_took"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/drawn.rs"
+find = '        Some(code) if code != 0 => Status::Failed,'
+replace = '        Some(code) if code > 1 => Status::Failed,'
+
+[[plant]]
+name = "items: Codex's reasoning is passed over"
+meant = "a_reasonings_summary_stands_beside_the_items_and_moves_no_reading"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '            (Some("reasoning"), _) => {'
+replace = '            (Some("reasonings"), _) => {'
+
+[[plant]]
+name = "items: Codex's command completed still runs beside the items"
+meant = "a_command_codex_started_runs_beside_the_items_until_it_completes"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '                    self.beside[place].answered = true;'
+replace = '                    self.beside[place].answered = false;'
+
+[[plant]]
+name = "items: Codex's compaction is passed over"
+meant = "a_compaction_stands_beside_the_items_where_codex_wrote_it"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '            Some("compacted") => {'
+replace = '            Some("compactions") => {'
+
+[[plant]]
+name = "items: Devin's thinking is passed over"
+meant = "an_assistants_thinking_stands_beside_the_items_before_its_message"
+runs = ["it-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '                    if let Some(thought) = thinking(message.get("thinking")) {'
+replace = '                    if let Some(thought) = thinking(message.get("thought")) {'
+
+[[plant]]
+name = "items: Devin's tool answer is headed by no call"
+meant = "a_tools_answer_is_headed_by_the_call_it_answers_and_says_no_end_devin_keeps_none"
+runs = ["it-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '                        .and_then(|call| calls.get(call))'
+replace = '                        .and_then(|call| calls.get(call).filter(|_| false))'
+
+[[plant]]
+name = "items: Devin's compactor's summary is no compaction"
+meant = "the_summary_its_compactor_begins_a_chain_with_is_a_compaction"
+runs = ["it-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '                Role::Custom if summary(message) =>'
+replace = '                Role::Custom if summary(message) && false =>'
+
+[[plant]]
+name = "items: Muse's reasoning is passed over"
+meant = "a_reasoning_stands_beside_the_items_and_a_call_runs_beside_them_until_its_result"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '            Some("reasoning_committed") => {'
+replace = '            Some("reasoning_committed_x") => {'
+
+[[plant]]
+name = "items: Muse's answered call still runs beside the items"
+meant = "a_reasoning_stands_beside_the_items_and_a_call_runs_beside_them_until_its_result"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '                    self.answered(&id);'
+replace = ''
+
+[[plant]]
+name = "items: Muse's result that is an error is no failure"
+meant = "a_reasoning_stands_beside_the_items_and_a_call_runs_beside_them_until_its_result"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '                    let failed = result.get("is_error") == Some(&Value::Bool(true))'
+replace = '                    let failed = result.get("is_error") == Some(&Value::Bool(false))'
+
+[[plant]]
+name = "items: the copy's guard leaves a call that ended unwritten"
+meant = "a_calls_detail_is_kept_and_written_again_when_it_says_more_with_the_same_words"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '            OR transcript.role != excluded.role OR transcript.detail IS NOT excluded.detail'
+replace = '            OR transcript.role != excluded.role'
+
+[[plant]]
+name = 'items: an item only the history shows is copied out of its place'
+meant = "the_items_only_the_history_shows_are_in_it_where_they_stand_and_in_no_reader_of_words"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '        misplaced[at] = drawn_only && !present && later_copied;'
+replace = '        misplaced[at] = false && drawn_only && !present && later_copied;'
+
+[[plant]]
+name = "items: cf history reads the history's own items"
+meant = "the_items_only_the_history_shows_are_in_it_where_they_stand_and_in_no_reader_of_words"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '       WHERE conversation_id = ? AND drawn_only = 0 ORDER BY seq'
+replace = '       WHERE conversation_id = ? ORDER BY seq'
+
+[[plant]]
+name = "items: a task's transcript reads the history's own items"
+meant = "a_tasks_transcript_says_what_each_call_was_and_shows_nothing_only_the_history_shows"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '       WHERE c.participant_id = ? AND t.drawn_only = 0 ORDER BY t.conversation_id, t.seq'
+replace = '       WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq'
+
+[[plant]]
+name = 'items: thinking is copied whole'
+meant = "thinking_is_cut_as_a_tools_output_is_and_a_change_as_well"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '            let text = if role == "tool" || thinking {'
+replace = '            let text = if role == "tool" {'
+
+[[plant]]
+name = 'items: the history reads no change an edit made'
+meant = "thinking_is_cut_as_a_tools_output_is_and_a_change_as_well"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '            if diff_bytes > 0 {'
+replace = '            if diff_bytes > usize::MAX - 1 {'
+
+[[plant]]
+name = 'items: a kind the ledger does not know is drawn as one'
+meant = "a_kind_or_a_status_the_ledger_does_not_know_draws_as_a_plain_item_or_no_status"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '            kind: word("kind", &KINDS)?,'
+replace = '            kind: word("kind", &KINDS).unwrap_or("text"),'
+
+[[plant]]
+name = 'items: the players keep the drawn columns of a dump'
+meant = "takes_the_drawn_columns_and_the_diff_table_out_of_a_dump_and_nothing_else"
+runs = ["it-ledger-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''        .chain(drawn_items::COLUMNS)
+'''
+replace = ''
+
+[[plant]]
+name = "items: the copy says no item is the history's alone"
+meant = "an_items_detail_is_copied_as_the_ledger_takes_it_and_a_reading_never_says_it"
+runs = ["it-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = '        if drawn_only {'
+replace = '        if drawn_only && false {'
+
+[[plant]]
+name = 'items: the copy counts the items and not the timeline'
+meant = "a_look_copies_the_timeline_its_items_and_those_beside_them_each_where_it_stands"
+runs = ["it-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = '            count: timeline.len(),'
+replace = '            count: observed.items().len(),'
+
+[[plant]]
+name = 'items: a search finds no call by its header'
+meant = "a_search_finds_a_call_by_its_header_and_counts_it_among_the_items"
+runs = ["it-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task/pages.rs"
+find = '                        [Some(item.text.as_str()), header]'
+replace = '                        [Some(item.text.as_str()), header.filter(|_| false)]'
+
+[[plant]]
+name = "items: a task's transcript says no call a tool's output answers"
+meant = "a_tools_item_says_the_call_it_answers_how_it_ended_and_how_long_it_took"
+runs = ["it-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = '                Some("tool") => tool(item).into(),'
+replace = '                Some("tool") => "Tool output".into(),'

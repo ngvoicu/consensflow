@@ -577,6 +577,25 @@ impl Rollout {
                     self.add_item(field(native, "id"), Role::Tool, output, true, at, seq)?;
                 self.items[place].item.detail = Some(Arc::new(detail));
             }
+            // The edit a patch made (Codex 0.166): no item Node read, the history's alone.
+            Some("FileChange") if completed => {
+                if let Some(id) = field(native, "id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                {
+                    let said = field(native, "stdout")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let detail = drawn::file_change(native);
+                    self.beside(beside_item(
+                        Arc::from(id),
+                        Role::Tool,
+                        said,
+                        Some(at),
+                        detail,
+                    ));
+                }
+            }
             Some("SubAgentActivity") => {
                 let agent = self.keys.of(field(native, "agent_thread_id"));
                 if !agent.truthy() {

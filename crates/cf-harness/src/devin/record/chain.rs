@@ -23,7 +23,7 @@ use cf_base::js;
 use serde_json::Value;
 
 use super::store::{Row, Store};
-use crate::shared::record::drawn::{self, Detail, Kind};
+use crate::shared::record::drawn::{self, Detail, Kind, Status};
 use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{Item, Role};
 use crate::shared::record::sqlite::{text_of, Cell};
@@ -115,14 +115,16 @@ impl Chain {
                     }
                     None
                 }
-                Role::Tool => Some(Arc::new(
-                    message
+                Role::Tool => {
+                    let mut detail = message
                         .get("tool_call_id")
                         .and_then(Value::as_str)
                         .and_then(|call| calls.get(call))
                         .cloned()
-                        .unwrap_or_else(|| Detail::of(Kind::Tool)),
-                )),
+                        .unwrap_or_else(|| Detail::of(Kind::Tool));
+                    ran(metadata("extensions"), &mut detail);
+                    Some(Arc::new(detail))
+                }
                 // The summary Devin's compactor begins a chain with: a compaction's.
                 Role::Custom if summary(message) => Some(Arc::new(Detail::of(Kind::Compaction))),
                 _ => None,
@@ -191,9 +193,29 @@ fn thinking(thought: Option<&Value>) -> Option<String> {
     (!js::trim(&said).is_empty()).then_some(said)
 }
 
+/// How a tool's call ran, as Devin 3000.11 says it beside its answer (`metadata.extensions`):
+/// the time it took (`chisel/tool_call_timing.duration_ms`), and how it ended: failed where
+/// a command's exit code is not 0 (`chisel/terminal_output.exit.exit_code`; Devin's own
+/// `chisel/tool_result_meta.success` is true for it) or where Devin says it did not succeed,
+/// else well. An answer that says neither says nothing of it.
+fn ran(extensions: Option<&Value>, detail: &mut Detail) {
+    let at = |path: &[&str]| {
+        path.iter()
+            .try_fold(extensions?, |value, name| value.get(name))
+    };
+    detail.took_ms = at(&["chisel/tool_call_timing", "duration_ms"]).and_then(Value::as_u64);
+    let code = at(&["chisel/terminal_output", "exit", "exit_code"]).and_then(Value::as_i64);
+    let success = at(&["chisel/tool_result_meta", "success"]).and_then(Value::as_bool);
+    detail.status = match (code, success) {
+        (Some(code), _) if code != 0 => Some(Status::Failed),
+        (_, Some(false)) => Some(Status::Failed),
+        (Some(_), _) | (_, Some(true)) => Some(Status::Ok),
+        (None, None) => None,
+    };
+}
+
 /// The calls an assistant's message makes (`tool_calls`), each by its id with what the
-/// history draws of it: its tool's name and its header ([`drawn::guess`]). Devin's record
-/// says no call's end or time.
+/// history draws of it: its tool's name and its header ([`drawn::guess`]).
 fn remember_calls(message: &Value, calls: &mut HashMap<String, Detail>) {
     let Some(Value::Array(made)) = message.get("tool_calls") else {
         return;

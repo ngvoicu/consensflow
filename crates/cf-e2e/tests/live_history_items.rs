@@ -38,16 +38,22 @@ const BRIEF: &str = "This folder is an automated ConsensFlow test. Do only what 
 const NOTES: &str = "notes.txt";
 const NOTES_TEXT: &str = "The light is red.\nThe door is shut.\n";
 
-/// What the human asks: a thought, a read, a command that fails and an edit, then a line.
-const ASK: &str = "Think it through first. Then do these three things with your tools, one tool call each, in this order: 1) read the file notes.txt; 2) run the shell command `ls no-such-folder` (it fails, which is expected); 3) edit notes.txt so that the word red reads blue. Then reply with exactly one line: DONE.";
+/// What the human asks: a thought (`ultrathink` is Claude Code's word for thinking hard,
+/// which a cheap model may otherwise skip), a read, a command that fails and an edit, then a
+/// line.
+const ASK: &str = "Ultrathink: think hard about the order first. Then do these three things with your tools, one tool call each, in this order: 1) read the file notes.txt; 2) run the shell command `ls no-such-folder` (it fails, which is expected); 3) edit notes.txt so that the word red reads blue. Then reply with exactly one line: DONE.";
+
+/// What the run's own Pi is set to: to keep little of the newest when it compacts.
+const PI_SETTINGS: &str = "{\"compaction\":{\"keepRecentTokens\":200}}\n";
 
 /// How long a turn has, and how often the history is looked at.
 const TURN: Duration = Duration::from_secs(420);
+const COMPACTED: Duration = Duration::from_secs(180);
 const LOOK: Duration = Duration::from_secs(2);
 
-/// What each harness's record says, and so what its reader is held to: a call's status
-/// (Devin's record says none), the change an edit made, and a compaction (Devin's record
-/// keeps none: its compacted chain keeps the steps' ids, and no message says it).
+/// What each harness's record says, and so what its reader is held to: a call's status, the
+/// change an edit made (Devin's store keeps the file before the edit, not the change), and a
+/// compaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Expect {
     status: bool,
@@ -63,9 +69,9 @@ fn expect(harness: Harness) -> Expect {
             compaction: true,
         },
         Harness::Devin => Expect {
-            status: false,
+            status: true,
             diff: false,
-            compaction: false,
+            compaction: true,
         },
     }
 }
@@ -91,6 +97,65 @@ fn says(members: &Members, words: &str) -> Result<()> {
     members.rig().types(&pane, words.as_bytes())?;
     std::thread::sleep(Duration::from_millis(700));
     members.rig().types(&pane, b"\r")
+}
+
+/// Where a run asked to keep what it made (`--keep`) copies each harness's records: the
+/// tree's own scratch, which the readers' fixtures are made from.
+const RECORDS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../app/src-tauri/target/scratch/history-items"
+);
+
+/// The folders of the run's own a harness keeps its records in, by the variable the rig
+/// gives its windows, and the folder below it.
+fn record_folders(harness: Harness) -> &'static [(&'static str, &'static str)] {
+    match harness {
+        Harness::Claude => &[("CLAUDE_CONFIG_DIR", "projects")],
+        Harness::Codex => &[("CODEX_HOME", "sessions")],
+        Harness::Pi => &[("PI_CODING_AGENT_DIR", "sessions")],
+        Harness::Devin => &[("XDG_DATA_HOME", "devin")],
+        Harness::Muse => &[("XDG_DATA_HOME", "muse"), ("XDG_STATE_HOME", "muse")],
+    }
+}
+
+/// Copies what `harness`'s windows recorded of the run into [`RECORDS`], where `--keep` was
+/// asked: the folders are the run's own, and go with it.
+fn keep_records(members: &Members, harness: Harness, log: &Log) {
+    if !live::keep_requested() {
+        return;
+    }
+    let into = Path::new(RECORDS).join(harness.name());
+    for (variable, below) in record_folders(harness) {
+        let Some(home) = members.rig().var(variable) else {
+            continue;
+        };
+        let from = Path::new(home).join(below);
+        match copy_tree(&from, &into.join(variable).join(below)) {
+            Ok(count) => log.say(format!(
+                "kept {count} files of {} in {}",
+                from.display(),
+                into.display()
+            )),
+            Err(failed) => log.say(format!("kept none of {}: {failed}", from.display())),
+        }
+    }
+}
+
+/// `from`'s files copied into `to`, folders and all: how many.
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<usize> {
+    let mut count = 0;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            count += copy_tree(&entry.path(), &target)?;
+        } else if entry.file_type()?.is_file() {
+            std::fs::create_dir_all(to)?;
+            std::fs::copy(entry.path(), &target)?;
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 /// The chief's whole history, oldest first, as the modal reads it (the tools' outputs too),
@@ -138,9 +203,10 @@ fn line(item: &Value) -> String {
 }
 
 /// What the check holds of the history of a chief on `harness`.
-fn judge(harness: Harness, items: &[Value]) -> Vec<Check> {
+fn judge(harness: Harness, items: &[Value], refused: bool) -> Vec<Check> {
     let who = harness.name();
-    let expect = expect(harness);
+    let mut expect = expect(harness);
+    expect.compaction &= !refused;
     let tools = of_kind(items, "tool");
     let header = |words: &str| {
         tools.iter().find(|item| {
@@ -201,13 +267,18 @@ fn judge(harness: Harness, items: &[Value]) -> Vec<Check> {
             who,
             "the compaction is a compaction",
             !expect.compaction || !of_kind(items, "compaction").is_empty(),
-            format!(
-                "{:?}",
-                of_kind(items, "compaction")
-                    .iter()
-                    .map(|item| format!("tokens {:?}", item["tokens"]))
-                    .collect::<Vec<_>>()
-            ),
+            if refused {
+                "the harness compacted nothing (its screen says so): no record for its reader"
+                    .to_owned()
+            } else {
+                format!(
+                    "{:?}",
+                    of_kind(items, "compaction")
+                        .iter()
+                        .map(|item| format!("tokens {:?}", item["tokens"]))
+                        .collect::<Vec<_>>()
+                )
+            },
         ),
     ];
     let thinking = of_kind(items, "thinking");
@@ -229,6 +300,19 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
         member_as(harness, "chief"),
     )
     .told(BRIEF);
+    // Pi compacts nothing of a session shorter than what it keeps of the newest
+    // (`keepRecentTokens`, 20,000 by default: "Nothing to compact (session too small)"); the
+    // run's own Pi keeps little, so that `/compact` compacts a few turns.
+    let plan = if harness == Harness::Pi {
+        plan.with_home_file(
+            Harness::Pi,
+            "PI_CODING_AGENT_DIR",
+            "settings.json",
+            PI_SETTINGS,
+        )
+    } else {
+        plan
+    };
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
     std::fs::write(members.folder().join(NOTES), NOTES_TEXT)
         .map_err(|failed| Error::Daemon(format!("{NOTES}: {failed}")))?;
@@ -255,18 +339,33 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
         done.is_some(),
         format!("in {} s at most", TURN.as_secs()),
     )];
+    // Whether the harness itself refused to compact (Pi: "Nothing to compact (session too
+    // small)"): its record then holds no compaction for its reader to read.
+    let mut refused = false;
     if done.is_some() && members.chief_is_idle(log)? {
         says(&members, "/compact")?;
-        find(log, "the compaction", TURN, LOOK, || {
+        // Pi's picker takes the first Enter for the command it lists, and runs it on the second.
+        if harness == Harness::Pi {
+            std::thread::sleep(Duration::from_secs(2));
+            members.rig().types(&chief_pane(&members), b"\r")?;
+        }
+        let compacted = find(log, "the compaction", COMPACTED, LOOK, || {
             Ok((!of_kind(&history(&members)?, "compaction").is_empty()).then_some(()))
         })?;
+        if compacted.is_none() {
+            let pane = format!("p{}-chief", members.project_id());
+            let screen = members.tail(&pane);
+            log.say(format!("no compaction; the chief's screen: {screen}"));
+            refused = screen.to_lowercase().contains("nothing to compact");
+        }
         let _ = members.chief_is_idle(log)?;
     }
     let items = history(&members)?;
     for item in &items {
         log.say(format!("  {}", line(item)));
     }
-    checks.extend(judge(harness, &items));
+    checks.extend(judge(harness, &items, refused));
+    keep_records(&members, harness, log);
     members.close()?;
     Ok(checks)
 }
@@ -335,21 +434,26 @@ mod tests {
             json!({ "role": "assistant", "text": "DONE" }),
             json!({ "kind": "compaction", "role": "user", "text": "summary", "tokens": 12_000 }),
         ];
-        assert_eq!(held(&judge(Harness::Claude, &items)), [true; 6]);
+        assert_eq!(held(&judge(Harness::Claude, &items, false)), [true; 6]);
         // A command that failed and says it did not, an edit with no change, no compaction.
         let mut plain = items.clone();
         plain[3]["status"] = json!("ok");
         plain[4].as_object_mut().unwrap().remove("diff");
         plain.pop();
         assert_eq!(
-            held(&judge(Harness::Pi, &plain)),
+            held(&judge(Harness::Pi, &plain, false)),
             [true, true, false, false, false, true]
         );
-        // Devin's record says none of them: no gap of its is held against it.
-        assert_eq!(held(&judge(Harness::Devin, &plain)), [true; 6]);
+        // Devin's store says no edit's change: that gap of its is not held against it.
+        assert_eq!(
+            held(&judge(Harness::Devin, &plain, false)),
+            [true, true, false, true, false, true]
+        );
+        // A compaction the harness refused is no reader's to show.
+        assert!(held(&judge(Harness::Pi, &plain, true))[4]);
         // Thinking taken for the agent's words is never held.
         let mut taken = items;
         taken[1]["role"] = json!("assistant");
-        assert!(!held(&judge(Harness::Claude, &taken))[5]);
+        assert!(!held(&judge(Harness::Claude, &taken, false))[5]);
     }
 }
