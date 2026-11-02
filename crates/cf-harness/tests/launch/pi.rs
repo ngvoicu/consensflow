@@ -678,6 +678,7 @@ fn reads_each_turn_s_end_from_the_extension_s_settled_marker() {
     );
 }
 
+mod failed;
 mod install;
 mod resumed;
 mod roles;

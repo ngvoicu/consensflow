@@ -298,3 +298,17 @@ and the hash that names a bundle of an extension is `$HASH`.
   leaves a step already moved as it is: after a merge brings rows of the old shape,
   run it on each file and let the scenarios test check it, rather than merging these
   files by hand.
+
+- **A failed Pi turn is settled by the session file's quiet, as a stopped or an aborted
+  one is** (2026-11-01, T-781). Node's Pi reader settled a turn whose last step stopped
+  or was aborted once the file had been quiet for 120 s, and never one whose last step
+  failed: a failure with no evidence from the extension read `settlement: unknown`, with
+  nothing in flight, for good, and the dispatcher publishes that as Working. Pi writes a
+  new step for each retry (at most 60 s apart), so a failed step with nothing after it
+  for 120 s is the last, as the other two are. `records/` moved for it in three readings
+  of two scenarios, each a quiet 429 that says the quota is exhausted: `sequences`,
+  `pi/provider-429.jsonl, read in pieces (quiet)`, the fourth and fifth readings, and
+  `suite`, `pi: a 429, quiet, is exhausted`. `settlement` is `settled` in each where
+  Node's was `unknown`; `inFlight`, `failed`, `quota` and the items are Node's. The
+  other Pi readings are unmoved (a failure that is not yet quiet is in flight in
+  both, and the extension's evidence settled it already). Moved by hand.

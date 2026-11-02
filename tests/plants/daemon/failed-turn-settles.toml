@@ -1,0 +1,49 @@
+# A failed turn is a turn that ended (T-781, 2026-11-01, ConsensFlow 3.0.7). Pi's reader settled a
+# turn whose last step stopped or was aborted once the session file had been quiet for 120 s, and
+# never one whose last step failed: with no evidence of the extension's (a conversation followed
+# with `/resume`, a launch folder swept, a write that failed) a failed turn read `unknown` with
+# nothing in flight for good, and the dispatcher publishes that as Working. Claude Code's, Codex's,
+# Devin's and Muse's readers settle a failed turn from their own record already (the cases are
+# beside each reader, and the goldens' Claude and Codex readings: 14 and 16 settled and failed).
+#
+# The reader's cases are `crates/cf-harness/src/pi/record/tests/`; the window's, over a record on
+# disk with no evidence from the extension, is `crates/cf-harness/tests/launch/pi/failed.rs`; the
+# three readings of Node's recordings that the fix moved are in
+# `crates/cf-harness/tests/goldens/records/`, read by `crates/cf-harness/tests/records`.
+#
+# Every name holds `failed turn`, so `cargo xtask plants daemon "failed turn"` runs them all.
+
+[run]
+failed-turn-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
+failed-turn-goldens = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]
+failed-turn-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::failed"]
+
+[[plant]]
+name = "failed turn: Pi's reader never settles a failed step by the file's quiet (the field's)"
+meant = "a_failed_step_is_a_turn_that_ended_once_nothing_follows_it_for_the_quiet_spell"
+runs = ["failed-turn-pi", "failed-turn-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        let can_settle = self.terminal.is_some() && quiet && !open;\n"
+replace = "        let can_settle = self.terminal.is_some() && quiet && !open && !self.failed;\n"
+
+[[plant]]
+name = "failed turn: Pi's reader takes a failure just written, which Pi may retry, for a turn at rest"
+meant = "a_failed_step_is_a_turn_that_ended_once_nothing_follows_it_for_the_quiet_spell"
+runs = ["failed-turn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "                Some(_) => !(quiet || native_settled),\n"
+replace = "                Some(_) => !(quiet || native_settled || self.failed),\n"
+
+[[plant]]
+name = "failed turn: a Pi window whose turn failed and whose extension said nothing of its end reads at work for good (the field's)"
+meant = "a_window_whose_turn_failed_is_at_work_while_pi_may_retry_and_at_rest_with_its_failure_once_the_record_is_quiet_whatever_the_extension_wrote"
+runs = ["failed-turn-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        let can_settle = self.terminal.is_some() && quiet && !open;\n"
+replace = "        let can_settle = self.terminal.is_some() && quiet && !open && !self.failed;\n"
