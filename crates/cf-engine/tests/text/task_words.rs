@@ -99,7 +99,13 @@ fn brief_of(ledger: &Ledger, project: i64, number: i64) -> String {
 #[test]
 fn a_critical_task_s_lead_says_the_task_changes_no_file_and_answers_to_the_chief() {
     let (_dir, mut ledger, project) = world();
-    let task = add_task(&mut ledger, project, "critical", Some("hard-problem"), "Why is it slow?");
+    let task = add_task(
+        &mut ledger,
+        project,
+        "critical",
+        Some("hard-problem"),
+        "Why is it slow?",
+    );
     let zeus = id_of(&ledger, project, "zeus");
     let assigned = ledger.assign_task(project, task, zeus).unwrap();
     assert_eq!(
@@ -117,7 +123,13 @@ fn the_words_consensflow_adds_to_a_task_hold_the_member_texts_bans() {
     let mut added: Vec<String> = Vec::new();
 
     // A critical task's lead, queued with its brief for a member's session.
-    let task = add_task(&mut ledger, project, "critical", Some("hard-problem"), "Why is it slow?");
+    let task = add_task(
+        &mut ledger,
+        project,
+        "critical",
+        Some("hard-problem"),
+        "Why is it slow?",
+    );
     let assigned = ledger
         .assign_task(project, task, id_of(&ledger, project, "zeus"))
         .unwrap();
@@ -128,7 +140,9 @@ fn the_words_consensflow_adds_to_a_task_hold_the_member_texts_bans() {
 
     // The words a window is resumed with: the chief's, and the daemon's fixed
     // ones when a quota hold ends.
-    ledger.pause_task(project, task, Some("chief"), None).unwrap();
+    ledger
+        .pause_task(project, task, Some("chief"), None)
+        .unwrap();
     let resumed = ledger
         .resume_task(project, task, Some("chief"), "Take v2")
         .unwrap()
@@ -196,7 +210,9 @@ fn the_words_consensflow_adds_to_a_task_hold_the_member_texts_bans() {
             },
         )
         .unwrap();
-    ledger.pause_task(project, moved, Some("chief"), None).unwrap();
+    ledger
+        .pause_task(project, moved, Some("chief"), None)
+        .unwrap();
     ledger.end_session(project, &ended, "human").unwrap();
     let resumed = ledger
         .resume_task(project, moved, Some("chief"), "Back on")

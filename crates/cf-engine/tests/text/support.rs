@@ -30,11 +30,17 @@ pub const OLD_COMMANDS: &str =
 /// word ConsensFlow sets in and before a task's own, so a banned word cannot
 /// come back in a lead the role tests never read (T-1060).
 pub const MEMBER_BANS: &[(&str, &str)] = &[
-    (OLD_COMMANDS, "teaches the board's commands, not the old transport's"),
+    (
+        OLD_COMMANDS,
+        "teaches the board's commands, not the old transport's",
+    ),
     ("the human", "is asked and answers only through the chief"),
     ("cf task add", "hands out no tasks"),
     (r"PM(?-u:\b)|coordinator", "answers to the chief"),
-    (r"VERDICT|Review round", "knows no verdict line: a review is a task"),
+    (
+        r"VERDICT|Review round",
+        "knows no verdict line: a review is a task",
+    ),
 ];
 
 /// `tests/goldens/text.json`, recorded from Node and fixed since.
