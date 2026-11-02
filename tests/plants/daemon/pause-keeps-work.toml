@@ -19,7 +19,12 @@
 # - once its work ended, it is closed with no fresh rounds;
 # - the chief is told again at each look; the human is not told;
 # - the close's note does not say what was checked;
-# - the live kit's command matching and its Mac `ping` (T-1117's kit fixes).
+# - the live kit's command matching (T-1117's kit fix);
+# - T-1137: what the harness says it keeps running (Codex's background terminals, from its
+#   broker's GET /terminals, which asks Codex's server) is not asked, or a harness that
+#   cannot say is read as one that runs none; the broker's route, its reading of Codex's
+#   list, the channel's route and the adapter's word; the kit's stuck script is found by
+#   Node's line, and midtool's command by the count in its file.
 #
 # Every name holds `pause keeps work`, so `cargo xtask plants daemon "pause keeps work"`
 # runs them all.
@@ -29,7 +34,11 @@ engine-dispatcher-paused-left = ["cargo", "test", "--offline", "-p", "cf-engine"
 engine-dispatcher-stops-keeps = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stops::"]
 rig-regression-busy-pause = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_pause_a_busy_worker_ignored_closed_its_window_and_ended_its_work::"], builds = true }
 cf-e2e-lib-runs-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "a_line_runs_the_command"]
-live-stops-command-here = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "the_command_of_this_machine"]
+codex-session-terminals = ["cargo", "test", "--offline", "-p", "cf-codex-session", "terminals"]
+harness-codex-channel = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::channel"]
+harness-launch-codex-kept = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "what_a_codex_window_keeps_running"]
+live-stops-stuck-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "stuck::"]
+live-stops-tool-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
 
 [[plant]]
 name = "pause keeps work: a window that runs work is closed anyway"
@@ -153,12 +162,91 @@ find = "            .is_some_and(|before| ends_with_program(before, file_of(prog
 replace = "            .is_some_and(|before| ends_with_program(before, program)),"
 
 [[plant]]
-name = "pause keeps work: the kit names the Mac's ping bare"
-meant = "the_command_of_this_machine_is_its_own_ping_or_a_sleep_of_the_same_time"
-runs = ["live-stops-command-here"]
-platforms = ["macos"]
+name = "pause keeps work: what the harness keeps running is not asked"
+meant = "a_window_whose_harness_keeps_commands_running_that_no_tree_shows_is_kept_open_for_them"
+runs = ["engine-dispatcher-paused-left"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "            Some(window) => window.kept_commands().await,"
+replace = "            Some(_) => Some(Vec::new()),"
+
+[[plant]]
+name = "pause keeps work: a harness that cannot say what it keeps running is read as running none"
+meant = "a_window_whose_harness_cannot_say_what_it_keeps_running_is_kept_open"
+runs = ["engine-dispatcher-paused-left"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '        None => said.push("what its harness could not list (it gave no answer)".to_owned()),'
+replace = "        None => {}"
+
+[[plant]]
+name = "pause keeps work: the broker has no route for what Codex keeps running"
+meant = "the_commands_codex_keeps_running_for_the_shown_thread_are_its_own_list_of_them"
+runs = ["codex-session-terminals"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/http.rs"
+find = '    if request.method() == Method::GET && target == "/terminals" {'
+replace = '    if request.method() == Method::GET && target == "/terminal" {'
+
+[[plant]]
+name = "pause keeps work: the broker reads Codex's list from another field"
+meant = "the_commands_codex_keeps_running_for_the_shown_thread_are_its_own_list_of_them"
+runs = ["codex-session-terminals"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/terminals.rs"
+find = '            .get("data")?'
+replace = '            .get("items")?'
+
+[[plant]]
+name = "pause keeps work: the broker passes over a terminal with no command"
+meant = "a_list_codex_refuses_or_answers_with_no_list_is_no_word_of_what_runs"
+runs = ["codex-session-terminals"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/terminals.rs"
+find = "            .collect::<Option<Vec<_>>>()?;"
+replace = "            .flatten()\n            .collect::<Vec<_>>();"
+
+[[plant]]
+name = "pause keeps work: the channel asks the session route for what Codex keeps running"
+meant = "what_codex_keeps_running_is_the_brokers_list_for_this_launch_and_nothing_else_is"
+runs = ["harness-codex-channel"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel.rs"
+find = '        let request = self.request("/terminals", None)?;'
+replace = '        let request = self.request("/session", None)?;'
+
+[[plant]]
+name = "pause keeps work: a Codex window says it keeps nothing running"
+meant = "what_a_codex_window_keeps_running_is_its_brokers_list_of_codexs_background_terminals"
+runs = ["harness-launch-codex-kept"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "        Box::pin(async move { self.channel.terminals(&*self.time, &*self.loopback).await })"
+replace = "        Box::pin(async { Some(Vec::new()) })"
+
+[[plant]]
+name = "pause keeps work: the kit's stuck script is looked for as a sh script"
+meant = "the_commands_process_is_the_script_by_whichever_path_of_nodes_and_not_the_shell_naming_it"
+runs = ["live-stops-stuck-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '        &format!(r"^{}\s+\.[\\/]{}$", program("node"), regex::escape(SCRIPT)),'
+replace = '        &format!(r"^{}\s+\.[\\/]{}$", program("sh"), regex::escape(SCRIPT)),'
+
+[[plant]]
+name = "pause keeps work: the kit does not read midtool's count"
+meant = "the_command_is_told_running_by_the_hosts_tree_then_its_file_then_the_screen_then_the_wire"
+runs = ["live-stops-tool-unit"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
-find = "            Ok(path) => Self::ping_at(&path.display().to_string()),"
-replace = "            Ok(_) => Self::ping(false),"
+find = "    if let Some(seconds) = ticked() {"
+replace = "    if let Some(seconds) = ticked().filter(|_| false) {"
