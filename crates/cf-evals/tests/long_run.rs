@@ -24,6 +24,8 @@ mod field;
 mod keeper;
 #[path = "long_run/order.rs"]
 mod order;
+#[path = "long_run/parity.rs"]
+mod parity;
 #[path = "long_run/scene.rs"]
 mod scene;
 #[path = "long_run/signals.rs"]

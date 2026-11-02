@@ -706,3 +706,57 @@ fn a_question_for_no_op_names_every_op_the_table_of_the_tool_has() {
         assert!(refused.contains(op), "{op} is not in: {refused}");
     }
 }
+
+#[test]
+fn a_transcript_is_read_after_each_of_its_lines_as_the_product_reads_it() {
+    let line = |record: Value| {
+        let mut record = record;
+        record["sessionId"] = json!("s1");
+        record["isSidechain"] = json!(false);
+        record.to_string()
+    };
+    let text = [
+        line(json!({
+            "type": "user", "uuid": "u1", "parentUuid": null,
+            "message": { "role": "user", "content": "Hello" },
+        })),
+        line(json!({
+            "type": "assistant", "uuid": "a1", "parentUuid": "u1",
+            "message": {
+                "id": "m1", "role": "assistant",
+                "content": [{ "type": "text", "text": "Hi" }],
+                "stop_reason": "end_turn",
+            },
+        })),
+        line(json!({
+            "type": "system", "subtype": "turn_duration", "uuid": "d1", "parentUuid": "a1",
+            "durationMs": 5, "messageCount": 2,
+        })),
+    ]
+    .join("\n");
+    let read = answer(&ask(
+        "claude_prefixes",
+        json!({ "session": "s1", "text": text }),
+    ))
+    .unwrap();
+    let states: Vec<(i64, &str)> = read
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|prefix| {
+            (
+                prefix["lines"].as_i64().unwrap(),
+                prefix["reading"]["settlement"]["state"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    // The turn begins at the prompt, and an answer that ended it settles it at its boundary.
+    assert_eq!(states, [(1, "in-flight"), (2, "in-flight"), (3, "settled")]);
+    assert!(
+        read[0]["reading"].get("items").is_none(),
+        "the words are left out"
+    );
+    for missing in [json!({ "text": text }), json!({ "session": "s1" })] {
+        assert!(answer(&ask("claude_prefixes", missing)).is_err());
+    }
+}

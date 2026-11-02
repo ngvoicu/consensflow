@@ -23,7 +23,7 @@ use crate::clock;
 use crate::long_run::ledger::{Item, Message, Participant, Task};
 use crate::long_run::look::Look;
 use crate::long_run::mask::{cut, Names};
-use crate::long_run::record::{jobs_ended_in, jobs_started_in, Record, Stood};
+use crate::long_run::record::{jobs_ended_in, jobs_started_in, Kind, Record, Stood};
 
 /// ConsensFlow's note that a task held for its jobs was finished at someone's word
 /// (the chief's, or the human's): `T-14 is finished at @chief's word: what it said
@@ -31,9 +31,6 @@ use crate::long_run::record::{jobs_ended_in, jobs_started_in, Record, Stood};
 /// let go of, and a result taken while they run is what was asked for.
 pub const FINISHED: &str =
     r"^T-(\d+) is finished at @[^\s']+'s word: what it said last is its result";
-
-/// Where ConsensFlow's own deliveries begin, which quote what they like.
-const DELIVERY: &str = "[ConsensFlow m-";
 
 /// 1: a working task whose window came to rest and has done nothing since, holding
 /// no job, for longer than the run lets it. One whose window's own record could not be
@@ -320,7 +317,7 @@ pub fn unread_records(look: &Look, settings: &Settings) -> Vec<Unjudged> {
         let prompt = items
             .iter()
             .rev()
-            .find(|item| item.role == "user" && item.text.starts_with(DELIVERY))
+            .find(|item| super::deliveries::is_delivery(item))
             .and_then(|item| item.millis())
             .unwrap_or(at);
         let why = match record_by(look, worker, at, at + settings.settle) {
@@ -452,18 +449,22 @@ fn jobs_held_by_record(
                 started.push((id, item_line(item, names)));
             }
         }
-        if item.role == "user" && !item.text.starts_with(DELIVERY) {
+        // Only a notification that opens its item is one (`jobs_ended_in` reads the head): what a
+        // delivery of ConsensFlow's quotes, wrapped or not, ends no job.
+        if item.role == "user" {
             ended.extend(jobs_ended_in(&item.text));
         }
     }
     if let Some(record) = own {
         for entry in record.jobs_pending_at(at) {
-            if let crate::long_run::record::Kind::JobStarted(id) = &entry.kind {
+            if let Kind::JobStarted(id) = &entry.kind {
                 started.push((id.clone(), entry.line()));
             }
         }
+        // A job is over by Claude Code's notification of it or by the result of a `TaskStop`
+        // call that stopped it, as the product's reader counts a job that runs.
         for entry in &record.entries {
-            if let crate::long_run::record::Kind::JobEnded(id) = &entry.kind {
+            if let Kind::JobEnded(id) | Kind::JobStopped(id) = &entry.kind {
                 if entry.at.is_none_or(|said| said <= at) {
                     ended.insert(id.clone());
                 }
@@ -480,17 +481,14 @@ fn jobs_held_by_record(
 /// Whether `worker`'s record or the copy of it says the job `id` ended by `at`.
 fn ended_by(look: &Look, worker: &Participant, id: &str, at: i64) -> bool {
     let in_copy = look.items_by(worker.id, at).iter().any(|item| {
-        item.role == "user"
-            && !item.text.starts_with(DELIVERY)
-            && jobs_ended_in(&item.text).iter().any(|ended| ended == id)
+        item.role == "user" && jobs_ended_in(&item.text).iter().any(|ended| ended == id)
     });
-    in_copy
-        || look.record_of(worker.id).is_some_and(|record| {
-            record.entries.iter().any(|entry| {
-                entry.kind == crate::long_run::record::Kind::JobEnded(id.to_owned())
-                    && entry.at.is_none_or(|said| said <= at)
-            })
+    in_copy || look.record_of(worker.id).is_some_and(|record| {
+        record.entries.iter().any(|entry| {
+            matches!(&entry.kind, Kind::JobEnded(ended) | Kind::JobStopped(ended) if ended == id)
+                && entry.at.is_none_or(|said| said <= at)
         })
+    })
 }
 
 /// Whether ConsensFlow's note that `task` was finished at someone's word came before

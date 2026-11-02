@@ -77,6 +77,13 @@ fn said_until(text: &str, body: &str) -> usize {
             }
             continue;
         }
+        // A quote of a wrapper inside a message's words is escaped in Claude Code's record
+        // (`<pasted_content` as `<\pasted_content`): a backslash the record holds and the
+        // ledger's words do not is that escape, and says nothing else.
+        if said == '\\' && wanted != '\\' {
+            text_chars.next();
+            continue;
+        }
         if said != wanted {
             return until;
         }
@@ -117,18 +124,38 @@ fn body_in(look: &Look, id: i64) -> Option<&str> {
 /// `"`, `>` or line break, then `>`.
 const PASTED: &str = r#"^<pasted_content(?: [A-Za-z][A-Za-z0-9_-]*="[^">\n]*")*>"#;
 
-/// Where a delivery in `text` would begin: past its leading white space and, where
-/// Claude Code wrapped the paste, past the wrapper's opening tag ([`PASTED`]) and the white
-/// space after it.
+/// What Claude Code puts ahead of a paste whose lines are paths of images it can read
+/// (2.1.308): a placeholder for each image, `[Image #4]`, one white space between them.
+const PLACEHOLDERS: &str = r"^\[Image #\d+\](?:\s\[Image #\d+\])*";
+
+/// Where a delivery in `text` would begin: past its leading white space, the placeholders of
+/// the images Claude Code attached ([`PLACEHOLDERS`]) and, where it wrapped the paste, the
+/// wrapper's opening tag ([`PASTED`]), each with the white space after it.
 fn delivery_start(text: &str) -> usize {
+    static IMAGES: OnceLock<Regex> = OnceLock::new();
     static TAG: OnceLock<Regex> = OnceLock::new();
-    let start = text.len() - text.trim_start().len();
-    pattern::once(&TAG, PASTED)
-        .find(&text[start..])
-        .map_or(start, |tag| {
-            let inner = &text[start + tag.end()..];
+    let after = |from: usize, found: Option<regex::Match<'_>>| {
+        found.map_or(from, |found| {
+            let inner = &text[from + found.end()..];
             text.len() - inner.trim_start().len()
         })
+    };
+    let start = text.len() - text.trim_start().len();
+    let start = after(
+        start,
+        pattern::once(&IMAGES, PLACEHOLDERS).find(&text[start..]),
+    );
+    after(start, pattern::once(&TAG, PASTED).find(&text[start..]))
+}
+
+/// Whether `item` is a prompt that opens with a delivery's header, inside the wrapper where
+/// Claude Code wrapped the paste and behind the placeholders of the images it attached: what
+/// a person typed, a tool's output or a job's notification may quote a header anywhere else.
+pub(super) fn is_delivery(item: &Item) -> bool {
+    item.role == "user"
+        && headers(&item.text)
+            .first()
+            .is_some_and(|(_, start, _)| *start == delivery_start(&item.text))
 }
 
 /// The messages `item` delivered to `worker`, in order: none where it is no prompt that
@@ -137,10 +164,7 @@ fn delivery_start(text: &str) -> usize {
 /// else each message it was given ([`given_in`]: a header its words quote is none) that
 /// the ledger holds as one to `worker`.
 pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<&'l Message> {
-    let opens = headers(&item.text)
-        .first()
-        .is_some_and(|(_, start, _)| *start == delivery_start(&item.text));
-    if item.role != "user" || !opens {
+    if !is_delivery(item) {
         return Vec::new();
     }
     given_in(&item.text, |id| body_in(look, id))

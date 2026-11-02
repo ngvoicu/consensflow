@@ -132,7 +132,8 @@ fn a_background_job_is_pending_from_its_start_until_claude_codes_own_notificatio
     );
     let woken = line(
         61,
-        json!({ "type": "user", "turnOrigin": "task_notification", "message": { "role": "user",
+        json!({ "type": "user", "promptSource": "system", "turnOrigin": "task_notification",
+            "message": { "role": "user",
             "content": "<task-notification>\n<task-id>b7x2</task-id>\n<status>completed</status>\n</task-notification>" } }),
     );
     let record = record(&[
@@ -149,7 +150,10 @@ fn a_background_job_is_pending_from_its_start_until_claude_codes_own_notificatio
     );
     // A message that quotes a notification is no notification.
     assert_eq!(record.jobs_pending_at(at(50)).len(), 1);
-    assert!(record.jobs_pending_at(at(60)).is_empty());
+    // Queued, a notification ends nothing (the product's reader: the job is pending until Claude
+    // Code delivers it, as the user's record of the turn it begins); delivered, it ends the job.
+    assert_eq!(record.jobs_pending_at(at(60)).len(), 1);
+    assert!(record.jobs_pending_at(at(61)).is_empty());
     assert!(record.jobs_pending_at(at(5)).is_empty());
 }
 
@@ -164,11 +168,21 @@ fn a_command_moved_to_the_background_names_its_job_in_the_words_of_its_result() 
         ["fd8bf7"]
     );
     assert!(jobs_started_in("the build ran in the background").is_empty());
+    // A notification ends the jobs its head names, once its status says they are over.
     assert_eq!(
-        jobs_ended_in("<task-notification>\n<task-id> t1 </task-id></task-notification><task-notification><task-id>t2</task-id>"),
+        jobs_ended_in("<task-notification>\n<task-id> t1 </task-id>\n<task-id>t2</task-id>\n<status>completed</status>\n</task-notification>"),
         ["t1", "t2"]
     );
     assert!(jobs_ended_in("<task-id>t1</task-id>").is_empty());
+}
+
+/// Claude Code's own record of an interrupt: a list of one text block.
+fn interrupted(second: u32, marker: &str) -> String {
+    line(
+        second,
+        json!({ "type": "user", "message": { "role": "user",
+            "content": [{ "type": "text", "text": marker }] } }),
+    )
 }
 
 #[test]
@@ -176,7 +190,7 @@ fn an_interrupt_leaves_the_turn_at_rest_and_a_line_that_is_no_json_is_none() {
     let record = Record::claude(&format!(
         "{}\nnot json\n{}",
         prompt(0, "Work."),
-        prompt(9, "[Request interrupted by user]")
+        interrupted(9, "[Request interrupted by user]")
     ));
     assert_eq!(record.entries.len(), 2);
     assert_eq!(record.stood_at(at(10)).unwrap().0, Stood::AtRest);
@@ -847,4 +861,33 @@ fn the_agents_a_process_proved_gone_left_running_went_with_it() {
     record.gone_at(at(15));
     assert_eq!(record.agents_pending_at(at(14)), 1, "before it went");
     assert_eq!(record.agents_pending_at(at(20)), 0);
+}
+
+#[test]
+fn an_interrupt_is_claude_codes_record_of_one_and_what_a_person_typed_is_a_prompt() {
+    // The product's rule (`is_interrupt`): a list of one text block that says one of its two
+    // markers and nothing else. The same words typed, or after others, begin a turn.
+    for marker in [
+        "[Request interrupted by user]",
+        "[Request interrupted by user for tool use]",
+    ] {
+        let record = record(&[prompt(0, "Work."), interrupted(9, marker)]);
+        assert_eq!(
+            record.stood_at(at(10)).unwrap().0,
+            Stood::AtRest,
+            "{marker}"
+        );
+    }
+    for typed in [
+        prompt(9, "[Request interrupted by user]"),
+        interrupted(9, "[Request interrupted by user] and then"),
+        interrupted(9, "[Request interrupted by someone]"),
+    ] {
+        let record = record(&[prompt(0, "Work."), typed.clone()]);
+        assert_eq!(
+            record.stood_at(at(10)).unwrap().0,
+            Stood::InFlight,
+            "{typed}"
+        );
+    }
 }
