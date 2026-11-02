@@ -4,6 +4,7 @@
 
 mod cells;
 mod compaction;
+mod drawn;
 mod logs;
 mod messages;
 mod rows;

@@ -3,6 +3,7 @@
 //! completion that names no answer, and the records Node's reader threw on.
 
 mod answers;
+mod drawn;
 mod refusals;
 mod twins;
 
