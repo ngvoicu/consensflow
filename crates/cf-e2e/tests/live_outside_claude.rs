@@ -38,7 +38,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use cf_e2e::live::members::{find, member, stand_in_chief, Account, Members, Plan};
+use cf_e2e::live::members::{find, member, quiet_command, stand_in_chief, Account, Members, Plan};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::Open;
 use cf_e2e::live::{self, agents, ask, claude, Harness, Log};
@@ -56,12 +56,30 @@ const FOLDER: &str = "outside-claude";
 const WAIT_SECONDS: u32 = 40;
 const WORKER_SAID: &str = "WINDOW-DONE-T489";
 
-/// What the second Claude is asked, and answers: words its question does not hold, which a
-/// screen that shows the question would show too. Its turn runs past the worker's, so that
-/// it ends after the worker's answer: the order in which the last answer of the record is the
-/// second's.
-const OUTSIDE_ASKED: &str = "Run this exact command with your shell tool, in the foreground, and wait for it to finish: python3 -c 'import time; time.sleep(60)'\nThen tell me what 2111 plus 2111 is: reply with exactly one line, the word OUTSIDE, a hyphen, and the sum, with no spaces.";
+/// How long the second Claude's command runs: past the worker's, so that the worker answers
+/// first and the second Claude last (the order in which the last answer of the record is the
+/// second's).
+const OUTSIDE_SECONDS: u64 = 60;
+
+/// What the second Claude answers: words its question does not hold, which a screen that shows
+/// the question would show too.
 const OUTSIDE_SAID: &str = "OUTSIDE-4222";
+
+/// The command a Claude on a machine that is `windows` (or is not) is told to run to wait
+/// `seconds`: the kit's own quiet command, which the shell of every machine knows. Windows
+/// has no `python3` (what its `PATH` holds under that name opens the Microsoft Store, and a
+/// Claude's command ended "Python was not found", T-1079).
+fn waiting(seconds: u64, windows: bool) -> String {
+    quiet_command(seconds, windows)
+}
+
+/// What the second Claude is asked.
+fn outside_asked(windows: bool) -> String {
+    format!(
+        "Run this exact command with your shell tool, in the foreground, and wait for it to finish: {}\nThen tell me what 2111 plus 2111 is: reply with exactly one line, the word OUTSIDE, a hyphen, and the sum, with no spaces.",
+        waiting(OUTSIDE_SECONDS, windows)
+    )
+}
 
 /// How long the worker's window may take to be at work on its task, and what the board and the
 /// record have to say what they make of the second Claude's answer once it is on its screen.
@@ -73,9 +91,10 @@ const TOLD: &str = "another Claude than @";
 
 /// The task's brief: a command that keeps the turn at work while the second Claude takes its
 /// own, then the answer.
-fn brief() -> String {
+fn brief(windows: bool) -> String {
     format!(
-        "Run this exact command with your shell tool, in the foreground, and wait for it to finish: python3 -c 'import time; time.sleep({WAIT_SECONDS})'\nThen reply with exactly one line: {WORKER_SAID}"
+        "Run this exact command with your shell tool, in the foreground, and wait for it to finish: {}\nThen reply with exactly one line: {WORKER_SAID}",
+        waiting(u64::from(WAIT_SECONDS), windows)
     )
 }
 
@@ -185,14 +204,9 @@ fn branches_from_the_call(config: &Path, session: &str) -> usize {
         .lines()
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect();
+    let command = waiting(u64::from(WAIT_SECONDS), cfg!(windows));
     let call = records.iter().find(|record| {
-        record["type"] == "assistant"
-            && record["message"]["content"]
-                .to_string()
-                .contains("time.sleep(")
-            && record["message"]["content"]
-                .to_string()
-                .contains(&format!("time.sleep({WAIT_SECONDS})"))
+        record["type"] == "assistant" && record["message"]["content"].to_string().contains(&command)
     });
     let Some(call) = call.and_then(|call| call["uuid"].as_str()) else {
         return 0;
@@ -222,7 +236,7 @@ fn drive(members: &mut Members, log: &Log) -> Result<Account> {
     let agent = agents::id(Harness::Claude);
     let config = members.claude_config();
     members.add(&agent, &[])?;
-    let number = members.give(&agent, &brief())?;
+    let number = members.give(&agent, &brief(cfg!(windows)))?;
     let session = find(
         log,
         "the worker's window at work",
@@ -235,9 +249,10 @@ fn drive(members: &mut Members, log: &Log) -> Result<Account> {
             let Some(session) = window.session() else {
                 return Ok(None);
             };
+            let command = waiting(u64::from(WAIT_SECONDS), cfg!(windows));
             let at_work = claude::record(&config, &session)
                 .iter()
-                .any(|entry| entry.text.contains(&format!("time.sleep({WAIT_SECONDS})")));
+                .any(|entry| entry.text.contains(&command));
             Ok(at_work.then_some(session))
         },
     )?;
@@ -264,7 +279,7 @@ fn drive(members: &mut Members, log: &Log) -> Result<Account> {
         },
     )?
     .unwrap_or_else(|| holders(&config, &session).len());
-    let sent = outside.send(OUTSIDE_ASKED, OUTSIDE_SAID);
+    let sent = outside.send(&outside_asked(cfg!(windows)), OUTSIDE_SAID);
     log.block("the second Claude's screen, asked", &outside.screen());
     case.check(
         "two Claudes show the conversation at once",
@@ -378,4 +393,34 @@ fn a_claude_the_human_starts_on_a_workers_conversation_has_none_of_its_turns_tak
     )];
     log.report("what the case came to", &report::table(&checks));
     report::verdict(&checks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_command_the_case_asks_for_is_one_a_machine_may_lack() {
+        // Windows has no `python3` (its shim opens the Store, T-1079), and a Claude there runs
+        // its commands in Git Bash or PowerShell: the quiet command is the kit's own.
+        for windows in [false, true] {
+            for asked in [brief(windows), outside_asked(windows)] {
+                assert!(!asked.contains("python"), "{windows}: {asked}");
+            }
+        }
+        assert!(brief(true).contains("ping -n 41 127.0.0.1"));
+        assert!(brief(false).contains("sleep 40"));
+        assert!(outside_asked(true).contains("ping -n 61 127.0.0.1"));
+        assert!(outside_asked(false).contains("sleep 60"));
+    }
+
+    #[test]
+    fn the_worker_s_command_is_found_by_its_own_words_and_not_by_the_second_claudes() {
+        for windows in [false, true] {
+            let worker = waiting(u64::from(WAIT_SECONDS), windows);
+            let outside = waiting(OUTSIDE_SECONDS, windows);
+            assert!(!outside.contains(&worker), "{windows}: {outside}");
+            assert!(!worker.contains(&outside), "{windows}: {worker}");
+        }
+    }
 }

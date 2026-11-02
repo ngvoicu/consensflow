@@ -140,6 +140,31 @@ fn real_path_on(path: &Path, windows: bool) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// A real name of a folder (`canonical`, what `fs::canonicalize` says of it) as the product
+/// writes it in a note, which is the name Node's `realpath` gives (`cf_harness`'s
+/// `real_path`): on Windows the `\\?\` of a drive's path taken off (`\\?\C:\x` is `C:\x`) and
+/// `\\?\UNC\server\share` as `\\server\share`. What a note names is found by this name, and
+/// not by the canonical one, which no note holds there (T-1079: three trust notes that were
+/// there were not found).
+pub fn plain_name(canonical: &str) -> String {
+    if let Some(share) = canonical.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}");
+    }
+    match canonical.strip_prefix(r"\\?\") {
+        Some(rest) if has_drive(rest) => rest.to_owned(),
+        _ => canonical.to_owned(),
+    }
+}
+
+/// Whether `text` begins with a drive's letter and its colon.
+fn has_drive(text: &str) -> bool {
+    let mut characters = text.chars();
+    matches!(
+        (characters.next(), characters.next()),
+        (Some(letter), Some(':')) if letter.is_ascii_alphabetic()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +177,21 @@ mod tests {
             real_path_on(folder.path(), false),
             fs::canonicalize(folder.path()).unwrap()
         );
+    }
+
+    #[test]
+    fn a_folder_is_named_as_the_product_writes_it_with_no_verbatim_prefix_of_a_drive_or_a_share() {
+        // What Windows' `canonicalize` says of a folder, and the name Node's `realpath` gives it.
+        assert_eq!(plain_name(r"\\?\C:\Users\me\live\x"), r"C:\Users\me\live\x");
+        assert_eq!(
+            plain_name(r"\\?\UNC\server\share\live"),
+            r"\\server\share\live"
+        );
+        // A name that is none of those two is as given, whatever the system.
+        assert_eq!(plain_name(r"\\?\Volume{1b2}\x"), r"\\?\Volume{1b2}\x");
+        assert_eq!(plain_name(r"\\?\1:\x"), r"\\?\1:\x");
+        assert_eq!(plain_name("/private/tmp/x"), "/private/tmp/x");
+        assert_eq!(plain_name(r"C:\Users\me"), r"C:\Users\me");
     }
 
     #[test]
