@@ -10,6 +10,7 @@
 //! launch joins a family and its effort, nothing more.
 
 use super::*;
+use cf_proto::agents::DevinModel;
 use serde_json::Value;
 
 /// The levels a Devin preset names, the hardest first.
@@ -229,4 +230,60 @@ fn gemini_4_argon_is_complex_at_high_standard_at_medium_and_light_at_low_on_devi
             assert_eq!(entry.entry.profile.work_tier, tier, "{name}");
         }
     }
+}
+
+#[test]
+fn a_devin_agent_on_a_model_the_catalog_runs_bare_and_never_at_its_effort_runs_bare() {
+    // T-609's edge: a family Devin lists with no level (Claude Opus 4.6), or not at the
+    // agent's (GLM 5.2, listed bare and at max), made an id Devin has not of the agent's
+    // effort (`claude-opus-4-6-medium-thinking`). The window runs the model as named.
+    let catalog = catalog();
+    let effort = |model: &str, effort: &'static str| {
+        catalog.launch_effort(Harness::Devin, model, Some(effort))
+    };
+    assert_eq!(effort("claude-opus-4-6", "medium"), None);
+    assert_eq!(effort("claude-opus-4-6-thinking", "medium"), None);
+    assert_eq!(effort("glm-5-2", "medium"), None);
+    assert_eq!(effort("glm-5-2-max-1m", "high"), None);
+    assert_eq!(effort("swe-1-7", "high"), None);
+    // Controls: a level the catalog runs the family at is the agent's; a family it runs
+    // at levels alone keeps the agent's (it has no bare id to fall back on); a model the
+    // catalog does not know is called by the id it names; another harness takes its
+    // effort as a flag of its own; and an agent of no effort has none.
+    assert_eq!(effort("glm-5-2", "max"), Some("max"));
+    assert_eq!(effort("swe-1-7", "medium"), Some("medium"));
+    assert_eq!(effort("claude-opus-5-5-fast", "medium"), Some("medium"));
+    assert_eq!(effort("swe-2", "low"), Some("low"));
+    assert_eq!(effort("my-own-model", "high"), Some("high"));
+    assert_eq!(
+        catalog.launch_effort(Harness::Claude, "claude-opus-4-6", Some("high")),
+        Some("high")
+    );
+    assert_eq!(catalog.launch_effort(Harness::Devin, "glm-5-2", None), None);
+}
+
+#[test]
+fn a_devin_model_listed_with_no_level_is_run_by_an_id_devin_lists_at_every_effort() {
+    // Over Devin's own list: each id of a family it lists with no level, at each effort an
+    // agent can name, launches as an id Devin lists; and where the effort is dropped, the
+    // model as named is one Devin lists.
+    let catalog = catalog();
+    let mut bare_families = 0;
+    for (label, ids) in devin_lists() {
+        let listed: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let no_level = ids.iter().all(|id| DevinModel::of(id).level.is_none());
+        bare_families += usize::from(no_level);
+        for id in &ids {
+            for level in efforts(Harness::Devin).levels {
+                let kept = catalog.launch_effort(Harness::Devin, id, Some(level));
+                if no_level {
+                    assert_eq!(kept, None, "{label}: {id} at {level}");
+                }
+                if kept.is_none() {
+                    assert!(listed.contains(id.as_str()), "{label}: {id} at {level}");
+                }
+            }
+        }
+    }
+    assert_eq!(bare_families, 6, "Devin's families with no level");
 }

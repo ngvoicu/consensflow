@@ -309,6 +309,40 @@ async fn a_kill_is_asked_by_the_panes_id_and_generation() {
 }
 
 #[tokio::test]
+async fn how_long_a_pane_has_printed_nothing_is_what_its_snapshot_says_and_none_where_it_says_nothing(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&seen);
+            app.on("pane.snapshot", move |_, body| {
+                let answer = match body["generation"].as_u64() {
+                    Some(1) => json!({ "ok": true, "outputQuietMs": 320 }),
+                    // A pane that has printed nothing yet.
+                    Some(2) => json!({ "ok": true, "outputQuietMs": null }),
+                    // An answer that does not say, as a host older than the field's.
+                    Some(3) => json!({ "ok": true }),
+                    _ => json!({ "ok": false, "error": "no such pane" }),
+                };
+                heard.borrow_mut().push(body);
+                async move { Ok(answer) }
+            });
+            let host = host_over(&daemon);
+            assert_eq!(host.quiet(&pane("p1-zeus", 1)).await, Ok(Some(320.0)));
+            assert_eq!(host.quiet(&pane("p1-zeus", 2)).await, Ok(None));
+            assert_eq!(host.quiet(&pane("p1-zeus", 3)).await, Ok(None));
+            assert_eq!(host.quiet(&pane("p1-zeus", 4)).await, Ok(None));
+            // The request is the plain look at a pane: its id and generation, no tail asked.
+            assert_eq!(
+                seen.borrow()[0],
+                json!({ "id": "p1-zeus", "generation": 1 })
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn an_adapters_own_request_goes_straight_through_and_is_asked_where_it_is_called() {
     LocalSet::new()
         .run_until(async {

@@ -59,7 +59,26 @@ fn drawn_lines(snapshot: &Value) -> Vec<String> {
 }
 
 /// How long a fresh window's output must hold still before its screen counts as drawn.
+/// The window of a task that is done is held to the same rest before it closes
+/// ([`Dispatcher::still_drawing`], T-1051): one rest for "drawn", the number the engine
+/// already read a fresh window by, not a new one. Devin's screen shows "Typing · 2s" while it
+/// types an answer out, so it repaints at least as often as that counter counts; 1.5 s is
+/// longer than a second, so a screen still typing is not taken for one at rest. Not yet
+/// measured on a Devin window at rest (T-1051's live runs say what it prints then).
 const DRAWN_QUIET_MS: f64 = 1_500.0;
+
+/// The longest the window of a task that is done is held open for its screen to be drawn,
+/// from the look that found the window free: where the screen has not held still by then
+/// the window closes all the same ([`Dispatcher::still_drawing`], T-1051). From T-1038's A/B
+/// (Devin 3000.11.228, 16 legs with the window kept open, logs in
+/// `consensflow-trees/.runs/T-1038-logs/ab-*.log`): the screen drew the answer 5.0 to 6.8 s
+/// after the task was given, and the agent had ended its turn a few seconds before that, so
+/// the screen trailed the turn by about five seconds at most. This doubles that, and is the
+/// host's whole close grace ([`CLOSE_GRACE`]). A
+/// screen that never rests (a clock, a spinner that goes on at rest) holds its window no
+/// longer, and the next task of its session waits no longer for a window of its own
+/// (`ownership`).
+const STILL_BOUND_MS: i64 = 10_000;
 
 /// How soon a chief that could not start is tried again; the wait doubles
 /// with each failure, up to the most.
@@ -269,6 +288,12 @@ pub(crate) struct WindowPart {
     /// forget the first's, and be interrupted for it again on going back to
     /// it: only a member's own lane, given tasks by name, can.
     pub(crate) stopped: Option<(i64, i64)>,
+    /// The stop it paid at rest with its turn's message not yet taken back: a harness that
+    /// takes the message back writes so a moment after the turn's end (Muse's
+    /// `run_retracted`, 5–11 ms after its `terminal cancelled`), and a look between the two
+    /// pays the stop (`stops`). A later look that reads the message taken back takes it
+    /// back then.
+    pub(crate) paid_untaken: Option<Stop>,
     /// The rounds the stop it owes has had.
     pub(crate) interrupted: Option<Interrupted>,
     /// The stop it ignored in every round, while it lasts.
@@ -294,6 +319,12 @@ pub(crate) struct WindowPart {
     pub(crate) owner: Option<i64>,
     /// The task whose requester was told it waits for this window to close.
     pub(crate) told_waiting: Option<i64>,
+    /// When the engine first found the window free with its task done, wanting it closed:
+    /// its screen is waited for from then, [`STILL_BOUND_MS`] at the most
+    /// ([`Dispatcher::still_drawing`]). None until then, again once a task of the window's
+    /// is in hand (the wait is over, the next time it is done is a wait of its own), and
+    /// once the window closes.
+    pub(crate) found_free: Option<i64>,
     /// The window of its last launch whose open the host never answered by the open's
     /// deadline: the host may have started its program since, or may yet, and it would
     /// run on the conversation the next window goes on with (a Codex thread one client
@@ -340,6 +371,7 @@ impl Default for WindowPart {
             trust_keys: 0,
             trust_sure: false,
             stopped: None,
+            paid_untaken: None,
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
@@ -348,6 +380,7 @@ impl Default for WindowPart {
             unproven: false,
             owner: None,
             told_waiting: None,
+            found_free: None,
             abandoned: None,
         }
     }
@@ -492,6 +525,7 @@ impl Dispatcher {
             window.conversation = None;
             window.unproven = false;
             window.told_waiting = None;
+            window.found_free = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
             window.trust_keys = 0;
@@ -744,7 +778,7 @@ impl Dispatcher {
         // the host's answer.
         let opened = returning(self.seams.host.open(OpenPane {
             pane: pane.clone(),
-            cwd: project.directory.clone(),
+            cwd: workspace(project),
             argv: planned.argv.clone(),
             env,
             drop_env: planned.drop_env.clone(),
@@ -867,6 +901,7 @@ impl Dispatcher {
             part.harness.clone_from(&planned.harness);
             part.pane = Some(pane.clone());
             part.opened_at = Some(asked_at);
+            part.paid_untaken = None;
             record.quota.borrow_mut().drifts_told.clear();
             part.launch_id = Some(launch_id);
             part.token = Some(token);
@@ -1088,6 +1123,8 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
+        // The folder the window works in, as the system names it.
+        let directory = workspace(project);
         // The program of the last window on its conversation was proven gone: nothing
         // of it writes on.
         let previous_gone = match &conversation {
@@ -1099,7 +1136,7 @@ impl Dispatcher {
             project: project.id,
             handle: &participant.handle,
             role: &participant.role,
-            directory: &project.directory,
+            directory: &directory,
             resume,
             previous_gone,
             message: text.as_deref().filter(|_| !delivered),
@@ -1600,8 +1637,11 @@ impl Dispatcher {
     /// on the board for what it needs is not in hand: the session is its
     /// already, but its window opens again, on its conversation, when the
     /// follow-up goes, and stays closed meanwhile. One the human opened and
-    /// has hidden since waits for its agent's turn to end first. Says whether
-    /// it closed; one gone already has nothing to close.
+    /// has hidden since waits for its agent's turn to end first. The window of
+    /// a task that is done also waits for its screen to be drawn
+    /// ([`Dispatcher::still_drawing`]); the task's result is taken meanwhile as ever,
+    /// and the next step tries the close again. Says whether the step is done with the
+    /// window: it closed, or it waits for its screen. One gone already has nothing to close.
     pub(crate) async fn close_if_free(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -1612,10 +1652,73 @@ impl Dispatcher {
         } || record.delivery.borrow().delivering.is_some()
             || self.seams.ledger.borrow().has_task_in_hand(record.id)?;
         if kept {
+            // The wait is over with the task that is in hand again (resumed, or reopened):
+            // the next time it is done, the window waits its own time. Not while the task
+            // the window was given is still done: what keeps it is the next task of its
+            // session, queued behind it, which waits for the same screen (`ownership`).
+            if !self.given_task_finished(record)? {
+                record.window.borrow_mut().found_free = None;
+            }
             return Ok(false);
+        }
+        if self.still_drawing(record).await? {
+            return Ok(true);
         }
         self.retire(record).await?;
         Ok(true)
+    }
+
+    /// Whether the task the window of `record` was last given is finished with its result:
+    /// done, or accepted since (the chief that takes the result within seconds does not
+    /// end the wait). A task message queued for it since is not given yet.
+    fn given_task_finished(&self, record: &Record) -> Result<bool, EngineError> {
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .task_given(record.id)?
+            .is_some_and(|thread| matches!(thread.task.state.as_str(), "done" | "accepted")))
+    }
+
+    /// Whether the window of `record` is to wait before it closes because its screen is
+    /// still being drawn: its task is done or accepted (the answer is the chief's already; a person
+    /// watching the window sees it go mid-typing, frozen where it was, if it closes now:
+    /// Devin's agent ends its turn some seconds before its screen has typed the answer
+    /// out, T-1038), and the pane has printed within the last [`DRAWN_QUIET_MS`]. A window
+    /// whose task is not done closes at once, whatever its screen shows: a pause, a cancel,
+    /// a failure or a hold for quota take the task out of the window's hands, and a
+    /// crash or the human closing the window is no close of the engine's to wait with. So
+    /// does one whose host cannot say how long its pane has been quiet, or says it printed
+    /// nothing. The wait is bounded: it ends [`STILL_BOUND_MS`] after the window was first
+    /// found free, a screen that never rests notwithstanding. The host is asked at each
+    /// step while the window waits.
+    pub(crate) async fn still_drawing(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+    ) -> Result<bool, EngineError> {
+        if !self.given_task_finished(record)? {
+            return Ok(false);
+        }
+        let now = self.now();
+        let (since, pane) = {
+            let mut part = record.window.borrow_mut();
+            (*part.found_free.get_or_insert(now), part.pane.clone())
+        };
+        let Some(pane) = pane else {
+            return Ok(false);
+        };
+        if now - since >= STILL_BOUND_MS {
+            return Ok(false);
+        }
+        let quiet = self.seams.host.quiet(&pane).await;
+        // A window that went while the host answered is the next step's.
+        if record.window.borrow().pane.as_ref() != Some(&pane) {
+            return Ok(true);
+        }
+        Ok(quiet
+            .ok()
+            .flatten()
+            .is_some_and(|quiet| quiet < DRAWN_QUIET_MS))
     }
 
     /// Closes a window whose exit is the engine's own (a switch, a Close, a
@@ -1767,6 +1870,21 @@ impl Dispatcher {
         }
         Ok(true)
     }
+}
+
+/// The folder a window of `project` works in: the project's, as the system names it, its
+/// links resolved (a Mac's `/var/folders/…` is `/private/var/folders/…`, and `/tmp` is
+/// `/private/tmp`). ConsensFlow's folder for a window is so the folder its harness has:
+/// a window's program is given its folder only as its working folder, which the system
+/// resolves (no `PWD` reaches it), so every harness already saw, and wrote in its records,
+/// the real path (T-783, T-1036). The launch is prepared for that folder too. It changes
+/// nothing a harness sees, and fixes no screen of Devin's (T-724's finding 1, T-1038). On
+/// Windows a folder is as the project names it, its real path being a verbatim one
+/// programs do not take (`cf_base::file::real_path`).
+fn workspace(project: &ProjectView) -> String {
+    cf_base::file::real_path(std::path::Path::new(&project.directory))
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]

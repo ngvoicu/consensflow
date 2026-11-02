@@ -8,7 +8,9 @@
 //! server goes on in the thread's rollout, which keeps the developer instructions
 //! the thread began with (those its start named, the role the broker gave it), and the window ends with 1 where the server has no
 //! rollout of it, as Codex's does: a thread has one only once it has had a turn.
-//! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`.
+//! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`, and with
+//! `CF_TEST_CODEX_ENV_LOG` set the names of its environment's variables, never a value, to
+//! that file: the daemon's probes run it on the daemon's own environment.
 //! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `die` once a
 //! thread starts, `spawns` starts programs (`children`) for as long as it lives once a
 //! thread starts, `orphans` starts one whose parent has gone, `deaf` takes neither SIGTERM nor
@@ -71,6 +73,9 @@ fn main() -> ExitCode {
     let given: Vec<String> = std::env::args().skip(1).collect();
     let own = std::env::current_exe().ok();
     let args = asked(&given, own.as_deref());
+    if let Some(log) = own_var("CF_TEST_CODEX_ENV_LOG") {
+        write_names(&log, args);
+    }
     match args.first().map(String::as_str) {
         Some(servers::SERVER) => servers::serve(&args[1..]),
         Some(servers::WORKER) => servers::work(&args[1..]),
@@ -84,6 +89,24 @@ fn main() -> ExitCode {
             }
         }
         _ => tui(args),
+    }
+}
+
+/// Writes the names of this run's variables, and what it was asked, to `log`: a JSON line.
+fn write_names(log: &str, args: &[String]) {
+    #[allow(clippy::disallowed_methods)] // A stand-in's own environment, as it was started.
+    let mut names: Vec<String> = std::env::vars_os()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    let line = json!({ "pid": std::process::id(), "args": args, "names": names });
+    let wrote = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(log)
+        .and_then(|mut file| writeln!(file, "{line}"));
+    if let Err(failed) = wrote {
+        fail(&format!("{log}: {failed}"));
     }
 }
 

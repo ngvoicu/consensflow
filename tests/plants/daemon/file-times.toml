@@ -1,0 +1,154 @@
+# Record readers trusted what a file's time cannot prove (T-971,
+# issues/record-readers-trust-what-a-file-time-cannot-prove.md in consensflow-sme): the JSONL
+# reader every harness's records are read by (`shared/record/jsonl.rs`) took a file whose size
+# and time were as a look found them, its time within a step of that look, for the one read if
+# its last kilobyte and its tail were: a record rewritten at its length before them, or a last
+# line finished at its size, went unseen. It now keeps a hash of every byte read, made as it
+# parses them, and one of the rest after the last whole line, and checks the rest at every look
+# and the hash at the one look whose time settles the file (T-1024: a full read at each look of
+# the step cost 55 to 130 ms of a transcript of 200 to 520 MB, which every other window's look
+# waited behind). And a file dated ahead of the clock was read
+# again at every look, by it and by Devin's wire log, until the clock passed its time
+# (`cf_base::file::settled`): it is settled a step after the look that first found it so, while
+# its time stays a step ahead. One plant takes one rule out; a test of it fails. Every name
+# holds `file-times`, so `npm run plants:daemon -- file-times` runs them all.
+
+[run]
+file-times-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::tests::"]
+file-times-jsonl = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::jsonl::tests::"]
+file-times-wire = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::wire_log::tests::"]
+
+# --- the JSONL reader ---
+
+[[plant]]
+name = "file-times: a file at its size within a step of the look is held by its edge and tail alone"
+meant = "a_record_rewritten_at_its_length_before_the_edge_is_not_the_one_read_at_the_look_that_settles_it"
+runs = ["file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''            if settles && hash_of(&mut handle, ReadHash::default(), 0, seen.offset)? != seen.read {'''
+replace = '''            if false {'''
+
+[[plant]]
+name = "file-times: a file at its size is read whole again at every look within a step of its time"
+meant = "a_file_is_read_whole_once_at_its_first_look_and_once_at_the_look_that_settles_it"
+runs = ["file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''            let settles = settled(written, seen.since_ms, looked_ms, looked_ms);'''
+replace = '''            let settles = true;'''
+
+[[plant]]
+name = "file-times: a look hashes what it read in a read of its own after it parsed it"
+meant = "a_file_is_read_whole_once_at_its_first_look_and_once_at_the_look_that_settles_it"
+runs = ["file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''        read: hashed,'''
+replace = '''        read: hash_of(&mut handle, ReadHash::default(), 0, offset)?,'''
+
+[[plant]]
+name = "file-times: the hash a look makes as it reads leaves out the tail whose line it finishes"
+meant = "the_hash_made_as_looks_read_is_the_whole_file_s_through_a_tail_a_torn_line_and_lines_passed_over"
+runs = ["file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''                    hashed.0.write(&tail);
+'''
+replace = ""
+
+[[plant]]
+name = "file-times: a look that stops before a torn line keeps the hash of the bytes after it"
+meant = "the_hash_made_as_looks_read_is_the_whole_file_s_through_a_tail_a_torn_line_and_lines_passed_over"
+runs = ["file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''        hashed = first.read.clone();
+'''
+replace = ""
+
+[[plant]]
+name = "file-times: a file at its size within a step of the look is held whatever follows its last whole line"
+meant = "a_last_line_finished_at_its_size_within_a_step_is_read"
+runs = ["file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''            if hash_of(&mut handle, ReadHash::default(), seen.offset, size)? == seen.rest {'''
+replace = '''            if true {'''
+
+[[plant]]
+name = "file-times: a look hashes what it read from the start of the file again, not from where the last stopped"
+meant = "a_file_read_in_two_looks_and_unchanged_since_is_held_within_a_step_and_as_it_settles"
+runs = ["file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''    let mut hashed = seen.map(|seen| seen.read.clone()).unwrap_or_default();'''
+replace = '''    let mut hashed = ReadHash::default();'''
+
+# --- a file dated ahead of the clock ---
+
+[[plant]]
+name = "file-times: a file dated ahead of the clock is never settled before the clock passes its time"
+meant = "a_file_dated_ahead_of_the_clock_is_settled_a_step_after_it_was_first_found_so"
+runs = ["file-times-base", "file-times-jsonl", "file-times-wire"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file.rs"
+find = '''        || (since + WRITE_TIME_STEP_MS < checked && now + WRITE_TIME_STEP_MS < written_ms)'''
+replace = '''        || (false && since + WRITE_TIME_STEP_MS < checked && now + WRITE_TIME_STEP_MS < written_ms)'''
+
+[[plant]]
+name = "file-times: a file dated ahead of the clock is settled as soon as it is found"
+meant = "a_file_dated_ahead_of_the_clock_rewritten_within_a_step_of_being_found_is_not_the_one_read"
+runs = ["file-times-base", "file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file.rs"
+find = '''        || (since + WRITE_TIME_STEP_MS < checked && now + WRITE_TIME_STEP_MS < written_ms)'''
+replace = '''        || (now + WRITE_TIME_STEP_MS < written_ms)'''
+
+[[plant]]
+name = "file-times: a file dated ahead of the clock stays settled as the clock comes to its time"
+meant = "a_file_dated_ahead_of_the_clock_is_settled_a_step_after_it_was_first_found_so"
+runs = ["file-times-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file.rs"
+find = '''        || (since + WRITE_TIME_STEP_MS < checked && now + WRITE_TIME_STEP_MS < written_ms)'''
+replace = '''        || (since + WRITE_TIME_STEP_MS < checked && now < written_ms + WRITE_TIME_STEP_MS)'''
+
+[[plant]]
+name = "file-times: the JSONL reader forgets when it first found a file's time"
+meant = "a_file_dated_ahead_of_the_clock_is_read_again_only_for_a_step_after_it_is_found"
+runs = ["file-times-jsonl"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''                return Ok(Looked::Held(Seen {
+                    looked_ms,
+                    ..seen.clone()
+                }));'''
+replace = '''                return Ok(Looked::Held(Seen {
+                    looked_ms,
+                    since_ms: looked_ms,
+                    ..seen.clone()
+                }));'''
+
+[[plant]]
+name = "file-times: Devin's wire log forgets when it first found its time"
+meant = "a_log_dated_ahead_of_the_clock_is_read_again_only_for_a_step_after_it_is_found"
+runs = ["file-times-wire"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''        if state.written != written {
+            state.since_ms = at_ms;
+        }'''
+replace = '''        state.since_ms = at_ms;'''

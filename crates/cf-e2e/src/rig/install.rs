@@ -178,12 +178,13 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     let home = root.join("home");
     let projects = home.join(".claude").join("projects").join("integration");
     files::make_dir(&projects)?;
-    let (own, system) = if config.finder {
+    let own = own_commands(root, config);
+    let system = if config.finder {
         // There, as Homebrew's is on a Mac, for what a case puts in it.
         files::make_dir(&tool_folder(root))?;
-        (home.join(".local").join("bin"), tool_folder(root))
+        tool_folder(root)
     } else {
-        (fake_bin.clone(), fake_bin.clone())
+        fake_bin.clone()
     };
     write_shim(&own, "claude", "CF_TEST_HARNESS", &config.stand_in)?;
     if let Some(devin) = &config.devin {
@@ -198,6 +199,9 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
         }
         Some((install, crate::muse::Run::Live { real_home })) => {
             crate::muse::seed_live_home(&home, real_home)?;
+            // Before any window can spend it: a live run stops at 90% of Muse's allowance,
+            // whatever case seats Muse (T-1076).
+            crate::muse::guard_allowance(install, real_home, &home.join(".config"))?;
             // By its real path, as `environment` gives the rig's Muse data folder.
             let rig_home = files::real_path(&home);
             crate::muse::write_live_stand_in(
@@ -211,6 +215,17 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
         None => {}
     }
     Ok(fake_bin)
+}
+
+/// The folder of the rig's own commands under `root`: its stand-ins, and the launcher of a
+/// live Muse ([`Config::muse_live`]). The windows find it first on their `PATH`; as the
+/// Finder starts it, it is where each harness installs itself, in the rig's home.
+pub(super) fn own_commands(root: &Path, config: &Config) -> PathBuf {
+    if config.finder {
+        root.join("home").join(".local").join("bin")
+    } else {
+        root.join("fake-bin")
+    }
 }
 
 /// The command `name` in `dir`, which starts `program`: a script that runs the
@@ -613,6 +628,37 @@ mod tests {
         }
     }
 
+    /// The launcher of a live Muse is in the rig's own commands, where the rig says it is
+    /// ([`own_commands`], which a Muse window opened by a live case starts on, T-1024), and the
+    /// person's own Muse folder is read for its login's metadata and never written.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_muse_s_launcher_is_in_the_rigs_own_commands_and_the_persons_folder_is_only_read() {
+        let person = tempfile::tempdir().unwrap();
+        let theirs = person.path().join(".config").join("muse");
+        files::make_dir(&theirs).unwrap();
+        files::write(&theirs.join("auth.json"), "{\"login\":\"metadata\"}\n").unwrap();
+        // The rig asks a live Muse its allowance as it writes the launcher (T-1076): this
+        // one answers it, at half the week.
+        let bin = tempfile::tempdir().unwrap();
+        let install = muse_in(bin.path(), 50);
+        for given in [
+            config().muse_live(install.clone(), person.path()),
+            config()
+                .muse_live(install.clone(), person.path())
+                .as_the_finder_starts_it(),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            write_fake_install(root.path(), &given).unwrap();
+            let launcher = own_commands(root.path(), &given).join("muse");
+            assert!(launcher.is_file(), "{}", launcher.display());
+        }
+        assert_eq!(
+            files::read_string(&theirs.join("auth.json")).unwrap(),
+            "{\"login\":\"metadata\"}\n"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn as_the_finder_starts_it_the_path_is_the_systems_and_each_stand_in_is_where_it_installs_itself(
@@ -651,5 +697,62 @@ mod tests {
             var(&env, "PATH"),
             "/real/node:/usr/bin:/bin:/usr/sbin:/sbin"
         );
+    }
+
+    /// A machine's Muse whose `usage --json` answers that `weekly` percent of the week is
+    /// used: what a live rig asks before it seats Muse.
+    #[cfg(unix)]
+    fn muse_in(bin: &Path, weekly: u64) -> crate::muse::Installed {
+        let binary = bin.join("muse-bin-1.4.14-R7309.1");
+        let answer = format!(
+            r#"{{"schemaVersion":1,"allowance":{{"window":{{"usedPercent":10,"resetsAtMs":1}},"weekly":{{"usedPercent":{weekly},"resetsAtMs":2}}}}}}"#
+        );
+        files::write_executable(
+            &binary,
+            format!("#!/bin/sh\n[ \"$1 $2\" = \"usage --json\" ] || exit 9\necho '{answer}'\n"),
+        )
+        .unwrap();
+        crate::muse::Installed {
+            binary,
+            version: "1.4.14-R7309.1".to_owned(),
+        }
+    }
+
+    /// [`muse_in`], and a person's home in `real` with the metadata of a login: what a live
+    /// rig seats.
+    #[cfg(unix)]
+    fn muse_at(bin: &Path, real: &Path, weekly: u64) -> crate::muse::Installed {
+        files::write(&real.join(".config").join("muse").join("auth.json"), "{}\n").unwrap();
+        muse_in(bin, weekly)
+    }
+
+    /// T-1076: every rig that runs the machine's Muse live asks its allowance as it writes
+    /// the launcher, so no case starts on an allowance at its end: at 95% of the week the rig
+    /// is refused and its windows find no Muse to run; at 50% the launcher is written.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_rig_that_seats_muse_is_refused_at_ninety_percent_of_its_allowance_and_runs_under_it()
+    {
+        for (weekly, runs) in [(95, false), (50, true)] {
+            let (bin, real, root) = (
+                tempfile::tempdir().unwrap(),
+                tempfile::tempdir().unwrap(),
+                tempfile::tempdir().unwrap(),
+            );
+            let install = muse_at(bin.path(), real.path(), weekly);
+            let config = Config::new("/the/stand-in").muse_live(install, real.path());
+            let made = write_fake_install(root.path(), &config);
+            let launcher = root.path().join("fake-bin").join("muse");
+            if runs {
+                made.unwrap();
+                assert!(launcher.is_file(), "at {weekly}% the launcher is written");
+            } else {
+                let Err(Error::Daemon(refused)) = made else {
+                    panic!("at {weekly}% the rig is refused: {made:?}");
+                };
+                assert!(refused.contains("95% of its week"), "{refused}");
+                assert!(!launcher.exists(), "and its windows find no Muse to run");
+            }
+        }
     }
 }

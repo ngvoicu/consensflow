@@ -16,7 +16,7 @@ use cf_harness::contract::{Adapter, LaunchId};
 use cf_harness::launch::adapter;
 use cf_harness::seams::{uuid, Services, SystemEntropy};
 use cf_ledger::{ParticipantView, ProjectView};
-use cf_proto::agents::Harness;
+use cf_proto::agents::{is_parent_session_variable, Harness};
 
 use crate::errors::{contain, Errors};
 
@@ -57,9 +57,11 @@ impl WindowEnv {
 }
 
 /// The variables of `env` that [`TERMINAL_ENV`] names, as `env` holds them: none of
-/// ConsensFlow's own nor the PATH, which a window is given otherwise, and none whose
-/// value is no text a pane's environment can hold. An empty value is a value, as a
-/// terminal's `export NAME=` gives it.
+/// ConsensFlow's own nor the PATH, which a window is given otherwise, none of a session the
+/// terminal was asked in ([`is_parent_session_variable`]: one inside an agent's shell has its
+/// session's, which a window would be taken for, T-971), and none whose value is no
+/// text a pane's environment can hold. An empty value is a value, as a terminal's
+/// `export NAME=` gives it.
 fn terminal_of(env: &Env) -> Vec<(String, String)> {
     let names: Vec<String> = env
         .text(TERMINAL_ENV)
@@ -68,6 +70,7 @@ fn terminal_of(env: &Env) -> Vec<(String, String)> {
     names
         .into_iter()
         .filter(|name| !name.starts_with("CONSENSFLOW_") && !name.eq_ignore_ascii_case("PATH"))
+        .filter(|name| !is_parent_session_variable(name))
         .filter_map(|name| Some((name.clone(), env.os(&name)?.to_str()?.to_owned())))
         .collect()
 }

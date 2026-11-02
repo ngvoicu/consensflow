@@ -191,7 +191,7 @@ runs = ["harness-lib-devin"]
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
 find = '''        if let Some(written) = written.filter(|written| Some(*written) == self.written) {
-            if settled(written, self.looked_ms) {'''
+            if settled(written, self.since_ms, self.looked_ms, now_ms) {'''
 replace = '''        if let Some(written) = written {
             if written.is_finite() {'''
 
@@ -208,7 +208,7 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''            if settled(written, self.looked_ms) {'''
+find = '''            if settled(written, self.since_ms, self.looked_ms, now_ms) {'''
 replace = '''            if true {'''
 
 [[plant]]
@@ -218,8 +218,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/file.rs"
-find = '''    written_ms + WRITE_TIME_STEP_MS < looked'''
-replace = '''    written_ms < looked'''
+find = '''    written_ms + WRITE_TIME_STEP_MS < checked'''
+replace = '''    written_ms < checked'''
 
 [[plant]]
 name = "devin resume: a settled log is hashed again at every look"
@@ -228,8 +228,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''            if settled(written, self.looked_ms) {'''
-replace = '''            if false && settled(written, self.looked_ms) {'''
+find = '''            if settled(written, self.since_ms, self.looked_ms, now_ms) {'''
+replace = '''            if false && settled(written, self.since_ms, self.looked_ms, now_ms) {'''
 
 [[plant]]
 name = "devin resume: a log's look keeps no time of its own"
@@ -248,7 +248,7 @@ runs = ["harness-lib-record"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/jsonl.rs"
-find = '''        if same && settled(written, seen.looked_ms) {'''
+find = '''        if same && settled(written, seen.since_ms, seen.looked_ms, looked_ms) {'''
 replace = '''        if same {'''
 
 [[plant]]
@@ -258,7 +258,7 @@ runs = ["harness-lib-record"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/jsonl.rs"
-find = '''        if same && settled(written, seen.looked_ms) {'''
+find = '''        if same && settled(written, seen.since_ms, seen.looked_ms, looked_ms) {'''
 replace = '''        if same && false {'''
 
 [[plant]]
@@ -268,10 +268,12 @@ runs = ["harness-lib-record"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/jsonl.rs"
-find = '''        looked_ms,
-        offset,'''
-replace = '''        looked_ms: 0,
-        offset,'''
+find = '''        mtime_ms: written,
+        looked_ms,
+        since_ms'''
+replace = '''        mtime_ms: written,
+        looked_ms: 0,
+        since_ms'''
 
 [[plant]]
 name = "devin resume: a record checked and found as it was is read as changed"
@@ -280,12 +282,12 @@ runs = ["harness-lib-record"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/jsonl.rs"
-find = '''        if same {
-            return Ok(Looked::Held(Seen {
-                looked_ms,
-                ..seen.clone()
-            }));
-        }'''
+find = '''            if hash_of(&mut handle, ReadHash::default(), seen.offset, size)? == seen.rest {
+                return Ok(Looked::Held(Seen {
+                    looked_ms,
+                    ..seen.clone()
+                }));
+            }'''
 replace = ""
 
 [[plant]]
@@ -295,11 +297,11 @@ runs = ["harness-lib-record"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/jsonl.rs"
-find = '''            return Ok(Looked::Held(Seen {
-                looked_ms,
-                ..seen.clone()
-            }));'''
-replace = '''            return Ok(Looked::Held(Seen { ..seen.clone() }));'''
+find = '''                return Ok(Looked::Held(Seen {
+                    looked_ms,
+                    ..seen.clone()
+                }));'''
+replace = '''                return Ok(Looked::Held(Seen { ..seen.clone() }));'''
 
 [[plant]]
 name = "devin resume: a followed transcript held as it was keeps the time of the look before"
@@ -328,7 +330,7 @@ runs = ["harness-lib-record"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/followed.rs"
-find = '''            if *stat == current && settled(stat.mtime_ms, *looked_ms) {'''
+find = '''            if *stat == current && settled(stat.mtime_ms, *looked_ms, *looked_ms, now_ms) {'''
 replace = '''            if *stat == current {'''
 
 [[plant]]

@@ -62,6 +62,8 @@ pub const SITES: &[(&str, &str, Kind, usize)] = &[
     // The identity table: a harness's id and kind. It stays while the table is a `match`.
     ("crates/cf-proto/src/agents.rs", "Harness::as_str", Kind::Match, 1),
     ("crates/cf-proto/src/agents.rs", "Harness::kind", Kind::Match, 1),
+    // Product boundaries' (I-1, T-1091): each harness's own session variables, written before this list (T-971).
+    ("crates/cf-proto/src/agents.rs", "Harness::session_variables", Kind::Match, 1),
 
     // The CLI's hooks: `cf hook claude|devin|muse-session` picks the adapter's handler, and the doctor reads Claude's.
     ("crates/cf/src/hook.rs", "run", Kind::IdMatch, 1),

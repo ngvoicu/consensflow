@@ -484,6 +484,7 @@ dependencies = [
  "cf-e2e",
  "cf-panes",
  "cf-process",
+ "cf-proto",
  "flate2",
  "jiff",
  "nix 0.28.0",
@@ -644,6 +645,7 @@ dependencies = [
 name = "cf-proto"
 version = "3.0.7-alpha.1"
 dependencies = [
+ "cf-base",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

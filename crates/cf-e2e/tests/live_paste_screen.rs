@@ -126,7 +126,10 @@ impl Shows {
             .iter()
             .any(|line| line.contains("[Pasted text #") || line.contains("[Pasted Content "));
         let lines = (1..=LINES)
-            .filter(|n| tail.iter().any(|line| line.contains(&mark(*n))))
+            .filter(|n| {
+                let numbered = format!("{}:", mark(*n));
+                tail.iter().any(|line| begun(line).starts_with(&numbered))
+            })
             .count();
         Self {
             header,
@@ -292,17 +295,55 @@ fn look(members: &mut Members, harness: Harness, log: &Log) -> Result<(bool, See
             .unwrap_or_default();
         // The thread holds the worker's result to the chief too: the engine reads what
         // went into the window by its recipient.
-        seen.wrong = misread(&lines, &ask::ours(&lines, &handle, &pasted)?);
+        let ours = ask::ours(&lines, &handle, &pasted)?;
+        seen.wrong = misread(&lines, &ours);
+        // A screen the rule misread is said whole, each line with the rule's word on it,
+        // so the red case can be read and kept (T-1000, T-784): what it holds is the
+        // check's own brief and the window's frame.
+        if seen.wrong.is_some() {
+            log.say(format!(
+                "the look at rest, as the rule read it:\n{}",
+                read_as(&lines, &ours)
+            ));
+        }
     }
     let state = ended.unwrap_or_else(|| "not over".to_owned());
     log.say(format!("T-{number} is {state}; {}", seen.line()));
     Ok((state == "done", seen))
 }
 
+/// `lines`, each after the rule's word on it: `ours` for ConsensFlow's, `    ` for the
+/// window's, and its place in the look.
+fn read_as(lines: &[String], ours: &[bool]) -> String {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(at, line)| {
+            let said = if ours.get(at).copied().unwrap_or(false) {
+                "ours"
+            } else {
+                "    "
+            };
+            format!("{:>2} {said} |{line}", at + 1)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `line` after the window's frame: what it begins with that is no letter, digit or `[`
+/// (a prompt's `>`, a box's `│`, the indent).
+fn begun(line: &str) -> &str {
+    line.trim_start_matches(|c: char| !(c.is_alphanumeric() || c == '['))
+}
+
 /// Whether the brief's line `line` is: one of its numbered lines, or the sum it
-/// asks for.
+/// asks for, begun after the window's frame. A line that only names the brief's marks
+/// is the window's: Devin 3000.11.228 draws a title of the conversation, made from its
+/// words, in the line above its input (`─── Analyze PSL-01–PSL-40 Brief and Provide… ─`),
+/// which the check took for the brief, and failed 2 runs of 3 (T-1000, T-784).
 fn of_the_brief(line: &str) -> bool {
-    line.contains("PSL-") || line.contains("Reply with only the sum of")
+    let begun = begun(line);
+    begun.starts_with("PSL-") || begun.starts_with("Reply with only the sum of")
 }
 
 /// What the engine's rule (`ours`, a line to each of `lines`) took otherwise than
@@ -429,6 +470,39 @@ mod tests {
         );
         // A screen that holds none of the brief has nothing to hold to the rule.
         assert_eq!(misread(&lines(&["3470"]), &[false]), None);
+    }
+
+    #[test]
+    fn a_title_devin_draws_from_the_briefs_words_is_the_windows_and_no_line_of_the_brief() {
+        // The screen at rest of a run on Devin 3000.11.228 (2026-10-31), as the engine's
+        // rule read it: the brief's last lines ConsensFlow's, and from the answer down the
+        // window's, its title of the conversation among them.
+        let screen = lines(&[
+            "  PSL-36: line 36 of the brief, nothing to do for it.",
+            "  PSL-37: line 37 of the brief, nothing to do for it.",
+            "  PSL-38: line 38 of the brief, nothing to do for it.",
+            "  PSL-39: line 39 of the brief, nothing to do for it.",
+            "  PSL-40: line 40 of the brief, nothing to do for it.",
+            "  Reply with only the sum of 2357 and 1113, in digits, and run no tools.",
+            " 3470",
+            " ⏺ ~/.consensflow-candidate/live/paste-screen-devin",
+            "───────────────────────────────────── Analyze PSL-01–PSL-40 Brief and Provide… ─",
+            "❭ Ask Devin to build features, fix bugs, or work on your code",
+            "SWE-2 Medium · bypass                            Context: 16k / 262k tokens (6%)",
+            "Update v3000.11.234 available!",
+        ]);
+        let ours = [
+            true, true, true, true, true, true, false, false, false, false, false, false,
+        ];
+        assert_eq!(misread(&screen, &ours), None);
+        assert_eq!(
+            Shows::of(&screen).lines,
+            5,
+            "the title names no line it shows"
+        );
+        // A line of the brief is one still, after any frame.
+        assert!(of_the_brief("│ PSL-02: line 2 of the brief"));
+        assert!(of_the_brief("> Reply with only the sum of 2357 and 1113"));
     }
 
     #[test]

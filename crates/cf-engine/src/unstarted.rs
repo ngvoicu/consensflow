@@ -277,7 +277,7 @@ impl Dispatcher {
         let failing = match failing {
             Some(delivering) if delivering.chief => {
                 let mut back = None;
-                self.settle_gone(delivering, |delivering| {
+                self.settle_gone(delivering, false, |delivering| {
                     back = Some(delivering);
                     Ok(())
                 })

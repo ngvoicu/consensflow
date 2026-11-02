@@ -302,7 +302,11 @@ impl Said {
         let replayed = meta("cognition.ai/timestamp").is_some()
             && !(kind.is_some_and(|kind| STREAMED.contains(&kind))
                 && meta("cognition.ai/streamingMessageId").is_some());
-        if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed {
+        // What the TUI answers itself, at once, to a command of its own (`/login`, `/mcp`,
+        // the workspace's folders) is said as Devin's words, flagged instant, with no turn
+        // and no end: work it would be for good (Calliope's P3-1 on T-683, T-688).
+        let instant = meta("cognition.ai/instant") == Some(&Value::Bool(true));
+        if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed && !instant {
             self.busy = true;
         }
         if kind == Some("session_info_update") {

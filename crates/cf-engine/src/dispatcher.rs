@@ -829,19 +829,23 @@ impl Dispatcher {
             None => project,
             Some(delivering) => {
                 let launches = record.window.borrow().launches;
-                // A first message the window was to be handed once up, which its record
-                // does not show (`settle_gone`), owed it still or pasted a moment before,
-                // reached no conversation when the window closed with its project: it
-                // waits for the Resume, as one turned away at its hand-over does
-                // (`hand_first`). One whose window ended by itself in an open project
-                // fails, as a launch that did not come up does.
+                // A window that closed with its project (the human's Close, or the
+                // chief's own exit closing its workers' windows) fails nothing that was
+                // on its way to it: what its record does not show it took (`settle_gone`)
+                // reached no conversation the Resume goes on with, and waits for the
+                // Resume with its attempt given back, as one turned away at its hand-over
+                // does (`hand_first`). So does a launch's first message, however it went
+                // in: owed still, pasted a moment before, or read from the file its
+                // command line named as the window opened (Devin's `--prompt-file`, which
+                // T-523 left out: the alpha.1 release check T-1068 saw its brief and task
+                // fail at a Close, T-1076). One whose window ended by itself in an open
+                // project fails, as a launch that did not come up does.
                 let closed_with_project = project.state != "open";
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
-                self.settle_gone(delivering, move |delivering| {
-                    let once_up = delivering.owed.is_some() || delivering.late;
+                self.settle_gone(delivering, closed_with_project, move |delivering| {
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief || (once_up && closed_with_project) {
+                    if delivering.chief || closed_with_project {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
@@ -1356,7 +1360,8 @@ impl Dispatcher {
             } else {
                 // Its answer is its result, recorded now, unless its harness says the turn
                 // left work running that wakes its agent: then the task goes on. Nothing the
-                // turn left is ended; the window closes below if it is free (`turn_end`).
+                // turn left is ended; the window closes below if it is free (`turn_end`), once
+                // its screen is drawn where its task is done (`still_drawing`).
                 let watching = self.watch_monitors(participant, record, &observed).await;
                 self.collect(project, participant, record, &observed, watching)
                     .await?;

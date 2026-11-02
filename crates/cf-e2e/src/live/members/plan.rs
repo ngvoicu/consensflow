@@ -4,6 +4,8 @@
 //! stand-in agent's ([`stand_in_chief`], [`stand_in_worker`]), which is no model
 //! and only notes what it is sent.
 
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
 
 use super::super::agents;
@@ -125,6 +127,9 @@ pub struct Plan {
     /// harness that asks of one asks in the project's own windows, and ConsensFlow
     /// answers ([`Plan::in_a_new_repository`]).
     pub repository: bool,
+    /// The folder the harnesses' homes of the run's own are made in, as it spells it,
+    /// where not the temporary folder ([`Plan::homes_made_in`]).
+    pub homes_in: Option<PathBuf>,
 }
 
 impl Plan {
@@ -141,6 +146,7 @@ impl Plan {
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
             repository: false,
+            homes_in: None,
         }
     }
 
@@ -150,6 +156,15 @@ impl Plan {
     #[must_use]
     pub fn in_a_new_repository(mut self) -> Self {
         self.repository = true;
+        self
+    }
+
+    /// With the harnesses' homes of the run's own (Devin's XDG folders, Codex's and Pi's
+    /// own) made in `folder`, as `folder` spells it: a Mac's temporary folder through its
+    /// link `/var`, or as `/private/var` (`live linked-folder`, T-1038).
+    #[must_use]
+    pub fn homes_made_in(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.homes_in = Some(folder.into());
         self
     }
 

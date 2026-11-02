@@ -472,6 +472,9 @@ pub struct Rig {
     /// The `cf` the daemon runs, which its windows find first on their `PATH`: the rig's own
     /// copy (`crate::bundle`).
     cf: PathBuf,
+    /// The launcher a live Muse of the rig runs through ([`Config::muse_live`]), where it
+    /// seats one.
+    muse_launcher: Option<PathBuf>,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// The homes of real harnesses the windows run on, where a case gave any: its Claude
@@ -537,6 +540,13 @@ impl Rig {
             .rev()
             .find(|(given, _)| given == name)
             .map(|(_, value)| value.as_str())
+    }
+
+    /// The launcher the rig's live Muse runs through, where it seats one ([`Config::muse_live`]):
+    /// the machine's Muse on the rig's folders and the person's keychain login, never on their
+    /// `~/.config/muse` ([`crate::muse::write_live_stand_in`]).
+    pub fn muse_launcher(&self) -> Option<&Path> {
+        self.muse_launcher.as_deref()
     }
 
     /// The daemon's home, `CONSENSFLOW_HOME`.

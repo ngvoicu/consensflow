@@ -169,7 +169,7 @@ fn the_efforts_the_work_tiers_and_the_harnesses_are_listed_as_node_lists_them() 
     let golden = golden("catalog.json");
     let by_harness: Map<String, Value> = Harness::ALL
         .into_iter()
-        .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))
+        .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness).levels)))
         .collect();
     assert_same_text(
         &Value::Object(by_harness).to_string(),

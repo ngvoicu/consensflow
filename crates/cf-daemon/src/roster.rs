@@ -67,12 +67,26 @@ impl AgentRows for Agents {
 
 /// What a launch and the chief's checks read of a saved agent.
 impl cf_engine::seams::Roster for Agents {
+    /// The agent's row, its effort the one its window runs at: a Devin model the catalog
+    /// runs bare, and never at the agent's level, runs bare ([`Catalog::launch_effort`]).
     fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal> {
-        Ok(self.roster().agent_row(name)?.map(|row| SavedAgent {
-            model: row.model().map(str::to_owned),
-            effort: row.effort().map(str::to_owned),
-            thinking: row.thinking().map(str::to_owned),
-            designer: row.is_designer(),
+        Ok(self.roster().agent_row(name)?.map(|row| {
+            let harness = row
+                .kind()
+                .and_then(Harness::from_kind)
+                .or_else(|| row.harness().and_then(Harness::from_name));
+            let effort = match (harness, row.model()) {
+                (Some(harness), Some(model)) => {
+                    self.catalog.launch_effort(harness, model, row.effort())
+                }
+                _ => row.effort(),
+            };
+            SavedAgent {
+                model: row.model().map(str::to_owned),
+                effort: effort.map(str::to_owned),
+                thinking: row.thinking().map(str::to_owned),
+                designer: row.is_designer(),
+            }
         }))
     }
 

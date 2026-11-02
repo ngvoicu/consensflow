@@ -109,6 +109,23 @@ impl EngineHost for BridgeHost {
         let sent = self.bridge.request("pane.kill", body, None);
         Box::pin(async move { sent.await.map(|answer| killed(&answer)).map_err(host_error) })
     }
+
+    fn quiet<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Option<f64>, HostError>> {
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        let sent = self.bridge.request("pane.snapshot", body, None);
+        Box::pin(async move {
+            sent.await
+                .map(|answer| quiet_ms(&answer))
+                .map_err(host_error)
+        })
+    }
+}
+
+/// How long the host says a pane has printed nothing: its `pane.snapshot`'s
+/// `outputQuietMs`, none where the pane has printed nothing (null) or the answer has no
+/// such field.
+fn quiet_ms(answer: &Value) -> Option<f64> {
+    answer.get("outputQuietMs").and_then(Value::as_f64)
 }
 
 impl BackgroundWork for BridgeHost {

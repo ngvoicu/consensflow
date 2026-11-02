@@ -16,13 +16,15 @@
 //! window is given while the words that were for it wait at the human's gate
 //! (`approval`), and the tester, which Node's staff never had (`testers`), and
 //! the human's Resume of what a start suspended (`resume`), and of what a Close
-//! suspended, whose windows are handed nothing meanwhile (`closed_given_nothing`), the conversation its
+//! suspended, whose windows are handed nothing meanwhile (`closed_given_nothing`), and in
+//! which nothing on its way to a window fails (`close_while_delivering`), the conversation its
 //! harness holds nothing of, which a window opened again does not resume
 //! (`resumable`), and the arrival window counted in the time a window is at
 //! rest, so that a record that is late while its window is in a turn is waited
 //! for, as a message its harness says its own queue holds is (`slow_records`),
 //! and the paste a window went with, which its harness's record may show it took
-//! (`window_went_with_a_paste`), and a header quoted in a window's words, which is
+//! (`window_went_with_a_paste`), and the close of a window whose task is done, which
+//! waits for its screen to be drawn (`close_when_drawn`), and a header quoted in a window's words, which is
 //! no paste (`quoted_headers`), and the shapes a harness's record keeps a paste in
 //! (`paste_shapes`), the quota wait that keeps a member's task with its
 //! window whoever else is free (`quota_waits`), and an account's quota as every
@@ -40,9 +42,12 @@ mod approval;
 mod assigning;
 mod background;
 mod cancelled_task;
+mod canonical_folder;
 mod carriers;
 mod chief_not_up;
 mod chiefs;
+mod close_when_drawn;
+mod close_while_delivering;
 mod closed_given_nothing;
 mod closing;
 mod compacting;

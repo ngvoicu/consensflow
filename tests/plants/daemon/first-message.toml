@@ -230,7 +230,7 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "if delivering.chief || (once_up && closed_with_project) {"
+find = "if delivering.chief || closed_with_project {"
 replace = "if delivering.chief {"
 
 [[plant]]
@@ -240,8 +240,8 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "let once_up = delivering.owed.is_some() || delivering.late;"
-replace = "let once_up = delivering.owed.is_some();"
+find = "if delivering.chief || closed_with_project {"
+replace = "if delivering.chief || (closed_with_project && !delivering.late) {"
 
 [[plant]]
 name = "first message: one owed to a window that ended by itself in an open project is given back"
@@ -250,8 +250,8 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "(once_up && closed_with_project)"
-replace = "once_up"
+find = "if delivering.chief || closed_with_project {"
+replace = "if delivering.chief || closed_with_project || delivering.owed.is_some() {"
 
 [[plant]]
 name = "first message: a monitor of the turn it begins proves no rest before it"

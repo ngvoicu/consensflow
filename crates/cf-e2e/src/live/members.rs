@@ -131,7 +131,13 @@ impl Members {
         let harnesses = plan.harnesses();
         let installs = harnesses
             .iter()
-            .map(|harness| log.found(*harness))
+            .map(|harness| {
+                let found = log.found(*harness)?;
+                match &plan.homes_in {
+                    Some(folder) => found.with_homes_in(folder),
+                    None => Ok(found),
+                }
+            })
             .collect::<Result<Vec<_>>>()?;
         for file in &plan.home_files {
             let isolation = installs
@@ -390,6 +396,14 @@ impl Members {
                     .is_some_and(|id| id.starts_with(&prefix))
             })
             .collect()
+    }
+
+    /// What the window whose pane is `pane` (its id) printed, its control sequences
+    /// taken out ([`Rig::screen`]): what was drawn over is still in it, and a word the
+    /// program repaints cell by cell is not in it in one piece. The screen as the pane
+    /// host draws it is [`Rig::snapshot`]'s.
+    pub fn screen(&self, pane: &str) -> String {
+        self.rig.screen(pane)
     }
 
     /// The end of the screen of the window whose pane is `pane` (its id), as a

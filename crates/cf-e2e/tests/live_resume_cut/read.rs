@@ -84,6 +84,34 @@ pub fn unanswered(items: &[Item], message: &str) -> bool {
     items[at + 1..].iter().all(|item| item.role == "custom")
 }
 
+/// The reply that answers the message `message` with its own answer `answer`: the first
+/// of the assistant's items after the message's user item whose last line is `answer`. A
+/// reply may say more before its answer: Devin 3000.11.228 answered, in the one reply of
+/// the turn the message began, the turn the resume found cut as well, its own answer the
+/// last line (T-813, T-811's early case of 2026-10-27, which a reply that was the answer
+/// alone missed). A reply to the cut turn written before the message is none.
+pub fn answer_to<'a>(items: &'a [Item], message: &str, answer: &str) -> Option<&'a Item> {
+    let at = items
+        .iter()
+        .rposition(|item| item.role == "user" && item.text.contains(message))?;
+    items[at + 1..]
+        .iter()
+        .find(|item| item.role == "assistant" && last_line(&item.text) == Some(answer))
+}
+
+/// What `reply` said before its answer, its last line, as a line: none where the answer
+/// was all it said.
+pub fn before_answer(reply: &Item) -> Option<String> {
+    let said = reply.text.trim_end();
+    let before = said[..said.rfind('\n')?].trim();
+    (!before.is_empty()).then(|| squash(before, 100))
+}
+
+/// The last line of `text` that says something, trimmed.
+fn last_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).rfind(|line| !line.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +215,45 @@ mod tests {
         let again = [asked[0].clone(), item("assistant", "1"), asked[0].clone()];
         assert!(unanswered(&again, message));
         assert!(!unanswered(&[item("user", "something else")], message));
+    }
+
+    #[test]
+    fn a_message_is_answered_by_a_reply_after_it_that_ends_in_its_answer_whatever_it_said_before() {
+        let cut = item("user", "Count from 1 to 40, then COUNTED");
+        let after = item("user", "Reply with exactly one line: AFTER");
+        // T-811's early case on Devin 3000.11.228: one reply answered the cut turn and the
+        // message, the message's answer last.
+        let both = item("assistant", "1\n2\n40\nCOUNTED\nAFTER\n");
+        let items = [cut.clone(), after.clone(), both.clone()];
+        assert_eq!(answer_to(&items, "AFTER", "AFTER"), Some(&both));
+        assert_eq!(
+            before_answer(&both).as_deref(),
+            Some("1 2 40 COUNTED"),
+            "what it said first"
+        );
+        let alone = item("assistant", "AFTER");
+        assert_eq!(
+            answer_to(
+                &[cut.clone(), after.clone(), alone.clone()],
+                "AFTER",
+                "AFTER"
+            ),
+            Some(&alone)
+        );
+        assert_eq!(before_answer(&alone), None);
+        // No answer: the cut turn's words alone, a reply that only mentions the word, or a
+        // reply written before the message.
+        let counted = item("assistant", "1\n2\n40\nCOUNTED");
+        assert_eq!(
+            answer_to(&[cut.clone(), after.clone(), counted], "AFTER", "AFTER"),
+            None
+        );
+        let mentions = item("assistant", "AFTER is the word you asked for.");
+        assert_eq!(
+            answer_to(&[after.clone(), mentions], "AFTER", "AFTER"),
+            None
+        );
+        assert_eq!(answer_to(&[alone, after.clone()], "AFTER", "AFTER"), None);
+        assert_eq!(answer_to(&[cut], "AFTER", "AFTER"), None);
     }
 }

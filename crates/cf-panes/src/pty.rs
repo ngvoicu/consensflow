@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 use portable_pty::native_pty_system;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
 
+use cf_proto::agents::parent_session_variables;
+
 use crate::background::Baseline;
 use crate::ended::{Ended, EndedSlot};
 use crate::screen::{Drawn, PaneScreen};
@@ -277,6 +279,19 @@ fn advertise_terminal(
         )
     {
         command.env("COLORTERM", "truecolor");
+    }
+}
+
+/// A pane inherits nothing of a session the host was started in
+/// ([`parent_session_variables`]): an app, a `tauri dev` or a test run started from an
+/// agent's shell holds its session's variables (T-971), and one started from a board's
+/// window that board's (T-868); a window given them is taken for that session, or reaches
+/// into it. What the frame's own `env` sets is the window's, and stays.
+fn forget_parent_sessions(command: &mut CommandBuilder, env: &HashMap<String, String>) {
+    for name in parent_session_variables() {
+        if !env.contains_key(name) {
+            command.env_remove(name);
+        }
     }
 }
 
@@ -636,6 +651,7 @@ impl PaneTable {
         for name in drop_env {
             command.env_remove(name);
         }
+        forget_parent_sessions(&mut command, env);
         advertise_terminal(&mut command, env, drop_env);
         // The clock is watched from before the program starts.
         #[cfg(target_os = "macos")]
@@ -1569,6 +1585,7 @@ mod tests {
         Sentinel,
     };
     use super::{PaneError, PaneTable, CANCELLED_KEPT};
+    use cf_proto::agents::parent_session_variables;
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
         PtySize {
@@ -2382,6 +2399,74 @@ mod tests {
         assert_eq!(read_to_end(reader), b"role-value");
     }
 
+    /// Sets every variable of a parent session in the test's own environment, the host's,
+    /// as an app started from an agent's shell or a board's window has them
+    /// ([`parent_session_variables`]: a board's window's and every harness's), and takes
+    /// them out again.
+    pub(crate) struct InParentSessions;
+
+    impl InParentSessions {
+        pub(crate) fn set() -> Self {
+            for name in parent_session_variables() {
+                std::env::set_var(name, "from-the-parent-session");
+            }
+            Self
+        }
+    }
+
+    impl Drop for InParentSessions {
+        fn drop(&mut self) {
+            for name in parent_session_variables() {
+                std::env::remove_var(name);
+            }
+        }
+    }
+
+    /// The names of a parent session's variables the pane's `env` printed, one a line.
+    #[cfg(unix)]
+    fn held(printed: &[u8]) -> Vec<&'static str> {
+        let printed = String::from_utf8_lossy(printed);
+        parent_session_variables()
+            .filter(|name| {
+                printed
+                    .lines()
+                    .any(|line| line.trim_end_matches('\r').starts_with(&format!("{name}=")))
+            })
+            .collect()
+    }
+
+    /// T-971, T-868: a pane's program holds none of a session the host was started in, a
+    /// board's window's or any harness's, but what its frame sets itself.
+    #[cfg(unix)]
+    #[test]
+    fn a_pane_inherits_nothing_of_a_session_the_host_was_started_in() {
+        let _pty_guard = serial_pty_test();
+        let _sessions = InParentSessions::set();
+        let table = PaneTable::new();
+        let OpenedPane { reader, .. } = table
+            .open(
+                Path::new("/tmp"),
+                &shell("env"),
+                &HashMap::new(),
+                terminal_size(24, 80),
+            )
+            .expect("open env in a PTY");
+        assert_eq!(held(&read_to_end(reader)), Vec::<&str>::new());
+
+        let own = HashMap::from([("CLAUDECODE".to_string(), "the-window's".to_string())]);
+        let OpenedPane { reader, .. } = table
+            .open(
+                Path::new("/tmp"),
+                &shell("env"),
+                &own,
+                terminal_size(24, 80),
+            )
+            .expect("open env in a PTY");
+        let printed = read_to_end(reader);
+        assert_eq!(held(&printed), ["CLAUDECODE"]);
+        assert!(String::from_utf8_lossy(&printed).contains("CLAUDECODE=the-window's"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn raw_mode_recorder_receives_exact_bytes() {
@@ -2880,6 +2965,7 @@ mod tests {
 
         use super::super::conpty_test::{line_echo, open, powershell, read_until, system};
         use super::super::{serial_pty_test, PaneEnvironment, PaneTable};
+        use super::parent_session_variables;
 
         fn number_after(text: &str, marker: &str) -> u32 {
             let at = text.find(marker).expect("marker printed") + marker.len();
@@ -2924,6 +3010,35 @@ mod tests {
             table.write(&key, b"\r").expect("go on");
             let text = read_until(&table, &key, &output, "#");
             assert_eq!(number_after(&text, "SIZE="), 100, "{text:?}");
+            table.kill(&key).expect("kill the pane");
+        }
+
+        /// T-971, T-868: as the Unix test of it says, on ConPTY: a pane's program holds none
+        /// of a session the host was started in, but what its frame sets itself.
+        #[test]
+        fn a_pane_inherits_nothing_of_a_session_the_host_was_started_in() {
+            let _pty_guard = serial_pty_test();
+            let _sessions = super::InParentSessions::set();
+            let names: Vec<String> = parent_session_variables()
+                .map(|name| format!("'{name}'"))
+                .collect();
+            // One line a name it holds, short of the pane's width, and the end.
+            let script = format!(
+                "foreach ($n in @({})) {{ if (Test-Path \"env:$n\") {{ Write-Output \"HAS=$n\" }} }}; \
+                 Write-Output 'DONE#'",
+                names.join(",")
+            );
+            let table = Arc::new(PaneTable::new());
+            let (key, output) = open(&table, &powershell(&script), &HashMap::new(), 1 << 20);
+            let text = read_until(&table, &key, &output, "DONE#");
+            assert!(!text.contains("HAS="), "{text:?}");
+            table.kill(&key).expect("kill the pane");
+
+            let own = HashMap::from([("CLAUDECODE".to_string(), "1".to_string())]);
+            let (key, output) = open(&table, &powershell(&script), &own, 1 << 20);
+            let text = read_until(&table, &key, &output, "DONE#");
+            assert!(text.contains("HAS=CLAUDECODE"), "{text:?}");
+            assert_eq!(text.matches("HAS=").count(), 1, "{text:?}");
             table.kill(&key).expect("kill the pane");
         }
 
