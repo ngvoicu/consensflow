@@ -17,8 +17,9 @@ use cf_e2e::process::Run;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde_json::Value;
 
-/// The model and effort of the case.
-pub const MODEL: &str = "muse-spark-1.3";
+/// The model and effort of the case: the live kit's cheap Muse model
+/// (`cf_e2e::live::agents`), the contributor one (T-954).
+pub const MODEL: &str = "muse-spark-1.3-contributor";
 pub const EFFORT: &str = "minimal";
 
 pub type Outcome = Result<(), String>;

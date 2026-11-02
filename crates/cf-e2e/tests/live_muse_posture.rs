@@ -5,7 +5,7 @@
 //!
 //! ConsensFlow opens each member's window in its harness's full-permission mode, Muse's
 //! in `--yolo`. This asks whether a softer mode of Muse's would do: one real turn on
-//! `muse-spark-1.3` at `minimal` (contributor mode off) in each posture, in Muse's own
+//! `muse-spark-1.3-contributor` at `minimal` (contributor mode off) in each posture, in Muse's own
 //! TUI in a pty as `live_muse_background` runs it (`live_muse/tui.rs`), each in a project
 //! and folders of its own, outside every temporary folder (in the checkout's `target`).
 //! The model runs one script that does what a member must be able to do:
@@ -302,7 +302,7 @@ fn only_full_permission_lets_a_muse_member_reach_the_daemon_commit_and_write_out
     tui::on_a_mac()?;
     let log = Log::own_agents(
         "live muse-posture",
-        "it runs Muse on muse-spark-1.3 at minimal",
+        "it runs Muse on muse-spark-1.3-contributor at minimal",
     )
     .map_err(|failed| failed.to_string())?;
     ask::prepare().map_err(|failed| failed.to_string())?;

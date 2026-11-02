@@ -3,7 +3,7 @@
 //!
 //!     cargo xtask live muse-background [--keep]
 //!
-//! One real turn on `muse-spark-1.3` at `minimal` (contributor mode off), in Muse's own
+//! One real turn on `muse-spark-1.3-contributor` at `minimal` (contributor mode off), in Muse's own
 //! TUI in a pty, as a member's window is: the model is asked to start a command that
 //! sleeps 40 s in the background and end its turn at once. The case reads Muse's own
 //! log of the session as ConsensFlow does (the harness code's own reader, asked through
@@ -96,7 +96,7 @@ fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcom
     // shared models of `--models`, which no Muse window is asked for yet.
     let log = Log::own_agents(
         "live muse-background",
-        "it runs Muse on muse-spark-1.3 at minimal",
+        "it runs Muse on muse-spark-1.3-contributor at minimal",
     )
     .map_err(|failed| failed.to_string())?;
     let binary = binary()?;

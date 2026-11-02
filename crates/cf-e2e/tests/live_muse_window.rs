@@ -1,6 +1,6 @@
 //! Live: a Muse member's window as the daemon opens one, on the real model. It is opt-in
 //! (`cargo xtask live muse-window`): it spends the Muse account's allowance on a worker of
-//! Muse's cheap model, `muse-spark-1.3` at `minimal` (contributor mode off; `--models
+//! Muse's cheap model, `muse-spark-1.3-contributor` at `minimal` (contributor mode off; `--models
 //! muse=<model>:<effort>` names another), and needs Muse Code installed and
 //! logged in, so it is ignored unless asked for and is no part of `check` or of CI. On a
 //! Mac and on Windows (MUS-20, T-792: Muse runs there as the rig's stand-in's child).

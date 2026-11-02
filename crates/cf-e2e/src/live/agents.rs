@@ -90,9 +90,14 @@ fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
         Harness::Pi => ("openrouter/meta/muse-spark-1.3", None),
         Harness::Devin => ("swe-2", Some("medium")),
         Harness::Codex => ("gpt-5.6-luna", None),
-        // The owner's testing model of 2026-10-26: not a contributor model, at its least
-        // effort (the contributor model measured no saving, T-718).
-        Harness::Muse => ("muse-spark-1.3", Some("minimal")),
+        // The contributor model, at its least effort: test code only, never the product, which
+        // never defaults a person to a contributor model (`cf_harness::muse::models`). Meta may
+        // train on what it is sent, and a live run sends ConsensFlow's own test content alone
+        // (Gabriel, 2026-11-02). Launched as the product launches Muse, contributor mode off,
+        // it drew about half the allowance of `muse-spark-1.3` (T-954: three 3.5k-character
+        // turns with a tool call each, on the same server model: window +2, +0, +2 against
+        // +3, +2, +3; week +1, +0, +0 against +1, +1, +1).
+        Harness::Muse => ("muse-spark-1.3-contributor", Some("minimal")),
     }
 }
 
@@ -404,7 +409,7 @@ mod tests {
                 "openrouter/meta/muse-spark-1.3",
                 "swe-2",
                 "gpt-5.6-luna",
-                "muse-spark-1.3"
+                "muse-spark-1.3-contributor"
             ]
         );
         assert!(rows.iter().all(|row| row["workTier"] == "standard"));
@@ -484,7 +489,7 @@ mod tests {
                 on("openai/gpt-6-luna", None),
                 on("swe-2", Some("max")),
                 on("gpt-6.1-sol", Some("high")),
-                on("muse-spark-1.3", Some("minimal")),
+                on("muse-spark-1.3-contributor", Some("minimal")),
             ]
         );
         // Spaces around a piece, a harness, a model or an effort are let be, and so is
@@ -620,7 +625,7 @@ mod tests {
             models.line(),
             "the models --models and the cheap ones give: claude claude-sonnet-5-5; \
              pi openai/gpt-6-luna; devin swe-2, effort medium; codex gpt-6.1-sol, effort high; \
-             muse muse-spark-1.3, effort minimal"
+             muse muse-spark-1.3-contributor, effort minimal"
         );
         // What a window launched on an agent runs on is the agent's: Pi's effort is its
         // thinking, and the stand-in agent's windows run on nothing of a harness.
