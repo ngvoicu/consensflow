@@ -95,3 +95,14 @@ them, in each row that holds them (12, 12, 12, 12 and 7 times). The role-change 
 moved with the longer chief text: whole to 24 rows without specs (27 before), read whole to
 240 rows with specs on and 250 without (241 and 251), and to 85 and 95 with the most rules
 for the staff (86 and 96).
+
+The members' text, in the same 27 `roleInstructions` rows, moved again on 2026-11-01
+(T-1061, `skill/core/staff.md`): the sentence of 2026-10-13 said "Your answer ends your
+turn's work: anything you left running is stopped then, so wait for what your result
+needs", and the engine had not done that since `0eec91d20` (2026-10-21) — a turn's end
+ends no process: a turn whose harness record counts pending work holds its task working,
+and otherwise the answer is the result and the free worker's window then closes, which
+ends only what the host can tell is the window's, so a detached job can run on. The
+sentence now says "Your answer ends your turn: wait for what your result needs, and
+leave nothing running", in those words alone. The rows were moved by a script that
+put the new text where the old stood.
