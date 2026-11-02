@@ -183,7 +183,7 @@ impl<'a> Ctx<'a> {
     /// ConsensFlow's: read from where its harness was given it.
     pub fn role_text(&self, frame: &Value) -> std::result::Result<String, String> {
         let text = match launched::role_of(frame) {
-            Some(RoleText::Inline(text)) => text,
+            Some(RoleText::Inline(appended)) => launched::text_of(&appended)?,
             Some(RoleText::File(file)) => std::fs::read_to_string(&file)
                 .map_err(|failed| format!("the role text {file} cannot be read: {failed}"))?,
             None => {

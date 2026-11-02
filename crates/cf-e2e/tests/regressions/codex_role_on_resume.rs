@@ -183,7 +183,7 @@ fn skill_named_in(message: &str) -> Option<String> {
 
 /// The folder the message says Specmint's `.specs` means.
 fn folder_named_in(message: &str) -> Option<String> {
-    Regex::new(r"Where Specmint says `\.specs`, it means `([^`]+)`")
+    Regex::new(r"Your specs and their registry are in `([^`]+)`:")
         .ok()?
         .captures(message)
         .map(|found| found[1].to_owned())

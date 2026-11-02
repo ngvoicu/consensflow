@@ -382,10 +382,18 @@ pub struct SpecmintSkill {
 
 /// Where the harness of the kind `kind` has the Specmint variant `variant`
 /// (`core`, `core-html`, `tdd`, `tdd-html`) installed for its user, in the places
-/// `env` names (the machine's own, for a run of real harnesses).
-pub fn specmint(kind: &str, variant: &str, env: &[(String, String)]) -> Result<SpecmintSkill> {
+/// `env` names (the machine's own, for a run of real harnesses), for a project that keeps
+/// its specs in `folder`: an installed copy names `.specs`, so for any other folder the
+/// answer is ConsensFlow's own copy (T-662).
+pub fn specmint(
+    kind: &str,
+    variant: &str,
+    folder: &str,
+    env: &[(String, String)],
+) -> Result<SpecmintSkill> {
     let answer = question(&json!({
-        "op": "specmint", "kind": kind, "variant": variant, "env": env_object(env),
+        "op": "specmint", "kind": kind, "variant": variant, "folder": folder,
+        "env": env_object(env),
     }))?;
     Ok(specmint_of(&answer))
 }

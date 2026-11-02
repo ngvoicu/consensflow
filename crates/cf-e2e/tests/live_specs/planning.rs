@@ -153,6 +153,13 @@ pub fn spec(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
     ));
     checks.push(
         ctx.judged(
+            "the chief wrote nothing of specs outside the specs folder",
+            seen.none_outside(folder)
+                .map(|()| format!("no spec and no registry outside {folder}")),
+        ),
+    );
+    checks.push(
+        ctx.judged(
             "the registry has a row for the spec",
             registry_row(ctx, &spec.id)
                 .map(|row| format!("{}: {} of {} done", row.status, row.done, row.total)),

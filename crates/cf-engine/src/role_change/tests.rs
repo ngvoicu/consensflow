@@ -171,7 +171,9 @@ fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
+    // 37 until T-662 said in the section of specs that the copy of the skill a chief reads
+    // names the project's folder (any word more costs a row: the text sat at the edge).
+    assert_eq!(rows_whole(true), 36, "docs: whole to 36 rows with specs on");
     assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
 }
 

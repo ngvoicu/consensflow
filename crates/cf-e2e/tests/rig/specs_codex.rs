@@ -180,7 +180,10 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
     assert_eq!(told.len(), 1, "told once: {told:?}");
     let message = &told[0];
     assert!(message.contains(REPLACES), "{message}");
-    assert!(message.contains("it means `plans`"), "{message}");
+    assert!(
+        message.contains("Your specs and their registry are in `plans`"),
+        "{message}"
+    );
     // It names ConsensFlow's copy of the skill, in the folder that is kept for the
     // harness and the variant, and that file is there: the one the window's role
     // names too.

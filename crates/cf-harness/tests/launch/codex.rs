@@ -109,6 +109,8 @@ struct Request {
     starts_given_up: u32,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
+    /// The folder its project keeps its specs in, relative to the project.
+    folder: &'static str,
 }
 
 impl Default for Request {
@@ -122,6 +124,7 @@ impl Default for Request {
             first_message_ms: FIRST_MESSAGE_MS,
             starts_given_up: 0,
             specs: None,
+            folder: ".specs",
         }
     }
 }
@@ -150,7 +153,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
     let id = LaunchId::new(LAUNCH).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant).unwrap());
+        .map(|variant| adapter.specmint(variant, request.folder).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -165,7 +168,11 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
         specs: request
             .specs
             .zip(skill.as_ref())
-            .map(|(variant, skill)| Specs { variant, skill }),
+            .map(|(variant, skill)| Specs {
+                variant,
+                folder: request.folder,
+                skill,
+            }),
         first_message_ms: request.first_message_ms,
         starts_given_up: request.starts_given_up,
     };

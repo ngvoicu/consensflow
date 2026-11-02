@@ -1,0 +1,205 @@
+# A project's specs folder wins over the skill's (T-662, 2026-11-01, ConsensFlow 3.0.7; the live suite
+# `specs` on Pi, `cf task get T-656` F2): a Pi chief of a project whose specs are in `docs/specs`
+# wrote its spec and registry to `.specs`. The folder reached Pi correctly (the role text, through
+# `--append-system-prompt`), but the bundled skill's own files call `.specs` the canonical folder in
+# 35 places of `SKILL.md` alone, and the chief went by the skill. A role sentence cannot undo a skill
+# that says the opposite, and an installed skill is never edited for one project: so the chief of a
+# project whose folder is another is given ConsensFlow's own copy of the skill with the project's
+# folder where the vendored files say `.specs`, kept beside the others under the folder's hash
+# (`crates/cf-harness/src/shared/specmint.rs`), whether or not its harness has the variant
+# installed, and its role text names that folder and no `.specs`
+# (`crates/cf-engine/src/roles/specs.rs`).
+#
+# The cases are in `crates/cf-harness/src/shared/specmint/tests.rs` (every harness, every variant),
+# each harness's `tests/launch/<harness>/specs.rs`, `crates/cf-engine/tests/dispatcher/specs.rs` and
+# `roles/specs/tests.rs`, and the live suite's judge (`crates/cf-e2e/tests/live_specs/launched/`).
+#
+# Every name holds `specs folder`, so `cargo xtask plants daemon "specs folder"` runs them all.
+
+[run]
+specs-folder-shared = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::specmint"]
+specs-folder-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "whose_specs_are_in_another_folder"]
+specs-folder-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::adapter"]
+specs-folder-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "specs::"]
+specs-folder-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "roles::specs"]
+specs-folder-live-judge = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs"]
+
+[[plant]]
+name = "specs folder: the copy a chief is given still says .specs where the project's folder is another (the field's)"
+meant = "a_chief_of_a_project_whose_folder_is_another_is_given_a_copy_that_names_its_folder_and_never_dot_specs"
+runs = ["specs-folder-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = "        let bytes = in_folder(bytes, folder);\n"
+replace = "        let bytes = Cow::Borrowed(*bytes);\n"
+
+[[plant]]
+name = "specs folder: a file of the copy that is the vendored one is not written again for the folder"
+meant = "a_file_of_a_folders_copy_that_is_what_the_vendored_one_says_is_written_again_for_the_folder"
+runs = ["specs-folder-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = "        if fs::read(file).is_ok_and(|held| held == *bytes) {\n"
+replace = "        if fs::read(file).is_ok() {\n"
+
+[[plant]]
+name = "specs folder: the human's installed copy is given to a project whose folder is another"
+meant = "an_installed_copy_serves_only_a_project_that_keeps_its_specs_where_it_says"
+runs = ["specs-folder-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = "        Some(file) if folder == DEFAULT_FOLDER => Ok(Skill::Global(file)),\n"
+replace = "        Some(file) => Ok(Skill::Global(file)),\n"
+
+[[plant]]
+name = "specs folder: two folders share one place for the copy"
+meant = "a_folder_has_a_place_of_its_own_the_same_at_every_launch_and_no_two_folders_share_one"
+runs = ["specs-folder-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = "        let name = if folder == DEFAULT_FOLDER {\n"
+replace = "        let name = if folder == folder {\n"
+
+[[plant]]
+name = "specs folder: the substitution swallows the character after the name it replaces"
+meant = "a_vendored_file_names_the_project_s_folder_where_it_names_dot_specs_and_nothing_else_changes"
+runs = ["specs-folder-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = "            at += named.len();\n"
+replace = "            at += named.len() + 1;\n"
+
+[[plant]]
+name = "specs folder: Pi's adapter asks for the skill of the default folder, whatever the project's"
+meant = "a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_names_it_whether_or_not_pi_has_the_variant_installed"
+runs = ["specs-folder-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = "            folder,\n            paths::global_specmint(&self.env, variant),\n"
+replace = "            cf_proto::specs::DEFAULT_FOLDER,\n            paths::global_specmint(&self.env, variant),\n"
+
+[[plant]]
+name = "specs folder: Claude's adapter asks for the skill of the default folder, whatever the project's"
+meant = "a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_names_it_whether_or_not_claude_has_the_variant_installed"
+runs = ["specs-folder-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            folder,\n            paths::global_specmint(&self.env, variant),\n"
+replace = "            cf_proto::specs::DEFAULT_FOLDER,\n            paths::global_specmint(&self.env, variant),\n"
+
+[[plant]]
+name = "specs folder: Codex's adapter asks for the skill of the default folder, whatever the project's"
+meant = "a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_names_it_whether_or_not_codex_has_the_variant_installed"
+runs = ["specs-folder-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "            folder,\n            paths::global_specmint(env, variant),\n"
+replace = "            cf_proto::specs::DEFAULT_FOLDER,\n            paths::global_specmint(env, variant),\n"
+
+[[plant]]
+name = "specs folder: Devin's adapter asks for the skill of the default folder, whatever the project's"
+meant = "a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_names_it_whether_or_not_devin_has_the_variant_installed"
+runs = ["specs-folder-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            folder,\n            paths::global_specmint(env, variant),\n"
+replace = "            cf_proto::specs::DEFAULT_FOLDER,\n            paths::global_specmint(env, variant),\n"
+
+[[plant]]
+name = "specs folder: Muse's adapter asks for the skill of the default folder, whatever the project's"
+meant = "a_specmint_muse_has_installed_serves_only_a_project_that_keeps_its_specs_where_it_says"
+runs = ["specs-folder-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = "            folder,\n            specmint::installed(&roots, variant),\n"
+replace = "            cf_proto::specs::DEFAULT_FOLDER,\n            specmint::installed(&roots, variant),\n"
+
+[[plant]]
+name = "specs folder: the engine asks the adapter for the skill of the default folder, whatever the project's"
+meant = "a_skill_the_harness_has_installed_serves_only_a_project_that_keeps_its_specs_where_it_says"
+runs = ["specs-folder-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = "            .specmint(setting.variant, &setting.folder)\n"
+replace = "            .specmint(setting.variant, cf_proto::specs::DEFAULT_FOLDER)\n"
+
+[[plant]]
+name = "specs folder: the launch is given the default folder, whatever the project's"
+meant = "a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at_its_next_launch_and_not_before"
+runs = ["specs-folder-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = "            folder: &self.setting.folder,\n            skill: &self.skill,\n"
+replace = "            folder: cf_proto::specs::DEFAULT_FOLDER,\n            skill: &self.skill,\n"
+
+[[plant]]
+name = "specs folder: a chief's text says again that Specmint's .specs means the project's folder"
+meant = "a_chief_of_a_project_whose_folder_is_another_is_told_no_dot_specs_anywhere_in_its_text"
+runs = ["specs-folder-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/specs.rs"
+find = "Your specs and their registry are in `{folder}`: use this copy"
+replace = "Where Specmint says `.specs`, it means `{folder}`: use this copy"
+
+[[plant]]
+name = "specs folder: the live judge takes a copy that still says .specs for the project's"
+meant = "a_copy_of_the_skill_names_the_project_s_folder_and_no_other"
+runs = ["specs-folder-live-judge"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/launched.rs"
+find = "    if folder == DEFAULT_FOLDER {\n        return Ok(format!(\"{folder} is the folder the skill names\"));\n    }\n"
+replace = "    if folder == folder {\n        return Ok(format!(\"{folder} is the folder the skill names\"));\n    }\n"
+
+[[plant]]
+name = "specs folder: harness-ask answers the default folder's skill whatever folder it is asked"
+meant = "what_each_harness_s_adapter_says_of_the_variant_is_what_the_judge_holds_the_chief_s_text_to"
+runs = ["specs-folder-live-judge"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling.rs"
+find = "    let folder = optional(question, \"folder\").unwrap_or(DEFAULT_FOLDER);\n"
+replace = "    let folder = DEFAULT_FOLDER;\n"
+
+[[plant]]
+name = "specs folder: the live judge takes a spec in the folder beside a registry the chief also wrote outside it"
+meant = "a_registry_or_a_spec_outside_the_specs_folder_is_said_though_the_folder_holds_a_spec"
+runs = ["specs-folder-live-judge"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/evidence.rs"
+find = "    pub fn none_outside(&self, folder: &str) -> Result<(), String> {\n        if self.elsewhere.is_empty() {\n"
+replace = "    pub fn none_outside(&self, folder: &str) -> Result<(), String> {\n        if true {\n"
+
+[[plant]]
+name = "specs folder: the live judge reads the path Pi was given as the role text and finds no section of specs in it (Pi 1.4.0's)"
+meant = "each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_finds_it_there"
+runs = ["specs-folder-live-judge"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/launched.rs"
+find = "    if !appended.contains('\\n') && Path::new(appended).is_file() {\n"
+replace = "    if false && Path::new(appended).is_file() {\n"
+
+[[plant]]
+name = "specs folder: the live judge takes the user's own appended file of Pi for the role"
+meant = "each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_finds_it_there"
+runs = ["specs-folder-live-judge"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/launched.rs"
+find = "            .rposition(|word| *word == flag)\n"
+replace = "            .position(|word| *word == flag)\n"

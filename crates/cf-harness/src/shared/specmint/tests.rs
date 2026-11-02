@@ -267,7 +267,7 @@ fn a_variant_not_found_installed_is_placed_in_the_folder_kept_for_its_harness_an
         (Harness::Codex, "codex"),
     ] {
         for variant in Variant::ALL {
-            let placed = place(harness, &env, variant, None).expect("a place");
+            let placed = place(harness, &env, variant, ".specs", None).expect("a place");
             assert_eq!(
                 placed,
                 Skill::Own(path::join(&[
@@ -288,7 +288,8 @@ fn a_harness_s_folder_holds_launches_and_nothing_else_the_copy_is_kept_beside_th
     let fake = Fake::new();
     let env = home_env(&fake);
     for harness in [Harness::Claude, Harness::Devin, Harness::Codex] {
-        let Skill::Own(file) = place(harness, &env, Variant::Tdd, None).expect("a place") else {
+        let Skill::Own(file) = place(harness, &env, Variant::Tdd, ".specs", None).expect("a place")
+        else {
             panic!("an own copy");
         };
         let launches = path::join(&[
@@ -308,7 +309,7 @@ fn a_variant_vendored_at_another_commit_is_another_folder() {
     let fake = Fake::new();
     let env = home_env(&fake);
     let at = |commit: &str| {
-        OwnCopy::at(Harness::Pi, &env, Variant::Core, commit)
+        OwnCopy::at(Harness::Pi, &env, Variant::Core, commit, ".specs")
             .expect("a copy")
             .root
     };
@@ -332,6 +333,7 @@ fn an_installed_variant_is_placed_where_it_is_and_its_place_needs_no_home() {
         Harness::Claude,
         &Env::default(),
         Variant::Tdd,
+        ".specs",
         Some("/home/me/.claude/skills/specmint-tdd/SKILL.md".to_owned()),
     );
     assert_eq!(
@@ -340,7 +342,13 @@ fn an_installed_variant_is_placed_where_it_is_and_its_place_needs_no_home() {
             "/home/me/.claude/skills/specmint-tdd/SKILL.md".to_owned()
         ))
     );
-    let own = place(Harness::Claude, &Env::default(), Variant::Tdd, None);
+    let own = place(
+        Harness::Claude,
+        &Env::default(),
+        Variant::Tdd,
+        ".specs",
+        None,
+    );
     assert_eq!(own, Err("missing home in env".to_owned()));
 }
 
@@ -351,9 +359,10 @@ fn the_own_copy_is_written_whole_at_the_place_the_role_text_named_and_the_harnes
         let fake = Fake::new();
         let env = home_env(&fake);
         let id = id();
-        let skill = place(Harness::Claude, &env, variant, None).expect("a place");
+        let skill = place(Harness::Claude, &env, variant, ".specs", None).expect("a place");
         let specs = Specs {
             variant,
+            folder: ".specs",
             skill: &skill,
         };
         let launch = launch(&id, Some(specs));
@@ -407,6 +416,7 @@ fn nothing_is_written_for_a_launch_with_no_specs_or_whose_harness_has_the_varian
     let skill = Skill::Global("/home/me/.claude/skills/specmint-core/SKILL.md".to_owned());
     let specs = Specs {
         variant: Variant::Core,
+        folder: ".specs",
         skill: &skill,
     };
     assert_eq!(
@@ -422,11 +432,213 @@ fn a_window_that_has_no_home_to_write_in_says_so() {
     let skill = Skill::Own("/nowhere/SKILL.md".to_owned());
     let specs = Specs {
         variant: Variant::Core,
+        folder: ".specs",
         skill: &skill,
     };
     let none = Env::default();
     assert_eq!(
         write_own(Harness::Codex, &none, &launch(&id, Some(specs))),
         Err("missing home in env".to_owned())
+    );
+}
+
+#[test]
+fn a_vendored_file_names_the_project_s_folder_where_it_names_dot_specs_and_nothing_else_changes() {
+    let named = |text: &str, folder: &str| in_folder(text.as_bytes(), folder).into_owned();
+    assert_eq!(
+        named(
+            "see `.specs/registry.md` and .specs/<id>/SPEC.md",
+            "docs/specs"
+        ),
+        b"see `docs/specs/registry.md` and docs/specs/<id>/SPEC.md"
+    );
+    // A folder that holds the name does not name itself again.
+    assert_eq!(
+        named("a .specs b .specs", "x/.specs"),
+        b"a x/.specs b x/.specs"
+    );
+    // A name in any script.
+    assert_eq!(named(".specs/", "планы"), "планы/".as_bytes());
+    // A file that names none, and the folder the files name, are the file as it is.
+    assert!(matches!(
+        in_folder(b"nothing of it", "docs/specs"),
+        Cow::Borrowed(_)
+    ));
+    assert!(matches!(
+        in_folder(b"`.specs/registry.md`", DEFAULT_FOLDER),
+        Cow::Borrowed(_)
+    ));
+}
+
+#[test]
+fn a_folder_has_a_place_of_its_own_the_same_at_every_launch_and_no_two_folders_share_one() {
+    let fake = Fake::new();
+    let env = home_env(&fake);
+    let at = |folder: &str| {
+        OwnCopy::at(Harness::Pi, &env, Variant::Core, "aaaa", folder)
+            .expect("a copy")
+            .root
+    };
+    assert_eq!(at("docs/specs"), at("docs/specs"));
+    assert_ne!(at("docs/specs"), at("docs-specs"));
+    assert_ne!(at("docs/specs"), at(".specs"));
+    // The folder is any text, and no part of a path: a name of 12 hex digits after the commit.
+    let name = |folder: &str| {
+        Path::new(&at(folder))
+            .file_name()
+            .expect("a name")
+            .to_string_lossy()
+            .into_owned()
+    };
+    assert_eq!(name(".specs"), "core-aaaa");
+    for folder in ["docs/specs", "a b/ü", "plans", "x\\y"] {
+        let name = name(folder);
+        let key = name
+            .strip_prefix("core-aaaa-")
+            .expect("a key after the commit");
+        assert!(
+            key.len() == 12 && key.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "{folder}: {name}"
+        );
+    }
+}
+
+#[test]
+fn an_installed_copy_serves_only_a_project_that_keeps_its_specs_where_it_says() {
+    let fake = Fake::new();
+    let env = home_env(&fake);
+    let installed = "/home/me/.claude/skills/specmint-core/SKILL.md".to_owned();
+    // The folder the installed copy names is its project's.
+    assert_eq!(
+        place(
+            Harness::Claude,
+            &env,
+            Variant::Core,
+            ".specs",
+            Some(installed.clone())
+        ),
+        Ok(Skill::Global(installed.clone()))
+    );
+    // Any other: the copy is never edited for one project, so the chief is given another.
+    for harness in [
+        Harness::Claude,
+        Harness::Pi,
+        Harness::Devin,
+        Harness::Codex,
+        Harness::Muse,
+    ] {
+        let placed = place(
+            harness,
+            &env,
+            Variant::Core,
+            "docs/specs",
+            Some(installed.clone()),
+        )
+        .expect("a place");
+        assert!(
+            matches!(&placed, Skill::Own(file) if file != &installed),
+            "{harness:?}: {placed:?}"
+        );
+    }
+    assert_eq!(
+        fs::read_dir(fake.at(""))
+            .map(|entries| entries.count())
+            .unwrap_or(0),
+        0,
+        "nothing was written, or touched"
+    );
+}
+
+#[test]
+fn a_chief_of_a_project_whose_folder_is_another_is_given_a_copy_that_names_its_folder_and_never_dot_specs(
+) {
+    for harness in [
+        Harness::Claude,
+        Harness::Pi,
+        Harness::Devin,
+        Harness::Codex,
+        Harness::Muse,
+    ] {
+        for variant in Variant::ALL {
+            let fake = Fake::new();
+            let env = home_env(&fake);
+            let id = id();
+            let skill = place(harness, &env, variant, "docs/specs", None).expect("a place");
+            let specs = Specs {
+                variant,
+                folder: "docs/specs",
+                skill: &skill,
+            };
+            let copy = write_own(harness, &env, &launch(&id, Some(specs)))
+                .expect("written")
+                .expect("a copy");
+            assert_eq!(copy.file(), skill.path(), "{harness:?} {variant:?}");
+            let written = files_under(Path::new(skill.path()).parent().expect("a folder"));
+            let mut vendored_names: Vec<&str> =
+                files::of(variant).iter().map(|(name, _)| *name).collect();
+            vendored_names.sort_unstable();
+            assert_eq!(
+                written.keys().map(String::as_str).collect::<Vec<_>>(),
+                vendored_names,
+                "{harness:?} {variant:?}: every file of the variant"
+            );
+            for (name, bytes) in &written {
+                assert!(
+                    !String::from_utf8_lossy(bytes).contains(".specs"),
+                    "{harness:?} {variant:?}: {name} still sends the chief to .specs"
+                );
+            }
+            // The vendored words, with the folder where they named `.specs`.
+            for (name, vendored) in files::of(variant) {
+                assert_eq!(
+                    written[*name],
+                    String::from_utf8_lossy(vendored)
+                        .replace(".specs", "docs/specs")
+                        .into_bytes(),
+                    "{harness:?} {variant:?}: {name}"
+                );
+            }
+            // Beside the copy for `.specs`, never in its place.
+            let default = place(harness, &env, variant, ".specs", None).expect("a place");
+            assert_ne!(skill.path(), default.path(), "{harness:?} {variant:?}");
+            assert!(
+                skill
+                    .path()
+                    .contains(&format!("{}-{}-", variant.as_str(), pinned(variant))),
+                "{harness:?} {variant:?}: {}",
+                skill.path()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_file_of_a_folders_copy_that_is_what_the_vendored_one_says_is_written_again_for_the_folder() {
+    let fake = Fake::new();
+    let env = home_env(&fake);
+    let id = id();
+    let skill = place(Harness::Pi, &env, Variant::Core, "docs/specs", None).expect("a place");
+    let specs = Specs {
+        variant: Variant::Core,
+        folder: "docs/specs",
+        skill: &skill,
+    };
+    write_own(Harness::Pi, &env, &launch(&id, Some(specs)))
+        .expect("written")
+        .expect("a copy");
+    // A copy the build before this one left, with the vendored words as they are.
+    let vendored = files::of(Variant::Core)
+        .iter()
+        .find(|(name, _)| *name == "SKILL.md")
+        .expect("a SKILL.md")
+        .1;
+    fs::write(skill.path(), vendored).expect("the old words");
+    write_own(Harness::Pi, &env, &launch(&id, Some(specs)))
+        .expect("written")
+        .expect("a copy");
+    let held = fs::read_to_string(skill.path()).expect("the skill");
+    assert!(
+        !held.contains(".specs") && held.contains("docs/specs/registry.md"),
+        "{held}"
     );
 }

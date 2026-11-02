@@ -222,6 +222,8 @@ pub(super) struct Request {
     pub(super) first_message_ms: i64,
     /// The Specmint variant a chief is given, where its project has specs on.
     pub(super) specs: Option<Variant>,
+    /// The folder its project keeps its specs in, relative to the project.
+    pub(super) folder: &'static str,
 }
 
 impl Default for Request {
@@ -238,6 +240,7 @@ impl Default for Request {
             }),
             first_message_ms: FIRST_MESSAGE_MS,
             specs: None,
+            folder: ".specs",
         }
     }
 }
@@ -272,7 +275,7 @@ pub(super) fn prepare_as(
     let id = LaunchId::new(id).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant).unwrap());
+        .map(|variant| adapter.specmint(variant, request.folder).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -287,7 +290,11 @@ pub(super) fn prepare_as(
         specs: request
             .specs
             .zip(skill.as_ref())
-            .map(|(variant, skill)| Specs { variant, skill }),
+            .map(|(variant, skill)| Specs {
+                variant,
+                folder: request.folder,
+                skill,
+            }),
         first_message_ms: request.first_message_ms,
         starts_given_up: 0,
     };

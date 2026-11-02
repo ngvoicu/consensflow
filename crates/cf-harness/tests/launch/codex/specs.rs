@@ -85,7 +85,7 @@ fn a_chief_given_specs_has_the_skill_written_where_its_role_text_names_it_and_co
             "SKILL.md",
         ]);
         assert_eq!(
-            adapter.specmint(variant).unwrap(),
+            adapter.specmint(variant, ".specs").unwrap(),
             Skill::Own(skill.clone()),
             "{variant:?}: the place the role text names is the place written"
         );
@@ -118,10 +118,10 @@ fn a_second_launch_names_the_same_skill_whatever_its_id_and_its_text_names_it_th
     };
     // The place the role text names, asked before either launch: the adapter
     // is given no launch to ask it for.
-    let named = adapter.specmint(Variant::TddHtml).unwrap();
+    let named = adapter.specmint(Variant::TddHtml, ".specs").unwrap();
     prepare(&adapter, &request).unwrap();
     prepare(&adapter, &request).unwrap();
-    assert_eq!(adapter.specmint(Variant::TddHtml).unwrap(), named);
+    assert_eq!(adapter.specmint(Variant::TddHtml, ".specs").unwrap(), named);
     assert!(
         Path::new(named.path()).is_file(),
         "{} is where it was written",
@@ -144,11 +144,11 @@ fn a_codex_that_has_the_variant_installed_in_the_agents_skills_or_its_own_is_giv
     let own = install(".codex/skills", "specmint-core-html");
     let (adapter, _fakes) = adapter(&home);
     assert_eq!(
-        adapter.specmint(Variant::Tdd).unwrap(),
+        adapter.specmint(Variant::Tdd, ".specs").unwrap(),
         Skill::Global(agents.clone())
     );
     assert_eq!(
-        adapter.specmint(Variant::CoreHtml).unwrap(),
+        adapter.specmint(Variant::CoreHtml, ".specs").unwrap(),
         Skill::Global(own.clone())
     );
     for variant in [Variant::Tdd, Variant::CoreHtml] {
@@ -165,7 +165,7 @@ fn a_codex_that_has_the_variant_installed_in_the_agents_skills_or_its_own_is_giv
     );
     // Neither installed variant is the core one: ConsensFlow's own is written.
     assert!(matches!(
-        adapter.specmint(Variant::Core).unwrap(),
+        adapter.specmint(Variant::Core, ".specs").unwrap(),
         Skill::Own(_)
     ));
     let (before_agents, before_own) = (fs::read(&agents).unwrap(), fs::read(&own).unwrap());
@@ -177,4 +177,37 @@ fn a_codex_that_has_the_variant_installed_in_the_agents_skills_or_its_own_is_giv
     assert!(Path::new(&kept::skill(&consensflow(&home), "codex", Variant::Core)).exists());
     assert_eq!(fs::read(&agents).unwrap(), before_agents);
     assert_eq!(fs::read(&own).unwrap(), before_own);
+}
+
+#[test]
+fn a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_names_it_whether_or_not_codex_has_the_variant_installed(
+) {
+    let home = Home::new();
+    // Installed by the human, and never edited for one project: its files call `.specs` the
+    // folder (T-662).
+    let dir = path::join(&[&home.root, "home", ".agents/skills", "specmint-tdd"]);
+    fs::create_dir_all(&dir).unwrap();
+    let installed = path::join(&[&dir, "SKILL.md"]);
+    let words = "---\nname: specmint-tdd\n---\nthe human's own, in .specs/registry.md\n";
+    fs::write(&installed, words).unwrap();
+    let (adapter, _fakes) = adapter(&home);
+    assert_eq!(
+        adapter.specmint(Variant::Tdd, ".specs").unwrap(),
+        Skill::Global(installed.clone())
+    );
+    let Skill::Own(copy) = adapter.specmint(Variant::Tdd, "docs/specs").unwrap() else {
+        panic!("a copy of its own for another folder");
+    };
+    let request = Request {
+        specs: Some(Variant::Tdd),
+        folder: "docs/specs",
+        ..Request::chief()
+    };
+    prepare(&adapter, &request).unwrap();
+    kept::names_only(&copy, "docs/specs");
+    assert_eq!(
+        fs::read_to_string(&installed).unwrap(),
+        words,
+        "not touched"
+    );
 }
