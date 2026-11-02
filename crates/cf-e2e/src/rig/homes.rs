@@ -284,7 +284,9 @@ mod tests {
         let apart = Config::new("fake-agent")
             .isolated(Arc::new(Told("Devin's", vec![("USERPROFILE", "/a")])))
             .isolated(Arc::new(Told("Pi's", vec![("PI_CODING_AGENT_DIR", "/b")])));
-        let (_, vars) = Homes::start(&apart).ok().expect("a start");
+        let Ok((_, vars)) = Homes::start(&apart) else {
+            panic!("homes that set different variables start");
+        };
         assert_eq!(vars.len(), 2);
     }
 }
