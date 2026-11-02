@@ -2974,13 +2974,14 @@ mod tests {
             }
         }
 
-        /// How a window declares that it reads a paste at 0.5 ms a character, draws as it reads,
-        /// and is quiet for 200 ms when it has: Muse's measure on Windows (T-954), with a cap
-        /// that gives a slow machine's PowerShell room.
+        /// How a window declares that it reads a paste at 0.5 ms a character and draws as it
+        /// reads (Muse's measure on Windows, T-954), with a quiet spell well above a busy
+        /// machine's scheduling gap, as the burst reader's test has it, and a cap that gives a
+        /// slow machine's PowerShell room.
         const SLOW: SilentPaste = SilentPaste {
             pace_us_per_character: 500,
             drawn_after_ms: 0,
-            quiet_ms: 200,
+            quiet_ms: 500,
             most_ms: 1_000,
             most_us_per_character: 3_000,
         };
