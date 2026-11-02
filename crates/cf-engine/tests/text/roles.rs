@@ -286,6 +286,52 @@ fn tells_the_chief_one_member_runs_as_many_tasks_at_once_as_it_is_given() {
     ));
 }
 
+/// A chief that read a member as a person who can be busy chained its work through one
+/// window with `--after` and let all of it wait behind a window that stuck (Gabriel's field
+/// board, T-6 then T-8 then T-9, 2026-11-02): a member is a model, and no task waits for one.
+#[test]
+fn never_says_a_member_is_free_or_busy() {
+    let text = instructions("chief", &[zeus()]);
+    let said = Regex::new(r"(?i)\b(free|busy)\b").unwrap().find(&text);
+    assert!(
+        said.is_none(),
+        "the chief's text says a member is free or busy: {:?}",
+        said.map(|word| &text[word.start().saturating_sub(60)..word.end() + 60])
+    );
+}
+
+#[test]
+fn tells_the_chief_each_task_gets_a_new_window_of_a_member_of_its_role_and_tier() {
+    assert!(found(
+        r"Each task gets a new window of a member of that role and tier on this\s+project's staff; you never pick the member\.",
+        &instructions("chief", &[zeus()])
+    ));
+}
+
+#[test]
+fn tells_the_chief_a_member_is_a_model_that_runs_any_number_of_tasks_at_once_each_in_its_own_window(
+) {
+    let text = instructions("chief", &[zeus()]);
+    assert!(found(
+        r"Each member is a\s+model, not a person: it runs any number of tasks at once, each in its own\s+window\.\n\n\| Member \|",
+        &text
+    ));
+    // It comes with the staff, and the rule that the human may change it stays.
+    assert!(found(
+        r"`cf staff` shows them as they are now\. Each member is a\s+model",
+        &text
+    ));
+}
+
+#[test]
+fn tells_the_chief_a_follow_up_is_for_what_its_window_knows_and_other_work_starts_at_once_beside_it(
+) {
+    assert!(found(
+        r"the next step of that window's own work, only when it needs what that window already knows \(carry out the plan or findings it just wrote, part 2 after its part 1\); reviews, parallel work and work for another role stay fresh, and start at once beside that window's work\n",
+        &instructions("chief", &[zeus()])
+    ));
+}
+
 #[test]
 fn tells_every_window_its_messages_arrive_pasted_and_are_its_to_act_on() {
     for role in [
