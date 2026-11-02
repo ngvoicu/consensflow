@@ -58,9 +58,11 @@ pub const SECONDS: u64 = 60;
 /// with no shell, which the host names as no turn's work, T-1137).
 pub const TICKER: &str = "tick-cf-stops-live.cjs";
 
-/// What [`TICKER`] holds.
+/// What [`TICKER`] holds. It takes no hang-up, as a long job its agent leaves is started
+/// (`nohup`): a terminal a harness closes after the shell that started a job with `&` (Codex's,
+/// on the Mac) hangs up what it started.
 pub fn ticker_text() -> &'static str {
-    "const [seconds, file] = process.argv.slice(2);\nlet count = 0;\nconst tick = () => require(\"fs\").writeFileSync(file, String(++count));\ntick();\nconst every = setInterval(tick, 1000);\nsetTimeout(() => clearInterval(every), Number(seconds) * 1000);\n"
+    "process.on(\"SIGHUP\", () => {});\nconst [seconds, file] = process.argv.slice(2);\nlet count = 0;\nconst tick = () => require(\"fs\").writeFileSync(file, String(++count));\ntick();\nconst every = setInterval(tick, 1000);\nsetTimeout(() => clearInterval(every), Number(seconds) * 1000);\n"
 }
 
 /// How many seconds the ticking command in the project's `folder` says it has run, by its
@@ -394,19 +396,27 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
         let after = holding(&tree::read(ctx.members.rig(), pane), &background.mark);
         let counted_after = counted(background);
         // Its own count says it ran on whether or not the host's tree lists it: a harness
-        // that starts a program with no shell (Codex) leaves it unlisted (T-1137). A job the
-        // agent detached with `&` (Pi's and Devin's shells) counts all the same.
-        case.check(
-            "the pause left the work started in the background running",
-            counted_before.is_some() && counted_after > counted_before,
-            format!(
-                "its file: {} at the pause, {} after the watch; the host's tree before the pause: {}; after the watch: {}",
-                seconds_said(counted_before),
-                seconds_said(counted_after),
-                said(&listed),
-                said(&after)
-            ),
+        // that starts a program with no shell (Codex) leaves it unlisted (T-1137). One that never
+        // wrote its file before the pause never ran, or ended at once (a job a shell started
+        // with `&` in a terminal that closed with it): there is nothing the pause could leave.
+        let said_of_it = format!(
+            "its file: {} at the pause, {} after the watch; the host's tree before the pause: {}; after the watch: {}",
+            seconds_said(counted_before),
+            seconds_said(counted_after),
+            said(&listed),
+            said(&after)
         );
+        if counted_before.is_none() {
+            case.say(format!(
+                "the command started in the background never ran, or ended before it began, so whether the pause left it is not said: {said_of_it}"
+            ));
+        } else {
+            case.check(
+                "the pause left the work started in the background running",
+                counted_after > counted_before,
+                said_of_it,
+            );
+        }
     }
     Ok(())
 }
