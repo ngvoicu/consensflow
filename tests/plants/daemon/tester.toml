@@ -128,10 +128,10 @@ runs = ["ledger-lib-testing"]
 file = "crates/cf-ledger/src/testing.rs"
 find = """                *sql = sql
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
-                    .replace(chief_model::COLUMN_LINES, "");"""
+                    .replace(chosen_tier::COLUMN_LINES, "")"""
 replace = """                *sql = sql
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.0)
-                    .replace(chief_model::COLUMN_LINES, "");"""
+                    .replace(chosen_tier::COLUMN_LINES, "")"""
 
 [[plant]]
 name = "tester: the ledger's replay of Node's traces does not hold the schema apart, and every recorded database differs"

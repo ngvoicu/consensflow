@@ -675,8 +675,8 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "      if (!agent) return\n      const project = this.#project\n"
-replace = "      if (!agent) return\n      const project = page.board().project.id\n"
+find = "      if (picked === null) return\n      const project = this.#project\n"
+replace = "      if (picked === null) return\n      const project = page.board().project.id\n"
 
 [[plant]]
 name = "project settings: a member is removed from the project the board shows"
