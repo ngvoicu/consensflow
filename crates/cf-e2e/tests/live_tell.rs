@@ -19,8 +19,10 @@
 //! stand-in, and the check plays the chief with its own token. What the run judges is what
 //! the chief was given: the words the turn ended with, in a note, once, before any resume
 //! (the answer to the question reached the chief too, as its own message or in the words of
-//! that note); the task still paused, with no result; and `cf task finish T-1` making those
-//! words the result. What the window did is said besides: the lane's state, the thread and
+//! that note: what the window wrote first, before its first tool call, is in the note beside
+//! its last words, T-1151: Devin wrote the line as text and put other words into its `cf
+//! answer`, or none); the task still paused, with no result; and `cf task finish T-1` making
+//! the last words the result. What the window did is said besides: the lane's state, the thread and
 //! the chief's inbox.
 //!
 //! Two cases (`--case`): `plain`, the shape above, on every harness named; and `monitor`

@@ -170,17 +170,27 @@ impl Ledger {
     }
 
     /// Tells T-`number`'s requester what the window of `handle` ended its turn on tell `tell`
-    /// with, while the task is paused: `words`, its last complete answer after the tell. A note
-    /// for each tell; none where there is one.
+    /// with, while the task is paused: `words`, its last complete answer after the tell, and
+    /// `reply`, what it wrote first, before its first tool call, where that is other words
+    /// (T-1151). A note for each tell; none where there is one.
     pub fn note_paused_answer(
         &mut self,
         project_id: i64,
         number: i64,
         handle: &str,
         tell: i64,
+        reply: Option<&str>,
         words: &str,
     ) -> Result<Option<MessageView>, LedgerError> {
-        messages::note_paused_answer(&mut self.store, project_id, number, handle, tell, words)
+        messages::note_paused_answer(
+            &mut self.store,
+            project_id,
+            number,
+            handle,
+            tell,
+            reply,
+            words,
+        )
     }
 
     /// The newest note that gave T-`number`'s requester the answer of its window's turn on a

@@ -51,8 +51,10 @@ fn tell_working(context: &Context, project: i64, window: &str) -> MessageView {
     told
 }
 
-/// The window answers the tell with `cf answer` and works on: the record shows its words,
-/// a tool, the answer's tool, and another tool, and its turn goes on.
+/// The window answers the tell with `cf answer` and works on: the record shows a call that
+/// says nothing, a tool, the answer's tool, and another tool, and its turn goes on. The call
+/// says no words, so the note of these tests is of the turn's end alone; what a window writes
+/// first, before its first tool, has its tests at the end of this file (T-1151).
 pub(crate) fn answers_and_goes_on(context: &Context, told: &MessageView) {
     let item = |role, text: &str, complete| {
         let mut item = context.adapter.item(role, text);
@@ -65,9 +67,7 @@ pub(crate) fn answers_and_goes_on(context: &Context, told: &MessageView) {
         .answer(told.id, told.recipient_id, Some(&json!(ANSWER)), None)
         .unwrap();
     context.adapter.with("zeus", |agent| {
-        agent
-            .items
-            .push(item(Role::Assistant, "Answering, then on", false));
+        agent.items.push(item(Role::Assistant, "", false));
         agent
             .items
             .push(item(Role::Tool, "m-3 answered @chief.", true));
@@ -1018,4 +1018,373 @@ fn a_resumed_turn_that_fails_fails_the_task_and_leaves_the_note_of_the_tells_ans
         "the answer to the tell is not dropped with the task"
     );
     assert_eq!(kept.body, moved_on_words("zeus", &told));
+}
+
+// ---------------------------------------------------------------------------------------
+// T-1151: the words a window writes in reply to a tell, before its first tool call.
+//
+// `live tell devin` on the Mac (T-1131's sweep, 2026-11-02, Devin 3000.11.234, swe-2): the
+// chief told the window "First write the line TOLD-ANSWER-K3 as text. Then run `sleep 15`.
+// Then end your reply with FINAL-RESULT-ALPHA-9Z". Devin did: it wrote the line, ran the
+// command, ran `cf answer m-2` (with the last line, in the run that did) and ended with the
+// last line. The note said "What it said last: FINAL-RESULT-ALPHA-9Z" and nothing carried the
+// line it wrote first: the rule took only what follows the turn's last tool call, and called
+// the rest progress. The kept ledgers of the sweep's Claude, Codex and Muse runs hold the
+// same record shape (text, tool, tool, `cf answer`, text); theirs reached the chief only
+// because the model put the words into its `cf answer` (Claude, Codex) or wrote them again at
+// the end (Muse).
+
+/// What the window writes in reply to the tell, before it runs anything.
+const WRITTEN: &str = "TOLD-LINE: stopped on the v2 grammar, not running it again";
+
+/// Items pushed to zeus's record, in order, as `(role, text, complete)`.
+fn record_of_zeus(context: &Context, items: &[(Role, &str, bool)]) {
+    let built: Vec<_> = items
+        .iter()
+        .map(|&(role, text, complete)| {
+            let mut item = context.adapter.item(role, text);
+            item.complete = complete;
+            item
+        })
+        .collect();
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.extend(built));
+}
+
+/// The turn Devin 3000.11.234 recorded on the tell (the kept ledger of T-1131's live run, its
+/// items 15 to 21): the text, the command (`sleep 15`, put in the background after 10 s), a
+/// second call, then, where it ran `cf answer`, that call and its output, and its last words.
+fn devin_turn(context: &Context, told: &MessageView, answered_with: Option<&str>) {
+    record_of_zeus(
+        context,
+        &[
+            (Role::Assistant, WRITTEN, false),
+            (
+                Role::Tool,
+                "No output produced after 10.0 seconds. Command running in background with ID: d186ce. Run get_output with timeout if you need to wait.",
+                true,
+            ),
+            (Role::Assistant, "", false),
+            (Role::Tool, "Exited with code 0 and no output\n\nExit code: 0", true),
+        ],
+    );
+    if let Some(words) = answered_with {
+        context
+            .ledger
+            .borrow_mut()
+            .answer(told.id, told.recipient_id, Some(&json!(words)), None)
+            .unwrap();
+        record_of_zeus(
+            context,
+            &[
+                (Role::Assistant, "", false),
+                (
+                    Role::Tool,
+                    "Output from command in shell 98fc41:\nm-3 answered @chief.\n\nExit code: 0",
+                    true,
+                ),
+            ],
+        );
+    }
+    context.adapter.answer("zeus", FINAL);
+}
+
+/// The note of a paused task whose window wrote `reply` before its first tool call.
+fn paused_words_after(reply: &str, handle: &str, told: &MessageView) -> String {
+    format!(
+        "T-1 is paused, and @{handle}'s turn on the words put to its window (m-{}) is over. What it wrote first, before any tool:\n\n{reply}\n\nWhat it said last:\n\n{FINAL}\n\nIf that is the result, take it: cf task finish T-1. To send it on: cf task resume T-1 \"…\".",
+        told.id
+    )
+}
+
+/// The same note of a task that has moved on.
+fn moved_on_words_after(reply: &str, handle: &str, told: &MessageView) -> String {
+    format!(
+        "T-1, paused when @{handle}'s turn on the words put to its window (m-{}) began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. What the turn on those words wrote first, before any tool:\n\n{reply}\n\nand ended with:\n\n{FINAL}",
+        told.id
+    )
+}
+
+/// zeus's turn on the tell ends, and the dispatcher looks at it.
+fn passes_after_the_turn(context: &Context) {
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+}
+
+#[test]
+fn the_words_a_window_wrote_before_its_first_tool_in_the_turn_of_a_tell_reach_the_chief_beside_its_last_when_it_ran_no_cf_answer(
+) {
+    // The first of T-1131's two Devin runs: no `cf answer` at all, the line written as text.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    devin_turn(&context, &told, None);
+    passes_after_the_turn(&context);
+
+    assert_eq!(
+        kept_notes(&context, project),
+        [paused_words_after(WRITTEN, "zeus", &told)]
+    );
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    assert_eq!(results(&context, project), Vec::<String>::new());
+}
+
+#[test]
+fn the_words_a_window_wrote_before_its_first_tool_reach_the_chief_though_it_answered_the_tell_with_other_words(
+) {
+    // The second run, which T-1131 reran alone: `cf answer m-2` carried the last line, and the
+    // line written first was in the record and nowhere the chief looks.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    devin_turn(&context, &told, Some(FINAL));
+    passes_after_the_turn(&context);
+
+    assert_eq!(
+        kept_notes(&context, project),
+        [paused_words_after(WRITTEN, "zeus", &told)]
+    );
+    let thread = context.task(project, 1);
+    assert!(thread
+        .messages
+        .iter()
+        .any(|message| message.kind == "answer" && message.body == FINAL));
+}
+
+#[test]
+fn the_progress_a_window_writes_between_its_tools_stays_out_of_the_note() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    record_of_zeus(
+        &context,
+        &[
+            (Role::Assistant, WRITTEN, false),
+            (Role::Tool, "(Bash completed)", true),
+            (Role::Assistant, "Now reading the lexer", false),
+            (Role::Tool, "(Read completed)", true),
+            (Role::Assistant, "And the parser", false),
+            (Role::Tool, "(Read completed)", true),
+        ],
+    );
+    context.adapter.answer("zeus", FINAL);
+    passes_after_the_turn(&context);
+
+    assert_eq!(
+        kept_notes(&context, project),
+        [paused_words_after(WRITTEN, "zeus", &told)],
+        "its reply and its last words: the steps between are in the transcript"
+    );
+}
+
+#[test]
+fn a_turn_that_runs_a_tool_before_it_writes_anything_has_no_reply_to_tell() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    record_of_zeus(
+        &context,
+        &[
+            (Role::Assistant, "", false),
+            (Role::Tool, "(Bash completed)", true),
+            (Role::Assistant, "Reading on", false),
+            (Role::Tool, "(Read completed)", true),
+        ],
+    );
+    context.adapter.answer("zeus", FINAL);
+    passes_after_the_turn(&context);
+
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+}
+
+#[test]
+fn a_turn_of_one_run_has_no_reply_apart_from_its_last_words() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.adapter.answer("zeus", FINAL);
+    passes_after_the_turn(&context);
+
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+}
+
+#[test]
+fn a_reply_a_harness_marks_as_progress_is_still_the_reply_to_the_tell() {
+    // Codex marks the text it writes beside a tool call `commentary` where its phase says so,
+    // whatever it says; the chief asked a question, and that text is the first words of its
+    // answer.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    let mut said = context.adapter.item(Role::Assistant, WRITTEN);
+    said.commentary = true;
+    said.complete = false;
+    let tool = context.adapter.item(Role::Tool, "Script completed");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(said);
+        agent.items.push(tool);
+    });
+    context.adapter.answer("zeus", FINAL);
+    passes_after_the_turn(&context);
+
+    assert_eq!(
+        kept_notes(&context, project),
+        [paused_words_after(WRITTEN, "zeus", &told)]
+    );
+}
+
+#[test]
+fn what_a_harness_wrote_itself_is_no_reply() {
+    // Claude Code's close of a turn it found cut is an assistant's item with no model behind it.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    let mut closed = context
+        .adapter
+        .item(Role::Assistant, "No response requested.");
+    closed.synthetic = true;
+    closed.commentary = true;
+    let tool = context.adapter.item(Role::Tool, "(Bash completed)");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(closed);
+        agent.items.push(tool);
+    });
+    context.adapter.answer("zeus", FINAL);
+    passes_after_the_turn(&context);
+
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+}
+
+#[test]
+fn a_reply_the_turn_ends_with_again_is_told_once() {
+    // Muse wrote the line first and again at the end: one copy.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    record_of_zeus(
+        &context,
+        &[
+            (Role::Assistant, FINAL, true),
+            (Role::Tool, "(Bash completed)", true),
+        ],
+    );
+    context.adapter.answer("zeus", FINAL);
+    passes_after_the_turn(&context);
+
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+}
+
+#[test]
+fn a_reply_the_window_also_sent_with_cf_answer_is_not_told_again() {
+    // Claude and Codex wrote the line and put it into `cf answer`: the chief has it as a
+    // message of its own.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    devin_turn(&context, &told, Some(&format!("Done: {WRITTEN}, and on")));
+    passes_after_the_turn(&context);
+
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+}
+
+#[test]
+fn a_cf_answer_to_an_earlier_tell_does_not_stand_for_the_reply_to_this_one() {
+    // The first tell was answered with `cf answer`, in words that hold the line; the second
+    // tell's turn wrote the same line first and answered nothing: the chief has no message of
+    // its own for it, and the note must hold it.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    devin_turn(&context, &told, Some(&format!("Done: {WRITTEN}, and on")));
+    passes_after_the_turn(&context);
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+
+    let again = context.tell(project, "zeus", 1, "Once more");
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(again.id).state,
+        "delivering",
+        "pasted, not yet read"
+    );
+    record_of_zeus(
+        &context,
+        &[
+            (Role::Assistant, WRITTEN, false),
+            (Role::Tool, "(Bash completed)", true),
+        ],
+    );
+    context.adapter.answer("zeus", "SECOND-RESULT");
+    passes_after_the_turn(&context);
+
+    let kept = kept_notes(&context, project);
+    assert_eq!(kept.len(), 2, "{kept:?}");
+    assert!(
+        kept[1].contains(&format!(
+            "What it wrote first, before any tool:\n\n{WRITTEN}\n\nWhat it said last:\n\nSECOND-RESULT"
+        )),
+        "{}",
+        kept[1]
+    );
+}
+
+#[test]
+fn finish_takes_only_the_last_words_of_a_turn_that_wrote_a_reply_as_the_result() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    devin_turn(&context, &told, Some(FINAL));
+    passes_after_the_turn(&context);
+    assert_eq!(kept_notes(&context, project).len(), 1);
+    let _ = told;
+
+    let finished = context.finish_task(project, 1, "chief").expect("finished");
+    assert_eq!(finished.task.state, "done");
+    assert_eq!(
+        results(&context, project),
+        [format!(
+            "{FINAL}\n\n(ConsensFlow: Finished at @chief's word: what @zeus said last is the result.)"
+        )]
+    );
+}
+
+#[test]
+fn a_resume_before_the_chief_read_the_note_keeps_the_reply_in_the_words_of_a_task_that_moved_on() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.adapter.busy("chief");
+    devin_turn(&context, &told, Some(FINAL));
+    context.pass().unwrap();
+    let note = kept_note(&context, project);
+    assert_eq!(note.state, "queued");
+    assert_eq!(note.body, paused_words_after(WRITTEN, "zeus", &told));
+
+    context.resume_task(project, 1, "Go on, or say you finished");
+    let kept = context.message(note.id);
+    assert_eq!(kept.state, "queued", "the resume does not take it back");
+    assert_eq!(kept.body, moved_on_words_after(WRITTEN, "zeus", &told));
+}
+
+#[test]
+fn the_human_is_given_the_reply_too() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    let told = context.tell(project.id, "zeus", 1, "Stop, answer, and carry on");
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Half a parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    devin_turn(&context, &told, None);
+    passes_after_the_turn(&context);
+
+    assert_eq!(
+        notes(&context, context.id(project.id, "human")),
+        [format!(
+            "T-1 is paused, and @zeus's turn on the words put to its window (m-{}) is over. What it wrote first, before any tool:\n\n{WRITTEN}\n\nWhat it said last:\n\n{FINAL}\n\nTo take it as the result, Finish it in the task's drawer; to send it on, Resume it there.",
+            told.id
+        )]
+    );
 }

@@ -93,6 +93,8 @@ mod a_question_the_chief_answered_was_typed_in_later;
 mod a_quota_wait_ended_failed;
 #[path = "regressions/a_reopened_window_with_no_task_read_working_for_good.rs"]
 mod a_reopened_window_with_no_task_read_working_for_good;
+#[path = "regressions/a_reply_written_before_the_tools_of_a_tells_turn_reached_nobody.rs"]
+mod a_reply_written_before_the_tools_of_a_tells_turn_reached_nobody;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
 mod a_result_delivered_twice_to_a_devin_chief;
 #[path = "regressions/a_result_pasted_again_after_its_window_went.rs"]

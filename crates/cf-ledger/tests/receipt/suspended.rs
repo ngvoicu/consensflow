@@ -1271,7 +1271,7 @@ fn the_answer_note_of_a_task_that_stays_paused_through_the_resume_stays_in_the_w
     closed_with(&mut w, &[first, second], CLOSED);
     let note = w
         .ledger
-        .note_paused_answer(w.project, first, &session, 7, "Parser done")
+        .note_paused_answer(w.project, first, &session, 7, None, "Parser done")
         .expect("the ledger")
         .expect("a note");
     assert!(note

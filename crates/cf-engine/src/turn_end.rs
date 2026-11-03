@@ -1155,6 +1155,20 @@ pub(crate) fn words_of(final_run: &[&Item]) -> String {
     }
 }
 
+/// The words a member wrote in reply to the question put to its window, before its first tool
+/// call (`Answers::reply`), in the items it was written in: each trimmed, a blank line between.
+/// Unlike [`words_of`] it keeps what a harness marks as progress (Codex marks the text it
+/// writes beside a tool call so, where its phase says `commentary`), since the question is
+/// what that text answers. None where there are none (T-1151).
+pub(crate) fn reply_of(reply: &[&Item]) -> Option<String> {
+    let words: Vec<&str> = reply
+        .iter()
+        .map(|item| js::trim(item.text.as_ref()))
+        .filter(|text| !text.is_empty())
+        .collect();
+    (!words.is_empty()).then(|| words.join("\n\n"))
+}
+
 /// What a worker's turn left pending, as a pass takes it: the monitors that said they ended
 /// are over where a look found no command in their window ([`Watching`]). A working task's
 /// turn ([`Dispatcher::collect`]) and a paused task's ([`paused`]) are held by the same count.

@@ -615,6 +615,16 @@ pub(crate) struct Answers<'a> {
     /// Finish takes where the turn after it is still under way (a call open, a
     /// notification's turn begun). None where it wrote none complete.
     pub(crate) complete_run: Option<Vec<&'a Item>>,
+    /// What the member wrote after the message it was given and before its first tool call,
+    /// in the items it was written in, where a tool call came after it: its reply. A turn
+    /// that answers a question puts the answer first, and goes on; the words of that answer
+    /// are not the turn's last (T-1151: Devin, Claude Code, Codex and Muse all write text, run
+    /// a tool, and write the last words after it). A harness's own words in the member's place
+    /// (`synthetic`) are no reply; a note it marks as progress (Codex's `commentary`) is the
+    /// reply all the same, as it is the first words a question gets. Holds no words where the
+    /// member ran a tool before it wrote (a call that says nothing is an item with none),
+    /// where it ran none (its one run is the final answer), or where it wrote nothing.
+    pub(crate) reply: Vec<&'a Item>,
 }
 
 /// The answer to the task in `items`, a member's record after its latest message: what
@@ -639,6 +649,7 @@ pub(crate) fn answers_to_the_task<'a>(
     let mut last = None;
     let mut final_run = Vec::new();
     let mut complete_run = None;
+    let mut first = FirstRun::default();
     for item in items.iter().filter(|item| !item.compaction) {
         match item.role {
             Role::User => {
@@ -661,10 +672,47 @@ pub(crate) fn answers_to_the_task<'a>(
             }
             _ => {}
         }
+        first.see(item, of_the_role);
     }
     (last.is_some() || complete_run.is_some()).then_some(Answers {
         last,
         final_run,
         complete_run,
+        reply: first.reply(),
     })
+}
+
+/// What a member wrote before its first tool call, as the walk over its record meets it
+/// (`Answers::reply`): the assistant's items from its latest message to its first tool call,
+/// and whether a tool call came. A message to the member begins it again, a replacement of the
+/// role (`of_the_role`) none; the harness's own words are none of it.
+#[derive(Default)]
+struct FirstRun<'a> {
+    run: Vec<&'a Item>,
+    over: bool,
+}
+
+impl<'a> FirstRun<'a> {
+    /// The next item of the record, `of_the_role` whether it is of a turn on a replacement.
+    fn see(&mut self, item: &'a Item, of_the_role: bool) {
+        if of_the_role {
+            return;
+        }
+        match item.role {
+            Role::User => *self = Self::default(),
+            Role::Tool => self.over = true,
+            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),
+            _ => {}
+        }
+    }
+
+    /// Its words, where a tool call came after them: with none, the one run is the turn's
+    /// final answer, and it is no reply apart from it.
+    fn reply(self) -> Vec<&'a Item> {
+        if self.over {
+            self.run
+        } else {
+            Vec::new()
+        }
+    }
 }
