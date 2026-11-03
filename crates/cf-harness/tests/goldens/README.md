@@ -35,6 +35,15 @@ once, with the reason here and in the commit.
   `sweep`. Each such reading lost the repeated user item and nothing else (its
   other items, their order, `inFlight`, `failed`, `quota` and `settlement` are
   Node's); no look was added or taken, so the counts in `../records/main.rs` stand.
+- **A Claude window on a Mac is denied reads of the Music and Photos libraries** (2026-11-03,
+  T-1194, a user's Mac showed "Allow ConsensFlow to access your music, video activity, and media
+  library in Apple Music?" over a Claude Code window). Node wrote a window's settings file with
+  `permissions` holding the permission mode alone. On a Mac the Rust adapter adds `deny`, four
+  reads (`Read(~/Music)`, `Read(~/Music/**)`, `Read(~/Pictures/*.photoslibrary)` and its
+  contents), unless the window's folder is inside one of them (`claude/install.rs`,
+  `private_reads`). `launch/scenarios.darwin.json` moved for it in the 43 settings files its
+  Claude scenarios recorded (`tools/move_claude_private_reads_goldens.py`, which can be run again
+  after a merge); the Windows recording is as Node left it, since nothing is denied there.
 - **A Claude window opened again on a turn the app's quit cut** (2026-10-11, the
   human's report that the daemon seemed not to send responses; found by
   `npm run live:resume-cut` and `npm run live:restart-cut`). The quit ends a

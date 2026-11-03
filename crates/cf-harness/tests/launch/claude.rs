@@ -35,6 +35,7 @@ mod compaction_window;
 mod dialogs;
 mod moves;
 mod outside;
+mod private_folders;
 mod relaunched;
 mod resumed;
 mod specs;
@@ -148,6 +149,8 @@ struct Request {
     specs: Option<Variant>,
     /// The size the project chose for its Claude members' windows to compact at.
     compaction: Option<u32>,
+    /// The project's folder, where the window opens.
+    directory: String,
 }
 
 impl Default for Request {
@@ -167,6 +170,7 @@ impl Default for Request {
             }),
             specs: None,
             compaction: None,
+            directory: "/work/app".to_owned(),
         }
     }
 }
@@ -203,7 +207,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
         project: 1,
         handle: request.handle,
         role: request.role,
-        directory: "/work/app",
+        directory: &request.directory,
         resume: request.resume.as_deref(),
         previous_gone: request.previous_gone,
         message: request.message.as_deref(),

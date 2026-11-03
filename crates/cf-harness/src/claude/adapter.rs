@@ -151,6 +151,7 @@ impl Adapter for ClaudeAdapter {
                 launch.id,
                 launch.role != "chief",
                 launch.compaction,
+                Some(launch.directory),
             )?;
             let role = install::role(&self.env, launch)?;
             // Claude keeps a conversation only once something was said in

@@ -61,3 +61,35 @@ fn every_role_enters_every_harness_with_its_whole_text_already_loaded() {
         );
     }
 }
+
+#[test]
+fn nothing_is_denied_on_windows_and_only_the_libraries_a_folder_is_not_in_are_denied_on_a_mac() {
+    // The reads a Mac's window is denied (T-1194).
+    let mac = Env::from_vars([("HOME", "/Users/dmitry")]);
+    assert_eq!(
+        private_reads(&mac, "/work/app"),
+        [
+            "Read(~/Music)",
+            "Read(~/Music/**)",
+            "Read(~/Pictures/*.photoslibrary)",
+            "Read(~/Pictures/*.photoslibrary/**)"
+        ]
+    );
+    // A project in Music is not kept out of its own folder, nor one in a Photos library.
+    assert_eq!(private_reads(&mac, "/Users/dmitry/Music").len(), 2);
+    assert_eq!(private_reads(&mac, "/Users/dmitry/Music/songs/").len(), 2);
+    assert_eq!(
+        private_reads(
+            &mac,
+            "/Users/dmitry/Pictures/Photos Library.photoslibrary/originals"
+        ),
+        ["Read(~/Music)", "Read(~/Music/**)"]
+    );
+    // Music's neighbours are ordinary folders.
+    assert_eq!(private_reads(&mac, "/Users/dmitry/Musical").len(), 4);
+    assert_eq!(private_reads(&mac, "/Users/dmitry").len(), 4);
+    // Windows asks nothing of the kind: its file is as it always was, wherever the folder is.
+    let windows = Env::from_vars([("HOME", "C:\\Users\\dmitry"), ("OS", "Windows_NT")]);
+    assert!(private_reads(&windows, "C:\\work\\app").is_empty());
+    assert!(private_reads(&windows, "C:\\Users\\dmitry\\Music").is_empty());
+}

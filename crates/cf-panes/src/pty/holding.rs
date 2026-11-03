@@ -36,16 +36,22 @@ impl PaneTable {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
     use std::collections::HashMap;
+    #[cfg(target_os = "macos")]
     use std::path::Path;
 
+    #[cfg(target_os = "macos")]
     use portable_pty::PtySize;
 
+    #[cfg(target_os = "macos")]
     use super::*;
+    #[cfg(target_os = "macos")]
     use crate::pty::serial_pty_test;
 
+    #[cfg(target_os = "macos")]
     fn open_sleep(table: &PaneTable) -> (PaneKey, u32) {
         let size = PtySize {
             rows: 24,
@@ -71,6 +77,7 @@ mod tests {
         (opened.key, pid)
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_window_holds_its_program_and_the_sleep_below_it_and_this_test_is_no_windows() {
         let _serial = serial_pty_test();

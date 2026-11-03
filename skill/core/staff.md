@@ -36,6 +36,11 @@ every permission granted: Claude Code does on any removal (`rm`, `rm -f`,
 `rmdir`) whose path a variable makes (`"$R/$b"`), and no permission lets it
 through. Write a removal's paths out in full, or as `"${R:?}/${b:?}"`.
 
+Look for files inside the project folder, never over the home folder or in
+`~/Music` or `~/Pictures` (`find ~`, `grep -r ~`, `ls ~/Music`): on a Mac that
+makes macOS ask the person at the screen, in ConsensFlow's name, and your command
+waits until they answer.
+
 Others work in this folder too, and not all of their work is committed. Never
 throw away a change you did not make: no `git checkout` or `git restore` that
 overwrites a file (`git restore --staged` of your own change is fine), and no

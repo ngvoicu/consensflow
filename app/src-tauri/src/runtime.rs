@@ -93,8 +93,12 @@ impl AppRuntime {
         daemon.start(starter, Arc::clone(&panes), DAEMON_RESTART);
         // Its events go to whichever bridge the daemon has when it is told one.
         let telling = Arc::clone(&daemon);
-        let watch = watch_privacy_dialogs(Arc::clone(&panes), move || telling.bridge());
-        let _ = PRIVACY.set(watch);
+        match watch_privacy_dialogs(Arc::clone(&panes), move || telling.bridge()) {
+            Ok(watch) => {
+                let _ = PRIVACY.set(watch);
+            }
+            Err(why) => eprintln!("consensflow: the watch of privacy dialogs did not start: {why}"),
+        }
         Self {
             panes,
             daemon,
