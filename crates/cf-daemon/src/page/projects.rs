@@ -39,7 +39,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         None => last_staff(page)?,
         Some(Value::Array(members)) => members
             .iter()
-            .map(|member| Ok(member_json(&picked_member(page, Body::new(member))?)))
+            .map(|member| Ok(member_json(&picked_member(page, Body::new(member), false)?)))
             .collect::<Result<Vec<_>, Said>>()?,
         // `staff.map` of what is no list.
         Some(other) => {

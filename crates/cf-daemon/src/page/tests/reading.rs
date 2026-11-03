@@ -1,15 +1,13 @@
-//! What the operations read of the body the page sent and of the saved agents,
-//! where Node's recordings do not look: the order of the checks of a body the
-//! page would never send, the words of a harness no window opens, and the
-//! lanes of a board whose agents are gone. They run on the engine's own kit,
-//! with a real ledger and a roster file in a home of the test's.
+//! What the operations read of the body the page sent, where Node's recordings do
+//! not look: the order of the checks of a body the page would never send, the words
+//! of a harness no window opens, and the lanes of a board, which say nothing of saved
+//! agents (a member holds its own model: harness-models). They run on the engine's
+//! own kit, with a real ledger in a home of the test's.
 
-use cf_ledger::{NewChief, NewMember, NewProject, NewTask};
+use cf_ledger::{NewChief, NewMember, NewProject};
 use serde_json::Value;
 
-use super::scripted::Scripted;
 use super::*;
-use crate::roster::offerable;
 
 /// A home whose agents file holds `rows`, and the environment that names it.
 pub(super) fn home_with(rows: &str) -> (tempfile::TempDir, Env) {
@@ -61,20 +59,19 @@ async fn a_staff_member_on_a_harness_no_window_opens_is_refused_in_the_engines_w
 ) {
     LocalSet::new()
         .run_until(async {
-            // An agent saved for Kimi, which was dropped, stays in the file.
-            let rows = r#"[{"id":"legacy","kind":"kimi","model":"m","workTier":"light"}]"#;
-            let staff = json!([{ "agent": "legacy", "roles": ["worker"] }]);
+            // A member on Kimi, which was dropped.
+            let staff = json!([{ "harness": "kimi", "model": "m", "tier": "light", "roles": ["worker"] }]);
             let (answer, rig) = asked(
-                rows,
+                "[]",
                 "project.open",
                 json!({ "directory": "/work/app", "harness": "claude-code", "model": "claude-sonnet-5", "staff": staff }),
             )
             .await;
-            // The dispatcher asks its adapters before the ledger checks the
-            // request: the harness Node's ledger did not know is not what it says.
+            // The page refuses a harness ConsensFlow runs no windows of before the
+            // ledger is asked: the harness Node's ledger did not know is not what it says.
             assert_eq!(
                 answer,
-                json!({ "ok": false, "error": "ConsensFlow cannot open kimi windows" })
+                json!({ "ok": false, "error": "kimi is no harness ConsensFlow runs" })
             );
             assert_eq!(rig.kicks.get(), 0);
             assert!(rig.kit.ledger.borrow().projects().unwrap().is_empty());
@@ -97,7 +94,7 @@ async fn staff_that_is_no_list_is_refused_and_so_is_a_member_whose_roles_are_no_
                 json!({ "ok": false, "error": "staff is a list of members, not zeus" })
             );
             // The ledger's own words for roles, which it reads as Node's did.
-            let staff = json!([{ "agent": "zeus", "roles": "worker" }]);
+            let staff = json!([{ "harness": "claude-code", "model": "claude-sonnet-5", "tier": "standard", "roles": "worker" }]);
             let (answer, rig) = asked(
                 "[]",
                 "project.open",
@@ -224,286 +221,6 @@ async fn no_tasks_to_delete_is_a_delete_of_nothing_that_still_wakes_the_dispatch
 }
 
 #[tokio::test]
-async fn the_board_marks_the_agent_of_a_member_gone_and_not_that_of_the_session_it_gave_work_to() {
-    LocalSet::new()
-        .run_until(async {
-            let (_home, env) = home_with("[]");
-            let rig = rig_over(env, None);
-            let (daemon, app) = bridge_pair_over(&rig.spawn);
-            register(&daemon, &rig.page, &rig.spawn);
-            let project = {
-                let mut ledger = rig.kit.ledger.borrow_mut();
-                let project = ledger
-                    .create_project(&NewProject {
-                        directory: "/work/app".to_owned(),
-                        name: "app".to_owned(),
-                        chief: NewChief {
-                            harness: "claude-code".to_owned(),
-                            model: Some("zeus".to_owned()),
-                            effort: None,
-                        },
-                        // An agent the file does not have: the human removed it.
-                        staff: vec![NewMember {
-                            model: None,
-                            effort: None,
-                            model_name: Some("mine".to_owned()),
-                            harness: "codex".to_owned(),
-                            designer: false,
-                            roles: vec!["worker".to_owned()],
-                            tier: "standard".to_owned(),
-                        }],
-                        gate: false,
-                        wake_up: None,
-                        specs: None,
-                    })
-                    .unwrap();
-                let mine = project
-                    .participants
-                    .iter()
-                    .find(|p| p.handle == "mine")
-                    .unwrap()
-                    .id;
-                ledger
-                    .create_task(
-                        project.id,
-                        &NewTask {
-                            from: "chief".to_owned(),
-                            pool: Some("worker".to_owned()),
-                            tier: Some("standard".to_owned()),
-                            body: "Lexer".to_owned(),
-                            ..NewTask::default()
-                        },
-                    )
-                    .unwrap();
-                ledger.assign_task(project.id, 1, mine).unwrap();
-                project.id
-            };
-            let board =
-                ask(&app, "board.get", json!({ "project": project })).await["board"].clone();
-            let lanes = board["lanes"].as_array().unwrap();
-            let missing: Vec<(&str, &Value)> = lanes
-                .iter()
-                .map(|lane| {
-                    (
-                        lane["participant"]["handle"].as_str().unwrap(),
-                        &lane["agentMissing"],
-                    )
-                })
-                .collect();
-            assert_eq!(
-                missing.len(),
-                4,
-                "the human, the chief, the member and its session"
-            );
-            assert_eq!(missing[0], ("human", &json!(false)));
-            assert_eq!(missing[1], ("chief", &json!(false)));
-            assert_eq!(missing[2], ("mine", &json!(true)));
-            assert_eq!(
-                missing[3].1,
-                &json!(false),
-                "its session is no member whose agent is gone"
-            );
-            // What the dispatcher knows of a window it never opened.
-            let keys: Vec<&str> = lanes[2]
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .collect();
-            assert_eq!(
-                keys,
-                [
-                    "participant",
-                    "tasks",
-                    "agentMissing",
-                    "activity",
-                    "pane",
-                    "hidden",
-                    "switching",
-                    "holding"
-                ]
-            );
-            assert_eq!(lanes[2]["activity"], json!({ "state": "closed" }));
-            assert_eq!(lanes[2]["pane"], Value::Null);
-        })
-        .await;
-}
-
-#[tokio::test]
-async fn a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why_on_its_lanes() {
-    // Khnum (Devin's SWE-1.6 Slow) left the catalog on 2026-10-25: Devin no
-    // longer offers its model. A staff and a chief saved before still name it.
-    LocalSet::new()
-        .run_until(async {
-            let (_home, env) = home_with("[]");
-            let rig = rig_over(env, None);
-            let (daemon, app) = bridge_pair_over(&rig.spawn);
-            register(&daemon, &rig.page, &rig.spawn);
-            let project = rig
-                .kit
-                .ledger
-                .borrow_mut()
-                .create_project(&NewProject {
-                    directory: "/work/app".to_owned(),
-                    name: "app".to_owned(),
-                    // A chief runs on a model, never a saved agent (CHF-08): nothing is missing of it.
-                    chief: NewChief {
-                        harness: "devin".to_owned(),
-                        model: Some("swe-1-6-slow".to_owned()),
-                        effort: None,
-                    },
-                    staff: vec![
-                        NewMember {
-                            model: None,
-                            effort: None,
-                            model_name: Some("khnum".to_owned()),
-                            harness: "devin".to_owned(),
-                            designer: false,
-                            roles: vec!["worker".to_owned()],
-                            tier: "light".to_owned(),
-                        },
-                        // An agent of the human's own they removed: gone, but no catalog's.
-                        NewMember {
-                            model: None,
-                            effort: None,
-                            model_name: Some("mine".to_owned()),
-                            harness: "codex".to_owned(),
-                            designer: false,
-                            roles: vec!["worker".to_owned()],
-                            tier: "standard".to_owned(),
-                        },
-                    ],
-                    gate: false,
-                    wake_up: None,
-                    specs: None,
-                })
-                .unwrap()
-                .id;
-            // A chief from before a chief had a model names a saved agent, here the one the
-            // release dropped: no saved agent is the chief's (CHF-08), and nothing is missing.
-            rig.kit.edit_ledger(|file| {
-                let db = rusqlite::Connection::open(file).unwrap();
-                db.execute_batch(
-                    "UPDATE participant SET agent = 'khnum', model = NULL WHERE role = 'chief'",
-                )
-                .unwrap();
-            });
-            let board =
-                ask(&app, "board.get", json!({ "project": project })).await["board"].clone();
-            let lanes: Vec<(&str, &Value, &Value)> = board["lanes"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|lane| {
-                    (
-                        lane["participant"]["handle"].as_str().unwrap(),
-                        &lane["agentMissing"],
-                        lane.get("agentRetired").unwrap_or(&Value::Null),
-                    )
-                })
-                .collect();
-            let why = json!("Devin no longer offers SWE-1.6 Slow");
-            assert_eq!(
-                lanes,
-                [
-                    ("human", &json!(false), &Value::Null),
-                    ("chief", &json!(false), &Value::Null),
-                    ("khnum", &json!(true), &why),
-                    ("mine", &json!(true), &Value::Null),
-                ]
-            );
-            // Said right after `agentMissing`, and only where it holds.
-            let keys: Vec<&str> = board["lanes"][2]
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .take(4)
-                .collect();
-            assert_eq!(
-                keys,
-                ["participant", "tasks", "agentMissing", "agentRetired"]
-            );
-        })
-        .await;
-}
-
-#[tokio::test]
-async fn the_agents_file_is_read_at_each_lane_and_not_once_for_the_board() {
-    LocalSet::new()
-        .run_until(async {
-            let row = |id: &str| {
-                format!(r#"{{"id":"{id}","kind":"claude-code","model":"m","workTier":"light"}}"#)
-            };
-            let (home, env) = home_with(&format!("[{},{}]", row("a1"), row("a2")));
-            // The human takes a2 away as the first lane's activity is read: the
-            // lanes after it find the file as it is then.
-            let file = home.path().join("agents.json");
-            let only_a1 = format!(r#"{{"schemaVersion":1,"agents":[{}]}}"#, row("a1"));
-            let mut engine = Scripted::new();
-            engine.reading = Box::new(move |participant| {
-                if participant == 1 {
-                    std::fs::write(&file, &only_a1).unwrap();
-                }
-            });
-            let rig = rig_over(env, Some(Rc::new(engine)));
-            let (daemon, app) = bridge_pair_over(&rig.spawn);
-            register(&daemon, &rig.page, &rig.spawn);
-            let member = |agent: &str| NewMember {
-                model: None,
-                effort: None,
-                model_name: Some(agent.to_owned()),
-                harness: "claude-code".to_owned(),
-                designer: false,
-                roles: vec!["worker".to_owned()],
-                tier: "light".to_owned(),
-            };
-            let project = rig
-                .kit
-                .ledger
-                .borrow_mut()
-                .create_project(&NewProject {
-                    directory: "/work/app".to_owned(),
-                    name: "app".to_owned(),
-                    chief: NewChief {
-                        harness: "claude-code".to_owned(),
-                        model: Some("zeus".to_owned()),
-                        effort: None,
-                    },
-                    staff: vec![member("a1"), member("a2")],
-                    gate: false,
-                    wake_up: None,
-                    specs: None,
-                })
-                .unwrap()
-                .id;
-            let board =
-                ask(&app, "board.get", json!({ "project": project })).await["board"].clone();
-            let gone: Vec<(&str, bool)> = board["lanes"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|lane| {
-                    (
-                        lane["participant"]["handle"].as_str().unwrap(),
-                        lane["agentMissing"].as_bool().unwrap(),
-                    )
-                })
-                .collect();
-            assert_eq!(
-                gone,
-                [
-                    ("human", false),
-                    ("chief", false),
-                    ("a1", false),
-                    ("a2", true)
-                ]
-            );
-        })
-        .await;
-}
-
-#[tokio::test]
 async fn an_inbox_is_the_humans_unless_the_page_names_a_handle_in_text() {
     LocalSet::new()
         .run_until(async {
@@ -559,67 +276,4 @@ async fn an_inbox_is_the_humans_unless_the_page_names_a_handle_in_text() {
             );
         })
         .await;
-}
-
-/// An agent as the roster lists it, written as the page reads it.
-fn view(name: &str, harness: &str, hidden: bool, unsupported: bool) -> cf_catalog::AgentView {
-    cf_catalog::AgentView {
-        name: Some(name.to_owned()),
-        harness: Some(harness.to_owned()),
-        designer: false,
-        model: Some("m".to_owned()),
-        work_tier: None,
-        effort: None,
-        description: None,
-        preset: None,
-        custom: false,
-        profile: cf_catalog::Profile {
-            model_key: "m".to_owned(),
-            model_label: "M".to_owned(),
-            route_label: "R".to_owned(),
-            work_tier: cf_catalog::WorkTier::Standard,
-        },
-        unsupported,
-        hidden,
-    }
-}
-
-#[test]
-fn an_agent_on_a_harness_not_installed_or_not_run_is_hidden_and_marked_as_javascript_spreads() {
-    let agents = [
-        view("here", "claude", false, false),
-        view("away", "codex", false, false),
-        view("kept", "codex", true, false),
-        view("dropped", "kimi", false, true),
-    ];
-    let offered = offerable(&agents, &[cf_catalog::Harness::Codex]).unwrap();
-    let written: Vec<String> = offered.iter().map(Value::to_string).collect();
-    assert!(!written[0].contains("notInstalled"), "{}", written[0]);
-    assert!(!written[0].contains("hidden"), "{}", written[0]);
-    for (at, name) in [(1, "away"), (3, "dropped")] {
-        assert!(
-            written[at].ends_with(r#","hidden":true,"notInstalled":true}"#),
-            "{name}: {}",
-            written[at]
-        );
-    }
-    // One the preference hid already keeps `hidden` where the roster put it, and
-    // `notInstalled` comes last.
-    let kept: Vec<&str> = offered[2]
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        kept,
-        [
-            "name",
-            "harness",
-            "model",
-            "profile",
-            "hidden",
-            "notInstalled"
-        ]
-    );
 }

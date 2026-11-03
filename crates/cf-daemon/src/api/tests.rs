@@ -118,13 +118,7 @@ async fn a_window_with_its_token_is_told_a_route_is_unknown_in_nodes_words() {
 #[tokio::test]
 async fn the_screens_answer_their_own_paths_before_any_window_s_token_is_looked_at() {
     let scene = scene();
-    for target in [
-        "/",
-        "/harnesses",
-        "/api/agents",
-        "/api/agents/mybuilder",
-        "/api/preferences",
-    ] {
+    for target in ["/harnesses", "/api/harnesses/check"] {
         // No token, and a window's: their own bare 401, neither the API's (which
         // says why) nor its 404 for a route it has none for.
         for token in [None, Some(scene.zeus.as_str())] {

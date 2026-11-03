@@ -16,7 +16,7 @@ pub(crate) const TOKEN: &str = "the-ui-token";
 
 /// Screens over a home in a temporary folder, and what a test reaches into.
 pub(crate) struct Rig {
-    pub(crate) home: tempfile::TempDir,
+    pub(crate) _home: tempfile::TempDir,
     /// Where each harness installed is: its stand-in.
     pub(crate) installed: Vec<(String, PathBuf)>,
     pub(crate) screens: Screens,
@@ -51,14 +51,13 @@ impl Rig {
             env,
         };
         Self {
-            home,
+            _home: home,
             installed,
             screens,
             latest,
             capture,
         }
     }
-}
 }
 
 /// Screens over no home at all: for the tests that never reach a route that reads one.

@@ -55,7 +55,7 @@ pub(super) async fn switch_chief(page: &Page, body: Body<'_>) -> Result<Fields, 
 /// already takes the roles as roles more, in the tier chosen now.
 pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
-    let member = picked_member(page, body)?;
+    let member = picked_member(page, body, true)?;
     let on_it = active_member(page, project, |member_now| {
         member_now.harness.as_deref() == Some(member.harness.as_str())
             && member_now.model == member.model
@@ -89,7 +89,7 @@ pub(super) async fn edit(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let found = active_member(page, project, |member| member.handle == handle)?
         .ok_or_else(|| Said(format!("no member @{handle} on this project's staff")))?;
     let designer = found.roles.iter().any(|role| role == "designer");
-    let picked = picked(page, body, designer)?;
+    let picked = picked(page, body, designer, true)?;
     let edited = page
         .ledger
         .borrow_mut()
@@ -127,11 +127,17 @@ fn active_member(
 }
 
 /// The member `body` asks for, as Add member and New project's staff give one: its roles
-/// (a worker where it names none), and what it runs on ([`picked`]).
-pub(super) fn picked_member(page: &Page, body: Body<'_>) -> Result<NewMember, Said> {
+/// (a worker where it names none), and what it runs on ([`picked`]); `adapter` where the
+/// page asks the engine whether it opens windows of the harness (Add member: New project's
+/// engine says so as it opens the project).
+pub(super) fn picked_member(
+    page: &Page,
+    body: Body<'_>,
+    adapter: bool,
+) -> Result<NewMember, Said> {
     let roles = parse_roles(Some(body.get("roles").unwrap_or(&json!(["worker"]))))?;
     let designer = roles.contains(&"designer");
-    let picked = picked(page, body, designer)?;
+    let picked = picked(page, body, designer, adapter)?;
     Ok(NewMember {
         harness: picked.harness.kind().to_owned(),
         model: picked.model,
@@ -189,7 +195,7 @@ pub(super) fn tier_of(value: Option<&Value>) -> Result<WorkTier, Said> {
 /// chief's model is), named as the listing names it; and a tier, which the human must
 /// pick. Devin's effort is part of the id it lists for it (`model_uid`): the member's model
 /// is that id, never the model and the effort joined, and its effort is said beside it.
-fn picked(page: &Page, body: Body<'_>, designer: bool) -> Result<Picked, Said> {
+fn picked(page: &Page, body: Body<'_>, designer: bool, adapter: bool) -> Result<Picked, Said> {
     let kind = body.text("harness").into_owned();
     let harness = Harness::from_kind(&kind)
         .ok_or_else(|| Said(format!("{kind} is no harness ConsensFlow runs")))?;
@@ -198,7 +204,9 @@ fn picked(page: &Page, body: Body<'_>, designer: bool) -> Result<Picked, Said> {
             "an image designer draws on Codex: pick one of Codex's models",
         ));
     }
-    page.engine.require_adapter(harness.kind())?;
+    if adapter {
+        page.engine.require_adapter(harness.kind())?;
+    }
     let model = match body.get("model") {
         Some(Value::String(model)) if !model.is_empty() => model.as_str(),
         _ => return Err(Said::from("pick the member's model: one its harness lists")),

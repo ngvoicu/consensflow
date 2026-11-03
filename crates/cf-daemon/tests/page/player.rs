@@ -12,7 +12,7 @@ use cf_daemon::host::daemon_bridge;
 use cf_daemon::page::{self, Engine, Page};
 use cf_daemon::seams::DaemonSpawn;
 use rusqlite::Connection;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::io::{duplex, split};
 use tokio::task::JoinHandle;
 
@@ -199,7 +199,7 @@ impl Player {
                 .collect(),
         );
         self.kicks.take();
-        let body = step["body"].clone();
+        let body = modelled(&name, step);
         let before = snapshot(&self.world);
         let answered =
             tokio::time::timeout(Duration::from_secs(10), self.wire().ask(&name, &body)).await;
@@ -207,7 +207,8 @@ impl Player {
         match answered {
             Ok(Ok(reply)) => {
                 let recorded = step["reply"].as_str().unwrap_or_default();
-                if let Some(why) = differs(&format!("{what}'s reply"), reply, recorded) {
+                let (ours, theirs) = (projected(reply.as_bytes()), projected(recorded.as_bytes()));
+                if let Some(why) = differs(&format!("{what}'s reply"), ours, theirs) {
                     self.problems.push(why);
                 }
             }
@@ -239,6 +240,83 @@ impl Player {
         self.problems.extend(self.standin.leftover());
         self.tally.operations += 1;
     }
+}
+
+/// The body of operation `name` as this daemon takes it (harness-models): Node's page named
+/// a member by its ready-made agent (`{agent: 'zeus'}`), this one by its harness, a model
+/// and the tier the human picks. A member Add member added, or New project started with,
+/// is given what Node's ledger recorded of it (its harness and tier, in the reply, or in
+/// the dispatcher's `openProject`), and the agent's name for its model, which names it as
+/// Node's handle did; one Node refused before its ledger, which recorded none, is given
+/// none, and says so in this daemon's words (a departure).
+fn modelled(name: &str, step: &Value) -> Value {
+    let mut body = step["body"].clone();
+    match name {
+        "member.add" => {
+            let reply: Value =
+                serde_json::from_str(step["reply"].as_str().unwrap_or_default()).unwrap_or_default();
+            let member = &reply["member"];
+            if let (Some(fields), Some(agent)) = (body.as_object_mut(), step["body"]["agent"].as_str()) {
+                fields.shift_remove("agent");
+                fields.insert("model".to_owned(), json!(agent));
+                for key in ["harness", "tier"] {
+                    if !member[key].is_null() {
+                        fields.insert(key.to_owned(), member[key].clone());
+                    }
+                }
+            }
+        }
+        "project.open" => {
+            let opened = step["seams"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|seam| seam["method"] == "openProject")
+                .map(|seam| seam["args"][0]["staff"].clone());
+            if let (Some(Value::Array(staff)), Some(Value::Array(recorded))) =
+                (body.get_mut("staff"), opened)
+            {
+                for member in staff.iter_mut() {
+                    let Some(agent) = member["agent"].as_str().map(str::to_owned) else {
+                        continue;
+                    };
+                    let kept = recorded.iter().find(|kept| kept["agent"] == agent.as_str());
+                    if let Some(fields) = member.as_object_mut() {
+                        fields.shift_remove("agent");
+                        fields.insert("model".to_owned(), json!(agent));
+                        if let Some(kept) = kept {
+                            fields.insert("harness".to_owned(), kept["harness"].clone());
+                            fields.insert("tier".to_owned(), kept["tier"].clone());
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    body
+}
+
+/// A reply as both sides are compared: what a participant runs on held apart
+/// (`cf_ledger::testing::hold_apart_what_members_run_on`), and the marks of a lane whose
+/// saved agent was gone, which Node's board said and this one's has none of.
+fn projected(reply: &[u8]) -> String {
+    let Ok(mut value) = serde_json::from_slice::<Value>(reply) else {
+        return String::from_utf8_lossy(reply).into_owned();
+    };
+    cf_ledger::testing::hold_apart_what_members_run_on(&mut value);
+    if let Some(Value::Array(lanes)) = value
+        .get_mut("board")
+        .and_then(|board| board.get_mut("lanes"))
+    {
+        for lane in lanes {
+            if let Some(fields) = lane.as_object_mut() {
+                fields.shift_remove("agentMissing");
+                fields.shift_remove("agentRetired");
+            }
+        }
+    }
+    value.to_string()
 }
 
 /// What the test's own ledger said the last staff was, when the test gave the

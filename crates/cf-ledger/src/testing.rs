@@ -71,7 +71,9 @@ use serde_json::{Map, Value};
 
 pub use chief_model::undo_migration_0026;
 pub use chosen_tier::undo_migration_0028;
-pub use harness_models::undo_migration_0029;
+pub use harness_models::{
+    hold_apart_what_members_run_on, node_member, node_staff, undo_migration_0029,
+};
 pub use compaction::undo_migration_0020;
 pub use handed::undo_migration_0022;
 pub use history_indexes::undo_migration_0027;

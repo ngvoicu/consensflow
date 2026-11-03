@@ -59,7 +59,7 @@ impl SettingsFile {
 
     /// What the file says of specs for every project now.
     pub fn app_specs(&self) -> Result<AppSpecs, Refusal> {
-        Ok(app_specs_of(&read(&self.path)?))
+        Ok(app_specs_of(&read_file(&self.path)?))
     }
 
     /// Sets what `said` says of specs for every project (`{on, folder, variant}`, a
@@ -82,7 +82,7 @@ impl cf_engine::seams::AppSettings for SettingsFile {
 /// JavaScript enumerates them; an empty one where there is no file. Reading creates
 /// nothing. A file that cannot be read, or holds no object, is said, and nothing is
 /// written over it.
-fn read(path: &Path) -> Result<Map<String, Value>, Refusal> {
+fn read_file(path: &Path) -> Result<Map<String, Value>, Refusal> {
     // Node says EISDIR for a directory on every system.
     if path.is_dir() {
         return Err(unreadable(path, "cannot be read (EISDIR)"));
@@ -146,7 +146,7 @@ fn app_specs_of(file: &Map<String, Value>) -> AppSpecs {
 /// checked, in that order, before anything is written; then the file is written, every
 /// key it does not set as it was, and made where there is none.
 fn set_app_specs(path: &Path, said: &Value) -> Result<AppSpecs, Refusal> {
-    let mut file = read(path)?;
+    let mut file = read_file(path)?;
     let mut next = app_specs_of(&file);
     if let Some(on) = said.get("on") {
         next.on = on.as_bool().ok_or_else(|| {

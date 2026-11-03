@@ -85,7 +85,13 @@ const FINISH_IN_THE_USAGE: &str = "the usage `cf help` prints inside a window li
 /// those that print the verbs of `cf task`, which have `finish` now; and the one
 /// that tells a task still open, which is told now. Found by playing them against
 /// the daemon.
+/// A member holds its own model (harness-models): the staff says it, with the name its
+/// harness gives it, where Node's said its saved agent's.
+const STAFF_ON_ITS_OWN_MODEL: &str = "`cf staff` says the model, its name and the effort each member holds itself (none for a member a test named by its agent alone), where Node's API read them off the member's saved agent";
+
 const DEPARTED: &[Departed] = &[
+    ("cf-board-018", STAFF_ON_ITS_OWN_MODEL),
+    ("cf-board-027", STAFF_ON_ITS_OWN_MODEL),
     ("core-api-003", RESULT_ACCEPTED),
     ("core-api-005", ANSWERED_AS_IT_WAITED),
     (

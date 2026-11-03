@@ -131,6 +131,12 @@ async fn every_operation_is_registered_and_asked_for_nothing_it_says_what_it_lac
                     assert_eq!(answer, json!({ "ok": true, "projects": [] }));
                     continue;
                 }
+                // What is installed is the environment's to say, and the last staff the
+                // ledger's: neither needs a home.
+                if name == "harnesses.missing" || name == "staff.last" {
+                    assert_eq!(answer["ok"], true, "{answer}");
+                    continue;
+                }
                 // The rig has no home, so even the operations that need no body
                 // are refused, and each says why: an operation nobody registered
                 // would say `unknown-op`.

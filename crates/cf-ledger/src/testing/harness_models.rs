@@ -8,6 +8,62 @@
 //! ready-made agent, so the column that named it, which Node's members always filled, is
 //! held apart too.
 
+use serde_json::Value;
+
+/// A member as Node's ledger was given it, as this one takes it: Node's member named the
+/// ready-made agent it ran on (`agent`), which was its handle too; this ledger's is named
+/// by its model, and the agent's name stands for the model's name, so its handle is the
+/// one Node's had.
+pub fn node_member(member: &Value) -> Value {
+    let mut member = member.clone();
+    if let Value::Object(fields) = &mut member {
+        if let Some(agent) = fields.shift_remove("agent") {
+            fields.insert("modelName".to_owned(), agent);
+        }
+    }
+    member
+}
+
+/// A project's request as Node's ledger was given it, each member of its staff as
+/// [`node_member`] takes it.
+pub fn node_staff(request: &Value) -> Value {
+    let mut request = request.clone();
+    if let Some(Value::Array(staff)) = request.get_mut("staff") {
+        for member in staff.iter_mut() {
+            *member = node_member(member);
+        }
+    }
+    request
+}
+
+/// What neither side of an answer is compared by: what a participant runs on (Node's named
+/// its ready-made agent, this one's its model, its effort and its model's name, each held
+/// apart, a chief's model aside, which the recordings were moved to), and of a staff a new
+/// project starts from, all but its harness and roles.
+pub fn hold_apart_what_members_run_on(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            let participant = fields.contains_key("handle");
+            if participant || fields.contains_key("roles") {
+                for key in ["agent", "effort", "modelName"] {
+                    fields.shift_remove(key);
+                }
+                let chief = fields.get("role").and_then(Value::as_str) == Some("chief");
+                if !chief {
+                    fields.shift_remove("model");
+                }
+                if !participant {
+                    fields.shift_remove("designer");
+                    fields.shift_remove("tier");
+                }
+            }
+            fields.values_mut().for_each(hold_apart_what_members_run_on);
+        }
+        Value::Array(items) => items.iter_mut().for_each(hold_apart_what_members_run_on),
+        _ => {}
+    }
+}
+
 /// The columns migration 0029 added to `participant`, and the one it no longer writes.
 pub(super) const COLUMNS: [(&str, &str); 3] = [
     ("participant", "effort"),

@@ -29,7 +29,7 @@ async fn a_member_is_said_with_its_roles_tier_harness_and_the_model_and_effort_i
     assert_eq!(status, 200);
     assert_eq!(
         said.to_string(),
-        r#"{"members":[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","model":"claude-sonnet-5","modelName":"zeus","effort":"high"}]}"#
+        r#"{"members":[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","model":"claude-sonnet-5","modelName":"zeus","effort":null}]}"#
     );
     assert_eq!(scene.kicks.get(), 0);
 }

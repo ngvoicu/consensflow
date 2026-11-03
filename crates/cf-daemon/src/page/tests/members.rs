@@ -3,18 +3,17 @@
 //! harness's case keeps the listing its adapter reads of its recorded answer (CHF-03's
 //! fixtures, as `app/tests/fixtures/models/` holds them: `cf-harness`'s `page_listings`
 //! writes those files and fails while they differ), so what is taken and refused is what
-//! the harness really lists. The member runs on a saved agent of the human's for that
-//! model and effort, which the launch reads as it reads every member's.
+//! the harness really lists. The member holds what it runs on itself (harness-models): the
+//! model as its launch passes it, the effort and the name the listing gives the model, by
+//! which it is named.
 
 use std::path::PathBuf;
 
-use cf_engine::seams::Roster as _;
 use cf_engine::testing::Made;
 use cf_proto::models::ModelListing;
 
 use super::reading::home_installed;
 use super::*;
-use crate::roster::{member_agent_name, Agents};
 
 /// What `harness` lists, as its adapter reads its recorded answer.
 fn recorded(harness: &str) -> ModelListing {
@@ -27,7 +26,7 @@ fn recorded(harness: &str) -> ModelListing {
 /// A page over a project with no staff, whose kit opens windows of every harness, and
 /// whose home keeps the listing each harness was recorded giving.
 struct Staffing {
-    home: tempfile::TempDir,
+    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
@@ -54,7 +53,7 @@ fn staffing() -> Staffing {
     register(&daemon, &rig.page, &rig.spawn);
     let project = rig.kit.with_staff(&[]).id;
     Staffing {
-        home,
+        _home: home,
         _daemon: daemon,
         app,
         rig,
@@ -71,17 +70,30 @@ impl Staffing {
         ask(&self.app, "member.add", body).await
     }
 
-    /// The saved agent the launch reads for `name`: its model, effort and Pi's thinking.
-    fn launches(&self, name: &str) -> (Option<String>, Option<String>, Option<String>) {
-        let saved = self.agents().agent(name).unwrap().expect("a saved agent");
-        (saved.model, saved.effort, saved.thinking)
+    /// What the member `handle` runs on, as it holds it: its harness, its model, its effort
+    /// and the name its harness's list gives the model.
+    fn runs(&self, handle: &str) -> (String, Option<String>, Option<String>, Option<String>) {
+        let member = self.member(handle);
+        (
+            member.harness.unwrap_or_default(),
+            member.model,
+            member.effort,
+            member.model_name,
+        )
     }
 
-    fn agents(&self) -> Agents {
-        Agents::new(
-            cf_catalog::Catalog::bundled().unwrap(),
-            self.home.path().join("agents.json"),
-        )
+    fn member(&self, handle: &str) -> cf_ledger::ParticipantView {
+        self.rig
+            .kit
+            .ledger
+            .borrow()
+            .project(self.project)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|participant| participant.handle == handle)
+            .expect("the member")
     }
 
     fn tier_of(&self, handle: &str) -> Option<String> {
@@ -100,12 +112,11 @@ impl Staffing {
     }
 }
 
-/// Claude Code: the member carries the tier the human chose, though the catalog's rules say
-/// another of Opus 5.5 at high, and keeps it when the daemon's start follows the agents'
-/// tiers. Its saved agent runs the model at the effort; a second Add of the same model and
-/// effort gives that member the role more.
+/// Claude Code: the member carries the tier the human chose and holds the model at the
+/// effort, named by the model's name in Claude Code's list and the effort; a second Add of
+/// the same model and effort gives that member the role more.
 #[tokio::test]
-async fn a_member_added_by_model_carries_the_tier_the_human_chose_and_keeps_it() {
+async fn a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_the_human_chose() {
     LocalSet::new()
         .run_until(async {
             let staffing = staffing();
@@ -119,24 +130,18 @@ async fn a_member_added_by_model_carries_the_tier_the_human_chose_and_keeps_it()
                 }))
                 .await;
             assert_eq!(added["ok"], true, "{added}");
-            assert_eq!(added["member"]["handle"], "claude-opus-5-5-high");
-            assert_eq!(added["member"]["agent"], "claude-opus-5-5-high");
-            assert_eq!(added["member"]["harness"], "claude-code");
+            assert_eq!(added["member"]["handle"], "opus-high");
+            assert_eq!(added["member"]["agent"], json!(null), "no saved agent");
+            assert_eq!(added["member"]["modelName"], "Opus");
             assert_eq!(added["member"]["tier"], "critical");
             assert_eq!(
-                staffing.launches("claude-opus-5-5-high"),
-                (Some("claude-opus-5-5".into()), Some("high".into()), None)
-            );
-            // The presets' rules call Opus 5.5 at high complex work: the start follows them for
-            // every member but this one.
-            let changed = staffing
-                .agents()
-                .follow(&mut staffing.rig.kit.ledger.borrow_mut())
-                .unwrap();
-            assert!(changed.is_empty(), "{changed:?}");
-            assert_eq!(
-                staffing.tier_of("claude-opus-5-5-high").as_deref(),
-                Some("critical")
+                staffing.runs("opus-high"),
+                (
+                    "claude-code".to_owned(),
+                    Some("claude-opus-5-5".into()),
+                    Some("high".into()),
+                    Some("Opus".into())
+                )
             );
             // The same model at the same effort is the same member: the role is one more.
             let again = staffing
@@ -148,14 +153,25 @@ async fn a_member_added_by_model_carries_the_tier_the_human_chose_and_keeps_it()
                     "roles": ["reviewer"],
                 }))
                 .await;
-            assert_eq!(again["member"]["handle"], "claude-opus-5-5-high", "{again}");
+            assert_eq!(again["member"]["handle"], "opus-high", "{again}");
             assert_eq!(again["member"]["roles"], json!(["worker", "reviewer"]));
+            // Another effort is another member.
+            let other = staffing
+                .add(json!({
+                    "harness": "claude-code",
+                    "model": "claude-opus-5-5",
+                    "effort": "max",
+                    "tier": "critical",
+                }))
+                .await;
+            assert_eq!(other["member"]["handle"], "opus-max", "{other}");
         })
         .await;
 }
 
 /// Add member is refused, in words the dialog shows, for no tier, a model the harness does
-/// not list, and an effort it does not list for the model or one left out.
+/// not list, and an effort it does not list for the model or one left out; an image
+/// designer draws on Codex alone.
 #[tokio::test]
 async fn add_member_is_refused_without_a_tier_or_on_what_the_harness_does_not_list() {
     LocalSet::new()
@@ -186,6 +202,14 @@ async fn add_member_is_refused_without_a_tier_or_on_what_the_harness_does_not_li
                     json!({ "harness": "devin", "model": "adaptive", "effort": "high", "tier": "light" }),
                     "devin takes no effort for adaptive",
                 ),
+                (
+                    json!({ "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "light", "roles": ["designer"] }),
+                    "an image designer draws on Codex: pick one of Codex's models",
+                ),
+                (
+                    json!({ "harness": "claude-code", "effort": "high", "tier": "light" }),
+                    "pick the member's model: one its harness lists",
+                ),
             ] {
                 let answer = staffing.add(fields.clone()).await;
                 assert_eq!(answer, json!({ "ok": false, "error": said }), "{fields}");
@@ -195,7 +219,7 @@ async fn add_member_is_refused_without_a_tier_or_on_what_the_harness_does_not_li
                 .unwrap()
                 .participants
                 .into_iter()
-                .filter(|participant| participant.agent.is_some())
+                .filter(|participant| participant.role != "chief" && participant.role != "human")
                 .count();
             assert_eq!(members, 0, "nobody joined");
             assert_eq!(staffing.rig.kicks.get(), 0, "nothing succeeded, nothing is woken");
@@ -203,7 +227,8 @@ async fn add_member_is_refused_without_a_tier_or_on_what_the_harness_does_not_li
         .await;
 }
 
-/// Codex: a model of its account's list at an effort Codex lists only for it (`ultra`).
+/// Codex: a model of its account's list at an effort Codex lists only for it (`ultra`); an
+/// image designer is a Codex member like any other.
 #[tokio::test]
 async fn a_codex_member_runs_the_model_codex_lists_at_its_effort() {
     LocalSet::new()
@@ -212,11 +237,16 @@ async fn a_codex_member_runs_the_model_codex_lists_at_its_effort() {
             let added = staffing
                 .add(json!({ "harness": "codex", "model": "gpt-6.1-sol", "effort": "ultra", "tier": "critical" }))
                 .await;
-            assert_eq!(added["member"]["handle"], "codex-gpt-6-1-sol-ultra", "{added}");
+            assert_eq!(added["member"]["handle"], "gpt-6-1-sol-ultra", "{added}");
             assert_eq!(added["member"]["roles"], json!(["worker"]), "a worker unless said");
             assert_eq!(
-                staffing.launches("codex-gpt-6-1-sol-ultra"),
-                (Some("gpt-6.1-sol".into()), Some("ultra".into()), None)
+                staffing.runs("gpt-6-1-sol-ultra"),
+                (
+                    "codex".to_owned(),
+                    Some("gpt-6.1-sol".into()),
+                    Some("ultra".into()),
+                    Some("GPT-6.1-Sol".into())
+                )
             );
             // GPT-6 Luna's list stops at max.
             let refused = staffing
@@ -226,13 +256,18 @@ async fn a_codex_member_runs_the_model_codex_lists_at_its_effort() {
                 refused["error"],
                 "codex runs gpt-6-luna at low, medium, high, xhigh, max, not ultra"
             );
+            let designer = staffing
+                .add(json!({ "harness": "codex", "model": "gpt-6-astra", "effort": "high", "tier": "light", "roles": ["designer"] }))
+                .await;
+            assert_eq!(designer["member"]["handle"], "gpt-6-astra-high", "{designer}");
+            assert_eq!(designer["member"]["designer"], true);
         })
         .await;
 }
 
 /// Pi lists only the providers it holds a login for: a model on one it lists is taken as
-/// `provider/id`, an OpenRouter id keeping its own `/`, its effort as Pi's thinking; a model
-/// of a provider Pi has no login for (Google's, here) is not listed, and is refused.
+/// `provider/id`, an OpenRouter id keeping its own `/`; a model of a provider Pi has no
+/// login for (Google's, here) is not listed, and is refused.
 #[tokio::test]
 async fn a_pi_member_is_on_a_provider_pi_holds_a_login_for() {
     LocalSet::new()
@@ -252,17 +287,16 @@ async fn a_pi_member_is_on_a_provider_pi_holds_a_login_for() {
                     "tier": "complex",
                 }))
                 .await;
-            let name = "pi-openrouter-anthropic-claude-fable-5-1-high";
+            let name = "anthropic-claude-fable-5-1-high";
             assert_eq!(added["member"]["handle"], name, "{added}");
-            assert_eq!(added["member"]["harness"], "pi");
             assert_eq!(
-                staffing.launches(name),
+                staffing.runs(name),
                 (
+                    "pi".to_owned(),
                     Some("openrouter/anthropic/claude-fable-5.1".into()),
-                    None,
-                    Some("high".into())
-                ),
-                "Pi's effort is its thinking"
+                    Some("high".into()),
+                    Some("Anthropic: Claude Fable 5.1".into())
+                )
             );
             let refused = staffing
                 .add(json!({
@@ -281,10 +315,10 @@ async fn a_pi_member_is_on_a_provider_pi_holds_a_login_for() {
 }
 
 /// Devin writes the effort into the id, before a suffix (`claude-opus-5-5-medium-fast`): the
-/// member runs on the exact `model_uid` Devin lists for that effort, with no effort beside it
-/// for the launch to join again; never `claude-opus-5-5-fast-medium`.
+/// member holds the exact `model_uid` Devin lists for that effort, never one joined
+/// (`claude-opus-5-5-fast-medium`), and the effort beside it for the page to say.
 #[tokio::test]
-async fn a_devin_member_runs_the_exact_id_devin_lists_for_the_effort_never_one_joined() {
+async fn a_devin_member_holds_the_exact_id_devin_lists_for_the_effort_never_one_joined() {
     LocalSet::new()
         .run_until(async {
             let staffing = staffing();
@@ -297,27 +331,35 @@ async fn a_devin_member_runs_the_exact_id_devin_lists_for_the_effort_never_one_j
                 }))
                 .await;
             assert_eq!(added["ok"], true, "{added}");
-            let name = added["member"]["agent"].as_str().unwrap().to_owned();
-            assert_eq!(name, "devin-claude-opus-5-5-medium-fast");
+            assert_eq!(added["member"]["handle"], "claude-opus-5-5-fast-medium");
             assert_eq!(
-                staffing.launches(&name),
-                (Some("claude-opus-5-5-medium-fast".into()), None, None)
+                staffing.runs("claude-opus-5-5-fast-medium"),
+                (
+                    "devin".to_owned(),
+                    Some("claude-opus-5-5-medium-fast".into()),
+                    Some("medium".into()),
+                    Some("Claude Opus 5.5 Fast".into())
+                )
             );
             // A model Devin lists with no effort at all is its own id.
             let adaptive = staffing
                 .add(json!({ "harness": "devin", "model": "adaptive", "tier": "light" }))
                 .await;
-            assert_eq!(adaptive["member"]["agent"], "devin-adaptive", "{adaptive}");
+            assert_eq!(adaptive["member"]["handle"], "adaptive", "{adaptive}");
             assert_eq!(
-                staffing.launches("devin-adaptive"),
-                (Some("adaptive".into()), None, None)
+                staffing.runs("adaptive"),
+                (
+                    "devin".to_owned(),
+                    Some("adaptive".into()),
+                    None,
+                    Some("Adaptive".into())
+                )
             );
         })
         .await;
 }
 
-/// Muse Code: a model of its account's list, a contributor one too (the dialog marks it), at
-/// an effort Muse lists for it.
+/// Muse Code: a model of its account's list, at an effort Muse lists for it.
 #[tokio::test]
 async fn a_muse_member_runs_a_model_muse_lists_at_its_effort() {
     LocalSet::new()
@@ -328,8 +370,13 @@ async fn a_muse_member_runs_a_model_muse_lists_at_its_effort() {
                 .await;
             assert_eq!(added["member"]["handle"], "muse-spark-1-3-minimal", "{added}");
             assert_eq!(
-                staffing.launches("muse-spark-1-3-minimal"),
-                (Some("muse-spark-1.3".into()), Some("minimal".into()), None)
+                staffing.runs("muse-spark-1-3-minimal"),
+                (
+                    "muse".to_owned(),
+                    Some("muse-spark-1.3".into()),
+                    Some("minimal".into()),
+                    Some("muse-spark-1.3".into())
+                )
             );
             // Muse Spark 1.2 stops at xhigh.
             let refused = staffing
@@ -344,7 +391,7 @@ async fn a_muse_member_runs_a_model_muse_lists_at_its_effort() {
 }
 
 /// Edit member: the member runs on another model, harness and effort from its next window,
-/// in the tier chosen, under its handle and in its roles; the tier stays the human's.
+/// in the tier chosen, under its handle and in its roles.
 #[tokio::test]
 async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
     LocalSet::new()
@@ -358,7 +405,7 @@ async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
                 "member.edit",
                 json!({
                     "project": staffing.project,
-                    "member": "claude-sonnet-5-5-medium",
+                    "member": "sonnet-medium",
                     "harness": "codex",
                     "model": "gpt-6-astra",
                     "effort": "max",
@@ -367,21 +414,19 @@ async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
             )
             .await;
             assert_eq!(edited["ok"], true, "{edited}");
-            assert_eq!(edited["member"]["handle"], "claude-sonnet-5-5-medium");
-            assert_eq!(edited["member"]["agent"], "codex-gpt-6-astra-max");
-            assert_eq!(edited["member"]["harness"], "codex");
+            assert_eq!(edited["member"]["handle"], "sonnet-medium");
             assert_eq!(edited["member"]["tier"], "complex");
             assert_eq!(edited["member"]["roles"], json!(["worker", "tester"]));
             assert_eq!(
-                staffing.launches("codex-gpt-6-astra-max"),
-                (Some("gpt-6-astra".into()), Some("max".into()), None)
+                staffing.runs("sonnet-medium"),
+                (
+                    "codex".to_owned(),
+                    Some("gpt-6-astra".into()),
+                    Some("max".into()),
+                    Some("GPT-6-Astra".into())
+                )
             );
-            // GPT-6 Astra at max is critical work by the presets' rules; the human said complex.
-            let changed = staffing
-                .agents()
-                .follow(&mut staffing.rig.kit.ledger.borrow_mut())
-                .unwrap();
-            assert!(changed.is_empty(), "{changed:?}");
+            assert_eq!(staffing.tier_of("sonnet-medium").as_deref(), Some("complex"));
             let refused = ask(
                 &staffing.app,
                 "member.edit",
@@ -401,51 +446,4 @@ async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
             );
         })
         .await;
-}
-
-/// The tier the dialog's select starts on: the presets' rules for a model a preset runs on
-/// that harness, at each effort it lists; nothing of a model no preset runs there.
-#[test]
-fn the_preset_tiers_are_said_of_the_models_the_presets_know_at_each_effort() {
-    let catalog = cf_catalog::Catalog::bundled().unwrap();
-    let claude = crate::page::models::preset_tiers(
-        &catalog,
-        cf_proto::agents::Harness::Claude,
-        &recorded("claude"),
-    );
-    assert_eq!(
-        claude["claude-opus-5-5"],
-        json!({ "low": "light", "medium": "standard", "high": "complex", "xhigh": "complex", "max": "critical" })
-    );
-    let muse = crate::page::models::preset_tiers(
-        &catalog,
-        cf_proto::agents::Harness::Muse,
-        &recorded("muse"),
-    );
-    assert_eq!(muse, json!({}), "no preset runs on Muse");
-}
-
-/// A member's saved agent is named after its harness, model and effort, in the words an
-/// agent's name takes, the harness not said twice, and short enough for a handle.
-#[test]
-fn a_member_agent_s_name_is_its_harness_model_and_effort() {
-    use cf_proto::agents::Harness;
-    assert_eq!(
-        member_agent_name(Harness::Claude, "claude-opus-5-5", Some("high")),
-        "claude-opus-5-5-high"
-    );
-    assert_eq!(
-        member_agent_name(Harness::Codex, "gpt-6.1-sol", Some("ultra")),
-        "codex-gpt-6-1-sol-ultra"
-    );
-    assert_eq!(
-        member_agent_name(
-            Harness::Pi,
-            "openrouter/~unbiased/pareto-latest",
-            Some("off")
-        ),
-        "pi-openrouter-unbiased-pareto-latest-off"
-    );
-    let long = member_agent_name(Harness::Pi, &"a-very-long-model-name/".repeat(6), None);
-    assert!(long.len() <= 60 && !long.ends_with('-'), "{long}");
 }

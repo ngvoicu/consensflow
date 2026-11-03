@@ -39,7 +39,7 @@ use crate::api::credentials::Credentials;
 use crate::api::request::Request;
 use crate::api::{routes, Api, Handler};
 use crate::files::{Log, Trace};
-use crate::testing::{sent_body, NoRows};
+use crate::testing::sent_body;
 
 /// A handler that closes or resumes the project its body names: the engine's
 /// work, begun in the request's first part.
@@ -329,7 +329,6 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
             })
         }),
         closing: Closing::new(),
-        roster: Rc::new(NoRows),
         log: Rc::new(Log::new(home)),
         trace: Rc::new(Trace::new(home)),
     });

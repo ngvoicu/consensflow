@@ -49,17 +49,37 @@ const DEPARTED: &[Departed] = &[
         "the human cancels T-1 while T-2 waits for it: the cancel is refused (`waited-for`) until T-2 is cancelled, where Node cancels it and T-2 stays blocked for good",
     ),
     ("core-page-024", UNREACHED),
+    ("core-page-004", NO_AGENTS_LIST),
+    ("corners-page-006", NO_AGENTS_LIST),
+    ("core-page-006", NAMED_BY_HARNESS),
+    ("core-page-008", NAMED_BY_HARNESS),
+    ("corners-page-004", NAMED_BY_HARNESS),
+    ("core-page-007", LAST_STAFF_OWN_FIELDS),
+    ("core-page-009", LAST_STAFF_OWN_FIELDS),
     ("core-page-025", UNREACHED),
     ("corners-page-008", UNREACHED),
 ];
+
+/// The saved agents are gone (harness-models): the pickers ask which harnesses are not
+/// installed (`harnesses.missing`), and no operation lists agents.
+const NO_AGENTS_LIST: &str = "`agents.list` is no operation: there are no saved agents to list, and the pickers ask `harnesses.missing` for the harnesses not installed here";
+
+/// A member names its harness, model and tier (harness-models): one Node's page named by an
+/// agent it refused before its ledger recorded any is refused here in this daemon's words.
+const NAMED_BY_HARNESS: &str = "a member is asked for by its harness, model and tier: one Node's page named by an agent it refused (`no agent named …`, `ConsensFlow cannot open … windows`, `only an image agent can be an image designer`) names no harness here, and is refused in this daemon's words";
+
+/// The last staff is its members' own fields (harness-models).
+const LAST_STAFF_OWN_FIELDS: &str = "the last staff is each member's own harness, model, effort, tier and roles, read from the ledger, where Node's was the members still among the saved agents, in the roles their agents fit";
 
 /// A task whose brief reached no window has no transcript of its own.
 const UNREACHED: &str =
     "the drawer of a task whose brief reached no window shows no transcript: the copy of the window its brief waits for, which shows none of its headers, is none of its, where Node showed the window's whole copy";
 
 /// The operations this build added to Node's: no recording of Node's asks
-/// them, and the page's own unit tests (`src/page/tests`) do.
-const ADDED: [PageOperation; 18] = [
+/// them, and the page's own unit tests (`src/page/tests`) do. `harnesses.missing` is
+/// what is left of Node's `agents.list`.
+const ADDED: [PageOperation; 19] = [
+    PageOperation::HarnessesMissing,
     PageOperation::WakeUpGet,
     PageOperation::WakeUpSet,
     PageOperation::ProjectSpecs,
@@ -89,7 +109,8 @@ fn the_traces_ask_every_operation_of_the_page() {
     for name in trace::names(&SUITES) {
         let played = trace::load(&name);
         for step in played["steps"].as_array().unwrap() {
-            if step["kind"] == "operation" {
+            // Node's `agents.list` is no operation here (`NO_AGENTS_LIST`).
+            if step["kind"] == "operation" && step["name"] != "agents.list" {
                 operations += 1;
                 calls += step["seams"].as_array().map_or(0, Vec::len);
                 asked.insert(step["name"].as_str().unwrap().to_owned());

@@ -17,7 +17,7 @@ fn file_with(bytes: &[u8]) -> (TempDir, PathBuf) {
 
 fn read(text: &str) -> AppSpecs {
     let (_home, path) = file_with(text.as_bytes());
-    app_specs_of(&read(&path).unwrap())
+    app_specs_of(&read_file(&path).unwrap())
 }
 
 /// What the human says for every project: on or off, and the folder and the variant named.
@@ -63,7 +63,7 @@ fn a_file_that_says_nothing_of_them_is_off_and_names_no_folder_or_variant() {
         assert_eq!(read(text), AppSpecs::default(), "{text}");
     }
     let home = tempdir().unwrap();
-    let missing = read(&home.path().join("agents.json")).unwrap();
+    let missing = read_file(&home.path().join("agents.json")).unwrap();
     assert_eq!(app_specs_of(&missing), AppSpecs::default());
 }
 

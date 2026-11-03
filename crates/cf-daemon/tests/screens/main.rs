@@ -1,10 +1,10 @@
 //! The screens, held to what Node answers (`tests/goldens`, the traces of
 //! Node's screens suite and its corners, which `FORMAT.md` describes). Each
 //! trace is played step by step against the daemon's own front, the screens
-//! mounted over the agents' API on loopback, a folder of its own for the roster
-//! and the harnesses' stand-ins, and a ledger: every exchange is sent as a
-//! client sends it, and its answer compared as bytes, the roster file before
-//! and after each write, and no other file changed.
+//! mounted over the agents' API on loopback, a folder of its own for the
+//! harnesses' stand-ins, and a ledger: every exchange is sent as a client sends
+//! it, and its answer compared as bytes, and no file changed. The traces of the
+//! saved agents' screen and routes went with them (harness-models).
 //!
 //! The stand-ins of the harnesses the traces name are POSIX scripts (the
 //! traces' own list says so); on Windows each is the shape of an npm shim, as
@@ -55,23 +55,9 @@ macro_rules! traces {
 }
 
 traces! {
-    core_agents_server_001: "core-agents-server-001",
     core_agents_server_002: "core-agents-server-002",
-    core_agents_server_003: "core-agents-server-003",
-    core_agents_server_004: "core-agents-server-004",
     core_agents_server_005: "core-agents-server-005",
-    core_agents_server_006: "core-agents-server-006",
-    core_agents_server_007: "core-agents-server-007",
-    core_agents_server_008: "core-agents-server-008",
     core_agents_server_009: "core-agents-server-009",
-    corners_screens_001: "corners-screens-001",
-    corners_screens_002: "corners-screens-002",
-    corners_screens_003: "corners-screens-003",
-    corners_screens_004: "corners-screens-004",
-    corners_screens_005: "corners-screens-005",
-    corners_screens_006: "corners-screens-006",
-    corners_screens_007: "corners-screens-007",
-    corners_screens_008: "corners-screens-008",
     corners_screens_009: "corners-screens-009",
     corners_screens_010: "corners-screens-010",
 }
@@ -85,7 +71,7 @@ fn recorded() -> BTreeSet<String> {
 fn every_trace_of_the_screens_there_is_has_a_test_and_no_test_is_for_none() {
     let tested: BTreeSet<String> = TRACES.iter().map(|name| (*name).to_owned()).collect();
     assert_eq!(recorded(), tested);
-    assert_eq!(TRACES.len(), 19);
+    assert_eq!(TRACES.len(), 5);
 }
 
 /// The world is read as the recorder reads it: a roster's `createdAt` and

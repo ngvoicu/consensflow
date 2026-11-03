@@ -12,7 +12,6 @@ use std::rc::Rc;
 use bytes::Bytes;
 use cf_base::refusal::Refusal;
 use cf_bridge::local::{Bridge, BridgeBuilder};
-use cf_catalog::AgentRow;
 use cf_engine::Finished;
 use cf_ledger::{
     open_ledger, MessageView, NewChief, NewMember, NewProject, NewQuestion, Options, ProjectView,
@@ -26,7 +25,7 @@ use tokio::sync::mpsc;
 
 use crate::api::answer::{Answer, Content, Failure};
 use crate::api::body::Body;
-use crate::api::context::{AgentRows, Closing, Context};
+use crate::api::context::{Closing, Context};
 use crate::api::credentials::Credentials;
 use crate::api::request::Request;
 use crate::errors::Errors;
@@ -237,7 +236,7 @@ pub fn scene() -> Scene {
             project.id,
             &NewMember {
                 model: Some("claude-sonnet-5".to_owned()),
-                effort: Some("high".to_owned()),
+                effort: None,
                 model_name: Some("zeus".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,

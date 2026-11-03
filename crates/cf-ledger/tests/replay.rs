@@ -792,7 +792,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
     let args = args.as_slice();
     let id = || integer(arg(args, 0));
     let answered: Result<Value, LedgerError> = match method {
-        "createProject" => NewProject::from_json(&node_staff(arg(args, 0).expect("a request")))
+        "createProject" => NewProject::from_json(&cf_ledger::testing::node_staff(arg(args, 0).expect("a request")))
             .and_then(|request| encode(ledger.create_project(&request))),
         "project" => encode(ledger.project(id())),
         "projects" => encode(ledger.projects()),
@@ -809,7 +809,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             encode(ledger.events(id(), after.unwrap_or(0), limit.unwrap_or(500)))
         }
         "integrity" => encode(ledger.integrity()),
-        "addMember" => NewMember::from_json(&node_member(arg(args, 1).expect("a member")))
+        "addMember" => NewMember::from_json(&cf_ledger::testing::node_member(arg(args, 1).expect("a member")))
             .and_then(|member| encode(ledger.add_member(id(), &member))),
         // A member's tier is the human's: nothing follows a catalog's (harness-models).
         "refreshMemberTiers" => return Err(NO_TIERS_FOLLOWED.to_owned()),
@@ -1038,56 +1038,6 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
 /// Why a trace that has Node's ledger follow its members' tiers departs at that call.
 const NO_TIERS_FOLLOWED: &str = "no call of this ledger: a member's tier is the human's, and nothing follows a catalog's (harness-models)";
 
-/// A member as Node's ledger was given it, as this one takes it: Node's member named the
-/// ready-made agent it ran on (`agent`), which was its handle too; this ledger's is named
-/// by its model, and the agent's name stands for the model's name, so its handle is the
-/// one Node's had (harness-models).
-fn node_member(member: &Value) -> Value {
-    let mut member = member.clone();
-    if let Value::Object(fields) = &mut member {
-        if let Some(agent) = fields.shift_remove("agent") {
-            fields.insert("modelName".to_owned(), agent);
-        }
-    }
-    member
-}
-
-/// A project's request as Node's ledger was given it, each member of its staff as
-/// [`node_member`] takes it.
-fn node_staff(request: &Value) -> Value {
-    let mut request = request.clone();
-    if let Some(Value::Array(staff)) = request.get_mut("staff") {
-        for member in staff.iter_mut() {
-            *member = node_member(member);
-        }
-    }
-    request
-}
-
-/// What neither side's answer is compared by: what a participant runs on (Node's named
-/// its ready-made agent, this one's its model, its effort and its model's name, each
-/// held apart), and of a staff a new project starts from, all but its harness and roles.
-fn hold_apart_what_members_run_on(value: &mut Value) {
-    match value {
-        Value::Object(fields) => {
-            if fields.contains_key("handle") || fields.contains_key("roles") {
-                for key in ["agent", "model", "effort", "modelName", "designer", "tier"] {
-                    if key == "model" || key == "designer" || key == "tier" {
-                        // Only a staff member (no handle) holds these apart.
-                        if fields.contains_key("handle") {
-                            continue;
-                        }
-                    }
-                    fields.shift_remove(key);
-                }
-            }
-            fields.values_mut().for_each(hold_apart_what_members_run_on);
-        }
-        Value::Array(items) => items.iter_mut().for_each(hold_apart_what_members_run_on),
-        _ => {}
-    }
-}
-
 fn encode<T: Serialize>(answered: Result<T, LedgerError>) -> Result<Value, LedgerError> {
     answered.map(|value| serde_json::to_value(value).unwrap())
 }
@@ -1119,8 +1069,8 @@ fn compare(what: &str, actual: &Value, expected: &Value) -> Option<String> {
             let mut expected = expected.clone();
             hold_apart_the_resume_mark(&mut expected);
             let mut actual = actual.clone();
-            hold_apart_what_members_run_on(&mut actual);
-            hold_apart_what_members_run_on(&mut expected);
+            cf_ledger::testing::hold_apart_what_members_run_on(&mut actual);
+            cf_ledger::testing::hold_apart_what_members_run_on(&mut expected);
             (actual, expected)
         }
     };
