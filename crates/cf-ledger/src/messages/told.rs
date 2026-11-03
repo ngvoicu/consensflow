@@ -74,7 +74,9 @@ pub(super) fn behind_held_words(alias: &str) -> String {
 /// `from` tells T-`number`'s window `body` while the task is queued for it: the
 /// words are kept for the window, the note that says them. A task that has gone
 /// on (its window has it now) or is over is refused, and so is the chief's own,
-/// which has no window but the chief's.
+/// which has no window but the chief's. A task that reads working or waiting for the
+/// words that resumed it (`work_while_resumed`) is queued for them still: its window
+/// has not read them, and these go in with them.
 pub(crate) fn tell_queued(
     store: &mut Store,
     project_id: i64,
@@ -86,7 +88,9 @@ pub(crate) fn tell_queued(
     store.write(|store| {
         store.participant_by_handle(project_id, from)?;
         let task = store.task_row(project_id, number)?;
-        require_task_state(&task, &["queued"], "keep words for the window of")?;
+        if crate::tasks::resume_words_not_in(store, &task)?.is_none() {
+            require_task_state(&task, &["queued"], "keep words for the window of")?;
+        }
         let window = store.participant_of(task.assignee_id)?;
         if !MEMBER_ROLES.contains(&window.role.as_str()) {
             return Err(LedgerError::refused_with(

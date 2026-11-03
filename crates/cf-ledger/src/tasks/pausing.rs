@@ -674,22 +674,41 @@ pub(crate) fn work_while_resumed(
     })
 }
 
-/// The reverse of [`work_while_resumed`]: the window has rested and the words that resumed
-/// the task have still not gone in (the human typed in the window and has not sent it, a
-/// screen that never goes quiet), so no window is at work on it, and it reads queued again
-/// until they are in. Refused for any other task, and for words already being pasted.
+/// The words that resumed `task`, still to go in: queued or held for the human, not being
+/// pasted ([`resume_words`]). A task that reads working or waiting for them has no window
+/// that has read them, and whatever is told it meanwhile goes in with them.
+pub(crate) fn resume_words_not_in(
+    store: &Store,
+    task: &TaskRow,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(match task.state.as_str() {
+        "queued" | "working" | "waiting" => resume_words(store, task)?
+            .filter(|(_, state)| state != "delivering")
+            .map(|(words, _)| words),
+        _ => None,
+    })
+}
+
+/// The reverse of [`work_while_resumed`]: no window is at work on the task any more, and
+/// the words that resumed it have still not gone in, so it reads queued again until they
+/// are. `why` says so: the window rested and the words are held (the human typed in it and
+/// has not sent it, a screen that never goes quiet), or the window went (it exited, a
+/// Close, a quit). A task that waits for an answer goes back too: its words are what the
+/// window reads first. Refused for any other task, and for words already being pasted.
 pub(crate) fn rest_while_resumed(
     store: &mut Store,
     project_id: i64,
     number: i64,
+    why: &str,
 ) -> Result<TaskView, LedgerError> {
+    model::require_text(why, "why", 1000)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         let waiting = match task.state.as_str() {
-            "working" => resume_words(store, &task)?,
+            "working" | "waiting" => resume_words_not_in(store, &task)?,
             _ => None,
         };
-        let Some((words, _)) = waiting.filter(|(_, state)| state != "delivering") else {
+        let Some(words) = waiting else {
             return Err(LedgerError::refused_with(
                 "not-resumed",
                 format!("T-{number} is not working with the words that resume it waiting"),
@@ -701,9 +720,7 @@ pub(crate) fn rest_while_resumed(
             "queued",
             json!({
                 "by": null,
-                "because": format!(
-                    "its window is at rest, and m-{words}, the words that resumed it, have not gone in"
-                ),
+                "because": format!("{why}, and m-{words}, the words that resumed it, have not gone in"),
             }),
         )?;
         task_by_id(store, task.id)

@@ -1102,7 +1102,10 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let now = time::iso(self.now());
         for task in self.active_work(project, participant)? {
-            if task.state == "queued" {
+            // A queued task is on its way to the window already, and so is one that reads
+            // working or waiting while the words that resumed it wait (`resumed_at_work`):
+            // held and resumed here, its window would be told to go on twice (T-1153's F3).
+            if task.state == "queued" || self.resume_words_wait(project.id, task.number)? {
                 continue;
             }
             self.seams.ledger.borrow_mut().hold_task(

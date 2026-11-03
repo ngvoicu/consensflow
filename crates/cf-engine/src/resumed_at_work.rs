@@ -30,10 +30,23 @@
 //!
 //! **And back.** The claim is a live one, and it is withdrawn when its evidence is gone: a
 //! window that has rested for [`RESTED_MS`] with the words still not in (the human typed in the
-//! window and has not sent it; a Muse window, whose pacing gate held them for the whole of a
-//! live run's wait: "its screen printed within the last 3 s") is at work on nothing, and the task reads queued again until they go in (`rest_while_resumed`). A rest of
-//! seconds is the settle and the paste, which the claim outlasts: no flicker where the words go
-//! in as they should.
+//! window and has not sent it; a screen the pacing gate finds never quiet, as a Muse window's
+//! was in the first live run) is at work on nothing, and the task reads queued again until they
+//! go in (`rest_while_resumed`). A rest of seconds is the settle and the paste, which the claim
+//! outlasts: no flicker where the words go in as they should. A task sent back so is not shown
+//! working for the same words again for [`HELD_FOR_MS`], whatever the window writes: a window
+//! that rests and acts again would move the board at every turn. The words going in end it, for
+//! they move the task by themselves.
+//!
+//! **The claim goes with its window** (T-1153's F1, F2). A window that exits while its task
+//! reads working or waiting for the words that resumed it (the engine's own close of a kept
+//! window, the human's Close, a crash) takes the claim with it: the task goes back to queued,
+//! "its window closed", and its words open the next window as they do for a task that was
+//! queued when the window went ([`Dispatcher::withdraw_resume_claim`], called by the exit).
+//! Paused there, as any working task is, the exit would undo the chief's resume. A start finds
+//! no window at all: the Resume withdraws the claim of such a task before it brings windows
+//! back (`Dispatcher::at_work`), so the window it opens is given the words and not a note that
+//! a turn was cut as well.
 //!
 //! **What it does not touch.** The daemon's own bare words that resume a task held for quota
 //! are none of these ([`cf_ledger::Ledger::resume_words_waiting`]): a window that goes on by
@@ -71,8 +84,9 @@ pub(crate) struct ResumeWatch {
 
 /// Whether the look reads the window's turn in flight and its record whole: a turn the
 /// record says is over, or may be ending (`Over`), one that failed, a window waiting on a
-/// dialog of its own or starting, another conversation's, one another program of the
-/// harness's writes into, or a record that could not be read, is no work shown.
+/// dialog of its own or starting, one another program of the harness's writes into, or a
+/// record that could not be read, is no work shown. (A window the human switched to
+/// another conversation is never looked at here: the step handles it first.)
 fn in_flight(observed: &Observed) -> bool {
     matches!(observed.reading.as_deref(), Some(Reading::Known(_)))
         && !observed.settled
@@ -82,7 +96,6 @@ fn in_flight(observed: &Observed) -> bool {
         && !observed.shared
         && !observed.unnamed
         && observed.waiting.is_none()
-        && observed.switched.is_none()
 }
 
 /// How long a window must have rested, with the words that resumed its task still not in,
@@ -91,9 +104,14 @@ fn in_flight(observed: &Observed) -> bool {
 /// never goes quiet) show it.
 const RESTED_MS: i64 = 10_000;
 
-/// Whether the look reads the window's turn over, by its record whole: the window is at rest
-/// or may be given words (a dialog of its own, another conversation, a record that could
-/// not be read, and a turn that failed are none).
+/// How long a task sent back to queued ([`RESTED_MS`]) is not shown working again, whatever
+/// the window writes: a window that rests and acts again, words held at rest for as long
+/// as the human has not sent what they typed, would otherwise move the board at every
+/// turn. The words going in end it, as they move the task by themselves.
+const HELD_FOR_MS: i64 = 30_000;
+
+/// Whether the look reads the window's turn over, by its record whole: it is at rest, or
+/// its record says the turn is over, and it did not fail.
 fn at_rest(observed: &Observed) -> bool {
     matches!(observed.reading.as_deref(), Some(Reading::Known(_)))
         && (observed.settled || observed.over == Over::Held)
@@ -142,7 +160,9 @@ impl Dispatcher {
             .transpose()?
             .flatten();
         let (Some(thread), Some(words)) = (task, words) else {
-            record.delivery.borrow_mut().resumed = None;
+            let mut part = record.delivery.borrow_mut();
+            part.resumed = None;
+            part.sent_back = None;
             return Ok(());
         };
         // Their paste is begun: its arrival moves the task, as it moves any.
@@ -155,17 +175,25 @@ impl Dispatcher {
             record.delivery.borrow_mut().resumed = None;
             let rested = self.rested_for(record).is_some_and(|ms| ms >= RESTED_MS);
             if rested && at_rest(observed) && project.state == "open" {
-                match self
-                    .seams
-                    .ledger
-                    .borrow_mut()
-                    .rest_while_resumed(project.id, thread.task.number)
-                {
-                    Ok(_) => self.changed(),
+                match self.seams.ledger.borrow_mut().rest_while_resumed(
+                    project.id,
+                    thread.task.number,
+                    "its window is at rest",
+                ) {
+                    Ok(_) => {
+                        record.delivery.borrow_mut().sent_back = Some((words, self.now()));
+                        self.changed();
+                    }
                     Err(cf_ledger::LedgerError::Refused(_)) => {}
                     Err(failed) => return Err(failed.into()),
                 }
             }
+            return Ok(());
+        }
+        // Sent back to queued for these words a moment ago: not claimed again yet.
+        let sent_back = record.delivery.borrow().sent_back;
+        if sent_back.is_some_and(|(sent, at)| sent == words && self.now() - at < HELD_FOR_MS) {
+            record.delivery.borrow_mut().resumed = None;
             return Ok(());
         }
         if !matches!(observed.reading.as_deref(), Some(Reading::Known(_))) {
@@ -210,6 +238,35 @@ impl Dispatcher {
         record.delivery.borrow_mut().resumed = None;
         self.changed();
         Ok(())
+    }
+
+    /// The task reads working or waiting for the words that resumed it, which have not gone
+    /// in, and its window went: it reads queued again, `why`, and the words wait for the
+    /// window that opens. Whether it was such a task, and is queued now. Nothing is written
+    /// for any other.
+    pub(crate) fn withdraw_resume_claim(
+        &self,
+        project: i64,
+        task: (i64, &str),
+        why: &str,
+    ) -> Result<bool, EngineError> {
+        let (number, state) = task;
+        if !matches!(state, "working" | "waiting") {
+            return Ok(false);
+        }
+        match self
+            .seams
+            .ledger
+            .borrow_mut()
+            .rest_while_resumed(project, number, why)
+        {
+            Ok(_) => {
+                self.changed();
+                Ok(true)
+            }
+            Err(cf_ledger::LedgerError::Refused(_)) => Ok(false),
+            Err(failed) => Err(failed.into()),
+        }
     }
 
     /// Whether the words that resumed T-`number` are on their way to the window still: such

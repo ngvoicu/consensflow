@@ -102,13 +102,13 @@ fn record(
                 ));
             }
         }
-        // The words that resumed a task its window is at work on (`work_while_resumed`)
-        // wait for its rest, and the window has not read them: its own `cf task done`
-        // is refused as it is for notes on their way, since what it would finish is the
-        // task without them. The chief's Finish takes the answer of the turn at work, and
-        // the words go with it: left queued for a task that is done, a reopen of it would
-        // put them in with its follow-up.
-        if task.state == "working" {
+        // The words that resumed a task its window is at work on (`work_while_resumed`), or
+        // that waits for an answer meanwhile, wait for its rest, and the window has not
+        // read them: its own `cf task done` is refused as it is for notes on their way,
+        // since what it would finish is the task without them. The chief's Finish takes
+        // the answer of the turn at work, and the words go with it: left queued for a task
+        // that is done, a reopen of it would put them in with its follow-up.
+        if matches!(task.state.as_str(), "working" | "waiting") {
             if let Some((words, state)) = resume_words(store, &task)? {
                 if by_window {
                     return Err(LedgerError::refused_with(
