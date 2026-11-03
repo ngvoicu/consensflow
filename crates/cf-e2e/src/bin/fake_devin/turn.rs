@@ -196,7 +196,7 @@ fn cf_words(line: &str) -> Vec<String> {
 /// `cf` as an agent runs it: the one first on the window's `PATH`, with the window's own
 /// environment. What it printed and said, trimmed.
 fn run_cf(words: &[String]) -> String {
-    match Run::new("cf")
+    match Run::new(cf_e2e::process::as_a_shell_finds("cf"))
         .args(words)
         .inheriting_env()
         .unlimited()

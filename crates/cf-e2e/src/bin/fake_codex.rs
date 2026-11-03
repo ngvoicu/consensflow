@@ -45,6 +45,9 @@ mod children;
 mod probes;
 #[path = "fake_codex/servers.rs"]
 mod servers;
+#[path = "fake_agent/terminal.rs"]
+#[allow(dead_code)]
+mod terminal;
 #[path = "fake_codex/typed.rs"]
 mod typed;
 
@@ -361,6 +364,10 @@ fn serve<S: Read + Write + Timed>(
                 result(id, json!({ "turn": { "id": "turn-1" } }))
             }
             Some("thread/read") => result(id, json!({ "thread": agent.read() })),
+            Some("turn/interrupt") => {
+                agent.interrupt();
+                result(id, json!({}))
+            }
             Some("thread/queue/add") => {
                 hand_over(agent, &request);
                 result(id, json!({ "queuedMessage": { "id": "queue-1" } }))
@@ -571,6 +578,9 @@ fn tui(args: &[String]) -> ExitCode {
     if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
         let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
     }
+    // Its terminal raw, as Codex's TUI holds it: a key comes as it is pressed, an Escape alone
+    // among them, which stops the turn at work (T-1207).
+    terminal::raw_mode();
     let typed = typed::typed();
     let mut asked = 3;
     loop {
@@ -581,6 +591,18 @@ fn tui(args: &[String]) -> ExitCode {
         }
         while let Ok(text) = typed.try_recv() {
             asked += 1;
+            // Escape stops the turn at work, as Codex's TUI does at one Escape.
+            if text == typed::ESCAPE {
+                let interrupt = json!({
+                    "id": asked,
+                    "method": "turn/interrupt",
+                    "params": { "threadId": thread, "turnId": "" },
+                });
+                if socket.send(Message::text(interrupt.to_string())).is_err() {
+                    return ExitCode::SUCCESS;
+                }
+                continue;
+            }
             let input = json!([{ "type": "text", "text": text, "text_elements": [] }]);
             let turn = json!({
                 "id": asked,

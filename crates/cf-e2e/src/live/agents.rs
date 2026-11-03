@@ -45,9 +45,8 @@ pub const STAND_IN_WORKER_MODEL: &str = "fake";
 /// a fake one) are none.
 pub fn harness_of(agent: &Value) -> Option<Harness> {
     let kind = agent["kind"].as_str()?;
-    if kind == "claude-code"
-        && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?)
-    {
+    // A fake model is the rig's stand-in, of whichever kind it is shaped as (T-1207).
+    if [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {
         return None;
     }
     Harness::ALL

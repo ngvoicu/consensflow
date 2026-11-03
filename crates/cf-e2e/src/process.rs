@@ -108,6 +108,37 @@ pub fn own_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+/// The first `name` in the folders of `path`, as a shell finds a command: on Windows with each
+/// of the extensions `extensions` names (`PATHEXT`). A program started by its bare name on
+/// Windows is looked for first in the folder of the program that starts it, which no shell
+/// does: a stand-in's is cargo's `target\debug`, where another tree's build of `cf` may be
+/// (zeewin2, T-1186: a3-1's `cf`, with T-1110's fix, ran for a tree without it).
+pub fn first_on_path(name: &str, path: &str, extensions: &str) -> Option<std::path::PathBuf> {
+    let extensions: Vec<&str> = if cfg!(windows) {
+        extensions
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .collect()
+    } else {
+        vec![""]
+    };
+    std::env::split_paths(path).find_map(|folder| {
+        extensions
+            .iter()
+            .map(|extension| folder.join(format!("{name}{extension}")))
+            .find(|file| file.is_file())
+    })
+}
+
+/// The program `name` as a shell started from this process's environment finds it: the first on
+/// its `PATH` ([`first_on_path`]), or the bare name where none is. The stand-in agents run `cf`
+/// so, as an agent's shell does (T-1186, T-1207).
+pub fn as_a_shell_finds(name: &str) -> std::path::PathBuf {
+    let path = own_var("PATH").unwrap_or_default();
+    let extensions = own_var("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned());
+    first_on_path(name, &path, &extensions).unwrap_or_else(|| name.into())
+}
+
 /// What a program is given to read.
 #[derive(Debug, Clone)]
 enum Input {

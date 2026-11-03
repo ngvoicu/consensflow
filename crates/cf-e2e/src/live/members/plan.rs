@@ -318,6 +318,13 @@ mod tests {
         let row = json!({ "id": "x", "kind": "claude-code", "model": "fake-2" });
         assert_eq!(harness_of(&row), Some(Harness::Claude));
         assert_eq!(harness_of(&json!({ "id": "y", "kind": "nothing" })), None);
+        // Devin's and Codex's shapes of the stand-in, on its fake model, are no install either
+        // (the matrix's seats of those kinds, T-1207).
+        for kind in ["devin", "codex"] {
+            let row =
+                json!({ "id": "worker", "kind": kind, "model": "fake", "workTier": "standard" });
+            assert_eq!(harness_of(&row), None, "{kind}");
+        }
     }
 
     #[test]

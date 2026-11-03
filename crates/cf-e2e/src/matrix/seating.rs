@@ -85,6 +85,10 @@ pub struct Seat {
     pub role: Role,
     /// The real harness, or none where the rig's stand-in plays it.
     pub harness: Option<Harness>,
+    /// The harness the rig's stand-in is shaped as where it plays the seat: Claude Code's
+    /// (`fake-agent`), Devin's (`fake-devin`) or Codex's (`fake-codex`), on its fake model
+    /// (T-1207).
+    pub stand_in: Harness,
 }
 
 impl Seat {
@@ -96,12 +100,17 @@ impl Seat {
     /// The kind of record its windows keep, as `harness-ask records` reads it: the stand-in
     /// keeps Claude Code's.
     pub fn kind(&self) -> &'static str {
-        self.harness.map_or("claude-code", Harness::kind)
+        self.harness.map_or(self.stand_in.kind(), Harness::kind)
     }
 
     /// Who it is, as the evidence says it: the harness's name, or `stand-in`.
     pub fn who(&self) -> &'static str {
-        self.harness.map_or("stand-in", Harness::name)
+        match (self.harness, self.stand_in) {
+            (Some(harness), _) => harness.name(),
+            (None, Harness::Devin) => "stand-in devin",
+            (None, Harness::Codex) => "stand-in codex",
+            (None, _) => "stand-in",
+        }
     }
 
     /// Its roster row: the harness on the kit's model for it ([`agents::model`]: the cheap
@@ -116,7 +125,7 @@ impl Seat {
                 } else {
                     STAND_IN_WORKER_MODEL
                 };
-                json!({ "kind": "claude-code", "model": model, "workTier": TIER })
+                json!({ "kind": self.stand_in.kind(), "model": model, "workTier": TIER })
             }
         };
         if let Some(fields) = row.as_object_mut() {
@@ -260,6 +269,7 @@ impl Seating {
                 .map(|(role, harness)| Seat {
                     role,
                     harness: Some(harness),
+                    stand_in: Harness::Claude,
                 })
                 .collect(),
             control: false,
@@ -357,7 +367,11 @@ impl Seating {
                     ),
                     None => return Err(refuse("a seat has no harness")),
                 };
-                Ok(Seat { role, harness })
+                Ok(Seat {
+                    role,
+                    harness,
+                    stand_in: Harness::Claude,
+                })
             })
             .collect::<Result<Vec<_>>>()?;
         if Role::ALL
@@ -396,9 +410,25 @@ impl Seating {
                 .map(|role| Seat {
                     role: *role,
                     harness: None,
+                    stand_in: Harness::Claude,
                 })
                 .collect(),
         }
+    }
+
+    /// The same seating of stand-ins with the seat of `role` played by the stand-in shaped as
+    /// `harness`'s (Devin's or Codex's), on its fake model: the rig starts that stand-in as the
+    /// harness's command, and the oracle reads its records as that harness's (T-1207).
+    #[must_use]
+    pub fn with_stand_in(mut self, role: Role, harness: Harness) -> Self {
+        for seat in self
+            .seats
+            .iter_mut()
+            .filter(|seat| seat.role == role && seat.harness.is_none())
+        {
+            seat.stand_in = harness;
+        }
+        self
     }
 
     /// The same seating with the members of `roles` played by the rig's stand-in: a seat whose

@@ -26,6 +26,7 @@ mod order;
 mod phase2;
 mod questions;
 mod reports;
+mod seats;
 mod window_life;
 
 pub use field::field;
@@ -46,6 +47,7 @@ pub fn all() -> Vec<Scenario> {
     all.extend(deliveries::deliveries());
     all.extend(branches::branches());
     all.extend(window_life::window_life());
+    all.extend(seats::seats());
     all
 }
 

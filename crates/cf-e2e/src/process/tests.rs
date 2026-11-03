@@ -712,3 +712,29 @@ fn the_powershell_asked_when_a_process_began_is_given_what_one_takes_on_a_loaded
     assert_eq!(pid::when_started(1).limit_given(), Some(POWERSHELL_LIMIT));
     assert!(POWERSHELL_LIMIT > LIMIT);
 }
+
+/// `cf` is the first on the window's `PATH`, as a shell finds it, and none elsewhere is.
+#[test]
+fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
+    let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let file = |folder: &tempfile::TempDir| {
+        folder
+            .path()
+            .join(if cfg!(windows) { "cf.EXE" } else { "cf" })
+    };
+    std::fs::write(file(&second), "").unwrap();
+    let path = std::env::join_paths([first.path(), second.path()]).unwrap();
+    let path = path.to_str().unwrap();
+    let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
+    assert_eq!(
+        found.canonicalize().unwrap(),
+        file(&second).canonicalize().unwrap()
+    );
+    std::fs::write(file(&first), "").unwrap();
+    let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
+    assert_eq!(
+        found.canonicalize().unwrap(),
+        file(&first).canonicalize().unwrap()
+    );
+    assert_eq!(first_on_path("cf", "", ".EXE"), None);
+}
