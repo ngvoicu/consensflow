@@ -84,6 +84,8 @@ impl Rig {
         let muse_launcher = matches!(config.muse, Some((_, crate::muse::Run::Live { .. })))
             .then(|| own_commands(&root, &config).join("muse"));
         let env = environment(&root, &fake_bin, &config, &home_vars);
+        #[cfg(unix)]
+        super::install::give_muse_its_folders(&root, &config, &home_vars)?;
         // A restart over the same home keeps its roster, as the app's does: the
         // agents a case wrote are still the ones its chief and staff run on.
         if config.existing_root.is_none() {

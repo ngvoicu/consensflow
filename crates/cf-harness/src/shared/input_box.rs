@@ -81,7 +81,7 @@ pub(crate) fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>)
         Harness::Claude => crate::claude::input_box::MARK,
         Harness::Devin => crate::devin::input_box::MARK,
         // Muse's rules are drawn shorter than Claude's and Devin's: its own reader.
-        Harness::Muse => return crate::muse::input_box_words(screen),
+        Harness::Muse => return crate::muse::input_box_words(screen, cursor),
         Harness::Codex | Harness::Pi => return None,
     };
     match read(harness, screen, cursor)? {

@@ -974,8 +974,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/screen.rs"
-find = '''    Some(if typed.is_empty() && !more {'''
-replace = '''    Some(if typed.is_empty() {'''
+find = '''(typed.is_empty() && !more) ||'''
+replace = '''typed.is_empty() ||'''
 
 # The screen: the picker of a session another window holds.
 [[plant]]

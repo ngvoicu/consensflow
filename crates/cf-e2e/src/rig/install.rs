@@ -195,7 +195,13 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     }
     match &config.muse {
         Some((install, crate::muse::Run::Echo { turn_ms })) => {
-            crate::muse::write_stand_in(&own, install, *turn_ms, &root.join("muse-argv.log"))?;
+            crate::muse::write_stand_in(
+                &own,
+                install,
+                *turn_ms,
+                &files::real_path(&home),
+                &root.join("muse-argv.log"),
+            )?;
         }
         Some((install, crate::muse::Run::Live { real_home })) => {
             crate::muse::seed_live_home(&home, real_home)?;
@@ -226,6 +232,68 @@ pub(super) fn own_commands(root: &Path, config: &Config) -> PathBuf {
     } else {
         root.join("fake-bin")
     }
+}
+
+/// The folders a Muse keeps under the XDG folders, each by the variable that moves it and
+/// where it is below the home: its settings, and its sessions, which the daemon reads to
+/// learn the session a window opened (`cf_harness::muse::paths`).
+#[cfg(unix)]
+const MUSE_FOLDERS: [(&str, &str); 2] = [
+    ("XDG_CONFIG_HOME", ".config"),
+    ("XDG_DATA_HOME", ".local/share"),
+];
+
+/// Gives the daemon the rig's Muse folders where a harness's home moved the XDG folders it
+/// reads them under (`homes`: Devin's moves all four, and a home's variables are the rig's
+/// last word): a link `muse` there to the rig's own (`<root>/home/.config/muse`, `…/.local/
+/// share/muse`), where the rig's Muse, echo or live, keeps its settings and sessions. Two
+/// harnesses on the XDG layout share its folders, each in its own folder below them. Without
+/// it the daemon read Muse's sessions in Devin's data folder and never found the session a
+/// window opened: the window read "starting" for good, its brief never pasted (T-1081). A
+/// link the rig left there before (a home lasts the run, a rig starts again on it) is put
+/// back; anything else of that name is the rig's to refuse, never to replace.
+#[cfg(unix)]
+pub(super) fn give_muse_its_folders(
+    root: &Path,
+    config: &Config,
+    homes: &[(String, String)],
+) -> Result {
+    if config.muse.is_none() {
+        return Ok(());
+    }
+    let own = files::real_path(&root.join("home"));
+    for (variable, below) in MUSE_FOLDERS {
+        let Some(moved) = homes
+            .iter()
+            .rev()
+            .find(|(name, _)| name == variable)
+            .map(|(_, value)| PathBuf::from(value))
+        else {
+            continue;
+        };
+        let target = own.join(below).join("muse");
+        files::make_dir(&target)?;
+        if files::real_path(&moved) == own.join(below) {
+            continue;
+        }
+        files::make_dir(&moved)?;
+        let link = moved.join("muse");
+        match std::fs::symlink_metadata(&link) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                std::fs::remove_file(&link).map_err(Error::file("remove", &link))?;
+            }
+            Ok(_) => {
+                return Err(Error::Daemon(format!(
+                    "{} holds a Muse folder of a harness's home: the rig's Muse keeps its own in {}, and the daemon would read the other",
+                    link.display(),
+                    target.display()
+                )))
+            }
+            Err(_) => {}
+        }
+        std::os::unix::fs::symlink(&target, &link).map_err(Error::file("link", &link))?;
+    }
+    Ok(())
 }
 
 /// The command `name` in `dir`, which starts `program`: a script that runs the
