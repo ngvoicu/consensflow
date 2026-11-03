@@ -512,7 +512,7 @@ fn finishing_a_paused_task_withdraws_what_its_requester_was_told_of_the_pause_an
 
     let finished = world
         .ledger
-        .record_finished(world.project, 1, "Parser done", (0, 0))
+        .record_finished(world.project, 1, "Parser done")
         .expect("finished");
     assert_eq!(finished.task.state, "done");
     for id in [stall.id, queued.id] {

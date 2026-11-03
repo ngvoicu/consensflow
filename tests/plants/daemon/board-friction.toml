@@ -16,8 +16,6 @@ friction-release-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--li
 friction-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
 friction-hold-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "hold_for_context"]
 friction-hold-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "exit_proof::"]
-friction-running-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "left_running"]
-friction-running-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "turn_end::"]
 
 # --- T-689: the last line of a reply names its task ---
 
@@ -296,68 +294,6 @@ runs = ["cf-lib-board"]
 file = "crates/cf/src/board/lines.rs"
 find = '        assignee => format!("{blocked}@{}", js::text(assignee)),'
 replace = '        assignee => format!("@{}", js::text(assignee)),'
-
-# --- T-691: an accept says what the finish left running, which the close of the window ends ---
-
-[[plant]]
-name = "board friction: accept: a finish keeps no count of what its window ran"
-meant = "a_finish_keeps_what_the_window_was_counted_running_for_the_accept_to_say"
-runs = ["friction-running-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '            Some((jobs, agents)) => json!({ "result": message_id, "jobs": jobs, "agents": agents }),'
-replace = '            Some(_) => json!({ "result": message_id }),'
-
-[[plant]]
-name = "board friction: accept: the first finish of a task is the one counted, not the latest"
-meant = "a_task_sent_back_and_finished_again_is_counted_by_its_latest_finish"
-runs = ["friction-running-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "              ORDER BY id DESC LIMIT 1\","
-replace = "              ORDER BY id ASC LIMIT 1\","
-
-[[plant]]
-name = "board friction: accept: the engine's finish counts nothing running"
-meant = "finish_takes_the_last_complete_answer_of_a_held_task_once_and_ends_nothing"
-runs = ["friction-running-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_end/finish.rs"
-find = "            (pending.jobs, pending.agents),"
-replace = "            (0, 0),"
-
-[[plant]]
-name = "board friction: accept: the route does not read what the finish counted"
-meant = "an_accept_says_how_many_jobs_and_agents_the_finish_counted_running"
-runs = ["friction-release-route"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "            running = ledger.left_running(project, number)?;"
-replace = "            running = (0, 0);"
-
-[[plant]]
-name = "board friction: accept: cf says nothing of what the window ran"
-meant = "an_accept_says_what_the_finish_left_running_which_the_close_of_the_window_ends"
-runs = ["cf-lib-board"]
-
-[[plant.edit]]
-file = "crates/cf/src/board/task.rs"
-find = '    let (jobs, agents) = (count("jobs"), count("agents"));'
-replace = '    let (jobs, agents) = (count("jobs") * 0, count("agents") * 0);'
-
-[[plant]]
-name = "board friction: accept: cf says one job and many are all it"
-meant = "an_accept_says_what_the_finish_left_running_which_the_close_of_the_window_ends"
-runs = ["cf-lib-board"]
-
-[[plant.edit]]
-file = "crates/cf/src/board/task.rs"
-find = '    let them = if jobs + agents == 1 { "it" } else { "them" };'
-replace = '    let them = "it";'
 
 # --- The sixth fix (the field issue of 2026-10-29): a follow-up whose window cannot go on in
 # --- its conversation is held for the chief's word, never given to a fresh window unasked ---

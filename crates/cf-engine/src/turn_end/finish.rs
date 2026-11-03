@@ -246,12 +246,11 @@ impl Dispatcher {
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
         );
-        let moved = self.seams.ledger.borrow_mut().record_finished(
-            project,
-            number,
-            &body,
-            (pending.jobs, pending.agents),
-        )?;
+        let moved = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .record_finished(project, number, &body)?;
         record.held.borrow_mut().reset();
         self.changed();
         Ok(Finished {

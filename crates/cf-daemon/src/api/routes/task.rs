@@ -404,9 +404,7 @@ fn tellable(task: &TaskView) -> bool {
 /// its result, cancel it, pause it, resume it, give it back. A cancel says
 /// which of the words the caller told the task's window went with it, the
 /// window never having had them (`dropped`, when any did): the ledger tells
-/// everyone else who told it some. An accept of a task the chief or the human
-/// finished while its window was counted running jobs or agents says how many
-/// (`running`, when any): the close of the window after the accept ends them (T-691).
+/// everyone else who told it some.
 fn moved(
     context: &Context,
     caller: &Caller,
@@ -418,13 +416,8 @@ fn moved(
     let by = caller.participant.handle.as_str();
     let mut ledger = context.ledger.borrow_mut();
     let mut dropped = Vec::new();
-    let mut running = (0, 0);
     let moved = match action {
-        TaskAction::Accept => {
-            // Read before the accept, whose close of the window ends what it still runs.
-            running = ledger.left_running(project, number)?;
-            ledger.accept_task(project, number, by)?
-        }
+        TaskAction::Accept => ledger.accept_task(project, number, by)?,
         TaskAction::Cancel => {
             // Read in the same borrow as the cancel: nothing is pasted between.
             dropped = ledger
@@ -448,12 +441,6 @@ fn moved(
     answer.insert("task".to_owned(), value(&TaskSummary::from(&moved))?);
     if !dropped.is_empty() {
         answer.insert("dropped".to_owned(), json!(dropped));
-    }
-    if running != (0, 0) {
-        answer.insert(
-            "running".to_owned(),
-            json!({ "jobs": running.0, "agents": running.1 }),
-        );
     }
     Ok(Answer::ok(Value::Object(answer)))
 }
