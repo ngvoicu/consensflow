@@ -80,25 +80,3 @@ more: its line reads `cf task list [--all]` and says what the flag adds, in ever
 in `cf-board-028` and `-029`. Changed by hand, in those words alone. The recordings of the
 crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them, and one
 more there: the case `cf task list --json` carries an `idle` key (see that folder's README).
-
-The last line of the replies that give a window words (board task T-957, 3.0.7, from T-689)
-names its task: `T-1: sent 16 characters, ending "Write the parser".` where it read
-`Sent: 16 characters, …`, so a chief that sees only the last line of a command's output knows
-which task it is about. Twenty-five `stdout` strings of twelve traces (`cf-board-004`, `-008`,
-`-009`, `-010`, `-011`, `-014`, `-015`, `-016`, `-017`, `-020`, `-021`, `-022`) changed, each by
-a script that read the number from the string's own first word (`T-1 is on the board …`), and
-nothing else in them moved. The crates' own goldens (`crates/cf/tests/goldens/board.json`)
-changed with them.
-
-The refusal of `cf task add --before T-3` for a task already in a window (board task T-957,
-3.0.7, from T-675) says what to do instead: in `cf-board-016`, the `stderr` of the run and the
-board's answer to it read `T-3 is queued: only a task still on the board can wait for a new
-one; a task in a window is not pulled back. Add the new task without --before, pause T-3 now
-(cf task pause T-3), and send it on with cf task resume T-3 "…" once the new task is accepted;
-or cancel it and add it again with --needs on the new task`. Changed by hand, in those words
-alone, as the ledger's `ledger-tasks-012` was.
-
-`cf task list` says what a task given to a window waits for, as it says it of one for a tier
-(board task T-957, 3.0.7, from T-798): in `cf-board-021`, the chief's own step in the run of `cf task list`
-reads `T-2 [open] blocked by T-1 · @chief ← @chief: Plan the release` where it read `T-2 [open]
-@chief ← @chief: Plan the release`. Changed by hand, in those words alone.

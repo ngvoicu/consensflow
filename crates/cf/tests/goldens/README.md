@@ -142,12 +142,14 @@ where it began `Sent:`. A chief that read only that last line (a harness shows a
 output cut, `crates/cf/src/board/cut.rs`) did not learn the number of the task it had just
 added. The ten cases of `board.json` that carry the line were changed by a script from each
 case's own first word (`T-3 is on the board …` gives `T-3`), and nothing else in them moved.
-The daemon's traces changed with them, by hand and in the same words alone
-(`crates/cf-daemon/tests/goldens/README.md`).
+The daemon's traces that hold the line (`cf-board-004`, `-008`, `-009`, `-010`, `-011`, `-014`,
+`-015`, `-016`, `-017`, `-020`, `-021`, `-022`) are all departed from Node's already, for other
+words (`DEPARTED` in `crates/cf-daemon/tests/api/main.rs`), so they are not edited.
 
 The line of a task given to a window says what it waits for (`T-7 [open] blocked by T-1, T-2 ·
 @chief ← @chief: …`), as the line of a task for a tier did (T-957, from T-798). No case of
-`board.json` prints such a line, so none changed; the daemon's trace `cf-board-021` did.
+`board.json` prints such a line, so none changed; the daemon's trace that does (`cf-board-021`) departs
+from Node's already (`crates/cf-daemon/tests/api/main.rs`), and is not edited.
 
 ## `cf task add --after` says the task may wait for the chief's word (T-957, the field issue of 2026-10-29)
 
