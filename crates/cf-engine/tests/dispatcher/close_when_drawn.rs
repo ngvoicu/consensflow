@@ -2,8 +2,8 @@
 //! drawn (T-1051, from T-1038's decision 2): Devin's agent ends its turn some seconds before
 //! its screen has typed the answer out, and a window closed as the result was taken went
 //! mid-typing, frozen on "Typing", for whoever watched. The result is taken and delivered at
-//! once as ever; only the close waits, until the pane has printed nothing for a moment, or
-//! for the bound. A pause, a cancel, a failure or a hold for quota close at once, whatever
+//! once as ever; only the close waits, until what the pane's screen shows has held still for
+//! a moment, or for the bound. A pause, a cancel, a failure or a hold for quota close at once, whatever
 //! the screen shows.
 //!
 //! Not held to a Node recording: Node's dispatcher closed the window as the result was
@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::fixtures::Tiers;
 
-/// How long the pane must have printed nothing: `windows.rs`' `DRAWN_QUIET_MS`.
+/// How long what the pane's screen shows must have held still: `windows.rs`' `DRAWN_QUIET_MS`.
 const STILL_MS: i64 = 1_500;
 
 /// The longest the window waits from the look that found it free: `windows.rs`'
@@ -31,9 +31,9 @@ fn at_work(context: &Context, project: i64) -> Pane {
     context.host.last("zeus").unwrap().pane
 }
 
-/// The pane printed `ms` ago, as the host's snapshot says it.
+/// What the pane's screen shows changed `ms` ago, as the host's snapshot says it.
 fn printed(context: &Context, ms: i64) {
-    context.host.set_snapshot(json!({ "outputQuietMs": ms }));
+    context.host.set_snapshot(json!({ "screenQuietMs": ms }));
 }
 
 /// Zeus's agent answers, and the engine looks at it twice.
@@ -127,15 +127,15 @@ fn a_screen_that_never_rests_holds_the_window_for_the_bound_from_the_look_that_f
 fn a_window_whose_screen_is_already_still_or_whose_host_cannot_tell_closes_as_soon_as_its_task_is_done(
 ) {
     let screens: [(&str, Value); 4] = [
-        ("printed a minute ago", json!({ "outputQuietMs": 60_000 })),
+        ("printed a minute ago", json!({ "screenQuietMs": 60_000 })),
         (
             "printed just long enough ago",
-            json!({ "outputQuietMs": STILL_MS }),
+            json!({ "screenQuietMs": STILL_MS }),
         ),
         ("a host that does not say", json!({})),
         (
             "a pane that has printed nothing",
-            json!({ "outputQuietMs": null }),
+            json!({ "screenQuietMs": null }),
         ),
     ];
     for (name, screen) in screens {
@@ -152,6 +152,26 @@ fn a_window_whose_screen_is_already_still_or_whose_host_cannot_tell_closes_as_so
         );
         context.close();
     }
+}
+
+/// T-1083: a window whose harness prints without end and changes nothing it shows has a still
+/// screen, and closes as soon as its task is done: by its output it was held the whole bound.
+#[test]
+fn a_window_that_prints_and_shows_the_same_closes_as_soon_as_its_task_is_done() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 40, "screenQuietMs": 60_000 }));
+    answers(&context);
+    assert_eq!(context.task(project.id, 1).task.state, "done");
+    assert_eq!(
+        context.host.killed(),
+        [window],
+        "closed in the step that took the result"
+    );
+    context.close();
 }
 
 #[test]

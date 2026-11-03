@@ -1,7 +1,7 @@
 //! A re-paste needs proof of loss (3.0.7 chief-meeting, CMT-24, T-760's F4): a paste its
 //! window's record never showed goes again only where it is gone from the screen as from
-//! the record. A window whose screen printed within the last seconds is at work, or taking
-//! it in; a window whose input box holds it is pressed Enter once more. Either way it waits
+//! the record. A window whose screen changed within the last seconds is at work, or taking
+//! it in (one that prints and shows the same is not, T-1083); a window whose input box holds it is pressed Enter once more. Either way it waits
 //! a whole wait more, and nothing is pasted.
 
 use cf_engine::testing::Context;
@@ -50,9 +50,10 @@ fn enters(context: &Context) -> usize {
 fn a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again() {
     let context = Context::new();
     let note = a_note_that_never_shows(&context);
+    // It prints all the while, and what its screen shows has not changed for a minute.
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 60_000 }));
+        .set_snapshot(json!({ "outputQuietMs": 40, "screenQuietMs": 60_000 }));
     context.adapter.input_box.set(Some(InputBox::Holds));
     let before = enters(&context);
     context.advance(PAST_ARRIVAL);
@@ -81,7 +82,7 @@ fn a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again
 fn a_window_whose_screen_printed_within_the_last_seconds_is_not_pasted_again() {
     let context = Context::new();
     let note = a_note_that_never_shows(&context);
-    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 500 }));
     let before = enters(&context);
     context.advance(PAST_ARRIVAL);
     context.pass().unwrap();
@@ -94,7 +95,7 @@ fn a_window_whose_screen_printed_within_the_last_seconds_is_not_pasted_again() {
     );
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 60_000 }));
+        .set_snapshot(json!({ "screenQuietMs": 60_000 }));
     context.advance(PAST_ARRIVAL);
     context.pass().unwrap();
     context.pass().unwrap();

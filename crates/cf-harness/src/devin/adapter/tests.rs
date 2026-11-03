@@ -331,7 +331,7 @@ fn host() -> crate::testing::AnsweringHost<
     impl Fn(&str) -> Result<serde_json::Value, crate::contract::HostError>,
 > {
     crate::testing::AnsweringHost::new(|_| {
-        Ok(serde_json::json!({ "ok": true, "outputQuietMs": 60_000 }))
+        Ok(serde_json::json!({ "ok": true, "outputQuietMs": 60_000, "screenQuietMs": 60_000 }))
     })
 }
 

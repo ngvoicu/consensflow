@@ -1289,6 +1289,11 @@ impl Dispatcher {
                     None => Activity::of(state),
                 }
             };
+            // A look of the host's own, out of the Node traces: it costs no turn.
+            let activity = self.fallback_lane(record, activity).await;
+            if self.forgotten(record) {
+                return Ok(());
+            }
             self.set_activity(record, activity)?;
         }
         self.copy(participant, record, &observed)?;

@@ -88,9 +88,14 @@ pub struct ArbiterSnapshot {
     pub typed: u64,
     /// How long ago the human last typed into the pane, once they have.
     pub typed_quiet_ms: Option<u64>,
-    /// How long the pane has printed nothing, once it has printed anything:
-    /// a harness still drawing its screen is not ready for input.
+    /// How long the pane has printed nothing, once it has printed anything: what a
+    /// paste's Enter waits on ([`EnterTiming`]), and a harness's reader of its input box
+    /// on whether the window answered the human's last key.
     pub output_quiet_ms: Option<u64>,
+    /// How long what the pane's screen shows has not changed, once it has shown
+    /// anything ([`crate::screen::Screen::feed`]): how a screen at rest is told from one
+    /// at work. A harness can print without end and change nothing shown (T-1083).
+    pub screen_quiet_ms: Option<u64>,
     /// How long since a paste was last written into the pane, once one was: a
     /// paste the host held while it was slow is written when it catches up, and
     /// the window's record has had only this long to show it.
@@ -147,13 +152,17 @@ struct Written {
     classes: Classes,
 }
 
-/// When one generation of a pane last printed. Its output thread notes every
-/// chunk here and takes no lock: output never waits on the pane's input.
+/// When one generation of a pane last printed, and when what its screen shows last
+/// changed. Its output thread notes every chunk here and takes no lock: output never
+/// waits on the pane's input.
 pub struct OutputClock {
     started: Instant,
     /// Milliseconds after `started` of the last output, plus one; 0 before
     /// the pane has printed anything.
     printed: AtomicU64,
+    /// Milliseconds after `started` of the last chunk that changed what the screen
+    /// shows, plus one; 0 before any has.
+    shown: AtomicU64,
 }
 
 impl OutputClock {
@@ -161,18 +170,31 @@ impl OutputClock {
         Self {
             started: Instant::now(),
             printed: AtomicU64::new(0),
+            shown: AtomicU64::new(0),
         }
     }
 
-    /// The pane printed something now.
-    pub(crate) fn note(&self) {
-        let now = self.elapsed_ms();
-        self.printed.store(now.saturating_add(1), Ordering::Release);
+    /// The pane printed `changed` now: whether it changed what its screen shows
+    /// ([`crate::screen::Screen::feed`]).
+    pub(crate) fn note(&self, changed: bool) {
+        let now = self.elapsed_ms().saturating_add(1);
+        self.printed.store(now, Ordering::Release);
+        if changed {
+            self.shown.store(now, Ordering::Release);
+        }
     }
 
     fn quiet_ms(&self) -> Option<u64> {
-        let printed = self.printed.load(Ordering::Acquire);
-        (printed != 0).then(|| self.elapsed_ms().saturating_sub(printed - 1))
+        self.since(&self.printed)
+    }
+
+    fn screen_quiet_ms(&self) -> Option<u64> {
+        self.since(&self.shown)
+    }
+
+    fn since(&self, clock: &AtomicU64) -> Option<u64> {
+        let at = clock.load(Ordering::Acquire);
+        (at != 0).then(|| self.elapsed_ms().saturating_sub(at - 1))
     }
 
     fn elapsed_ms(&self) -> u64 {
@@ -185,7 +207,11 @@ impl OutputClock {
 /// `quiet_ms`; never sooner than `least_ms`, and at `most_ms` whatever it
 /// printed. A window silent since the paste may still be reading it: Devin
 /// draws a long paste's placeholder only once it has read all of it, and an
-/// Enter before that finds nothing to send.
+/// Enter before that finds nothing to send. It waits on the output, not on what
+/// the screen shows (T-1083): a window that still prints is still busy with the
+/// paste as far as anything here can tell (Codex on Windows asks where the cursor
+/// is while it reads one, T-1048), and an Enter too soon goes into the paste; a
+/// window that only repaints at rest costs the paste no more than `most_ms`.
 #[derive(Clone, Copy, Debug)]
 pub struct EnterTiming {
     pub least_ms: u64,
@@ -276,6 +302,7 @@ impl PaneInputState {
                 .typed_at
                 .map(|at| u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX)),
             output_quiet_ms: self.output.quiet_ms(),
+            screen_quiet_ms: self.output.screen_quiet_ms(),
             paste_quiet_ms: self
                 .pasted
                 .map(|pasted| u64::try_from(pasted.elapsed().as_millis()).unwrap_or(u64::MAX)),
@@ -775,6 +802,34 @@ mod tests {
     use crate::pty::{serial_pty_test, OpenedPane};
     use crate::pty::{PaneError, PaneInputWriter, PaneKey, PaneTable};
 
+    /// What the pane printed that changed nothing its screen shows moves its output's
+    /// clock and not its screen's (T-1083); a screen that has shown nothing says none.
+    #[test]
+    fn a_snapshot_says_how_long_the_screen_has_shown_the_same_apart_from_the_output() {
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let pane = PaneKey::new("still-pane", 1);
+        let printed = arbiter.register(&pane).expect("register");
+        let quiet = || {
+            let snapshot = arbiter.snapshot(&pane).expect("snapshot");
+            (snapshot.output_quiet_ms, snapshot.screen_quiet_ms)
+        };
+        printed.note(false);
+        assert!(
+            matches!(quiet(), (Some(_), None)),
+            "printed, and shown nothing: {:?}",
+            quiet()
+        );
+        printed.note(true);
+        thread::sleep(Duration::from_millis(40));
+        printed.note(false);
+        let (output, screen) = quiet();
+        assert!(output.is_some_and(|ms| ms < 40), "{output:?}");
+        assert!(
+            screen.is_some_and(|ms| (40..5_000).contains(&ms)),
+            "the screen shows what it showed 40 ms ago: {screen:?}"
+        );
+    }
+
     #[test]
     fn a_snapshot_says_how_long_the_pane_has_printed_nothing() {
         let arbiter = InputArbiter::new(EnterTiming::fixed(0));
@@ -784,7 +839,7 @@ mod tests {
             arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms,
             None
         );
-        printed.note();
+        printed.note(true);
         thread::sleep(Duration::from_millis(20));
         let quiet = arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms;
         assert!(
@@ -796,7 +851,7 @@ mod tests {
         arbiter
             .register(&newer)
             .expect("register a newer generation");
-        printed.note();
+        printed.note(true);
         assert_eq!(
             arbiter.snapshot(&newer).expect("snapshot").output_quiet_ms,
             None,
@@ -1353,7 +1408,7 @@ mod tests {
             writing_arbiter.write_via(writer.as_ref(), &writing_key, b"typed")
         });
         first_write.wait();
-        printed.note();
+        printed.note(true);
         let (read, snapshot) = mpsc::channel();
         let reading_arbiter = Arc::clone(&arbiter);
         let reading_key = key.clone();
@@ -1414,7 +1469,9 @@ mod tests {
 
     /// Pastes `body` through an arbiter with `enter`, the pane printing
     /// nothing for `silent` and then every 10 ms for `printing`, and says how
-    /// long its Enter waited.
+    /// long its Enter waited. What it prints changes nothing its screen shows:
+    /// the Enter waits on the window's output all the same, for a window that
+    /// still prints may still be taking the paste in (T-1083).
     fn enter_waited(enter: EnterTiming, silent: Duration, printing: Duration) -> Duration {
         let key = PaneKey::new("echoing", 1);
         let (writer, _observed) = RecordingWriter::new(None);
@@ -1424,7 +1481,7 @@ mod tests {
             thread::sleep(silent);
             let started = Instant::now();
             while started.elapsed() < printing {
-                clock.note();
+                clock.note(false);
                 thread::sleep(Duration::from_millis(10));
             }
         });
@@ -1788,6 +1845,7 @@ mod tests {
                 typed: 0,
                 typed_quiet_ms: None,
                 output_quiet_ms: None,
+                screen_quiet_ms: None,
                 paste_quiet_ms: None,
                 human_writes: Vec::new(),
             }

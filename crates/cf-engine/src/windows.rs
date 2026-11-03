@@ -18,7 +18,7 @@ use cf_ledger::{
 };
 use cf_proto::agents::Harness;
 use cf_proto::bridge::DEADLINE;
-use cf_proto::panes::{Servers, BOTTOM_LINES, CLOSE_GRACE};
+use cf_proto::panes::{Servers, BOTTOM_LINES, CLOSE_GRACE, SCREEN_QUIET_MS};
 use cf_proto::trace::WindowEvent;
 use futures_util::future::{select, Either};
 use serde_json::{json, Value};
@@ -58,7 +58,8 @@ fn drawn_lines(snapshot: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// How long a fresh window's output must hold still before its screen counts as drawn.
+/// How long what a fresh window's screen shows must hold still before it counts as drawn
+/// (the pane host's `screenQuietMs`: a screen printed again as it is, is still, T-1083).
 /// The window of a task that is done is held to the same rest before it closes
 /// ([`Dispatcher::still_drawing`], T-1051): one rest for "drawn", the number the engine
 /// already read a fresh window by, not a new one. Devin's screen shows "Typing · 2s" while it
@@ -1512,8 +1513,8 @@ impl Dispatcher {
         Ok(observed)
     }
 
-    /// Whether a window has drawn its screen: it printed, then held still for
-    /// a moment (the pane host says how long it has printed nothing). A host
+    /// Whether a window has drawn its screen: it showed something, then held still for
+    /// a moment (the pane host says how long what its screen shows has not changed). A host
     /// that cannot tell is taken as drawn. A window whose harness has no word of its
     /// own that it is at rest (`Window::idle_word`) is read at rest by the pacing's
     /// fallback, on its record and a quiet screen, and a screen held still is no
@@ -1546,7 +1547,7 @@ impl Dispatcher {
         };
         let quiet = match snapshot
             .as_ref()
-            .and_then(|snapshot| snapshot.get("outputQuietMs"))
+            .and_then(|snapshot| snapshot.get(SCREEN_QUIET_MS))
         {
             None => true,
             Some(Value::Null) => false,
@@ -1727,12 +1728,14 @@ impl Dispatcher {
     /// still being drawn: its task is done or accepted (the answer is the chief's already; a person
     /// watching the window sees it go mid-typing, frozen where it was, if it closes now:
     /// Devin's agent ends its turn some seconds before its screen has typed the answer
-    /// out, T-1038), and the pane has printed within the last [`DRAWN_QUIET_MS`]. A window
+    /// out, T-1038), and what its screen shows changed within the last [`DRAWN_QUIET_MS`] (a
+    /// screen printed again as it is, is still: one that repaints without end, as Muse Code
+    /// 1.4.14 can, is not held the whole bound, T-1083). A window
     /// whose task is not done closes at once, whatever its screen shows: a pause, a cancel,
     /// a failure or a hold for quota take the task out of the window's hands, and a
     /// crash or the human closing the window is no close of the engine's to wait with. So
-    /// does one whose host cannot say how long its pane has been quiet, or says it printed
-    /// nothing. The wait is bounded: it ends [`STILL_BOUND_MS`] after the window was first
+    /// does one whose host cannot say how long its screen has been quiet, or says it has
+    /// shown nothing. The wait is bounded: it ends [`STILL_BOUND_MS`] after the window was first
     /// found free, a screen that never rests notwithstanding. The host is asked at each
     /// step while the window waits.
     pub(crate) async fn still_drawing(

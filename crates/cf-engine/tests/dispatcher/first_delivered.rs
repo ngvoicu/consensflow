@@ -162,7 +162,7 @@ fn a_first_message_waits_while_its_window_is_not_ready_says_so_once_and_goes_in_
 fn a_first_message_waits_while_its_window_has_not_drawn_its_screen() {
     let context = delivered();
     // The host says the window has printed and not held still yet.
-    context.host.set_snapshot(json!({ "outputQuietMs": null }));
+    context.host.set_snapshot(json!({ "screenQuietMs": null }));
     let (_, brief) = briefed(&context);
     passes(&context, 4);
     assert_eq!(
@@ -170,7 +170,7 @@ fn a_first_message_waits_while_its_window_has_not_drawn_its_screen() {
         0,
         "nothing while it draws"
     );
-    context.host.set_snapshot(json!({ "outputQuietMs": 5000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5000 }));
     passes(&context, 2);
     assert_eq!(times_handed(&context, SEAM, brief), 1, "handed once drawn");
     context.close();
@@ -304,7 +304,7 @@ fn a_first_message_pasted_once_up_that_its_record_never_shows_is_pressed_enter_f
     context.settle();
     // Zeus's window takes the paste and its record never shows it: its Enter was lost.
     context.adapter.with("zeus", |agent| agent.arrive = false);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5000 }));
     passes(&context, 2);
     assert_eq!(times_handed(&context, SEAM, brief), 1);
     let before = enters(&context);
@@ -627,7 +627,7 @@ fn switched_to_a_chief_showing(context: &Context, screen: &str) -> (i64, i64) {
     context.adapter.asks_to_trust("/work/app", true);
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [screen] }));
+        .set_snapshot(json!({ "screenQuietMs": 5000, "tail": [screen] }));
     context
         .switch_chief(project, to("claude-code", "apollo"), SwitchWhen::Now, false)
         .unwrap();
@@ -697,7 +697,7 @@ fn a_chief_whose_window_shows_no_prompt_for_two_minutes_has_the_human_told_once_
     // Its prompt comes: the handoff goes in.
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [TRUST_PROMPT] }));
+        .set_snapshot(json!({ "screenQuietMs": 5000, "tail": [TRUST_PROMPT] }));
     wait(&context, 10);
     passes(&context, 2);
     assert_eq!(times_handed(&context, SEAM, handoff), 1);
@@ -712,7 +712,7 @@ fn a_chief_whose_window_shows_its_prompt_within_two_minutes_has_the_human_told_n
     wait(&context, 60);
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [TRUST_PROMPT] }));
+        .set_snapshot(json!({ "screenQuietMs": 5000, "tail": [TRUST_PROMPT] }));
     wait(&context, 240);
     assert_eq!(times_handed(&context, SEAM, handoff), 1, "handed once up");
     assert_eq!(no_prompt_notes(&context, project), 0);
@@ -744,7 +744,7 @@ fn briefed_showing(context: &Context, screen: &str) -> (i64, i64) {
     context.adapter.asks_to_trust("/work/app", true);
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [screen] }));
+        .set_snapshot(json!({ "screenQuietMs": 5000, "tail": [screen] }));
     briefed(context)
 }
 
@@ -772,7 +772,7 @@ fn a_question_drawn_after_the_window_showed_its_prompt_holds_its_first_message_u
     // A question is drawn, and then the window reads ready for a paste.
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [TRUST_QUESTION] }));
+        .set_snapshot(json!({ "screenQuietMs": 5000, "tail": [TRUST_QUESTION] }));
     ready.set(true);
     passes(&context, 2);
     assert_eq!(
@@ -789,7 +789,7 @@ fn a_question_drawn_after_the_window_showed_its_prompt_holds_its_first_message_u
     // Answered, the window at its prompt: the brief goes in once.
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [TRUST_PROMPT] }));
+        .set_snapshot(json!({ "screenQuietMs": 5000, "tail": [TRUST_PROMPT] }));
     wait(&context, 20);
     assert_eq!(times_handed(&context, SEAM, brief), 1);
     assert_eq!(context.message(brief).state, "delivered");
@@ -807,7 +807,7 @@ fn a_question_that_comes_after_half_a_minute_holds_a_workers_first_message_until
     assert_eq!(times_handed(&context, SEAM, brief), 0, "not let go at 30 s");
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [TRUST_QUESTION] }));
+        .set_snapshot(json!({ "screenQuietMs": 5000, "tail": [TRUST_QUESTION] }));
     wait(&context, 20);
     assert_eq!(
         times_handed(&context, SEAM, brief),
@@ -816,7 +816,7 @@ fn a_question_that_comes_after_half_a_minute_holds_a_workers_first_message_until
     );
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [TRUST_PROMPT] }));
+        .set_snapshot(json!({ "screenQuietMs": 5000, "tail": [TRUST_PROMPT] }));
     wait(&context, 20);
     assert_eq!(times_handed(&context, SEAM, brief), 1);
     assert_ne!(context.task(project, 1).task.state, "failed");

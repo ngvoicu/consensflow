@@ -309,7 +309,7 @@ async fn a_kill_is_asked_by_the_panes_id_and_generation() {
 }
 
 #[tokio::test]
-async fn how_long_a_pane_has_printed_nothing_is_what_its_snapshot_says_and_none_where_it_says_nothing(
+async fn how_long_a_panes_screen_has_held_still_is_what_its_snapshot_says_and_none_where_it_says_nothing(
 ) {
     LocalSet::new()
         .run_until(async {
@@ -318,9 +318,11 @@ async fn how_long_a_pane_has_printed_nothing_is_what_its_snapshot_says_and_none_
             let heard = Rc::clone(&seen);
             app.on("pane.snapshot", move |_, body| {
                 let answer = match body["generation"].as_u64() {
-                    Some(1) => json!({ "ok": true, "outputQuietMs": 320 }),
-                    // A pane that has printed nothing yet.
-                    Some(2) => json!({ "ok": true, "outputQuietMs": null }),
+                    // A pane that prints all the time and changes nothing it shows: what
+                    // its screen shows is what is asked, not its output (T-1083).
+                    Some(1) => json!({ "ok": true, "outputQuietMs": 5, "screenQuietMs": 320 }),
+                    // A pane whose screen has shown nothing yet.
+                    Some(2) => json!({ "ok": true, "screenQuietMs": null }),
                     // An answer that does not say, as a host older than the field's.
                     Some(3) => json!({ "ok": true }),
                     _ => json!({ "ok": false, "error": "no such pane" }),

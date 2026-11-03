@@ -54,10 +54,12 @@ pub trait EngineHost: PaneHost {
     fn open(&self, open: OpenPane) -> Work<'_, Result<Opened, HostError>>;
     /// Kills `pane`'s program.
     fn kill<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Killed, HostError>>;
-    /// How long `pane` has printed nothing, in milliseconds, as the host's `pane.snapshot`
-    /// says it (`outputQuietMs`): none where the pane has printed nothing yet or the host
-    /// does not say. The engine's look at whether a window's screen is still being drawn
-    /// before it closes the window of a task that is done (`Dispatcher::close_if_free`).
+    /// How long what `pane`'s screen shows has not changed, in milliseconds, as the host's
+    /// `pane.snapshot` says it (`screenQuietMs`): none where its screen has shown nothing yet
+    /// or the host does not say. The engine's look at whether a window's screen is still
+    /// being drawn before it closes the window of a task that is done
+    /// (`Dispatcher::close_if_free`), and at whether the screen of a window read at rest by
+    /// the pacing's fallback is quiet, for its lane to say (`Dispatcher::fallback_lane`).
     /// It is a read of the screen and changes nothing: the Node traces, which hold every
     /// call of the host the engine makes, have none of it, so a fake writes none down.
     fn quiet<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Option<f64>, HostError>>;

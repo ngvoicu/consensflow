@@ -134,7 +134,9 @@ impl Rig {
     /// What the pane host says of the window `pane` (`{ id, generation }`, as
     /// the board has it) now: its answer to `pane.snapshot`, which has how long
     /// the window printed nothing (`outputQuietMs`, null for a window that never
-    /// did), whether a paste is on its way in and what was typed and not sent, and
+    /// did) and how long what its screen shows has not changed (`screenQuietMs`, what
+    /// the daemon reads a window's screen at rest by, T-1083), whether a paste is on
+    /// its way in and what was typed and not sent, and
     /// the last `tail` lines of its screen as the host draws it (`tail`). The host
     /// keeps the cells the program's text, cursor moves and erasures leave, so
     /// that is the screen a person sees, however the program or the console host
