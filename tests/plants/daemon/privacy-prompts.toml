@@ -261,7 +261,7 @@ replace = '''
                 }'''
 
 [[plant]]
-name = "privacy prompts: a window holds what it does not and not what it does"
+name = "privacy prompts: a window holds no process, though its program runs"
 meant = "a_window_holds_its_program_and_what_runs_below_it"
 runs = ["pv-holds"]
 platforms = ["macos"]
@@ -269,10 +269,10 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
 find = "            .any(|member| member.key.pid == pid))"
-replace = "            .any(|member| member.key.pid != pid))"
+replace = "            .any(|member| member.key.pid == 0))"
 
 [[plant]]
-name = "privacy prompts: every pane holds every process"
+name = "privacy prompts: every pane holds every process it can look at"
 meant = "a_window_holds_its_program_and_the_sleep_below_it_and_this_test_is_no_windows"
 runs = ["pv-holding"]
 platforms = ["macos"]
@@ -280,7 +280,7 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/holding.rs"
 find = ".find(|(_, tree)| tree.holds(pid).unwrap_or(false))"
-replace = ".find(|(_, tree)| tree.holds(pid).unwrap_or(true))"
+replace = ".find(|(_, tree)| tree.holds(pid).is_ok())"
 
 [[plant]]
 name = "privacy prompts: every window of the system's is an alert"
