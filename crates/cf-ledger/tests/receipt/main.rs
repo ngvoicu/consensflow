@@ -46,4 +46,5 @@ mod told;
 mod told_edges;
 mod told_kept;
 mod transfers;
+mod waiting_after_failure;
 mod waiting_notes;

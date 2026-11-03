@@ -309,6 +309,31 @@ impl Ledger {
         tasks::give_up_task(&mut self.store, project_id, number, reason)
     }
 
+    /// What the note that tells `requester` that task `number` failed adds of the tasks it asked
+    /// for that wait for it: a sentence led by a space, none where nothing of theirs waits. The
+    /// engine writes that note when a delivery that did not arrive failed the task, and the
+    /// failure comes first in it, as in the ledger's own (`give_up_task`).
+    pub fn waiting_for_it(
+        &self,
+        project_id: i64,
+        number: i64,
+        requester: &str,
+    ) -> Result<String, LedgerError> {
+        tasks::waiting_for_it_of(&self.store, project_id, number, requester)
+    }
+
+    /// The requesters of the tasks that wait for the failed task `number`, but `named`, whose
+    /// note of the failure names its own ([`Ledger::waiting_for_it`]), are told that they wait
+    /// for a failed task: the engine says it last, after the words of the failure.
+    pub fn tell_waiting_for_failed(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        named: &str,
+    ) -> Result<(), LedgerError> {
+        tasks::tell_waiting_for_failed(&mut self.store, project_id, number, named)
+    }
+
     /// The human takes finished tasks off the board for good, all or none.
     pub fn delete_tasks(
         &mut self,
