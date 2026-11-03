@@ -17,12 +17,8 @@ runs = ["brief"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''
-const BRIEFED: Shape = Shape {
-    valued: &[brief::FILE],'''
-replace = '''
-const BRIEFED: Shape = Shape {
-    valued: &[],'''
+find = "const FILED: Shape = Shape {\n    valued: &[brief::FILE],"
+replace = "const FILED: Shape = Shape {\n    valued: &[],"
 
 [[plant]]
 name = "a brief's file: note, ask and answer do not know --file, and it is words"

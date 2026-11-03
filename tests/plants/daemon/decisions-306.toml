@@ -280,8 +280,8 @@ runs = ["cf-transcript-pages"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/transcript.rs"
-find = "    if words.value(\"--last\").is_some() {"
-replace = "    if false && words.value(\"--last\").is_some() {"
+find = "    if words.value(\"--last\")?.is_some() {"
+replace = "    if false && words.value(\"--last\")?.is_some() {"
 
 [[plant]]
 name = "transcript pages: a search shows a long item from its start, not around the words"

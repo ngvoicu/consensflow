@@ -266,7 +266,7 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "        TaskAction::Edit => edit(context, caller, &task, &body),\n"
+find = "        TaskAction::Edit => edit(context, caller, &task, &body, title.as_deref()),\n"
 replace = ""
 
 [[plant]]

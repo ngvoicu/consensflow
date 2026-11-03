@@ -213,12 +213,8 @@ runs = ["qnr-text"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''   it. One ending "(ConsensFlow: … If they are its result: `cf task finish T-5`.)"
-   is a turn's last words: answer it, or finish the task. `cf task pause T-5`
-   interrupts a running task and keeps its window and
-'''
-replace = '''   it. `cf task pause T-5` interrupts a running task and keeps its window and
-'''
+find = "   it. One ending \"(ConsensFlow: … If they are its result: `{{cf}} task finish T-5`.)\"\n   is a turn's last words: answer it, or finish the task. A window lost to a\n   crash pauses its task and tells you; resume it.\n"
+replace = "   it. A window lost to a\n   crash pauses its task and tells you; resume it.\n"
 
 [[plant]]
 name = "questions not results: the staff's text does not say a question is asked with cf ask"
@@ -227,11 +223,8 @@ runs = ["qnr-text"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''turn has ended. To wait for the chief's answer, ask with `cf ask`, never in your
-last words.
-'''
-replace = '''turn has ended.
-'''
+find = "turn has ended. To wait for the chief's answer, ask with `{{cf}} ask`, never in your\nlast words.\n"
+replace = "turn has ended.\n"
 
 [[plant]]
 name = "questions not results: the rig's stand-in answers nothing to a SAY line"

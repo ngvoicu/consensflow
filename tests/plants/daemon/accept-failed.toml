@@ -171,12 +171,8 @@ runs = ["accept-failed-engine-text"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''
-   undecided stays Done, and any task that needs it stays blocked. A failed
-   task whose work you checked is accepted too, with what you checked:
-   `cf task accept T-3 "what I checked"`.'''
-replace = '''
-   undecided stays Done, and any task that needs it stays blocked.'''
+find = "   stays Done, and any task that needs it stays blocked. A failed task whose\n   work you checked is accepted too, with what you checked:\n   `{{cf}} task accept T-3 \"what I checked\"`. Keep your own checks\n"
+replace = "   stays Done, and any task that needs it stays blocked. Keep your own checks\n"
 
 # The notes that tell the chief what to do with a failed task offer the accept as well as the
 # reopen (T-1111: the field chief read "cancel T-w, or reopen T-n" and cancelled the task that

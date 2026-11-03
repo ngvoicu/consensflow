@@ -68,8 +68,8 @@ runs = ["cf-text"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = '        require_text(text_of(words.text, input)?, "cf note \"what to know\"")?.into(),'
-replace = '        require_text(words.text, "cf note \"what to know\"")?.into(),'
+find = "            brief::brief_of(&words, given, input)?,\n            \"cf note \\\"what to know\\\"\",\n"
+replace = "            words.text.clone(),\n            \"cf note \\\"what to know\\\"\",\n"
 
 [[plant]]
 name = "text: cf ask takes a dash as its text"
@@ -78,8 +78,8 @@ runs = ["cf-text"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = '    let question = require_text(text_of(words.text, input)?, "cf ask \"your question\"")?;'
-replace = '    let question = require_text(words.text, "cf ask \"your question\"")?;'
+find = "        brief::brief_of(&words, given, input)?,\n        \"cf ask \\\"your question\\\"\",\n"
+replace = "        words.text.clone(),\n        \"cf ask \\\"your question\\\"\",\n"
 
 [[plant]]
 name = "text: cf answer takes a dash as its text"
@@ -88,15 +88,8 @@ runs = ["cf-text"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = '''
-        require_text(
-            text_of(words.text, input)?,
-            "cf answer m-<id> \"your answer\"",
-        )?
-'''
-replace = '''
-        require_text(words.text, "cf answer m-<id> \"your answer\"")?
-'''
+find = "            brief::brief_of(&words, given, input)?,\n            \"cf answer m-<id> \\\"your answer\\\"\",\n"
+replace = "            words.text.clone(),\n            \"cf answer m-<id> \\\"your answer\\\"\",\n"
 
 [[plant]]
 name = "text: cf task done takes a dash as its text"
@@ -105,16 +98,8 @@ runs = ["cf-text"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''
-    } else {
-        text_of(words.text, input)?
-    };
-'''
-replace = '''
-    } else {
-        words.text
-    };
-'''
+find = "    let text = brief::brief_of(&words, given, input)?;\n    // An edit with a title and nothing else"
+replace = "    let text = if action == \"done\" {\n        words.text.clone()\n    } else {\n        brief::brief_of(&words, given, input)?\n    };\n    // An edit with a title and nothing else"
 
 [[plant]]
 name = "text: the commands that give a window work take a dash as their text"
@@ -170,20 +155,8 @@ runs = ["cf-text"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = '''
-    let words: Vec<String> = given
-        .iter()
-        .map(|word| word.to_string_lossy().into_owned())
-        .collect();
-    match command(&words, given, board, input) {
-'''
-replace = '''
-    let words: Vec<String> = given
-        .iter()
-        .map(|word| word.to_string_lossy().lines().next().unwrap_or_default().to_owned())
-        .collect();
-    match command(&words, given, board, input) {
-'''
+find = "    let words: Vec<String> = given\n        .iter()\n        .map(|word| word.to_string_lossy().into_owned())\n        .collect();\n    match command(&words, given, board, input).map(|said| said.in_words_of(board.cf())) {\n"
+replace = "    let words: Vec<String> = given\n        .iter()\n        .map(|word| word.to_string_lossy().lines().next().unwrap_or_default().to_owned())\n        .collect();\n    match command(&words, given, board, input).map(|said| said.in_words_of(board.cf())) {\n"
 
 # The table and the sources must agree.
 

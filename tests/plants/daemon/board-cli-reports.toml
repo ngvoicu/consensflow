@@ -270,8 +270,8 @@ runs = ["bcr-daemon-verbs"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "        TaskAction::Edit if title.is_some() && js::trim(words).is_empty() => {"
-replace = "        TaskAction::Edit if false && title.is_some() && js::trim(words).is_empty() => {"
+find = "        no_words && edit.tier.is_none() && edit.needs.is_none() && edit.before.is_none()\n"
+replace = "        false && no_words && edit.tier.is_none() && edit.needs.is_none() && edit.before.is_none()\n"
 
 [[plant]]
 name = "cli reports 1118 title: the API gives no title with the words of a reopen or a resume"
@@ -328,13 +328,8 @@ runs = ["bcr-cf-lib-task"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''
-        && js::trim(&text).is_empty()
-        && !retitling
-    {'''
-replace = '''
-        && js::trim(&text).is_empty()
-    {'''
+find = "        && (action != \"edit\" || !alone)\n        && !retitling\n    {"
+replace = "        && (action != \"edit\" || !alone)\n    {"
 
 [[plant]]
 name = "cli reports 1118 title: cf takes a blank title"
@@ -353,8 +348,8 @@ runs = ["bcr-cf-lib-task"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '    let retitling = action == "edit" && title.is_some() && js::trim(&text).is_empty();'
-replace = "    let retitling = title.is_some() && js::trim(&text).is_empty();"
+find = "    let retitling = action == \"edit\" && title.is_some() && js::trim(&text).is_empty() && !alone;"
+replace = "    let retitling = title.is_some() && js::trim(&text).is_empty() && !alone;"
 
 [[plant]]
 name = "cli reports 1118 title: the usage names no --title"
@@ -376,9 +371,7 @@ runs = ["bcr-engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''
-    cf task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it alone, in any state
-'''
+find = "    {{cf}} task edit|reopen|resume T-3 … --title \"…\"   a new title; edit takes it alone, in any state\n"
 replace = ""
 
 [[plant]]

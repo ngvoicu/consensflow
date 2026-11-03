@@ -441,11 +441,8 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '''
-        TaskAction::Edit => edit(context, caller, &task, &body),
-'''
-replace = '''
-'''
+find = "        TaskAction::Edit => edit(context, caller, &task, &body, title.as_deref()),\n"
+replace = ""
 
 [[plant]]
 name = "tier fallback: the route drops the needs of an edit"
@@ -618,17 +615,13 @@ the next one up first.
 
 [[plant]]
 name = "tier fallback: the chief's text does not know the tier, needs and before of an edit"
-meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
 runs = ["tf-engine-text"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''
-    cf task edit T-3 "…" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task no window has yet (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
-'''
-replace = '''
-    cf task edit T-3 "…"          replace the brief of a task no window has yet (open, queued, or paused)
-'''
+find = "    {{cf}} task edit T-3 \"…\" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task no window has yet (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
+replace = "    {{cf}} task edit T-3 \"…\"          replace the brief of a task no window has yet (open, queued, or paused)\n"
 
 [[plant]]
 name = "tier fallback: cf help does not know the tier, needs and before of an edit"
