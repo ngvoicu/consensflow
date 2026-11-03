@@ -48,7 +48,7 @@ fn specs_turned_on_give_the_section_and_say_it_is_context() {
     assert_eq!(
         note,
         format!(
-            "Specs are now on in this project: the human turned them on while you work. This is now a section of your instructions:\n{}\n\n{CONTEXT}",
+            "Specs are now on in this project: the human turned them on while you work. This is now a section of your instructions:\n{}\n\nThis is context, not a task: say in one short line that you have it, and wait for the next message.",
             now.section()
         )
     );

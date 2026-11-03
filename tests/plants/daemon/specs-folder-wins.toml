@@ -136,7 +136,7 @@ replace = "            .specmint(setting.variant, cf_proto::specs::DEFAULT_FOLDE
 
 [[plant]]
 name = "specs folder: the launch is given the default folder, whatever the project's"
-meant = "a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at_its_next_launch_and_not_before"
+meant = "a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_at_its_next_rest_and_given_it_at_its_next_launch"
 runs = ["specs-folder-engine"]
 
 [[plant.edit]]

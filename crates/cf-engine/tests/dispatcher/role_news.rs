@@ -879,3 +879,147 @@ fn a_staff_that_changed_while_the_chief_ran_is_still_the_resumes_to_say_whole_th
         replacements[0].body
     );
 }
+
+#[test]
+fn a_skill_that_could_not_be_put_in_place_is_tried_again_when_the_setting_comes_back_to_what_failed(
+) {
+    let context = made(FirstMessage::Delivered);
+    let project = project_on(&context, "claude-code");
+    let chief = at_rest(&context, &project);
+    *context.adapter.place_fails.borrow_mut() = Some("no space left on device".to_owned());
+    says(
+        &context,
+        project.id,
+        Some(true),
+        "docs/specs",
+        Some(Variant::Core),
+    );
+    passes(&context);
+    // The human turns them off again (nothing was told, so nothing differs), then on.
+    says(&context, project.id, Some(false), "", None);
+    passes(&context);
+    *context.adapter.place_fails.borrow_mut() = None;
+    says(
+        &context,
+        project.id,
+        Some(true),
+        "docs/specs",
+        Some(Variant::Core),
+    );
+    passes(&context);
+    let notes = told(&context, chief);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].starts_with("Specs are now on in this project: "));
+}
+
+#[test]
+fn a_chief_told_of_specs_now_and_then_cleared_is_given_the_role_with_them_and_not_told_again() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = at_rest(&context, &project);
+    says(&context, project.id, Some(true), "", Some(Variant::Core));
+    passes(&context);
+    assert_eq!(told(&context, chief).len(), 1, "told now");
+    // A /clear that no hook greeted (Muse's) starts a conversation of its own with no role:
+    // the note that tells the first one does not stand for it.
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    passes(&context);
+    let notes = role_notes(&context, chief);
+    assert_eq!(
+        notes.len(),
+        2,
+        "the news, and the role for the cleared session: {notes:?}"
+    );
+    assert!(
+        notes[1]
+            .body
+            .contains("began without your ConsensFlow role instructions"),
+        "{}",
+        notes[1].body
+    );
+    assert!(
+        notes[1].body.contains("with specs: core in .specs"),
+        "the role it is given has them: {}",
+        notes[1].body
+    );
+    assert_eq!(notes[1].state, "delivered");
+    // It was told them in that role: nothing tells it again, at the rest after its turn on it.
+    rests(&context, &project);
+    passes(&context);
+    assert_eq!(role_notes(&context, chief).len(), 2);
+}
+
+#[test]
+fn a_clear_that_comes_with_a_change_one_look_has_found_is_given_the_role_with_it_and_told_no_more()
+{
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = at_rest(&context, &project);
+    // One look finds the specs turned on: nothing is written yet (two looks in a row tell).
+    says(&context, project.id, Some(true), "", Some(Variant::Core));
+    context.pass().unwrap();
+    assert!(role_notes(&context, chief).is_empty());
+    // A /clear no hook greeted comes before the second: the role it is given has the specs,
+    // and that is all it is told of them.
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    passes(&context);
+    passes(&context);
+    let notes = role_notes(&context, chief);
+    assert_eq!(
+        notes.len(),
+        1,
+        "the role for the cleared session alone: {notes:?}"
+    );
+    assert!(
+        notes[0]
+            .body
+            .contains("began without your ConsensFlow role instructions")
+            && notes[0].body.contains("with specs: core in .specs"),
+        "{}",
+        notes[0].body
+    );
+    assert_eq!(notes[0].state, "delivered");
+    // Its turn on that role over, the chief at rest is told nothing more of them.
+    rests(&context, &project);
+    passes(&context);
+    assert_eq!(
+        role_notes(&context, chief).len(),
+        1,
+        "{:?}",
+        role_notes(&context, chief)
+    );
+}
+
+#[test]
+fn a_member_at_rest_while_it_waits_for_an_answer_is_told_nothing_of_the_rules_changed_under_it() {
+    let context = made(FirstMessage::Delivered);
+    let project = project_on(&context, "claude-code");
+    at_rest(&context, &project);
+    let task = context.give(project.id, "zeus", "Write the parser").task;
+    passes(&context);
+    let zeus = context.id(project.id, "zeus");
+    // The member asks the chief and ends its turn: its window is open and at rest.
+    context.ask(project.id, "zeus", "chief", task.number, "Which parser?");
+    context.adapter.answer("zeus", "Asked.");
+    passes(&context);
+    assert_eq!(
+        context.dispatcher.activity(zeus).state,
+        cf_engine::ActivityState::Idle,
+        "the member's window is at rest"
+    );
+    // The human changes the rules; the member's window is a task's, the next one is given them.
+    rules(&context, project.id, Some(RULES));
+    passes(&context);
+    passes(&context);
+    assert!(
+        role_notes(&context, zeus).is_empty(),
+        "{:?}",
+        role_notes(&context, zeus)
+    );
+}

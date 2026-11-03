@@ -1407,6 +1407,13 @@ impl Dispatcher {
                 .await_switch(project, participant, record, &observed, idle)
                 .await;
         }
+        // A setting its role is built from may have changed under the window: it is told
+        // now, as a wake-up is queued, and the note goes in by the way every message does,
+        // ahead of the wake-up's. Only a chief's window was told a role at its launch that a
+        // setting changes (`role_news`).
+        if project.state == "open" && idle {
+            self.tell_role_news(project, participant, record)?;
+        }
         // A closed project's window that its Close could not close is given nothing
         // until the Resume, as no closed project is: what waits for it is the Resume's
         // to settle first (Sol's review of 2026-10-16: the note that the work was
@@ -1418,11 +1425,6 @@ impl Dispatcher {
             if participant.role == "chief" {
                 self.queue_wake_up_if_due(project, participant)?;
             }
-            // A setting its role is built from may have changed under the window: it is told
-            // now, as a wake-up is queued, and goes in by the way every message does. Only a
-            // chief's window was told a role at its launch that a setting changes
-            // (`role_news`).
-            self.tell_role_news(project, participant, record)?;
             let next = self.next_in_line(record)?;
             // A hold is the head's: a message that left the head of its queue (withdrawn,
             // its task paused or cancelled) is held back no more (Calliope's re-check of

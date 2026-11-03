@@ -792,7 +792,7 @@ replace = '''      `Specmint ${specmint.version}, brought with this app.`'''
 # dispatcher after the change: one that closed the chief to give it the new specs passed it.
 [[plant]]
 name = "specs settings: a pass closes a chief at work where the app has specs on, for its next window to have them"
-meant = "a_project_that_said_a_variant_keeps_it_when_the_app_names_another_and_a_change_reaches_the_next_launch"
+meant = "a_project_that_said_a_variant_keeps_it_when_the_app_names_another_and_a_change_reaches_the_running_chief_and_the_next_launch"
 runs = ["settings-engine"]
 
 [[plant.edit]]

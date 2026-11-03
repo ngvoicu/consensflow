@@ -173,7 +173,12 @@ impl Dispatcher {
             return Ok(());
         }
         let (told, refused) = {
-            let part = record.window.borrow();
+            let mut part = record.window.borrow_mut();
+            // The human was told of one thing that could not be put in place: a setting that
+            // is another now is another to try, and one that comes back is tried anew.
+            if part.news.refused.as_ref() != Some(&wanted) {
+                part.news.refused = None;
+            }
             (part.news.told.clone(), part.news.refused.clone())
         };
         let Some(told) = told else {
@@ -202,8 +207,8 @@ impl Dispatcher {
     /// What became of the note written before, if one was: whether the look may go
     /// on to write one. A note that went in is told: the window holds what it says.
     /// One that waits and says what the project says still waits for its turn (no
-    /// other is written); one that says what it does not is withdrawn; one that is on
-    /// its way goes in.
+    /// other is written); one that says what it does not is withdrawn. (A look at rest
+    /// finds no note on its way: a window with a delivery on its way is not at rest.)
     fn settle_news(&self, record: &Record, wanted: &Parts) -> Result<bool, EngineError> {
         let Some(written) = record.window.borrow().news.waiting.clone() else {
             return Ok(true);
@@ -215,7 +220,6 @@ impl Dispatcher {
             .message(written.message)?
             .map(|message| message.state);
         match state.as_deref() {
-            Some("delivering") => Ok(false),
             Some("queued") if written.parts == *wanted => Ok(false),
             Some("queued") => {
                 self.seams.ledger.borrow_mut().cancel_message(
