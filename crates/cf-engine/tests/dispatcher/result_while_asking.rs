@@ -444,6 +444,40 @@ fn a_question_raised_from_a_turns_last_words_is_not_given_again_in_the_result() 
     );
 }
 
+/// The question ConsensFlow raised carries a line about a line of the record lost in the turn
+/// after the words (`questions_not_results`): it is still the question raised from them.
+#[test]
+fn a_question_raised_past_a_line_lost_in_the_turn_is_not_given_again_in_the_result() {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    let tiers = working(&context);
+    works_on(&context);
+    context.adapter.loses_a_line("zeus");
+    context.pass().unwrap();
+    let words = format!("{WRITE_UP}\n\nShould I continue with the live runs, or stop here?");
+    context.adapter.answer("zeus", &words);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    let raised = context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .find(|message| message.kind == "question")
+        .expect("the question ConsensFlow raised");
+    assert!(raised.body.contains("A line of @"), "{}", raised.body);
+
+    context.answer(tiers.project.id, raised.id, "Stop here.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Stopped.");
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    let results = results(&context, &tiers);
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert!(results[0].starts_with("Stopped."), "{results:?}");
+    assert!(!results[0].contains("Written before"), "{results:?}");
+}
+
 /// The turn was cut off before the answer went in (its last words are not complete: Claude
 /// Code marks the text of a turn it was stopped in so): those are no one's last words.
 #[test]

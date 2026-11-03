@@ -159,11 +159,15 @@ impl Dispatcher {
                         && !header_id(&item.text).is_some_and(|id| replacements.contains(&id))
                 })
                 .map_or(0, |at| at + 1);
-            let raised = with_finish_line(words.clone(), &participant.handle, thread.task.number);
+            // The question raised from these words has them first, a line of a record lost in
+            // the turn after them where there was one, and the line that says how to finish.
+            let finish_line =
+                with_finish_line(String::new(), &participant.handle, thread.task.number);
             let on_the_board = thread.messages.iter().any(|message| {
                 message.kind == "question"
                     && message.sender.as_deref() == Some(participant.handle.as_str())
-                    && message.body == raised
+                    && message.body.starts_with(&words)
+                    && message.body.ends_with(&finish_line)
             });
             let a_line_about_the_question =
                 ended_on_asking(&before[began..]) && words.chars().count() <= WRAPPER_CHARS;
