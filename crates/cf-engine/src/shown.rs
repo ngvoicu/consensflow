@@ -42,6 +42,7 @@ use cf_ledger::MAY_STILL_RUN;
 use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft, SnapshotTail};
 use regex::Regex;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use mask::mask;
 #[cfg(any(test, feature = "test-support"))]
@@ -170,11 +171,18 @@ impl Shown {
     }
 
     /// What the screen says of a failure, to tell one outage from the next
-    /// ([`outage_key`]): its last lines with a word in them.
+    /// ([`hashed`]): its last lines with a word in them, which are the screen's own and may
+    /// name a secret, so only their hash goes on.
     pub(crate) fn outage_key(&self) -> String {
+        hashed(&self.screen_folded())
+    }
+
+    /// The last lines of the screen with a word in them, folded ([`folded_key`]): readable,
+    /// and for [`Shown::outage_key`] alone.
+    fn screen_folded(&self) -> String {
         self.tail
             .as_deref()
-            .map_or_else(String::new, |tail| outage_key(tail, Keep::Last))
+            .map_or_else(String::new, |tail| folded_key(tail, Keep::Last))
     }
 
     /// The last lines of the screen the host sent: none where it sent none.
@@ -264,15 +272,40 @@ pub(crate) fn after_words(because: &str, words: &str) -> Option<String> {
 }
 
 /// What a harness's `words` say of a failure, to tell one outage from the next
-/// ([`outage_key`]): their first lines with a word in them.
+/// ([`hashed`]): their first lines with a word in them. A provider's error can name the key
+/// it refused ("Incorrect API key provided: sk-…"), so only their hash goes on.
 pub(crate) fn words_key(words: &str) -> String {
+    hashed(&words_folded(words))
+}
+
+/// The first lines of a harness's `words` with a word in them, folded ([`folded_key`]):
+/// readable, and for [`words_key`] alone.
+fn words_folded(words: &str) -> String {
     let lines: Vec<String> = words.lines().map(str::to_owned).collect();
-    outage_key(&lines, Keep::First)
+    folded_key(&lines, Keep::First)
+}
+
+/// What an outage's key is as it goes on, to the engine's memory, the ledger, its log and the
+/// trace: the SHA-256 of what the failure said as [`folded_key`] folds it, in hex. The words
+/// of a failure and the lines of a screen can hold a login or a token, and the note that
+/// quotes them masks them (`mask`, `names_a_secret`); the key only has to be told equal or
+/// not, and keeps nothing readable. A failure that said nothing the engine could tell
+/// (no line with a word in it) has no key: the empty one, which is no cause and is never
+/// hashed into one.
+fn hashed(folded: &str) -> String {
+    if folded.is_empty() {
+        return String::new();
+    }
+    Sha256::digest(folded.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The lines a quote of `lines` would keep, their blanks made one and what
-/// changes by itself within one outage folded ([`folded`]).
-fn outage_key(lines: &[String], keep: Keep) -> String {
+/// changes by itself within one outage folded ([`folded`]). Readable: it never leaves the
+/// functions that hash it ([`hashed`]).
+fn folded_key(lines: &[String], keep: Keep) -> String {
     let lines: Vec<String> = lines
         .iter()
         .filter(|line| line.chars().any(char::is_alphanumeric))

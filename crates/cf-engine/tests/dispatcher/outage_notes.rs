@@ -23,6 +23,7 @@
 
 use cf_engine::testing::Context;
 use cf_ledger::{NewTask, SAME_ERROR_WITHIN_MS};
+use serde_json::json;
 
 use crate::fixtures::Tiers;
 
@@ -585,5 +586,124 @@ fn a_failure_a_delivery_gave_up_is_withdrawn_with_its_task_as_well() {
     assert_eq!(
         reason_of(&tiers, told[0].0).as_deref(),
         Some("T-1 is accepted now")
+    );
+}
+
+/// A key a harness or a shell could show: made up, as long as a real one.
+const SECRET: &str = "sk-proj-Zq81XmN4vT7bKd29LpWs3YcRu6EhGf0A";
+
+/// T-`number`'s window ends its turn failed with no words of the harness's own, so that what
+/// the failure says is what its window shows last.
+fn fails_showing_only_its_screen(context: &Context, tiers: &Tiers<'_>, number: i64) {
+    let window = tiers.assignee(number);
+    context.adapter.with(&window, |agent| {
+        agent.failed = true;
+        agent.failure = None;
+    });
+    context.adapter.answer(&window, "Working on it");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(number).task.state, "failed", "T-{number}");
+}
+
+/// Everything the ledger holds in its log and in its messages, as text.
+fn ledger_text(context: &Context) -> String {
+    let ledger = context.ledger.borrow();
+    let mut text = String::new();
+    for sql in ["SELECT data FROM event", "SELECT body FROM message"] {
+        let mut statement = ledger.sqlite().prepare(sql).unwrap();
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap();
+        for row in rows {
+            text.push_str(&row.unwrap());
+            text.push('\n');
+        }
+    }
+    text
+}
+
+/// The parts of `secret` a ledger must not hold: the whole, and every run of 8 characters
+/// of it (a part of a key is as good as a key to whoever reads the log).
+fn parts_of(secret: &str) -> Vec<String> {
+    let chars: Vec<char> = secret.chars().collect();
+    let mut parts = vec![secret.to_owned()];
+    parts.extend(chars.windows(8).map(|run| run.iter().collect::<String>()));
+    parts
+}
+
+#[test]
+fn a_failure_whose_screen_names_a_key_leaves_no_part_of_it_in_the_ledger() {
+    let context = Context::new();
+    let tiers = six_at_work(&context);
+    context.host.set_snapshot(json!({
+        "tail": [
+            "Working on the parser",
+            format!("export OPENAI_API_KEY={SECRET}"),
+            "Error: the request failed",
+        ]
+    }));
+    fails_showing_only_its_screen(&context, &tiers, 1);
+
+    let held = ledger_text(&context);
+    for part in parts_of(SECRET) {
+        assert!(!held.contains(&part), "the ledger holds {part:?}");
+    }
+    // The note says the screen named a secret and left its lines out, as it always did.
+    let told = queued_failures(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0]
+            .1
+            .contains("its last screen lines named a secret, so they are left out"),
+        "{}",
+        told[0].1
+    );
+}
+
+#[test]
+fn a_failure_whose_harness_quotes_a_key_leaves_no_part_of_it_in_the_ledger() {
+    // A provider's error that says which key it refused ("Incorrect API key provided: sk-…").
+    let context = Context::new();
+    let tiers = six_at_work(&context);
+    fails(
+        &context,
+        &tiers,
+        1,
+        &format!("Incorrect API key provided: {SECRET}. You can find your API key at the provider's page."),
+    );
+
+    let held = ledger_text(&context);
+    for part in parts_of(SECRET) {
+        assert!(!held.contains(&part), "the ledger holds {part:?}");
+    }
+}
+
+#[test]
+fn failures_whose_screens_say_the_same_are_still_one_note_and_other_screens_stand_apart() {
+    let context = Context::new();
+    let tiers = six_at_work(&context);
+    let screen = |last: &str| json!({ "tail": ["Working on the parser", format!("export OPENAI_API_KEY={SECRET}"), last] });
+    context
+        .host
+        .set_snapshot(screen("Error: the request failed"));
+    fails_showing_only_its_screen(&context, &tiers, 1);
+    context.advance(MINUTE);
+    fails_showing_only_its_screen(&context, &tiers, 2);
+    context.advance(MINUTE);
+    context
+        .host
+        .set_snapshot(screen("Error: the model is not found"));
+    fails_showing_only_its_screen(&context, &tiers, 3);
+
+    let told = queued_failures(&tiers);
+    assert_eq!(told.len(), 2, "{told:?}");
+    assert!(
+        told[0].1.starts_with("T-3 failed: ") || told[1].1.starts_with("T-3 failed: "),
+        "{told:?}"
+    );
+    assert!(
+        told.iter()
+            .any(|(_, body)| body.starts_with("T-1 and T-2 failed within")),
+        "the same screen is one note: {told:?}"
     );
 }

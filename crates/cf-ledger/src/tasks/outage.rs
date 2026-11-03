@@ -72,7 +72,9 @@ struct Member {
 }
 
 /// What a queued note of failures is made of: the message that tells it, whom it tells,
-/// what the failures said (empty where the engine could not tell), and the failures.
+/// what the failures said as the engine hashed it (empty where the engine could not tell: the
+/// ledger and its log hold nothing readable of a screen or of a harness's error, which can
+/// name a key), and the failures.
 #[derive(Clone, Serialize, Deserialize)]
 struct Told {
     message: i64,

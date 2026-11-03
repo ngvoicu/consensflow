@@ -1053,8 +1053,8 @@ pub(crate) fn give_up_task(
     fail(store, project_id, number, reason, true, cause)
 }
 
-/// `cause` is what the failure said, to tell one outage from the next (empty where the engine
-/// could not tell): the requester is told of the windows that failed alike in one note
+/// `cause` is what the failure said, to tell one outage from the next, as the engine hashes it
+/// (`Shown::outage_key`; empty where the engine could not tell): the requester is told of the windows that failed alike in one note
 /// (`outage`).
 fn fail(
     store: &mut Store,

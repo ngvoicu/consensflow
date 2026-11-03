@@ -448,7 +448,7 @@ fn a_snapshot_answer_gives_its_tail_when_it_was_a_success() {
 
 #[test]
 fn what_changes_by_itself_in_an_outage_is_folded_and_every_other_number_kept() {
-    let key = |words: &str| words_key(words);
+    let key = |words: &str| words_folded(words);
     assert_eq!(
         key("Overloaded, retry in 12s"),
         key("Overloaded, retry in 7s")
@@ -535,7 +535,7 @@ fn what_a_screen_says_is_the_windows_lines_after_the_newest_paste() {
 
 #[test]
 fn a_footers_counters_are_folded_and_keep_one_failure_one() {
-    let key = |words: &str| words_key(words);
+    let key = |words: &str| words_folded(words);
     assert_eq!(
         key("Error: x / 12% context left"),
         key("Error: x / 9% context left")
@@ -560,5 +560,48 @@ fn a_footers_counters_are_folded_and_keep_one_failure_one() {
     assert_eq!(
         key("1.2k tokens and 3k left"),
         "#count tokens and #count left"
+    );
+}
+
+#[test]
+fn an_outage_key_is_a_hash_that_tells_equal_failures_and_keeps_nothing_readable() {
+    let hex = |key: &str| key.len() == 64 && key.chars().all(|c| c.is_ascii_hexdigit());
+    let secret = "sk-proj-Zq81XmN4vT7bKd29LpWs3YcRu6EhGf0A";
+
+    // The harness's words: what folds to the same is the same key, and no other.
+    let one = words_key(&format!(
+        "Incorrect API key provided: {secret} (retry in 12s)"
+    ));
+    let other = words_key(&format!(
+        "Incorrect API key provided: {secret} (retry in 7s)"
+    ));
+    let another = words_key(&format!(
+        "Incorrect API key provided: {secret} for another organisation"
+    ));
+    assert!(hex(&one), "{one}");
+    assert_eq!(one, other);
+    assert_ne!(one, another);
+    assert!(!one.contains("sk-proj"), "{one}");
+
+    // The screen's last lines are the same.
+    let screen = |last: &str| {
+        Shown::from_snapshot(&json!({
+            "ok": true,
+            "tail": ["Working", format!("export OPENAI_API_KEY={secret}"), last],
+        }))
+    };
+    let key = screen("Error: the request failed").outage_key();
+    assert!(hex(&key), "{key}");
+    assert_eq!(key, screen("Error: the request failed").outage_key());
+    assert_ne!(key, screen("Error: the model is not found").outage_key());
+    assert!(!key.contains("OPENAI") && !key.contains("sk-"), "{key}");
+
+    // A failure that said nothing the engine could tell has no key, and is never hashed into one.
+    assert_eq!(words_key(""), "");
+    assert_eq!(words_key("  \n ... \n"), "");
+    assert_eq!(Shown::default().outage_key(), "");
+    assert_eq!(
+        Shown::from_snapshot(&json!({ "ok": true, "tail": ["", "  "] })).outage_key(),
+        ""
     );
 }

@@ -376,7 +376,8 @@ impl Ledger {
     }
 
     /// [`Ledger::give_up_task`] of a task whose failure said what `cause` says (what the
-    /// engine tells one outage from the next by): its requester is told in one note of the
+    /// engine tells one outage from the next by: a hash of it, never the words or the screen,
+    /// which the ledger and its log do not keep): its requester is told in one note of the
     /// windows that failed alike while it has still to be given the first.
     pub fn give_up_task_for_cause(
         &mut self,
