@@ -687,6 +687,9 @@ fn a_pause_of_a_task_the_window_holds_but_does_not_work_on_presses_no_key_and_it
 #[test]
 fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer_that_pause() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = working(&context);
     // T-2 is given to the window, which works on T-1, and is paused before any
     // words of it reach the window: nothing in the window is for it to stop.
@@ -728,6 +731,9 @@ fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer
 #[test]
 fn a_stop_paid_for_one_task_the_window_held_never_hides_the_stop_of_the_task_it_goes_on_with() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = working(&context);
     context.give(project, "zeus", "Docs");
     // T-1 is paused and its turn ends before a look finds it at work: the

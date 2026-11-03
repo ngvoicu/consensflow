@@ -98,6 +98,10 @@ fn is_killed_once_when_its_member_leaves_the_staff_though_its_exit_comes_late() 
 fn closed_with_its_task_done_and_its_exit_late_pauses_nothing_its_session_is_given_meanwhile() {
     for reopen in [false, true] {
         let context = Context::new();
+        // The host proves each window's program gone, as the app's does, but late: the
+        // session's next task goes on with its conversation (`ownership`), as this test is
+        // about the exit's lateness.
+        context.host.exits_showing(Some(0), None, None);
         context.host.hold_exits.set(true);
         let tiers = Tiers::new(&context, &["zeus"]);
         let project = tiers.project.id;

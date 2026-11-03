@@ -224,6 +224,9 @@ fn a_follow_up_of_an_older_accepted_task_waits_while_the_window_holds_a_result_t
 #[test]
 fn a_follow_up_released_by_the_cancel_of_its_sessions_task_goes_once_the_window_is_stopped() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let tiers = Tiers::new(&context, &["zeus"]);
     let project = tiers.project.id;
     tiers.open();

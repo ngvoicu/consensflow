@@ -205,6 +205,9 @@ fn a_cancelled_task_closes_its_window_at_once_whatever_its_screen_shows() {
 fn the_next_task_of_the_session_waits_for_the_same_screen_and_its_requester_is_told_nothing_of_it()
 {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = context.with_staff(&["zeus"]);
     let window = at_work(&context, project.id);
     printed(&context, 300);
@@ -241,6 +244,9 @@ fn the_next_task_of_the_session_waits_for_the_same_screen_and_its_requester_is_t
 #[test]
 fn the_next_task_of_the_session_waits_no_longer_than_the_bound_for_a_screen_that_never_rests() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = context.with_staff(&["zeus"]);
     let window = at_work(&context, project.id);
     printed(&context, 300);
@@ -316,6 +322,9 @@ fn a_task_in_hand_again_ends_the_wait_and_the_next_time_it_is_done_the_window_wa
 #[test]
 fn a_window_opened_since_waits_its_own_time_not_the_bound_of_the_one_that_closed() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = context.with_staff(&["zeus"]);
     let first = at_work(&context, project.id);
     printed(&context, 300);

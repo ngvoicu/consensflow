@@ -70,6 +70,9 @@ fn the_chiefs_turn_ends(context: &Context) {
 #[test]
 fn pastes_no_result_into_a_chief_that_accepted_its_task_in_the_turn_the_result_waited_behind() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let tiers = working(&context);
     let result = finished_in_the_chiefs_turn(&context, &tiers);
 

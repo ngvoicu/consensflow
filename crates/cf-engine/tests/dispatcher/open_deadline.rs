@@ -137,7 +137,26 @@ fn the_next_window_of_a_session_waits_until_the_host_has_ended_the_one_given_up_
     );
     assert_eq!(tiers.task(3).task.state, "queued");
 
+    // Once the host has ended it, T-3 is no longer kept from a window; but the conversation
+    // may have been run on, so T-3, a follow-up no window had, is held for the chief's word.
     context.host.refuse_kills.set(false);
+    passes(&context, 3);
+    assert_eq!(
+        context.host.opened().len(),
+        opened,
+        "no window opens unasked"
+    );
+    assert_eq!(tiers.task(3).task.state, "paused");
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            tiers.project.id,
+            3,
+            Some("chief"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
     passes(&context, 3);
     assert_eq!(
         context.host.opened().len(),
@@ -184,6 +203,20 @@ fn the_end_of_the_window_given_up_on_told_after_the_next_one_opened_is_nothing_t
     context.host.hold_exits.set(false);
 
     follow_up(&context, &tiers, "Write the docs, again");
+    passes(&context, 3);
+    // The window given up on may have run on the conversation: T-3, a follow-up no window
+    // had, is held for the chief's word, and goes to a window of its own once it is given.
+    assert_eq!(tiers.task(3).task.state, "paused");
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            tiers.project.id,
+            3,
+            Some("chief"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
     passes(&context, 3);
     assert_eq!(tiers.task(3).task.state, "working");
     let next = context.host.last(&session).unwrap().pane;

@@ -34,13 +34,16 @@
 //! saw it close: a window open when the app quit, which the window's quit ends after the
 //! daemon has gone and tells no one, `cf_panes::headless::reap_all`), the other task opens
 //! a new conversation, as a session's first task does, and whoever gave it is told once
-//! that it does not go on in the earlier task's ([`Dispatcher::kept_apart`]). A task queued for
-//! the window that cannot go on in the earlier task's conversation is not given to a window of
-//! its own unasked, though: its brief may be written for a window that remembers the earlier
-//! task ("your T-65 snapshot", the field issue of 2026-10-29). It is held for the chief's word
+//! that it does not go on in the earlier task's ([`Dispatcher::kept_apart`]). A follow-up, a
+//! task queued for the window that has never been in a window, is not given to a window of its
+//! own unasked, though: its brief may be written for a window that remembers the earlier task
+//! ("your T-65 snapshot", the field issue of 2026-10-29). It is held for the chief's word
 //! (paused, `Ledger::hold_for_context`), told once with how to go on: rewrite the brief with
 //! `cf task edit`, and send it on with `cf task resume`, which is the chief's knowing: the task
-//! then goes to a conversation of its own, and is not held a second time.
+//! then goes to a conversation of its own, and is not held a second time. A task that was in a
+//! window before (resumed after a restart, sent back with words) is not held: the chief's word
+//! to resume or reopen it was given knowing the window, and it goes to a conversation of its
+//! own as it did, told once.
 //!
 //! The window knows its task by the launch that opened it (its first message's task, the
 //! message a role said first displaced among them, or the task its conversation was last
@@ -168,10 +171,11 @@ impl Dispatcher {
     /// The conversation a member's window that opens for `first` goes on with: `found`,
     /// the session's, unless `first` is a message of another task than the one that
     /// conversation was last given (`before`) and the host did not prove the program of
-    /// the last window on it gone, as the ledger keeps it. Then a task still queued for the
-    /// window is held for the chief's word ([`Kept::Held`]), once: told to whoever gave it,
-    /// with how to go on. A task the chief sent on after that goes to a new conversation (none),
-    /// knowingly, and so does one that is not queued, whoever gave it told once.
+    /// the last window on it gone, as the ledger keeps it. Then a follow-up, a task still
+    /// queued for the window that no window ever had, is held for the chief's word
+    /// ([`Kept::Held`]), once: told to whoever gave it, with how to go on. A task the chief
+    /// sent on after that goes to a new conversation (none), knowingly, and so does one that
+    /// a window had before or that is not queued, whoever gave it told once.
     pub(crate) fn kept_apart(
         &self,
         project: &ProjectView,
@@ -209,7 +213,13 @@ impl Dispatcher {
         {
             return Ok(Kept::On(None));
         }
-        if waiting.task.state == "queued" {
+        // No task message of it ever reached a window: it is a follow-up, and what its brief
+        // counts on is the window it follows. A task a window had (resumed, sent back) was
+        // given to a window knowingly.
+        let never_in_a_window = !waiting.messages.iter().any(|message| {
+            message.kind == "task" && matches!(message.state.as_str(), "delivered" | "read")
+        });
+        if waiting.task.state == "queued" && never_in_a_window {
             let mut ledger = self.seams.ledger.borrow_mut();
             ledger.hold_for_context(
                 project.id,
