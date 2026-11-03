@@ -156,6 +156,9 @@ mod tests {
         let reports = tempfile::tempdir().unwrap();
         let mut scenario = Scenario::named("smoke").unwrap();
         scenario.steps.truncate(1);
+        // A run that went on past the cancelled task would end at this deadline, red for
+        // another reason, and soon.
+        scenario.deadline = std::time::Duration::from_secs(90);
         scenario.steps[0].stand_in = |_| {
             "CF task add --advice --tier standard :: SLEEP 60 Reply with exactly: ADVICE_OK\nCF task cancel T-1\nCF task reopen T-1 :: Once more."
                 .to_owned()

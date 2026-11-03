@@ -6,11 +6,9 @@
 # what the oracle reads, and the control fails. The others take a rule of the oracle, the
 # driver, the bindings or the stand-in out, and the matrix's or the stand-in's own tests fail.
 #
-# Every name holds `live matrix`, so `cargo xtask plants daemon "live matrix"` runs them all.
+# Every name holds `live matrix`, so `cargo xtask plants cli "live matrix"` runs them all.
 
 [run]
-# The control, on the rig's stand-ins.
-matrix-control = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::"]
 # The matrix's own tests.
 matrix-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
 # The stand-in agent's replies.
@@ -26,7 +24,7 @@ matrix-rig-install = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "ri
 [[plant]]
 name = "live matrix: the oracle reads each task's assignee as another task's (a wrong assignee)"
 meant = "the_matrix_passes_its_scenario_on_the_rigs_stand_ins"
-runs = ["matrix-control"]
+runs = ["matrix-control-smoke"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/matrix/oracle.rs"
@@ -36,7 +34,7 @@ replace = '''        let assignee = snapshot.task(number % 4 + 1).and_then(|othe
 [[plant]]
 name = "live matrix: the oracle looks for each result under another task (a missing result)"
 meant = "the_matrix_passes_its_scenario_on_the_rigs_stand_ins"
-runs = ["matrix-control"]
+runs = ["matrix-control-smoke"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/matrix/oracle.rs"
