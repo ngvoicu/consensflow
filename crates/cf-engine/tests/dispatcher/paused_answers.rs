@@ -19,14 +19,14 @@ use crate::fixtures::{given, notes, Tiers};
 use crate::turn_end::{monitor, pending};
 
 /// What the window ends its turn with, after the answer to the tell.
-const FINAL: &str = "FINAL-RESULT: the parser is done on grammar v2";
+pub(crate) const FINAL: &str = "FINAL-RESULT: the parser is done on grammar v2";
 
 /// What the window answers the tell with.
-const ANSWER: &str = "TOLD-ANSWER: on the v2 grammar";
+pub(crate) const ANSWER: &str = "TOLD-ANSWER: on the v2 grammar";
 
 /// T-1 given to zeus and at work; the chief tells it, and the window, stopped, takes the
 /// words in as a question and begins its turn on them. The project and the tell.
-fn told_at_work(context: &Context) -> (i64, MessageView) {
+pub(crate) fn told_at_work(context: &Context) -> (i64, MessageView) {
     let project = context.with_staff(&["zeus"]);
     context.give(project.id, "zeus", "Parser");
     context.pass().unwrap();
@@ -53,7 +53,7 @@ fn tell_working(context: &Context, project: i64, window: &str) -> MessageView {
 
 /// The window answers the tell with `cf answer` and works on: the record shows its words,
 /// a tool, the answer's tool, and another tool, and its turn goes on.
-fn answers_and_goes_on(context: &Context, told: &MessageView) {
+pub(crate) fn answers_and_goes_on(context: &Context, told: &MessageView) {
     let item = |role, text: &str, complete| {
         let mut item = context.adapter.item(role, text);
         item.complete = complete;
@@ -82,7 +82,7 @@ fn answers_then_goes_on_to_the_end(context: &Context, told: &MessageView) {
 }
 
 /// The notes the chief was sent, oldest first, that are about T-1's paused turn.
-fn kept_notes(context: &Context, project: i64) -> Vec<String> {
+pub(crate) fn kept_notes(context: &Context, project: i64) -> Vec<String> {
     notes(context, context.id(project, "chief"))
         .into_iter()
         .filter(|note| {
@@ -92,7 +92,7 @@ fn kept_notes(context: &Context, project: i64) -> Vec<String> {
 }
 
 /// The results T-1 has, oldest first.
-fn results(context: &Context, project: i64) -> Vec<String> {
+pub(crate) fn results(context: &Context, project: i64) -> Vec<String> {
     context
         .task(project, 1)
         .messages
@@ -182,7 +182,7 @@ fn finish_takes_the_final_answer_of_a_paused_task_as_its_result() {
 }
 
 /// The note T-1's paused turn left, as the words of a task that has moved on say it.
-fn moved_on_words(handle: &str, told: &MessageView) -> String {
+pub(crate) fn moved_on_words(handle: &str, told: &MessageView) -> String {
     format!(
         "T-1, paused when @{handle}'s turn on the words put to its window (m-{}) began, has moved on since (resumed, or back on the board). This is not its result: that comes as a message of its own, the answer of the turn its resume, or its next assignment, begins, and it is the one to decide. What the turn on those words ended with:\n\n{FINAL}",
         told.id
@@ -399,6 +399,8 @@ fn a_resume_while_the_window_is_still_at_work_on_its_answer_loses_nothing_of_the
         .answer(told.id, told.recipient_id, Some(&json!(ANSWER)), None)
         .unwrap();
     context.resume_task(project, 1, "Go on, or say you finished");
+    // Queued at the resume, and for as long as the window's record shows no work of its
+    // own after it (`resumed_at_work`: with some, the task reads working meanwhile).
     assert_eq!(context.task(project, 1).task.state, "queued");
     context.adapter.answer("zeus", FINAL);
     context.pass().unwrap();

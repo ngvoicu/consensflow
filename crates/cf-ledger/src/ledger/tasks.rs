@@ -222,6 +222,53 @@ impl Ledger {
         tasks::go_on_in_window(&mut self.store, project_id, number)
     }
 
+    /// A resumed task whose window is at work on it reads working, its resume's words
+    /// still queued for the window's rest. Refused for any other task.
+    pub fn work_while_resumed(
+        &mut self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::work_while_resumed(&mut self.store, project_id, number)
+    }
+
+    /// A task that read working for the words that resumed it ([`Ledger::work_while_resumed`])
+    /// reads queued again, `why` (its window rested, or went) and they have not gone in.
+    /// Refused for any other.
+    pub fn rest_while_resumed(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        why: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::rest_while_resumed(&mut self.store, project_id, number, why)
+    }
+
+    /// The words that resumed the task, where they are queued or held for the human and the
+    /// task is queued, working or waiting: what is told its window meanwhile goes in with
+    /// them. None once they are being pasted or in.
+    pub fn resume_words_not_in(
+        &self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<Option<i64>, LedgerError> {
+        let task = self.store.task_row(project_id, number)?;
+        tasks::resume_words_not_in(&self.store, &task)
+    }
+
+    /// The words that resumed the task of a participant's window, if they are on their way
+    /// to it still (queued, held for the human or being pasted): their message. None for a
+    /// task that was not resumed by words, or whose window has them. The daemon's own bare
+    /// words, which a window that goes on by itself withdraws, are none.
+    pub fn resume_words_waiting(
+        &self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<Option<i64>, LedgerError> {
+        let task = self.store.task_row(project_id, number)?;
+        Ok(tasks::resume_words(&self.store, &task)?.map(|(message, _)| message))
+    }
+
     /// A task the daemon resumed went on: its window got a turn through after
     /// the words that resumed it. Its requester, told it waits, is told once
     /// that it goes on.

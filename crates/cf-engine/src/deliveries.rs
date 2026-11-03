@@ -159,6 +159,14 @@ pub(crate) struct DeliveryPart {
     /// The message whose sender and the human were told it waits on the window's work
     /// (`at_work`): once a message, however many times it is pasted.
     pub(crate) told_work: Option<i64>,
+    /// The record of the window as it stood when the words that resumed its task were
+    /// first seen waiting, for the look that finds the window acting after them
+    /// (`resumed_at_work`).
+    pub(crate) resumed: Option<crate::resumed_at_work::ResumeWatch>,
+    /// The words whose task was sent back to queued because the window rested without them
+    /// going in, and when, on the engine's clock: it is not shown working for them again
+    /// for a while (`resumed_at_work`).
+    pub(crate) sent_back: Option<(i64, i64)>,
     /// What goes into the window before anything else of its queue, in this
     /// order and while it waits and may go: a launch that is to say a role
     /// first puts the replacement here, and the message it displaced after it

@@ -138,7 +138,10 @@ pub(crate) fn reconcile(store: &mut Store, task_id: i64) -> Result<(), LedgerErr
 /// is an old one already, and is born with its door shut: the task is
 /// paused, or queued with the words that send it on still waiting for their
 /// paste, so the window is still on the turn that came before them. Its
-/// answer comes as a message, with those words, when the task goes on.
+/// answer comes as a message, with those words, when the task goes on. A
+/// resumed task that reads working because its window is at work on it
+/// (`work_while_resumed`), or waiting for the answer to a question it asked meanwhile,
+/// is the same: its resume's words are not in yet.
 pub(crate) fn door_born_closed(store: &Store, task: &TaskRow) -> Result<bool, LedgerError> {
     let Some(window) = task.assignee_id else {
         return Ok(false);
@@ -152,6 +155,9 @@ pub(crate) fn door_born_closed(store: &Store, task: &TaskRow) -> Result<bool, Le
                    AND state IN ('queued', 'gated')",
             )?
             .exists(params![task.id, window])?,
+        // Or at work, or waiting for the answer to a question asked meanwhile, on the turn
+        // before the words that resumed it: every door is shut until they are in.
+        "working" | "waiting" => crate::tasks::resume_words_not_in(store, task)?.is_some(),
         _ => false,
     })
 }

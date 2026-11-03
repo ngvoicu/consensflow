@@ -929,6 +929,22 @@ impl Dispatcher {
             }
         } else {
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
+            // A task shown working (or waiting) for the words that resumed it, which had not
+            // gone in, goes back to queued with them: the claim was its window's, and the
+            // words reopen the window. Paused here, the window's exit would undo the chief's
+            // resume (T-1153's F1).
+            let task = match task {
+                Some(thread)
+                    if self.withdraw_resume_claim(
+                        project.id,
+                        (thread.task.number, thread.task.state.as_str()),
+                        "its window closed",
+                    )? =>
+                {
+                    None
+                }
+                other => other,
+            };
             // What the host lists is the turn's work, by its own proof, as it was when the
             // window closed.
             let left = shown.left_running();
@@ -1352,6 +1368,9 @@ impl Dispatcher {
             }
             // A held task's window that went on with it by itself: its task goes on.
             self.went_on_by_itself(project, participant, &observed)?;
+            // A resumed task whose window is at work on it reads working while its words
+            // wait for the window's rest.
+            self.show_resumed_at_work(project, participant, record, &observed)?;
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.

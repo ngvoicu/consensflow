@@ -143,8 +143,16 @@ enum Round {
 /// task may move meanwhile. Only a task still paused waits for its resume, and
 /// only one queued for this window (`ours`: resumed while it closed) has words
 /// that go in as it reopens; one cancelled, finished or given elsewhere has none.
-fn became_of(number: i64, state: Option<&str>, ours: bool) -> (String, String) {
+/// One shown working or waiting for its resume's words (`words_wait`) is that one queued:
+/// its claim goes with the window, whichever the close or its exit is seen first.
+fn became_of(number: i64, state: Option<&str>, ours: bool, words_wait: bool) -> (String, String) {
     let both = |said: String| (said.clone(), said);
+    // Shown working or waiting for the words that resumed it: the claim goes with the
+    // window, and the task is queued for them (`withdraw_resume_claim`).
+    let state = match state {
+        Some("working" | "waiting") if ours && words_wait => Some("queued"),
+        other => other,
+    };
     match state {
         Some("paused") => both(format!(
             "T-{number} stays paused, and its window reopens on its conversation when it is resumed."
@@ -586,11 +594,22 @@ impl Dispatcher {
             .borrow()
             .task(project.id, number)?
             .map(|thread| thread.task);
+        // A task deleted meanwhile has no words to wait.
+        let words_wait = match &task {
+            Some(_) => self
+                .seams
+                .ledger
+                .borrow()
+                .resume_words_not_in(project.id, number)?
+                .is_some(),
+            None => false,
+        };
         let (human, words) = became_of(
             number,
             task.as_ref().map(|task| task.state.as_str()),
             task.as_ref()
                 .is_some_and(|task| task.assignee.as_ref() == Some(handle)),
+            words_wait,
         );
         self.tell_stop(
             project,
@@ -809,7 +828,7 @@ mod tests {
     #[test]
     fn a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended(
     ) {
-        let said = |state, ours| became_of(1, state, ours);
+        let said = |state, ours| became_of(1, state, ours, false);
         let both = |text: &str| (text.to_owned(), text.to_owned());
         assert_eq!(
             said(Some("paused"), true),
@@ -825,6 +844,29 @@ mod tests {
                 "Your words go in once it reopens on its conversation.".to_owned()
             )
         );
+        // Shown working or waiting for the words that resumed it, which have not gone in: the
+        // claim goes with the window, so the task is queued for them, as it reads once the exit
+        // is seen. Without them (or not ours) it is what it is.
+        for state in [Some("working"), Some("waiting")] {
+            assert_eq!(
+                became_of(1, state, true, true),
+                said(Some("queued"), true),
+                "{state:?}"
+            );
+            assert_eq!(
+                became_of(1, state, true, false),
+                (
+                    format!("T-1 is {}.", state.unwrap_or_default()),
+                    format!("T-1 is {}.", state.unwrap_or_default())
+                ),
+                "{state:?}"
+            );
+            assert_eq!(
+                became_of(1, state, false, true).0,
+                format!("T-1 is {}.", state.unwrap_or_default()),
+                "{state:?}"
+            );
+        }
         for (state, ours, text) in [
             (Some("queued"), false, "T-1 is queued."),
             (Some("cancelled"), true, "T-1 was cancelled."),

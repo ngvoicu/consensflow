@@ -1,0 +1,520 @@
+# A resumed task whose window is at work on it reads working (T-1139, field bug 8: after
+# `cf tell`, the window's answer and `cf task resume`, the window went on with the turn the
+# tell began and the board read `T-10 [queued]` for as long as it ran commands on it, because
+# only the paste of the resume's words moved a task to working, and nothing is typed into a
+# turn at work). The look is `crates/cf-engine/src/resumed_at_work.rs`; the ledger's move is
+# `work_while_resumed`. The engine's tests are `crates/cf-engine/tests/dispatcher/
+# resumed_at_work.rs`; the rig's case, `crates/cf-e2e/tests/regressions/
+# a_task_resumed_after_a_tell_read_queued_while_its_window_worked_on_it.rs`, is the real
+# daemon and pane host on a stand-in that answers the tell and goes on working at a pace.
+#
+# - the look that shows the task working is never made (engine and rig);
+# - a turn in flight alone counts as work, whatever the record shows of the agent;
+# - a turn that has ended counts as one at work;
+# - the baseline is the start of the record, so what the agent wrote before the resume counts;
+# - a record rewritten under the baseline counts as work;
+# - what the harness writes in its agent's place counts as work, and so does a message typed in;
+# - a turn the record has said is over, not yet for a moment, counts as one at work;
+# - the daemon's own bare words that resume a held task count as the chief's;
+# - a first brief counts as the words that resumed a task;
+# - words already being pasted can be shown as work;
+# - a task shown working never reads queued again for a window at rest with the words held;
+#   it reads queued again at the first look at rest, though the words go in as they should;
+# - T-1153's review (F1 to F5, the churn and the guards no plant held): the exit of a window,
+#   its Close and a quit take the claim with them; go_on passes over it; every door of a
+#   waiting task is shut; a second tell is kept behind the words; a task sent back is not
+#   shown working again for 30 s; each guard of the look (a failed turn, another program in
+#   the conversation, a dialog (an unnamed window says it waits), a turn taken back, a closed project on both
+#   moves, a settled look for the send back, the second resume's baseline) is held;
+# - what the task needs once it reads working with its words waiting: the one-task rules of
+#   the queue and of the begin of a delivery hold its own words back; the turn before the words
+#   is taken for its result; the note of what that turn ended with is not told; the words that
+#   never reach the window leave the task working; a question's door is open; the window's own
+#   `cf task done` goes through; the chief's Finish leaves the words queued.
+#
+# Every name holds `resume shows working`, so `cargo xtask plants daemon "resume shows working"`
+# runs them all.
+
+[run]
+engine-dispatcher-resumed-at-work = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resumed_at_work"]
+engine-lib-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "stops::"]
+daemon-routes-verbs = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_tell_of_a_task_shown_working"]
+rig-regression-resumed-after-tell = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_resumed_after_a_tell_read_queued_while_its_window_worked_on_it::"], builds = true }
+
+[[plant]]
+name = "resume shows working: the look that shows a resumed task working is never made"
+meant = "a_task_resumed_while_its_window_goes_on_with_the_turn_on_the_tell_shows_working_and_its_words_still_go_in_at_rest"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.show_resumed_at_work(project, participant, record, &observed)?;"
+replace = "            // planted: the look is never made"
+
+[[plant]]
+name = "resume shows working: the look is never made, on the rig"
+meant = "a_task_resumed_after_a_tell_reads_working_while_its_window_goes_on_with_the_turn_and_its_words_go_in_after"
+runs = ["rig-regression-resumed-after-tell"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.show_resumed_at_work(project, participant, record, &observed)?;"
+replace = "            // planted: the look is never made"
+
+[[plant]]
+name = "resume shows working: a turn in flight alone counts as work"
+meant = "a_resumed_task_whose_window_reads_at_work_and_writes_nothing_stays_queued"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = '        if !worked || !in_flight(observed) || project.state != "open" {'
+replace = '        if (false && !worked) || !in_flight(observed) || project.state != "open" {'
+
+[[plant]]
+name = "resume shows working: a turn that has ended counts as one at work"
+meant = "a_turn_that_ends_after_the_resume_shows_nothing_of_work_and_the_task_is_working_from_its_words_paste"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = '        if !worked || !in_flight(observed) || project.state != "open" {'
+replace = '        if !worked || (false && !in_flight(observed)) || project.state != "open" {'
+
+[[plant]]
+name = "resume shows working: the baseline is the start of the record"
+meant = "a_resumed_task_whose_window_reads_at_work_and_writes_nothing_stays_queued"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "            last: items.last().map(|item| Arc::clone(&item.id)),"
+replace = "            last: None,"
+
+[[plant]]
+name = "resume shows working: a record rewritten under the baseline counts as work"
+meant = "a_record_rewritten_under_the_baseline_claims_no_work_until_the_agent_writes_again"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "        Some(last) => items.iter().rposition(|item| item.id == *last)? + 1,"
+replace = "        Some(last) => items.iter().rposition(|item| item.id == *last).map_or(0, |at| at + 1),"
+
+[[plant]]
+name = "resume shows working: what the harness writes in its agent's place counts as work"
+meant = "what_the_harness_writes_in_its_agents_place_and_a_message_typed_in_are_no_work_of_the_agent"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "    matches!(item.role, Role::Assistant | Role::Tool) && !item.synthetic && !item.compaction"
+replace = "    matches!(item.role, Role::Assistant | Role::Tool)"
+
+[[plant]]
+name = "resume shows working: a message typed into the window counts as work"
+meant = "what_the_harness_writes_in_its_agents_place_and_a_message_typed_in_are_no_work_of_the_agent"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "    matches!(item.role, Role::Assistant | Role::Tool) && !item.synthetic && !item.compaction"
+replace = "    matches!(item.role, Role::Assistant | Role::Tool | Role::User) && !item.synthetic && !item.compaction"
+
+[[plant]]
+name = "resume shows working: a turn the record says is over but not yet for a moment counts as at work"
+meant = "a_turn_the_record_says_is_over_but_has_not_said_so_a_moment_shows_no_work"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "        && observed.over == Over::No"
+replace = "        && observed.over != Over::Held"
+
+[[plant]]
+name = "resume shows working: the daemon's own bare words count as the chief's"
+meant = "the_daemons_bare_words_that_resume_a_held_task_are_no_resume_words_of_a_task_shown_working"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                AND NOT (m.sender_id IS NULL AND m.body = ?3"
+replace = "                AND NOT (m.sender_id IS NULL AND m.body = ?3 AND 1 = 0"
+
+[[plant]]
+name = "resume shows working: a first brief counts as the words that resumed the task"
+meant = "a_first_brief_waiting_for_its_window_is_no_resume_words"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                             WHERE e.project_id = ?4 AND e.kind = 'task.state'"
+replace = "                             WHERE e.project_id = ?4 AND e.kind IS NOT NULL"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                               AND json_extract(e.data, '$.from') = 'paused'"
+replace = "                               AND json_extract(e.data, '$.from') IS NOT NULL"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                               AND json_extract(e.data, '$.to') = 'queued'"
+replace = "                               AND json_extract(e.data, '$.to') IS NOT NULL"
+
+[[plant]]
+name = "resume shows working: a follow-up that reopened a done task counts as the words that resumed it"
+meant = "a_follow_up_that_reopened_a_done_task_is_no_resume_words"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                               AND json_extract(e.data, '$.from') = 'paused'"
+replace = "                               AND json_extract(e.data, '$.from') IN ('paused', 'done')"
+
+[[plant]]
+name = "resume shows working: words already being pasted can be shown as work"
+meant = "the_ledger_shows_no_work_for_words_that_are_being_pasted_already"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''            "queued" => resume_words(store, &task)?,
+            _ => None,
+        };
+        let Some((words, _)) = waiting.filter(|(_, state)| state != "delivering") else {'''
+replace = '''            "queued" => resume_words(store, &task)?,
+            _ => None,
+        };
+        let Some((words, _)) = waiting.filter(|_| true) else {'''
+
+[[plant]]
+name = "resume shows working: the queue holds the task's own words back for its being at work"
+meant = "a_task_resumed_while_its_window_goes_on_with_the_turn_on_the_tell_shows_working_and_its_words_still_go_in_at_rest"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "             AND id IS NOT m.task_id"
+replace = "             AND id IS NOT NULL"
+
+[[plant]]
+name = "resume shows working: the begin of a delivery holds the task's own words back for its being at work"
+meant = "a_task_resumed_while_its_window_goes_on_with_the_turn_on_the_tell_shows_working_and_its_words_still_go_in_at_rest"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '                       AND id IS NOT (SELECT task_id FROM message WHERE id = ?)",'
+replace = '                       AND id IS NOT (SELECT task_id FROM message WHERE id = ? AND 1 = 0)",'
+
+[[plant]]
+name = "resume shows working: the turn before the words is taken for the task's result"
+meant = "a_task_resumed_while_its_window_goes_on_with_the_turn_on_the_tell_shows_working_and_its_words_still_go_in_at_rest"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        let Some(thread) = task.filter(|thread| thread.task.state == "working" && !waiting) else {'
+replace = '        let Some(thread) = task.filter(|thread| thread.task.state == "working" || (false && waiting)) else {'
+
+[[plant]]
+name = "resume shows working: the note of what the turn before the words ended with is not told"
+meant = "a_task_resumed_while_its_window_goes_on_with_the_turn_on_the_tell_shows_working_and_its_words_still_go_in_at_rest"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = '        if !waiting && !matches!(thread.task.state.as_str(), "paused" | "queued") {'
+replace = '        if (false && waiting) || !matches!(thread.task.state.as_str(), "paused" | "queued") {'
+
+[[plant]]
+name = "resume shows working: words that never reach the window leave the task working"
+meant = "the_words_of_a_task_shown_working_that_never_reach_its_window_pause_it_again"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '    if message.kind != "task" || !matches!(task.state.as_str(), "queued" | "working") {'
+replace = '    if message.kind != "task" || task.state != "queued" {'
+
+[[plant]]
+name = "resume shows working: a question asked while the words wait has its door open"
+meant = "a_question_the_window_asks_while_its_resume_words_wait_is_born_with_its_door_shut"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '        "working" | "waiting" => crate::tasks::resume_words_not_in(store, task)?.is_some(),'
+replace = '        "working" | "waiting" if false => crate::tasks::resume_words_not_in(store, task)?.is_some(),'
+
+[[plant]]
+name = "resume shows working: the window's own cf task done goes through while the words wait"
+meant = "the_window_cannot_finish_a_task_shown_working_before_it_has_read_the_words_that_resumed_it"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "                if !finished_by_word {"
+replace = "                if false && !finished_by_word {"
+
+[[plant]]
+name = "resume shows working: the chief's Finish leaves the words queued"
+meant = "finish_takes_the_turn_on_the_tell_as_the_result_of_a_task_shown_working_and_its_words_never_go_in"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "                        \"UPDATE message SET state = 'cancelled', reason = ? WHERE id = ?\","
+replace = "                        \"UPDATE message SET state = 'queued', reason = ? WHERE id = ?\","
+
+[[plant]]
+name = "resume shows working: a task shown working never reads queued again for a window at rest with the words held"
+meant = "a_task_shown_working_reads_queued_again_once_its_window_has_rested_with_the_words_held"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = '            if rested && observed.settled && project.state == "open" {'
+replace = '            if false && rested && observed.settled && project.state == "open" {'
+
+[[plant]]
+name = "resume shows working: a task shown working reads queued again at the first look at rest"
+meant = "a_task_shown_working_does_not_read_queued_while_its_words_go_in_at_the_settle"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "const RESTED_MS: i64 = 10_000;"
+replace = "const RESTED_MS: i64 = 0;"
+
+# ---- T-1153's review of T-1139 -------------------------------------------------------------
+
+[[plant]]
+name = "resume shows working: a window's exit pauses a task shown working for its words"
+meant = "a_window_that_exits_while_its_task_reads_working_for_the_resume_words_does_not_undo_the_resume"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                    if self.withdraw_resume_claim(
+                        project.id,
+                        (thread.task.number, thread.task.state.as_str()),
+                        "its window closed",
+                    )? =>'''
+replace = '''                    if false
+                        && self.withdraw_resume_claim(
+                            project.id,
+                            (thread.task.number, thread.task.state.as_str()),
+                            "its window closed",
+                        )? =>'''
+
+[[plant]]
+name = "resume shows working: a window's exit takes the claim of a working task only"
+meant = "a_waiting_task_whose_window_exits_is_not_paused_for_the_resume_words_either"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = '        if !matches!(state, "working" | "waiting") {'
+replace = '        if !matches!(state, "working") {'
+
+[[plant]]
+name = "resume shows working: the move back says nothing of why the claim went"
+meant = "the_claim_a_window_leaves_when_it_exits_says_so_in_the_log"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''                "because": format!("{why}, and m-{words}, the words that resumed it, have not gone in"),'''
+replace = '''                "because": format!("and m-{words}, the words that resumed it, have not gone in"),'''
+
+[[plant]]
+name = "resume shows working: the close of a window with the claim says it is working"
+meant = "a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended"
+runs = ["engine-lib-stops"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '        Some("working" | "waiting") if ours && words_wait => Some("queued"),'
+replace = '        Some("working" | "waiting") if false && ours && words_wait => Some("queued"),'
+
+[[plant]]
+name = "resume shows working: the close note promises words for a window that has not the claim"
+meant = "a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended"
+runs = ["engine-lib-stops"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '        Some("working" | "waiting") if ours && words_wait => Some("queued"),'
+replace = '        Some("working" | "waiting") if ours => Some("queued"),'
+
+[[plant]]
+name = "resume shows working: the Resume brings a window back for a task shown working for words that never went in"
+meant = "a_quit_while_the_task_reads_working_for_the_resume_words_gives_its_window_no_cut_note"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = "                    Ok(true) => return None,"
+replace = "                    Ok(true) => {}"
+
+[[plant]]
+name = "resume shows working: a hold and a resume of a turn the quota cut go over a task shown working"
+meant = "a_quota_refusal_whose_reset_has_passed_does_not_hold_and_resume_a_task_shown_working"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '            if task.state == "queued" || self.resume_words_wait(project.id, task.number)? {'
+replace = '            if task.state == "queued" {'
+
+[[plant]]
+name = "resume shows working: a second question of a waiting task has its door open"
+meant = "a_question_asked_after_the_first_has_its_door_shut_too"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '        "working" | "waiting" => crate::tasks::resume_words_not_in(store, task)?.is_some(),'
+replace = '        "working" => crate::tasks::resume_words_not_in(store, task)?.is_some(),'
+
+[[plant]]
+name = "resume shows working: a second tell pauses a task shown working and withdraws its words"
+meant = "a_tell_of_a_task_shown_working_for_the_words_that_resumed_it_is_kept_behind_them"
+runs = ["daemon-routes-verbs"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "            .resume_words_not_in(caller.project.id, number)?"
+replace = "            .resume_words_not_in(caller.project.id, number)?\n            .filter(|_| false)"
+
+[[plant]]
+name = "resume shows working: the ledger keeps no tell for a task shown working"
+meant = "a_second_tell_keeps_the_resume_words_queued_and_rides_in_their_paste"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "        if crate::tasks::resume_words_not_in(store, &task)?.is_none() {"
+replace = "        if true {"
+
+[[plant]]
+name = "resume shows working: the ledger keeps a tell for any task"
+meant = "words_cannot_be_kept_for_a_window_that_has_the_words_that_resumed_its_task"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "        if crate::tasks::resume_words_not_in(store, &task)?.is_none() {"
+replace = "        if false {"
+
+[[plant]]
+name = "resume shows working: the window's own cf task done goes through for a waiting task"
+meant = "a_waiting_tasks_window_cannot_finish_it_before_it_has_read_the_words_that_resumed_it"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        if matches!(task.state.as_str(), "working" | "waiting") {'
+replace = '        if matches!(task.state.as_str(), "working") {'
+
+[[plant]]
+name = "resume shows working: a task sent back to queued is shown working again at once"
+meant = "a_task_sent_back_to_queued_does_not_read_working_again_for_thirty_seconds_unless_its_words_went_in"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "const HELD_FOR_MS: i64 = 30_000;"
+replace = "const HELD_FOR_MS: i64 = 0;"
+
+[[plant]]
+name = "resume shows working: the first resume's sending back holds the second's words"
+meant = "the_words_of_a_second_resume_are_not_held_back_for_the_first_s_sending_back"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "        if sent_back.is_some_and(|(sent, at)| sent == words && self.now() - at < HELD_FOR_MS) {"
+replace = "        if sent_back.is_some_and(|(_, at)| self.now() - at < HELD_FOR_MS) {"
+
+[[plant]]
+name = "resume shows working: a failed turn counts as work shown"
+meant = "a_failed_turn_is_no_work_shown"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "        && !observed.failed\n"
+replace = ""
+
+[[plant]]
+name = "resume shows working: a turn taken back counts as work shown"
+meant = "a_window_that_took_its_turn_back_is_no_work_shown"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "        && !observed.took_back\n"
+replace = ""
+
+[[plant]]
+name = "resume shows working: a conversation another program writes into counts as work shown"
+meant = "a_conversation_another_program_writes_into_is_no_work_shown"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "        && !observed.shared\n"
+replace = ""
+
+[[plant]]
+name = "resume shows working: a window waiting on a dialog of its own counts as work shown"
+meant = "a_window_waiting_on_a_dialog_of_its_own_is_no_work_shown"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "        && observed.waiting.is_none()\n}"
+replace = "}"
+
+[[plant]]
+name = "resume shows working: a closed project's window is shown working"
+meant = "a_window_in_a_closed_project_is_shown_no_work"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = '        if !worked || !in_flight(observed) || project.state != "open" {'
+replace = '        if !worked || !in_flight(observed) {'
+
+[[plant]]
+name = "resume shows working: a closed project's claim is withdrawn"
+meant = "a_claim_in_a_closed_project_is_not_withdrawn_for_a_window_at_rest"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = '            if rested && observed.settled && project.state == "open" {'
+replace = '            if rested && observed.settled {'
+
+[[plant]]
+name = "resume shows working: a task is sent back for a rest the last look read"
+meant = "a_turn_the_window_began_since_its_rest_keeps_the_claim"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = '            if rested && observed.settled && project.state == "open" {'
+replace = '            if rested && project.state == "open" {'
+
+[[plant]]
+name = "resume shows working: the work before a second resume is shown as work after it"
+meant = "the_work_a_window_did_before_a_second_resume_is_not_shown_as_work_after_it"
+runs = ["engine-dispatcher-resumed-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resumed_at_work.rs"
+find = "            .filter(|watch| watch.words == words);"
+replace = "            .filter(|_| true);"

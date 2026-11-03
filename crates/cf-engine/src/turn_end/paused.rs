@@ -28,10 +28,13 @@
 //! [`answers_to_the_task`] takes only a complete answer.
 //!
 //! **The chief may resume at once**, on the answer it was given, while the window is still
-//! at work on the rest of its turn: the resume waits behind the turn, the task is queued
-//! when the turn ends, and its answer is the follow-up to the resume's words, not the turn
-//! on the tell. That turn's end is told all the same, in the words of a task that has
-//! moved on.
+//! at work on the rest of its turn: the resume's words wait behind the turn, and the task
+//! reads queued until the window's record shows it acting after the resume, then working
+//! (`resumed_at_work`, T-1139: before, it read queued for as long as the turn ran, with the
+//! window at work on it). The turn's end is no result either way: the answer to the resume's
+//! words is the follow-up, not the turn on the tell ([`Dispatcher::collect`] leaves a task
+//! whose resume words wait to this note). That turn's end is told all the same, in the
+//! words of a task that has moved on.
 //!
 //! **A turn that left a Monitor** that said it ended is told as a working task's result is:
 //! once a look at the window's commands found none of the monitor's running
@@ -52,7 +55,7 @@ use crate::seams::EngineError;
 
 impl Dispatcher {
     /// The turn of the window of a paused task (or of one resumed, whose resume waits behind
-    /// the turn), looked at: if it ended with a complete answer after the chief's tell,
+    /// the turn, whether it reads queued or working meanwhile), looked at: if it ended with a complete answer after the chief's tell,
     /// whoever gave the task is told it (see above). Nothing where the task is neither, no
     /// tell is the latest message the window was pasted, the turn goes on, left work pending
     /// (the monitors that said they ended are over once a look found no command, as for a
@@ -72,11 +75,16 @@ impl Dispatcher {
         }
         // Paused, or resumed already with the resume queued behind the turn that just ended.
         let found = self.seams.ledger.borrow().task_in_hand(participant.id)?;
-        let Some(thread) =
-            found.filter(|thread| matches!(thread.task.state.as_str(), "paused" | "queued"))
-        else {
+        // Or at work on the turn it was resumed in, the words that resumed it still waiting
+        // (`resumed_at_work`).
+        let Some(thread) = found else {
             return Ok(());
         };
+        let waiting = thread.task.state == "working"
+            && self.resume_words_wait(project.id, thread.task.number)?;
+        if !waiting && !matches!(thread.task.state.as_str(), "paused" | "queued") {
+            return Ok(());
+        }
         let tells: Vec<i64> = thread
             .messages
             .iter()

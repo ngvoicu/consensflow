@@ -103,6 +103,8 @@ mod a_resumed_devin_worker_skipped_every_call;
 mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
 #[path = "regressions/a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed.rs"]
 mod a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed;
+#[path = "regressions/a_task_resumed_after_a_tell_read_queued_while_its_window_worked_on_it.rs"]
+mod a_task_resumed_after_a_tell_read_queued_while_its_window_worked_on_it;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
 #[path = "regressions/a_task_waiting_for_a_failed_one_was_told_to_the_chief_before_the_failure.rs"]

@@ -369,8 +369,8 @@ runs = ["engine-unknown-looks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        let Some(thread) = task.filter(|thread| thread.task.state == "working") else {'
-replace = '        let Some(thread) = task.filter(|thread| matches!(thread.task.state.as_str(), "working" | "waiting")) else {'
+find = '        let Some(thread) = task.filter(|thread| thread.task.state == "working" && !waiting) else {'
+replace = '        let Some(thread) = task.filter(|thread| matches!(thread.task.state.as_str(), "working" | "waiting") && !waiting) else {'
 
 [[plant]]
 name = "load retype and turn-end: an arrival confirmed as the window is read once more names no item of the record turn-end finds the answer after"

@@ -318,7 +318,16 @@ fn tell(
             ))
         }
     };
-    let told = if state == QUEUED {
+    // Queued for its window, or at work (or waiting for an answer) on the turn before the
+    // words that resumed it, which have not gone in: the tell is kept for the window and
+    // goes in with them. A pause here would withdraw those words (T-1153's F5).
+    let behind_words = state == QUEUED
+        || context
+            .ledger
+            .borrow()
+            .resume_words_not_in(caller.project.id, number)?
+            .is_some();
+    let told = if behind_words {
         // Whatever is no text is no words: the ledger refuses it as it refuses
         // a blank one.
         context.ledger.borrow_mut().tell_queued(

@@ -27,12 +27,13 @@ use serde_json::json;
 
 use super::pausing::shut_doors;
 use super::{
-    carrier_body, delivery_body, own_steps, require_on_board, require_task_state, task_by_id,
+    carrier_body, delivery_body, own_steps, require_on_board, require_task_state, resume_words,
+    task_by_id,
 };
 use crate::messages::{
     drop_queued_but_told, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
-    queued_paused_answers, say_again, tell_sent_back, warnings_on_their_way, warnings_queued,
-    withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
+    queued_paused_answers, release_carried, say_again, tell_sent_back, warnings_on_their_way,
+    warnings_queued, withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
@@ -113,8 +114,34 @@ fn record(
                 ));
             }
         }
-        // A refusal above writes nothing, these withdrawals with it. The words the paused
-        // task's window ended its turn with are the result: the note that gave them is moot.
+        // The words that resumed a task its window is at work on (`work_while_resumed`), or
+        // that waits for an answer meanwhile, wait for its rest, and the window has not
+        // read them: its own `cf task done` is refused as it is for notes on their way,
+        // since what it would finish is the task without them. The chief's Finish takes
+        // the answer of the turn at work, and the words go with it: left queued for a task
+        // that is done, a reopen of it would put them in with its follow-up.
+        if matches!(task.state.as_str(), "working" | "waiting") {
+            if let Some((words, state)) = resume_words(store, &task)? {
+                if !finished_by_word {
+                    return Err(LedgerError::refused_with(
+                        "words-on-their-way",
+                        format!(
+                            "T-{number} has words on their way to you: run cf task done again once you have read them"
+                        ),
+                        409,
+                    ));
+                }
+                if state != "delivering" {
+                    store.db.execute(
+                        "UPDATE message SET state = 'cancelled', reason = ? WHERE id = ?",
+                        params![format!("T-{number} was finished before they went in"), words],
+                    )?;
+                    release_carried(store, task.id)?;
+                }
+            }
+        }
+        // The words the paused task's window ended its turn with are the result: the
+        // note that gave them is moot.
         if task.state == "paused" {
             withdraw_paused_answers(store, &task, "finished")?;
             leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
