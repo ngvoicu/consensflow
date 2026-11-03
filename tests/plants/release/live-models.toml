@@ -378,11 +378,9 @@ runs = ["e2e-live"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
 find = '''
-    if kind == "claude-code"
-        && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL]'''
+    if [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {'''
 replace = '''
-    if false
-        && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL]'''
+    if false && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {'''
 
 [[plant]]
 name = "live models: the report of a run that launched windows says none was"

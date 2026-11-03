@@ -27,8 +27,8 @@
 #   workspace      the workspace's tests, whole (its limit below says why);
 #   daemons        the daemons' suites in six shards, a sixth of their cases
 #                  each (`cargo xtask test daemons` with CF_TEST_SHARD: suites.rs);
-#   live-matrix    the live matrix on the stand-ins in two halves, nextest's partitions
-#                  of its cases (T-1195);
+#   live-matrix    the live matrix on the stand-ins in thirds, nextest's partitions
+#                  of its cases (T-1195, T-1207);
 #   platform-free  on Linux, once: the layout of the Rust, the linter, the page's
 #                  Playwright suite and the engine's paced kit, which read no code
 #                  of one system's (T-1161).
@@ -250,22 +250,22 @@ jobs:
 
   # The live matrix on the rig's stand-ins (tests/live_matrix.rs): every scenario of a board,
   # the field-found issues as the field had them, and the known reds, each marked until the
-  # task whose fix turns it green (T-1168, T-1173, T-1186, T-1195). Its cases take turns in
-  # one process (cf_e2e::serial); nextest runs each in a process of its own, each on a board
-  # of its own (a home, a daemon, its ports), 4 at a time: a case mostly waits on its board,
-  # and the runners have 3 processors (macOS) and 4 (Windows). As a step of the checks job
-  # (T-1184) its 56 cases took 601 s on a Mac; 6 at a time took 396 to 415 s there, but two
-  # cases missed their first step on Windows, so it stays at 4 and runs in two halves,
-  # nextest's partitions of its cases by count, a job each: two jobs more on each platform
-  # (T-1195). The step's limit is set with a margin until CI's own runs read it (`cargo
-  # xtask ci-times --step "The live matrix"`); suites.rs holds this job, ci_times' tests its
-  # limit.
+  # task whose fix turns it green (T-1168, T-1173, T-1186, T-1195, T-1207), with workers of
+  # Devin's and Codex's shape besides Claude's (T-1207; Codex's stand-in is Unix's only). Its
+  # cases take turns in one process (cf_e2e::serial); nextest runs each in a process of its
+  # own, each on a board of its own (a home, a daemon, its ports), 4 at a time: a case mostly
+  # waits on its board, and the runners have 3 processors (macOS) and 4 (Windows). 6 at a time
+  # lost cases on Windows (T-1195). Its cases run in thirds, nextest's partitions of them by
+  # count, a job each, so that a third stays under about 6 minutes (T-1207: halves passed it
+  # once the Devin and Codex seats came in). The step's limit is set with a margin until CI's
+  # own runs read it (`cargo xtask ci-times --step "The live matrix"`); suites.rs holds this
+  # job, ci_times' tests its limit.
   live-matrix:
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
-        part: ['1/2', '2/2']
+        part: ['1/3', '2/3', '3/3']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:

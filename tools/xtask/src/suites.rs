@@ -517,8 +517,9 @@ mod tests {
     /// The live matrix's program, which CI runs in a job of its own.
     const MATRIX: &str = "live_matrix";
 
-    /// The live matrix on the rig's stand-ins runs in a job of its own on both platforms, in two
-    /// halves, nextest's partitions of its cases by count (T-1195): its 56 cases took 601 s 4 at
+    /// The live matrix on the rig's stand-ins runs in a job of its own on both platforms, in
+    /// thirds, nextest's partitions of its cases by count (T-1195, T-1207: halves passed 6 minutes
+    /// once the Devin and Codex seats came in): its 56 cases took 601 s 4 at
     /// a time on a Mac as a step of the checks job (T-1184), and 6 at a time lost two of them on
     /// Windows. Its cases take turns in one process (`cf_e2e::serial`), so the step runs them
     /// under nextest, each a process of its own and a board of its own (a home, a daemon, its
@@ -526,7 +527,7 @@ mod tests {
     /// run on request. The gate waits for the job, and no step of the checks job runs the
     /// matrix besides.
     #[test]
-    fn ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side() {
+    fn ci_runs_the_live_matrix_in_a_job_of_its_own_in_thirds_its_cases_side_by_side() {
         let jobs = jobs(&workflow());
         let job = |id: &str| {
             jobs.iter()
@@ -538,8 +539,8 @@ mod tests {
         assert_eq!(listed(matrix, "os"), ["macos-latest", "windows-latest"]);
         assert_eq!(
             listed(matrix, "part"),
-            ["1/2", "2/2"],
-            "each half of the cases, once"
+            ["1/3", "2/3", "3/3"],
+            "each third of the cases, once"
         );
         let program = format!("--test {MATRIX}");
         assert!(
