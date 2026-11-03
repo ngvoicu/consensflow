@@ -24,7 +24,7 @@ use crate::seams::processes::{Limits, Processes, Program};
 use crate::seams::Time;
 
 /// How the list is read, as the human could run it.
-pub const HOW: &str = "devin models list --format json";
+pub(crate) const HOW: &str = "devin models list --format json";
 
 /// How long the list may take, and how much it may say (about 500 KB).
 const LIMITS: Limits = Limits {
@@ -39,7 +39,7 @@ const EFFORTS: [&str; 7] = ["none", "minimal", "low", "medium", "high", "xhigh",
 const SUFFIXES: [&str; 5] = ["fast", "priority", "lightning", "1m", "thinking"];
 
 /// The program the list is read from.
-pub fn program(executable: PathBuf, env: &Env) -> Program {
+pub(crate) fn program(executable: PathBuf, env: &Env) -> Program {
     Program {
         executable,
         args: HOW.split(' ').skip(1).map(str::to_owned).collect(),
@@ -93,7 +93,7 @@ fn label_without(label: &str, effort: &str) -> String {
 
 /// What the list says, its models in the order Devin lists them, each with its efforts
 /// from the lowest, read at `at`. Fails where it lists no model.
-pub fn parse(listed: &Value, at: i64) -> Result<ModelListing, String> {
+pub(crate) fn parse(listed: &Value, at: i64) -> Result<ModelListing, String> {
     let families = listed
         .get("families")
         .and_then(Value::as_array)
@@ -146,7 +146,7 @@ pub fn parse(listed: &Value, at: i64) -> Result<ModelListing, String> {
 
 /// The models `program` lists, or why it could not say: Devin's own words where it ended
 /// with one (`Not logged in. Run devin auth login to authenticate.`).
-pub async fn read(
+pub(crate) async fn read(
     processes: &dyn Processes,
     program: Program,
     at: i64,

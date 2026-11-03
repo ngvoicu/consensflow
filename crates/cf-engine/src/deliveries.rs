@@ -1594,8 +1594,7 @@ impl Dispatcher {
     /// a screen shows: lines of a screen that are these are no words of the window's own
     /// ([`Shown::without_pastes`]).
     pub(crate) fn pastes_on_screen(&self, participant_id: i64) -> Result<Vec<Paste>, EngineError> {
-        Ok(self
-            .seams
+        self.seams
             .ledger
             .borrow()
             .last_pastes(participant_id, PASTES_ON_SCREEN)?
@@ -1608,7 +1607,7 @@ impl Dispatcher {
                     text: self.delivery_text_of(&begun.message, &begun.carried)?,
                 })
             })
-            .collect::<Result<_, EngineError>>()?)
+            .collect()
     }
 
     /// What a window was to receive goes back to its queue with its attempt:

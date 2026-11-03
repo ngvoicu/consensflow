@@ -25,11 +25,12 @@ use crate::seams::Time;
 use crate::shared::one_shot::{ask, conversation, BOUND_MS};
 
 /// How the list is read, as the human could run it.
-pub const HOW: &str = "claude -p --input-format stream-json: the SDK's initialize control request";
+pub(crate) const HOW: &str =
+    "claude -p --input-format stream-json: the SDK's initialize control request";
 
 /// The program the list is read from: `claude` at `executable`, in the config folder
 /// `config`, with nothing it need not fetch.
-pub fn program(executable: PathBuf, env: &Env, config: &Path) -> Program {
+pub(crate) fn program(executable: PathBuf, env: &Env, config: &Path) -> Program {
     let args = [
         "-p",
         "--input-format",
@@ -54,7 +55,7 @@ pub fn program(executable: PathBuf, env: &Env, config: &Path) -> Program {
 
 /// What the `initialize` answer's `response` lists, read at `at`. Fails where it lists no
 /// model.
-pub fn parse(response: &Value, at: i64) -> Result<ModelListing, String> {
+pub(crate) fn parse(response: &Value, at: i64) -> Result<ModelListing, String> {
     let rows = response
         .get("models")
         .and_then(Value::as_array)
@@ -102,7 +103,7 @@ pub(crate) fn words(list: Option<&Value>) -> Vec<String> {
 }
 
 /// The models `program` lists: one bounded conversation, no turn.
-pub async fn read(
+pub(crate) async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,

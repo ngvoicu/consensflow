@@ -24,19 +24,19 @@ use crate::seams::Time;
 use crate::shared::one_shot::{ask, conversation, BOUND_MS};
 
 /// How the list is read, as the human could run it.
-pub const HOW: &str = "codex app-server: model/list";
+pub(crate) const HOW: &str = "codex app-server: model/list";
 
 /// How old the app-server's copy of the account's list may be and the list still be the
 /// account's: an hour, well past the few minutes it keeps a copy before it fetches again
 /// (a second read three seconds after the first answered from the first's copy).
-pub const FRESH_MS: i64 = 3_600_000;
+pub(crate) const FRESH_MS: i64 = 3_600_000;
 
 /// The most pages of `model/list` read: one held every model (7 to 12) on 0.165.
 const PAGES: usize = 10;
 
 /// The program the list is read from: `codex app-server` at `executable`, on the home
 /// `env` names.
-pub fn program(executable: PathBuf, env: &Env) -> Program {
+pub(crate) fn program(executable: PathBuf, env: &Env) -> Program {
     Program {
         executable,
         args: vec!["app-server".to_owned()],
@@ -48,7 +48,11 @@ pub fn program(executable: PathBuf, env: &Env) -> Program {
 /// What the pages of `model/list` list, the hidden models left out. Stale where `fetched`
 /// (when the app-server's copy was fetched, if it kept one) is not within [`FRESH_MS`] of
 /// `at`. Fails where it lists no model.
-pub fn parse(pages: &[Value], fetched: Option<i64>, at: i64) -> Result<ModelListing, String> {
+pub(crate) fn parse(
+    pages: &[Value],
+    fetched: Option<i64>,
+    at: i64,
+) -> Result<ModelListing, String> {
     let text = |row: &Value, name: &str| row.get(name).and_then(Value::as_str).map(str::to_owned);
     let models: Vec<ModelChoice> = pages
         .iter()
@@ -94,14 +98,14 @@ pub fn parse(pages: &[Value], fetched: Option<i64>, at: i64) -> Result<ModelList
 
 /// When the app-server's copy in `cache` (`models_cache.json`) was fetched: none where
 /// there is none, or it says no time.
-pub fn fetched_at(cache: &str) -> Option<i64> {
+pub(crate) fn fetched_at(cache: &str) -> Option<i64> {
     let cache: Value = serde_json::from_str(cache).ok()?;
     let at: jiff::Timestamp = cache.get("fetched_at")?.as_str()?.parse().ok()?;
     Some(at.as_millisecond())
 }
 
 /// The pages of `model/list` that `program` answers: one bounded conversation, no turn.
-pub async fn pages(
+pub(crate) async fn pages(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,

@@ -21,13 +21,13 @@ use crate::seams::Time;
 use crate::shared::one_shot::{ask, conversation, BOUND_MS};
 
 /// How the list is read, as the human could run it.
-pub const HOW: &str = "pi --mode rpc --offline: get_available_models";
+pub(crate) const HOW: &str = "pi --mode rpc --offline: get_available_models";
 
 /// What the human's Refresh runs first: the catalogs fetched again.
-pub const UPDATE: [&str; 2] = ["update", "--models"];
+pub(crate) const UPDATE: [&str; 2] = ["update", "--models"];
 
 /// How long the catalogs' fetch may take, and how much it may say.
-pub const UPDATE_LIMITS: Limits = Limits {
+pub(crate) const UPDATE_LIMITS: Limits = Limits {
     timeout: Duration::from_secs(60),
     max_buffer: 1 << 20,
 };
@@ -37,7 +37,7 @@ const LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "
 
 /// The program the list is read from: `pi` at `executable` in rpc mode, offline, with no
 /// session, extension or MCP server of its own.
-pub fn program(executable: PathBuf, env: &Env) -> Program {
+pub(crate) fn program(executable: PathBuf, env: &Env) -> Program {
     let args = [
         "--mode",
         "rpc",
@@ -75,7 +75,7 @@ fn levels(model: &Value) -> Vec<String> {
 
 /// What a `get_available_models` answer lists, read at `at`. Fails where Pi refused, or
 /// lists no model (it holds no login for any provider).
-pub fn parse(answer: &Value, at: i64) -> Result<ModelListing, String> {
+pub(crate) fn parse(answer: &Value, at: i64) -> Result<ModelListing, String> {
     if answer.get("success") == Some(&Value::Bool(false)) {
         let said = answer["error"].as_str().unwrap_or("no reason given");
         return Err(format!("pi refused get_available_models: {said}"));
@@ -104,7 +104,7 @@ pub fn parse(answer: &Value, at: i64) -> Result<ModelListing, String> {
 }
 
 /// The models `program` lists: one bounded conversation, no turn.
-pub async fn read(
+pub(crate) async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,
