@@ -3164,23 +3164,31 @@ async function selecting(page, line) {
 }
 
 // On a Mac, Cmd+C copies and Ctrl+C stays the program's interrupt, selection
-// or not; Ctrl+Shift+C copies on every system.
-test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
-  page,
-}) => {
-  const { copied, sent } = await selecting(page, 'copy this line')
-  await page.keyboard.press('Control+Shift+C')
-  expect(await copied()).toEqual(['copy'])
-  expect(await sent()).toEqual([])
-  await page.mouse.dblclick(
-    ...(await page
-      .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
-      .boundingBox()
-      .then((box) => [box.x + 6, box.y + 6])),
-  )
-  await page.keyboard.press('Control+C')
-  await expect.poll(sent).toEqual([[3]])
-  expect(await copied()).toEqual(['copy'])
+// or not; Ctrl+Shift+C copies on every system. The page tells a Mac by the
+// browser's user agent, which this sets, as the cases on Windows set theirs: the
+// suite runs on Linux (T-1161).
+test.describe('on a Mac', () => {
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+  })
+  test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
+    page,
+  }) => {
+    const { copied, sent } = await selecting(page, 'copy this line')
+    await page.keyboard.press('Control+Shift+C')
+    expect(await copied()).toEqual(['copy'])
+    expect(await sent()).toEqual([])
+    await page.mouse.dblclick(
+      ...(await page
+        .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+        .boundingBox()
+        .then((box) => [box.x + 6, box.y + 6])),
+    )
+    await page.keyboard.press('Control+C')
+    await expect.poll(sent).toEqual([[3]])
+    expect(await copied()).toEqual(['copy'])
+  })
 })
 
 test.describe('on Windows', () => {

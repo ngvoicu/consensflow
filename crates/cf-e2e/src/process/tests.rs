@@ -735,3 +735,12 @@ fn the_shipped_bundle_is_started_only_with_leave_for_it() {
         "the shipped bundle was not started with leave for it"
     );
 }
+
+/// The PowerShell that says when a process began is given what one takes to start on a loaded
+/// Windows machine, not the 30 s of a verb of `cf`: ended there, it said a process that ran was
+/// none (GitHub's Windows runner, 2026-10-15). Built here as on Windows, where it runs.
+#[test]
+fn the_powershell_asked_when_a_process_began_is_given_what_one_takes_on_a_loaded_machine() {
+    assert_eq!(pid::when_started(1).limit_given(), Some(POWERSHELL_LIMIT));
+    assert!(POWERSHELL_LIMIT > LIMIT);
+}

@@ -482,8 +482,11 @@ pub fn until_up(file: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// How long a job has to write its process once it is started.
-const UP: Duration = Duration::from_secs(30);
+/// How long a job has to write its process once it is started: what its shell, a PowerShell
+/// on Windows, may take to start on a loaded machine (`cf_e2e::process::POWERSHELL_LIMIT`).
+/// Given 30 s, a stand-in under the load of a whole test program on GitHub's Windows runner
+/// took its own command for failed and left its window mid-task (CI, 2026-11-03, T-1161).
+const UP: Duration = cf_e2e::process::POWERSHELL_LIMIT;
 
 /// `program` with `words`, run as a harness's tool runs a command for its agent: by a
 /// shell (a PowerShell on Windows) that waits for it and ends with its code, in a group

@@ -59,6 +59,14 @@ pub use spawned::{Sink, Spawned};
 /// once, and one that waited for ever would hold the whole suite with it.
 pub const LIMIT: Duration = Duration::from_secs(30);
 
+/// How long a PowerShell the rig, its checks or its stand-ins start on Windows is given:
+/// well past what one takes to start on a loaded machine. That was 11 to 17 s on GitHub's
+/// Windows runner (2026-10-15), and past [`LIMIT`] under the load of a whole test program
+/// (CI's run of the live suites' offline cases, 2026-11-03, T-1161): a PowerShell ended at
+/// [`LIMIT`] said nothing of processes that ran, and a stand-in that waited no longer for
+/// its own command's PowerShell took the command for failed and left its window.
+pub const POWERSHELL_LIMIT: Duration = Duration::from_secs(120);
+
 /// The case `case` of a test binary (`binary`: the test's own, `std::env::current_exe()`) run
 /// again alone as a program by a test of it, held to `limit`: the most what the case runs may
 /// take, which its caller says. A nested case is held to no verb of `cf`'s [`LIMIT`] by default:
@@ -284,6 +292,12 @@ impl Run {
     pub fn limit(mut self, limit: Duration) -> Self {
         self.limit = Some(limit);
         self
+    }
+
+    /// The most the run may take before it is ended: none for a run never ended.
+    #[cfg(test)]
+    pub(crate) fn limit_given(&self) -> Option<Duration> {
+        self.limit
     }
 
     /// Never ended for running long: for a build, which takes what it takes.
