@@ -104,12 +104,18 @@ unsafe impl Sync for JobObject {}
 
 impl JobObject {
     pub fn new() -> io::Result<Self> {
+        Self::with_births(Births::default())
+    }
+
+    /// A job whose processes' births are kept in `births` (a test gives one with a bound of
+    /// its own).
+    pub(crate) fn with_births(births: Births) -> io::Result<Self> {
         // SAFETY: no attributes and no name: a private job for this pane.
         let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        let births = Arc::new(Mutex::new(Births::default()));
+        let births = Arc::new(Mutex::new(births));
         let port = listen_for_births(handle, &births);
         let job = Self {
             handle,
@@ -694,5 +700,7 @@ fn command_line(process: &Process) -> Option<String> {
     Some(String::from_utf16_lossy(units))
 }
 
+#[cfg(test)]
+mod listener_tests;
 #[cfg(test)]
 mod tests;

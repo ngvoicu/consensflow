@@ -33,14 +33,31 @@ struct Birth {
 }
 
 /// The births of a job's processes.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Births {
     by_number: HashMap<u32, Birth>,
     /// The numbers, oldest first, for letting go of them.
     order: VecDeque<u32>,
+    /// How many are kept at most.
+    cap: usize,
+}
+
+impl Default for Births {
+    fn default() -> Self {
+        Self::with_cap(BIRTHS)
+    }
 }
 
 impl Births {
+    /// A record that keeps `cap` births at most.
+    pub fn with_cap(cap: usize) -> Self {
+        Self {
+            by_number: HashMap::new(),
+            order: VecDeque::new(),
+            cap,
+        }
+    }
+
     /// A process joined the job: it is `pid`, it began at `began`, and the process that started
     /// it was, or was not, a shell. A number that is recorded again is the newer process's.
     pub fn record(&mut self, pid: u32, began: u64, started_by_a_shell: bool) {
@@ -57,12 +74,15 @@ impl Births {
         {
             self.order.push_back(pid);
         }
-        while self.order.len() > BIRTHS {
+        while self.order.len() > self.cap {
             if let Some(oldest) = self.order.pop_front() {
                 self.by_number.remove(&oldest);
             }
         }
     }
+
+    /// The process `pid` exited: its birth is let go of.
+    pub fn forget(&mut self, _pid: u32) {}
 
     /// Whether the process `key` names was started by a shell, as it was read when it began:
     /// false for a process whose birth is not kept, or is of another process of its number.

@@ -65,6 +65,47 @@ mod macos {
     }
 
     #[test]
+    fn a_detached_job_is_still_named_after_a_note_is_pasted_and_a_close_after_that_ends_it_and_names_it(
+    ) {
+        let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
+        for servers in [Servers::InGroup, Servers::Unknown] {
+            let table = Arc::new(PaneTable::closing_within(GRACE));
+            let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
+            assert_eq!(
+                listed(&table, &pane.key),
+                numbers(&pid, &["job"]),
+                "{servers:?}: named in the turn it was detached in"
+            );
+
+            // A note is pasted, then the words of a resume: each marks a turn, with the job in
+            // the tree (T-1153's D1).
+            for turn in ["the tell", "the resume's words"] {
+                table.mark(&pane.key, servers, None).expect("mark the turn");
+                assert_eq!(
+                    listed(&table, &pane.key),
+                    numbers(&pid, &["job"]),
+                    "{servers:?}: after the mark of {turn}"
+                );
+            }
+
+            // The close a later turn's ignored pause comes to ends it, and names it.
+            table.kill(&pane.key).expect("close the pane");
+            assert!(gone(pid["job"]), "{servers:?}: the close ended it");
+            let mut kept: Vec<u32> = pane
+                .ended
+                .background()
+                .expect("the close kept its list")
+                .iter()
+                .map(|process| process.pid)
+                .collect();
+            kept.sort_unstable();
+            assert_eq!(kept, numbers(&pid, &["job"]), "{servers:?}: it named it");
+            assert!(outsider.runs(), "{servers:?}: a process outside the window");
+        }
+    }
+
+    #[test]
     fn a_job_that_left_the_session_with_the_shell_that_started_it_gone_is_left_running_and_not_named(
     ) {
         let _serial = serial_pty_test();
@@ -438,6 +479,67 @@ mod windows {
             "the close names it: {kept:?}"
         );
         // The pane's job is the window's: its close ends it with the rest.
+        table.kill(&key).expect("close the pane");
+    }
+
+    /// Every paste marks a turn (T-1153's D1): a ping the agent detached before a note was pasted
+    /// is named after the paste, and a build tool's ping, detached the same way, is not.
+    #[test]
+    fn a_detached_ping_is_still_named_after_a_note_is_pasted_and_a_build_tools_is_not() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let ping = system("PING.EXE");
+        let shell = system(r"WindowsPowerShell\v1.0\powershell.exe");
+        let cmd = system("cmd.exe");
+        let (key, output) = open(
+            &table,
+            &powershell(&format!(
+                // Once told to go, the agent detaches a ping from a shell that ends at once, and
+                // a build tool (`cmd.exe`) leaves another.
+                "Write-Output 'READY#'; [Console]::In.ReadLine() | Out-Null; \
+                 Start-Process -WindowStyle Hidden -FilePath '{shell}' -ArgumentList '-NoProfile','-Command','Start-Process -WindowStyle Hidden -FilePath ''{ping}'' -ArgumentList ''-n'',''1007'',''127.0.0.1'''; \
+                 Start-Process -WindowStyle Hidden -FilePath '{cmd}' -ArgumentList '/c','start \"\" /b {ping} -n 1008 127.0.0.1'; \
+                 Write-Output 'STARTED#'; Start-Sleep 1000"
+            )),
+            &HashMap::new(),
+            1 << 20,
+        );
+        read_until(&table, &key, &output, "READY#");
+        table
+            .mark(&key, Servers::Unknown, None)
+            .expect("mark the turn");
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "STARTED#");
+
+        // Both pings are in the job on their own once the shells that started them have gone.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let found = held(&table, &key);
+            if on_its_own(&found, "-n 1007") && on_its_own(&found, "-n 1008") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the pings were never in the job on their own: {found:?}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let names = |ping: &str| {
+            listed(&table, &key)
+                .iter()
+                .any(|(_, command)| command.contains(ping))
+        };
+        assert!(names("-n 1007"), "named in its own turn");
+        assert!(!names("-n 1008"), "the build tool's is not");
+
+        // A note is pasted, and the words of a resume after it: each marks a turn.
+        for _ in 0..2 {
+            table
+                .mark(&key, Servers::Unknown, None)
+                .expect("mark the turn");
+            assert!(names("-n 1007"), "still named after the mark");
+            assert!(!names("-n 1008"), "and the build tool's is not");
+        }
         table.kill(&key).expect("close the pane");
     }
 

@@ -68,12 +68,71 @@ fn told(rig: &Rig, project: &Project) -> cf_e2e::Result<[Vec<String>; 2]> {
     Ok([said(human), said(project.inbox("chief")?)])
 }
 
+/// The conversation a Claude window is opened on, from its command line.
+fn session_of(frame: &Value) -> String {
+    let argv = frame["argv"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    argv.iter()
+        .position(|word| word == "--session-id")
+        .and_then(|at| argv.get(at + 1))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
 /// `cf` with `words`, run in the chief's window as its agent runs it.
 fn cf(rig: &Rig, chief: &Value, words: &[&str]) -> cf_e2e::Result<()> {
     let ran = rig.cf_in_window(chief, words)?;
     if ran.code != Some(0) {
         return Err(Error::Daemon(format!("cf {}: {ran}", words.join(" "))));
     }
+    Ok(())
+}
+
+/// After the chief's pause (or tell) the window ignored: the window is open as it was, the task
+/// paused, the job running and never asked to end, the chief and the human told once; and the
+/// human's delete-session ends the window and the job with it.
+fn the_window_is_kept_for_the_job_until_the_human_ends_its_session(
+    rig: &Rig,
+    project: &Project,
+    handle: &str,
+    pane: &Value,
+    job: &cf_e2e::rig::Job,
+) -> Outcome {
+    sleep(secs(15));
+    assert_eq!(project.task(1)?["state"], "paused");
+    assert_eq!(
+        project.lane(handle)?["pane"],
+        *pane,
+        "the window is open, as it was"
+    );
+    assert!(
+        is_alive(job.pid()) && !job.released(),
+        "the detached job runs on, never asked to end"
+    );
+    let [human, to_chief] = told(rig, project)?;
+    assert!(
+        to_chief.len() == 1
+            && to_chief[0].contains("ConsensFlow keeps the window open for it")
+            && to_chief[0].contains("--background-job"),
+        "the chief was told, and the note names the job: {to_chief:?}"
+    );
+    assert!(
+        human.len() == 1 && human[0].contains(&format!("delete @{handle}'s session")),
+        "the human was told: {human:?}"
+    );
+
+    // The human deletes the session: that ends the window, and its work with it.
+    let ended = rig.page(
+        "session.end",
+        json!({ "project": project.id(), "handle": handle }),
+    )?;
+    assert_eq!(ended["ok"], true, "{ended}");
+    rig.wait_for("the window's work to end with it", secs(60), || {
+        Ok(!is_alive(job.pid()))
+    })?;
     Ok(())
 }
 
@@ -111,39 +170,72 @@ fn a_busy_worker_that_detached_a_job_and_ignores_its_pause_keeps_its_window_and_
     rig.wait_for("the chief to be told the window is kept", secs(60), || {
         Ok(!told(&rig, &project)?[1].is_empty())
     })?;
-    sleep(secs(15));
-    assert_eq!(project.task(1)?["state"], "paused");
-    assert_eq!(
-        project.lane(&handle)?["pane"],
-        pane,
-        "the window is open, as it was"
-    );
-    assert!(
-        is_alive(job.pid()) && !job.released(),
-        "the detached job runs on, never asked to end"
-    );
-    let [human, to_chief] = told(&rig, &project)?;
-    assert!(
-        to_chief.len() == 1
-            && to_chief[0].contains("ConsensFlow keeps the window open for it")
-            && to_chief[0].contains("--background-job"),
-        "the chief was told, and the note names the job: {to_chief:?}"
-    );
-    assert!(
-        human.len() == 1 && human[0].contains(&format!("delete @{handle}'s session")),
-        "the human was told: {human:?}"
-    );
+    the_window_is_kept_for_the_job_until_the_human_ends_its_session(
+        &rig, &project, &handle, &pane, &job,
+    )
+}
 
-    // The human deletes the session: that ends the window, and its work with it.
-    let ended = rig.page(
-        "session.end",
-        json!({ "project": project.id(), "handle": handle }),
+/// A tell is pasted after the agent detached its job, and the turn it starts ignores every key
+/// (T-1153's D1): every paste marks a turn, and a mark used to make the host forget what the
+/// window already ran. The pause the tell makes is ignored again, and the window must be kept
+/// for the job as before, the chief told of it by name.
+#[test]
+fn a_tell_pasted_after_the_agent_detached_a_job_does_not_make_the_host_forget_it_and_the_window_is_kept(
+) -> Outcome {
+    let rig = Rig::start(config())?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"].as_str().unwrap_or_default();
+    // The first turn: the agent detaches a job and goes on at a tool call a key stops.
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} JOB {DETACH} 600 SLEEP 120 Reply with exactly: NEVER_OK"),
     )?;
-    assert_eq!(ended["ok"], true, "{ended}");
-    rig.wait_for("the window's work to end with it", secs(60), || {
-        Ok(!is_alive(job.pid()))
+    rig.wait_for("the worker's detached job to run", secs(90), || {
+        Ok(project.task(1)?["state"] == "working" && rig.jobs("job").len() == 1)
     })?;
-    Ok(())
+    let job = rig
+        .jobs("job")
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::Daemon("the job is gone".to_owned()))?;
+    let handle = project.task(1)?["assignee"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
+
+    // The chief tells the worker something: the tell stops the turn at its tool call, pauses the
+    // task, and is pasted once the window rests. That paste marks the second turn, which the
+    // stand-in spends deaf to every key.
+    cf(
+        &rig,
+        &chief,
+        &["tell", "T-1", "HANG 600 Reply with exactly: TOLD_OK"],
+    )?;
+    let frame = rig.open_frame(&format!("p{}-{handle}", project.id()), secs(60))?;
+    let session = session_of(&frame);
+    rig.wait_for("the worker's window to be given the tell", secs(90), || {
+        Ok(rig
+            .transcript(&session)
+            .contains("HANG 600 Reply with exactly: TOLD_OK"))
+    })?;
+    let pane = project.lane(&handle)?["pane"].clone();
+
+    // The chief resumes the task, and pauses it again while the window is at work on the tell:
+    // the pause is ignored, and the host is asked what the window runs.
+    cf(
+        &rig,
+        &chief,
+        &["task", "resume", "T-1", "Go on where you stopped"],
+    )?;
+    cf(&rig, &chief, &["task", "pause", "T-1"])?;
+    rig.wait_for("the chief to be told the window is kept", secs(90), || {
+        Ok(!told(&rig, &project)?[1].is_empty())
+    })?;
+    the_window_is_kept_for_the_job_until_the_human_ends_its_session(
+        &rig, &project, &handle, &pane, &job,
+    )
 }
 
 #[test]

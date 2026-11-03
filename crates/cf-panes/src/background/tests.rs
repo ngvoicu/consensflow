@@ -847,7 +847,7 @@ fn detached(baseline: &Baseline, tree: &[Member]) -> Vec<u32> {
 }
 
 #[test]
-fn a_job_that_lost_its_starter_before_the_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work(
+fn a_job_that_lost_its_starter_before_the_first_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work(
 ) {
     let orphan = |pid| member(pid, "sleep 600", "sleep", None);
     let baseline = marked(&[program(), orphan(30)], None, None);
@@ -858,6 +858,99 @@ fn a_job_that_lost_its_starter_before_the_mark_is_nobodys_to_name_and_one_that_b
     assert_eq!(detached(&baseline, &tree), [31]);
     // And a window never marked names none: nothing says where its turn began.
     assert_eq!(detached(&Baseline::default(), &tree), Vec::<u32>::new());
+}
+
+/// Every paste marks a turn (a tell, the words of a resume, a follow-up), and a mark takes what
+/// the tree has as what came before (T-1153's D1). A job the agent detached in an earlier turn
+/// is the window's still, and is named at the marks that follow it.
+#[test]
+fn a_detached_job_is_still_named_at_the_turns_after_the_one_it_was_detached_in() {
+    let orphan = |pid| member(pid, "sleep 600", "sleep", None);
+    let mut baseline = marked(&[program(), orphan(30)], None, None);
+    let turn_one = vec![program(), orphan(30), orphan(31)];
+    assert_eq!(detached(&baseline, &turn_one), [31]);
+
+    // A note is pasted, then the resume's words: two more marks, with the job in the tree.
+    baseline.mark(&turn_one, None, None);
+    assert_eq!(detached(&baseline, &turn_one), [31], "after the next mark");
+    baseline.mark(&turn_one, None, None);
+    assert_eq!(detached(&baseline, &turn_one), [31], "and the one after");
+    // What the window had before the first turn is still nobody's to name.
+    assert!(!baseline
+        .detached(&turn_one)
+        .iter()
+        .any(|job| job.key.pid == 30));
+    // A job the agent detaches in a later turn is named beside it.
+    let turn_three = vec![program(), orphan(30), orphan(31), orphan(32)];
+    assert_eq!(detached(&baseline, &turn_three), [31, 32]);
+}
+
+#[test]
+fn what_a_carried_job_starts_in_a_later_turn_is_named_with_it_and_a_job_that_ended_is_forgotten() {
+    let orphan = |pid| member(pid, "sleep 600", "sleep", None);
+    let mut baseline = marked(&[program()], None, None);
+    let turn_one = vec![program(), orphan(31)];
+    assert_eq!(detached(&baseline, &turn_one), [31]);
+    baseline.mark(&turn_one, None, None);
+
+    // The job starts a worker after the next mark: it is what the job started, and named.
+    let later = vec![
+        program(),
+        orphan(31),
+        member(33, "python worker", "python", of(31)),
+    ];
+    assert_eq!(detached(&baseline, &later), [31, 33]);
+
+    // The job ends before the mark after: it is forgotten, and a process that takes its
+    // number later (another start) is a job of its own, not the old one carried.
+    baseline.mark(&[program()], None, None);
+    assert!(
+        baseline.carried.is_empty(),
+        "nothing is carried for a job that ended"
+    );
+    let reused = Member {
+        key: ProcessKey {
+            pid: 31,
+            began: 999,
+        },
+        ..orphan(31)
+    };
+    let tree = vec![program(), reused];
+    assert_eq!(detached(&baseline, &tree), [31]);
+    baseline.mark(&tree, None, None);
+    assert_eq!(baseline.carried.len(), 1);
+    assert!(baseline.carried.contains(&ProcessKey {
+        pid: 31,
+        began: 999
+    }));
+    assert!(
+        !baseline.carried.contains(&key(31)),
+        "not the process that ended"
+    );
+}
+
+#[test]
+fn a_carried_job_is_proved_again_when_the_host_names_it() {
+    let orphan = |pid| member(pid, "sleep 600", "sleep", None);
+    let mut baseline = marked(&[program()], None, None);
+    let tree = vec![program(), orphan(31), orphan(32)];
+    baseline.mark(&tree, None, None);
+    baseline.mark(&tree, None, None);
+
+    // Of the two carried, the platform proves one (a Windows job: one a shell started).
+    let named = baseline
+        .named(&tree, |candidates| {
+            assert_eq!(candidates.len(), 2, "both are asked of");
+            Ok(Some([key(32)].into_iter().collect()))
+        })
+        .expect("named");
+    assert_eq!(
+        named
+            .iter()
+            .map(|member| member.key.pid)
+            .collect::<Vec<_>>(),
+        [32]
+    );
 }
 
 #[test]

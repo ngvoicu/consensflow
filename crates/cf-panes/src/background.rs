@@ -160,6 +160,10 @@ pub(crate) struct Baseline {
     rests: VecDeque<(u64, HashSet<ProcessKey>)>,
     /// The number the next rest is given.
     next_rest: u64,
+    /// The detached work the tree had when the latest turn was marked, by what a look before
+    /// the mark named: the turns after the one it was detached in do not forget it
+    /// ([`Baseline::detached`]).
+    carried: HashSet<ProcessKey>,
     /// What was seen to descend from a process of the harness's own at the latest
     /// look, and runs still: kept for the day the process that started it has gone. It
     /// is shared by the copies a look is made with: whatever one sees, the next knows.
