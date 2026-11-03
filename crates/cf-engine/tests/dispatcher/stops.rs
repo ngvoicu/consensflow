@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use cf_ledger::NewTask;
 
-use crate::fixtures::{after, assert_match, exhausted, Tiers};
+use crate::fixtures::{after, assert_match, exhausted, hold_notes, Tiers};
 
 /// What pressing Escape into `pane` is, as the host is asked it.
 fn escape(pane: &Pane) -> Value {
@@ -728,6 +728,55 @@ fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer
     );
 }
 
+/// The same, where the host proves nothing of the exit of the window that closed: the words that
+/// resumed T-2 are not the first a window of its own is given; T-2 is held for the chief's word
+/// first, and the words that send it on are, with no turn of it to interrupt for the earlier pause.
+#[test]
+fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_are_held_for_the_chiefs_word_when_the_window_before_closed_with_no_proof(
+) {
+    let context = Context::new();
+    let project = working(&context);
+    context.give(project, "zeus", "Docs");
+    context.pause_task(project, 2);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+    context.pause_task(project, 1);
+    context.adapter.answer("zeus", "Stopped");
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    context.resume_task(project, 2, "Go on");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 2).task.state, "queued");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.task(project, 2).task.state,
+        "paused",
+        "held for the chief's word: T-1's window closed with no proof"
+    );
+    assert_eq!(hold_notes(&context, project, 2).len(), 1);
+
+    context.resume_task(project, 2, "Go on in a window of your own.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 2).task.state, "working");
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs(),
+        Vec::<Value>::new(),
+        "the turn the words began is not interrupted for a pause that came before them"
+    );
+}
+
 #[test]
 fn a_stop_paid_for_one_task_the_window_held_never_hides_the_stop_of_the_task_it_goes_on_with() {
     let context = Context::new();
@@ -752,6 +801,50 @@ fn a_stop_paid_for_one_task_the_window_held_never_hides_the_stop_of_the_task_it_
         .borrow_mut()
         .cancel_task(project, 1, "chief")
         .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 2).task.state, "working");
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    // T-2 is paused in its turn: its stop is owed, whatever was paid for T-1.
+    context.adapter.busy("zeus");
+    context.pause_task(project, 2);
+    context.pass().unwrap();
+    let pane = pane_of(&context, "zeus");
+    assert_eq!(context.host.inputs(), [escape(&pane)]);
+}
+
+/// The same, where the host proves nothing of the exit of the window that closed: T-2 is held for
+/// the chief's word, no key is pressed for anything, and once sent on its stop is owed all the same.
+#[test]
+fn a_stop_paid_for_one_task_never_hides_the_stop_of_the_task_the_chief_sends_on_after_a_hold() {
+    let context = Context::new();
+    let project = working(&context);
+    context.give(project, "zeus", "Docs");
+    context.pause_task(project, 1);
+    context.adapter.answer("zeus", "Stopped");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 2).task.state, "queued");
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.task(project, 2).task.state,
+        "paused",
+        "held for the chief's word: T-1's window closed with no proof"
+    );
+    assert_eq!(hold_notes(&context, project, 2).len(), 1);
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    context.resume_task(project, 2, "Go on in a window of your own.");
     for _ in 0..3 {
         context.pass().unwrap();
     }

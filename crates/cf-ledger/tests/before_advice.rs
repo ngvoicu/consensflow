@@ -167,6 +167,58 @@ fn a_task_for_a_tier_queued_for_its_window_is_put_behind_the_new_task_by_an_edit
 }
 
 #[test]
+fn a_task_for_a_tier_whose_brief_is_being_pasted_is_told_to_pause_it_not_to_edit_it() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    // Still queued, as the task is until its window has the brief, but the paste has begun.
+    let review = ledger
+        .create_task(1, &task("Review"))
+        .expect("a task")
+        .task
+        .number;
+    let member = zeus(&ledger);
+    let brief = ledger
+        .assign_task(1, review, member)
+        .expect("assigned")
+        .message
+        .expect("its brief")
+        .id;
+    ledger.begin_delivery(brief).expect("the paste begins");
+    assert_eq!(state(&ledger, review), "queued");
+
+    let refusal = refused_before(&mut ledger, review as u64).to_string();
+    assert!(
+        refusal.contains("pause T-1 now (cf task pause T-1)") && !refusal.contains("cf task edit"),
+        "{refusal}"
+    );
+    // The edit would be refused (the window has the brief), and the pause is not.
+    let fix = ledger
+        .create_task(1, &task("Fix first"))
+        .expect("the new task")
+        .task
+        .number;
+    let edit = ledger
+        .edit_task_with(
+            1,
+            review,
+            "chief",
+            &TaskEdit {
+                needs: Some(Links::Change {
+                    add: vec![fix],
+                    remove: Vec::new(),
+                }),
+                ..TaskEdit::default()
+            },
+        )
+        .expect_err("a brief being pasted is not edited");
+    assert_eq!(edit.code(), Some("already-given"));
+    ledger
+        .pause_task(1, review, Some("chief"), None)
+        .expect("the pause the refusal named works");
+    assert_eq!(state(&ledger, review), "paused");
+}
+
+#[test]
 fn a_task_for_a_tier_at_work_is_paused_and_sent_on_when_the_new_task_is_accepted() {
     let dir = tempfile::tempdir().expect("a folder");
     let mut ledger = ledger_in(&dir);
