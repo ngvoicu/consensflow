@@ -369,14 +369,19 @@ pub(crate) fn create_task(
 /// an open one can wait for a new task. A task in a window is not pulled back, by
 /// design, so the refusal says what to do instead (T-675, the field report of
 /// 2026-10-27, where a chief cancelled a running review and added it again with
-/// its whole brief restated): add the new task alone, stop the one in its window
-/// with a pause and send it on when the new task is accepted, or add it again
-/// with `--needs`. The new task is not on the board, since the refusal rolls it
-/// back, so it is not named by number.
+/// its whole brief restated). Add the new task alone, then: a task queued for its
+/// window, whose brief has not begun to reach it, is put behind the new one with
+/// `cf task edit T-n --needs +T-new` (T-1108); one at work is stopped with a pause
+/// and sent on when the new task is accepted; or it is added again with `--needs`.
+/// The new task is not on the board, since the refusal rolls it back, so it is not
+/// named by number.
 fn cannot_wait_for_a_new_one(waits: &TaskRow) -> LedgerError {
     let number = waits.number;
     let instead = match waits.state.as_str() {
-        "queued" | "working" | "waiting" => format!(
+        "queued" => format!(
+            "a task in a window is not pulled back. Add the new task without --before, then put T-{number} behind it with cf task edit T-{number} --needs +T-<the new task> while its brief has not begun to reach its window; or cancel it and add it again with --needs on the new task"
+        ),
+        "working" | "waiting" => format!(
             "a task in a window is not pulled back. Add the new task without --before, pause T-{number} now (cf task pause T-{number}), and send it on with cf task resume T-{number} \"…\" once the new task is accepted; or cancel it and add it again with --needs on the new task"
         ),
         "paused" => format!(

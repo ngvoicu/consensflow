@@ -189,7 +189,7 @@ fn what_waits_for_a_failed_task_still_refuses_its_cancel_and_is_told_to_reopen_i
         refused(&mut ledger, 1, "chief"),
         Some((
             "waited-for",
-            "T-1 cannot be cancelled while T-2 waits for it: cancel T-2 first, or reopen T-1 and let it finish"
+            "T-1 cannot be cancelled while T-2 waits for it: cancel T-2 first, reopen T-1 and let it finish, or accept it with what you checked"
                 .to_owned()
         ))
     );
@@ -209,7 +209,6 @@ fn a_task_in_a_window_cannot_wait_for_a_new_one_and_the_refusal_says_what_to_do_
     let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
     project(&mut ledger);
     open(&mut ledger, "Review", &[]);
-    in_its_window(&mut ledger, 1);
 
     let before = |ledger: &mut Ledger| {
         ledger
@@ -226,6 +225,24 @@ fn a_task_in_a_window_cannot_wait_for_a_new_one_and_the_refusal_says_what_to_do_
             )
             .expect_err("T-1 is in a window")
     };
+    // Queued for its window, the brief not begun: it can be put behind the new task with an edit.
+    let brief = ledger
+        .assign_task(1, 1, project_member(&ledger))
+        .expect("assigned")
+        .message
+        .expect("its brief")
+        .id;
+    assert_eq!(state(&ledger, 1), "queued");
+    let queued = before(&mut ledger);
+    assert_eq!(queued.code(), Some("not-on-the-board"));
+    assert_eq!(
+        queued.to_string(),
+        "T-1 is queued: only a task still on the board can wait for a new one; a task in a window is not pulled back. Add the new task without --before, then put T-1 behind it with cf task edit T-1 --needs +T-<the new task> while its brief has not begun to reach its window; or cancel it and add it again with --needs on the new task"
+    );
+    ledger.begin_delivery(brief).expect("its delivery begins");
+    ledger
+        .confirm_delivery(brief, Some(&json!({ "item": "i-1" })))
+        .expect("its delivery is confirmed");
     let working = before(&mut ledger);
     assert_eq!(working.code(), Some("not-on-the-board"));
     assert_eq!(
