@@ -14,6 +14,8 @@
 [run]
 launcher-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::launcher"]
 launcher-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "owner_launchers::"]
+keychain-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::keychain"]
+login-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login"]
 
 [[plant]]
 name = "owner launcher: the windows of a rig are told to update no harness"
@@ -123,8 +125,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
-find = '''        Err(Error::Daemon(said))'''
-replace = '''        let _ = Error::Daemon(said);
+find = '''        Err(Error::Daemon(words))'''
+replace = '''        let _ = Error::Daemon(words);
         Ok(())'''
 
 [[plant]]
@@ -303,3 +305,208 @@ find = '''        config = config.isolated(Arc::new(Guard::new(
             &install.home,
         )));'''
 replace = '''        let _ = Guard::new(install.harness, &install.command, &install.home);'''
+
+# The owner's Keychain (T-1102): a Claude Code that is given a config folder of its own keeps what it
+# stores in the login Keychain under a name made of the folder's path, and the folder goes with the
+# run. Three rules: the guard of Claude Code lists the Keychain's names around every rig and fails
+# the rig that ends for one gained (`live/launcher.rs`); the item of a folder is named as Claude Code
+# names it, and a login that went into it is said once, as that (`live/keychain.rs`, `live/login.rs`);
+# a probe that cannot take --strict-mcp-config has a `security` that holds no item first on its PATH.
+# The cases that write an item of the Keychain are the Mac's.
+
+[[plant]]
+name = "owner launcher: the Keychain items a run gained are not said"
+meant = "a_keychain_item_a_run_gained_is_named_with_the_command_that_deletes_it_and_no_launcher_changed"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''        now.difference(was)
+            .map(|name| keychain::gained_words(name))
+            .collect()'''
+replace = '''        now.difference(was)
+            .take(0)
+            .map(|name| keychain::gained_words(name))
+            .collect()'''
+
+[[plant]]
+name = "owner launcher: only the first Keychain item a run gained is said"
+meant = "every_item_gained_is_named_and_what_was_there_before_or_went_is_not_one"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''        now.difference(was)
+            .map(|name| keychain::gained_words(name))'''
+replace = '''        now.difference(was)
+            .take(1)
+            .map(|name| keychain::gained_words(name))'''
+
+[[plant]]
+name = "owner launcher: every item the Keychain has is said, not the ones it gained"
+meant = "a_keychain_that_gained_nothing_or_was_not_listed_is_no_change"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''        now.difference(was)
+            .map(|name| keychain::gained_words(name))'''
+replace = '''        now.iter()
+            .map(|name| keychain::gained_words(name))'''
+
+[[plant]]
+name = "owner launcher: the guard of Claude Code lists no Keychain"
+meant = "only_the_guard_of_claude_code_looks_at_the_keychain"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''            watch: if harness == Harness::Claude {
+                watch.with_keychain(keychain::names)
+            } else {
+                watch
+            },'''
+replace = '''            watch,'''
+
+[[plant]]
+name = "owner launcher: the guard of every harness lists the Keychain, the others' too"
+meant = "only_the_guard_of_claude_code_looks_at_the_keychain"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''            watch: if harness == Harness::Claude {'''
+replace = '''            watch: if harness != Harness::Pi {'''
+
+[[plant]]
+name = "owner launcher: a rig that ends is not failed for a Keychain item gained"
+meant = "a_guard_whose_keychain_gained_an_item_fails_the_rig_that_ends_and_names_it"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''        let gained = before.keychain_gained(&after);'''
+replace = '''        let gained: Vec<String> = Vec::new();'''
+
+[[plant]]
+name = "owner launcher: a Keychain item gained is said as a change to the launchers"
+meant = "a_guard_whose_keychain_gained_an_item_fails_the_rig_that_ends_and_names_it"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''            words.push_str(&said_of_keychain(&gained));'''
+replace = '''            words.push_str(&said(self.harness, &gained));'''
+
+[[plant]]
+name = "owner launcher: a rig of Claude Code that gained an item in the Keychain ends clean"
+meant = "a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_and_names_it"
+runs = ["launcher-rig"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''            keychain: self.keychain.and_then(|names| names()),'''
+replace = '''            keychain: None,'''
+
+[[plant]]
+name = "owner launcher: the item of a folder is named for one digit fewer than Claude Code names it for"
+meant = "the_item_of_a_folder_is_named_as_claude_code_names_it_for_the_path_as_it_is_given"
+runs = ["keychain-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/keychain.rs"
+find = '''.take(4)'''
+replace = '''.take(3)'''
+
+[[plant]]
+name = "owner launcher: the item of a folder is named for its real path, as the system spells it"
+meant = "the_item_of_a_folder_is_named_as_claude_code_names_it_for_the_path_as_it_is_given"
+runs = ["keychain-unit"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/keychain.rs"
+find = '''Sha256::digest(folder.to_string_lossy().as_bytes())'''
+replace = '''Sha256::digest(
+        std::fs::canonicalize(folder)
+            .unwrap_or_else(|_| folder.to_path_buf())
+            .to_string_lossy()
+            .as_bytes(),
+    )'''
+
+[[plant]]
+name = "owner launcher: what is said of an item gained does not name the command that deletes it"
+meant = "what_is_said_of_an_item_gained_names_it_and_its_cause_and_the_command_that_deletes_it"
+runs = ["keychain-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/keychain.rs"
+find = '''(delete it with `security delete-generic-password -s \"{name}\"`; the kit never does)'''
+replace = '''(delete it by hand; the kit never does)'''
+
+[[plant]]
+name = "owner launcher: the stand-in for security finds the item it is asked for"
+meant = "the_security_that_finds_no_item_and_writes_none_answers_as_claude_code_reads_it"
+runs = ["keychain-unit"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/keychain.rs"
+find = '''find-generic-password|delete-generic-password) exit {NOT_FOUND} ;;'''
+replace = '''find-generic-password|delete-generic-password) exit 0 ;;'''
+
+[[plant]]
+name = "owner launcher: the stand-in for security writes the item it is asked to"
+meant = "the_security_that_finds_no_item_and_writes_none_answers_as_claude_code_reads_it"
+runs = ["keychain-unit"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/keychain.rs"
+find = '''  *) exit 1 ;;\nesac\n"'''
+replace = '''  *) exit 0 ;;\nesac\n"'''
+
+[[plant]]
+name = "owner launcher: an item another process made fails this run for it"
+meant = "an_item_another_process_made_is_a_note_of_this_run_and_not_its_failure"
+runs = ["login-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        if *name == own {'''
+replace = '''        if *name != "" {'''
+
+[[plant]]
+name = "owner launcher: the item made for the run's folder is no failure of the run"
+meant = "a_run_whose_claude_code_moved_the_login_into_the_keychain_is_told_so_and_not_that_it_refreshed_it"
+runs = ["login-unit"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            kept = found.own;'''
+replace = '''            kept = Vec::new();'''
+
+[[plant]]
+name = "owner launcher: a login that went into the Keychain is said gone from the folder as well"
+meant = "a_run_whose_claude_code_moved_the_login_into_the_keychain_is_told_so_and_not_that_it_refreshed_it"
+runs = ["login-unit"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''                refreshed.clear();'''
+replace = '''                let _ = &refreshed;'''
+
+[[plant]]
+name = "owner launcher: what a run said of the Keychain is left out of the words"
+meant = "what_is_said_of_a_run_that_did_both_says_both"
+runs = ["login-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''    if !kept.is_empty() {
+        said.push_str('''
+replace = '''    if false && !kept.is_empty() {
+        said.push_str('''

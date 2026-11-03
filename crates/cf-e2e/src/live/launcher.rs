@@ -31,6 +31,10 @@
 //!
 //! The link and where it ends are recorded as well as the bytes of the file, because the
 //! updater's copy of the version the owner already ran is the same file.
+//!
+//! **The Keychain** is the owner's too (T-1102): the guard of Claude Code also lists the names of
+//! the login Keychain's items of `Claude Code-credentials` around the run, and an item gained fails
+//! the rig that ends ([`super::keychain`] says what writes one, and what keeps a run from it).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -40,6 +44,7 @@ use std::sync::{Mutex, PoisonError};
 
 use sha2::{Digest, Sha256};
 
+use super::keychain;
 use super::login::digest;
 use super::machine::Harness;
 use crate::process::own_var;
@@ -75,7 +80,7 @@ pub fn updates_off() -> impl Iterator<Item = (&'static str, &'static str)> {
 }
 
 /// What to look at for one harness.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Watch {
     /// The launchers: each is looked at as a link and as the file it ends at.
     launchers: Vec<PathBuf>,
@@ -84,6 +89,9 @@ pub struct Watch {
     folders: Vec<(PathBuf, Option<&'static str>)>,
     /// The small files that name the version in use.
     files: Vec<PathBuf>,
+    /// How to list the names of Claude Code's Keychain items, for the harness that keeps its login
+    /// there; none for the others, and for a watch that is only about the launchers.
+    keychain: Option<fn() -> Option<BTreeSet<String>>>,
 }
 
 impl Watch {
@@ -132,12 +140,22 @@ impl Watch {
             launchers,
             folders,
             files,
+            keychain: None,
         }
+    }
+
+    /// This watch, which also lists the names of Claude Code's Keychain items with `names` (none
+    /// where the machine has no Keychain, or it cannot be listed, which a run then cannot check).
+    #[must_use]
+    pub fn with_keychain(mut self, names: fn() -> Option<BTreeSet<String>>) -> Self {
+        self.keychain = Some(names);
+        self
     }
 
     /// What it is now.
     pub fn look(&self) -> Seen {
         Seen {
+            keychain: self.keychain.and_then(|names| names()),
             launchers: self
                 .launchers
                 .iter()
@@ -242,6 +260,8 @@ pub struct Seen {
     launchers: BTreeMap<PathBuf, Launcher>,
     folders: BTreeMap<PathBuf, Option<BTreeSet<String>>>,
     files: BTreeMap<PathBuf, Option<String>>,
+    /// The names of Claude Code's Keychain items; none where they were not listed.
+    keychain: Option<BTreeSet<String>>,
 }
 
 /// `path` as a run says it: below `~` where it is below the owner's `home`.
@@ -365,6 +385,19 @@ impl Seen {
     }
 }
 
+impl Seen {
+    /// The Keychain items of Claude Code that `after` has and this look did not, in words; none
+    /// where either look could not list the Keychain.
+    pub fn keychain_gained(&self, after: &Self) -> Vec<String> {
+        let (Some(was), Some(now)) = (&self.keychain, &after.keychain) else {
+            return Vec::new();
+        };
+        now.difference(was)
+            .map(|name| keychain::gained_words(name))
+            .collect()
+    }
+}
+
 /// The guard of one harness's launchers: a [`HarnessHome`] that sets no variable, looks at the
 /// owner's launchers when the rig starts and again when it ends, and fails the rig that ends if
 /// they differ (the owner's own harness could have written them as well, while the run went:
@@ -382,10 +415,15 @@ impl Guard {
     /// The guard of `harness`, run as `command`, on the machine of the person whose home is
     /// `home`.
     pub fn new(harness: Harness, command: &Path, home: &Path) -> Self {
+        let watch = Watch::of(harness, command, home);
         Self {
             harness,
             home: home.to_path_buf(),
-            watch: Watch::of(harness, command, home),
+            watch: if harness == Harness::Claude {
+                watch.with_keychain(keychain::names)
+            } else {
+                watch
+            },
             before: Mutex::new(None),
         }
     }
@@ -413,20 +451,33 @@ impl HarnessHome for Guard {
         };
         let after = self.watch.look();
         let changed = before.changes_to(&after, &self.home);
-        if changed.is_empty() {
+        let gained = before.keychain_gained(&after);
+        if changed.is_empty() && gained.is_empty() {
+            let keychain = before.keychain.as_ref().map_or_else(String::new, |names| {
+                format!(
+                    "; so is the Keychain ({} items of Claude Code)",
+                    names.len()
+                )
+            });
             let _ = std::io::Write::write_fmt(
                 &mut std::io::stderr(),
                 format_args!(
-                    "the owner's {} launchers are as they were: {}\n",
+                    "the owner's {} launchers are as they were: {}{keychain}\n",
                     self.harness.name(),
                     before.summary(&self.home)
                 ),
             );
             return Ok(());
         }
-        let said = said(self.harness, &changed);
-        let _ = std::io::Write::write_fmt(&mut std::io::stderr(), format_args!("{said}\n"));
-        Err(Error::Daemon(said))
+        let mut words = String::new();
+        if !changed.is_empty() {
+            words.push_str(&said(self.harness, &changed));
+        }
+        if !gained.is_empty() {
+            words.push_str(&said_of_keychain(&gained));
+        }
+        let _ = std::io::Write::write_fmt(&mut std::io::stderr(), format_args!("{words}\n"));
+        Err(Error::Daemon(words))
     }
 }
 
@@ -443,6 +494,24 @@ fn said(harness: Harness, changed: &[String]) -> String {
     );
     for change in changed {
         said.push_str(&format!("  - {change}\n"));
+    }
+    said.push_str(&bar);
+    said
+}
+
+/// What the guard says when the Keychain gained an item of Claude Code (`gained`, one line each): loud,
+/// and with what to do.
+fn said_of_keychain(gained: &[String]) -> String {
+    let bar = "!".repeat(78);
+    let mut said = format!(
+        "\n{bar}\nTHE RUN LEFT AN ITEM IN THE OWNER'S KEYCHAIN, which a live run is never to do (T-1102). A Claude \
+         Code run on a config folder of its own keeps what it stores securely in the login Keychain under a name \
+         made of the folder's path, and the folder goes with the run; a run of the kit starts Claude Code with \
+         --strict-mcp-config so that it has no MCP server to keep the OAuth state of. The kit does not delete it; \
+         do it by hand if it is the run's:\n"
+    );
+    for item in gained {
+        said.push_str(&format!("  - {item}\n"));
     }
     said.push_str(&bar);
     said

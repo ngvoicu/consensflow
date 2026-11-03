@@ -69,13 +69,14 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
+use super::keychain;
 use crate::process::{is_alive, own_var, Run};
 use crate::rig::ClaudeConfig;
 use crate::{files, Error, Result};
 
 /// The Keychain service Claude Code keeps its login under, and the start of the
 /// names it keeps another config folder's under (`Claude Code-credentials-<8 hex>`).
-const SERVICE: &str = "Claude Code-credentials";
+pub(super) const SERVICE: &str = "Claude Code-credentials";
 
 /// How long the login's access token must last for a live suite to start on a copy
 /// of it. Claude Code refreshes a token when five minutes of it are left, so a run
@@ -253,7 +254,7 @@ fn services(dump: &str) -> BTreeSet<String> {
 
 /// The names of those items now; none where the machine has no Keychain (or it cannot be
 /// listed, which a run then cannot check).
-fn keychain_services() -> Option<BTreeSet<String>> {
+pub fn keychain_services() -> Option<BTreeSet<String>> {
     if !cfg!(target_os = "macos") {
         return None;
     }
@@ -267,18 +268,42 @@ fn keychain_services() -> Option<BTreeSet<String>> {
     Some(services(&ran.stdout))
 }
 
-/// What the Keychain has now (`now`) of Claude Code's items that it did not have before the run
-/// (`before`), in words: Claude Code writes an item for the config folder it refreshes a
-/// login in.
-fn gained(before: &BTreeSet<String>, now: &BTreeSet<String>) -> Vec<String> {
-    now.difference(before)
-        .map(|name| {
-            format!(
-                "the Keychain gained the item `{name}`, which Claude Code writes when it refreshes a login \
-                 (delete it with `security delete-generic-password -s \"{name}\"`)"
-            )
-        })
-        .collect()
+/// What the Keychain came to for a run whose Claude Code worked in `folder`, from the names it had
+/// `before` the run and `now`.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Kept {
+    /// The item Claude Code made for the run's folder (in words): the run's own, and a failure.
+    own: Vec<String>,
+    /// The other items gained since, which are some other process's as far as this run can tell (the
+    /// Keychain is the whole machine's): in words, and no failure of this run. The guard of the
+    /// launchers is what fails a rig for them ([`super::launcher::Guard`]).
+    others: Vec<String>,
+}
+
+/// What the Keychain came to for the run that worked in `folder` ([`Kept`]).
+///
+/// Claude Code keeps what it stores securely in the Keychain, as an item named for the folder's path
+/// ([`keychain::item_of`]), once it writes it: the OAuth state of an MCP server it connected to
+/// is enough, and the login the folder held goes into the item with it and out of the folder
+/// (T-1102). Before, every item gained was said to be a refresh of the login, and one made by
+/// another run on the machine failed this one (T-1044).
+fn keychain_of(folder: &Path, before: &BTreeSet<String>, now: &BTreeSet<String>) -> Kept {
+    let own = keychain::item_of(folder);
+    let mut kept = Kept::default();
+    for name in now.difference(before) {
+        if *name == own {
+            kept.own.push(format!(
+                "Claude Code kept the secure storage of the run's folder in the Keychain item `{own}` (named for the \
+                 folder's path), not in the folder: the OAuth state of the MCP servers it connected to and, when the \
+                 folder held a login, the copy of it, which it takes out of the folder's .credentials.json. The item \
+                 outlives the folder (delete it with `security delete-generic-password -s \"{own}\"`; the kit never \
+                 does), and a window that was started with --strict-mcp-config has no server to keep any of it for"
+            ));
+        } else {
+            kept.others.push(keychain::gained_words(name));
+        }
+    }
+    kept
 }
 
 /// Whether `path` is a folder a run worked in: a live folder of the candidate
@@ -760,10 +785,19 @@ impl ClaudeConfig for Login {
             let _ = writeln!(io::stderr(), "note: {note}");
         }
         let mut refreshed: Vec<String> = made.refreshed().into_iter().collect();
+        let mut kept = Vec::new();
         if let (Some(before), Some(now)) = (&made.services, keychain_services()) {
-            refreshed.extend(gained(before, &now));
+            let found = keychain_of(made.folder.path(), before, &now);
+            for other in &found.others {
+                let _ = writeln!(io::stderr(), "note: {other}");
+            }
+            // A login that went into the Keychain is a login gone from the folder: said once, there.
+            if !found.own.is_empty() && made.copy() == Copy::Lost {
+                refreshed.clear();
+            }
+            kept = found.own;
         }
-        if touched.is_empty() && refreshed.is_empty() {
+        if touched.is_empty() && refreshed.is_empty() && kept.is_empty() {
             // What was checked, with a hash that says nothing of what the files hold.
             let hash = |text: &str| digest(text.as_bytes())[..12].to_owned();
             let _ = writeln!(
@@ -775,7 +809,7 @@ impl ClaudeConfig for Login {
             );
             return Ok(());
         }
-        let said = said(&touched, &refreshed);
+        let said = said(&touched, &refreshed, &kept);
         // The error is the case's to fail with; the banner is for whoever reads the output.
         let _ = writeln!(io::stderr(), "{said}");
         Err(Error::Daemon(said))
@@ -784,7 +818,7 @@ impl ClaudeConfig for Login {
 
 /// What `finish` says when the run touched the person's setup (`touched`) or its copy of the
 /// login was refreshed (`refreshed`): loud, and with what to do. Never what the login holds.
-fn said(touched: &[String], refreshed: &[String]) -> String {
+fn said(touched: &[String], refreshed: &[String], kept: &[String]) -> String {
     let bar = "!".repeat(78);
     let mut said = format!("\n{bar}\n");
     if !touched.is_empty() {
@@ -804,6 +838,15 @@ fn said(touched: &[String], refreshed: &[String]) -> String {
         );
         for change in refreshed {
             said.push_str(&format!("  - {change}\n"));
+        }
+    }
+    if !kept.is_empty() {
+        said.push_str(
+            "THE RUN'S CLAUDE CODE LEFT ITS SECURE STORAGE IN THE OWNER'S KEYCHAIN (T-1102), which a live run is \
+             never to do:\n",
+        );
+        for item in kept {
+            said.push_str(&format!("  - {item}\n"));
         }
     }
     said.push_str(&bar);

@@ -15,6 +15,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use cf_e2e::live::{self, Harness, Installed};
+#[cfg(target_os = "macos")]
+use cf_e2e::process::{own_var, Run};
 use cf_e2e::rig::Rig;
 
 use crate::{Outcome, FAKE_AGENT};
@@ -110,5 +112,85 @@ fn the_windows_of_a_rig_are_told_to_update_no_harness() -> Outcome {
         assert_eq!(rig.var(name), Some("1"), "{name}");
     }
     rig.close()?;
+    Ok(())
+}
+
+// The owner's Keychain (T-1102): the guard of Claude Code lists the names of its items around the
+// run, and the rig that ends fails for one gained. On a Mac only, which is the machine with the
+// Keychain; the case writes one item of its own, of the name Claude Code would give a throwaway
+// folder, and deletes that item by that name.
+
+/// A Keychain item of the name Claude Code gives a config folder, made here and deleted by that
+/// name when this is dropped, however the case ends.
+#[cfg(target_os = "macos")]
+struct Item {
+    name: String,
+    user: String,
+}
+
+#[cfg(target_os = "macos")]
+impl Item {
+    fn make(folder: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let name = live::keychain::item_of(folder);
+        let user = own_var("USER").ok_or("no USER")?;
+        let made = Run::new("/usr/bin/security")
+            .args([
+                "add-generic-password",
+                "-s",
+                &name,
+                "-a",
+                &user,
+                "-w",
+                "a made-up value",
+            ])
+            .inheriting_env()
+            .run()?;
+        if made.code != Some(0) {
+            return Err(format!("security could not make the item {name}: {:?}", made.code).into());
+        }
+        Ok(Self { name, user })
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for Item {
+    fn drop(&mut self) {
+        let _ = Run::new("/usr/bin/security")
+            .args([
+                "delete-generic-password",
+                "-s",
+                &self.name,
+                "-a",
+                &self.user,
+            ])
+            .inheriting_env()
+            .run();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_and_names_it(
+) -> Outcome {
+    let owner = Owner::new()?;
+    let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
+    // What a Claude Code writes in the Keychain for a throwaway config folder, after the rig began.
+    let folder = tempfile::tempdir()?;
+    let item = Item::make(folder.path())?;
+    let failed = rig.close().unwrap_err().to_string();
+    assert!(
+        failed.contains("THE RUN LEFT AN ITEM IN THE OWNER'S KEYCHAIN"),
+        "{failed}"
+    );
+    assert!(failed.contains(&item.name), "{failed}");
+    assert!(
+        failed.contains(&format!(
+            "security delete-generic-password -s \"{}\"",
+            item.name
+        )),
+        "{failed}"
+    );
+    // The launcher is as it was: only the Keychain is said.
+    assert!(!failed.contains("LAUNCHER"), "{failed}");
     Ok(())
 }

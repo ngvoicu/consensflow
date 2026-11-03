@@ -259,3 +259,181 @@ fn a_path_followed_through_a_link_is_said_below_the_home_the_run_was_given() {
         "{shown}"
     );
 }
+
+// The Keychain (T-1102): the names of Claude Code's items, around a run. The looks are made by hand
+// here (a test does not read the machine's Keychain); `a_guard_...` runs the guard on a lister
+// of its own.
+
+/// A look at `watch`'s launchers with the Keychain's names `names`.
+fn seen_with(watch: &Watch, names: Option<&[&str]>) -> Seen {
+    let mut seen = watch.look();
+    seen.keychain = names.map(|names| names.iter().map(|name| (*name).to_owned()).collect());
+    seen
+}
+
+/// The watch of a pretend owner's Claude Code.
+fn claude_watch(home: &Home) -> Watch {
+    home.write(
+        &format!(".local/bin/{}", program("claude")),
+        "claude 2.1.316",
+    );
+    Watch::of(Harness::Claude, &claude_launcher(home), home.0.path())
+}
+
+#[test]
+fn a_keychain_item_a_run_gained_is_named_with_the_command_that_deletes_it_and_no_launcher_changed()
+{
+    let home = Home::new();
+    let watch = claude_watch(&home);
+    let before = seen_with(&watch, Some(&["Claude Code-credentials"]));
+    let after = seen_with(
+        &watch,
+        Some(&[
+            "Claude Code-credentials",
+            "Claude Code-credentials-f2cee134",
+        ]),
+    );
+    let found = before.keychain_gained(&after);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("`Claude Code-credentials-f2cee134`"),
+        "{found:?}"
+    );
+    assert!(
+        found[0]
+            .contains("security delete-generic-password -s \"Claude Code-credentials-f2cee134\""),
+        "{found:?}"
+    );
+    // It is the Keychain's, not the launchers': the launchers' changes say nothing of it.
+    assert!(before.changes_to(&after, home.0.path()).is_empty());
+}
+
+#[test]
+fn every_item_gained_is_named_and_what_was_there_before_or_went_is_not_one() {
+    let home = Home::new();
+    let watch = claude_watch(&home);
+    let before = seen_with(
+        &watch,
+        Some(&[
+            "Claude Code-credentials",
+            "Claude Code-credentials-aaaaaaaa",
+        ]),
+    );
+    // One the owner deleted while the run went, and two the run (or another process) made.
+    let after = seen_with(
+        &watch,
+        Some(&[
+            "Claude Code-credentials",
+            "Claude Code-credentials-bbbbbbbb",
+            "Claude Code-credentials-cccccccc",
+        ]),
+    );
+    let found = before.keychain_gained(&after);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found[0].contains("Claude Code-credentials-bbbbbbbb"),
+        "{found:?}"
+    );
+    assert!(
+        found[1].contains("Claude Code-credentials-cccccccc"),
+        "{found:?}"
+    );
+    assert!(
+        found.iter().all(|line| !line.contains("aaaaaaaa")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn a_keychain_that_gained_nothing_or_was_not_listed_is_no_change() {
+    let home = Home::new();
+    let watch = claude_watch(&home);
+    let names = [
+        "Claude Code-credentials",
+        "Claude Code-credentials-aaaaaaaa",
+    ];
+    let same = seen_with(&watch, Some(&names));
+    assert!(same
+        .keychain_gained(&seen_with(&watch, Some(&names)))
+        .is_empty());
+    // A machine with no Keychain, or one that could not be listed at either look, has nothing to
+    // compare: it is not a change, and not an error.
+    let gained = seen_with(&watch, Some(&["Claude Code-credentials-bbbbbbbb"]));
+    assert!(seen_with(&watch, None).keychain_gained(&gained).is_empty());
+    assert!(same.keychain_gained(&seen_with(&watch, None)).is_empty());
+}
+
+#[test]
+fn only_the_guard_of_claude_code_looks_at_the_keychain() {
+    let home = Home::new();
+    let command = claude_launcher(&home);
+    let looks = |harness| {
+        Guard::new(harness, &command, home.0.path())
+            .watch
+            .keychain
+            .is_some()
+    };
+    assert!(looks(Harness::Claude));
+    for other in [Harness::Codex, Harness::Pi, Harness::Devin, Harness::Muse] {
+        assert!(!looks(other), "{other:?}");
+    }
+    // A watch of the launchers alone lists none, so the existing looks stay what they were.
+    assert!(Watch::of(Harness::Claude, &command, home.0.path())
+        .keychain
+        .is_none());
+}
+
+/// The names the guard of [`a_guard_whose_keychain_gained_an_item_fails_the_rig_that_ends_and_names_it`]
+/// lists: a function cannot close over them.
+static LISTED: Mutex<Option<BTreeSet<String>>> = Mutex::new(None);
+
+fn listed() -> Option<BTreeSet<String>> {
+    LISTED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
+fn list(names: &[&str]) {
+    *LISTED.lock().unwrap_or_else(PoisonError::into_inner) =
+        Some(names.iter().map(|name| (*name).to_owned()).collect());
+}
+
+#[test]
+fn a_guard_whose_keychain_gained_an_item_fails_the_rig_that_ends_and_names_it() {
+    let home = Home::new();
+    let watch = claude_watch(&home).with_keychain(listed);
+    list(&["Claude Code-credentials"]);
+    let guard = Guard {
+        harness: Harness::Claude,
+        home: home.0.path().to_path_buf(),
+        watch,
+        before: Mutex::new(None),
+    };
+    guard.vars().unwrap();
+    // A run that left the Keychain as it was ends clean, however often it is asked.
+    assert!(guard.finish().is_ok());
+    // A run whose Claude Code wrote secure storage for its throwaway folder.
+    list(&[
+        "Claude Code-credentials",
+        "Claude Code-credentials-f2cee134",
+    ]);
+    let said = guard.finish().unwrap_err().to_string();
+    assert!(
+        said.contains("THE RUN LEFT AN ITEM IN THE OWNER'S KEYCHAIN"),
+        "{said}"
+    );
+    assert!(said.contains("Claude Code-credentials-f2cee134"), "{said}");
+    assert!(said.contains(&"!".repeat(78)), "{said}");
+    // It is not said as a change to the launchers, which are as they were.
+    assert!(!said.contains("LAUNCHER"), "{said}");
+    // A run that also changed a launcher has both said.
+    home.write(
+        &format!(".local/bin/{}", program("claude")),
+        "claude 2.1.317",
+    );
+    let said = guard.finish().unwrap_err().to_string();
+    assert!(said.contains("CLAUDE LAUNCHER"), "{said}");
+    assert!(said.contains("IN THE OWNER'S KEYCHAIN"), "{said}");
+    assert!(said.contains("Claude Code-credentials-f2cee134"), "{said}");
+}
