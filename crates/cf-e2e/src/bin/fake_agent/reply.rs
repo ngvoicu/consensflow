@@ -54,11 +54,19 @@
 //!   <words>`); with `--deaf` the job ignores the requests to end; with `--detach`
 //!   the shell that runs it detaches it (`nohup … &`) and ends, which leaves the job
 //!   with no parent, as the agents of four harnesses left theirs, and with no chain of
-//!   processes to a shell the harness started: the host leaves it running.
-//! - A line `JOB [--deaf] <seconds> <rest>` starts such a job and goes on with
-//!   `rest` as the line it was given, as an agent does whose tool runs a command
+//!   processes to a shell the harness started. On Unix that shell is in a session of its
+//!   own (Pi's, Claude's), so that the job is in a session no window has and the host cannot
+//!   see it; with `--detach-here` the shell is in the window's session instead, and the job is
+//!   there after it (T-1145: the host names it as work the window's close ends). On Windows the
+//!   two are the same: a PowerShell's `Start-Process`, and the pane's job holds the job.
+//! - A line `JOB [--deaf] [--detach|--detach-here] <seconds> <rest>` starts such a job and
+//!   goes on with `rest` as the line it was given, as an agent does whose tool runs a command
 //!   while its turn is at work (`JOB 120 SLEEP 60 words` leaves a job running for
-//!   the whole of a minute's turn, which then answers `words`).
+//!   the whole of a minute's turn, which then answers `words`). With `--detach` the job
+//!   is detached from its shell as in `BACKGROUND --detach`, and the turn goes on once the
+//!   shell has ended: a job left with no parent while the turn works (`JOB --detach-here`
+//!   keeps the shell in the window's session, as the shells of a harness that leads no
+//!   session of its own do: what the window's close ends).
 //! - A line `AGENTS <count> <seconds> <words>` starts that many background agents
 //!   (`agents`: no program, as Claude Code's run in its own process) that end
 //!   together after that long, and answers the words at once, as an agent does
@@ -113,7 +121,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::agents::Agents;
-use crate::background::{until_up, Jobs, Server, THINKING};
+use crate::background::{until_up, Detach, Jobs, Server, THINKING};
 use crate::scripted;
 use crate::steps::{Step, Tasks};
 use crate::stop::Stop;
@@ -121,6 +129,19 @@ use crate::stop::Stop;
 /// How long the shell that detaches a job may take to end: a PowerShell's
 /// `Start-Process` takes a second or two, a `/bin/sh` a moment.
 const DETACHED_SHELL: Duration = Duration::from_secs(30);
+
+/// How the flags of a `JOB` or a `BACKGROUND` line say the agent's tool detaches the command:
+/// `--detach-here` leaves the shell in the window's session, `--detach` in one of its own
+/// (on Windows both are a PowerShell's `Start-Process`), none does not detach it.
+fn detaching(flags: &str) -> Detach {
+    if flags.contains("--detach-here") {
+        Detach::Here
+    } else if flags.contains("--detach") {
+        Detach::Apart
+    } else {
+        Detach::No
+    }
+}
 
 /// The header of a result delivered to a window, with the task it is the result of.
 const RESULT: &str = r"^\[ConsensFlow m-\d+ · (T-\d+) · result from @[^\]]+\]$";
@@ -385,19 +406,36 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         thread::sleep(Duration::from_secs(seconds));
         return reply_to(&hung[2], window);
     }
-    if let Some(job) = pattern::once(&JOB, r"(?m)^JOB ((?:--deaf )?)(\d+) (.+)$").captures(text) {
+    if let Some(job) = pattern::once(
+        &JOB,
+        r"(?m)^JOB ((?:--(?:deaf|detach-here|detach) )*)(\d+) (.+)$",
+    )
+    .captures(text)
+    {
         let seconds: u64 = job[2].parse().map_err(|_| format!("JOB {}", &job[2]))?;
+        let (deaf, detach) = (job[1].contains("--deaf"), detaching(&job[1]));
         // An agent thinks before it runs a tool (see `BACKGROUND`).
         thread::sleep(THINKING);
+        let (shell_ended, ended) = std::sync::mpsc::channel();
         let file = window
             .jobs
-            .start("job", seconds, !job[1].is_empty(), false, || {})?;
+            .start_detaching("job", seconds, deaf, detach, move || {
+                let _ = shell_ended.send(());
+            })?;
         until_up(&file)?;
+        // A tool that detached a job returns once its shell has ended, and the turn goes
+        // on from there (see `BACKGROUND`): the job has no parent from then on.
+        if detach != Detach::No && ended.recv_timeout(DETACHED_SHELL).is_err() {
+            return Err(format!(
+                "JOB --detach: the shell that detached the job did not end in {} s",
+                DETACHED_SHELL.as_secs()
+            ));
+        }
         return reply_to(&job[3], window);
     }
     if let Some(job) = pattern::once(
         &BACKGROUND,
-        r"(?m)^BACKGROUND ((?:--(?:wake|deaf|detach) )*)(\d+) (.+)$",
+        r"(?m)^BACKGROUND ((?:--(?:wake|deaf|detach-here|detach) )*)(\d+) (.+)$",
     )
     .captures(text)
     {
@@ -405,11 +443,12 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             .parse()
             .map_err(|_| format!("BACKGROUND {}", &job[2]))?;
         let words = job[3].to_owned();
-        let (wakes, deaf, detached) = (
+        let (wakes, deaf, detach) = (
             job[1].contains("--wake"),
             job[1].contains("--deaf"),
-            job[1].contains("--detach"),
+            detaching(&job[1]),
         );
+        let detached = detach != Detach::No;
         if wakes && detached {
             return Err(
                 "BACKGROUND --wake --detach: a job detached from its shell is no child to wait for"
@@ -429,12 +468,14 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         // turn's work by the chain (a PowerShell's `Start-Process` takes a second or
         // two: Windows CI and zeewin, 2026-10-14).
         let (shell_ended, ended) = std::sync::mpsc::channel();
-        let file = window.jobs.start("job", seconds, deaf, detached, move || {
-            if wakes {
-                let _ = wake.send(woken);
-            }
-            let _ = shell_ended.send(());
-        })?;
+        let file = window
+            .jobs
+            .start_detaching("job", seconds, deaf, detach, move || {
+                if wakes {
+                    let _ = wake.send(woken);
+                }
+                let _ = shell_ended.send(());
+            })?;
         until_up(&file)?;
         if detached && ended.recv_timeout(DETACHED_SHELL).is_err() {
             return Err(format!(

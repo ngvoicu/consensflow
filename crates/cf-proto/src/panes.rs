@@ -207,7 +207,9 @@ pub struct PossiblyLeft {
 
 /// `pane.background`'s answer: what the window's tree has running that began
 /// after the window's last `pane.mark` and that the host can tell is the turn's
-/// work, `total` of it and the first `processes` of it by how long ago they began.
+/// work, or work detached from it that the window's close ends (a job whose shell has gone:
+/// `nohup … &`, `Start-Process`), `total` of it and the first `processes` of it by how long ago
+/// they began.
 /// A window with no mark has none: nothing says where its turn began. And what may be
 /// the window's and runs outside its tree (`possiblyLeft`, as `pane.exit` names it at a
 /// close), which the host names and never signals: a pause leaves both running (T-487).

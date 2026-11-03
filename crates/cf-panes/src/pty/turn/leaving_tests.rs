@@ -18,7 +18,7 @@ mod macos {
 
     use cf_proto::panes::Servers;
 
-    use super::programs::{HELPERS, LEFT};
+    use super::programs::{HELPERS, LEFT, LEFT_MARKED};
     use crate::pty::turn::support::{
         gone, harness_programs, kill, listed, numbers, started, DETACHED,
     };
@@ -29,7 +29,7 @@ mod macos {
     const GRACE: Duration = Duration::from_millis(1500);
 
     #[test]
-    fn a_job_the_agent_detached_from_a_shell_that_ended_is_left_running_unnamed_and_the_close_ends_it(
+    fn a_job_the_agent_detached_from_a_shell_that_ended_is_named_as_work_the_window_left_and_the_close_ends_it_and_names_it(
     ) {
         let _serial = serial_pty_test();
         let mut outsider = Sentinel::start();
@@ -38,13 +38,69 @@ mod macos {
             let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
 
             // The shell has gone and the job has no parent: no chain of processes that
-            // run leads from it to a shell the harness started, and its being in the
-            // window's session, which it is, is no proof of whose work it is.
-            assert_eq!(listed(&table, &pane.key), Vec::<u32>::new(), "{servers:?}");
+            // run leads from it to a shell the harness started. It is in the window's
+            // session, which the window's close ends, and it began after the mark, and
+            // it is none of the harness's own: the host names it, as the work the
+            // window left running that a pause (or a close) would end (T-1145).
+            assert_eq!(
+                listed(&table, &pane.key),
+                numbers(&pid, &["job"]),
+                "{servers:?}"
+            );
             assert!(process_exists(pid["job"]), "{servers:?}: it runs on");
-            // It is the window's all the same: the window's close ends it.
+            // The window's close ends it, and says it did.
             table.kill(&pane.key).expect("close the pane");
             assert!(gone(pid["job"]), "{servers:?}: the close ended it");
+            let mut kept: Vec<u32> = pane
+                .ended
+                .background()
+                .expect("the close kept its list")
+                .iter()
+                .map(|process| process.pid)
+                .collect();
+            kept.sort_unstable();
+            assert_eq!(kept, numbers(&pid, &["job"]), "{servers:?}: it named it");
+            assert!(outsider.runs(), "{servers:?}: a process outside the window");
+        }
+    }
+
+    #[test]
+    fn a_detached_job_is_still_named_after_a_note_is_pasted_and_a_close_after_that_ends_it_and_names_it(
+    ) {
+        let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
+        for servers in [Servers::InGroup, Servers::Unknown] {
+            let table = Arc::new(PaneTable::closing_within(GRACE));
+            let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
+            assert_eq!(
+                listed(&table, &pane.key),
+                numbers(&pid, &["job"]),
+                "{servers:?}: named in the turn it was detached in"
+            );
+
+            // A note is pasted, then the words of a resume: each marks a turn, with the job in
+            // the tree (T-1153's D1).
+            for turn in ["the tell", "the resume's words"] {
+                table.mark(&pane.key, servers, None).expect("mark the turn");
+                assert_eq!(
+                    listed(&table, &pane.key),
+                    numbers(&pid, &["job"]),
+                    "{servers:?}: after the mark of {turn}"
+                );
+            }
+
+            // The close a later turn's ignored pause comes to ends it, and names it.
+            table.kill(&pane.key).expect("close the pane");
+            assert!(gone(pid["job"]), "{servers:?}: the close ended it");
+            let mut kept: Vec<u32> = pane
+                .ended
+                .background()
+                .expect("the close kept its list")
+                .iter()
+                .map(|process| process.pid)
+                .collect();
+            kept.sort_unstable();
+            assert_eq!(kept, numbers(&pid, &["job"]), "{servers:?}: it named it");
             assert!(outsider.runs(), "{servers:?}: a process outside the window");
         }
     }
@@ -67,6 +123,31 @@ mod macos {
             process_exists(pid["job"]),
             "the close does not find it either"
         );
+        assert!(outsider.runs(), "a process outside the window");
+        kill(pid["job"]);
+    }
+
+    #[test]
+    fn a_job_only_the_windows_marker_ties_to_it_is_not_named_as_work_a_close_ends_and_no_close_ends_it(
+    ) {
+        let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
+        let table = Arc::new(PaneTable::closing_within(GRACE));
+        let (pane, pid) = started(&table, LEFT_MARKED, Servers::Unknown, None, &HashMap::new());
+
+        // The job left the window's session with its shell gone, and shows the marker the pane
+        // gave its program: the tree finds it by that (T-406), which proves nothing of whose
+        // work it is, so the bound refuses it and a close leaves it running. The host names it
+        // as possibly the window's at the exit, never as work a close ended (T-1145).
+        assert_eq!(listed(&table, &pane.key), Vec::<u32>::new());
+        assert!(process_exists(pid["job"]), "it runs on");
+        table.kill(&pane.key).expect("close the pane");
+        assert_eq!(
+            pane.ended.background().expect("the close kept its list"),
+            Vec::new(),
+            "the close ended none of it"
+        );
+        assert!(process_exists(pid["job"]), "the close does not find it");
         assert!(outsider.runs(), "a process outside the window");
         kill(pid["job"]);
     }
@@ -108,8 +189,8 @@ mod macos {
 }
 
 /// The same on Windows, where the tree is the pane's job: what a shell started
-/// after the mark is the turn's, with what it started, and the rest (a job with no
-/// parent left among it) is not named.
+/// after the mark is the turn's, with what it started, and a job with no parent left among it is
+/// named as detached work (T-1145); the window's program and a server it started late are not.
 #[cfg(windows)]
 mod windows {
     use std::collections::HashMap;
@@ -324,7 +405,7 @@ mod windows {
     }
 
     #[test]
-    fn a_job_whose_shell_has_ended_is_in_the_pane_job_still_with_no_parent_and_is_left_running_unnamed(
+    fn a_job_whose_shell_has_ended_is_in_the_pane_job_still_with_no_parent_and_the_host_names_it_as_work_the_close_ends(
     ) {
         let _pty_guard = serial_pty_test();
         let table = Arc::new(PaneTable::new());
@@ -371,11 +452,151 @@ mod windows {
         }
 
         // With no process of the job that started it, no chain of processes that run
-        // leads from the ping to a shell the harness started: nothing proves whose it
-        // is, so it is not listed and not named.
-        assert_eq!(listed(&table, &key), Vec::new());
+        // leads from the ping to a shell the harness started. The job holds it all the
+        // same, it began after the mark and it is none of the harness's own: the host
+        // names it, as the work the window left running that its close would end
+        // (T-1145; before it, `Start-Process` left a job the close ended unnamed).
+        let found = listed(&table, &key);
+        assert!(
+            found
+                .iter()
+                .any(|(_, command)| command.contains("ping.exe") && command.contains("-n 1004")),
+            "the host names the detached ping: {found:?}"
+        );
         assert!(on_its_own(&held(&table, &key), "-n 1004"), "it runs on");
+        // What a close keeps for its exit is what the host finds at two looks, a moment
+        // apart: the ping is still there at both.
+        let (baseline, tree) = {
+            let panes = table.lock_panes().expect("the panes");
+            let pane = panes.get(&key).expect("the pane");
+            (pane.baseline.clone(), pane.tree())
+        };
+        let kept = super::super::steadily_looked_at(&baseline, &tree).expect("two looks");
+        assert!(
+            kept.processes
+                .iter()
+                .any(|process| process.command.to_lowercase().contains("-n 1004")),
+            "the close names it: {kept:?}"
+        );
         // The pane's job is the window's: its close ends it with the rest.
+        table.kill(&key).expect("close the pane");
+    }
+
+    /// Every paste marks a turn (T-1153's D1): a ping the agent detached before a note was pasted
+    /// is named after the paste, and a build tool's ping, detached the same way, is not.
+    #[test]
+    fn a_detached_ping_is_still_named_after_a_note_is_pasted_and_a_build_tools_is_not() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let ping = system("PING.EXE");
+        let shell = system(r"WindowsPowerShell\v1.0\powershell.exe");
+        let cmd = system("cmd.exe");
+        let (key, output) = open(
+            &table,
+            &powershell(&format!(
+                // Once told to go, the agent detaches a ping from a shell that ends at once, and
+                // a build tool (`cmd.exe`) leaves another.
+                "Write-Output 'READY#'; [Console]::In.ReadLine() | Out-Null; \
+                 Start-Process -WindowStyle Hidden -FilePath '{shell}' -ArgumentList '-NoProfile','-Command','Start-Process -WindowStyle Hidden -FilePath ''{ping}'' -ArgumentList ''-n'',''1007'',''127.0.0.1'''; \
+                 Start-Process -WindowStyle Hidden -FilePath '{cmd}' -ArgumentList '/c','start \"\" /b {ping} -n 1008 127.0.0.1'; \
+                 Write-Output 'STARTED#'; Start-Sleep 1000"
+            )),
+            &HashMap::new(),
+            1 << 20,
+        );
+        read_until(&table, &key, &output, "READY#");
+        table
+            .mark(&key, Servers::Unknown, None)
+            .expect("mark the turn");
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "STARTED#");
+
+        // Both pings are in the job on their own once the shells that started them have gone.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let found = held(&table, &key);
+            if on_its_own(&found, "-n 1007") && on_its_own(&found, "-n 1008") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the pings were never in the job on their own: {found:?}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let names = |ping: &str| {
+            listed(&table, &key)
+                .iter()
+                .any(|(_, command)| command.contains(ping))
+        };
+        assert!(names("-n 1007"), "named in its own turn");
+        assert!(!names("-n 1008"), "the build tool's is not");
+
+        // A note is pasted, and the words of a resume after it: each marks a turn.
+        for _ in 0..2 {
+            table
+                .mark(&key, Servers::Unknown, None)
+                .expect("mark the turn");
+            assert!(names("-n 1007"), "still named after the mark");
+            assert!(!names("-n 1008"), "and the build tool's is not");
+        }
+        table.kill(&key).expect("close the pane");
+    }
+
+    /// What a build's tool leaves is not what an agent detaches (T-1145): Gradle's daemon is
+    /// started by the build tool, which ends, and the owner does not want the chief told of it
+    /// (`regressions/a_builds_daemon_held_a_workers_task`). The job holds it all the same, with
+    /// no parent, as it holds a `Start-Process` job; what tells them apart is the starter, read
+    /// as the job began (`cmd.exe` is no shell here), and the host names the one only.
+    #[test]
+    fn a_job_whose_starter_was_no_shell_is_in_the_pane_job_with_no_parent_and_the_host_names_nothing_of_it(
+    ) {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let ping = system("PING.EXE");
+        let cmd = system("cmd.exe");
+        let (key, output) = open(
+            &table,
+            &powershell(&format!(
+                // Once told to go, a build tool that leaves its daemon and ends: `cmd.exe`
+                // starts a ping apart and ends at once.
+                "Write-Output 'READY#'; [Console]::In.ReadLine() | Out-Null; \
+                 Start-Process -WindowStyle Hidden -FilePath '{cmd}' -ArgumentList '/c','start \"\" /b {ping} -n 1006 127.0.0.1'; \
+                 Write-Output 'STARTED#'; Start-Sleep 1000"
+            )),
+            &HashMap::new(),
+            1 << 20,
+        );
+        read_until(&table, &key, &output, "READY#");
+        table
+            .mark(&key, Servers::Unknown, None)
+            .expect("mark the turn");
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "STARTED#");
+
+        // The ping is in the job once the `cmd.exe` that started it has gone.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let found = held(&table, &key);
+            if on_its_own(&found, "-n 1006") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the ping was never in the job on its own: {found:?}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // Its starter was no shell: nothing proves the agent detached it, and it is not named.
+        // (A moment is given for a look that came too early to have found a birth not yet read.)
+        std::thread::sleep(Duration::from_secs(2));
+        let found = listed(&table, &key);
+        assert!(
+            !found.iter().any(|(_, command)| command.contains("-n 1006")),
+            "the host names a job a build tool left: {found:?}"
+        );
+        assert!(on_its_own(&held(&table, &key), "-n 1006"), "it runs on");
         table.kill(&key).expect("close the pane");
     }
 }
