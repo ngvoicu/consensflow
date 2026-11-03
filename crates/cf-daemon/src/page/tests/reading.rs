@@ -240,10 +240,13 @@ async fn the_board_marks_the_agent_of_a_member_gone_and_not_that_of_the_session_
                         chief: NewChief {
                             harness: "claude-code".to_owned(),
                             model: Some("zeus".to_owned()),
+                            effort: None,
                         },
                         // An agent the file does not have: the human removed it.
                         staff: vec![NewMember {
-                            agent: "mine".to_owned(),
+                            model: None,
+                            effort: None,
+                            model_name: Some("mine".to_owned()),
                             harness: "codex".to_owned(),
                             designer: false,
                             roles: vec!["worker".to_owned()],
@@ -347,10 +350,13 @@ async fn a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why
                     chief: NewChief {
                         harness: "devin".to_owned(),
                         model: Some("swe-1-6-slow".to_owned()),
+                        effort: None,
                     },
                     staff: vec![
                         NewMember {
-                            agent: "khnum".to_owned(),
+                            model: None,
+                            effort: None,
+                            model_name: Some("khnum".to_owned()),
                             harness: "devin".to_owned(),
                             designer: false,
                             roles: vec!["worker".to_owned()],
@@ -358,7 +364,9 @@ async fn a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why
                         },
                         // An agent of the human's own they removed: gone, but no catalog's.
                         NewMember {
-                            agent: "mine".to_owned(),
+                            model: None,
+                            effort: None,
+                            model_name: Some("mine".to_owned()),
                             harness: "codex".to_owned(),
                             designer: false,
                             roles: vec!["worker".to_owned()],
@@ -442,7 +450,9 @@ async fn the_agents_file_is_read_at_each_lane_and_not_once_for_the_board() {
             let (daemon, app) = bridge_pair_over(&rig.spawn);
             register(&daemon, &rig.page, &rig.spawn);
             let member = |agent: &str| NewMember {
-                agent: agent.to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some(agent.to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],
@@ -458,6 +468,7 @@ async fn the_agents_file_is_read_at_each_lane_and_not_once_for_the_board() {
                     chief: NewChief {
                         harness: "claude-code".to_owned(),
                         model: Some("zeus".to_owned()),
+                        effort: None,
                     },
                     staff: vec![member("a1"), member("a2")],
                     gate: false,
@@ -510,10 +521,13 @@ async fn an_inbox_is_the_humans_unless_the_page_names_a_handle_in_text() {
                     chief: NewChief {
                         harness: "claude-code".to_owned(),
                         model: Some("zeus".to_owned()),
+                        effort: None,
                     },
                     // A member whose handle is a number's digits.
                     staff: vec![NewMember {
-                        agent: "7".to_owned(),
+                        model: None,
+                        effort: None,
+                        model_name: Some("7".to_owned()),
                         harness: "claude-code".to_owned(),
                         designer: false,
                         roles: vec!["worker".to_owned()],

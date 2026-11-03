@@ -303,6 +303,46 @@ pub fn parse_model_id(value: Option<&Value>) -> Result<String, LedgerError> {
     }
 }
 
+/// `value` read as the effort a model runs at, as its harness words it (`high`, `xhigh`):
+/// none where it names none (absent or `null`), else 1 to 32 ASCII letters, digits and
+/// `-`.
+pub fn parse_effort(value: Option<&Value>) -> Result<Option<String>, LedgerError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(effort))
+            if (1..=32).contains(&effort.len())
+                && effort
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-') =>
+        {
+            Ok(Some(effort.clone()))
+        }
+        _ => Err(LedgerError::refused(
+            "invalid-effort",
+            format!("not an effort: {}", printed(value)),
+        )),
+    }
+}
+
+/// `value` read as what a harness's list calls a model (`Opus`, `Claude Opus 5.5 Fast`):
+/// none where it names none, else text of 1 to 128 characters, no control among them.
+pub fn parse_model_name(value: Option<&Value>) -> Result<Option<String>, LedgerError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(name))
+            if (1..=128).contains(&name.chars().count())
+                && !name.trim().is_empty()
+                && !name.chars().any(char::is_control) =>
+        {
+            Ok(Some(name.clone()))
+        }
+        _ => Err(LedgerError::refused(
+            "invalid-model-name",
+            format!("not a model's name: {}", printed(value)),
+        )),
+    }
+}
+
 /// `^[A-Za-z0-9~][A-Za-z0-9._~/:@+\[\]-]{0,255}$`, in ASCII.
 fn is_model_id(model: &str) -> bool {
     let bytes = model.as_bytes();
@@ -334,7 +374,8 @@ pub fn fits_role(designer: bool, role: &str) -> bool {
     (role == "designer") == designer
 }
 
-/// Refuses roles that do not fit `agent`, a designer or not, saying which way.
+/// Refuses roles that do not fit the member named `agent`, a designer or not, saying
+/// which way.
 pub fn require_fitting_roles(
     agent: &str,
     designer: bool,

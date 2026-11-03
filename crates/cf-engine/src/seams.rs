@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_base::refusal::Refusal;
-use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
+use cf_harness::contract::{Adapter, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
 use cf_proto::panes::{Background, Servers};
@@ -88,47 +88,13 @@ pub trait LaunchFiles {
     fn forget(&self, launch: &LaunchId);
 }
 
-/// A saved agent, as a launch and the chief's checks read it: the model it
-/// runs and the levels its harness reads, and whether it is an image agent.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SavedAgent {
-    pub model: Option<String>,
-    pub effort: Option<String>,
-    pub thinking: Option<String>,
-    pub designer: bool,
-}
-
-impl SavedAgent {
-    /// The agent as a launch is given it.
-    pub fn agent(&self) -> Agent<'_> {
-        Agent {
-            model: self.model.as_deref(),
-            effort: self.effort.as_deref(),
-            thinking: self.thinking.as_deref(),
-            designer: self.designer,
-        }
-    }
-}
-
-/// The saved agents, read at each launch (`roster`): an agent, none for one
-/// the human deleted, or why the agents file could not be read.
-pub trait Roster {
-    fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal>;
-
-    /// Why the ready-made agent `name` went from the catalog (its harness no
-    /// longer offers its model), when it is one that did: a member or a chief
-    /// still on it is told so, and to pick another agent rather than define
-    /// it again. None for any other name, and where nothing says.
-    fn retired(&self, _name: &str) -> Option<String> {
-        None
-    }
-
-    /// What the human says of specs for every project, as the agents file keeps
-    /// it (the app's setting a project may say otherwise of): whether they are
-    /// on, and the folder and the variant a project uses when it names none.
-    /// Asked at the launch of a chief whose project does not say specs are off.
-    /// Off, and naming neither, where the file says nothing or cannot be read:
-    /// the launch asked for a saved agent from the same file already.
+/// What the app says (`app_settings`), read at each launch that asks it.
+pub trait AppSettings {
+    /// What the human says of specs for every project (the app's setting a project may
+    /// say otherwise of): whether they are on, and the folder and the variant a project
+    /// uses when it names none. Asked at the launch of a chief whose project does not say
+    /// specs are off. Off, and naming neither, where the app's settings say nothing or
+    /// cannot be read.
     fn app_specs(&self) -> AppSpecs {
         AppSpecs::default()
     }
@@ -390,7 +356,7 @@ pub struct Seams {
     pub launch_ids: Rc<dyn LaunchIds>,
     pub credentials: Rc<dyn Credentials>,
     pub pane_env: Rc<dyn PaneEnv>,
-    pub roster: Rc<dyn Roster>,
+    pub app_settings: Rc<dyn AppSettings>,
     pub roles: Rc<dyn Roles>,
     pub trace: Rc<dyn Trace>,
     pub log: Rc<dyn Log>,

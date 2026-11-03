@@ -35,7 +35,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod adapters_failing_at_once;
-mod agent_gone;
 mod approval;
 mod assigning;
 mod background;
@@ -68,6 +67,7 @@ mod looks_finished;
 mod lost_lines;
 mod meeting_main;
 mod moved_models;
+mod named_by_model;
 mod no_adapter;
 mod not_ready;
 mod nothing_to_stop;
@@ -91,7 +91,6 @@ mod receipts;
 mod restart;
 mod resumable;
 mod resume;
-mod retired_agents;
 mod review;
 mod role_change;
 mod schedules;
@@ -127,7 +126,6 @@ mod undeliverable;
 mod unfit;
 mod unknown_looks;
 mod unproven;
-mod unreadable_agents;
 mod unsent;
 mod unstarted;
 mod waiting_notes;

@@ -56,7 +56,7 @@ fn app_says(context: &Context, on: bool) {
 /// The human turned specs on or off for every project, and named the folder and
 /// the variant a project uses that names its own (a blank folder names none).
 fn app_names(context: &Context, on: bool, folder: &str, variant: Option<Variant>) {
-    *context.roster.app_specs.borrow_mut() = AppSpecs {
+    *context.app_settings.app_specs.borrow_mut() = AppSpecs {
         on,
         folder: (!folder.is_empty()).then(|| folder.to_owned()),
         variant,
@@ -421,7 +421,7 @@ fn the_roster_is_asked_what_the_app_says_unless_the_project_says_off() {
     let context = Context::new();
     let project = project_at(&context, "/work/app");
     app_names(&context, true, "docs", Some(Variant::CoreHtml));
-    let asked = |context: &Context| context.roster.app_specs_asked.get();
+    let asked = |context: &Context| context.app_settings.app_specs_asked.get();
     let before = asked(&context);
     says(
         &context,

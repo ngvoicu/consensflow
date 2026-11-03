@@ -85,7 +85,7 @@ impl Context {
         let dispatcher = Rc::clone(&self.dispatcher);
         let asked = request.clone();
         let open = self.operation("openProject", json!([request]), answer, async move {
-            let request = NewProject::from_json(&asked)?;
+            let request = NewProject::from_json(&super::context::staffed(&asked))?;
             dispatcher.open_project(request).await
         });
         self.executor.start_now(open)

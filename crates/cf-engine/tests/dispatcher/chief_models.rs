@@ -319,7 +319,6 @@ fn a_chief_that_still_names_a_deleted_agent_opens_on_its_record_and_the_roster_i
         )
         .unwrap();
     });
-    context.roster.gone.borrow_mut().insert("apollo".to_owned());
     context.adapter.with("chief", |chief| {
         chief.used = Some(used("claude-sonnet-5-5", Some("low"), false))
     });

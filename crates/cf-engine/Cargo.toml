@@ -9,7 +9,6 @@ publish = false
 [dependencies]
 cf-base.workspace = true
 # The work tiers and how each one reads, for the chief's text.
-cf-catalog.workspace = true
 cf-harness.workspace = true
 cf-ledger.workspace = true
 cf-proto.workspace = true

@@ -23,7 +23,12 @@ fn add_worker(context: &Context, project: i64, agent: &str) -> ParticipantView {
         .add_member(
             project,
             &NewMember {
-                agent: agent.to_owned(),
+                model: cf_engine::testing::MODELS
+                    .iter()
+                    .find(|(name, _)| *name == agent)
+                    .map(|(_, model)| (*model).to_owned()),
+                effort: None,
+                model_name: Some(agent.to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],

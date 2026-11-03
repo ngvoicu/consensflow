@@ -1,6 +1,6 @@
 //! The screens' paths, and the order of their checks as Node's screens had
 //! them: which paths are theirs, how the UI token is taken, what is read of a
-//! request and when. (The routes' own answers are in `routes` and `harnesses`,
+//! request and when. (The routes' own answers are in `harnesses`,
 //! and every one Node recorded is held in `tests/screens`.)
 
 use futures_util::stream;
@@ -13,7 +13,6 @@ use crate::api::answer::Content;
 use crate::api::body::Body;
 
 mod harnesses;
-mod routes;
 
 /// What the screens answer, or none where the path is not theirs.
 type Answered = Option<(u16, Content)>;
@@ -74,21 +73,9 @@ fn error(words: &str) -> Value {
 }
 
 #[test]
-fn the_screens_paths_are_the_seven_node_lists() {
+fn the_screens_paths_are_the_harnesses_page_and_its_two_routes() {
     for (path, screen) in [
-        ("/", Screen::Page),
         ("/harnesses", Screen::Page),
-        ("/api/agents", Screen::Agents),
-        (
-            "/api/agents/mybuilder",
-            Screen::Agent("mybuilder".to_owned()),
-        ),
-        ("/api/agents/a", Screen::Agent("a".to_owned())),
-        (
-            "/api/agents/my-agent-2",
-            Screen::Agent("my-agent-2".to_owned()),
-        ),
-        ("/api/preferences", Screen::Preferences),
         ("/api/harnesses/check", Screen::HarnessCheck),
         ("/api/harnesses/update", Screen::HarnessUpdate),
     ] {
@@ -96,51 +83,26 @@ fn the_screens_paths_are_the_seven_node_lists() {
     }
 }
 
+/// The saved agents' screen and routes, which Node's screens had, are none: a member is
+/// a harness, a model, an effort and a tier (harness-models).
 #[test]
-fn any_other_path_is_the_agents_api_s() {
+fn any_other_path_is_the_agents_api_s_the_saved_agents_screen_among_them() {
     for path in [
         "",
+        "/",
         "/harnesses/",
         "/api",
-        "/api/agents/",
-        "/api/agents/Upper",
-        "/api/agents/9lives",
-        "/api/agents/-dash",
-        "/api/agents/under_score",
-        "/api/agents/a/b",
-        "/api/agents/a b",
-        "/api/agents/%6dine",
+        "/api/agents",
+        "/api/agents/mybuilder",
+        "/api/preferences",
         "/api/harnesses",
         "/api/harnesses/check/",
-        "/api/preferences/x",
         "/api/whoami",
         "/api/questions/1",
         "/index.html",
         "/library",
     ] {
         assert_eq!(recognize(path), None, "{path:?}");
-    }
-}
-
-/// The paths the screens routed when Node was the daemon, frozen here: every
-/// one is a path, so that none falls through unseen. They are `/`,
-/// `/harnesses`, `/api/agents`, `/api/preferences`, `/api/harnesses/check` and
-/// `/api/harnesses/update`, and an agent by its name, as a name is written
-/// (`[a-z][a-z0-9-]*`; the paths that are not names are refused above).
-#[test]
-fn every_path_node_routed_is_one() {
-    for path in [
-        "/",
-        "/harnesses",
-        "/api/agents",
-        "/api/preferences",
-        "/api/harnesses/check",
-        "/api/harnesses/update",
-        "/api/agents/a",
-        "/api/agents/my-maia",
-        "/api/agents/pi-2-draw",
-    ] {
-        assert!(recognize(path).is_some(), "{path}");
     }
 }
 
@@ -151,8 +113,9 @@ async fn a_path_that_is_not_theirs_is_answered_none_whoever_asks() {
         "/api/whoami",
         "/api/nothing",
         "/library",
-        "/api/agents/Bad",
-        "/api/agents/a/b",
+        "/",
+        "/api/agents",
+        "/api/preferences",
     ] {
         for authorization in [None, Some("Bearer the-ui-token"), Some("Bearer other")] {
             assert_eq!(
@@ -168,17 +131,11 @@ async fn a_path_that_is_not_theirs_is_answered_none_whoever_asks() {
 async fn without_the_token_every_screen_is_a_bare_401_and_nothing_is_read() {
     let screens = inert();
     for (method, target) in [
-        (Method::GET, "/"),
         (Method::GET, "/harnesses"),
-        (Method::GET, "/api/agents"),
-        (Method::POST, "/api/agents"),
-        (Method::PATCH, "/api/agents/mine"),
-        (Method::DELETE, "/api/agents/mine"),
-        (Method::POST, "/api/preferences"),
         (Method::POST, "/api/harnesses/check"),
         (Method::POST, "/api/harnesses/update"),
-        (Method::HEAD, "/"),
-        (Method::PUT, "/api/agents"),
+        (Method::HEAD, "/harnesses"),
+        (Method::PUT, "/api/harnesses/check"),
     ] {
         for authorization in [None, Some("Bearer wrong"), Some("Basic the-ui-token")] {
             // A body that would fail the request if it were read.
@@ -236,7 +193,7 @@ async fn a_get_reads_nothing_of_its_body_and_every_other_method_reads_it_before_
     // A body that panics if it is polled: a GET is never read.
     let mut get = Request::new(
         Method::GET,
-        "/api/preferences?token=the-ui-token",
+        "/api/harnesses/check?token=the-ui-token",
         None,
         Body::new(stream::poll_fn(
             |_| -> std::task::Poll<Option<std::io::Result<bytes::Bytes>>> {
@@ -254,13 +211,11 @@ async fn a_get_reads_nothing_of_its_body_and_every_other_method_reads_it_before_
     // The others are read first, whatever their route: a body that is no JSON fails
     // a request that has no route, and one that is JSON goes on to find none.
     for (method, target) in [
-        (Method::POST, "/"),
         (Method::POST, "/harnesses"),
-        (Method::HEAD, "/"),
-        (Method::OPTIONS, "/api/agents"),
-        (Method::PUT, "/api/agents/mine"),
-        (Method::POST, "/api/agents/mine"),
-        (Method::DELETE, "/api/agents"),
+        (Method::HEAD, "/harnesses"),
+        (Method::OPTIONS, "/api/harnesses/check"),
+        (Method::PUT, "/api/harnesses/update"),
+        (Method::DELETE, "/api/harnesses/check"),
     ] {
         let (status, body) = json_of(ask_as_the_app(&screens, method.clone(), target, "{}").await);
         assert_eq!(
@@ -284,9 +239,9 @@ async fn a_body_over_64_k_units_is_refused_in_its_own_words_by_every_method_that
     let screens = inert();
     let big = "x".repeat(64 * 1024 + 1);
     for (method, target) in [
-        (Method::POST, "/api/preferences"),
-        (Method::DELETE, "/api/agents/mine"),
-        (Method::POST, "/"),
+        (Method::POST, "/api/harnesses/check"),
+        (Method::DELETE, "/api/harnesses/update"),
+        (Method::POST, "/harnesses"),
     ] {
         let answered = ask_as_the_app(&screens, method.clone(), target, &big).await;
         assert_eq!(
@@ -298,20 +253,8 @@ async fn a_body_over_64_k_units_is_refused_in_its_own_words_by_every_method_that
 }
 
 #[tokio::test]
-async fn a_page_is_html_and_a_delete_is_nothing() {
+async fn the_page_is_html() {
     let rig = Rig::new(&[]);
-    let (status, content) = ask_as_the_app(&rig.screens, Method::GET, "/", "")
-        .await
-        .unwrap();
-    assert_eq!(status, 200);
-    let Content::Html(page) = content else {
-        panic!("a page is HTML")
-    };
-    assert!(
-        page.starts_with("<!DOCTYPE html>\n<html lang=\"en\">"),
-        "{page:.80}"
-    );
-    assert!(page.contains("const TOKEN = \"the-ui-token\";"));
     let Some((200, Content::Html(harnesses))) =
         ask_as_the_app(&rig.screens, Method::GET, "/harnesses", "").await
     else {

@@ -1,16 +1,14 @@
-//! What migration 0028 added to the `participant` table, which Node's participants never had
-//! (whether a member's tier is the one the human chose, T-1143): its column, and the text
-//! SQLite wrote for it into the table's schema. The players of Node's recordings take them out
-//! of what this ledger left ([`super::hold_apart_what_node_never_writes`] for the rows and
-//! [`super::hold_apart_what_node_never_had_in_its_schema`] for the text of the table), so that
-//! what the two wrote in everything else is compared.
+//! What migration 0028 added to the `participant` table (whether a member's tier is the one
+//! the human chose, T-1143), which 0029 took out again: its column, and the text SQLite wrote
+//! for it into the table's schema.
 
 /// The column migration 0028 added to `participant`.
-pub(super) const COLUMNS: [(&str, &str); 1] = [("participant", "tier_chosen")];
+const COLUMNS: [(&str, &str); 1] = [("participant", "tier_chosen")];
 
 /// What SQLite wrote into the text of the `participant` table for it, as migration 0028 added
 /// it: after the last column, before the table's own checks.
-pub(super) const COLUMN_LINES: &str =
+#[cfg(test)]
+const COLUMN_LINES: &str =
     ", tier_chosen INTEGER NOT NULL DEFAULT 0 CHECK (tier_chosen IN (0, 1))";
 
 /// What migration 0028 made taken out of the ledger `db` holds, so that a test can take a
@@ -41,13 +39,13 @@ mod tests {
         let before = rusqlite::Connection::open_in_memory().unwrap();
         migrate(&before, &MIGRATIONS[..27]).unwrap();
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        migrate(&db, &MIGRATIONS).unwrap();
+        migrate(&db, &MIGRATIONS[..28]).unwrap();
         let after = participant_sql(&db);
         assert!(after.contains(super::COLUMN_LINES), "{after}");
         super::undo_migration_0028(&db).unwrap();
         assert_eq!(participant_sql(&db), participant_sql(&before));
         db.execute_batch("PRAGMA user_version = 27").unwrap();
-        migrate(&db, &MIGRATIONS).unwrap();
+        migrate(&db, &MIGRATIONS[..28]).unwrap();
         assert_eq!(participant_sql(&db), after);
     }
 }

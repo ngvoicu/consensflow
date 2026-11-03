@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::model::LedgerError;
 
-pub const MIGRATIONS: [&str; 28] = [
+pub const MIGRATIONS: [&str; 29] = [
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
@@ -41,6 +41,7 @@ pub const MIGRATIONS: [&str; 28] = [
     include_str!("../migrations/0026.sql"),
     include_str!("../migrations/0027.sql"),
     include_str!("../migrations/0028.sql"),
+    include_str!("../migrations/0029.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -116,13 +117,17 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
 /// own functions would read it once a part; and brings within their ceilings
 /// the native sessions, harnesses, agents and times an older build wrote past
 /// them, measured in bytes and cut at a character, which SQL's `length()` and
-/// `substr()` count only to a NUL.
+/// `substr()` count only to a NUL. 0029 names every member of a ready-made agent by its
+/// model, which needs a handle made of words SQL cannot make ([`crate::handles`]).
 fn after(db: &Connection, version: usize) -> Result<(), LedgerError> {
     if version == 20 {
         crate::conversations::head_copied(db)?;
         crate::conversations::split_copied(db)?;
         crate::conversations::cut_sessions(db)?;
         crate::conversations::fields_within(db)?;
+    }
+    if version == 29 {
+        crate::handles::name_members_by_model(db)?;
     }
     Ok(())
 }
@@ -139,7 +144,7 @@ mod tests {
     #[test]
     fn keeps_each_migration_byte_for_byte_as_it_shipped() {
         use sha2::{Digest, Sha256};
-        const SHIPPED: [&str; 28] = [
+        const SHIPPED: [&str; 29] = [
             "51006450d3168c24b6a42ce41afdcf525994957ea22161b4a82f12bf26b65c01",
             "2c6ed236d1829599fbb378164b0c830893fac89eb9780f634688f9ca40f7f0f0",
             "14165bc20e6cb9d4c3c46a81bee45a95b4962ab759f4622aa1cebb8f8edc1ff2",
@@ -168,6 +173,7 @@ mod tests {
             "31301910ef2d690f1a505af6b238fce655119196717215c4eb648ec60f2f3b67",
             "62b85e52ff13bb47d900b48629ca79be159622665d66e2a1a0931e8c7e0f87a9",
             "2a187d9caae6a081baac4f401cd45c976f1ec2b015c249b2f3df83d6a1462cad",
+            "464f4ae093771db432a237b824fc6c6ebdd00a41eae1371aa192afb0248a7da7",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())

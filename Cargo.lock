@@ -345,7 +345,6 @@ version = "3.0.6-alpha.3"
 dependencies = [
  "cf-base",
  "cf-board",
- "cf-catalog",
  "cf-codex-session",
  "cf-daemon",
  "cf-harness",
@@ -400,18 +399,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cf-catalog"
-version = "3.0.6-alpha.3"
-dependencies = [
- "cf-base",
- "cf-proto",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "cf-codex-session"
 version = "3.0.6-alpha.3"
 dependencies = [
@@ -445,7 +432,6 @@ dependencies = [
  "bytes",
  "cf-base",
  "cf-bridge",
- "cf-catalog",
  "cf-engine",
  "cf-harness",
  "cf-ledger",
@@ -481,7 +467,6 @@ name = "cf-e2e"
 version = "3.0.6-alpha.3"
 dependencies = [
  "cf-base",
- "cf-catalog",
  "cf-e2e",
  "cf-panes",
  "cf-process",
@@ -507,7 +492,6 @@ name = "cf-engine"
 version = "3.0.6-alpha.3"
 dependencies = [
  "cf-base",
- "cf-catalog",
  "cf-engine",
  "cf-harness",
  "cf-ledger",

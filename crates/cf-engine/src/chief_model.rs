@@ -42,14 +42,15 @@ impl ChiefRuns {
         let gone = chief.gone_model.as_deref();
         let kept =
             |model: &Option<String>| model.clone().filter(|model| Some(model.as_str()) != gone);
+        let picked = Self::picked(chief);
         let picked = || Self {
             model: kept(&chief.model),
-            ..Self::default()
+            ..picked
         };
         match used {
             Some(used) if used.by_harness || Some(used.model.as_str()) == gone => Self {
                 model: kept(&chief.launched_model).or_else(|| kept(&chief.model)),
-                ..Self::default()
+                ..Self::picked(chief)
             },
             Some(used) => Self {
                 model: Some(used.model),
@@ -60,15 +61,38 @@ impl ChiefRuns {
         }
     }
 
-    /// The agent a launch is given, never an image agent's: none where it names nothing,
-    /// which leaves the model to the harness's own default.
+    /// What a participant was picked to run on: its model and its effort as its harness
+    /// takes the effort (harness-models): Pi's as its thinking, none for Devin, whose model
+    /// id holds the effort (`claude-opus-5-5-high`), and the effort for every other.
+    pub(crate) fn picked(participant: &ParticipantView) -> Self {
+        let effort = participant.effort.clone();
+        let (effort, thinking) = match participant.harness.as_deref() {
+            Some("pi") => (None, effort),
+            Some("devin") => (None, None),
+            _ => (effort, None),
+        };
+        Self {
+            model: participant.model.clone(),
+            effort,
+            thinking,
+        }
+    }
+
+    /// The agent a chief's launch is given: none where it names nothing, which leaves the
+    /// model to the harness's own default.
     pub(crate) fn agent(&self) -> Option<Agent<'_>> {
-        (*self != Self::default()).then_some(Agent {
+        (*self != Self::default()).then(|| self.member_agent(false))
+    }
+
+    /// The agent a member's launch is given, an image designer's among them: a model it
+    /// names none of is its harness's own default.
+    pub(crate) fn member_agent(&self, designer: bool) -> Agent<'_> {
+        Agent {
             model: self.model.as_deref(),
             effort: self.effort.as_deref(),
             thinking: self.thinking.as_deref(),
-            designer: false,
-        })
+            designer,
+        }
     }
 }
 

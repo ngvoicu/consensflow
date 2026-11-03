@@ -285,7 +285,9 @@ fn a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_mes
     }
 }
 
-/// A home at schema `written_at`, its file open as a build left it.
+/// A home at schema `written_at`, its file open as a build left it. Its member names no
+/// ready-made agent, so that migration 0029 leaves it `zeus` (it names a member of one by
+/// its model, which `cf_ledger`'s handles hold): the receipt is what these hold.
 fn a_home_at(written_at: usize) -> (tempfile::TempDir, Connection) {
     let dir = tempfile::tempdir().expect("a home");
     let db = Connection::open(dir.path().join("consensflow.db")).unwrap();
@@ -308,7 +310,7 @@ fn a_carrier_on_its_way_left_in(db: &Connection) {
          INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, created_at) VALUES
            (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, '{AT}'),
            (2, 1, 'chief', 'chief', '[]', 'apollo', 'claude-code', NULL, '{AT}'),
-           (3, 1, 'zeus', 'worker', '[\"worker\"]', 'zeus', 'claude-code', 'standard', '{AT}');
+           (3, 1, 'zeus', 'worker', '[\"worker\"]', NULL, 'claude-code', 'standard', '{AT}');
          INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, created_at, updated_at)
            VALUES (1, 1, 1, 'Parser', 'Parser', 2, 3, 'working', '{AT}', '{AT}');
          INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, reply_to, body, state, attempts, created_at, carried_by) VALUES
@@ -525,7 +527,7 @@ fn a_row_in_a_carrier_no_paste_of_which_began_rides_in_its_first_paste_through_0
          INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, created_at) VALUES
            (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, '{AT}'),
            (2, 1, 'chief', 'chief', '[]', 'apollo', 'claude-code', NULL, '{AT}'),
-           (3, 1, 'zeus', 'worker', '[\"worker\"]', 'zeus', 'devin', 'standard', '{AT}');
+           (3, 1, 'zeus', 'worker', '[\"worker\"]', NULL, 'devin', 'standard', '{AT}');
          INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, created_at, updated_at)
            VALUES (1, 1, 1, 'Parser', 'Parser', 2, 3, 'queued', '{AT}', '{AT}');
          INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, reply_to, body, state, attempts, created_at, carried_by) VALUES
@@ -744,7 +746,7 @@ fn a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_r
          INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, member_id, created_at, designer) VALUES
            (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, '{AT}', 0),
            (2, 1, 'chief', 'chief', '[]', 'apollo', 'claude-code', NULL, NULL, '{AT}', 0),
-           (3, 1, 'zeus', 'worker', '[\"worker\",\"reviewer\"]', 'zeus', 'claude-code', 'standard', NULL, '{AT}', 0),
+           (3, 1, 'zeus', 'worker', '[\"worker\",\"reviewer\"]', NULL, 'claude-code', 'standard', NULL, '{AT}', 0),
            (4, 1, 'pygmalion', 'designer', '[\"designer\"]', 'pygmalion', 'codex', NULL, NULL, '{AT}', 1),
            (5, 1, 'hera', 'reviewer', '[\"reviewer\"]', 'hera', 'claude-code', 'light', NULL, '{AT}', 0),
            (6, 1, 'zeus-amber-pine', 'worker', '[\"worker\"]', 'zeus', 'claude-code', 'standard', 3, '{AT}', 0),

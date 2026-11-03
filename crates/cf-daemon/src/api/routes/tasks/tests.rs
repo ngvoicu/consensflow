@@ -272,7 +272,9 @@ async fn a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dis
         .add_member(
             scene.project.id,
             &cf_ledger::NewMember {
-                agent: "tess".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("tess".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["tester".to_owned()],

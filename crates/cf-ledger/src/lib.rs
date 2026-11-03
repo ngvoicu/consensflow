@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 mod conversations;
+pub mod handles;
 mod ledger;
 mod messages;
 /// The ledger's vocabulary: the words its records hold, their limits, and
@@ -45,7 +46,7 @@ pub use cf_proto::ledger::{
     HistoryRow, Lane, LastSwitch, LatestMessages, LatestTranscript, MemberView, MessageOpening,
     MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume,
     Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits,
-    TaskThread, TaskTranscript, TaskView, TextCut, TextPart, TierChange,
+    TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{

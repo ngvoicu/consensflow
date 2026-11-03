@@ -30,7 +30,6 @@
 //! contained, whatever poll it panics at, and answers `{ok: false}` with what
 //! it said.
 
-mod agents;
 mod app_specs;
 mod board;
 mod body;

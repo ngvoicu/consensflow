@@ -42,8 +42,8 @@ mod tests {
     ) {
         let mut tables = json!({
             "participant": {
-                "columns": ["id", "agent", "model", "switched_from_model", "launched_model", "gone_model"],
-                "rows": [["1", "NULL", "NULL", "NULL", "NULL", "NULL"], ["2", "NULL", "'gpt-6-luna'", "'swe-2'", "'gpt-6-luna'", "'gpt-gone-9'"]],
+                "columns": ["id", "handle", "model", "switched_from_model", "launched_model", "gone_model"],
+                "rows": [["1", "'chief'", "NULL", "NULL", "NULL", "NULL"], ["2", "'chief'", "'gpt-6-luna'", "'swe-2'", "'gpt-6-luna'", "'gpt-gone-9'"]],
             },
             "task": { "columns": ["id", "model"], "rows": [["1", "'kept'"]] },
         });
@@ -52,8 +52,8 @@ mod tests {
             tables,
             json!({
                 "participant": {
-                    "columns": ["id", "agent"],
-                    "rows": [["1", "NULL"], ["2", "NULL"]],
+                    "columns": ["id", "handle"],
+                    "rows": [["1", "'chief'"], ["2", "'chief'"]],
                 },
                 "task": { "columns": ["id", "model"], "rows": [["1", "'kept'"]] },
             })

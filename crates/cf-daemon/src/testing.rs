@@ -102,15 +102,6 @@ impl std::io::Write for Said {
     }
 }
 
-/// Saved agents none of whose rows are asked for.
-pub struct NoRows;
-
-impl AgentRows for NoRows {
-    fn row(&self, _agent: &str) -> Result<Option<AgentRow>, Refusal> {
-        Ok(None)
-    }
-}
-
 /// What the engine of a scene was asked to finish, and what it says of it: the task as
 /// the ledger has it, done, and the jobs and agents a test says its harness still counted,
 /// unless a test makes it refuse.
@@ -233,6 +224,7 @@ pub fn scene() -> Scene {
             chief: NewChief {
                 harness: "claude-code".to_owned(),
                 model: Some("mybuilder".to_owned()),
+                effort: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -244,7 +236,9 @@ pub fn scene() -> Scene {
         .add_member(
             project.id,
             &NewMember {
-                agent: "zeus".to_owned(),
+                model: Some("claude-sonnet-5".to_owned()),
+                effort: Some("high".to_owned()),
+                model_name: Some("zeus".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],
@@ -300,7 +294,6 @@ pub fn scene() -> Scene {
             })
         }),
         closing: Closing::new(),
-        roster: Rc::new(NoRows),
         log: Rc::new(Log::new(home.path())),
         trace: Rc::new(Trace::new(home.path())),
     });

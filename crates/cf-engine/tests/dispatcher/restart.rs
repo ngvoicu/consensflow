@@ -176,10 +176,11 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
     // 3.0.4 stops there, and the upgrade runs migration 0019 on what it left (and
     // the viewer's 0020, the Resume's 0021 and 0022, 0023 of the conversation a
     // paste went into, the exit proof's 0024, the model lists' 0025, and the chief's
-    // model's 0026, 0027, which took the history's heading indexes out, and 0028, a
-    // member's tier the human chose).
+    // model's 0026, 0027, which took the history's heading indexes out, 0028, a
+    // member's tier the human chose, and 0029, a member's own model).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0029(&db).unwrap();
         cf_ledger::testing::undo_migration_0028(&db).unwrap();
         cf_ledger::testing::undo_migration_0027(&db).unwrap();
         cf_ledger::testing::undo_migration_0026(&db).unwrap();

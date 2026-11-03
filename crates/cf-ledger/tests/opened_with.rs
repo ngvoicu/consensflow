@@ -46,6 +46,7 @@ fn project(name: &str) -> NewProject {
         chief: NewChief {
             harness: "claude-code".into(),
             model: Some("apollo".into()),
+            effort: None,
         },
         staff: Vec::new(),
         gate: false,

@@ -77,7 +77,7 @@
 //! ([`prelude`]).
 //!
 //! A role too long for one message (more than 16,000 units: a staff of more than
-//! 37 rows with specs on, 65 without, two roles to a row, on the real text) is
+//! 25 rows with specs on, 45 without, two roles and a model to a row, on the real text) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`).
 //! That is a role told in part: it is not recorded as told, and the human has a
 //! line on the board that says so. The role is said again at every Resume, and
@@ -255,9 +255,9 @@ impl Dispatcher {
             .adapters
             .adapter(harness)
             .filter(|adapter| adapter.keeps_first_instructions());
-        // A launch that cannot go (no adapter, an agent the human deleted) says
-        // why in its own step, which asks for the text again where this could not.
-        let Some(adapter) = kept.filter(|_| !self.agent_gone(participant)) else {
+        // A launch that cannot go (no adapter) says why in its own step, which asks for
+        // the text again where this could not.
+        let Some(adapter) = kept else {
             return apart(first);
         };
         let Ok(role) = self.role_text(project, participant, &*adapter) else {

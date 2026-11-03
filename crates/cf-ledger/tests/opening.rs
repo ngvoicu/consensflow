@@ -41,6 +41,7 @@ fn project(name: &str, harness: &str) -> NewProject {
         chief: NewChief {
             harness: harness.into(),
             model: None,
+            effort: None,
         },
         staff: Vec::new(),
         gate: false,

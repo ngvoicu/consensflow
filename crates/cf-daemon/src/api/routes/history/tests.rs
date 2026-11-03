@@ -64,6 +64,7 @@ fn switched(scene: &Scene) {
             &ChiefSwitch {
                 harness: "claude-code".to_owned(),
                 model: "other".to_owned(),
+                effort: None,
                 cut: false,
             },
         )
@@ -105,6 +106,7 @@ async fn while_the_project_is_closed_a_page_reads_out_none_of_a_message_no_windo
                 &ChiefSwitch {
                     harness: "claude-code".to_owned(),
                     model: "other".to_owned(),
+                    effort: None,
                     cut: false,
                 },
             )
@@ -256,6 +258,7 @@ async fn a_line_may_name_any_message_number_and_only_this_project_s_are_read_out
                 chief: cf_ledger::NewChief {
                     harness: "codex".to_owned(),
                     model: Some("mybuilder".to_owned()),
+                    effort: None,
                 },
                 staff: Vec::new(),
                 gate: false,
@@ -298,6 +301,7 @@ async fn a_line_may_name_any_message_number_and_only_this_project_s_are_read_out
                 &ChiefSwitch {
                     harness: "claude-code".to_owned(),
                     model: "other".to_owned(),
+                    effort: None,
                     cut: false,
                 },
             )

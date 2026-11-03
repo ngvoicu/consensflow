@@ -24,6 +24,7 @@ use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 
 use crate::at_work::OnWork;
+use crate::chief_model::ChiefRuns;
 use crate::deliveries::Delivering;
 use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
@@ -31,7 +32,7 @@ use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
 use crate::runtime::{begin, caught, returning};
-use crate::seams::{EngineError, SavedAgent};
+use crate::seams::EngineError;
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
 use crate::stops::{Interrupted, Unstopped};
@@ -1083,25 +1084,13 @@ impl Dispatcher {
         } else {
             participant
         };
-        // A member runs on its saved agent's model, read now; one the human
-        // has deleted from their agents must not fall back to a harness default.
-        // A chief runs on no saved agent: on what its harness's record says it ran
-        // on last, or the model picked for it (CHF-05).
-        let chief = if participant.role == "chief" {
-            Some(self.chief_runs(participant, &*adapter, resume).await)
+        // A member runs on its own harness, model and effort (harness-models). A chief
+        // runs on what its harness's record says it ran on last, or the model and effort
+        // picked for it (CHF-05).
+        let runs = if participant.role == "chief" {
+            self.chief_runs(participant, &*adapter, resume).await
         } else {
-            None
-        };
-        let saved: Option<SavedAgent> = match participant.agent.as_deref() {
-            _ if chief.is_some() => None,
-            None => None,
-            Some(name) => match self.seams.roster.agent(name)? {
-                Some(saved) => Some(saved),
-                None => {
-                    self.without_saved_agent(record, project, participant, name, delivering)?;
-                    return Ok(None);
-                }
-            },
+            ChiefRuns::picked(participant)
         };
         // A session plays the role of the task it was started for; a member
         // or the chief its own.
@@ -1137,9 +1126,10 @@ impl Dispatcher {
             resume,
             previous_gone,
             message: text.as_deref().filter(|_| !delivered),
-            agent: match &chief {
-                Some(chief) => chief.agent(),
-                None => saved.as_ref().map(SavedAgent::agent),
+            agent: if participant.role == "chief" {
+                runs.agent()
+            } else {
+                Some(runs.member_agent(participant.designer))
             },
             instructions: &instructions,
             specs: specs.as_ref().map(ChiefSpecs::launch),
@@ -1151,8 +1141,8 @@ impl Dispatcher {
         let prepared = returning(adapter.prepare(&launch))
             .await
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
-        if let Some(chief) = &chief {
-            self.chief_launched(participant, chief)?;
+        if participant.role == "chief" {
+            self.chief_launched(participant, &runs)?;
         }
         Ok(Some(Planned {
             window: prepared.window,
@@ -1214,30 +1204,6 @@ impl Dispatcher {
         };
         self.give_back(first.message, because)?;
         Ok(false)
-    }
-
-    /// A member whose saved agent the human has deleted does not open: its work
-    /// goes back to the board, and a session's window the human opened, with
-    /// nothing to deliver, says why it did not come.
-    fn without_saved_agent(
-        &self,
-        record: &Rc<Record>,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        agent: &str,
-        delivering: Option<&Delivering>,
-    ) -> Result<(), EngineError> {
-        self.without_agent(project, participant, delivering.cloned())?;
-        if delivering.is_none() {
-            self.launch_failed(
-                record,
-                project,
-                participant,
-                None,
-                &self.gone_because(agent),
-            )?;
-        }
-        Ok(())
     }
 
     /// A window the host did not open: its token and files go, and the

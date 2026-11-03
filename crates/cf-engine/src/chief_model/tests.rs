@@ -15,6 +15,8 @@ fn chief(model: Option<&str>, launched: Option<&str>) -> ParticipantView {
         agent: None,
         harness: Some("claude-code".into()),
         model: model.map(str::to_owned),
+        effort: None,
+        model_name: None,
         launched_model: launched.map(str::to_owned),
         gone_model: None,
         ran_on: None,

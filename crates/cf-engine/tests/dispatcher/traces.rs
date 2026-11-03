@@ -230,7 +230,15 @@ const NO_CHIEF_MODEL: &str = "a chief asked for with no model is refused with `p
 /// A chief runs on no saved agent (CHF-04, T-729): the roster is never read for it.
 const CHIEF_ON_NO_AGENT: &str = "the chief's saved agent is deleted after a Switch chief to it: the chief opens on its model when the project is resumed, and the human is told nothing, where Node kept the chief closed and told the human its agent was no longer among theirs";
 
+/// A member holds its own harness, model and effort (harness-models): it has no saved agent
+/// the human could delete, so nothing waits or fails for one.
+const NO_AGENT_TO_LOSE: &str = "a member runs on its own model, with no saved agent the human could delete: the member that is never free runs on a harness no window opens on, and is said so, where Node's had lost its agent; a session's window opened again opens, where Node's said its agent was gone";
+
 const DEPARTED: &[(&str, &str)] = &[
+    (
+        "tells the human why a session's window they opened did not start",
+        NO_AGENT_TO_LOSE,
+    ),
     (
         "switches no chief to a harness's own default model: it names a saved agent",
         NO_CHIEF_MODEL,
@@ -399,6 +407,7 @@ const DEPARTED: &[(&str, &str)] = &[
         "a note written 3 turns after a restart that finds a message in its harness's record",
         SUSPENDED_AT_START,
     ),
+    // And its member is never free on a harness no window opens on (NO_AGENT_TO_LOSE).
     (
         "tells the requester of a waiting task, though a deleted project's waiting task was told before it",
         TAKEN_AS_IT_WENT,
@@ -590,7 +599,9 @@ fn project(event: &Value) -> Option<Value> {
         let mut kept = Map::new();
         kept.insert("op".to_owned(), op.clone());
         if let Some(answer) = event.get("answer") {
-            kept.insert("answer".to_owned(), answer.clone());
+            let mut answer = answer.clone();
+            hold_apart_what_members_run_on(&mut answer);
+            kept.insert("answer".to_owned(), answer);
         }
         if let Some(threw) = event.get("threw") {
             kept.insert("threw".to_owned(), said(threw));
@@ -620,6 +631,28 @@ fn project(event: &Value) -> Option<Value> {
         "log" => Some(json!({ "log": args[0], "cause": said(&args[1]) })),
         adapter if adapter.starts_with("adapter:") => Some(adapter_call(adapter, method, &args[0])),
         _ => None,
+    }
+}
+
+/// What a participant of an answer runs on, held apart on both sides: Node's member named
+/// the ready-made agent it ran on, this engine's names its model, its effort and its
+/// model's name (harness-models); what a launch runs on is held by the launch's own
+/// settings. A chief's model, which the recordings were moved to (CHF-09), is compared.
+fn hold_apart_what_members_run_on(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            if fields.contains_key("handle") && fields.contains_key("role") {
+                for key in ["agent", "effort", "modelName"] {
+                    fields.shift_remove(key);
+                }
+                if fields.get("role") != Some(&json!("chief")) {
+                    fields.shift_remove("model");
+                }
+            }
+            fields.values_mut().for_each(hold_apart_what_members_run_on);
+        }
+        Value::Array(items) => items.iter_mut().for_each(hold_apart_what_members_run_on),
+        _ => {}
     }
 }
 

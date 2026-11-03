@@ -340,10 +340,17 @@ fn tells_the_requester_once_when_nobody_of_the_tier_is_free_and_assigns_when_one
 fn tells_the_requester_of_a_waiting_task_though_a_deleted_projects_waiting_task_was_told_before_it()
 {
     let context = Context::new();
-    context.roster.model.replace(Some("m".to_owned()));
-    context.roster.gone.borrow_mut().insert("zeus".to_owned());
-    let waits = "T-1 waits for a free standard worker: @zeus has no agent any more (zeus is not among your agents: define it, or remove the member).";
+    // Zeus runs on a harness whose windows ConsensFlow cannot open: it is never free.
+    let waits = "T-1 waits for a free standard worker: @zeus runs on kimi, whose windows ConsensFlow cannot open (remove @zeus from the staff and add a member on another harness).";
+    let on_kimi = |context: &Context| {
+        context.edit_ledger(|file| {
+            let db = rusqlite::Connection::open(file).unwrap();
+            db.execute_batch("UPDATE participant SET harness = 'kimi' WHERE handle = 'zeus'")
+                .unwrap();
+        });
+    };
     let first = Tiers::new(&context, &["zeus"]);
+    on_kimi(&context);
     let gone = first.open();
     context.pass().unwrap();
     assert_eq!(first.notes("chief"), [waits]);
@@ -351,6 +358,7 @@ fn tells_the_requester_of_a_waiting_task_though_a_deleted_projects_waiting_task_
     context.delete_project(first.project.id).unwrap();
 
     let second = Tiers::new(&context, &["zeus"]);
+    on_kimi(&context);
     assert_ne!(
         second.open().id,
         gone.id,

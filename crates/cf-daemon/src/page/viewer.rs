@@ -70,7 +70,6 @@ use futures_util::future::{LocalBoxFuture, Shared};
 use futures_util::FutureExt as _;
 use serde_json::{json, Value};
 
-use super::agents::saved;
 use super::body::{one, Body, Fields, Said};
 use super::Page;
 
@@ -357,8 +356,8 @@ impl Specs {
 }
 
 /// The folder of the project the body names: the project's own folder, and
-/// the specs folder's name in it. What the app says of specs is read from the
-/// agents file as a chief's launch reads it: where it cannot be read, the app
+/// the specs folder's name in it. What the app says of specs is read from its
+/// settings file as a chief's launch reads it: where it cannot be read, the app
 /// names no folder.
 fn folder_named(page: &Page, body: Body<'_>) -> Result<(PathBuf, String), Said> {
     let id = body.whole("project")?;
@@ -367,9 +366,9 @@ fn folder_named(page: &Page, body: Body<'_>) -> Result<(PathBuf, String), Said> 
         .borrow()
         .project(id)?
         .ok_or_else(|| Said(format!("no project {id}")))?;
-    let app = saved(&page.env)
+    let app = super::app_specs::settings(page)
         .ok()
-        .and_then(|agents| agents.roster().app_specs().ok())
+        .and_then(|settings| settings.app_specs().ok())
         .unwrap_or_default();
     let name = folder_of(&project, &app);
     Ok((PathBuf::from(project.directory), name))

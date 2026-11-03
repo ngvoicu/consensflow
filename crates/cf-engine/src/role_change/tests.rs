@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use cf_base::env::Env;
-use cf_catalog::WorkTier;
+use cf_proto::agents::WorkTier;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -121,6 +121,7 @@ fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
     let staff: Vec<StaffRow> = (0..rows)
         .map(|at| StaffRow {
             name: format!("member-{at}"),
+            model: "GPT-6.1-Sol · xhigh".to_owned(),
             roles: vec!["worker".to_owned(), "reviewer".to_owned()],
             work_tier: Some(WorkTier::Standard),
         })
@@ -171,8 +172,11 @@ fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
-    assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
+    assert_eq!(
+        (rows_whole(true), rows_whole(false)),
+        (25, 45),
+        "docs: whole to 25 rows with specs on, 45 without"
+    );
 }
 
 /// An item of a conversation's record, from `role`, saying `text`.

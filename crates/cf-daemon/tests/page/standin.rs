@@ -310,6 +310,7 @@ impl Engine for Standin {
         let switch = ChiefSwitch {
             harness: to.harness,
             model: to.model,
+            effort: None,
             cut: false,
         };
         let answered = seam

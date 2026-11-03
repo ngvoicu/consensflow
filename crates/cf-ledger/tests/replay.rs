@@ -89,7 +89,33 @@ enum Outcome {
 /// ledger's files. Elsewhere each must be there.
 const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
 
+/// Why a trace that starts from a ledger Node left departs at its first read of a member:
+/// migration 0029 named each member of a ready-made agent by its model, and runs it and a
+/// chief that named no model on that agent's model (harness-models).
+const NAMED_BY_MODEL: &str = "the ledger Node left is migrated by 0029: each member of a ready-made agent is named and run by its model (`@zeus` is `@opus-max`, a member of an agent the catalog never had is `@claude-code-default`), and a chief that named no model runs on its agent's";
+
 const DEPARTED: &[(&str, usize, &str)] = &[
+    ("evals-measure-002", 0, NAMED_BY_MODEL),
+    ("evals-measure-004", 0, NAMED_BY_MODEL),
+    ("evals-measure-006", 0, NAMED_BY_MODEL),
+    ("evals-measure-008", 0, NAMED_BY_MODEL),
+    ("evals-measure-010", 0, NAMED_BY_MODEL),
+    ("evals-measure-016", 0, NAMED_BY_MODEL),
+    ("home-copies-002", 1, NAMED_BY_MODEL),
+    ("home-copies-003", 1, NAMED_BY_MODEL),
+    ("ledger-010", 1, NAMED_BY_MODEL),
+    ("ledger-conversations-006", 1, NAMED_BY_MODEL),
+    ("ledger-schema-015", 0, NAMED_BY_MODEL),
+    ("ledger-schema-018", 1, NAMED_BY_MODEL),
+    ("ledger-schema-022", 0, NAMED_BY_MODEL),
+    ("ledger-schema-026", 0, NAMED_BY_MODEL),
+    ("ledger-staff-011", 0, NAMED_BY_MODEL),
+    ("ledger-tasks-022", 1, NAMED_BY_MODEL),
+    ("ledger-projects-008", 3, "a member whose model is named as another member's on another harness joins with its harness in front (`@pi-zeus`), where Node refused it as `member-exists`"),
+    ("ledger-staff-007", 3, "a member's handle is made from its model, so a model named `human` joins as `@pi-human` beside the human, where Node refused the agent id"),
+    ("ledger-conversations-010", 4, NO_TIERS_FOLLOWED),
+    ("ledger-projects-006", 6, NO_TIERS_FOLLOWED),
+
     ("core-api-003", 19, RESULT_ACCEPTED),
     ("core-api-005", 17, ANSWERED_AS_IT_WAITED),
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
@@ -139,11 +165,11 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-projects-002", 14, KEPT_IN_BRIEF),
     ("ledger-projects-011", 8, NO_MARK_TO_FORGET),
     ("ledger-schema-005", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-006", 18, KEPT_IN_BRIEF),
+    ("ledger-schema-006", 1, NAMED_BY_MODEL),
     ("ledger-schema-007", 15, KEPT_IN_BRIEF),
     ("ledger-schema-010", 14, KEPT_IN_BRIEF),
     ("ledger-schema-011", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-012", 1, WAITED_FOR),
+    ("ledger-schema-012", 0, NAMED_BY_MODEL),
     ("ledger-schema-013", 14, KEPT_IN_BRIEF),
     ("ledger-schema-014", 15, KEPT_IN_BRIEF),
     ("ledger-schema-016", 14, KEPT_IN_BRIEF),
@@ -766,7 +792,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
     let args = args.as_slice();
     let id = || integer(arg(args, 0));
     let answered: Result<Value, LedgerError> = match method {
-        "createProject" => NewProject::from_json(arg(args, 0).expect("a request"))
+        "createProject" => NewProject::from_json(&node_staff(arg(args, 0).expect("a request")))
             .and_then(|request| encode(ledger.create_project(&request))),
         "project" => encode(ledger.project(id())),
         "projects" => encode(ledger.projects()),
@@ -783,9 +809,10 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             encode(ledger.events(id(), after.unwrap_or(0), limit.unwrap_or(500)))
         }
         "integrity" => encode(ledger.integrity()),
-        "addMember" => NewMember::from_json(arg(args, 1).expect("a member"))
+        "addMember" => NewMember::from_json(&node_member(arg(args, 1).expect("a member")))
             .and_then(|member| encode(ledger.add_member(id(), &member))),
-        "refreshMemberTiers" => return tiers(ledger, &call["callbacks"]),
+        // A member's tier is the human's: nothing follows a catalog's (harness-models).
+        "refreshMemberTiers" => return Err(NO_TIERS_FOLLOWED.to_owned()),
         "setRoles" => parse_roles(arg(args, 2))
             .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles))),
         "removeMember" => encode(ledger.remove_member(id(), text(arg(args, 1)))),
@@ -1008,36 +1035,57 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
     Ok(answered.unwrap_or_else(|error| failure(&error)))
 }
 
-/// `refreshMemberTiers`, its `tierOf` answered as Node's was: the same
-/// agents asked in the same order, each answered what Node's answered.
-fn tiers(ledger: &mut Ledger, callbacks: &Value) -> Result<Value, String> {
-    let mut recorded = callbacks
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .into_iter();
-    let mut wrong = None;
-    let answered = ledger.refresh_member_tiers(|agent| {
-        let asked = json!([agent]);
-        match recorded.next() {
-            Some(entry) if entry["args"] == asked => entry["result"].as_str().map(str::to_string),
-            Some(entry) => {
-                wrong.get_or_insert(format!("asked tierOf {asked}, Node {}", entry["args"]));
-                None
-            }
-            None => {
-                wrong.get_or_insert(format!("asked tierOf {asked} past Node's last"));
-                None
-            }
+/// Why a trace that has Node's ledger follow its members' tiers departs at that call.
+const NO_TIERS_FOLLOWED: &str = "no call of this ledger: a member's tier is the human's, and nothing follows a catalog's (harness-models)";
+
+/// A member as Node's ledger was given it, as this one takes it: Node's member named the
+/// ready-made agent it ran on (`agent`), which was its handle too; this ledger's is named
+/// by its model, and the agent's name stands for the model's name, so its handle is the
+/// one Node's had (harness-models).
+fn node_member(member: &Value) -> Value {
+    let mut member = member.clone();
+    if let Value::Object(fields) = &mut member {
+        if let Some(agent) = fields.shift_remove("agent") {
+            fields.insert("modelName".to_owned(), agent);
         }
-    });
-    if let Some(why) = wrong {
-        return Err(why);
     }
-    if let Some(entry) = recorded.next() {
-        return Err(format!("never asked tierOf {}, as Node did", entry["args"]));
+    member
+}
+
+/// A project's request as Node's ledger was given it, each member of its staff as
+/// [`node_member`] takes it.
+fn node_staff(request: &Value) -> Value {
+    let mut request = request.clone();
+    if let Some(Value::Array(staff)) = request.get_mut("staff") {
+        for member in staff.iter_mut() {
+            *member = node_member(member);
+        }
     }
-    Ok(encode(answered).unwrap_or_else(|error| failure(&error)))
+    request
+}
+
+/// What neither side's answer is compared by: what a participant runs on (Node's named
+/// its ready-made agent, this one's its model, its effort and its model's name, each
+/// held apart), and of a staff a new project starts from, all but its harness and roles.
+fn hold_apart_what_members_run_on(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            if fields.contains_key("handle") || fields.contains_key("roles") {
+                for key in ["agent", "model", "effort", "modelName", "designer", "tier"] {
+                    if key == "model" || key == "designer" || key == "tier" {
+                        // Only a staff member (no handle) holds these apart.
+                        if fields.contains_key("handle") {
+                            continue;
+                        }
+                    }
+                    fields.shift_remove(key);
+                }
+            }
+            fields.values_mut().for_each(hold_apart_what_members_run_on);
+        }
+        Value::Array(items) => items.iter_mut().for_each(hold_apart_what_members_run_on),
+        _ => {}
+    }
 }
 
 fn encode<T: Serialize>(answered: Result<T, LedgerError>) -> Result<Value, LedgerError> {
@@ -1070,7 +1118,10 @@ fn compare(what: &str, actual: &Value, expected: &Value) -> Option<String> {
             // The mark of a project that comes back by itself is Node's alone.
             let mut expected = expected.clone();
             hold_apart_the_resume_mark(&mut expected);
-            (actual.clone(), expected)
+            let mut actual = actual.clone();
+            hold_apart_what_members_run_on(&mut actual);
+            hold_apart_what_members_run_on(&mut expected);
+            (actual, expected)
         }
     };
     let (ours, theirs) = (actual.to_string(), expected.to_string());

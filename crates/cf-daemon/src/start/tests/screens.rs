@@ -121,6 +121,7 @@ async fn a_change_to_the_agents_moves_the_members_tiers_and_tells_the_page() {
                         chief: NewChief {
                             harness: "claude-code".to_owned(),
                             model: Some("mine".to_owned()),
+                            effort: None,
                         },
                         staff: Vec::new(),
                         gate: false,
@@ -132,7 +133,9 @@ async fn a_change_to_the_agents_moves_the_members_tiers_and_tells_the_page() {
                     .add_member(
                         project.id,
                         &NewMember {
-                            agent: "mine".to_owned(),
+                            model: None,
+                            effort: None,
+                            model_name: Some("mine".to_owned()),
                             harness: "claude-code".to_owned(),
                             designer: false,
                             roles: vec!["worker".to_owned()],

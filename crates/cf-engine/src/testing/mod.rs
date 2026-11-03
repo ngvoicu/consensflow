@@ -37,7 +37,7 @@ pub use operations::Restarted;
 pub use recorder::Recorder;
 pub use seams::{
     CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
-    FakeRoster, FakeTrace, MODELS,
+    FakeAppSettings, FakeTrace, MODELS,
 };
 pub use time::TestTime;
 pub use window::{COMPACTING, TRUST_PROMPT, TRUST_QUESTION, TRUST_QUOTED, TRUST_UNPLACED};

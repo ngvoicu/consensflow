@@ -54,6 +54,7 @@
 
 mod chief_model;
 mod chosen_tier;
+mod harness_models;
 mod compaction;
 mod described;
 mod handed;
@@ -70,6 +71,7 @@ use serde_json::{Map, Value};
 
 pub use chief_model::undo_migration_0026;
 pub use chosen_tier::undo_migration_0028;
+pub use harness_models::undo_migration_0029;
 pub use compaction::undo_migration_0020;
 pub use handed::undo_migration_0022;
 pub use history_indexes::undo_migration_0027;
@@ -147,7 +149,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(pasted_into::COLUMNS)
         .chain(program_gone::COLUMNS)
         .chain(chief_model::COLUMNS)
-        .chain(chosen_tier::COLUMNS)
+        .chain(harness_models::COLUMNS)
     {
         take_column_out(tables, table, column);
     }
@@ -197,8 +199,8 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// summary in a copy, the table and the indexes migration 0020 made, that of the
 /// mark a project's suspension leaves on the tasks it paused, that of when a
 /// message was handed to its window, that of whether the program of a
-/// conversation's last window was proven gone, nor the four of a chief's model, nor whether a
-/// member's tier is the human's. A dump
+/// conversation's last window was proven gone, nor the four of a chief's model, nor a member's effort
+/// and its model's name. A dump
 /// of Node's is left as it is.
 pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     if let Some(version) = dump.get_mut("userVersion") {
@@ -227,7 +229,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             Some("participant") => {
                 *sql = sql
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
-                    .replace(chosen_tier::COLUMN_LINES, "")
+                    .replace(harness_models::COLUMN_LINES, "")
                     .replace(chief_model::COLUMN_LINES, "");
             }
             Some("task") => {

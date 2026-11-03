@@ -214,14 +214,6 @@ fn tells_the_human_why_a_sessions_window_they_opened_did_not_start() {
         tiers.notes("human"),
         ["@zeus-amber-pine could not start: the window did not open: refused by the test."]
     );
-    context.roster.gone.borrow_mut().insert("zeus".to_owned());
-    context
-        .open_window(tiers.project.id, "zeus-amber-pine")
-        .unwrap();
-    assert_eq!(
-        tiers.notes("human").last().unwrap(),
-        "@zeus-amber-pine could not start: zeus is no longer among your agents."
-    );
     held_to(
         context.close(),
         SUITES,

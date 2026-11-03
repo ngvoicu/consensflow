@@ -342,7 +342,6 @@ impl Dispatcher {
                     .number;
                 Some((lane.participant, task))
             })
-            .filter(|(participant, _)| !self.agent_gone(participant))
             .map(|(participant, task)| {
                 let paid = self.seams.ledger.borrow().stop_of(participant.id)?;
                 Ok((participant.id, Coming::Member { task, paid }))

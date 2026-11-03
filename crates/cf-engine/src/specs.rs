@@ -95,7 +95,7 @@ impl Dispatcher {
         let app = if says_off {
             AppSpecs::default()
         } else {
-            self.seams.roster.app_specs()
+            self.seams.app_settings.app_specs()
         };
         let Some(setting) = project.specs_setting(&app) else {
             return Ok(None);

@@ -8,7 +8,7 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_catalog::WorkTier;
+use cf_proto::agents::WorkTier;
 use cf_engine::roles::{role_instructions, StaffRow};
 use regex::Regex;
 
@@ -75,10 +75,10 @@ fn teaches_only_the_boards_commands(role: &str) {
         ));
         assert!(
             found(
-                r"\| Member \| Roles \| Work tier \|\n\|---\|---\|---\|\n\| zeus \| worker, reviewer \| Standard work \|",
+                r"\| Member \| Model \| Roles \| Work tier \|\n\|---\|---\|---\|---\|\n\| zeus \| Opus · high \| worker, reviewer \| Standard work \|",
                 &text
             ),
-            "the staff table: name, roles, tier"
+            "the staff table: name, model, roles, tier"
         );
         assert!(!found(r"tags|PM(?-u:\b)", &text), "no tags, no PM");
         assert!(

@@ -1,5 +1,5 @@
 use cf_base::env::Env;
-use cf_catalog::WorkTier;
+use cf_proto::agents::WorkTier;
 
 use super::*;
 use crate::roles::{role_instructions, StaffRow};
@@ -9,6 +9,7 @@ const CF: &str = "/opt/consensflow/bin/cf";
 fn staff() -> Vec<StaffRow> {
     vec![StaffRow {
         name: "zeus".to_owned(),
+        model: "Opus · max".to_owned(),
         roles: vec!["worker".to_owned()],
         work_tier: Some(WorkTier::Standard),
     }]
@@ -39,7 +40,7 @@ fn with_specs_off_a_chief_s_text_holds_no_word_of_them_and_is_the_text_it_was() 
     assert!(chief.ends_with(&format!(
         "\n## This window's cf\n\nHere `cf` is {CF}. If `cf` says a command is unknown, or answers as another program, another `cf` comes first on this shell's PATH: run {CF} instead.\n"
     )));
-    assert!(chief.contains("| zeus | worker | "));
+    assert!(chief.contains("| zeus | Opus · max | worker | "));
 }
 
 #[test]

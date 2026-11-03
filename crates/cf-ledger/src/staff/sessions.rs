@@ -13,7 +13,8 @@ use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
 /// A member's new session: its own participant, named after the member,
-/// with the member's agent, harness, designer flag and tier and the role
+/// with the member's harness, model, effort and model's name, designer flag and tier
+/// (and the ready-made agent's name an old member keeps), and the role
 /// its task needs. It starts from nothing and ends with its work.
 pub(crate) fn start_session(
     store: &mut Store,
@@ -50,8 +51,8 @@ pub(crate) fn start_session(
     }
     let at = store.at();
     store.db.execute(
-        "INSERT INTO participant (project_id, handle, role, roles, agent, harness, designer, tier, member_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO participant (project_id, handle, role, roles, agent, harness, model, effort, model_name, designer, tier, member_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             project_id,
             handle,
@@ -59,6 +60,9 @@ pub(crate) fn start_session(
             member.roles,
             member.agent,
             member.harness,
+            member.model,
+            member.effort,
+            member.model_name,
             member.designer,
             member.tier,
             member.id,

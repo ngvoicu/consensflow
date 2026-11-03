@@ -24,6 +24,7 @@ fn project(harness: &str, model: Option<&str>) -> NewProject {
         chief: NewChief {
             harness: harness.to_owned(),
             model: model.map(str::to_owned),
+            effort: None,
         },
         staff: Vec::new(),
         gate: false,
@@ -89,6 +90,7 @@ fn a_new_project_as_json_names_its_chief_by_harness_and_model() {
         NewChief {
             harness: "pi".to_owned(),
             model: Some(PI_MODEL.to_owned()),
+            effort: None,
         }
     );
 }

@@ -17,7 +17,9 @@ pub enum PageOperation {
     ProjectResume,
     ProjectClose,
     ProjectDelete,
-    AgentsList,
+    /// Node's `agents.list`: the harnesses not installed here, which the pickers
+    /// leave out (no saved agents are listed: harness-models).
+    HarnessesMissing,
     StaffLast,
     ChiefSwitch,
     MemberAdd,
@@ -100,7 +102,7 @@ impl PageOperation {
         Self::ProjectResume,
         Self::ProjectClose,
         Self::ProjectDelete,
-        Self::AgentsList,
+        Self::HarnessesMissing,
         Self::StaffLast,
         Self::ChiefSwitch,
         Self::MemberAdd,
@@ -151,7 +153,7 @@ impl PageOperation {
             Self::ProjectResume => "project.resume",
             Self::ProjectClose => "project.close",
             Self::ProjectDelete => "project.delete",
-            Self::AgentsList => "agents.list",
+            Self::HarnessesMissing => "harnesses.missing",
             Self::StaffLast => "staff.last",
             Self::ChiefSwitch => "chief.switch",
             Self::MemberAdd => "member.add",
@@ -210,7 +212,7 @@ impl PageOperation {
         !matches!(
             self,
             Self::ProjectsList
-                | Self::AgentsList
+                | Self::HarnessesMissing
                 | Self::StaffLast
                 | Self::BoardGet
                 | Self::InboxGet
@@ -233,7 +235,7 @@ impl PageOperation {
 
 /// The first line the daemon prints (`{"url":"http://127.0.0.1:<port>/",
 /// "token":"<48 hex>"}`): where its HTTP front listens and the token the app
-/// opens the human's agents screens with. The url ends in a slash; a
+/// opens the human's harnesses screen with. The url ends in a slash; a
 /// window's `CONSENSFLOW_URL` does not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HandleLine {
@@ -286,7 +288,8 @@ mod tests {
             "project.resume",
             "project.close",
             "project.delete",
-            "agents.list",
+            // Node's `agents.list`, renamed with the saved agents gone (harness-models).
+            "harnesses.missing",
             "staff.last",
             "chief.switch",
             "member.add",
@@ -346,7 +349,7 @@ mod tests {
             reads,
             [
                 "projects.list",
-                "agents.list",
+                "harnesses.missing",
                 "staff.last",
                 "board.get",
                 "inbox.get",

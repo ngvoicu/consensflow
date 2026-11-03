@@ -65,6 +65,7 @@ pub fn request(name: &str, directory: &str) -> NewProject {
         chief: NewChief {
             harness: "claude-code".to_owned(),
             model: Some("apollo".to_owned()),
+            effort: None,
         },
         staff: Vec::new(),
         gate: false,
