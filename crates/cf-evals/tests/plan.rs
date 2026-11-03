@@ -81,10 +81,23 @@ fn gives_each_staff_harness_two_workers_an_advisor_and_a_reviewer_on_its_cheap_m
         .agents
         .iter()
         .all(|agent| agent.to_value()["workTier"] == "standard"));
+    // `project.open` takes a member as what it runs on: one per harness, model and effort,
+    // holding the roles of its rows (spec harness-models).
     assert_eq!(
-        staff.to_value()[2],
-        json!({ "agent": "eval-codex-advisor", "roles": ["advisor"] })
+        staff.to_value(),
+        json!([
+            {
+                "harness": "codex", "model": "gpt-5.6-luna", "effort": null, "tier": "standard",
+                "roles": ["worker", "advisor", "reviewer"],
+            },
+            {
+                "harness": "pi", "model": "openrouter/other", "effort": null, "tier": "standard",
+                "roles": ["worker", "advisor", "reviewer"],
+            },
+        ])
     );
+    let with_effort = staff_for(&["claude"], &[], Some("medium")).unwrap();
+    assert_eq!(with_effort.to_value()[0]["effort"], "medium");
 }
 
 #[test]

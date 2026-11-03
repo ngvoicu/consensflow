@@ -1,6 +1,6 @@
 //! `GET /api/staff`: the members of the staff, each with its roles and tier, the harness
-//! it runs on, the model as its harness takes it and the name its harness's list gives it,
-//! and its effort. A member is a participant who is neither the chief nor the human, runs
+//! it runs on and the name the page gives that harness, the model as its harness takes it
+//! and the name its harness's list gives it, and its effort. A member is a participant who is neither the chief nor the human, runs
 //! on a harness, and is not a session of one (it belongs to no member).
 
 use serde_json::{json, Value};
@@ -30,6 +30,7 @@ pub(super) async fn handle(
                 "roles": member.roles,
                 "tier": member.tier,
                 "harness": member.harness,
+                "harnessName": cf_ledger::handles::harness_label(member.harness.as_deref()),
                 "model": said(member.model.as_deref()),
                 "modelName": cf_ledger::handles::model_shown(
                     member.model_name.as_deref(),

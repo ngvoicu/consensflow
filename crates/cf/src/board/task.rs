@@ -303,8 +303,13 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
         }
         kept.push(lane);
         if !lane_tasks.is_empty() {
+            // A lane on a harness says the model and effort it runs on (harness-models).
+            let runs_on = match lane.get("runsOn").and_then(Value::as_str) {
+                Some(runs_on) => format!(", {runs_on}"),
+                None => String::new(),
+            };
             lines.push(format!(
-                "@{} ({})",
+                "@{} ({}{runs_on})",
                 js::text(lane.get("handle")),
                 js::text(lane.get("role"))
             ));

@@ -6,6 +6,7 @@ after the member (`| Member | Model | Roles | Work tier |`).
 
     python3 -I tools/move_harness_models_goldens.py text crates/cf-engine/tests/goldens/text.json
     python3 -I tools/move_harness_models_goldens.py cli crates/cf/tests/goldens/cli.<platform>.json
+    python3 -I tools/move_harness_models_goldens.py board crates/cf/tests/goldens/board.json
 
 `text` moves the role texts' tables: each staff row of `teamTable` and `roleInstructions`
 that says no model runs on `Opus · high` (what the text tests' rows run on where a row says
@@ -20,6 +21,12 @@ printed loses their lines, and `ui` and `doctor` their words for them; `setup` a
 `doctor` count no agents (the line `agents: …` goes), and their two cases that stopped
 at a file of agents they could not read go, as neither reads one. What else a case printed, wrote
 and exited with is as Node's was, and the rest of `cli_goldens` holds it.
+
+`board` moves `cf staff`'s two cases: the board answers each member with what it runs on
+(`/api/staff`: its harness and the harness's name, the model's id and name, its effort),
+and `cf staff` prints it after the handle (`@opus-high · Opus · high (Claude Code,
+claude-opus-5-5) · worker · standard`); with no member it says members, not agents. A
+case already moved is left as it is.
 """
 
 import json
@@ -196,10 +203,62 @@ def cli_text(golden):
     return "{\n" + ",\n".join(head) + ',\n  "cases": [\n' + cases + "\n  ]\n}\n"
 
 
+STAFF = [
+    {
+        "handle": "opus-high",
+        "role": "worker",
+        "roles": ["worker"],
+        "tier": "standard",
+        "harness": "claude-code",
+        "harnessName": "Claude Code",
+        "model": "claude-opus-5-5",
+        "modelName": "Opus",
+        "effort": "high",
+    },
+    {
+        "handle": "codex-default",
+        "role": "advisor",
+        "roles": ["advisor", "reviewer"],
+        "tier": "critical",
+        "harness": "codex",
+        "harnessName": "Codex",
+        "model": None,
+        "modelName": "Codex default",
+        "effort": None,
+    },
+]
+
+STAFF_SAID = (
+    "@opus-high · Opus · high (Claude Code, claude-opus-5-5) · worker · standard\n"
+    "@codex-default · Codex default (Codex, its default model) · advisor+reviewer · critical\n"
+)
+
+NO_STAFF_SAID = "No members are on this project's staff yet; the human adds them in the app.\n"
+
+
+def move_board(path):
+    with open(path, encoding="utf-8") as file:
+        golden = json.load(file)
+    moved = 0
+    for case in golden:
+        if case["name"] == "no staff" and case["stdout"] != NO_STAFF_SAID:
+            case["stdout"] = NO_STAFF_SAID
+            moved += 1
+        if case["name"] == "the staff" and case["stdout"] != STAFF_SAID:
+            case["replies"][0]["text"] = json.dumps(
+                {"members": STAFF}, ensure_ascii=False, separators=(",", ":")
+            )
+            case["stdout"] = STAFF_SAID
+            moved += 1
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(json.dumps(golden, indent=2, ensure_ascii=False) + "\n")
+    print("moved %d cases of %s" % (moved, path))
+
+
 def main(argv):
-    if len(argv) != 3 or argv[1] not in ("text", "cli"):
+    if len(argv) != 3 or argv[1] not in ("text", "cli", "board"):
         sys.exit(__doc__)
-    {"text": move_text, "cli": move_cli}[argv[1]](argv[2])
+    {"text": move_text, "cli": move_cli, "board": move_board}[argv[1]](argv[2])
 
 
 if __name__ == "__main__":

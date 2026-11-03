@@ -37,15 +37,16 @@ pub fn node_staff(request: &Value) -> Value {
 }
 
 /// What neither side of an answer is compared by: what a participant runs on (Node's named
-/// its ready-made agent, this one's its model, its effort and its model's name, each held
-/// apart, a chief's model aside, which the recordings were moved to), and of a staff a new
+/// its ready-made agent, this one's its model, its effort, its model's name, its harness's
+/// name and the two as a lane says them, each held apart, a chief's model aside, which the
+/// recordings were moved to), and of a staff a new
 /// project starts from, all but its harness and roles.
 pub fn hold_apart_what_members_run_on(value: &mut Value) {
     match value {
         Value::Object(fields) => {
             let participant = fields.contains_key("handle");
             if participant || fields.contains_key("roles") {
-                for key in ["agent", "effort", "modelName"] {
+                for key in ["agent", "effort", "modelName", "harnessName", "runsOn"] {
                     fields.shift_remove(key);
                 }
                 let chief = fields.get("role").and_then(Value::as_str) == Some("chief");

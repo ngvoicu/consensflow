@@ -145,14 +145,40 @@ pub struct Staff {
 }
 
 impl Staff {
-    /// The staff as `project.open` takes it.
+    /// The staff as `project.open` takes it (spec harness-models): each member as the
+    /// harness, the model, the effort and the tier its agent row runs on, never the row's
+    /// name. Rows on one harness, model and effort are one member that holds their roles,
+    /// in the order they came, as Add member makes them.
     pub fn to_value(&self) -> Value {
-        Value::Array(
-            self.members
-                .iter()
-                .map(|member| json!({ "agent": member.agent, "roles": [member.role] }))
-                .collect(),
-        )
+        let mut members: Vec<Value> = Vec::new();
+        for member in &self.members {
+            let Some(agent) = self.agents.iter().find(|agent| agent.id == member.agent) else {
+                continue;
+            };
+            let effort = agent.effort.as_ref().map(|(_, level)| level.as_str());
+            let same = members.iter_mut().find(|held| {
+                held["harness"] == agent.kind
+                    && held["model"] == agent.model.as_str()
+                    && held["effort"].as_str() == effort
+            });
+            match same {
+                Some(held) => {
+                    if let Some(roles) = held["roles"].as_array_mut() {
+                        if !roles.iter().any(|role| role == member.role) {
+                            roles.push(json!(member.role));
+                        }
+                    }
+                }
+                None => members.push(json!({
+                    "harness": agent.kind,
+                    "model": agent.model,
+                    "effort": effort,
+                    "tier": agent.tier,
+                    "roles": [member.role],
+                })),
+            }
+        }
+        Value::Array(members)
     }
 }
 

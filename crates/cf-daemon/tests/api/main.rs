@@ -89,8 +89,15 @@ const FINISH_IN_THE_USAGE: &str = "the usage `cf help` prints inside a window li
 /// harness gives it, where Node's said its saved agent's.
 const STAFF_ON_ITS_OWN_MODEL: &str = "`cf staff` says the model, its name and the effort each member holds itself (none for a member a test named by its agent alone), where Node's API read them off the member's saved agent";
 
+/// A lane says the model and effort its participant runs on (harness-models), and
+/// `cf task list` says it after the role in each lane's head.
+const LANE_RUNS_ON: &str = "a lane of the board says the model and effort its participant runs on, and `cf task list` says it in the lane's head, where Node's said the handle and role alone";
+
 const DEPARTED: &[Departed] = &[
+    ("cf-board-014", LANE_RUNS_ON),
+    ("cf-board-016", LANE_RUNS_ON),
     ("cf-board-018", STAFF_ON_ITS_OWN_MODEL),
+    ("cf-board-021", LANE_RUNS_ON),
     ("cf-board-027", STAFF_ON_ITS_OWN_MODEL),
     ("core-api-003", RESULT_ACCEPTED),
     ("core-api-005", ANSWERED_AS_IT_WAITED),
