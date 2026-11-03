@@ -195,10 +195,12 @@ fn knows_the_window_commands_and_the_ones_outside_a_window() -> Outcome {
             "resume"
         ]
     );
-    for command in [
-        "inbox", "ask", "answer", "tell", "history", "agent", "setup", "doctor",
-    ] {
+    for command in ["inbox", "ask", "answer", "tell", "history", "setup", "doctor"] {
         assert!(commands.contains_key(command), "{command}");
+    }
+    // The saved agents and the catalog are gone (harness-models).
+    for command in ["agent", "catalog"] {
+        assert!(!commands.contains_key(command), "{command}");
     }
     Ok(())
 }

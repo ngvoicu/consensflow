@@ -104,6 +104,9 @@ pub struct Members {
     folder: PathBuf,
     trust: Option<&'static str>,
     tiers: BTreeMap<String, String>,
+    /// The handle each agent of the plan joined under, by its id: the daemon names a member
+    /// by its model (harness-models), and a check names it by its agent.
+    handles: BTreeMap<String, String>,
     /// Where the shim that starts Claude Code is, which the windows run through.
     _shims: TempDir,
 }
@@ -189,6 +192,7 @@ impl Members {
             folder,
             trust,
             tiers: BTreeMap::new(),
+            handles: BTreeMap::new(),
             _shims: shims,
         })
     }
@@ -282,9 +286,16 @@ impl Members {
     }
 
     /// The lane of the member or session `handle`, the newest one: a member's
-    /// work runs in a session of its own, and its lane is its newest session's.
+    /// work runs in a session of its own, and its lane is its newest session's. An agent of
+    /// the plan is found by the handle it joined under.
     pub fn lane(&self, handle: &str) -> Result<Value> {
-        self.project().lane(handle)
+        self.project().lane(self.handle_of(handle))
+    }
+
+    /// The handle the agent `agent` of the plan joined the staff under; `agent` itself for
+    /// any other name (the chief, a session's handle).
+    pub fn handle_of<'n>(&'n self, agent: &'n str) -> &'n str {
+        self.handles.get(agent).map_or(agent, String::as_str)
     }
 
     /// The task `number`, as the board reads it, with its whole thread: each
@@ -305,13 +316,12 @@ impl Members {
         }
     }
 
-    /// Adds the agent `agent` to the staff, as the human does, with the `roles`
-    /// asked for (none: a worker). Its tier, which the tasks for it name.
+    /// Adds the agent `agent` of the plan to the staff, as the human does in Add member,
+    /// with the `roles` asked for (none: a worker): its harness, model, effort and tier
+    /// (`rig::member_body`). Its tier, which the tasks for it name.
     pub fn add(&mut self, agent: &str, roles: &[&str]) -> Result<String> {
-        let mut request = json!({ "agent": agent });
-        if !roles.is_empty() {
-            request["roles"] = json!(roles);
-        }
+        let roles = (!roles.is_empty()).then(|| json!(roles));
+        let request = crate::rig::member_body(&self.rig, agent, roles)?;
         let added = self.page("member.add", request)?;
         if added["ok"] != true {
             return Err(Error::Daemon(format!("member.add {agent}: {added}")));
@@ -321,6 +331,9 @@ impl Members {
             .unwrap_or_default()
             .to_owned();
         self.tiers.insert(agent.to_owned(), tier.clone());
+        if let Some(handle) = added["member"]["handle"].as_str() {
+            self.handles.insert(agent.to_owned(), handle.to_owned());
+        }
         Ok(tier)
     }
 
@@ -472,6 +485,7 @@ impl Members {
             folder,
             trust,
             tiers,
+            handles,
             _shims,
         } = self;
         rig.kill_daemon();
@@ -491,6 +505,7 @@ impl Members {
             folder,
             trust,
             tiers,
+            handles,
             _shims,
         })
     }

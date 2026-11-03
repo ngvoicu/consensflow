@@ -59,7 +59,6 @@
 //! pseudoconsole does.
 
 use cf_e2e::devin_store::{self, Message};
-use cf_e2e::files;
 use cf_e2e::live::trace::at_ms;
 use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
@@ -109,7 +108,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker2", "kind": "claude-code", "model": "fake" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// A rig whose chief is the stand-in Devin, its agent as quick as `first_word` and

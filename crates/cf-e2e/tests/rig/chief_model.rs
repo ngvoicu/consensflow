@@ -7,7 +7,6 @@
 
 use std::time::Duration;
 
-use cf_e2e::files;
 use cf_e2e::rig::{chief_body, Project, Rig};
 use serde_json::{json, Value};
 
@@ -20,7 +19,7 @@ fn with_chief(config: cf_e2e::rig::Config) -> cf_e2e::Result<Rig> {
         "schemaVersion": 1,
         "agents": [{ "id": "my-chief", "kind": "claude-code", "model": "fake-chief" }],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     Ok(rig)
 }
 

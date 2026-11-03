@@ -313,8 +313,8 @@ pub async fn subscribe_output<R: Runtime>(
     json!({"ok":true})
 }
 
-/// The address of one agents screen (the agents, the harnesses): the
-/// daemon's page with the UI token, which the board's page frames in a
+/// The address of the daemon's screen (the harnesses; the saved agents' screen is no
+/// more): the daemon's page with the UI token, which the board's page frames in a
 /// dialog of its own.
 #[tauri::command]
 pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
@@ -332,7 +332,7 @@ pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value
     .await
 }
 
-const AGENTS_PAGES: &[&str] = &["", "harnesses"];
+const AGENTS_PAGES: &[&str] = &["harnesses"];
 
 /// The daemon's page for one agents screen, carrying the UI token.
 fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
@@ -415,10 +415,7 @@ mod tests {
             "token":"secret",
         }))
         .unwrap();
-        assert_eq!(
-            agents_url(&roster, "").unwrap().as_str(),
-            "http://localhost:43123/?token=secret"
-        );
+        assert!(agents_url(&roster, "").is_err(), "no screen of saved agents");
         assert_eq!(
             agents_url(&roster, "harnesses").unwrap().as_str(),
             "http://localhost:43123/harnesses?token=secret"

@@ -15,8 +15,6 @@
 // file beside it, where each would be a suite of its own.
 #[path = "cli/a_removed_harness_is_named_nowhere.rs"]
 mod a_removed_harness_is_named_nowhere;
-#[path = "cli/catalog.rs"]
-mod catalog;
 #[path = "cli/commands.rs"]
 mod commands;
 #[path = "cli/fixtures_end_with_their_owner.rs"]
@@ -31,8 +29,6 @@ mod nested_cases_name_their_limit;
 mod off_node;
 #[path = "cli/role_files.rs"]
 mod role_files;
-#[path = "cli/roster.rs"]
-mod roster;
 #[path = "cli/saved_data.rs"]
 mod saved_data;
 #[path = "cli/switch_over.rs"]
@@ -43,7 +39,6 @@ mod tool_folders;
 use std::path::PathBuf;
 
 use cf_e2e::ScratchHome;
-use serde_json::Value;
 
 /// What a case ends with: nothing, or why it could not be run. A check that
 /// does not hold is a panic, which is the case's failure.
@@ -67,12 +62,3 @@ fn role_file(home: &ScratchHome) -> PathBuf {
         .fold(home.consensflow(), |folder, part| folder.join(part))
 }
 
-/// The agent `name` in the answer of `cf agent list --json`, or null when it
-/// is not listed there (so a check on it fails by what it finds, not by a panic
-/// of its own).
-fn agent<'a>(listed: &'a Value, name: &str) -> &'a Value {
-    listed["agents"]
-        .as_array()
-        .and_then(|agents| agents.iter().find(|agent| agent["name"] == name))
-        .unwrap_or(&Value::Null)
-}

@@ -42,7 +42,7 @@ const PACKAGES: [(&str, &str); 2] = [("package.json", ""), ("app/package.json", 
 /// The scripts of the root `package.json` that hand over to a command, with the
 /// command each hands over to: the drivers and the build steps, whose names the
 /// workflows, the docs and the habit call them by.
-const ROOT: [(&str, &str); 30] = [
+const ROOT: [(&str, &str); 29] = [
     ("build:cf", "cargo xtask build-cf"),
     ("test:app", "cargo xtask app test"),
     ("clippy:app", "cargo xtask app clippy"),
@@ -52,7 +52,6 @@ const ROOT: [(&str, &str); 30] = [
     ("test:integration", "cargo xtask test integration"),
     ("test:regressions", "cargo xtask test regressions"),
     ("test:clis", "cargo xtask test clis"),
-    ("test:agents", "cargo xtask test agents"),
     ("load", "cargo xtask test load"),
     ("live:designer", "cargo xtask live designer"),
     ("live:approval", "cargo xtask live approval"),

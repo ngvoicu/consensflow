@@ -56,12 +56,6 @@ pub const COMMANDS: &[Command] = &[
         run: Run::Native(clis),
     },
     Command {
-        words: &["test", "agents"],
-        about: "Run the proof of the agents screens (the agents_proof cases of the daemon test of cf-e2e) against the native daemon",
-        usage: "[cargo test arguments: --offline, or -- and libtest's]",
-        run: Run::Native(agents),
-    },
-    Command {
         words: &["test", "load"],
         about: "Run the daemon under load (the load test of cf-e2e, which cargo test ignores unless asked)",
         usage: "[cargo test arguments: --offline, or -- and libtest's; CONSENSFLOW_LOAD_PROJECTS, _WAVES and _TASKS set the size]",
@@ -106,11 +100,6 @@ const CLIS: Suite = Suite {
     filter: None,
     ignored: false,
 };
-const AGENTS: Suite = Suite {
-    tests: &["daemon"],
-    filter: Some("agents_proof::"),
-    ignored: false,
-};
 const LOAD: Suite = Suite {
     tests: &["load"],
     filter: None,
@@ -133,7 +122,6 @@ pub(crate) fn named(name: &str) -> Option<Suite> {
         "integration" => Some(INTEGRATION),
         "regressions" => Some(REGRESSIONS),
         "clis" => Some(CLIS),
-        "agents" => Some(AGENTS),
         "load" => Some(LOAD),
         _ => None,
     }
@@ -169,10 +157,6 @@ fn regressions(
 
 fn clis(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
     run(context, CLIS, args, console)
-}
-
-fn agents(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
-    run(context, AGENTS, args, console)
 }
 
 fn load(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
@@ -279,7 +263,6 @@ mod tests {
             INTEGRATION,
             REGRESSIONS,
             CLIS,
-            AGENTS,
             LOAD,
         ];
         assert_eq!(words.len(), suites.len());
@@ -350,18 +333,6 @@ mod tests {
     }
 
     #[test]
-    fn the_agents_proof_is_the_agents_proof_cases_of_the_daemon_test() {
-        assert_eq!(
-            line(AGENTS, &[]),
-            "cargo test -p cf-e2e --test daemon agents_proof::"
-        );
-        assert_eq!(
-            line(AGENTS, &["--offline"]),
-            "cargo test -p cf-e2e --test daemon agents_proof:: --offline"
-        );
-    }
-
-    #[test]
     fn the_load_suite_asks_for_the_ignored_cases_after_the_arguments_for_cargo() {
         assert_eq!(
             line(LOAD, &[]),
@@ -388,7 +359,6 @@ mod tests {
             INTEGRATION,
             REGRESSIONS,
             CLIS,
-            AGENTS,
             LOAD,
             SMOKE,
         ] {
@@ -460,7 +430,6 @@ mod tests {
         };
         for (value, suite) in [
             (Some("4/3"), DAEMONS),
-            (Some("1/2"), AGENTS),
             (Some("1/2"), LOAD),
         ] {
             assert!(

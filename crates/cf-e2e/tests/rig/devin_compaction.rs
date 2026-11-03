@@ -12,7 +12,6 @@
 //! The answer is given once, into the same window (no Escape, no window closed or opened
 //! again), its receipt proves it arrived, and the task goes from waiting to working.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::{json, Value};
 
@@ -35,7 +34,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "devin-worker", "kind": "devin", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The messages of `participant`'s inbox of the kind `kind`.

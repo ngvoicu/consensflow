@@ -14,7 +14,6 @@
 //! What the owner should have seen: T-1 fails, and the note that says so, to the
 //! chief, quotes what Codex said.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
@@ -35,7 +34,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The notes ConsensFlow wrote the chief that say T-1 failed.

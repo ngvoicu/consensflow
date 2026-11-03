@@ -22,7 +22,6 @@
 //! window's first message. The daemon is given 15 s for a first message, and the
 //! compaction takes 30.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::rollout;
 use serde_json::{json, Value};
@@ -45,7 +44,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The worker's windows the daemon asked for, in order.

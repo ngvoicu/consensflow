@@ -31,7 +31,6 @@
 use std::time::Duration;
 
 #[cfg(unix)]
-use cf_e2e::files;
 use cf_e2e::live::members::{descending_from, Identity, Machine, ThisMachine};
 use cf_e2e::rig::{Config, Held, Project, Rig, OPEN};
 #[cfg(unix)]
@@ -355,7 +354,7 @@ fn write_codex_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// What the worker's thread was told by its user, in its one rollout.

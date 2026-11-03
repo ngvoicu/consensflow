@@ -29,9 +29,9 @@ use serde_json::{json, Value};
 use super::machine::Harness;
 use super::{requested, Log, CLAUDE_MODEL, MODELS};
 use crate::rig::Rig;
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
-/// The image designer, the catalog's own: a Codex agent whose image tool draws.
+/// The image designer: a Codex member whose image tool draws.
 pub const DESIGNER: &str = "pygmalion";
 
 /// The model of the agent the stand-in plays for a chief, and for a member: the
@@ -97,7 +97,7 @@ fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
 }
 
 /// The effort levels `harness` takes, as the product's catalog has them
-/// (`efforts` of `crates/cf-catalog/src/catalog.rs`, which quotes each CLI's own
+/// (as each CLI's own
 /// help; a test holds the two to one list).
 fn efforts(harness: Harness) -> &'static [&'static str] {
     match harness {
@@ -333,12 +333,13 @@ pub fn row_on(model: &Model, tier: &str) -> Value {
     row
 }
 
-/// Writes the roster of the rig's home: the agents `rows`, over the one the rig
-/// started with. The daemon opens a member's window on its row, so each row of a
-/// real harness is what the `log`'s report says it was launched on.
+/// Writes the rig's stand-ins: the agents `rows`, over the ones the rig started with. A
+/// member added from a row runs on the row's harness, model and effort
+/// (`rig::member_body`), so each row of a real harness is what the `log`'s report says
+/// it was launched on.
 pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
-    let roster = json!({ "schemaVersion": 1, "agents": rows });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    let roster = json!({ "agents": rows });
+    rig.stand_ins(&roster)?;
     for row in rows {
         log.launched(row);
     }
@@ -668,66 +669,4 @@ mod tests {
         );
     }
 
-    /// A run can name any agent of the product's catalog by its model and effort.
-    #[test]
-    fn every_agent_of_the_catalog_can_be_named_by_its_model_and_effort() {
-        let presets: Value = serde_json::from_str(
-            &std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/data/presets.json"))
-                .unwrap(),
-        )
-        .unwrap();
-        let presets = presets["presets"].as_array().unwrap();
-        assert!(presets.len() > 100, "{}", presets.len());
-        for preset in presets {
-            let kind = preset["kind"].as_str().unwrap();
-            let harness = Harness::ALL
-                .into_iter()
-                .find(|harness| harness.kind() == kind)
-                .unwrap_or_else(|| panic!("no harness runs {kind}"));
-            let model = preset["model"].as_str().unwrap();
-            let effort = preset["effort"].as_str().or(preset["thinking"].as_str());
-            let piece = match effort {
-                Some(effort) => format!("{}={model}:{effort}", harness.name()),
-                None => format!("{}={model}", harness.name()),
-            };
-            let named = parse(Some(&piece), None).unwrap_or_else(|refused| panic!("{refused}"));
-            assert_eq!(
-                (
-                    named.of(harness).name.as_str(),
-                    named.of(harness).effort.as_deref()
-                ),
-                (model, effort),
-                "{piece}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_efforts_a_harness_takes_are_the_ones_the_products_catalog_has() {
-        let catalog =
-            std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/src/catalog.rs"))
-                .unwrap();
-        for harness in Harness::ALL {
-            // The catalog's own name of the harness.
-            let name = harness.name();
-            let variant = format!("{}{}", name[..1].to_uppercase(), &name[1..]);
-            let quoted: Vec<String> = efforts(harness)
-                .iter()
-                .map(|effort| format!("\"{effort}\""))
-                .collect();
-            let line = format!("Harness::{variant} => &[{}],", quoted.join(", "));
-            assert!(catalog.contains(&line), "the catalog has no {line}");
-        }
-    }
-
-    #[test]
-    fn only_pi_has_no_tool_to_ask_a_question_with() {
-        for harness in Harness::ALL {
-            assert_eq!(
-                question_tool(harness).is_none(),
-                harness == Harness::Pi,
-                "{harness:?}"
-            );
-        }
-    }
 }

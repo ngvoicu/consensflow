@@ -56,7 +56,7 @@ use crate::{checkout, files, wire, Error, Result};
 pub use homes::HarnessHome;
 pub use jobs::Job;
 pub use names::project_name;
-pub use project::{chief_body, chief_of, write_staff, Project};
+pub use project::{chief_body, chief_of, member_body, write_staff, Project};
 pub use route::{Held, Pasted};
 
 pub(crate) use observe::events_of;
@@ -537,6 +537,19 @@ impl Rig {
             .rev()
             .find(|(given, _)| given == name)
             .map(|(_, value)| value.as_str())
+    }
+
+    /// The stand-ins a case seats (`install::STAND_INS`): the members it names, each by
+    /// the name its handle is, with the harness, the model and the effort it runs on and
+    /// its tier. No file of the daemon's: the case's own, beside the home.
+    pub fn stand_ins_file(&self) -> PathBuf {
+        self.root.join(install::STAND_INS)
+    }
+
+    /// The stand-ins a case seats are `roster`'s (`{agents: [{id, kind, model, effort,
+    /// workTier, designer}]}`), for the projects it opens and the members it adds after.
+    pub fn stand_ins(&self, roster: &Value) -> Result<()> {
+        crate::files::write(&self.stand_ins_file(), format!("{roster}\n"))
     }
 
     /// The daemon's home, `CONSENSFLOW_HOME`.

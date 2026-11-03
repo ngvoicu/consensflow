@@ -432,7 +432,7 @@ mod tests {
             err: &mut err,
         };
         let shard = Shard { index: 1, count: 2 };
-        for suite in [super::super::AGENTS, super::super::LOAD] {
+        for suite in [super::super::LOAD] {
             assert!(matches!(
                 run(&context(), suite, shard, &[], &mut console),
                 Err(Failure::Usage(_))

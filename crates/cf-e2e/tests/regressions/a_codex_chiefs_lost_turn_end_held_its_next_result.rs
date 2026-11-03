@@ -8,7 +8,6 @@
 //! The chief is the stand-in Codex, which leaves its first turn's end unsaid
 //! (`CF_TEST_CODEX_DROP_COMPLETED=1`); the worker is the stand-in Claude.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig, OPEN};
 use serde_json::{json, Value};
 
@@ -32,7 +31,7 @@ fn a_codex_chief_whose_first_turn_end_was_never_heard_is_given_its_next_result_o
             { "id": "worker", "kind": "claude-code", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open_with_staff(&rig, "codex-chief", None, &[("worker", "worker")])?;
     let tier = project.tiers()?.get("worker").cloned().unwrap_or_default();
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;

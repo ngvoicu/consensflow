@@ -365,7 +365,6 @@ pub mod members {
     use serde_json::{json, Value};
 
     use super::{kind, records};
-    use crate::files;
     use crate::rig::{Project, Rig};
     use crate::Result;
 
@@ -389,7 +388,7 @@ pub mod members {
             "schemaVersion": 1,
             "agents": [{ "id": "chief", "kind": "claude-code", "model": "fake-chief" }, worker],
         });
-        files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+        rig.stand_ins(&roster)?;
         let project = Project::open(rig, "chief", json!({}))?;
         project.add_member(WORKER)?;
         Ok(project)

@@ -12,7 +12,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use super::homes::Homes;
-use super::install::{environment, var, write_fake_install, write_roster};
+use super::install::{environment, var, write_fake_install, write_stand_ins};
 use super::route::Shared;
 use super::stranger::Stranger;
 use super::{Config, Rig};
@@ -82,10 +82,10 @@ impl Rig {
         files::make_dir(&workspace)?;
         let fake_bin = write_fake_install(&root, &config)?;
         let env = environment(&root, &fake_bin, &config, &home_vars);
-        // A restart over the same home keeps its roster, as the app's does: the
-        // agents a case wrote are still the ones its chief and staff run on.
+        // A restart over the same home keeps the stand-ins a case wrote: they are still
+        // the ones its chief and staff run on.
         if config.existing_root.is_none() {
-            write_roster(&root)?;
+            write_stand_ins(&root)?;
         }
 
         // Beside the pane host, before any window: none of theirs.

@@ -277,7 +277,7 @@ fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief
         "schemaVersion": 1,
         "agents": [{ "id": "my-chief", "kind": "claude-code", "model": "fake-chief" }],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let opened = rig.page(
         "project.open",
         chief_body(&rig, "my-chief", json!({ "directory": rig.workspace() }))?,
