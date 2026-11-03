@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, DialogSign, Held, InputBox, Observed, Over, Pane, PaneHost, Question, Readiness,
-    Trusts, Waiting, Window, Work, NOT_ADMITTED,
+    Admission, Decline, Dialog, DialogSign, Held, InputBox, Observed, Over, Pane, PaneHost,
+    Question, Readiness, Trusts, Waiting, Window, Work, NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Lines, Reading, Record, Settlement};
 use serde_json::{json, Value};
@@ -36,6 +36,10 @@ pub const TRUST_UNPLACED: &str = "Do you trust this folder? (a test's question, 
 pub const TRUST_QUOTED: &str = "Yes, I trust this folder / No, exit (a test's quote of them)";
 /// The line a test window's screen shows while its harness compacts its conversation.
 pub const COMPACTING: &str = "• Compacting the conversation (a test's compaction)";
+/// The question of the one dialog on a test window's list of safe declines, as Claude Code's
+/// offer to install an LSP plugin asks it, and its choice that declines it ([`Window::safe_decline`]).
+pub const DECLINED_OFFER: &str = "Would you like to install this LSP plugin?";
+pub const DECLINE_CHOICE: &str = "No, not now";
 /// Why a test window waits where its harness says a dialog of its own is open, as Claude
 /// Code's status says one ([`DialogSign::Open`]); any other reason is its own question's.
 pub const DIALOG_OPEN: &str = "dialog open (a test's harness dialog)";
@@ -149,6 +153,23 @@ impl Window for FakeWindow {
 
     fn compacting(&self, screen: &[String]) -> bool {
         holds(screen, COMPACTING)
+    }
+
+    /// Its list of safe declines holds [`DECLINED_OFFER`], declined by the digit of
+    /// [`DECLINE_CHOICE`] in its choices.
+    fn safe_decline(&self, dialog: &Dialog) -> Option<Decline> {
+        if dialog.question != DECLINED_OFFER {
+            return None;
+        }
+        let at = dialog
+            .options
+            .iter()
+            .position(|option| option == DECLINE_CHOICE)?;
+        let digit = u8::try_from(at + 1).ok()?;
+        Some(Decline {
+            choice: DECLINE_CHOICE.to_owned(),
+            key: vec![b'0' + digit],
+        })
     }
 
     /// Its harness says a dialog of its own is open where the window waits for

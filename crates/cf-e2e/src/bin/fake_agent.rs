@@ -62,7 +62,8 @@
 //! command, a sibling of the bare command, and no more, and the `/compact` put back in
 //! its input box, where what is pasted next goes after it.
 //! A message with a line `LSP-OFFER <seconds>` offers to install an LSP plugin as its turn
-//! works, the dialog on its screen that long, and one with a line `SURVEY` draws
+//! works, the dialog on its screen that long or until a digit answers it, and one with a line
+//! `SURVEY` draws
 //! the session survey unless the window's environment turns surveys off (`offers`).
 //!
 //! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set (milliseconds,
@@ -450,6 +451,10 @@ fn run(
                 }
                 Event::Interrupt => leave(&status_file, 0),
             }
+        }
+        // A digit typed alone answers an offer that is open, as Claude Code's lists take one.
+        if offers::takes(keys.typed()) {
+            keys.clear();
         }
         // What a cancelled command put back in the box, as Claude Code puts it back.
         if let Some(text) = put_back

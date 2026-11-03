@@ -41,7 +41,7 @@ replace = """
 
 [[plant]]
 name = "harness dialogs: the stand-in Claude's LSP offer mid-turn is told to nobody, as 3.0.6 told nobody"
-meant = "an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human"
+meant = "an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human_then_declined"
 runs = ["hd-rig"]
 builds = true
 
@@ -56,7 +56,7 @@ replace = """
 
 [[plant]]
 name = "harness dialogs: Claude Code's window whose status says busy is taken for one with no dialog, and its offer goes unseen"
-meant = "an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human"
+meant = "an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human_then_declined"
 runs = ["hd-rig"]
 builds = true
 
@@ -172,7 +172,7 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = "                record.dialog.borrow_mut().told = None;"
+find = "                watch.told = None;"
 replace = "                let _kept = ();"
 
 [[plant]]
@@ -245,3 +245,107 @@ runs = ["hd-codex"]
 file = "crates/cf-harness/src/codex/adapter.rs"
 find = "            args.extend(OFFERS.map(str::to_owned));"
 replace = "            let _offers = OFFERS;"
+
+# T-1192: the list of safe declines (Claude Code's LSP offer, "No, not now", by its digit),
+# pressed once after the note, at a look that still shows the dialog; and Devin's dialog read.
+
+[[plant]]
+name = "harness dialogs: the stand-in Claude's LSP offer is never declined, and closes by itself against the owner's count"
+meant = "an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human_then_declined"
+runs = ["hd-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        let _ = self.seams.host.request(\"pane.input\", body).await;"
+replace = "        let _ = body;"
+
+[[plant]]
+name = "harness dialogs: a dialog on the list is never declined"
+meant = "an_offer_on_the_list_is_told_then_declined_once_by_its_one_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        let _ = self.seams.host.request(\"pane.input\", body).await;"
+replace = "        let _ = body;"
+
+[[plant]]
+name = "harness dialogs: a decline is pressed again at every look while the dialog stays"
+meant = "an_offer_on_the_list_is_told_then_declined_once_by_its_one_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "            let Some(decline) = watch.decline.as_ref().filter(|_| !watch.declined) else {"
+replace = "            let Some(decline) = watch.decline.as_ref() else {"
+
+[[plant]]
+name = "harness dialogs: a decline whose look finds the dialog gone presses its key all the same"
+meant = "a_decline_whose_look_finds_the_dialog_gone_presses_nothing"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "            if !still {"
+replace = "            if false && !still {"
+
+[[plant]]
+name = "harness dialogs: the note of a declined offer says nothing of the decline"
+meant = "an_offer_on_the_list_is_told_then_declined_once_by_its_one_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "    if let Some(decline) = decline {"
+replace = "    if let Some(decline) = decline.filter(|_| false) {"
+
+[[plant]]
+name = "harness dialogs: Claude's list declines any dialog that offers \"No, not now\""
+meant = "its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_no_not_now"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "        if dialog.question != LSP_OFFER {"
+replace = "        if dialog.question.is_empty() {"
+
+[[plant]]
+name = "harness dialogs: Claude's decline presses the digit of another choice"
+meant = "its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_no_not_now"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            key: vec![b'0' + digit],"
+replace = "            key: vec![b'1' + digit - digit],"
+
+[[plant]]
+name = "harness dialogs: Devin's cursor is no cursor, and its dialog goes unread"
+meant = "devins_dialog_of_a_call_is_read_by_its_cursor_its_numbers_and_the_hint_of_its_keys"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "const CURSORS: [char; 7] = ['❯', '›', '❭', '▶', '►', '→', '>'];"
+replace = "const CURSORS: [char; 7] = ['❯', '›', '❯', '▶', '►', '→', '>'];"
+
+[[plant]]
+name = "harness dialogs: a numbered list drawn left of its cursor, as Devin draws it, is cut at the cursor"
+meant = "devins_dialog_of_a_call_is_read_by_its_cursor_its_numbers_and_the_hint_of_its_keys"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Less if numbers_its_choices && numbered(&words).0.is_some() => {"
+replace = "            std::cmp::Ordering::Less if false && numbers_its_choices => {"
+
+[[plant]]
+name = "harness dialogs: a hint of a dialog's keys says nothing of its waiting for an answer"
+meant = "devins_dialog_of_a_call_is_read_by_its_cursor_its_numbers_and_the_hint_of_its_keys"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "        .any(|line| hints_an_answer(line));"
+replace = "        .any(|line| hints_an_answer(line) && line.is_empty());"

@@ -186,3 +186,54 @@ fn the_lowest_cursor_is_the_dialogs() {
 fn a_screen_without_words_above_its_choices_shows_none() {
     assert_eq!(read(&lines(" ❯ Yes\n   No")), None);
 }
+
+/// Devin 3000.11.92's dialog of a tool call in its normal permission mode, as `cargo xtask live
+/// devin-resume` recorded its rows (2026-10-15; `live_devin_resume/scene.rs`, and the stand-in
+/// Devin that draws it, `fake_devin/permission.rs`): its `❭` on "1 Yes", the list numbered
+/// without a dot and drawn left of the chosen choice's words, the call above it and the hint of
+/// its keys below. No line above it asks.
+const DEVIN_CALL: &str = "└ $ echo ran > shell.txt\n❭ 1 Yes  (Approve once)\n2 Yes, switch to accept edits mode\n3 Yes, switch to bypass mode\n4 Edit command\n5 Describe change to command\n6 No\n↑↓ select · ↵ confirm · esc cancel";
+
+#[test]
+fn devins_dialog_of_a_call_is_read_by_its_cursor_its_numbers_and_the_hint_of_its_keys() {
+    let shown = read(&lines(DEVIN_CALL)).expect("the dialog");
+    assert_eq!(
+        shown.dialog.options,
+        [
+            "Yes  (Approve once)",
+            "Yes, switch to accept edits mode",
+            "Yes, switch to bypass mode",
+            "Edit command",
+            "Describe change to command",
+            "No"
+        ]
+    );
+    assert_eq!(shown.dialog.question, "$ echo ran > shell.txt");
+    assert!(
+        shown.dialog.asks,
+        "the hint of its keys says it waits for one"
+    );
+    // Without the hint, nothing says it waits for an answer.
+    let unhinted = DEVIN_CALL.replace("\n↑↓ select · ↵ confirm · esc cancel", "");
+    assert!(!read(&lines(&unhinted)).expect("the list").dialog.asks);
+}
+
+#[test]
+fn devins_input_box_under_its_rule_is_no_dialog() {
+    let boxed = lines(
+        " ⏺ Done.\n──────── (bypass permissions on) ─\n❭ Ask Devin to build features, fix bugs, or work on your code\n────────────────────────────────\nSWE-2 Medium",
+    );
+    assert_eq!(read(&boxed), None);
+    // Words typed into it over two lines are no choices either.
+    let typed = lines(
+        "──────── (bypass permissions on) ─\n❭ 1 thing first\n2 then the other\n────────────────────────────────",
+    );
+    assert_eq!(read(&typed), None);
+}
+
+#[test]
+fn a_numbered_list_left_of_a_cursor_is_held_to_its_count() {
+    // Numbers that do not follow the chosen one's are no choices of its list.
+    let stray = lines(" Which?\n❭ 1 Yes\n3 No");
+    assert_eq!(read(&stray), None);
+}

@@ -4,9 +4,11 @@
 //! its screen shows by its shape where its harness says nothing, is told once to whoever gave
 //! the window's task and to the human, with its question and its choices; one only the screen
 //! shows holds the window as one its harness says it waits on. The window's own question tool
-//! is no such dialog, and nor is a conversation that lists choices above the prompt.
+//! is no such dialog, and nor is a conversation that lists choices above the prompt. A dialog on
+//! its harness's list of safe declines is declined once the note of it has gone, by its one
+//! key, at a look that still shows it (T-1192); no other is ever pressed.
 
-use cf_engine::testing::{Context, DIALOG_OPEN, TRUST_PROMPT};
+use cf_engine::testing::{Context, DECLINED_OFFER, DECLINE_CHOICE, DIALOG_OPEN, TRUST_PROMPT};
 use cf_engine::ActivityState;
 use cf_harness::contract::Waiting;
 use serde_json::json;
@@ -32,6 +34,36 @@ const LSP: [&str; 12] = [
 ];
 
 const QUESTION: &str = "Would you like to install this LSP plugin?";
+
+/// A permission prompt of Claude Code's that full permission does not cover, as its window's
+/// last lines show it: no dialog of the test window's list.
+const PROMPT: [&str; 7] = [
+    " Bash command",
+    "   rm -rf \"$DIR/build\"",
+    "",
+    " Do you want to proceed?",
+    " \u{276f} 1. Yes",
+    "   2. No",
+    "",
+];
+
+const PROMPT_QUESTION: &str = "Do you want to proceed?";
+
+/// The keys pressed in zeus's window, by its pane: the chief's window shows the same screen
+/// (the host's one) and declines its own.
+fn keys_to(context: &Context, tiers: &Tiers<'_>) -> Vec<serde_json::Value> {
+    let pane = context
+        .dispatcher
+        .pane(tiers.id(&tiers.assignee(1)))
+        .expect("its pane");
+    context
+        .host
+        .inputs()
+        .into_iter()
+        .filter(|input| input["id"] == json!(pane.id))
+        .map(|input| input["bytes"].clone())
+        .collect()
+}
 
 /// T-1 given to zeus and at work in its window, its screen showing `screen`.
 fn at_work<'a>(context: &'a Context, screen: &[&str]) -> Tiers<'a> {
@@ -68,7 +100,7 @@ fn of_dialogs(bodies: &[String]) -> Vec<String> {
 #[test]
 fn a_dialog_its_harness_says_is_open_is_told_once_to_the_tasks_giver_and_the_human() {
     let context = Context::new();
-    let tiers = at_work(&context, &LSP);
+    let tiers = at_work(&context, &PROMPT);
     context.adapter.with("zeus", |agent| {
         agent.waiting = Some(Waiting {
             reason: Some(DIALOG_OPEN.to_owned()),
@@ -88,15 +120,10 @@ fn a_dialog_its_harness_says_is_open_is_told_once_to_the_tasks_giver_and_the_hum
         "{note}"
     );
     assert!(
-        note.contains(&format!("\u{201c}{QUESTION}\u{201d}")),
+        note.contains(&format!("\u{201c}{PROMPT_QUESTION}\u{201d}")),
         "{note}"
     );
-    for choice in [
-        "Yes, install",
-        "No, not now",
-        "Never for this plugin",
-        "Disable all LSP recommendations",
-    ] {
+    for choice in ["Yes", "No"] {
         assert!(
             note.contains(&format!("\u{201c}{choice}\u{201d}")),
             "{note}"
@@ -112,14 +139,13 @@ fn a_dialog_its_harness_says_is_open_is_told_once_to_the_tasks_giver_and_the_hum
         activity
             .reason
             .as_deref()
-            .is_some_and(|reason| reason.contains(QUESTION)),
+            .is_some_and(|reason| reason.contains(PROMPT_QUESTION)),
         "{activity:?}"
     );
-    // Nothing is pressed in it, and it is not told of again while it stays.
-    let keys_before = context.host.inputs().len();
+    // A dialog not on the list is never pressed, and it is not told of again while it stays.
     passes(&context, 20, 1_000);
     assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 1);
-    assert_eq!(context.host.inputs().len(), keys_before);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
 }
 
 #[test]
@@ -211,4 +237,51 @@ fn a_dialog_that_goes_and_comes_again_is_told_again() {
     context.host.set_snapshot(json!({ "tail": LSP }));
     passes(&context, 12, 1_000);
     assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 2);
+}
+
+#[test]
+fn an_offer_on_the_list_is_told_then_declined_once_by_its_one_key() {
+    let context = Context::new();
+    let tiers = at_work(&context, &LSP);
+    // Told first, as any dialog, and the note says it is declined: nothing pressed yet.
+    let mut passed = 0;
+    while of_dialogs(&tiers.notes("chief")).is_empty() && passed < 20 {
+        passes(&context, 1, 1_000);
+        passed += 1;
+    }
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].contains(&format!(
+            "ConsensFlow declines it for the window now, choosing \u{201c}{DECLINE_CHOICE}\u{201d}, which writes nothing"
+        )),
+        "{}",
+        told[0]
+    );
+    assert_eq!(of_dialogs(&to_human(&context, tiers.project.id)), told);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    // The next look that still shows it presses its one key: the digit of "No, not now".
+    passes(&context, 6, 1_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")]);
+    // Never again while it stays, whatever the screen (a press the window did not take).
+    passes(&context, 20, 1_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")]);
+    assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 1);
+    let _ = DECLINED_OFFER;
+}
+
+#[test]
+fn a_decline_whose_look_finds_the_dialog_gone_presses_nothing() {
+    let context = Context::new();
+    let tiers = at_work(&context, &LSP);
+    let mut passed = 0;
+    while of_dialogs(&tiers.notes("chief")).is_empty() && passed < 20 {
+        passes(&context, 1, 1_000);
+        passed += 1;
+    }
+    assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 1);
+    // It closed by itself before the next look.
+    context.host.set_snapshot(json!({ "tail": [TRUST_PROMPT] }));
+    passes(&context, 12, 1_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
 }

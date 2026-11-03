@@ -7,8 +7,11 @@
 //! "Would you like to install this LSP plugin?", its `❯` on "1. Yes, install" and three choices
 //! more) over its spinner for that long, as Claude Code closes it by itself after 30 s, while
 //! its status says it is busy, as Claude Code's did in a turn at work (the live run of
-//! 2026-11-03); then the screen is cleared to its prompt and the turn goes on. What is typed
-//! meanwhile answers nothing.
+//! 2026-11-03); then the screen is cleared to its prompt and the turn goes on. A digit typed
+//! alone while it is open answers it at once with the choice of that number, as Claude Code's
+//! lists take a digit; how it was answered is written down (`offer-answers`, in its config
+//! folder: the digit, or `timeout` where nothing answered it), which Claude Code itself writes
+//! nowhere for "No, not now" (T-1192).
 //!
 //! A message with a line `SURVEY` makes the window draw Claude Code's session survey under its
 //! prompt as its turn works ("How is Claude doing this session? (optional)", a digit a
@@ -18,6 +21,7 @@
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -29,8 +33,14 @@ use super::say;
 const OFFER: &str = "LSP-OFFER ";
 const SURVEY: &str = "SURVEY";
 
-/// The file in the window's config folder of the surveys drawn.
+/// The files in the window's config folder of the surveys drawn and of how each offer was
+/// answered.
 pub const SURVEYS: &str = "surveys";
+pub const ANSWERS: &str = "offer-answers";
+
+/// Whether an offer is open, and the digit typed into it: 0 for none yet.
+static OPEN: AtomicBool = AtomicBool::new(false);
+static ANSWER: AtomicU8 = AtomicU8::new(0);
 
 /// The offer, as Claude Code 2.1.317 drew it in a member's window mid-turn, over its spinner
 /// (`cargo xtask live harness-dialogs`, 2026-11-03).
@@ -91,9 +101,39 @@ fn note(config: &Path, name: &str, line: &str) -> io::Result<()> {
 /// The offer, open `open`: the screen shows it while the turn is at work; then it closes by
 /// itself and the turn goes on.
 pub fn offer(open: Duration) -> io::Result<()> {
+    ANSWER.store(0, Ordering::SeqCst);
+    OPEN.store(true, Ordering::SeqCst);
     say(&format!("{}\r\n", DIALOG.join("\r\n")))?;
-    sleep(open);
+    let step = Duration::from_millis(100);
+    let mut waited = Duration::ZERO;
+    while waited < open && ANSWER.load(Ordering::SeqCst) == 0 {
+        sleep(step);
+        waited += step;
+    }
+    OPEN.store(false, Ordering::SeqCst);
+    let answer = match ANSWER.swap(0, Ordering::SeqCst) {
+        0 => "timeout".to_owned(),
+        digit => char::from(digit).to_string(),
+    };
+    if let Some(config) = own_var("CLAUDE_CONFIG_DIR") {
+        note(Path::new(&config), ANSWERS, &answer)?;
+    }
     say(PROMPT)
+}
+
+/// What is typed into the window's box, where an offer is open and it is a digit of one of its
+/// choices alone: the offer takes it as its answer, and the box is left empty. False where no
+/// offer is open or the box holds anything else.
+pub fn takes(typed: &str) -> bool {
+    let digit = match typed.as_bytes() {
+        [digit @ b'1'..=b'4'] => *digit,
+        _ => return false,
+    };
+    if !OPEN.load(Ordering::SeqCst) {
+        return false;
+    }
+    ANSWER.store(digit, Ordering::SeqCst);
+    true
 }
 
 /// The survey, unless the window's environment turns it off; one drawn is written down in the
@@ -126,6 +166,18 @@ mod tests {
         assert_eq!(offer_in("Reply with exactly: OK"), None);
         assert!(survey_in("SURVEY Reply with exactly: OK"));
         assert!(!survey_in("Reply with exactly: OK"));
+    }
+
+    #[test]
+    fn a_digit_typed_alone_answers_an_open_offer_and_nothing_else() {
+        assert!(!takes("2"), "no offer is open");
+        OPEN.store(true, Ordering::SeqCst);
+        assert!(!takes("22"));
+        assert!(!takes("5"));
+        assert!(!takes("x"));
+        assert!(takes("2"));
+        assert_eq!(ANSWER.swap(0, Ordering::SeqCst), b'2');
+        OPEN.store(false, Ordering::SeqCst);
     }
 
     #[test]

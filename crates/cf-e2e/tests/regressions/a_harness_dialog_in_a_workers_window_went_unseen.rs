@@ -11,9 +11,12 @@
 //! 2026-11-03): only the screen shows it.
 //!
 //! The stand-in Claude draws the offer as that run saw it, as its turn works (`LSP-OFFER
-//! <seconds>`, its `offers`), then answers. What the owner should have seen: the
-//! chief, who gave the task, and the human are told once, in words that name the window,
-//! the question, its choices and that it waits, and the task goes on to its result.
+//! <seconds>`, its `offers`), for the 30 s Claude Code gives it, then answers. What the owner
+//! should have seen: the chief, who gave the task, and the human are told once, in words that
+//! name the window, the question and its choices; and since T-1192 the offer, on Claude Code's
+//! list of safe declines, is declined after that note ("No, not now", which writes nothing),
+//! by its digit, and the note says so, so that no window leaves it to close by itself and
+//! count against the owner's own offers. The task goes on to its result.
 //!
 //! The offers a launch can turn off never appear: the stand-in draws Claude Code's session
 //! survey (`SURVEY`) unless its window's environment turns surveys off, as every window's
@@ -61,11 +64,12 @@ fn dispatched(rig: &Rig, project: &Project, brief: &str) -> cf_e2e::Result<()> {
 }
 
 #[test]
-fn an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human() -> Outcome {
+fn an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human_then_declined(
+) -> Outcome {
     let rig = Rig::start(config())?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
-    dispatched(&rig, &project, "LSP-OFFER 12 Reply with exactly: DIALOG_OK")?;
+    dispatched(&rig, &project, "LSP-OFFER 30 Reply with exactly: DIALOG_OK")?;
 
     rig.wait_for("the chief to be told of the offer", secs(90), || {
         Ok(!dialog_notes(&project, "chief")?.is_empty())
@@ -97,13 +101,15 @@ fn an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_
             "{note}"
         );
     }
-    assert!(note.contains("The window waits on it"), "{note}");
-    assert!(note.contains("ConsensFlow presses nothing in it"), "{note}");
     assert!(
-        note.contains("closes it by itself 30 s after it opened"),
+        note.ends_with("ConsensFlow declines it for the window now, choosing \u{201c}No, not now\u{201d}, which writes nothing; nothing else is typed into the window meanwhile."),
         "{note}"
     );
     assert_eq!(dialog_notes(&project, "human")?, told);
+    // The offer was answered by its digit, "No, not now", before its 30 s were up.
+    let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default();
+    let answers = files::read_string(&Path::new(config).join("offer-answers")).unwrap_or_default();
+    assert_eq!(answers, "2\n", "how the offer was answered");
     rig.close()?;
     Ok(())
 }

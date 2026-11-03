@@ -27,10 +27,15 @@
 //!
 //! Either way the human, and whoever gave the window's task, hear it once a dialog, in words
 //! that name the window, the question and its choices, and that say it waits. Nothing is
-//! pressed in it: no choice of a harness's dialog is ConsensFlow's to make (an install, a
-//! model, a setting of the owner's), and Claude Code's offers to install a plugin close by
-//! themselves after 30 s, which the note says where the harness knows it of its dialog. A dialog
-//! that goes and comes again is told again.
+//! pressed in it but a decline on its harness's list of safe declines
+//! ([`cf_harness::contract::Window::safe_decline`]: Claude Code's offer to install an LSP
+//! plugin, "No, not now", which writes nothing, where an offer left to close by itself after
+//! its 30 s counts against the owner's own offers in `~/.claude.json`, T-1192). No other choice
+//! of a harness's dialog is ConsensFlow's to make (an install, a model, a setting of the
+//! owner's). A decline is pressed after the note of the dialog has gone, which says it, at a
+//! later look that still shows the dialog with that choice, by its one key, once: a look that
+//! finds it gone, or drawn otherwise, presses nothing, and a key the window did not take is not
+//! pressed again. A dialog that goes and comes again is told again.
 //!
 //! The screen is read through [`crate::host::EngineHost::screen`], which no Node trace holds.
 //! Limits: a dialog that opens and closes between two looks is not seen, and a dialog drawn in
@@ -39,8 +44,9 @@
 
 use std::rc::Rc;
 
-use cf_harness::contract::{Dialog, DialogSign, Observed, Waiting};
+use cf_harness::contract::{Decline, Dialog, DialogSign, Observed, Pane, Waiting};
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
+use serde_json::json;
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -75,6 +81,10 @@ pub(crate) struct DialogWatch {
     open_since: Option<i64>,
     /// The words of the dialog the human was told of, until a look finds it gone.
     told: Option<String>,
+    /// The decline of the dialog told of, where it is on its harness's list of safe declines,
+    /// and whether its key was pressed.
+    decline: Option<Decline>,
+    declined: bool,
 }
 
 impl Dispatcher {
@@ -155,7 +165,10 @@ impl Dispatcher {
         };
         if !counts {
             if sign == DialogSign::Screen && dialog.is_none() {
-                record.dialog.borrow_mut().told = None;
+                let mut watch = record.dialog.borrow_mut();
+                watch.told = None;
+                watch.decline = None;
+                watch.declined = false;
             }
             return Ok(observed);
         }
@@ -182,12 +195,47 @@ impl Dispatcher {
         let before = record.dialog.borrow().told.clone();
         if before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some())
         {
+            if due {
+                self.decline(record, &pane, dialog.as_ref()).await;
+            }
             return Ok(observed);
         }
-        record.dialog.borrow_mut().told = Some(key);
-        let body = told(&participant.handle, dialog.as_ref());
+        let decline = dialog
+            .as_ref()
+            .and_then(|dialog| window.safe_decline(dialog));
+        let body = told(&participant.handle, dialog.as_ref(), decline.as_ref());
+        {
+            let mut watch = record.dialog.borrow_mut();
+            watch.told = Some(key);
+            watch.decline = decline;
+            watch.declined = false;
+        }
         self.tell_dialog(project, participant, &body)?;
         Ok(observed)
+    }
+
+    /// The decline of the dialog told of in `record`'s window, pressed once, where it is on its
+    /// harness's list, the note of it has gone, and `shown`, what this step's look read of the
+    /// screen, is that dialog still with that choice: a look that finds it gone, or drawn
+    /// otherwise, presses nothing.
+    async fn decline(&self, record: &Record, pane: &Pane, shown: Option<&Dialog>) {
+        let key = {
+            let watch = record.dialog.borrow();
+            let Some(decline) = watch.decline.as_ref().filter(|_| !watch.declined) else {
+                return;
+            };
+            let still = shown.is_some_and(|shown| {
+                watch.told.as_deref() == Some(shown.question.as_str())
+                    && shown.options.contains(&decline.choice)
+            });
+            if !still {
+                return;
+            }
+            decline.key.clone()
+        };
+        record.dialog.borrow_mut().declined = true;
+        let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": key });
+        let _ = self.seams.host.request("pane.input", body).await;
     }
 
     /// The note of a dialog in `participant`'s window, `body`, to the human and to whoever gave
@@ -228,9 +276,9 @@ impl Dispatcher {
 }
 
 /// What the human and the task's giver are told of a dialog in `handle`'s window: its words and
-/// choices where its screen showed them, and when its harness closes it by itself where it
-/// says.
-pub(crate) fn told(handle: &str, dialog: Option<&Dialog>) -> String {
+/// choices where its screen showed them, when its harness closes it by itself where it says,
+/// and the choice ConsensFlow makes of it, `decline`, where it is on its harness's list.
+pub(crate) fn told(handle: &str, dialog: Option<&Dialog>, decline: Option<&Decline>) -> String {
     let shows = match dialog {
         Some(dialog) => {
             let choices: Vec<String> = dialog.options.iter().map(|option| quoted(option)).collect();
@@ -244,6 +292,12 @@ pub(crate) fn told(handle: &str, dialog: Option<&Dialog>) -> String {
             "@{handle}'s window shows a dialog of its harness that waits for a key, not its prompt; its screen shows no words ConsensFlow can read of it."
         ),
     };
+    if let Some(decline) = decline {
+        return format!(
+            "{shows} ConsensFlow declines it for the window now, choosing {}, which writes nothing; nothing else is typed into the window meanwhile.",
+            quoted(&decline.choice)
+        );
+    }
     let closes = dialog
         .and_then(|dialog| dialog.closes_after_s)
         .map_or_else(String::new, |seconds| {

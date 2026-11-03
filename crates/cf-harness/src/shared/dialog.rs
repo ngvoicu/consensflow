@@ -9,15 +9,17 @@
 //!
 //! The reader names what it found and leaves the judging to its caller: the lines below the
 //! choices ([`Shown::below`]: where the harness's prompt is drawn there, the choices are a
-//! conversation's words, or the box's own text), and whether the words above them ask anything
-//! ([`Dialog::asks`]). A screen with no cursor on a line of choices, or with fewer than two
-//! choices, shows none.
+//! conversation's words, or the box's own text), and whether it waits for an answer
+//! ([`Dialog::asks`]): its words above ask, or a hint below the choices says how to answer them
+//! (Devin's dialog of a call asks nothing above its list, T-1192). A screen with no cursor on a
+//! line of choices, or with fewer than two choices, shows none.
 
 use super::input_box::is_rule;
 use crate::contract::Dialog;
 
-/// The glyphs a harness marks the choice its Enter would take with.
-const CURSORS: [char; 6] = ['❯', '›', '▶', '►', '→', '>'];
+/// The glyphs a harness marks the choice its Enter would take with: Devin's is `❭`, the mark
+/// of its input box too (T-1192).
+const CURSORS: [char; 7] = ['❯', '›', '❭', '▶', '►', '→', '>'];
 
 /// The characters of the frame a harness draws round a dialog, taken off both ends of a line.
 const FRAME: [char; 14] = [
@@ -52,17 +54,34 @@ fn indent(line: &str) -> Option<usize> {
     line.chars().position(|at| !at.is_whitespace())
 }
 
-/// A choice's words without the number a harness draws before it (`1.`, `2)`): the number,
-/// where there is one.
+/// A choice's words without the number a harness draws before it (`1.`, `2)`, or Devin's `1`
+/// and a space): the number, where there is one.
 fn numbered(words: &str) -> (Option<u32>, &str) {
     let digits = words.chars().take_while(char::is_ascii_digit).count();
     if (1..=2).contains(&digits) {
         let rest = &words[digits..];
-        if let Some(after) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+        let after = rest
+            .strip_prefix(". ")
+            .or_else(|| rest.strip_prefix(") "))
+            .or_else(|| {
+                rest.strip_prefix(' ')
+                    .filter(|after| after.starts_with(char::is_alphanumeric))
+            });
+        if let Some(after) = after {
             return (words[..digits].parse().ok(), after.trim());
         }
     }
     (None, words)
+}
+
+/// Whether `line` is a dialog's hint of how it is answered, drawn under its choices: Enter, or
+/// `↵`, to confirm ("Enter to confirm · Esc to cancel", Devin's "↑↓ select · ↵ confirm · esc
+/// cancel", Codex's "Press enter to confirm or esc to go back"). A dialog that draws one waits
+/// for an answer, whatever its words above ask.
+fn hints_an_answer(line: &str) -> bool {
+    let line = line.to_lowercase();
+    line.contains("confirm")
+        && (line.contains("enter") || line.contains('↵') || line.contains("esc"))
 }
 
 /// The line `line` as the harness's cursor on a choice: the column its words start at, and
@@ -98,7 +117,10 @@ pub(crate) fn read(screen: &[String]) -> Option<Shown> {
         .rev()
         .find_map(|(at, line)| cursor_on(line).map(|cursor| (at, cursor)))?;
     // The choices aligned with the chosen one, above it and below, up to a line that is
-    // neither a choice nor one of a choice's own (a description drawn further in).
+    // neither a choice nor one of a choice's own (a description drawn further in). Where the
+    // chosen one is numbered, a numbered choice drawn left of it is one too, as Devin draws its
+    // list under its `❭`; the count in order below holds them to the list.
+    let numbers_its_choices = numbered(&chosen).0.is_some();
     let choice = |line: &str| -> Option<Option<String>> {
         let start = indent(line)?;
         let words: String = line.chars().skip(start).collect();
@@ -109,6 +131,9 @@ pub(crate) fn read(screen: &[String]) -> Option<Shown> {
                 Some(Some(words.trim_end().to_owned()))
             }
             std::cmp::Ordering::Greater => Some(None),
+            std::cmp::Ordering::Less if numbers_its_choices && numbered(&words).0.is_some() => {
+                Some(Some(words.trim_end().to_owned()))
+            }
             _ => None,
         }
     };
@@ -170,9 +195,14 @@ pub(crate) fn read(screen: &[String]) -> Option<Shown> {
         .filter(|line| !line.is_empty())
         .collect();
     let question = words.iter().find(|line| asks(line));
+    let hinted = lines[last + 1..]
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .take(2)
+        .any(|line| hints_an_answer(line));
     let (question, asks) = match question {
         Some(question) => ((*question).to_owned(), true),
-        None => ((*words.first()?).to_owned(), false),
+        None => ((*words.first()?).to_owned(), hinted),
     };
     Some(Shown {
         dialog: Dialog {

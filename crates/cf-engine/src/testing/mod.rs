@@ -41,7 +41,8 @@ pub use seams::{
 };
 pub use time::TestTime;
 pub use window::{
-    COMPACTING, DIALOG_OPEN, TRUST_PROMPT, TRUST_QUESTION, TRUST_QUOTED, TRUST_UNPLACED,
+    COMPACTING, DECLINED_OFFER, DECLINE_CHOICE, DIALOG_OPEN, TRUST_PROMPT, TRUST_QUESTION,
+    TRUST_QUOTED, TRUST_UNPLACED,
 };
 
 /// What a note that replaces a role says before the role text, which a test

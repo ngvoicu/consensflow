@@ -2,7 +2,7 @@
 //! open, and why, and the window reads which off its screen. Its question tool's dialog is the
 //! window's own question, and its offers to install a plugin close by themselves after 30 s.
 
-use cf_harness::contract::{DialogSign, Observed, Over, Waiting};
+use cf_harness::contract::{Decline, DialogSign, Observed, Over, Waiting};
 
 use super::{prepare, Home, Request};
 
@@ -98,4 +98,48 @@ fn choices_listed_above_its_prompt_are_read_with_the_prompt_below() {
     );
     let dialog = plan.window.dialog(&screen).expect("the choices' shape");
     assert!(dialog.prompt_below);
+}
+
+#[test]
+fn its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_no_not_now() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let offer = plan.window.dialog(&lines(LSP)).expect("the offer");
+    assert_eq!(
+        plan.window.safe_decline(&offer),
+        Some(Decline {
+            choice: "No, not now".to_owned(),
+            key: b"2".to_vec(),
+        })
+    );
+    // Its hint to install a plugin a command named: every answer but a cancel writes the
+    // plugin's name in the owner's `~/.claude.json`, so it is not on the list.
+    let hint = LSP
+        .replace(
+            "Would you like to install this LSP plugin?",
+            "Would you like to install it?",
+        )
+        .replace("2. No, not now", "2. No");
+    let hint = plan.window.dialog(&lines(&hint)).expect("the hint");
+    assert_eq!(plan.window.safe_decline(&hint), None);
+    // A permission prompt is no offer at all.
+    let prompt = plan
+        .window
+        .dialog(&lines(
+            " Bash command\n   rm -rf \"$DIR/build\"\n\n Do you want to proceed?\n \u{276f} 1. Yes\n   2. No",
+        ))
+        .expect("the prompt");
+    assert_eq!(plan.window.safe_decline(&prompt), None);
+    // Another question that offers "No, not now" is not on the list: only the LSP offer's
+    // answer is known to write nothing.
+    let other = LSP.replace(
+        "Would you like to install this LSP plugin?",
+        "Would you like to enable this?",
+    );
+    let other = plan.window.dialog(&lines(&other)).expect("the other");
+    assert_eq!(plan.window.safe_decline(&other), None);
+    // The offer drawn without its "No, not now" is not declined by a key that would be another's.
+    let without = LSP.replace("2. No, not now", "2. Maybe later");
+    let without = plan.window.dialog(&lines(&without)).expect("the offer");
+    assert_eq!(plan.window.safe_decline(&without), None);
 }
