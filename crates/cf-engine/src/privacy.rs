@@ -23,7 +23,8 @@
 //!   them. Once a service is told for a window it is not told again for that window, whatever
 //!   follows; a window that closes forgets them.
 //! - **A process of the app's that no window holds** (a job a shell detached, a helper) is told to
-//!   the human alone, once for each service while the daemon runs, in the first open project.
+//!   the human alone, once for each service while the daemon runs, in the open project with the
+//!   lowest number (else the lowest there is).
 //! - **A log the host cannot read** (a Mac user outside the admin group is refused by
 //!   `log stream`) is said once, in the daemon's log and as one note to the human: no dialog is
 //!   told then, and the note says so. That is the limit.
@@ -201,16 +202,17 @@ impl Dispatcher {
         }
     }
 
-    /// The open project with the lowest number: the one a report that is no window's is told in.
+    /// The project a report that is no window's is told in: the open one with the lowest number,
+    /// else (a daemon just started leaves every project suspended until the human's Resume) the
+    /// lowest number there is.
     fn first_open_project(&self) -> Result<Option<ProjectView>, EngineError> {
-        Ok(self
-            .seams
-            .ledger
-            .borrow()
-            .projects()?
-            .into_iter()
+        let projects = self.seams.ledger.borrow().projects()?;
+        Ok(projects
+            .iter()
             .filter(|project| project.state == "open")
-            .min_by_key(|project| project.id))
+            .min_by_key(|project| project.id)
+            .or_else(|| projects.iter().min_by_key(|project| project.id))
+            .cloned())
     }
 
     /// `body`, as a note of ConsensFlow's to the human in `project`.

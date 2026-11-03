@@ -199,6 +199,33 @@ fn the_window_stops_waiting_after_ten_minutes_whatever_is_on_screen() {
 }
 
 #[test]
+fn a_window_that_closed_forgets_what_it_waited_on_and_what_was_told_of_it() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    context.host.set_alerts(Some(1));
+    context
+        .dispatcher
+        .privacy_prompt(prompt(&context, &tiers, "MediaLibrary", "ls", 22913));
+    passes(&context, 1, 1_000);
+    assert!(waits_on_the_dialog(&context, &tiers));
+    assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 1);
+
+    // The human closes the project and resumes it: zeus's window is a new one, in a new pane.
+    context.close_project(tiers.project.id).unwrap();
+    context.settle();
+    context.resume_project(tiers.project.id).unwrap();
+    passes(&context, 4, 1_000);
+    assert!(!waits_on_the_dialog(&context, &tiers));
+    // The same service, asked in the new window, is told of again: the first window's is gone.
+    context
+        .dispatcher
+        .privacy_prompt(prompt(&context, &tiers, "MediaLibrary", "ls", 24000));
+    passes(&context, 1, 1_000);
+    assert!(waits_on_the_dialog(&context, &tiers));
+    assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 2);
+}
+
+#[test]
 fn a_dialog_for_the_chiefs_window_is_told_to_the_human_alone() {
     let context = Context::new();
     let tiers = at_work(&context);
@@ -361,8 +388,12 @@ mod home_folder {
             told.len(),
             "one note for each window: {told:?}"
         );
-        // A window opened again on it is not told again.
+        // A window opened again on it is not told again: the human closes the project and resumes
+        // it, and the windows that come up are new ones, on the same folder.
         let before = told.len();
+        context.close_project(tiers.project.id).unwrap();
+        context.settle();
+        context.resume_project(tiers.project.id).unwrap();
         passes(&context, 5, 1_000);
         assert_eq!(home_notes(&context, tiers.project.id).len(), before);
     }

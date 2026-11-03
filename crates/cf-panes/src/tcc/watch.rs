@@ -16,8 +16,9 @@ use std::time::{Duration, Instant};
 use super::lines::{read_line, Joiner, Line, Prompt};
 use crate::pty::PaneKey;
 
-/// How long to wait before looking again for a first window.
-pub(crate) const IDLE_POLL: Duration = Duration::from_secs(1);
+/// How long to wait before looking again for a first window: short, since `log stream` shows only
+/// what happens after it is attached, and a command a window runs at once is not to be missed.
+pub(crate) const IDLE_POLL: Duration = Duration::from_millis(250);
 /// How long a read waits for a line before looking at the windows and the stop.
 pub(crate) const READ_WAIT: Duration = Duration::from_secs(1);
 /// How long no window is open before the reader is ended.
