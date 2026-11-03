@@ -378,10 +378,11 @@ mod tests {
     }
 
     /// The kit with the gate's pacing on every case (CF_KIT_PACED, T-842: it found the P1 the
-    /// plain run hid) is a step of CI's `checks` job too, as the gate runs it, beside the
-    /// plain kit of the `workspace` job (Calliope's re-check of `a0aecd192`, T-854).
+    /// plain run hid) is a step of CI too, as the gate runs it, beside the plain kit of the
+    /// `workspace` job (Calliope's re-check of `a0aecd192`, T-854): of the `platform-free`
+    /// job, which runs once, on Linux, since cf-engine holds no code of one system's (T-1161).
     #[test]
-    fn the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable() {
+    fn the_paced_kit_the_gate_runs_is_a_step_of_cis_platform_free_job_with_its_variable() {
         let context = context();
         let steps = steps(&context, Path::new("xtask"), false, &families());
         let paced: Vec<_> = steps
@@ -395,19 +396,24 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/ci.yml"),
         )
         .unwrap();
-        let checks: String = workflow
+        let job: String = workflow
             .lines()
-            .skip_while(|line| *line != "  checks:")
+            .skip_while(|line| *line != "  platform-free:")
             .skip(1)
             .take_while(|line| !(line.starts_with("  ") && !line.starts_with("   ")))
             .map(|line| format!("{line}\n"))
             .collect();
+        assert!(
+            job.lines().any(|line| line == "    runs-on: ubuntu-latest")
+                && !job.contains("matrix:"),
+            "ci.yml's platform-free job runs once, on Linux:\n{job}"
+        );
         let step = format!(
             "      - run: {run}\n        env:\n          {PACED_VARIABLE}: 1\n        timeout-minutes: "
         );
         assert!(
-            checks.contains(&step),
-            "ci.yml's checks job runs the paced kit as the gate does:\n{step}"
+            job.contains(&step),
+            "ci.yml's platform-free job runs the paced kit as the gate does:\n{step}"
         );
     }
 
