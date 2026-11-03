@@ -130,11 +130,7 @@ fn active_member(
 /// (a worker where it names none), and what it runs on ([`picked`]); `adapter` where the
 /// page asks the engine whether it opens windows of the harness (Add member: New project's
 /// engine says so as it opens the project).
-pub(super) fn picked_member(
-    page: &Page,
-    body: Body<'_>,
-    adapter: bool,
-) -> Result<NewMember, Said> {
+pub(super) fn picked_member(page: &Page, body: Body<'_>, adapter: bool) -> Result<NewMember, Said> {
     let roles = parse_roles(Some(body.get("roles").unwrap_or(&json!(["worker"]))))?;
     let designer = roles.contains(&"designer");
     let picked = picked(page, body, designer, adapter)?;
@@ -175,9 +171,8 @@ impl Picked {
 /// The tier `value` names: one of the four words, which the human must pick.
 pub(super) fn tier_of(value: Option<&Value>) -> Result<WorkTier, Said> {
     match value {
-        Some(Value::String(word)) => WorkTier::from_word(word).ok_or_else(|| {
-            Said::from("Work tier must be critical, complex, standard or light")
-        }),
+        Some(Value::String(word)) => WorkTier::from_word(word)
+            .ok_or_else(|| Said::from("Work tier must be critical, complex, standard or light")),
         None | Some(Value::Null) => Err(Said::from(
             "pick the member's tier: critical, complex, standard or light",
         )),

@@ -253,10 +253,12 @@ fn modelled(name: &str, step: &Value) -> Value {
     let mut body = step["body"].clone();
     match name {
         "member.add" => {
-            let reply: Value =
-                serde_json::from_str(step["reply"].as_str().unwrap_or_default()).unwrap_or_default();
+            let reply: Value = serde_json::from_str(step["reply"].as_str().unwrap_or_default())
+                .unwrap_or_default();
             let member = &reply["member"];
-            if let (Some(fields), Some(agent)) = (body.as_object_mut(), step["body"]["agent"].as_str()) {
+            if let (Some(fields), Some(agent)) =
+                (body.as_object_mut(), step["body"]["agent"].as_str())
+            {
                 fields.shift_remove("agent");
                 fields.insert("model".to_owned(), json!(agent));
                 for key in ["harness", "tier"] {

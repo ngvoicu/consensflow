@@ -8,9 +8,9 @@
 //! the harness's word at the launch, where a model it does not have starts the chief on
 //! its default (CHF-06).
 
-use cf_proto::agents::Harness;
 use cf_engine::{require_chief_model, SwitchTo};
 use cf_harness::detect::missing_harnesses;
+use cf_proto::agents::Harness;
 use serde_json::Value;
 
 use super::body::{Body, Said};

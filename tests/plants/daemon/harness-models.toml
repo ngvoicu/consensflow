@@ -113,7 +113,7 @@ replace = '''
 
 [[plant]]
 name = "harness models: a member is made without a tier"
-meant = "a_member_needs_a_tier_and_a_word_for_an_effort_and_the_staff_a_project_starts_from_says_what_each_runs"
+meant = "a_member_with_no_tier_is_refused_at_a_project_s_start_and_at_an_add"
 runs = ["hm-ledger-members"]
 
 [[plant.edit]]
@@ -296,7 +296,7 @@ replace = '''
 
 [[plant]]
 name = "harness models: a member's row says its model's id, not the name its harness gives it"
-meant = "shows the staff as one row per member and role, and adds a member in a role, on a model its harness lists"
+meant = "starts a project in a chosen folder with the chosen chief, the staff ticked from the last one"
 runs = ["hm-page-staff"]
 
 [[plant.edit]]

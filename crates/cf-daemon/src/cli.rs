@@ -2,8 +2,8 @@
 //! ran it (with the drain for a broken pipe).
 //!
 //! `--json` prints the handle line, the first line of the output, which the
-//! app reads. A person gets the address of the agents screens instead, and the
-//! screens opened with `open` unless `--no-open` is given. Either way the
+//! app reads. A person gets the address of the harnesses screen instead, and the
+//! screen opened with `open` unless `--no-open` is given. Either way the
 //! bridge goes on over the same standard output, and the daemon stops when its
 //! input ends, when it is signalled, or when nobody reads its output or its
 //! error output any more.
@@ -110,7 +110,7 @@ fn lines(flags: Flags, handle: &HandleLine) -> io::Result<Vec<String>> {
     ])
 }
 
-/// Where a person opens the agents screens: the token goes in the query.
+/// Where a person opens the harnesses screen: the token goes in the query.
 fn address(handle: &HandleLine) -> String {
     format!("{}?token={}", handle.url, handle.token)
 }

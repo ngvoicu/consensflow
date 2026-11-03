@@ -33,7 +33,10 @@ fn a_window_paused_across_the_migration_is_resumed_finishes_its_task_and_is_deli
     let old = before.assignee.clone().expect("a window has it");
     let window = context.id(project.id, &old);
     let member = context.id(project.id, "zeus");
-    let session = old.strip_prefix("zeus-").unwrap_or_else(|| panic!("{old}")).to_owned();
+    let session = old
+        .strip_prefix("zeus-")
+        .unwrap_or_else(|| panic!("{old}"))
+        .to_owned();
     context.pause_task(project.id, 1);
     // The board as 3.0.7-alpha.1 left it: the member of the ready-made agent Poseidon
     // (Opus 5.5 at high on Claude Code), and its window, named after it.
@@ -108,7 +111,9 @@ fn a_window_paused_across_the_migration_is_resumed_finishes_its_task_and_is_deli
     let launched = context.adapter.prepared().last().cloned().unwrap();
     assert_eq!(launched["participant"]["handle"], renamed.as_str());
     assert!(
-        launched["resume"].as_str().is_some_and(|resume| !resume.is_empty()),
+        launched["resume"]
+            .as_str()
+            .is_some_and(|resume| !resume.is_empty()),
         "on its own conversation: {launched}"
     );
     assert_eq!(launched["agent"]["model"], "claude-opus-5-5");

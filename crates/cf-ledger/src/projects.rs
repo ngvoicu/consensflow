@@ -200,11 +200,8 @@ impl NewMember {
             Some(Value::Bool(designer)) => *designer,
             Some(_) => return Err(designer_refused()),
         };
-        let shown = crate::handles::model_shown(
-            model_name.as_deref(),
-            model.as_deref(),
-            Some(harness),
-        );
+        let shown =
+            crate::handles::model_shown(model_name.as_deref(), model.as_deref(), Some(harness));
         model::require_fitting_roles(&shown, designer, &roles)?;
         let tier = model::parse_tier(value.get("tier"))?;
         Ok(Self {

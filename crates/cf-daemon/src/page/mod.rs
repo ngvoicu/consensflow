@@ -12,8 +12,7 @@
 //! wake-up calls).
 //! What they stand on is [`Page`] and the engine they call ([`Engine`]), a
 //! small trait of what Node's page called on the dispatcher and its five
-//! projections, which the dispatcher is; the saved agents are read from the
-//! file at each use ([`agents`]), and the body is read as JavaScript read it
+//! projections, which the dispatcher is; the body is read as JavaScript read it
 //! ([`body`]).
 //!
 //! How an operation answers is the bridge's: `{ok: true, ...fields}` for the
@@ -68,7 +67,7 @@ use crate::seams::DaemonSpawn;
 
 /// What the page's operations are given: the ledger (borrowed for one call
 /// at a time, never across a wait), the engine, the daemon's environment
-/// (which finds the saved agents and the harnesses), the kick, and what the
+/// (which finds the harnesses and the app's settings), the kick, and what the
 /// specs viewer is given (its opener, and what it remembers).
 pub struct Page {
     pub ledger: Rc<RefCell<Ledger>>,

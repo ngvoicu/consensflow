@@ -1,6 +1,6 @@
 //! The table of the page's operations: which function serves which. An
 //! operation is read and begun in its first poll, in the order its frame came:
-//! each arm reads the saved agents and the body, makes its one call on the
+//! each arm reads the body, makes its one call on the
 //! ledger or the engine, and answers; none waits before it makes it.
 
 use cf_proto::page::PageOperation;

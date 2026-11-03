@@ -65,7 +65,10 @@ fn every_standalone_verb_answers_help_with_its_usage_and_reads_and_writes_nothin
 
 #[test]
 fn a_verb_asked_for_help_beside_its_options_or_a_name_answers_it_too() {
-    for args in [&["setup", "extra", "-h"][..], &["doctor", "--json", "--help"]] {
+    for args in [
+        &["setup", "extra", "-h"][..],
+        &["doctor", "--json", "--help"],
+    ] {
         let home = home_with_a_broken_roster();
         let ran = cf(
             args,

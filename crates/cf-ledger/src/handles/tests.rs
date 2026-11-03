@@ -15,19 +15,35 @@ fn a_handle_is_the_model_s_name_and_its_effort_in_lowercase_words() {
         ("GPT-6.1-Sol", Some("xhigh"), "gpt-6-1-sol-xhigh"),
         ("SWE-2", Some("max"), "swe-2-max"),
         ("Adaptive", None, "adaptive"),
-        ("Claude Haiku 4.5 (latest)", Some("off"), "claude-haiku-4-5-latest-off"),
-        ("muse-spark-1.3-contributor", Some("max"), "muse-spark-1-3-contributor-max"),
+        (
+            "Claude Haiku 4.5 (latest)",
+            Some("off"),
+            "claude-haiku-4-5-latest-off",
+        ),
+        (
+            "muse-spark-1.3-contributor",
+            Some("max"),
+            "muse-spark-1-3-contributor-max",
+        ),
         ("Codex default", None, "codex-default"),
         ("Ünïcode ✓", None, "n-code"),
         ("✓", None, "member"),
     ] {
-        assert_eq!(member_handle(shown, effort, "claude-code", none_taken), handle, "{shown}");
+        assert_eq!(
+            member_handle(shown, effort, "claude-code", none_taken),
+            handle,
+            "{shown}"
+        );
     }
 }
 
 #[test]
 fn a_taken_handle_puts_the_harness_in_front_then_a_number_after() {
-    let taken = ["opus-high", "claude-code-opus-high", "claude-code-opus-high-2"];
+    let taken = [
+        "opus-high",
+        "claude-code-opus-high",
+        "claude-code-opus-high-2",
+    ];
     assert_eq!(
         member_handle("Opus", Some("high"), "claude-code", |h| taken.contains(&h)),
         "claude-code-opus-high-3"
@@ -48,8 +64,14 @@ fn a_handle_is_short_enough_for_its_windows_and_ends_on_a_word() {
 
 #[test]
 fn a_model_is_shown_by_its_name_else_its_id_else_as_its_harness_s_default() {
-    assert_eq!(model_shown(Some("Opus"), Some("claude-opus-5-5"), Some("claude-code")), "Opus");
-    assert_eq!(model_shown(None, Some("claude-opus-5-5"), Some("claude-code")), "claude-opus-5-5");
+    assert_eq!(
+        model_shown(Some("Opus"), Some("claude-opus-5-5"), Some("claude-code")),
+        "Opus"
+    );
+    assert_eq!(
+        model_shown(None, Some("claude-opus-5-5"), Some("claude-code")),
+        "claude-opus-5-5"
+    );
     assert_eq!(model_shown(Some("  "), Some("m"), None), "m");
     assert_eq!(model_shown(None, None, Some("codex")), "Codex default");
 }
@@ -83,11 +105,24 @@ fn before_0029() -> Connection {
     db
 }
 
+/// A participant row as the migration tests read it: its id, handle, agent, harness, model,
+/// effort, model's name and tier.
+type Row = (
+    i64,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 #[test]
 fn migration_0029_runs_each_ready_made_agent_s_member_on_its_model_and_names_it_by_it() {
     let db = before_0029();
     migrate(&db, &MIGRATIONS).unwrap();
-    let rows: Vec<(i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)> = db
+    let rows: Vec<Row> = db
         .prepare(
             "SELECT id, handle, agent, harness, model, effort, model_name, tier FROM participant ORDER BY id",
         )
@@ -113,20 +148,110 @@ fn migration_0029_runs_each_ready_made_agent_s_member_on_its_model_and_names_it_
         [
             (1, "human".to_owned(), None, None, None, None, None, None),
             // The chief keeps its handle, and runs on its agent's model where it named none.
-            (2, "chief".to_owned(), s("apollo"), s("claude-code"), s("claude-opus-5-5"), s("xhigh"), s("Opus"), None),
-            (3, "opus-high".to_owned(), s("poseidon"), s("claude-code"), s("claude-opus-5-5"), s("high"), s("Opus"), s("complex")),
+            (
+                2,
+                "chief".to_owned(),
+                s("apollo"),
+                s("claude-code"),
+                s("claude-opus-5-5"),
+                s("xhigh"),
+                s("Opus"),
+                None
+            ),
+            (
+                3,
+                "opus-high".to_owned(),
+                s("poseidon"),
+                s("claude-code"),
+                s("claude-opus-5-5"),
+                s("high"),
+                s("Opus"),
+                s("complex")
+            ),
             // The image designer on Codex's default, as it ran.
-            (4, "codex-default".to_owned(), s("pygmalion"), s("codex"), None, None, None, s("light")),
+            (
+                4,
+                "codex-default".to_owned(),
+                s("pygmalion"),
+                s("codex"),
+                None,
+                None,
+                None,
+                s("light")
+            ),
             // Devin's model is the id its launch passed, the effort joined as it joined it.
-            (5, "swe-2-max".to_owned(), s("sobek"), s("devin"), s("swe-2-max"), s("max"), s("SWE-2"), s("light")),
+            (
+                5,
+                "swe-2-max".to_owned(),
+                s("sobek"),
+                s("devin"),
+                s("swe-2-max"),
+                s("max"),
+                s("SWE-2"),
+                s("light")
+            ),
             // An agent the catalog never had keeps its harness and no model.
-            (6, "hermes-code-default".to_owned(), s("buri"), s("hermes-code"), None, None, None, s("light")),
-            (7, "opus-medium".to_owned(), s("artemis"), s("claude-code"), s("claude-opus-5-5"), s("medium"), s("Opus"), s("standard")),
+            (
+                6,
+                "hermes-code-default".to_owned(),
+                s("buri"),
+                s("hermes-code"),
+                None,
+                None,
+                None,
+                s("light")
+            ),
+            (
+                7,
+                "opus-medium".to_owned(),
+                s("artemis"),
+                s("claude-code"),
+                s("claude-opus-5-5"),
+                s("medium"),
+                s("Opus"),
+                s("standard")
+            ),
             // A window: its member's new handle and its own two words.
-            (8, "opus-high-frosty-cliff".to_owned(), s("poseidon"), s("claude-code"), s("claude-opus-5-5"), s("high"), s("Opus"), s("complex")),
-            (9, "opus-max".to_owned(), s("zeus"), s("claude-code"), s("claude-opus-5-5"), s("max"), s("Opus"), s("critical")),
-            (10, "opus-xhigh".to_owned(), s("apollo"), s("claude-code"), s("claude-opus-5-5"), s("xhigh"), s("Opus"), s("critical")),
-            (11, "gpt-6-1-sol-xhigh".to_owned(), s("khepri"), s("devin"), s("gpt-6-1-sol-xhigh"), s("xhigh"), s("GPT-6.1 Sol"), s("standard")),
+            (
+                8,
+                "opus-high-frosty-cliff".to_owned(),
+                s("poseidon"),
+                s("claude-code"),
+                s("claude-opus-5-5"),
+                s("high"),
+                s("Opus"),
+                s("complex")
+            ),
+            (
+                9,
+                "opus-max".to_owned(),
+                s("zeus"),
+                s("claude-code"),
+                s("claude-opus-5-5"),
+                s("max"),
+                s("Opus"),
+                s("critical")
+            ),
+            (
+                10,
+                "opus-xhigh".to_owned(),
+                s("apollo"),
+                s("claude-code"),
+                s("claude-opus-5-5"),
+                s("xhigh"),
+                s("Opus"),
+                s("critical")
+            ),
+            (
+                11,
+                "gpt-6-1-sol-xhigh".to_owned(),
+                s("khepri"),
+                s("devin"),
+                s("gpt-6-1-sol-xhigh"),
+                s("xhigh"),
+                s("GPT-6.1 Sol"),
+                s("standard")
+            ),
         ]
     );
     // Every author and assignee stays: they are participants by id.

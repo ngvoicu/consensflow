@@ -91,9 +91,9 @@ export async function runSelftest({
   try {
     await report('boot', {
       protocol: location.protocol,
-      // Everything the document pulled in. The agents screens are not here on
-      // purpose: they are the one thing that legitimately comes over HTTP,
-      // from the daemon, and they have no `src` until opened.
+      // Everything the document pulled in. The harnesses screen is not here on
+      // purpose: it is the one thing that legitimately comes over HTTP,
+      // from the daemon, and it has no `src` until opened.
       assets: [
         ...[...document.querySelectorAll('script[src]')].map((tag) => tag.src),
         ...[...document.querySelectorAll('link[rel="stylesheet"]')].map((tag) => tag.href),

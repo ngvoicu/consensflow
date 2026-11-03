@@ -97,7 +97,6 @@ pub struct WorkTierInfo {
     pub description: &'static str,
 }
 
-
 impl WorkTier {
     /// The tier a word names (`critical`); none for any other word.
     pub fn from_word(word: &str) -> Option<WorkTier> {

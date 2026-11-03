@@ -792,8 +792,10 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
     let args = args.as_slice();
     let id = || integer(arg(args, 0));
     let answered: Result<Value, LedgerError> = match method {
-        "createProject" => NewProject::from_json(&cf_ledger::testing::node_staff(arg(args, 0).expect("a request")))
-            .and_then(|request| encode(ledger.create_project(&request))),
+        "createProject" => NewProject::from_json(&cf_ledger::testing::node_staff(
+            arg(args, 0).expect("a request"),
+        ))
+        .and_then(|request| encode(ledger.create_project(&request))),
         "project" => encode(ledger.project(id())),
         "projects" => encode(ledger.projects()),
         "setProjectState" => encode(ledger.set_project_state(id(), &js::text(arg(args, 1)))),
@@ -809,8 +811,10 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             encode(ledger.events(id(), after.unwrap_or(0), limit.unwrap_or(500)))
         }
         "integrity" => encode(ledger.integrity()),
-        "addMember" => NewMember::from_json(&cf_ledger::testing::node_member(arg(args, 1).expect("a member")))
-            .and_then(|member| encode(ledger.add_member(id(), &member))),
+        "addMember" => NewMember::from_json(&cf_ledger::testing::node_member(
+            arg(args, 1).expect("a member"),
+        ))
+        .and_then(|member| encode(ledger.add_member(id(), &member))),
         // A member's tier is the human's: nothing follows a catalog's (harness-models).
         "refreshMemberTiers" => return Err(NO_TIERS_FOLLOWED.to_owned()),
         "setRoles" => parse_roles(arg(args, 2))

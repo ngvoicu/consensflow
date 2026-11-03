@@ -177,9 +177,15 @@ fn stand_in(rig: &Rig, agent: &str) -> Result<Value> {
         return Ok(row.clone());
     }
     match agent {
-        "maia" => Ok(json!({ "id": "maia", "kind": "codex", "model": "gpt-6-astra", "effort": "medium" })),
-        "pygmalion" => Ok(json!({ "id": "pygmalion", "kind": "codex", "designer": true, "workTier": "light" })),
-        _ => Err(Error::Daemon(format!("no stand-in {agent} in the rig's stand-ins"))),
+        "maia" => {
+            Ok(json!({ "id": "maia", "kind": "codex", "model": "gpt-6-astra", "effort": "medium" }))
+        }
+        "pygmalion" => {
+            Ok(json!({ "id": "pygmalion", "kind": "codex", "designer": true, "workTier": "light" }))
+        }
+        _ => Err(Error::Daemon(format!(
+            "no stand-in {agent} in the rig's stand-ins"
+        ))),
     }
 }
 

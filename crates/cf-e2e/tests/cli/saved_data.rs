@@ -15,8 +15,7 @@ fn roster(home: &ScratchHome) -> PathBuf {
 
 #[test]
 fn setup_leaves_a_legacy_agents_file_as_it_is_and_prepares_no_role_or_manifest_before_pane_launch(
-) -> Outcome
-{
+) -> Outcome {
     let home = ScratchHome::new()?;
     let kept = roster(&home);
     files::copy(&checkout::path("tests/fixtures/v1-agents.json"), &kept)?;

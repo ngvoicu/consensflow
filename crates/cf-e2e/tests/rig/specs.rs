@@ -126,7 +126,10 @@ fn told_of_specs(role: &str) -> bool {
 /// The app's settings file with the human's word that specs are on for every project.
 fn turn_specs_on_for_every_project(rig: &Rig) -> Outcome {
     let file = rig.home().join("agents.json");
-    files::write(&file, format!("{}\n", json!({ "preferences": { "specs": true } })))?;
+    files::write(
+        &file,
+        format!("{}\n", json!({ "preferences": { "specs": true } })),
+    )?;
     Ok(())
 }
 

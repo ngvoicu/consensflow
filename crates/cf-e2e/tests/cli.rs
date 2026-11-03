@@ -61,4 +61,3 @@ fn role_file(home: &ScratchHome) -> PathBuf {
         .chain([".claude", "skills", "consensflow-chief", "SKILL.md"])
         .fold(home.consensflow(), |folder, part| folder.join(part))
 }
-

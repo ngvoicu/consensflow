@@ -1,7 +1,7 @@
 //! The staff table the chief reads: the cases of Node's skill suite.
 
-use cf_proto::agents::WorkTier;
 use cf_engine::roles::{team_table, work_tier_list};
+use cf_proto::agents::WorkTier;
 
 use super::support::staff_row;
 

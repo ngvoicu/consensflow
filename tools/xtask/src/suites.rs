@@ -427,10 +427,7 @@ mod tests {
             out: &mut out,
             err: &mut err,
         };
-        for (value, suite) in [
-            (Some("4/3"), DAEMONS),
-            (Some("1/2"), LOAD),
-        ] {
+        for (value, suite) in [(Some("4/3"), DAEMONS), (Some("1/2"), LOAD)] {
             assert!(
                 matches!(
                     run(&with(value), suite, &[], &mut console),

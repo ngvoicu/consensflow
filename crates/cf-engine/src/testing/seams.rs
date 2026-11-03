@@ -1,6 +1,6 @@
 //! The engine's other seams as Node's dispatcher suite made them: a token named
 //! after its window's handle, each window's environment naming its participant,
-//! the saved agents' models, a role text per role, and a trace, a log and
+//! the app's settings, a role text per role, and a trace, a log and
 //! launch files that keep what they are told. Every call is written down in the
 //! Node traces' shape.
 
@@ -16,9 +16,7 @@ use serde_json::{json, Value};
 
 use super::recorder::Recorder;
 use crate::roles::ProjectSpecs;
-use crate::seams::{
-    AppSettings, Credentials, LaunchFiles, LaunchIds, Log, PaneEnv, Roles, Trace,
-};
+use crate::seams::{AppSettings, Credentials, LaunchFiles, LaunchIds, Log, PaneEnv, Roles, Trace};
 
 /// The model each fake member runs on, by the name a test gives it: what a launch of it is
 /// given, as Node's roster gave its agent's (the kit's members are named by these names,

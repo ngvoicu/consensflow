@@ -1,6 +1,6 @@
 //! What the board page may ask of the app: the daemon's operations it forwards,
 //! its panes' input, size and acknowledgements, its output subscription, and
-//! the address of the agents screens.
+//! the address of the daemon's harnesses screen.
 
 use std::sync::Arc;
 
@@ -334,7 +334,7 @@ pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value
 
 const AGENTS_PAGES: &[&str] = &["harnesses"];
 
-/// The daemon's page for one agents screen, carrying the UI token.
+/// The daemon's page for its screen (the harnesses), carrying the UI token.
 fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
     if !AGENTS_PAGES.contains(&page) {
         return Err(format!("no agents screen {page:?}"));
@@ -415,7 +415,10 @@ mod tests {
             "token":"secret",
         }))
         .unwrap();
-        assert!(agents_url(&roster, "").is_err(), "no screen of saved agents");
+        assert!(
+            agents_url(&roster, "").is_err(),
+            "no screen of saved agents"
+        );
         assert_eq!(
             agents_url(&roster, "harnesses").unwrap().as_str(),
             "http://localhost:43123/harnesses?token=secret"

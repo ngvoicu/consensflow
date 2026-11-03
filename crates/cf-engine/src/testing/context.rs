@@ -28,8 +28,8 @@ use super::host::FakeHost;
 use super::operations::{answer, nothing};
 use super::recorder::Recorder;
 use super::seams::{
-    CountingLaunchIds, FakeComputerUse, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv,
-    FakeAppSettings, FakeRoles, FakeTrace, MODELS,
+    CountingLaunchIds, FakeAppSettings, FakeComputerUse, FakeCredentials, FakeLaunchFiles, FakeLog,
+    FakePaneEnv, FakeRoles, FakeTrace, MODELS,
 };
 use super::time::TestTime;
 use crate::dispatcher::Dispatcher;

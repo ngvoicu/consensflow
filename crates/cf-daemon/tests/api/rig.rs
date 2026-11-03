@@ -79,5 +79,4 @@ impl Rig {
     pub fn received(&self) -> usize {
         self.seen.borrow().len()
     }
-
 }

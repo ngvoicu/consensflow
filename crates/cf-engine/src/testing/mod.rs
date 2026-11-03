@@ -36,8 +36,8 @@ pub use host::{window_of, FakeHost, OnRequest};
 pub use operations::Restarted;
 pub use recorder::Recorder;
 pub use seams::{
-    CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
-    FakeAppSettings, FakeTrace, MODELS,
+    CountingLaunchIds, FakeAppSettings, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv,
+    FakeRoles, FakeTrace, MODELS,
 };
 pub use time::TestTime;
 pub use window::{COMPACTING, TRUST_PROMPT, TRUST_QUESTION, TRUST_QUOTED, TRUST_UNPLACED};

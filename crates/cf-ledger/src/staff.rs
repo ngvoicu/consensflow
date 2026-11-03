@@ -61,7 +61,11 @@ impl<'a> NewParticipant<'a> {
 
     /// A member of the staff: named by its model ([`crate::handles`]), which the caller
     /// made its handle.
-    pub(crate) fn member(handle: &'a str, roles: &'a [&'static str], member: &'a NewMember) -> Self {
+    pub(crate) fn member(
+        handle: &'a str,
+        roles: &'a [&'static str],
+        member: &'a NewMember,
+    ) -> Self {
         Self {
             handle,
             role: None,

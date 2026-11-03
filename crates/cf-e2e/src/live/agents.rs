@@ -674,5 +674,4 @@ mod tests {
             json!({ "kind": "devin", "model": "swe-2", "effort": "medium" })
         );
     }
-
 }

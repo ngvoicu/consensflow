@@ -960,8 +960,7 @@ impl Dispatcher {
     }
 
     /// The launch's plan, from its adapter, with its first message begun:
-    /// none where the participant's saved agent is gone (the human hears
-    /// it) or the launch is over before its window is made
+    /// none where the launch is over before its window is made
     /// ([`Dispatcher::launch_over`]), or why the launch failed. `conversation` is
     /// the chief's, which was looked into before its first message was chosen.
     /// `role` is the text the window starts with where it was asked for already

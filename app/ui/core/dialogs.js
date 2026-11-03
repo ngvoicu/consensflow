@@ -422,7 +422,7 @@ class ChiefPicker {
   }
 }
 
-/** The tiers a member's tier select offers, the most critical first, as the Agents screen names them. */
+/** The tiers a member's tier select offers, the most critical first, as the page names them. */
 const TIER_PICK = Object.entries(TIER_LABEL)
 
 /**

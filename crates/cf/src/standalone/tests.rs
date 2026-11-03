@@ -163,11 +163,7 @@ fn a_reader_that_went_away_is_the_callers_to_end_quietly_and_no_message_of_the_v
 fn with_no_folder_to_keep_its_things_in_a_verb_that_needs_it_says_so() {
     // `setup` and `doctor` say it before they make or say anything: the
     // launcher would say its own words for a home it cannot find.
-    for args in [
-        &["setup"][..],
-        &["doctor"],
-        &["doctor", "--anything"],
-    ] {
+    for args in [&["setup"][..], &["doctor"], &["doctor", "--anything"]] {
         assert_eq!(
             ran(&NONE, args),
             (
@@ -183,7 +179,10 @@ fn with_no_folder_to_keep_its_things_in_a_verb_that_needs_it_says_so() {
     for verb in ["catalog", "agent"] {
         let (code, _, wrong) = ran(&NONE, &[verb, "list"]);
         assert_eq!(code, 1, "{verb}");
-        assert!(wrong.starts_with(&format!("cf: unknown command \"{verb}\"")), "{wrong}");
+        assert!(
+            wrong.starts_with(&format!("cf: unknown command \"{verb}\"")),
+            "{wrong}"
+        );
     }
 }
 
@@ -212,7 +211,10 @@ fn setup_makes_the_command_in_the_home_and_says_what_it_found() {
     let dir = tempfile::tempdir().unwrap();
     let (code, said, wrong) = ran_in(dir.path(), &["setup"]);
     assert_eq!((code, wrong.as_str()), (0, ""));
-    assert_eq!(said, "harnesses: none found on PATH\n", "no agents are counted");
+    assert_eq!(
+        said, "harnesses: none found on PATH\n",
+        "no agents are counted"
+    );
     let extension = if cfg!(windows) { ".cmd" } else { "" };
     for name in ["cf", "consensflow"] {
         let command = dir

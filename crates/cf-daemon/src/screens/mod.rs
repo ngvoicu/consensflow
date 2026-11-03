@@ -100,10 +100,8 @@ impl Screens {
     /// The route's answer, or the words of why it threw.
     async fn answer(&self, screen: Screen, request: &mut Request) -> Result<Answer, String> {
         let get = request.method == Method::GET;
-        if get {
-            if screen == Screen::Page {
-                return Ok(Answer::html(pages::harnesses(&self.token)));
-            }
+        if get && screen == Screen::Page {
+            return Ok(Answer::html(pages::harnesses(&self.token)));
         }
         let body = if get {
             Value::Object(Map::new())

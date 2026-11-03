@@ -7,8 +7,8 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use cf_base::refusal::Refusal;
-use cf_proto::agents::{WorkTier, WORK_TIERS};
 use cf_engine::roles::StaffRow;
+use cf_proto::agents::{WorkTier, WORK_TIERS};
 use cf_proto::ledger::{
     ChiefConversation, ConversationView, HistoryItem, MessageView, ParticipantView, ProjectView,
     TaskView,

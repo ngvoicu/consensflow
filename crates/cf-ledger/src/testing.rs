@@ -54,10 +54,10 @@
 
 mod chief_model;
 mod chosen_tier;
-mod harness_models;
 mod compaction;
 mod described;
 mod handed;
+mod harness_models;
 mod history_indexes;
 mod model_list;
 mod pasted_into;
@@ -71,11 +71,11 @@ use serde_json::{Map, Value};
 
 pub use chief_model::undo_migration_0026;
 pub use chosen_tier::undo_migration_0028;
+pub use compaction::undo_migration_0020;
+pub use handed::undo_migration_0022;
 pub use harness_models::{
     hold_apart_what_members_run_on, node_member, node_staff, undo_migration_0029,
 };
-pub use compaction::undo_migration_0020;
-pub use handed::undo_migration_0022;
 pub use history_indexes::undo_migration_0027;
 pub use model_list::undo_migration_0025;
 pub use pasted_into::undo_migration_0023;

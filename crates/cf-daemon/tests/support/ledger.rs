@@ -331,13 +331,17 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, LedgerError> {
             .map(str::to_owned)
     };
     match method {
-        "createProject" => NewProject::from_json(&cf_ledger::testing::node_staff(arg(args, 0).expect("a request")))
-            .and_then(|request| encode(ledger.create_project(&request))),
+        "createProject" => NewProject::from_json(&cf_ledger::testing::node_staff(
+            arg(args, 0).expect("a request"),
+        ))
+        .and_then(|request| encode(ledger.create_project(&request))),
         "setProjectState" => encode(ledger.set_project_state(id(), &js::text(arg(args, 1)))),
         "deleteProject" => encode(ledger.delete_project(id())),
         "setGate" => parse_gate(arg(args, 1)).and_then(|gate| encode(ledger.set_gate(id(), gate))),
-        "addMember" => NewMember::from_json(&cf_ledger::testing::node_member(arg(args, 1).expect("a member")))
-            .and_then(|member| encode(ledger.add_member(id(), &member))),
+        "addMember" => NewMember::from_json(&cf_ledger::testing::node_member(
+            arg(args, 1).expect("a member"),
+        ))
+        .and_then(|member| encode(ledger.add_member(id(), &member))),
         "setRoles" => parse_roles(arg(args, 2))
             .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles))),
         "endSession" => {

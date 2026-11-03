@@ -84,10 +84,7 @@ async fn the_board_is_the_open_tasks_and_every_lane_as_summaries() {
         .iter()
         .map(|lane| &lane["runsOn"])
         .collect();
-    assert_eq!(
-        runs_on,
-        [&Value::Null, &json!("mybuilder"), &json!("zeus")]
-    );
+    assert_eq!(runs_on, [&Value::Null, &json!("mybuilder"), &json!("zeus")]);
     assert_eq!(scene.kicks.get(), 0, "a read wakes nothing");
 }
 

@@ -8,8 +8,7 @@ const COLUMNS: [(&str, &str); 1] = [("participant", "tier_chosen")];
 /// What SQLite wrote into the text of the `participant` table for it, as migration 0028 added
 /// it: after the last column, before the table's own checks.
 #[cfg(test)]
-const COLUMN_LINES: &str =
-    ", tier_chosen INTEGER NOT NULL DEFAULT 0 CHECK (tier_chosen IN (0, 1))";
+const COLUMN_LINES: &str = ", tier_chosen INTEGER NOT NULL DEFAULT 0 CHECK (tier_chosen IN (0, 1))";
 
 /// What migration 0028 made taken out of the ledger `db` holds, so that a test can take a
 /// ledger this build wrote for one an older build left, whose version it sets, and which

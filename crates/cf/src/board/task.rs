@@ -800,12 +800,19 @@ and 2 idle sessions (`cf task list --all`)";
     /// (harness-models); a lane that says none is as it was.
     #[test]
     fn a_lane_s_head_says_the_model_and_effort_it_runs_on() {
-        let mut opus = lane("opus-high", "worker", &[card(2, "working", Some("opus-high"))]);
+        let mut opus = lane(
+            "opus-high",
+            "worker",
+            &[card(2, "working", Some("opus-high"))],
+        );
         opus["runsOn"] = json!("Opus · high");
         let plain = lane("zeus", "worker", &[card(3, "working", Some("zeus"))]);
         let text = listed(&[], &json!([opus, plain]));
         let heads: Vec<&str> = text.lines().filter(|line| line.starts_with('@')).collect();
-        assert_eq!(heads, ["@opus-high (worker, Opus · high)", "@zeus (worker)"]);
+        assert_eq!(
+            heads,
+            ["@opus-high (worker, Opus · high)", "@zeus (worker)"]
+        );
     }
 
     /// What `cf task add words…` posted and printed, the board answering with `answer`.

@@ -83,12 +83,36 @@ fn a_member_is_named_by_its_model_and_effort_its_harness_in_front_where_that_is_
     let project = project(
         &mut ledger,
         vec![
-            on("claude-code", "claude-opus-5-5", Some("high"), "Opus", "complex"),
-            on("codex", "gpt-6-astra", Some("max"), "GPT-6-Astra", "critical"),
+            on(
+                "claude-code",
+                "claude-opus-5-5",
+                Some("high"),
+                "Opus",
+                "complex",
+            ),
+            on(
+                "codex",
+                "gpt-6-astra",
+                Some("max"),
+                "GPT-6-Astra",
+                "critical",
+            ),
             on("devin", "swe-2-max", Some("max"), "SWE-2", "light"),
             on("devin", "adaptive", None, "Adaptive", "standard"),
-            on("pi", "anthropic/claude-opus-5-5", Some("high"), "Claude Opus 5.5", "complex"),
-            on("devin", "claude-opus-5-5-high", Some("high"), "Claude Opus 5.5", "complex"),
+            on(
+                "pi",
+                "anthropic/claude-opus-5-5",
+                Some("high"),
+                "Claude Opus 5.5",
+                "complex",
+            ),
+            on(
+                "devin",
+                "claude-opus-5-5-high",
+                Some("high"),
+                "Claude Opus 5.5",
+                "complex",
+            ),
         ],
     );
     assert_eq!(
@@ -286,7 +310,13 @@ fn a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_ba
     let back = ledger
         .add_member(
             project.id,
-            &on("claude-code", "claude-opus-5-5", Some("high"), "Opus", "light"),
+            &on(
+                "claude-code",
+                "claude-opus-5-5",
+                Some("high"),
+                "Opus",
+                "light",
+            ),
         )
         .expect("back");
     assert_eq!(
@@ -298,7 +328,13 @@ fn a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_ba
     let other = ledger
         .add_member(
             project.id,
-            &on("claude-code", "claude-opus-5-5", Some("max"), "Opus", "critical"),
+            &on(
+                "claude-code",
+                "claude-opus-5-5",
+                Some("max"),
+                "Opus",
+                "critical",
+            ),
         )
         .expect("added");
     assert_eq!(other.handle, "opus-max");
@@ -343,5 +379,44 @@ fn a_member_needs_a_tier_and_a_word_for_an_effort_and_the_staff_a_project_starts
             "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "modelName": "GPT-6.1-Sol",
             "designer": false, "tier": "standard", "role": "worker", "roles": ["worker", "reviewer"],
         }])
+    );
+}
+
+/// A member made in code, not read from a request, is held to the same rule: no project
+/// starts with a member that has no tier, and no Add saves one.
+#[test]
+fn a_member_with_no_tier_is_refused_at_a_project_s_start_and_at_an_add() {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    let untiered = on("codex", "gpt-6.1-sol", Some("high"), "GPT-6.1-Sol", "");
+    let refused = ledger
+        .create_project(&NewProject {
+            directory: "/work/app".into(),
+            name: "app".into(),
+            chief: NewChief {
+                harness: "claude-code".into(),
+                model: Some("claude-opus-5-5".into()),
+                effort: None,
+            },
+            staff: vec![untiered.clone()],
+            gate: false,
+            wake_up: None,
+            specs: None,
+        })
+        .expect_err("refused");
+    assert_eq!(refused.code(), Some("invalid-tier"));
+    let started = project(&mut ledger, Vec::new());
+    let refused = ledger
+        .add_member(started.id, &untiered)
+        .expect_err("refused");
+    assert_eq!(refused.code(), Some("invalid-tier"));
+    assert_eq!(
+        handles(
+            &ledger
+                .project(started.id)
+                .expect("read")
+                .expect("the project")
+        ),
+        ["human", "chief"]
     );
 }

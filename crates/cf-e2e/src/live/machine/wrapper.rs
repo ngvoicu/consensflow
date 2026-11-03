@@ -178,9 +178,13 @@ fn relay(why: &str, argv: &[String], stand_in: Option<&Path>) -> String {
             format!("const stand_in = {}", json!([agent.to_string_lossy()])),
             format!(
                 "const fake = process.argv.slice(2).some((word) => {})",
-                [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL]
-                    .map(|model| format!("word === '{model}'"))
-                    .join(" || ")
+                [
+                    STAND_IN_WORKER_MODEL,
+                    STAND_IN_CHIEF_MODEL,
+                    STAND_IN_MEMBER_MODEL
+                ]
+                .map(|model| format!("word === '{model}'"))
+                .join(" || ")
             ),
             "const [file, ...args] = fake ? stand_in : real".to_owned(),
         ]
@@ -241,7 +245,12 @@ fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> St
          \x20 esac\n\
          done\n\
          exec {} {servers}{} \"$@\"\n",
-        [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL].join(" | "),
+        [
+            STAND_IN_WORKER_MODEL,
+            STAND_IN_CHIEF_MODEL,
+            STAND_IN_MEMBER_MODEL
+        ]
+        .join(" | "),
         shell_word(&stand_in.to_string_lossy()),
         shell_word(&claude.to_string_lossy()),
         ISOLATION.join(" ")

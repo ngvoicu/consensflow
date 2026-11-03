@@ -48,8 +48,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::daemon_log::{self, Kind};
-use cf_e2e::process::{is_alive, own_var};
 use cf_e2e::files;
+use cf_e2e::process::{is_alive, own_var};
 use regex::Regex;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};

@@ -8,8 +8,8 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_proto::agents::WorkTier;
 use cf_engine::roles::{role_instructions, StaffRow};
+use cf_proto::agents::WorkTier;
 use regex::Regex;
 
 use super::support::staff_row;

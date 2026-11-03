@@ -253,30 +253,6 @@ fn roles_refused(offender: &str) -> LedgerError {
     )
 }
 
-/// A saved agent's id, as the roster names it: what a chief runs on, and
-/// what a member is. A member's id is its handle too, so it is never one of
-/// the handles in `taken`.
-pub fn require_agent_id(agent: &str, taken: &[&str]) -> Result<(), LedgerError> {
-    if is_agent_id(agent) && !taken.contains(&agent) {
-        return Ok(());
-    }
-    Err(LedgerError::refused(
-        "invalid-agent",
-        format!("not an agent id: {}", quoted(agent)),
-    ))
-}
-
-/// `value` read as a saved agent's id.
-pub fn parse_agent_id(value: Option<&Value>, taken: &[&str]) -> Result<String, LedgerError> {
-    match value {
-        Some(Value::String(agent)) => require_agent_id(agent, taken).map(|()| agent.clone()),
-        _ => Err(LedgerError::refused(
-            "invalid-agent",
-            format!("not an agent id: {}", printed(value)),
-        )),
-    }
-}
-
 /// A model's id as a harness names it, what its `--model` takes: the model a chief runs
 /// on (CHF-04). Not an agent's id: Pi's holds its provider and may hold a `/` of
 /// OpenRouter's own (`openrouter/anthropic/claude-fable-5`), Claude Code's a context
@@ -355,16 +331,6 @@ fn is_model_id(model: &str) -> bool {
                     b'.' | b'_' | b'-' | b'~' | b'/' | b':' | b'@' | b'+' | b'[' | b']'
                 )
         })
-}
-
-/// `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, in ASCII.
-fn is_agent_id(agent: &str) -> bool {
-    let bytes = agent.as_bytes();
-    (1..=64).contains(&bytes.len())
-        && bytes[0].is_ascii_alphanumeric()
-        && bytes[1..]
-            .iter()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
 /// Whether a role fits an agent, by its designer flag: an image designer is
@@ -476,10 +442,6 @@ mod tests {
             refusal(parse_roles(Some(&json!(["chief"])))).1,
             r#"a member is one or more of worker, advisor, reviewer, tester, designer, not ["chief"]"#
         );
-        assert_eq!(
-            refusal(parse_agent_id(Some(&json!("chief")), &["human", "chief"])).1,
-            r#"not an agent id: "chief""#
-        );
     }
 
     #[test]
@@ -514,23 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn takes_an_agent_id_of_the_roster_s_shape_and_none_of_the_taken_handles() {
-        assert_eq!(
-            parse_agent_id(Some(&json!("zeus.v2_a-b")), &[]).unwrap(),
-            "zeus.v2_a-b"
-        );
-        for wrong in [
-            json!(""),
-            json!("-zeus"),
-            json!("no such!"),
-            json!("a".repeat(65)),
-            json!(42),
-        ] {
-            assert_eq!(
-                refusal(parse_agent_id(Some(&wrong), &[])).0,
-                Some("invalid-agent")
-            );
-        }
+    fn takes_an_image_designer_for_an_image_model_alone() {
         assert!(require_fitting_roles("pygmalion", true, &["designer"]).is_ok());
         assert_eq!(
             refusal(require_fitting_roles("hera", false, &["designer"])).1,

@@ -45,6 +45,7 @@ use tokio::sync::watch;
 use crate::api;
 use crate::api::context::Context;
 use crate::api::credentials::{random_hex, Credentials};
+use crate::app_settings::{settings_path, SettingsFile};
 use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
@@ -54,7 +55,6 @@ use crate::machine;
 use crate::models::ModelLists;
 use crate::page::{self, Page};
 use crate::pass::{throttle, PassLoop};
-use crate::app_settings::{settings_path, SettingsFile};
 use crate::screens::network::HttpsFeed;
 use crate::screens::Screens;
 use crate::seams::{
