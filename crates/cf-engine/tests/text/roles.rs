@@ -58,6 +58,15 @@ fn teaches_only_the_boards_commands(role: &str) {
         ] {
             assert!(text.contains(command), "{role} learns {command}");
         }
+        // A question raised from a turn's last words ends with a line that says how to take
+        // them as the result (T-1119): the chief's text says what the line is.
+        assert!(
+            found(
+                r#"One ending "\(ConsensFlow: … If they are its result: `cf task finish T-5`\.\)"\s+is a turn's last words: answer it, or finish the task\."#,
+                &text
+            ),
+            "the chief learns the line of a question raised from a turn's end"
+        );
         // The chief asks the human in its terminal: no command asks on the board.
         assert!(!text.contains("cf ask"));
         assert!(
@@ -118,6 +127,17 @@ fn teaches_only_the_boards_commands(role: &str) {
         );
         assert!(text.contains("final message of your turn"));
         assert!(text.contains("Questions go to the chief, never to another member"));
+        assert!(
+            found(
+                r"To wait for the chief's answer, ask with `cf ask`, never in your\s+last words\.",
+                &text
+            ),
+            "{role} is told that a question in its last words is its result"
+        );
+        assert!(
+            !text.contains("the human"),
+            "{role} is asked and answers only through the chief"
+        );
         assert!(found(
             r"(?i)never read another agent's\s+session files",
             &text

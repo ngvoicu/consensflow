@@ -123,6 +123,8 @@ mod a_window_with_nothing_to_stop_was_closed_and_its_work_ended;
 mod a_windows_first_message_was_on_its_command_line;
 #[path = "regressions/a_worker_that_waited_on_its_run_with_monitor_lost_it.rs"]
 mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
+#[path = "regressions/a_workers_question_in_its_last_words_was_given_as_its_result.rs"]
+mod a_workers_question_in_its_last_words_was_given_as_its_result;
 #[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]
 mod a_workers_still_going_was_given_as_its_result;
 #[path = "regressions/an_idle_quit_with_a_message_queued_read_as_a_cut_turn.rs"]

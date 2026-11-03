@@ -37,7 +37,7 @@ cf inside a ConsensFlow window: the board's commands.
   cf task resume T-3 "…"            go on with it: the same window, with your words
   cf task edit|reopen|resume T-3 … --title "…"
                                     a new title, in any state (else the brief's first line); edit takes it alone
-  cf task finish T-3                take what a working or paused task's worker said last as its
+  cf task finish T-3                take what a working, waiting or paused task's worker said last as its
                                     result; what its turn left running is not ended
   cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
                                     a message; then cf task resume T-3 "…"

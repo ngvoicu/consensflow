@@ -171,3 +171,14 @@ goes in then", where it said a window still at work on T-3 takes it once T-3 is 
 Changed by hand on 2026-11-02, and recorded from the engine on 2026-11-03 when it was merged
 (T-1176). The role-change budgets moved with it: read whole to 202 rows with specs on and 231
 without (205 and 234), and to 37 and 65 with the most rules for the staff (40 and 69).
+
+The members' 27 rows end the sentence "Never wait for an answer in your shell (no `sleep`, no
+loop over `cf inbox`): it arrives only once your turn has ended." with "To wait for the
+chief's answer, ask with `cf ask`, never in your last words." (`skill/core/staff.md`), and
+the chief's twelve say, in item 5 of "What you do", that a question ending "(ConsensFlow: …
+If they are its result: `cf task finish T-5`.)" is a turn's last words: answer it, or finish
+the task (`skill/core/chief.md`). Each `cf` is the row's (T-1049, above). A worker's question
+written in its last words arrived as its result (T-1119, the field report of 2026-11-02).
+Changed by hand on 2026-11-02, and recorded from the engine on 2026-11-03 when it was merged
+(T-1176). The role-change budgets moved with it: read whole to 199 rows with specs on and 227
+without (202 and 231), and to 33 and 62 with the most rules for the staff (37 and 65).

@@ -157,7 +157,7 @@ const BOARD: [(&[&str], &str); 19] = [
     (
         &["task", "finish"],
         concat!(
-            "  cf task finish T-3                take what a working or paused task's worker said last as its\n",
+            "  cf task finish T-3                take what a working, waiting or paused task's worker said last as its\n",
             "                                    result; what its turn left running is not ended\n",
         ),
     ),

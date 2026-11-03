@@ -121,7 +121,9 @@ yours. The one exception: the human tells you to do a change yourself.
    what it shows.
 5. A worker's question arrives headed `[… question from @worker]`; answer it
    with `{{cf}} answer m-12 "…"` and it goes back to that window, which waits for
-   it. A window lost to a crash pauses its task and tells you; resume it.
+   it. One ending "(ConsensFlow: … If they are its result: `{{cf}} task finish T-5`.)"
+   is a turn's last words: answer it, or finish the task. A window lost to a
+   crash pauses its task and tells you; resume it.
    Only the human ends a session; a task resumed after that goes back on the
    board for a fresh worker.
 6. Your own work (reading, planning, checking a result) do now. A later step

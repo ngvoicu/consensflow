@@ -2008,6 +2008,24 @@ test('offers Finish for any working task of a member, held or not, and for none 
   await expect(finishOf(page, 'Task T-2')).toHaveCount(0)
 })
 
+test("offers Finish for a task that waits on a question, which the chief or the human may take as the result of its worker's last words", async ({
+  page,
+}) => {
+  // The words a turn ended on may be raised as a question that nobody meant (T-1119): the
+  // task waits, and Finish is the way to take them as the result.
+  const data = heldModel()
+  data.finishLeaves = { jobs: 0, agents: 0 }
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(14, 'Install the toolchain', 'waiting', 'chief', 'zeus', 4))
+  data.tasks['1:14'] = { ...lane.tasks.at(-1), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="14"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-14' })).toBeVisible()
+  await expect(finishOf(page, 'Task T-14')).toHaveCount(1)
+  await finishOf(page, 'Task T-14').click()
+  await expect.poll(() => calls(page, 'task.finish')).toEqual([{ project: 1, task: 14 }])
+})
+
 test('says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last', async ({
   page,
 }) => {

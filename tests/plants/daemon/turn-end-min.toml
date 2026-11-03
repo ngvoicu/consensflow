@@ -592,8 +592,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '        if !matches!(thread.task.state.as_str(), "working" | "paused") {'
-replace = '        if !matches!(thread.task.state.as_str(), "working" | "paused" | "done") {'
+find = '        if !matches!(thread.task.state.as_str(), "working" | "waiting" | "paused") {'
+replace = '        if !matches!(thread.task.state.as_str(), "working" | "waiting" | "paused" | "done") {'
 
 [[plant]]
 name = "turn-end-min finish: the result says nothing of what still runs"

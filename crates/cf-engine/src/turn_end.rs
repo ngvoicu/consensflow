@@ -60,7 +60,7 @@ use std::sync::Arc;
 use cf_base::{js, time};
 use cf_harness::contract::Observed;
 use cf_harness::records::{End, Item, Monitor, Pending, Reading, Role, Source};
-use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
+use cf_ledger::{NewNote, NewQuestion, ParticipantView, ProjectView, TaskThread};
 use serde_json::Value;
 
 use crate::delivery_text::{header_id, is_paste_of};
@@ -68,6 +68,8 @@ use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
 use crate::seams::{CommandsSeen, EngineError};
+
+use self::asks::asks_the_chief;
 
 /// What a result says of a turn that wrote nothing after its last tool call.
 pub(crate) const WITHOUT_ANSWER: &str = "(the agent ended its turn without a written answer)";
@@ -82,6 +84,9 @@ pub(crate) enum Turn {
     Held,
     /// Over, and its final answer is the task's result, recorded.
     Answered,
+    /// Over, and its final answer asks the chief what to do, or says it waits for the
+    /// chief's answer: put to the chief as a question, from the worker, and the task waits.
+    Asked,
 }
 
 /// What a worker's task is held for: the task, and how many jobs and agents its turn left
@@ -376,6 +381,24 @@ impl Dispatcher {
             return Ok(Turn::Held);
         }
         record.held.borrow_mut().reset();
+        // Its last words ask the chief, or wait for its answer: they are a question, not
+        // the work done. The task waits for the chief's `cf answer`, as for any question
+        // its window asks; its window stays (T-1119).
+        if asks_the_chief(&words_of(&answers.final_run)) {
+            let body = with_finish_line(words, &participant.handle, thread.task.number);
+            self.seams.ledger.borrow_mut().ask(
+                project.id,
+                &NewQuestion {
+                    from: Some(participant.handle.clone()),
+                    to: "chief".to_owned(),
+                    body: Some(body),
+                    task: Some(thread.task.number),
+                    ..NewQuestion::default()
+                },
+            )?;
+            self.changed();
+            return Ok(Turn::Asked);
+        }
         let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));
         self.seams
             .ledger
@@ -1045,6 +1068,15 @@ pub(crate) fn with_leftovers(words: String, said: &str) -> String {
     }
 }
 
+/// `words`, and after them the line that tells the chief this question was raised by
+/// ConsensFlow from the last words of `handle`'s turn, and how to take them as the result
+/// if they are (T-1119): `cf task finish` takes a waiting task's last words.
+pub(crate) fn with_finish_line(words: String, handle: &str, number: i64) -> String {
+    format!(
+        "{words}\n\n(ConsensFlow: @{handle}'s turn ended on these words. If they are its result: `cf task finish T-{number}`.)"
+    )
+}
+
 /// The first line of the window's record lost in its turn, by the place among
 /// the records it stood at. The turn is what follows the paste that began it,
 /// the item `pasted`: where the reading says the record each item is of, a line
@@ -1126,6 +1158,7 @@ pub(crate) fn pending_after_look(observed: &Observed, watching: Watching) -> Pen
     pending
 }
 
+mod asks;
 mod finish;
 mod paused;
 
