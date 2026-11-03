@@ -130,3 +130,43 @@ fn a_survey_the_launch_turns_off_never_appears() -> Outcome {
     rig.close()?;
     Ok(())
 }
+
+/// Seen by the owner on 2026-11-03 about 19:1x, on 3.0.7-alpha.1 (T-1198): a plugin of the
+/// owner's (`cc-plugin-privacy`, which members keep) has a PreToolUse hook that answered "ask"
+/// for a worker's Bash call; Claude Code asks then even in full permission, and the window
+/// waited for good, nobody told. The stand-in Claude asks as Claude Code 2.1.317 drew it
+/// (`HOOK-ASK <seconds>`, its `offers`), its status waiting on a permission prompt. What the
+/// owner should have seen: the chief and the human told once, with the hook's own words, and
+/// nothing pressed in the window.
+#[test]
+fn a_hooks_ask_mid_turn_is_told_once_with_the_hooks_own_words_and_nothing_is_pressed() -> Outcome {
+    let rig = Rig::start(config())?;
+    write_roster(&rig)?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    dispatched(&rig, &project, "HOOK-ASK 20 Reply with exactly: HOOK_OK")?;
+    rig.wait_for("the chief to be told of the hook's ask", secs(90), || {
+        Ok(!dialog_notes(&project, "chief")?.is_empty())
+    })?;
+    rig.wait_for("T-1 to be done", secs(90), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let told = dialog_notes(&project, "chief")?;
+    assert_eq!(told.len(), 1, "{told:?}");
+    let note = &told[0];
+    for words in [
+        "\u{201c}Do you want to proceed?\u{201d}",
+        "its choices \u{201c}Yes\u{201d}, \u{201c}No\u{201d}",
+        "Hook tool.check requires confirmation for this command:",
+        "If nobody asked to send it, go on without it.",
+        "[plugin:cc-plugin-privacy]",
+        "ConsensFlow presses nothing in it",
+    ] {
+        assert!(note.contains(words), "{words} in {note}");
+    }
+    assert_eq!(dialog_notes(&project, "human")?, told);
+    let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default();
+    let answers = files::read_string(&Path::new(config).join("offer-answers")).unwrap_or_default();
+    assert_eq!(answers, "hook:timeout\n", "nothing was pressed in the ask");
+    rig.close()?;
+    Ok(())
+}

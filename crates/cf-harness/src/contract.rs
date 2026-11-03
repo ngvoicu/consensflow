@@ -362,6 +362,10 @@ pub struct Dialog {
     /// The words it opens with: the line above its choices that asks, or else the nearest
     /// that says anything.
     pub question: String,
+    /// What it says above those words, a line each, back to a rule drawn across it: a hook's
+    /// reason for asking ("Hook tool.check requires confirmation for this command: …", T-1198),
+    /// the plugin an offer is of. None where it says nothing more.
+    pub detail: Vec<String>,
     /// Its choices, in their order, without the numbers drawn before them.
     pub options: Vec<String>,
     /// Whether it waits for an answer by its words: [`Dialog::question`] ends in a question mark,

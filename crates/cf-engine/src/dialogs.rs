@@ -67,8 +67,9 @@ pub(crate) const SURE_LOOKS: u32 = 2;
 /// prompt a person in the window answers at once is not.
 pub(crate) const TELL_AFTER_MS: i64 = 2_000;
 
-/// The most characters of a dialog's words, or of one of its choices, a note quotes.
-const QUOTED_CHARS: usize = 200;
+/// The most characters of a dialog's words, of one of its choices, or of what it says above
+/// them, a note quotes.
+const QUOTED_CHARS: usize = 400;
 
 /// What the looks found of a window's dialogs.
 #[derive(Debug, Default)]
@@ -282,8 +283,13 @@ pub(crate) fn told(handle: &str, dialog: Option<&Dialog>, decline: Option<&Decli
     let shows = match dialog {
         Some(dialog) => {
             let choices: Vec<String> = dialog.options.iter().map(|option| quoted(option)).collect();
+            let says = if dialog.detail.is_empty() {
+                String::new()
+            } else {
+                format!(" Above it, it says: {}.", quoted(&dialog.detail.join(" ")))
+            };
             format!(
-                "@{handle}'s window shows a dialog of its harness that waits for a key, not its prompt: {}, its choices {}.",
+                "@{handle}'s window shows a dialog of its harness that waits for a key, not its prompt: {}, its choices {}.{says}",
                 quoted(&dialog.question),
                 choices.join(", ")
             )
