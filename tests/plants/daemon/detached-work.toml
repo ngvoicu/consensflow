@@ -31,7 +31,6 @@ dw-panes-work = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "backg
 dw-panes-baseline = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::tests::"]
 dw-panes-leaving = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::turn::leaving_tests::"]
 dw-panes-machine = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::machine_tests::"]
-dw-panes-headless = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_window_closed_names_a_server"]
 dw-panes-births = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::births::"]
 dw-rig-regression = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_the_agent_detached_was_never_seen"], builds = true }
 
@@ -230,8 +229,8 @@ replace = "        while self.order.len() > BIRTHS * 1000 {"
 
 [[plant]]
 name = "detached work: a job only the window's marker ties to it is work a close ends"
-meant = "a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_running"
-runs = ["dw-panes-headless"]
+meant = "a_job_only_the_windows_marker_ties_to_it_is_not_named_as_work_a_close_ends_and_no_close_ends_it"
+runs = ["dw-panes-leaving"]
 platforms = ["macos"]
 
 [[plant.edit]]

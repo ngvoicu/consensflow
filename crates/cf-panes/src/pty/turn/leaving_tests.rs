@@ -18,7 +18,7 @@ mod macos {
 
     use cf_proto::panes::Servers;
 
-    use super::programs::{HELPERS, LEFT};
+    use super::programs::{HELPERS, LEFT, LEFT_MARKED};
     use crate::pty::turn::support::{
         gone, harness_programs, kill, listed, numbers, started, DETACHED,
     };
@@ -82,6 +82,31 @@ mod macos {
             process_exists(pid["job"]),
             "the close does not find it either"
         );
+        assert!(outsider.runs(), "a process outside the window");
+        kill(pid["job"]);
+    }
+
+    #[test]
+    fn a_job_only_the_windows_marker_ties_to_it_is_not_named_as_work_a_close_ends_and_no_close_ends_it(
+    ) {
+        let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
+        let table = Arc::new(PaneTable::closing_within(GRACE));
+        let (pane, pid) = started(&table, LEFT_MARKED, Servers::Unknown, None, &HashMap::new());
+
+        // The job left the window's session with its shell gone, and shows the marker the pane
+        // gave its program: the tree finds it by that (T-406), which proves nothing of whose
+        // work it is, so the bound refuses it and a close leaves it running. The host names it
+        // as possibly the window's at the exit, never as work a close ended (T-1145).
+        assert_eq!(listed(&table, &pane.key), Vec::<u32>::new());
+        assert!(process_exists(pid["job"]), "it runs on");
+        table.kill(&pane.key).expect("close the pane");
+        assert_eq!(
+            pane.ended.background().expect("the close kept its list"),
+            Vec::new(),
+            "the close ended none of it"
+        );
+        assert!(process_exists(pid["job"]), "the close does not find it");
         assert!(outsider.runs(), "a process outside the window");
         kill(pid["job"]);
     }
