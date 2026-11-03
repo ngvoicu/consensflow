@@ -22,7 +22,10 @@
 //! its shell, so that the turn is still at work while the offer is open, and looks every half
 //! second at the window's screen as the pane host draws it, at Claude Code's status file and
 //! at the notes. It holds that the offer was drawn, that the human and the chief were told once
-//! with its question, that it closed by itself, and that the task came to its result. What the
+//! with its question, that it was then declined ("No, not now", T-1192) well before its 30 s,
+//! that the task came to its result, and that nothing of the offer was written: in the run's
+//! own `.claude.json` (no ignored count), or in the keys of the offers in the owner's own
+//! `~/.claude.json`, whose digest the run says before and after. What the
 //! screen showed, and what Claude Code's status said meanwhile (`busy`, in a turn at work: only
 //! the screen shows the offer), are in the log, word for word, for the reader's tests.
 //!
@@ -41,6 +44,7 @@ use cf_e2e::live::{self, text, Harness, Log};
 use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 /// The stand-in for the chief's window.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -219,29 +223,86 @@ fn observe(members: &Members, agent: &str, log: &Log) -> Result<Account> {
         chief == human,
         format!("{chief:?}"),
     );
+    // Since T-1192 the offer, on Claude Code's list of safe declines, is declined after the
+    // note ("No, not now", by its digit): it goes well before its 30 s, the note says so, and
+    // nothing of it is written, in the run's own config or in the owner's.
     case.check(
-        "the offer closed by itself",
-        seen.offer_until
-            .is_some_and(|until| started.elapsed() > until),
-        format!("last seen at {:?}", seen.offer_until),
+        "the note says the offer is declined, choosing \"No, not now\"",
+        human.first().is_some_and(|note| {
+            note.contains(
+                "ConsensFlow declines it for the window now, choosing \u{201c}No, not now\u{201d}",
+            )
+        }),
+        format!("{human:?}"),
+    );
+    let open_for = seen
+        .offer_from
+        .zip(seen.offer_until)
+        .map(|(from, until)| until - from);
+    case.check(
+        "the offer went before its 30 s were up: declined, not closed by itself",
+        open_for.is_some_and(|open| open < Duration::from_secs(25)),
+        format!("open for {open_for:?}"),
     );
     case.check("the task came to its result", state == "done", state);
-    // What Claude Code wrote of the offer left unanswered, in the run's own config.
-    let written = fs::read_to_string(config.join(".claude.json"))
+    let run = lsp_keys(&config.join(".claude.json"));
+    case.check(
+        "the run's own .claude.json holds nothing of the offer: no ignored count, no plugin never offered, offers not turned off",
+        run.iter().all(|(_, value)| value.is_null() || *value == json!(0)),
+        format!("{run:?}"),
+    );
+    let installed = config.join("plugins").join("installed_plugins.json");
+    case.check(
+        "no plugin was installed in the run's config",
+        !installed.exists()
+            || fs::read_to_string(&installed).is_ok_and(|text| !text.contains("lsp")),
+        format!("{}", installed.display()),
+    );
+    Ok(case)
+}
+
+/// The keys Claude Code writes of its LSP offers in a `.claude.json`, with their values (null
+/// where it holds none), and of its plugin hints.
+fn lsp_keys(file: &Path) -> Vec<(&'static str, Value)> {
+    let config = fs::read_to_string(file)
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .map(|config| config["lspRecommendationIgnoredCount"].clone())
         .unwrap_or(Value::Null);
-    case.say(format!(
-        "the run's .claude.json: lspRecommendationIgnoredCount {written}"
-    ));
-    Ok(case)
+    [
+        "lspRecommendationIgnoredCount",
+        "lspRecommendationNeverPlugins",
+        "lspRecommendationDisabled",
+        "claudeCodeHints",
+    ]
+    .into_iter()
+    .map(|key| (key, config[key].clone()))
+    .collect()
+}
+
+/// The owner's `~/.claude.json`: its digest and its keys of the LSP offers. The owner's own
+/// Claude Code sessions rewrite the rest of it all day, so the digest may move with them; the
+/// keys of the offers move only with an offer answered or left to close.
+fn owners_config() -> (String, Vec<(&'static str, Value)>) {
+    let file = own_var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default()
+        .join(".claude.json");
+    let digest = fs::read(&file)
+        .map(|bytes| {
+            Sha256::digest(&bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    (digest, lsp_keys(&file))
 }
 
 /// The run.
 fn run(log: &Log) -> Result<Account> {
     let plan = Plan::new("harness-dialogs", stand_in_chief()).with(member(Harness::Claude));
     let agent = plan.roster[1]["id"].as_str().unwrap_or_default().to_owned();
+    let (digest_before, keys_before) = owners_config();
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
     seed_marketplace(&members.claude_config())?;
     members.add(&agent, &[])?;
@@ -249,6 +310,20 @@ fn run(log: &Log) -> Result<Account> {
     let closed = members.close();
     let mut case = seen?;
     case.closed(closed);
+    let (digest_after, keys_after) = owners_config();
+    case.say(format!(
+        "the owner's ~/.claude.json: sha256 {digest_before} before, {digest_after} after ({})",
+        if digest_before == digest_after {
+            "the same"
+        } else {
+            "moved: the owner's own sessions write it too"
+        }
+    ));
+    case.check(
+        "the owner's ~/.claude.json keys of the LSP offers are as they were",
+        keys_before == keys_after,
+        format!("before {keys_before:?}, after {keys_after:?}"),
+    );
     Ok(case)
 }
 
