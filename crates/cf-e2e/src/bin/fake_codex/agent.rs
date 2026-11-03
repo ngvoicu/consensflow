@@ -40,7 +40,9 @@
 //! its limit cut, with `usage_limit_exceeded` and no answer. One that says
 //! `MODEL-BUSY` works as long as it says and fails as a real rollout's turn did when
 //! its model was at capacity: `server_overloaded`, with the error's words and no
-//! answer. The server tells every connection a turn's start and its end
+//! answer, a refusal for a moment that the task waits out (T-1112). One that says
+//! `TURN-FAILS` fails the same way for a reason no wait helps (`bad_request`), which
+//! fails its task. The server tells every connection a turn's start and its end
 //! (`turn/started`, `turn/completed`), as Codex does, but for the first
 //! `CF_TEST_CODEX_DROP_COMPLETED` ends, which it leaves unsaid, as a notice lost; a read
 //! of the thread (`thread/read`) says whether a turn runs. The thread is the same in every run unless
@@ -420,6 +422,22 @@ impl Agent {
                     "error": {
                         "message": "The stand-in model is busy. Pick another model.",
                         "codex_error_info": "server_overloaded",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
+        if text.contains("TURN-FAILS") {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "The stand-in refused the request.",
+                        "codex_error_info": "bad_request",
                     },
                     "completed_at": jiff::Timestamp::now().as_second(),
                 }),

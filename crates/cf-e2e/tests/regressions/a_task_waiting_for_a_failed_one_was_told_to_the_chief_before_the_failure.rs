@@ -11,9 +11,10 @@
 //! before-the-failure` in consensflow-sme (T-1113 fixed the ledger's own failure, T-1148
 //! the rest).
 //!
-//! A Codex worker fails here in that shape, three seconds into its brief, with words of
-//! the stand-in's own (`a_failure_said_no_reason`), and the chief has put a second task on
-//! the board that needs the first.
+//! A Codex worker fails here three seconds into its brief, for a request its server refused
+//! (a model at capacity is waited out since T-1112), with words of the stand-in's own
+//! (`a_failure_said_no_reason`), and the chief has put a second task on the board that needs
+//! the first.
 //!
 //! What the owner should have seen: the chief is sent one note for T-1, the failure first,
 //! and the task that waits for it named after the failure, in the same note.
@@ -25,10 +26,10 @@ use serde_json::{json, Value};
 use crate::{config_with_codex, secs, Outcome};
 
 /// The brief whose turn fails, three seconds in.
-const BRIEF: &str = "SLEEP 3 MODEL-BUSY Reply with exactly: CODEX_OK";
+const BRIEF: &str = "SLEEP 3 TURN-FAILS Reply with exactly: CODEX_OK";
 
 /// What the stand-in Codex says of the turn it failed.
-const SAID: &str = "The stand-in model is busy. Pick another model.";
+const SAID: &str = "The stand-in refused the request.";
 
 /// The roster of the case: the chief on the stand-in Claude, the worker on Codex.
 fn write_roster(rig: &Rig) -> cf_e2e::Result {

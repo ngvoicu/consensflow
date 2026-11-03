@@ -6,10 +6,11 @@
 //! is row 4 of `issues/field-reports-2026-10-19-dip-agentos.md` in consensflow-sme;
 //! the project is not on this Mac, so its records were not read.
 //!
-//! Codex ends a turn its model could not serve with `task_complete` whose error
-//! says why (`server_overloaded` in a real rollout, with the error's words). A Codex
-//! worker fails here in that shape, three seconds into its brief, with words of
-//! the stand-in's own.
+//! Codex ends a turn it could not serve with `task_complete` whose error says why,
+//! with the error's words (`server_overloaded` in a real rollout: a model at capacity,
+//! which a task now waits out, T-1112). A Codex worker fails here in that shape, three
+//! seconds into its brief, for a request its server refused (`bad_request`), with words
+//! of the stand-in's own.
 //!
 //! What the owner should have seen: T-1 fails, and the note that says so, to the
 //! chief, quotes what Codex said.
@@ -21,10 +22,10 @@ use serde_json::{json, Value};
 use crate::{config_with_codex, secs, Outcome};
 
 /// The brief whose turn fails, three seconds in.
-const BRIEF: &str = "SLEEP 3 MODEL-BUSY Reply with exactly: CODEX_OK";
+const BRIEF: &str = "SLEEP 3 TURN-FAILS Reply with exactly: CODEX_OK";
 
 /// What the stand-in Codex says of the turn it failed.
-const SAID: &str = "The stand-in model is busy. Pick another model.";
+const SAID: &str = "The stand-in refused the request.";
 
 /// The roster of the case: the chief on the stand-in Claude, the worker on Codex.
 fn write_roster(rig: &Rig) -> cf_e2e::Result {
