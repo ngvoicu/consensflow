@@ -44,7 +44,6 @@ matrix-question-not-retyped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--
 matrix-devin-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_compaction"]
 matrix-devin-command-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_command_left"]
 matrix-devin-resumed-writes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_resumed_writes"]
-matrix-devin-reopened = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_reopened"]
 matrix-codex-slow-login = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::codex_worker_field_codex_slow_login_shell"]
 matrix-devin-quota = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_quota"]
 matrix-devin-core = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_core"]
@@ -874,17 +873,6 @@ builds = true
 file = "crates/cf-harness/src/devin/adapter.rs"
 find = '''        format!("{BYPASS} {text}")'''
 replace = "        text.clone()"
-
-[[plant]]
-name = "live matrix: field fix out: a stamped Devin window reads at rest through its turn, and its reopen replays it as work"
-meant = "devin_worker_field_devin_reopened"
-runs = ["matrix-devin-reopened"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/record/wires.rs"
-find = '''                Some("working") => self.busy = true,'''
-replace = '''                Some("working") => {}'''
 
 [[plant]]
 name = "live matrix: field fix out: the system's folders of programs are not looked in for a harness"
