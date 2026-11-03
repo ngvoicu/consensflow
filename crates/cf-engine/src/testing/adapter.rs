@@ -320,6 +320,13 @@ pub struct FakeAdapter {
     /// refusal stays in the record a Resume reads, T-841). Nothing of either, as Node's
     /// suite, where each window began clean.
     pub rereads_failures: Cell<bool>,
+    /// Its windows record what they are given, a launch's first message too, and begin
+    /// no turn on it: the message stays the last item of their record, and the window
+    /// reads at rest (`Some(true)`: Devin and Muse past their first moments) or in flight
+    /// (`Some(false)`: Claude Code, Codex and Pi, whose readers take a record that ends on
+    /// a message of the user's for a turn begun). None: a message that arrives begins a
+    /// turn, as the fake of Node's suite's did (the field bug T-1130).
+    pub never_begins: Cell<Option<bool>>,
 }
 
 impl FakeAdapter {
@@ -398,6 +405,7 @@ impl FakeAdapter {
             idle_word: Cell::new(true),
             input_box: Cell::new(None),
             rereads_failures: Cell::new(false),
+            never_begins: Cell::new(None),
         })
     }
 
@@ -885,7 +893,7 @@ impl FakeAdapter {
                     // The harness's own words, as the reader makes of the companion.
                     agent.items.push(self.item(Role::Custom, &sources));
                 }
-                agent.settled = false;
+                agent.settled = self.never_begins.get().unwrap_or(false);
                 agent.pending = Pending::default();
                 agent.monitors.clear();
                 // A message that arrives starts a turn: the one before it ended as it did.
@@ -1075,7 +1083,7 @@ impl Asked {
             .filter(|_| !fake.forgets_first_messages.get())
         {
             agent.items.push(fake.item(Role::User, message));
-            agent.settled = false;
+            agent.settled = fake.never_begins.get().unwrap_or(false);
         }
         fake.agents.borrow_mut().push(agent);
         let handle = launch.handle.to_owned();

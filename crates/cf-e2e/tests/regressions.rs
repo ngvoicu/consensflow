@@ -69,6 +69,8 @@ mod a_final_answer_written_in_a_tells_turn_reached_nobody;
 mod a_follow_up_after_a_restart_lost_its_windows_conversation;
 #[path = "regressions/a_follow_up_could_not_be_queued_behind_its_windows_own_work.rs"]
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
+#[path = "regressions/a_follow_up_whose_window_never_began_read_working_for_an_hour.rs"]
+mod a_follow_up_whose_window_never_began_read_working_for_an_hour;
 #[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
 mod a_job_that_still_ran_was_taken_for_ended;
 #[path = "regressions/a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed.rs"]

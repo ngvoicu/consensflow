@@ -25,6 +25,7 @@ pub mod dispatcher;
 pub mod handoff;
 pub mod host;
 mod in_flight;
+mod never_began;
 mod ownership;
 mod pacing;
 mod record;

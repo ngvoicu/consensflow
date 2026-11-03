@@ -50,7 +50,7 @@ use crate::shown::Shown;
 use crate::stalls::StallsState;
 use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
-use crate::turn_end::{last_paste, lost_in_turn};
+use crate::turn_end::{last_paste, lost_in_turn, Turn};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -1385,8 +1385,15 @@ impl Dispatcher {
                 // turn left is ended; the window closes below if it is free (`turn_end`), once
                 // its screen is drawn where its task is done (`still_drawing`).
                 let watching = self.watch_monitors(participant, record, &observed).await;
-                self.collect(project, participant, record, &observed, watching)
+                let turn = self
+                    .collect(project, participant, record, &observed, watching)
                     .await?;
+                // A turn that came to nothing may be one that never began on what its
+                // window was given (`never_began`).
+                if matches!(turn, Turn::Open) {
+                    self.watch_begun(project, participant, record, &observed)
+                        .await?;
+                }
             }
             if self.close_if_free(record).await? {
                 return Ok(());
