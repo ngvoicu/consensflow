@@ -43,7 +43,6 @@ impl Owner {
             ".local/share/devin/credentials.toml",
             ".local/share/devin/cli/trusted_workspaces.json",
             ".local/share/devin/cli/sessions.db",
-            ".config/muse/auth.json",
             ".config/muse/settings.json",
             ".local/share/muse/session-index.db",
         ] {
@@ -54,6 +53,12 @@ impl Owner {
             &json!({ "openrouter": { "type": "api_key", "key": "sk-or-OWNERS" } }).to_string(),
         )?;
         owner.write(".codex/auth.json", r#"{"OPENAI_API_KEY":"sk-OWNERS"}"#)?;
+        // Muse's login is JSON: a live rig copies it into its own home with no key named
+        // refresh, and refuses one that is none (T-1121).
+        owner.write(
+            ".config/muse/auth.json",
+            &json!({ "sentinel": SENTINEL }).to_string(),
+        )?;
         Ok(owner)
     }
 
