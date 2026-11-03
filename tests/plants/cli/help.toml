@@ -342,34 +342,14 @@ find = '        None | Some("help" | "--help" | "-h") =>'
 replace = '        None | Some("help" | "--help") =>'
 
 [[plant]]
-name = "help: cf catalog takes --help for a word it refuses or runs on"
-meant = "a_verb_answers_help_before_it_reads_its_words_or_looks_at_the_home"
-runs = ["units", "help"]
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/mod.rs"
-find = '        Some(verb @ ("catalog" | "agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
-replace = '        Some(verb @ ("agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
-
-[[plant]]
-name = "help: cf agent takes --help for a word it refuses or runs on"
-meant = "a_verb_answers_help_before_it_reads_its_words_or_looks_at_the_home"
-runs = ["units", "help"]
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/mod.rs"
-find = '        Some(verb @ ("catalog" | "agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
-replace = '        Some(verb @ ("catalog" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
-
-[[plant]]
 name = "help: cf setup takes --help for a word it refuses or runs on"
 meant = "a_verb_answers_help_before_it_reads_its_words_or_looks_at_the_home"
 runs = ["units", "help"]
 
 [[plant.edit]]
 file = "crates/cf/src/standalone/mod.rs"
-find = '        Some(verb @ ("catalog" | "agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
-replace = '        Some(verb @ ("catalog" | "agent" | "doctor" | "ui")) if asks_for_help(rest) => {'
+find = '        Some(verb @ ("setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
+replace = '        Some(verb @ ("doctor" | "ui")) if asks_for_help(rest) => {'
 
 [[plant]]
 name = "help: cf doctor takes --help for a word it refuses or runs on"
@@ -378,8 +358,8 @@ runs = ["units", "help"]
 
 [[plant.edit]]
 file = "crates/cf/src/standalone/mod.rs"
-find = '        Some(verb @ ("catalog" | "agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
-replace = '        Some(verb @ ("catalog" | "agent" | "setup" | "ui")) if asks_for_help(rest) => {'
+find = '        Some(verb @ ("setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
+replace = '        Some(verb @ ("setup" | "ui")) if asks_for_help(rest) => {'
 
 [[plant]]
 name = "help: cf ui takes --help for a word it refuses or runs on"
@@ -388,30 +368,8 @@ runs = ["units", "help"]
 
 [[plant.edit]]
 file = "crates/cf/src/standalone/mod.rs"
-find = '        Some(verb @ ("catalog" | "agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
-replace = '        Some(verb @ ("catalog" | "agent" | "setup" | "doctor")) if asks_for_help(rest) => {'
-
-[[plant]]
-name = "help: cf agent remove --help is the usage of agent alone"
-meant = "every_standalone_verb_answers_help_with_its_usage_and_reads_and_writes_nothing"
-runs = ["help"]
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/mod.rs"
-find = '        .filter(|word| ["add", "list", "edit", "remove"].contains(word));'
-replace = '        .filter(|word| ["add", "list", "edit"].contains(word));'
-
-[[plant]]
-name = "help: an action the verb has not is the usage of that action"
-meant = "the_usage_of_a_verb_is_its_lines_with_those_that_go_on_from_them"
-runs = ["units"]
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/mod.rs"
-find = '''
-        .filter(|_| verb == "agent")
-'''
-replace = ""
+find = '        Some(verb @ ("setup" | "doctor" | "ui")) if asks_for_help(rest) => {'
+replace = '        Some(verb @ ("setup" | "doctor")) if asks_for_help(rest) => {'
 
 [[plant]]
 name = "help: the lines that go on from a verb of cf outside a window are not its own"

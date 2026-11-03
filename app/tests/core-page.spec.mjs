@@ -3261,7 +3261,7 @@ function recordedModels(data = model()) {
   return data
 }
 
-test("adds a member on a model its harness lists, the harness's own listing, never the catalog's agents", async ({
+test("adds a member on a model its harness lists, the harness's own listing, never a saved agent", async ({
   page,
 }) => {
   await open(page, recordedModels())
@@ -3298,6 +3298,62 @@ test("adds a member on a model its harness lists, the harness's own listing, nev
   for (const agent of ['zeus', 'hera', 'diana', 'athena', 'pygmalion']) {
     await expect(add.locator('option', { hasText: agent })).toHaveCount(0)
   }
+})
+
+test("asks the chief's effort where its model lists efforts, and sends it with the harness and the model, in New project and Switch chief", async ({
+  page,
+}) => {
+  await open(page, recordedModels())
+  // New project: Opus lists five efforts; nothing starts until one is picked.
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'Opus')
+  const effort = made.dialog.locator('[name="chiefEffort"]')
+  await expect(effort).toBeEnabled()
+  expect(await offered(effort)).toEqual([
+    ['Pick an effort', true],
+    ['low', false],
+    ['medium', false],
+    ['high', false],
+    ['xhigh', false],
+    ['max', false],
+  ])
+  await made.start.click()
+  await expect(made.dialog.locator('.chief-help')).toHaveText(
+    'Pick the effort Claude Code runs Opus at.',
+  )
+  expect(await calls(page, 'project.open')).toEqual([])
+  await effort.selectOption('high')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'high',
+        gate: false,
+        staff: [],
+      },
+    ])
+  // Switch chief: the effort goes with the harness and the model.
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await pickChief(dialog, 'Claude Code', 'Sonnet')
+  await dialog.locator('[name="chiefEffort"]').selectOption('max')
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'claude-code',
+        model: 'claude-sonnet-5-5',
+        effort: 'max',
+        when: 'turn',
+        note: false,
+      },
+    ])
 })
 
 test("Refresh beside the chief's model reads the picked harness's models again, in New project and Switch chief", async ({
@@ -3602,7 +3658,7 @@ test('keeps a pending removal and what Add member has picked when the daemon red
   await expect(dialog.locator('[name="memberTier"]')).toHaveValue('complex')
 })
 
-test("Add member saves nothing until a tier is picked: the presets' tier where they know the model at its effort, and none where they do not", async ({
+test('Add member saves nothing until a tier is picked: the tier starts empty, whatever the model and its effort', async ({
   page,
 }) => {
   await open(page, recordedModels())
@@ -3633,7 +3689,7 @@ test("Add member saves nothing until a tier is picked: the presets' tier where t
     ['Standard work', false],
     ['Light work', false],
   ])
-  // No preset runs Muse: no tier is picked for the human, and nothing is saved without one.
+  // No tier is picked for the human, and nothing is saved without one.
   await expect(tier).toHaveValue('')
   await add.click()
   await expect(hint).toHaveText(
@@ -4289,7 +4345,9 @@ test('says in New project who may be picked: nobody yet, and how a member is add
   await expect(dialog.locator('#new-project-hint')).toBeHidden()
   // Add with nothing picked adds nobody.
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(rows).toHaveText(['Nobody yet: pick a role, a harness, a model and a tier, then Add.'])
+  await expect(rows).toHaveText([
+    'Nobody yet: pick a role, a harness, a model and a tier, then Add.',
+  ])
 })
 
 test('shows and sets human approval from Project settings, which has no review policy', async ({

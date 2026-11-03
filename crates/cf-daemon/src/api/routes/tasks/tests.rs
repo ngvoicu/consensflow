@@ -76,6 +76,18 @@ async fn the_board_is_the_open_tasks_and_every_lane_as_summaries() {
         said.as_object().unwrap().keys().collect::<Vec<_>>(),
         ["open", "lanes"]
     );
+    // A lane on a harness says the model and effort it runs on (harness-models); the human's
+    // runs on none.
+    let runs_on: Vec<&Value> = said["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|lane| &lane["runsOn"])
+        .collect();
+    assert_eq!(
+        runs_on,
+        [&Value::Null, &json!("mybuilder"), &json!("zeus")]
+    );
     assert_eq!(scene.kicks.get(), 0, "a read wakes nothing");
 }
 

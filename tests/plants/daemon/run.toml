@@ -261,13 +261,3 @@ runs = ["daemon-lib-start"]
 file = "crates/cf-daemon/src/start.rs"
 find = "    ledger.borrow_mut().suspend_for_restart()?;"
 replace = ""
-
-[[plant]]
-name = "start: an agents file that cannot be used stops the start"
-meant = "an_agents_file_that_cannot_be_used_stops_no_start_and_the_log_says_why"
-runs = ["daemon-lib-start"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/start.rs"
-find = '        log.error("the agents file could not be used", Some(&cause));'
-replace = "        return Err(StartError::System(cause));"

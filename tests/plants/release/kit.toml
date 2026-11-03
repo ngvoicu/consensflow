@@ -1,7 +1,6 @@
-# The plants of what releases and of the agents screens: the rule of the feeds and its checks,
+# The plants of what releases: the rule of the feeds and its checks,
 # the publisher, the release workflow's text, the tool that makes the update feed's entry
-# (`cf-release prepare-update`), the portable app's collector, the agents of the daemon as the
-# packaged smoke holds them, the thin drivers of xtask (the app’s tests and lint, the lint for
+# (`cf-release prepare-update`), the portable app's collector, the thin drivers of xtask (the app’s tests and lint, the lint for
 # Windows and its archiver, the departures, the bench) and the gate that runs them, the models
 # the live suites run each harness on (`cargo xtask live … --models`) and their support on a
 # Windows user's machine (a program on the PATH that runs, a command PowerShell started), the
@@ -23,11 +22,9 @@
 
 run_limit_minutes = 10
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["feeds", "publish", "workflow", "installers", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged", "wiring", "live-models", "live-windows", "windows-runner", "release-commands", "ci-times", "ci-gate", "live-app", "tauri-2-12"]
+tables = ["feeds", "publish", "workflow", "installers", "portable", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged", "wiring", "live-models", "live-windows", "windows-runner", "release-commands", "ci-times", "ci-gate", "live-app", "tauri-2-12"]
 
 [run]
-# The proof of the agents screens against the native daemon, built from the sources as they are.
-agents-proof = { command = ["cargo", "xtask", "test", "agents", "--offline"], builds = true }
 # The smoke's readers of evidence (processes, daemon, ledger), and of the terminal command.
 smoke-evidence = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::evidence", "updater_smoke::ledger"]
 # The smoke's driver: where it keeps its builds, and what it does with the apps it is given.

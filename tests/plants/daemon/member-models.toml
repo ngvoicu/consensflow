@@ -1,69 +1,20 @@
-# Members' models from their harness (T-1143, staff-chains' CHN-10 moved ahead): Add member and
-# Edit member in Project settings pick a harness, a model that harness lists of itself
-# (`models.get`, CHF-03), an effort it lists for that model and a tier the human chooses; a
-# member whose harness no longer lists its model is marked; Refresh reads a harness again.
-# The ledger keeps a tier the human chose (migration 0028, `participant.tier_chosen`), which
-# `refresh_member_tiers` passes by (crates/cf-ledger/src/staff.rs); the catalog says the
-# presets' tier only of a model a preset runs (crates/cf-catalog/src/profile.rs,
-# `Catalog::preset_tier`); the daemon checks what was picked against the kept listing and runs
-# the member on a saved agent of the human's for it (crates/cf-daemon/src/page/staff.rs,
-# crates/cf-daemon/src/roster.rs); the page shares the chief's picker (app/ui/core/dialogs.js,
+# Members' models from their harness (T-1143, then harness-models): Add member and Edit member
+# in Project settings pick a harness, a model that harness lists of itself (`models.get`,
+# CHF-03), an effort it lists for that model and a tier the human chooses, none picked for them;
+# a member whose harness no longer lists its model is marked; Refresh reads a harness again. The
+# daemon checks what was picked against the kept listing, holds Devin's exact id for the effort,
+# and takes a second Add of a model and effort a member runs as roles more for that member
+# (crates/cf-daemon/src/page/staff.rs); the page shares the chief's picker (app/ui/core/dialogs.js,
 # `ModelLists`, `ModelPicker`, `MemberPicker`). Every name holds `member models:`:
 # `npm run plants:daemon -- "member models:"` runs them.
 
 [run]
-mm-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "chosen_tier"]
-mm-catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--lib", "profile::"]
 mm-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members::"]
 mm-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Add member|adds a member on a model|Edit member|no longer lists its model"]
 mm-page-chief = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Refresh beside the chief"]
 
-# --- the ledger: a tier the human chose stays ---
-
-[[plant]]
-name = "member models: the start's following of the agents' tiers moves a tier the human chose"
-meant = "a_tier_the_human_chose_survives_the_agents_tiers_being_followed_and_one_that_follows_moves"
-runs = ["mm-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff.rs"
-find = '''
-           AND tier_chosen = 0
-         ORDER BY id",'''
-replace = '''
-         ORDER BY id",'''
-
-[[plant]]
-name = "member models: a member added in the tier the human chose is not marked so"
-meant = "a_tier_the_human_chose_survives_the_agents_tiers_being_followed_and_one_that_follows_moves"
-runs = ["mm-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/ledger/staff.rs"
-find = "        staff::add_member(&mut self.store, project_id, member, true)"
-replace = "        staff::add_member(&mut self.store, project_id, member, false)"
-
-[[plant]]
-name = "member models: an edited member's tier follows its agent's again"
-meant = "an_edited_member_runs_on_its_new_agent_in_the_tier_chosen_and_keeps_it_from_then_on"
-runs = ["mm-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff.rs"
-find = "            \"UPDATE participant SET agent = ?, harness = ?, designer = ?, tier = ?, tier_chosen = 1"
-replace = "            \"UPDATE participant SET agent = ?, harness = ?, designer = ?, tier = ?, tier_chosen = 0"
 
 # --- the catalog: the presets' tier only of a model they know ---
-
-[[plant]]
-name = "member models: the presets' tier is said of a model no preset runs on that harness"
-meant = "the_preset_tier_is_the_rules_tier_of_a_model_the_presets_run_on_that_harness_and_none_else"
-runs = ["mm-catalog"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/profile.rs"
-find = "        self.known.named(Some(harness), Some(model))?;\n"
-replace = ""
 
 # --- the daemon: what was picked is what the harness lists ---
 
@@ -94,50 +45,66 @@ runs = ["mm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
-find = '    let tier = match validate_work_tier(body.get("tier")) {'
-replace = '    let tier = match validate_work_tier(body.get("tier")).map(|tier| tier.or(Some(WorkTier::Light))) {'
+find = '''
+    let tier = tier_of(body.get("tier"))?;
+'''
+replace = '''
+    let tier = tier_of(body.get("tier")).unwrap_or(WorkTier::Light);
+'''
 
 [[plant]]
 name = "member models: Devin's member runs the model and the effort joined, not the id Devin lists"
-meant = "a_devin_member_runs_the_exact_id_devin_lists_for_the_effort_never_one_joined"
+meant = "a_devin_member_holds_the_exact_id_devin_lists_for_the_effort_never_one_joined"
 runs = ["mm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
-find = "        Some(launch) => (launch.clone(), None),"
-replace = "        Some(_) => (listed.model(), effort.map(str::to_owned)),"
+find = '''
+        model: Some(listed.launch_model(effort)),
+'''
+replace = '''
+        model: Some(match effort {
+            Some(effort) if !listed.launch_ids.is_empty() => format!("{}-{effort}", listed.model()),
+            _ => listed.model(),
+        }),
+'''
 
 [[plant]]
 name = "member models: a second Add of a model a member runs makes another member"
-meant = "a_member_added_by_model_carries_the_tier_the_human_chose_and_keeps_it"
+meant = "a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_the_human_chose"
 runs = ["mm-daemon"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/roster.rs"
-find = "            .find(runs_it)\n"
-replace = "            .find(runs_it)\n            .filter(|_| false)\n"
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''
+            && member_now.effort == member.effort
+    })?;'''
+replace = '''
+            && member_now.effort == member.effort
+            && false
+    })?;'''
 
 [[plant]]
-name = "member models: Edit member leaves the member on its agent"
+name = "member models: Edit member leaves the member on the model it ran"
 meant = "edit_member_moves_a_member_to_another_model_in_the_tier_chosen"
 runs = ["mm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
-find = '''    let designer = member.roles.iter().any(|role| role == "designer");
-    let agent = saved(&page.env)?.member_agent(&picked.agent(designer))?;'''
-replace = '''    let designer = member.roles.iter().any(|role| role == "designer");
-    let agent = member.agent.clone().unwrap_or_default();'''
-
-[[plant]]
-name = "member models: the presets' tiers are said for no effort but the model's"
-meant = "the_preset_tiers_are_said_of_the_models_the_presets_know_at_each_effort"
-runs = ["mm-daemon"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/models.rs"
-find = "            if let Some(tier) = catalog.preset_tier(harness.as_str(), &name, effort) {"
-replace = "            if let Some(tier) = catalog.preset_tier(harness.as_str(), &name, None) {"
+find = '''
+        .edit_member(project, &handle, &picked.edit())?;'''
+replace = '''
+        .edit_member(
+            project,
+            &handle,
+            &MemberEdit {
+                harness: found.harness.clone().unwrap_or_default(),
+                model: found.model.clone(),
+                effort: found.effort.clone(),
+                model_name: found.model_name.clone(),
+                tier: picked.tier.as_str().to_owned(),
+            },
+        )?;'''
 
 # --- the page: Add member and Edit member on the chief's picker's code ---
 
@@ -164,15 +131,21 @@ find = "    if (this.#tier.value === '') {"
 replace = "    if (this.#tier.value === 'never') {"
 
 [[plant]]
-name = "member models: the tier select starts empty whatever the presets say"
-meant = "Add member starts the tier on the presets' rule for the model at the effort picked, from the daemon's presetTiers"
+name = "member models: the tier select starts on a tier the human did not pick"
+meant = "Add member saves nothing until a tier is picked: the tier starts empty, whatever the model and its effort"
 runs = ["mm-page"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    this.#tier.value = tiers?.[this.#effort.value] ?? ''"
-replace = "    this.#tier.value = ''"
+find = '''
+    this.#tier.value = ''
+    this.say('')
+'''
+replace = '''
+    this.#tier.value = 'standard'
+    this.say('')
+'''
 
 [[plant]]
 name = "member models: the effort select offers efforts the model does not list"
@@ -182,8 +155,10 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "        ...model.efforts.map((effort) => new Option(effort, effort)),"
-replace = "        ...['low', 'medium', 'high'].map((effort) => new Option(effort, effort)),"
+find = '''
+  select.replaceChildren(ask, ...model.efforts.map((effort) => new Option(effort, effort)))'''
+replace = '''
+  select.replaceChildren(ask, ...['low', 'medium', 'high'].map((effort) => new Option(effort, effort)))'''
 
 [[plant]]
 name = "member models: a harness's models are read again at each pick while the dialog is open"
@@ -215,8 +190,10 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    return whereListed(models, agent) === null"
-replace = "    return false"
+find = '''
+    return whereListed(models, member) === null'''
+replace = '''
+    return false'''
 
 [[plant]]
 name = "member models: Edit member adds a member instead"

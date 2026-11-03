@@ -399,8 +399,10 @@ runs = ["chm-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/chief.rs"
-find = 'model = ?, agent = NULL, launched_model = NULL,'
-replace = 'model = ?, agent = NULL,'
+find = '''
+model_name = NULL, agent = NULL, launched_model = NULL,'''
+replace = '''
+model_name = NULL, agent = NULL,'''
 
 [[plant]]
 name = 'chief: a switch keeps the model found gone'
@@ -629,9 +631,11 @@ runs = ["chm-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            self.chief_launched(participant, chief)?;
+find = '''
+            self.chief_launched(participant, &runs)?;
 '''
-replace = ''
+replace = '''
+'''
 
 [[plant]]
 name = 'chief: a gone model at a turn is a failed turn'
@@ -670,17 +674,6 @@ find = '''            if let Some(delivering) = delivering {
 replace = ''
 
 [[plant]]
-name = 'chief: a chief is held for a deleted agent'
-meant = "a_chief_that_still_names_a_deleted_agent_is_told_its_changed_role_all_the_same"
-runs = ["chm-role"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''        participant.role != "chief"
-            && participant'''
-replace = '        participant'
-
-[[plant]]
 name = 'chief: a chief may name no model'
 meant = "switches_no_chief_to_a_harness_with_no_model_named"
 runs = ["chm-switching"]
@@ -709,16 +702,6 @@ runs = ["chm-daemon"]
 file = "crates/cf-daemon/src/page/chief.rs"
 find = '    let Some(listing) = kept.filter(|listing| !listing.models.is_empty()) else {'
 replace = '    let Some(listing) = kept.filter(|_| false) else {'
-
-[[plant]]
-name = "chief: a chief's agent is missing on the board"
-meant = "a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why_on_its_lanes"
-runs = ["chm-daemon-reading"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/board.rs"
-find = '            Some(agent) if participant.member.is_none() && participant.role != "chief" => {'
-replace = '            Some(agent) if participant.member.is_none() => {'
 
 [[plant]]
 name = "chief: the page marks no contributor model in the chief's list"
@@ -769,8 +752,11 @@ runs = ["chm-page-unread"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''    if (this.#picker.kind !== '' && this.#picker.model() !== undefined) return true'''
-replace = '''    if (this.#picker.kind !== '') return true'''
+find = '''
+    if (this.#picker.kind !== '' && model !== undefined) {'''
+replace = '''
+    if (this.#picker.kind !== '' && model === undefined) return true
+    if (this.#picker.kind !== '' && model !== undefined) {'''
 
 [[plant]]
 name = "chief: the card says the model picked, not the one the window ran on"

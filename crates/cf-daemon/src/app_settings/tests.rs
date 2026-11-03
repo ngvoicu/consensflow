@@ -7,6 +7,8 @@ use tempfile::TempDir;
 
 use super::*;
 
+mod released;
+
 /// A home whose settings file holds `bytes`.
 fn file_with(bytes: &[u8]) -> (TempDir, PathBuf) {
     let home = tempdir().unwrap();
@@ -346,4 +348,87 @@ fn a_file_made_now_is_one_the_released_3_0_4_reads() {
         std::fs::read_to_string(&path).unwrap(),
         "{\n  \"schemaVersion\": 1,\n  \"agents\": [],\n  \"preferences\": {\n    \"specs\": true\n  },\n  \"specsDefaults\": {\n    \"folder\": \"docs/specs\"\n  }\n}\n"
     );
+}
+
+#[test]
+fn a_file_this_build_wrote_keeps_the_defaults_once_the_released_3_0_4_has_saved_it() {
+    let home = tempdir().unwrap();
+    let path = home.path().join("agents.json");
+    let settings = SettingsFile::new(path.clone());
+    let set = settings
+        .set_app_specs(&json!({ "on": true, "folder": "docs/specs", "variant": "tdd" }))
+        .unwrap();
+    // 3.0.4 reads the switch where it always did.
+    assert_eq!(
+        released::preferences_of(&read_file(&path).unwrap()),
+        released::Choices {
+            own_harness_only: false,
+            specs: true
+        }
+    );
+    // The human keeps to the harnesses' own models in 3.0.4, which saves its two choices.
+    released::set_preferences(&path, &json!({ "ownHarnessOnly": true }));
+    assert_eq!(settings.app_specs().unwrap(), set);
+    assert_eq!(
+        choices_in(&file_at(&path)),
+        (
+            json!({ "ownHarnessOnly": true, "specs": true }),
+            json!({ "folder": "docs/specs", "variant": "tdd" })
+        )
+    );
+    // 3.0.4 turns specs off for every project: the folder and the variant wait for the day
+    // they are on.
+    released::set_preferences(&path, &json!({ "specs": false }));
+    assert_eq!(
+        settings.app_specs().unwrap(),
+        says(false, Some("docs/specs"), Some(Variant::Tdd))
+    );
+    // And this build writes again what 3.0.4 left, its choice among the rest.
+    settings.set_app_specs(&json!({ "on": false })).unwrap();
+    assert_eq!(
+        settings.app_specs().unwrap(),
+        says(false, Some("docs/specs"), Some(Variant::Tdd))
+    );
+    assert_eq!(
+        file_at(&path)["preferences"],
+        json!({ "ownHarnessOnly": true })
+    );
+}
+
+#[test]
+fn the_human_s_choice_of_specs_for_every_project_is_read_from_the_file_at_each_launch() {
+    let home = tempdir().unwrap();
+    let file = home.path().join("agents.json");
+    let settings = SettingsFile::new(file.clone());
+    let by_default = || cf_engine::seams::AppSettings::app_specs(&settings);
+    // A file that says nothing of it, or none at all, is off and names no folder or variant.
+    assert_eq!(by_default(), AppSpecs::default());
+    // The human turns it on, and the next launch reads it as it is then.
+    let mut document = json!({ "schemaVersion": 1, "agents": [] });
+    document["preferences"] = json!({ "ownHarnessOnly": false, "specs": true });
+    std::fs::write(&file, document.to_string()).unwrap();
+    assert_eq!(by_default(), says(true, None, None));
+    // The folder and the variant every project uses come through the same file.
+    document["specsDefaults"] = json!({ "folder": "docs/specs", "variant": "tdd-html" });
+    std::fs::write(&file, document.to_string()).unwrap();
+    assert_eq!(
+        by_default(),
+        says(true, Some("docs/specs"), Some(Variant::TddHtml))
+    );
+    // Named while specs are off, they wait for the day they are on.
+    document["preferences"] = json!({ "ownHarnessOnly": false });
+    document["specsDefaults"] = json!({ "folder": "plans", "variant": "core-html" });
+    std::fs::write(&file, document.to_string()).unwrap();
+    assert_eq!(
+        by_default(),
+        says(false, Some("plans"), Some(Variant::CoreHtml))
+    );
+    // Anything but true is off, a folder or variant it cannot have is none, and so is a
+    // file that cannot be read.
+    document["preferences"] = json!({ "specs": "yes" });
+    document["specsDefaults"] = json!({ "folder": "../outside", "variant": "html" });
+    std::fs::write(&file, document.to_string()).unwrap();
+    assert_eq!(by_default(), AppSpecs::default());
+    std::fs::write(&file, "{ not json").unwrap();
+    assert_eq!(by_default(), AppSpecs::default());
 }

@@ -95,119 +95,6 @@ find = 'json!({ "error": "not found" })'
 replace = 'json!({ "error": "not-found" })'
 
 [[plant]]
-name = "screens: an agent’s name may begin with any letter"
-meant = "any_other_path_is_the_agents_api_s"
-runs = ["screens-unit"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/mod.rs"
-find = ".is_some_and(|first| first.is_ascii_lowercase())"
-replace = ".is_some_and(|first| first.is_ascii_alphabetic())"
-
-[[plant]]
-name = "screens: an agent added is not told"
-meant = "an_agent_is_added_edited_and_removed_and_each_is_told"
-runs = ["screens-unit"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = '''
-            .map_err(words)?;
-        (self.on_roster_change)()?;
-        Ok(Answer::created(json!({ "agent": agent })))'''
-replace = '''
-            .map_err(words)?;
-        Ok(Answer::created(json!({ "agent": agent })))'''
-
-[[plant]]
-name = "screens: a delete tells before it removes"
-meant = "a_write_the_roster_refuses_is_a_400_in_its_words_and_is_not_told"
-runs = ["screens-unit"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = "        self.agents.roster().remove(name).map_err(words)?;"
-replace = '''
-        (self.on_roster_change)()?;
-        self.agents.roster().remove(name).map_err(words)?;'''
-
-[[plant]]
-name = "screens: a delete removes nothing"
-meant = "corners_screens_005"
-runs = ["daemon-screens"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = "        self.agents.roster().remove(name).map_err(words)?;"
-replace = "        let _ = name;"
-
-[[plant]]
-name = "screens: a delete answers 200"
-meant = "an_agent_is_added_edited_and_removed_and_each_is_told"
-runs = ["screens-unit"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = "Answer::nothing(204)"
-replace = "Answer::nothing(200)"
-
-[[plant]]
-name = "screens: an agent added answers 200"
-meant = "corners_screens_005"
-runs = ["daemon-screens"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = 'Answer::created(json!({ "agent": agent }))'
-replace = 'Answer::ok(json!({ "agent": agent }))'
-
-[[plant]]
-name = "screens: an agent’s edit reads the model before the tier"
-meant = "a_body_that_is_no_object_is_read_as_javascript_read_it"
-runs = ["screens-unit"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = 'let patch = fields(body, "workTier")?;'
-replace = 'let patch = fields(body, "model")?;'
-
-[[plant]]
-name = "screens: an agent that is not offered says notInstalled before hidden (the roster offers them, for the page too)"
-meant = "an_agent_that_cannot_be_offered_is_said_hidden_and_not_installed_in_that_order"
-runs = ["screens-unit"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/roster.rs"
-find = '''
-                fields.insert("hidden".to_owned(), Value::Bool(true));
-                fields.insert("notInstalled".to_owned(), Value::Bool(true));'''
-replace = '''
-                fields.insert("notInstalled".to_owned(), Value::Bool(true));
-                fields.insert("hidden".to_owned(), Value::Bool(true));'''
-
-[[plant]]
-name = "screens: every harness is said installed"
-meant = "the_agents_are_the_catalog_s_as_the_pickers_offer_them"
-runs = ["screens-unit"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = "            .filter(|harness| !missing.contains(harness))"
-replace = "            .filter(|_| true)"
-
-[[plant]]
-name = "screens: the efforts leave a harness out"
-meant = "core_agents_server_006"
-runs = ["daemon-screens"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = "            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))"
-replace = '''
-            .filter(|harness| *harness != Harness::Devin)
-            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))'''
-
-[[plant]]
 name = "screens: a check is looked at again for any refresh"
 meant = "a_check_of_one_harness_is_kept_five_minutes_and_looked_at_again_only_when_asked_to"
 runs = ["screens-unit"]
@@ -270,16 +157,6 @@ find = "    if text.is_empty() {"
 replace = "    if false {"
 
 [[plant]]
-name = "screens: null is a body a roster operation reads"
-meant = "corners_screens_006"
-runs = ["daemon-screens"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/body.rs"
-find = "    property(body, first)?;"
-replace = "    let _ = first;"
-
-[[plant]]
 name = "screens: a body that is no JSON says it in no words of the daemon’s"
 meant = "corners_screens_002"
 runs = ["daemon-screens"]
@@ -298,26 +175,6 @@ runs = ["screens-unit"]
 file = "crates/cf-daemon/src/screens/pages.rs"
 find = "        &js::stringify(&Value::String(token.to_owned())),"
 replace = '        &format!("\"{token}\""),'
-
-[[plant]]
-name = "screens: the version is not put into the page"
-meant = "core_agents_server_003"
-runs = ["daemon-screens"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/pages.rs"
-find = 'AGENTS.replacen("$VERSION", VERSION, 1)'
-replace = 'AGENTS.replacen("$VERSION", "0", 1)'
-
-[[plant]]
-name = "screens: the agents page is not the recorded one"
-meant = "core_agents_server_003"
-runs = ["daemon-screens"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/pages/agents.html"
-find = '<p class="eyebrow eyebrow--section">Define your own</p>'
-replace = '<p class="eyebrow eyebrow--section">Define yours</p>'
 
 [[plant]]
 name = "network: a redirect is followed"
@@ -384,7 +241,7 @@ runs = [
 file = "crates/cf-daemon/src/start.rs"
 find = '''
         env: env.clone(),
-        agents: Rc::clone(&agents),'''
+        admin: HarnessAdmin::new('''
 replace = '''
         env: Env::default(),
-        agents: Rc::clone(&agents),'''
+        admin: HarnessAdmin::new('''

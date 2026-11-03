@@ -236,7 +236,6 @@ mod tests {
             ["test", "integration"],
             ["test", "regressions"],
             ["test", "clis"],
-            ["test", "agents"],
             ["test", "load"],
         ] {
             let command = COMMANDS.iter().find(|command| command.words == words);

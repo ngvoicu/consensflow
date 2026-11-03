@@ -796,6 +796,18 @@ and 2 idle sessions (`cf task list --all`)";
         assert_eq!(listed(&[], &json!([])), "No tasks yet.");
     }
 
+    /// A lane on a harness says in its head the model and effort it runs on, after its role
+    /// (harness-models); a lane that says none is as it was.
+    #[test]
+    fn a_lane_s_head_says_the_model_and_effort_it_runs_on() {
+        let mut opus = lane("opus-high", "worker", &[card(2, "working", Some("opus-high"))]);
+        opus["runsOn"] = json!("Opus · high");
+        let plain = lane("zeus", "worker", &[card(3, "working", Some("zeus"))]);
+        let text = listed(&[], &json!([opus, plain]));
+        let heads: Vec<&str> = text.lines().filter(|line| line.starts_with('@')).collect();
+        assert_eq!(heads, ["@opus-high (worker, Opus · high)", "@zeus (worker)"]);
+    }
+
     /// What `cf task add words…` posted and printed, the board answering with `answer`.
     fn added(words: &[&str], answer: &Value) -> (Option<Value>, String) {
         let api = scripted(vec![reply(201, answer.clone())]);

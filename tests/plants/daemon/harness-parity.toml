@@ -250,8 +250,10 @@ runs = ["live-kit-shim"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine/wrapper.rs"
-find = '''fake | fake-chief) exec {} \"$@\" ;;'''
-replace = '''fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;'''
+find = '''
+{}) exec {} \"$@\" ;;'''
+replace = '''
+{}) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;'''
 
 [[plant]]
 name = "parity env: a Claude window keeps the billing key an rc exports"

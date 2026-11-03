@@ -1,0 +1,309 @@
+# Models only from the harnesses (spec harness-models, T-1187): a member is a harness, a model
+# that harness lists, an effort it lists for that model and a tier the human picks; no bundled
+# list, no nicknames, no saved agents. A member is named by its model and effort (`@opus-high`,
+# the harness in front where that is taken, a number after where that is too: crates/cf-ledger/
+# src/handles.rs); migration 0029 runs every member a ready-made agent named on that agent's model
+# and names it so, its windows after it; a second Add of a model and effort a member runs is roles
+# more for that member; `cf staff` and `cf task list` say what each runs on; a chief's effort is
+# picked as its model's is and given as its harness takes it (Pi's as its thinking, none for
+# Devin). One plant takes one rule out; a test of it fails. Every name holds `harness models:`:
+# `npm run plants:daemon -- "harness models:"` runs them.
+
+[run]
+hm-ledger-handles = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "handles::"]
+hm-ledger-members = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "members_by_model"]
+hm-engine-chief = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "chief_model::"]
+hm-engine-named = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "named_by_model::"]
+hm-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members::"]
+hm-daemon-tasks = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::tasks::"]
+hm-cf-board = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
+hm-cf-task-list = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task::"]
+hm-evals-plan = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "plan"]
+hm-e2e-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
+hm-page-chief = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "asks the chief's effort"]
+hm-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a project in a chosen folder|shows the staff as one row per member"]
+
+[[plant]]
+name = "harness models: a handle another participant has takes a number, not the harness in front"
+meant = "a_taken_handle_puts_the_harness_in_front_then_a_number_after"
+runs = ["hm-ledger-handles", "hm-ledger-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    let with_harness = slug(&[harness, shown, effort]);
+'''
+replace = '''
+    let with_harness = plain.clone();
+'''
+
+[[plant]]
+name = "harness models: a handle leaves the effort out"
+meant = "a_handle_is_the_model_s_name_and_its_effort_in_lowercase_words"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    let plain = slug(&[shown, effort]);
+'''
+replace = '''
+    let plain = slug(&[shown]);
+'''
+
+[[plant]]
+name = "harness models: a model is shown by its id though its harness's list names it"
+meant = "a_model_is_shown_by_its_name_else_its_id_else_as_its_harness_s_default"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        .filter(|name| !name.trim().is_empty())
+'''
+replace = '''
+        .filter(|_| false)
+'''
+
+[[plant]]
+name = "harness models: a member's windows keep their old handles through the migration"
+meant = "migration_0029_runs_each_ready_made_agent_s_member_on_its_model_and_names_it_by_it"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+            let base = format!("{handle}-{own}");
+'''
+replace = '''
+            let base = format!("{}-{own}", member.handle);
+'''
+
+[[plant]]
+name = "harness models: the migration leaves the members of the ready-made agents their nicknames"
+meant = "migration_0029_runs_each_ready_made_agent_s_member_on_its_model_and_names_it_by_it"
+runs = ["hm-ledger-handles", "hm-engine-named"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/schema.rs"
+find = '''
+    if version == 29 {
+        crate::handles::name_members_by_model(db)?;
+    }
+'''
+replace = '''
+    if version == 29 {
+        let _ = crate::handles::name_members_by_model;
+    }
+'''
+
+[[plant]]
+name = "harness models: a member that left comes back as another member"
+meant = "a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_back"
+runs = ["hm-ledger-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                 WHERE project_id = ? AND handle = ? AND left_at IS NOT NULL",
+'''
+replace = '''
+                 WHERE project_id = ? AND handle = ? AND left_at IS NOT NULL AND 0",
+'''
+
+[[plant]]
+name = "harness models: a member is made without a tier"
+meant = "a_member_needs_a_tier_and_a_word_for_an_effort_and_the_staff_a_project_starts_from_says_what_each_runs"
+runs = ["hm-ledger-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        model::require_tier(&self.tier)?;
+        Ok(roles)
+'''
+replace = '''
+        Ok(roles)
+'''
+
+[[plant]]
+name = "harness models: an image designer is taken on any harness"
+meant = "add_member_is_refused_without_a_tier_or_on_what_the_harness_does_not_list"
+runs = ["hm-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''
+    if designer && harness != Harness::Codex {
+'''
+replace = '''
+    if designer && harness != Harness::Codex && false {
+'''
+
+[[plant]]
+name = "harness models: a member is taken with no effort where its model lists some"
+meant = "add_member_is_refused_without_a_tier_or_on_what_the_harness_does_not_list"
+runs = ["hm-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''
+        None if !listed.efforts.is_empty() => {
+'''
+replace = '''
+        None if !listed.efforts.is_empty() && false => {
+'''
+
+[[plant]]
+name = "harness models: a member keeps no name of its model, as its harness's list names it"
+meant = "a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_the_human_chose"
+runs = ["hm-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''
+        model_name: Some(listed.label.clone()),
+'''
+replace = '''
+        model_name: None,
+'''
+
+[[plant]]
+name = "harness models: cf staff says no harness or model id beside a member's model"
+meant = "every_case_but_the_departed_asks_says_and_exits_as_node_did"
+runs = ["hm-cf-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+    format!("{shown} ({}, {id})", js::text(member.get("harnessName")))
+'''
+replace = '''
+    let _ = id;
+    shown
+'''
+
+[[plant]]
+name = "harness models: a lane says nothing of what it runs on"
+meant = "the_board_is_the_open_tasks_and_every_lane_as_summaries"
+runs = ["hm-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+        if participant.harness.is_some() {
+'''
+replace = '''
+        if participant.harness.is_some() && false {
+'''
+
+[[plant]]
+name = "harness models: cf task list leaves what a lane runs on out of its head"
+meant = "a_lane_s_head_says_the_model_and_effort_it_runs_on"
+runs = ["hm-cf-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+                Some(runs_on) => format!(", {runs_on}"),
+'''
+replace = '''
+                Some(_) => String::new(),
+'''
+
+[[plant]]
+name = "harness models: a Pi chief's effort is given as an effort, not its thinking"
+meant = "the_effort_picked_for_a_chief_is_its_launch_s_pi_s_its_thinking_and_devin_s_none"
+runs = ["hm-engine-chief"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''
+            Some("pi") => (None, effort),
+'''
+replace = '''
+            Some("pi") => (effort, None),
+'''
+
+[[plant]]
+name = "harness models: Devin's chief is given an effort beside its model's id"
+meant = "the_effort_picked_for_a_chief_is_its_launch_s_pi_s_its_thinking_and_devin_s_none"
+runs = ["hm-engine-chief"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''
+            Some("devin") => (None, None),
+'''
+replace = '''
+            Some("devin") => (effort, None),
+'''
+
+[[plant]]
+name = "harness models: an eval's rows on one model and effort are a member each"
+meant = "gives_each_staff_harness_two_workers_an_advisor_and_a_reviewer_on_its_cheap_model_all_standard_tier"
+runs = ["hm-evals-plan"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/plan.rs"
+find = '''
+            let same = members.iter_mut().find(|held| {
+'''
+replace = '''
+            let same = members.iter_mut().filter(|_| false).find(|held| {
+'''
+
+[[plant]]
+name = "harness models: the live shim hands the stand-in member's window to the real Claude"
+meant = "a_shim_made_with_servers_gives_the_real_claude_their_file_before_the_flags_that_shut_the_rest_out"
+runs = ["hm-e2e-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''
+        [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL].join(" | "),
+'''
+replace = '''
+        [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL].join(" | "),
+'''
+
+[[plant]]
+name = "harness models: the chief's effort is not sent"
+meant = "asks the chief's effort where its model lists efforts, and sends it with the harness and the model, in New project and Switch chief"
+runs = ["hm-page-chief"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    if (this.#effort.value !== '') picked.effort = this.#effort.value
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "harness models: New project sends a member per role, not one member holding its roles"
+meant = "starts a project in a chosen folder with the chosen chief, the staff ticked from the last one"
+runs = ["hm-page-staff"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+      const key = `${harness} ${model} ${effort ?? ''}`
+'''
+replace = '''
+      const key = `${harness} ${model} ${effort ?? ''} ${role}`
+'''
+
+[[plant]]
+name = "harness models: a member's row says its model's id, not the name its harness gives it"
+meant = "shows the staff as one row per member and role, and adds a member in a role, on a model its harness lists"
+runs = ["hm-page-staff"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+  [modelShown(member), member.harness && harnessOf(member.harness), member.effort, member.tier]
+'''
+replace = '''
+  [member.model, member.harness && harnessOf(member.harness), member.effort, member.tier]
+'''

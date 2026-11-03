@@ -35,7 +35,6 @@ fn a_command_is_reported_by_the_runner_of_its_tests() {
         &["cargo", "xtask", "app", "test", "file_drop"][..],
         &["cargo", "xtask", "app", "test"],
         &["cargo", "xtask", "test", "clis", "--offline"],
-        &["cargo", "xtask", "test", "agents", "--offline"],
     ] {
         assert_eq!(of(suite), Reporter::Nextest, "{suite:?}");
     }

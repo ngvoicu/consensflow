@@ -320,17 +320,6 @@ replace = '''
         &["--entitlements", &entitlements],
 '''
 
-[[plant]]
-name = "deletion: a verb is given the first line of an argument"
-meant = "are_given_every_argument_whole_line_breaks_quotes_and_and_diacritics"
-runs = ["cf-native"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/agent.rs"
-find = "            input.insert(key.to_owned(), Value::from(text));"
-replace = '            input.insert(key.to_owned(), Value::from(text.lines().next().unwrap_or("")));'
-
 # The Node a bare `node` runs on, for an app started before Pi's installer put its own on the
 # PATH (T-34, P3-1), what follows a shim's script (P3-2) and what a Node is (P3-4).
 [[plant]]
