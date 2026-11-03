@@ -80,7 +80,7 @@ replace = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(
 
 [[plant]]
 name = "nothing to stop: a turn a refusal for quota ended is at work"
-meant = "a_task_held_for_its_job_whose_next_turn_is_refused_presses_no_key_and_goes_on_there_at_the_reset"
+meant = "a_pause_whose_turn_a_refusal_for_quota_ended_before_any_look_presses_no_key"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]

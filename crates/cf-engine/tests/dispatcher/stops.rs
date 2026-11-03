@@ -1109,3 +1109,27 @@ fn a_pause_of_a_window_at_work_whose_member_goes_out_meanwhile_is_pressed_while_
         "its rounds go on while its activity says it is out"
     );
 }
+
+#[test]
+fn a_pause_whose_turn_a_refusal_for_quota_ended_before_any_look_presses_no_key() {
+    // The chief's pause asks a stop; the refusal ended the turn before the window was
+    // looked at, and its record reads the turn in flight past it (T-502's reader): the turn
+    // is over, and the stop is paid with no key.
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    let resets_at = after(&context, 2 * 3_600_000);
+    context
+        .adapter
+        .refuse_unsettled("zeus", exhausted(Some(&now(&context)), Some(&resets_at)));
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(context.host.inputs(), Vec::<Value>::new(), "no key");
+    assert!(context.host.killed().is_empty());
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    assert_eq!(context.task(project, 1).task.state, "paused");
+}
