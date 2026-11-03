@@ -153,7 +153,7 @@ impl Dispatcher {
         }
     }
 
-    /// Tells `participant`'s window, a chief's at rest in an open project, of what the
+    /// Tells `participant`'s window, a chief's, at rest in an open project, of what the
     /// human changed of its role since it was last told. Called at a look that found
     /// the window at rest, before the next message goes in: the note written here is
     /// the head of the queue when nothing waits before it.
@@ -163,9 +163,8 @@ impl Dispatcher {
         participant: &ParticipantView,
         record: &Record,
     ) -> Result<(), EngineError> {
-        if participant.role != "chief" || project.state != "open" {
-            return Ok(());
-        }
+        // A window that was launched by a chief's launch has something it was told: a member's,
+        // and a window that is closed, has none.
         if record.window.borrow().news.told.is_none() {
             return Ok(());
         }

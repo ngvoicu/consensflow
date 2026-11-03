@@ -754,3 +754,128 @@ fn a_codex_chief_told_of_a_setting_now_is_not_told_the_same_again_when_it_is_res
         .collect();
     assert_eq!(replacements.len(), 1, "{notes:?}");
 }
+
+#[test]
+fn a_change_that_one_look_finds_and_the_next_does_not_is_told_to_nobody() {
+    let context = made(FirstMessage::Delivered);
+    let project = project_on(&context, "claude-code");
+    let chief = at_rest(&context, &project);
+    // What the app says is read from a file at each look, and a read that fails reads as
+    // specs off: a look that finds the app saying "on" and the next that finds it saying
+    // nothing is no change to tell a chief of.
+    *context.roster.app_specs.borrow_mut() = AppSpecs {
+        on: true,
+        folder: None,
+        variant: None,
+    };
+    context.pass().unwrap();
+    assert!(
+        role_notes(&context, chief).is_empty(),
+        "one look is not enough"
+    );
+    *context.roster.app_specs.borrow_mut() = AppSpecs::default();
+    passes(&context);
+    assert!(role_notes(&context, chief).is_empty());
+    assert!(context.adapter.specmint_placed.borrow().is_empty());
+}
+
+#[test]
+fn a_note_that_waits_behind_a_message_goes_in_when_the_chief_rests_and_is_not_written_again() {
+    let context = made(FirstMessage::Delivered);
+    let project = project_on(&context, "claude-code");
+    let chief = at_rest(&context, &project);
+    says(&context, project.id, Some(true), "", Some(Variant::Core));
+    context.pass().unwrap();
+    // A message comes before the second look: it goes in first, the note waits behind it.
+    context.note(project.id, "human", "chief", "Look at the board.");
+    context.pass().unwrap();
+    let waiting = role_notes(&context, chief);
+    assert_eq!(waiting.len(), 1, "{waiting:?}");
+    assert_eq!(waiting[0].state, "queued");
+    // The chief rests after the message: the note it waits for goes in, the same one.
+    answers(&context, &project);
+    let after = role_notes(&context, chief);
+    assert_eq!(after.len(), 1, "not written again: {after:?}");
+    assert_eq!(after[0].id, waiting[0].id);
+    assert_eq!(after[0].state, "delivered");
+    rests(&context, &project);
+    assert_eq!(role_notes(&context, chief).len(), 1);
+}
+
+#[test]
+fn a_staff_that_changed_while_the_chief_ran_is_still_the_resumes_to_say_whole_though_specs_were_told_now(
+) {
+    let context = with_codex();
+    context.codex.keeps_first_instructions.set(true);
+    context.roles.with_staff.set(true);
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "codex", "agent": "diana" },
+            "staff": [{ "agent": "zeus", "harness": "claude-code", "roles": ["worker"], "tier": "standard" }],
+        }))
+        .unwrap()
+        .expect("the project");
+    passes(&context);
+    let chief = context.id(project.id, "chief");
+    let recorded = |context: &Context| {
+        let ledger = context.ledger.borrow();
+        let current = ledger
+            .current_conversation(chief)
+            .unwrap()
+            .expect("a thread");
+        ledger.conversation_role_text(current.id).unwrap()
+    };
+    assert_eq!(
+        recorded(&context).as_deref(),
+        Some("instructions for chief staff 1")
+    );
+    // A member joins: no note tells the chief of it (`cf staff` shows the staff as it is).
+    context
+        .ledger
+        .borrow_mut()
+        .add_member(
+            project.id,
+            &cf_ledger::NewMember {
+                agent: "athena".to_owned(),
+                harness: "claude-code".to_owned(),
+                designer: false,
+                roles: vec!["advisor".to_owned()],
+                tier: "standard".to_owned(),
+            },
+        )
+        .unwrap();
+    passes(&context);
+    assert!(role_notes(&context, chief).is_empty());
+    // Then specs are turned on: the note is delivered, and the conversation is recorded as
+    // told the role it launched with, the specs added: not the staff it was never told.
+    says(&context, project.id, Some(true), "", Some(Variant::Core));
+    passes(&context);
+    assert_eq!(told(&context, chief).len(), 1);
+    let skill =
+        "/consensflow/integrations/specmint/fake/core/.claude/skills/specmint-core/SKILL.md";
+    assert_eq!(
+        recorded(&context).as_deref(),
+        Some(
+            format!("instructions for chief staff 1 with specs: core in .specs at {skill}")
+                .as_str()
+        )
+    );
+    // Its resume says the whole role, with the staff that is now: once.
+    relaunch(&context, project.id);
+    passes(&context);
+    let notes = role_notes(&context, chief);
+    let replacements: Vec<&MessageView> = notes
+        .iter()
+        .filter(|note| note.body.contains("replace the ones you were given then"))
+        .collect();
+    assert_eq!(replacements.len(), 1, "{notes:?}");
+    assert!(
+        replacements[0].body.ends_with(&format!(
+            "instructions for chief staff 2 with specs: core in .specs at {skill}"
+        )),
+        "{}",
+        replacements[0].body
+    );
+}

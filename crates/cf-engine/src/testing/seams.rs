@@ -129,6 +129,9 @@ pub struct FakeRoles {
     /// What a test adds to every text to say the roles were rewritten (a release
     /// of ConsensFlow that changed them): nothing, as no trace of Node's has any.
     pub rewritten: RefCell<String>,
+    /// Whether a chief's text says how many members its staff has, as the real text's table
+    /// of them makes it differ from a staff to another: not, as no trace of Node's has.
+    pub with_staff: Cell<bool>,
     /// How a command starts in every window: the word `cf`, unless a test gives the
     /// windows a path.
     pub cf: RefCell<CfWord>,
@@ -159,6 +162,9 @@ impl Roles for FakeRoles {
             json!([{ "handle": participant.handle, "role": participant.role }]),
             json!(text),
         );
+        if self.with_staff.get() && participant.role == "chief" {
+            text += &format!(" staff {}", crate::roles::staff_of(_project).len());
+        }
         if let Some(specs) = specs {
             text += &format!(
                 " with specs: {} in {} at {}",
