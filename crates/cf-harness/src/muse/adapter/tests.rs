@@ -5,7 +5,7 @@ use cf_base::env::Env;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::contract::{Agent, LaunchId};
+use crate::contract::{Agent, LaunchId, Specs};
 use crate::testing::{finished, Fakes};
 
 const LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
@@ -308,4 +308,55 @@ fn a_specmint_muse_has_installed_serves_only_a_project_that_keeps_its_specs_wher
         muse.specmint(Variant::Core, "docs/specs").unwrap(),
         Skill::Own(copy) if copy != own
     ));
+}
+
+#[test]
+fn a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch_would_have_it() {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.13-R6996.1"));
+    let adapter = adapter(&env);
+    let variant = Variant::Tdd;
+    let Skill::Own(file) = adapter.specmint(variant, "docs/specs").unwrap() else {
+        panic!("a copy of its own for another folder");
+    };
+    assert!(
+        fs::metadata(&file).is_err(),
+        "nothing is written before the window is told"
+    );
+    let skill = Skill::Own(file.clone());
+    let specs = Specs {
+        variant,
+        folder: "docs/specs",
+        skill: &skill,
+    };
+    let id = LaunchId::new(LAUNCH).unwrap();
+    adapter.place_specmint(&specs, &id).unwrap();
+    // No file of the copy sends the chief to `.specs`.
+    let skill_folder = Path::new(&file).parent().unwrap();
+    for entry in fs::read_dir(skill_folder).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            assert!(
+                !fs::read_to_string(&path).unwrap().contains(".specs"),
+                "{}",
+                path.display()
+            );
+        }
+    }
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../skill/specmint")
+                .join(variant.as_str())
+                .join("SKILL.md")
+        )
+        .unwrap()
+        .replace(".specs", "docs/specs"),
+        "the words a launch writes for the folder"
+    );
+    // Told again, it leaves what is there as it is.
+    let first = fs::read(&file).unwrap();
+    adapter.place_specmint(&specs, &id).unwrap();
+    assert_eq!(fs::read(&file).unwrap(), first);
 }

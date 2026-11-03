@@ -4,8 +4,8 @@
 //! beside the human's choice about the roster ([`cf_catalog::Roster::app_specs`]),
 //! and the human's alone, as a project's own word is: the page is the app's, and
 //! neither the agents' API nor the screens' route of the roster's choice says or
-//! takes them. A change applies at a chief's next launch, which reads them as
-//! they are then.
+//! takes them. A change reaches a chief whose window is open at its next rest, in a
+//! note, and any other chief at its next launch, which reads them as they are then.
 //!
 //! The page is answered what it draws from, whatever it asked: the raw word of
 //! the app (what Settings shows and edits), what a project that names none then

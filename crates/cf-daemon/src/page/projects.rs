@@ -144,7 +144,8 @@ pub(super) async fn describe(page: &Page, body: Body<'_>) -> Result<Fields, Said
 /// looked for. `rules` that are left out, `null` or blank take them away. Only
 /// the page writes them: no route of the agents' API does, so no `cf` command,
 /// the chief's or a member's, changes them. Every window of the project is given
-/// them when it next starts (the engine's `roles::with_staff_rules`).
+/// them when it next starts (the engine's `roles::with_staff_rules`), and a chief whose
+/// window is open is told at its next rest, in a note (the engine's `role_news`).
 pub(super) async fn rules(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let rules = parse_staff_rules(body.get("rules"))?;
     let project = page

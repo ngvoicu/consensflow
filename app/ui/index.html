@@ -192,7 +192,7 @@
   <dialog id="specs-dialog" class="settings" aria-labelledby="specs-title">
     <form class="dialog-form">
       <h2 id="specs-title">Specs</h2>
-      <p class="dialog-help">With specs on, a chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. A project's own Specs settings win over these. A change reaches a chief when it next starts: after Resume, or when you switch the chief.</p>
+      <p class="dialog-help">With specs on, a chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. A project's own Specs settings win over these. A change reaches a chief whose window is open as soon as it is at rest, and any other when it next starts: after Resume, or when you switch the chief.</p>
       <label class="check"><input type="checkbox" name="on">Plan big work as specs in every project that doesn't say otherwise</label>
       <label>Specs folder, inside the project
         <input name="folder" autocomplete="off" spellcheck="false">
@@ -304,7 +304,7 @@
            of the project is given after its role; written here only. -->
       <fieldset class="project-section staff-rules">
         <legend>Rules for the staff</legend>
-        <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief sees them as what every member already has, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. A change reaches each window when it next starts: a new task's window, or after Resume.</p>
+        <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief sees them as what every member already has, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. A change reaches the chief as soon as it is at rest, and each other window when it next starts: a new task's window, or after Resume.</p>
         <label>The rules<textarea name="staff-rules" rows="8" spellcheck="false" aria-describedby="staff-rules-count"></textarea></label>
         <p class="staff-rules-count" id="staff-rules-count" aria-live="polite"></p>
         <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
@@ -365,7 +365,7 @@
     </fieldset>
     <fieldset class="project-section project-specs">
       <legend>Specs</legend>
-      <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, in Specs. <span data-live>A change reaches the chief when it next starts: after Resume, or when you switch the chief.</span></p>
+      <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, in Specs. <span data-live>A change reaches the chief as soon as it is at rest if its window is open, else when it next starts: after Resume, or when you switch the chief.</span></p>
       <label>Specs
         <select name="specs">
           <option value="follow">Follow the app's setting</option>

@@ -16,7 +16,8 @@
 //! leaves for it (`resume`), the human's wake-up calls, which nudge a chief
 //! at rest (`wake_ups`), and a role that changed under a conversation whose
 //! harness keeps its first instructions, which its resumed window is told in a
-//! message (`role_change`).
+//! message (`role_change`), and a chief at rest whose specs or rules for the staff the
+//! human changed under its open window, which it is told in a note (`role_news`).
 //!
 //! Work runs as Node's did ([`crate::runtime`]): a piece of work is begun
 //! where JavaScript called it, and what JavaScript did not await goes on

@@ -2,9 +2,9 @@
 //! on when it says so, or says nothing and the human turned them on for every
 //! project, and they are kept in the folder and planned with the variant the
 //! project names, else the ones the human named for every project, else the
-//! documented ones (`cf_proto::specs`); only its chief is given them, and only
-//! at a launch, which is when a change of the setting applies (a Resume, a
-//! switch).
+//! documented ones (`cf_proto::specs`); only its chief is given them. They are in the
+//! text of a launch (a Resume, a switch), and a chief whose window is open when the
+//! setting changes is told in a note at its next rest (`role_news`).
 //! The harness says where its window finds the Specmint skill of the project's
 //! variant and folder ([`Adapter::specmint`]); that place is named in the chief's role
 //! text ([`ProjectSpecs`]) and given the adapter, which has the skill there,

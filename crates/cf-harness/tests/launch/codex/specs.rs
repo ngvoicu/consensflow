@@ -8,7 +8,7 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::path;
-use cf_harness::contract::{Adapter, Skill};
+use cf_harness::contract::{Adapter, LaunchId, Skill, Specs};
 use cf_harness::testing::unrooted;
 use cf_proto::specs::Variant;
 
@@ -213,4 +213,43 @@ fn a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_n
         words,
         "not touched"
     );
+}
+
+#[test]
+fn a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch_would_have_it() {
+    let home = Home::new();
+    let (adapter, _fakes) = adapter(&home);
+    let variant = Variant::Tdd;
+    let Skill::Own(file) = adapter.specmint(variant, "docs/specs").unwrap() else {
+        panic!("a copy of its own for another folder");
+    };
+    assert!(
+        fs::metadata(&file).is_err(),
+        "nothing is written before the window is told"
+    );
+    let skill = Skill::Own(file.clone());
+    let specs = Specs {
+        variant,
+        folder: "docs/specs",
+        skill: &skill,
+    };
+    let id = LaunchId::new(LAUNCH).unwrap();
+    adapter.place_specmint(&specs, &id).unwrap();
+    kept::names_only(&file, "docs/specs");
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../skill/specmint")
+                .join(variant.as_str())
+                .join("SKILL.md")
+        )
+        .unwrap()
+        .replace(".specs", "docs/specs"),
+        "the words a launch writes for the folder"
+    );
+    // Told again, it leaves what is there as it is.
+    let first = fs::read(&file).unwrap();
+    adapter.place_specmint(&specs, &id).unwrap();
+    assert_eq!(fs::read(&file).unwrap(), first);
 }
