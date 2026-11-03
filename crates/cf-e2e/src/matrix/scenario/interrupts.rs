@@ -277,8 +277,10 @@ pub fn interrupts() -> Vec<Scenario> {
         scenario(
             "edit-open",
             vec![
-                run!("W", "task add --tier standard :: SLEEP 10 Reply with exactly: W_DONE", |snapshot, bindings| {
-                    is(snapshot, bindings, "W", 0, &["working"])
+                // W works long enough for a loaded Windows machine's window to be seen at it
+                // (T-1195: zeewin2's half of the matrix missed a 10 s turn three times).
+                run!("W", "task add --tier standard :: SLEEP 30 Reply with exactly: W_DONE", |snapshot, bindings| {
+                    is(snapshot, bindings, "W", 0, &["working", "done"])
                 }),
                 run!("O needs W", "task add --advice --tier standard --needs {W} :: Reply with exactly: OLD_WORDS", |snapshot, bindings| {
                     is(snapshot, bindings, "O", 0, &["open"])
