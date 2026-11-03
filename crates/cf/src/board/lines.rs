@@ -35,7 +35,7 @@ pub fn a_pool(pool: Option<&Value>, tier: Option<&Value>) -> String {
 /// One task: its number and state, whose it is or who it waits for, who
 /// asked, and its title. What it waits for is said whoever has it: a task given
 /// to a window or to the chief itself waits on the board as one for a tier does,
-/// and `cf task release` lets it go (T-798).
+/// and `cf task edit T-3 --needs -T-1` lets it go of one (T-798).
 pub fn task_line(task: &Value) -> String {
     let blocked_by = list(task.get("blockedBy"));
     let blocked = if blocked_by.is_empty() {
