@@ -147,6 +147,7 @@ pub fn field() -> Vec<Scenario> {
                             )
                             .map(|_| ())
                     }),
+                    restarts: false,
                     name: "the complex tester leaves the staff",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),

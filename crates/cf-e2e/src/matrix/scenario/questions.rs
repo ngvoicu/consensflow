@@ -36,6 +36,7 @@ pub fn questions() -> Vec<Scenario> {
             "question-ask-answer",
             vec![Step {
                 human: None,
+                restarts: false,
                 name: "A asks",
                 asks: |_| "Put one task on the board for our worker with `cf task add --tier standard \"Ask the chief with cf ask which format to use, JSON or text, then reply with exactly the format you were told.\"`. When its question comes, answer it with `cf answer` and the word JSON. Tell me in one line when its result is back.".to_owned(),
                 stand_in: |_| "CF task add --tier standard :: CF ask :: Which format, JSON or text? REPLY JSON".to_owned(),

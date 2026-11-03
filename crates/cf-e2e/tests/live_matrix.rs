@@ -685,6 +685,91 @@ mod tests {
         holds_but_its_known_reds("field-question-not-retyped");
     }
 
+    #[test]
+    fn field_hold_notes() {
+        holds_but_its_known_reds("field-hold-notes");
+    }
+
+    #[test]
+    fn field_harness_dialog() {
+        holds_but_its_known_reds("field-harness-dialog");
+    }
+
+    #[test]
+    fn field_role_told() {
+        holds_but_its_known_reds("field-role-told");
+    }
+
+    #[test]
+    fn field_builds_daemon() {
+        holds_but_its_known_reds("field-builds-daemon");
+    }
+
+    #[test]
+    fn field_run_in_background() {
+        holds_but_its_known_reds("field-run-in-background");
+    }
+
+    #[test]
+    fn field_status_line() {
+        holds_but_its_known_reds("field-status-line");
+    }
+
+    #[test]
+    fn field_resume_at_rest() {
+        holds_but_its_known_reds("field-resume-at-rest");
+    }
+
+    #[test]
+    fn field_restart_mid_turn() {
+        holds_but_its_known_reds("field-restart-mid-turn");
+    }
+
+    #[test]
+    fn field_quota_out() {
+        holds_but_its_known_reds("field-quota-out");
+    }
+
+    #[test]
+    fn field_quota_account() {
+        holds_but_its_known_reds("field-quota-account");
+    }
+
+    #[test]
+    fn field_trust_git_init() {
+        holds_but_its_known_reds("field-trust-git-init");
+    }
+
+    #[test]
+    fn field_window_closed() {
+        holds_but_its_known_reds("field-window-closed");
+    }
+
+    #[test]
+    fn field_tell_queued() {
+        holds_but_its_known_reds("field-tell-queued");
+    }
+
+    #[test]
+    fn field_failure_reason() {
+        holds_but_its_known_reds("field-failure-reason");
+    }
+
+    #[test]
+    fn field_tell_keeps_work() {
+        holds_but_its_known_reds("field-tell-keeps-work");
+    }
+
+    #[test]
+    fn field_switch_chief() {
+        holds_but_its_known_reds("field-switch-chief");
+    }
+
+    #[test]
+    fn field_reopened_at_rest() {
+        holds_but_its_known_reds("field-reopened-at-rest");
+    }
+
     /// Field report 5's nudges (T-1113): five minutes of wake-up calls a minute apart, too long
     /// for CI's step, run on request:
     /// `cargo test -p cf-e2e --test live_matrix -- --ignored field5_nudges`.

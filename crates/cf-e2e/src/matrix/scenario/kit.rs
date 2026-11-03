@@ -109,6 +109,7 @@ macro_rules! run {
     ($step:literal, $lines:literal, $reached:expr) => {
         Step {
             human: None,
+            restarts: false,
             name: $step,
             asks: |bindings| super::kit::asks(bindings, $lines),
             stand_in: |bindings| super::kit::stand_in(bindings, $lines),

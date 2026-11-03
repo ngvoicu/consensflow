@@ -244,7 +244,45 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     );
     let mut over = None;
     if ready {
-        over = steps(&mut driver, seating, scenario, &id, &mut checks)?;
+        // A step the app is restarted before stops the steps there: the app quits and starts
+        // again on the same home, the human resumes the project, and the steps go on from it
+        // with the bounds and what the human typed so far.
+        let (mut from, mut restarted, mut said) = (0, false, 0);
+        loop {
+            match steps(
+                &mut driver,
+                seating,
+                scenario,
+                &id,
+                &mut checks,
+                (from, restarted),
+                &mut said,
+            )? {
+                Stop::Over(why) => {
+                    over = why;
+                    break;
+                }
+                Stop::Restart(at) => {
+                    let (bounds, typed) = driver.carried();
+                    members = members.restart(log)?;
+                    let resumed = members.resume();
+                    checks.push(Check::new(
+                        "app",
+                        &format!(
+                            "the app started again before step {}, and the project resumed",
+                            at + 1
+                        ),
+                        resumed.is_ok(),
+                        resumed.map_or_else(
+                            |failed| failed.to_string(),
+                            |answer| answer["ok"].to_string(),
+                        ),
+                    ));
+                    driver = Driver::resumed(&members, log, bounds, chief_kind, typed);
+                    (from, restarted) = (at, true);
+                }
+            }
+        }
     }
     let elapsed = driver.bounds.elapsed();
     let asks_in = driver.asks_in();
@@ -482,6 +520,13 @@ pub fn replay(
     )
 }
 
+/// Where the steps stopped: over (and why, where it was ended), or at a step the app is to be
+/// restarted before, by its index.
+enum Stop {
+    Over(Option<String>),
+    Restart(usize),
+}
+
 /// Asks each step and runs the scenario's machine ([`Steps`]) on the board until the step is
 /// reached: why the scenario was ended, where it was. A step that did not go in, or was not
 /// reached, is a check that failed, and the steps after it are not asked.
@@ -491,12 +536,16 @@ fn steps(
     scenario: &Scenario,
     id: &str,
     checks: &mut Vec<Check>,
-) -> Result<Option<String>> {
+    (from, restarted): (usize, bool),
+    said: &mut usize,
+) -> Result<Stop> {
     let mut machine = Steps::new(scenario.deadline, scenario.turns, scenario.facts);
-    let mut said = 0;
-    for (index, step) in scenario.steps.iter().enumerate() {
+    for (index, step) in scenario.steps.iter().enumerate().skip(from) {
+        if step.restarts && !(restarted && index == from) {
+            return Ok(Stop::Restart(index));
+        }
         if let Some(why) = driver.over_now()? {
-            return Ok(Some(why));
+            return Ok(Stop::Over(Some(why)));
         }
         let snapshot = Snapshot::of(driver.members)?;
         let bindings = Bindings::by(&snapshot, scenario.binds);
@@ -522,9 +571,11 @@ fn steps(
             let why = asked
                 .failed
                 .unwrap_or_else(|| "it did not go in".to_owned());
-            return Ok(driver
-                .over_now()?
-                .or(Some(format!("ask {} did not go in: {why}", index + 1))));
+            return Ok(Stop::Over(
+                driver
+                    .over_now()?
+                    .or(Some(format!("ask {} did not go in: {why}", index + 1))),
+            ));
         }
         let what = format!("step {} ({}) was reached", index + 1, step.name);
         loop {
@@ -548,30 +599,30 @@ fn steps(
                     break;
                 }
                 Next::Answer { answer, .. } => {
-                    said += 1;
+                    *said += 1;
                     if question.is_some_and(|question| question.dialog == Some(true)) {
                         driver
                             .log
                             .say(format!("the human answers the chief's dialog: {answer}"));
                         driver.answer_dialog(&snapshot, scenario.facts, &answer)?;
                     } else {
-                        let marker = format!("[matrix {id} answer {said}]");
+                        let marker = format!("[matrix {id} answer {}]", *said);
                         driver.asks("answer", &marker, &answer)?;
                     }
                 }
                 Next::Nudge => {
-                    said += 1;
-                    let marker = format!("[matrix {id} nudge {said}]");
+                    *said += 1;
+                    let marker = format!("[matrix {id} nudge {}]", *said);
                     driver.asks("nudge", &marker, scenario.nudge)?;
                 }
                 Next::End(why) => {
                     checks.push(Check::failed("steps", &what, why.clone()));
-                    return Ok(Some(why));
+                    return Ok(Stop::Over(Some(why)));
                 }
             }
         }
     }
-    Ok(None)
+    Ok(Stop::Over(None))
 }
 
 /// A bound task that failed or was cancelled, but those named in `ends` (whose end is the
