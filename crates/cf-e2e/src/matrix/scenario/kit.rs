@@ -134,6 +134,22 @@ pub(super) fn state<'a>(
 
 /// How long ago, in seconds, the task bound to `name` (its first) first went to `state`; none
 /// while it never did.
+/// How long ago, in seconds, the chief's first call of `action` on the task bound to `name` was
+/// answered; none while it made none.
+pub(super) fn since_call(
+    snapshot: &Snapshot,
+    bindings: &Bindings,
+    name: &str,
+    action: &str,
+) -> Option<i64> {
+    let path = format!("/api/tasks/{}/{action}", bindings.nth(name, 0)?);
+    let at = observe::calls(&snapshot.events)
+        .into_iter()
+        .find(|call| call.participant == "chief" && call.path == path)?
+        .at_ms?;
+    Some((jiff::Timestamp::now().as_millisecond() - at) / 1000)
+}
+
 pub(super) fn since(
     snapshot: &Snapshot,
     bindings: &Bindings,
@@ -351,6 +367,11 @@ mod tests {
         assert_eq!(
             named(&bound, "task cancel {C}"),
             "task cancel (no C task yet)"
+        );
+        // `{B+1}`: the task the chief adds after B's in the same step.
+        assert_eq!(
+            named(&bound, "task add --needs {B+1}"),
+            "task add --needs T-6"
         );
         assert_eq!(
             stand_in(&bound, "task pause {A}\ntask cancel {B}"),

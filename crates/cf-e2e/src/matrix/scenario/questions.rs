@@ -72,7 +72,7 @@ pub fn questions() -> Vec<Scenario> {
             "question-in-last-words",
             vec![run!(
                 "A",
-                "task add --tier standard :: SAY The parser is half done. Should I keep the old output format, or switch to JSON?",
+                "task add --tier standard :: SAY Should I continue with the live A/B runs and the packet/socket capture, or stop here so you can review the findings first?",
                 |snapshot, bindings| {
                     bindings.nth("A", 0).is_some()
                         && !is(snapshot, bindings, "A", 0, &["queued", "working"])

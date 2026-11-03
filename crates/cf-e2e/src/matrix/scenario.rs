@@ -380,7 +380,8 @@ mod tests {
         ]);
         let all = all();
         for scenario in &all {
-            for step in &scenario.steps {
+            // A step the human does on the page asks the chief nothing.
+            for step in scenario.steps.iter().filter(|step| step.human.is_none()) {
                 let asks = (step.asks)(&bound);
                 assert!(
                     !asks.contains('\n') && !asks.is_empty(),

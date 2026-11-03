@@ -15,7 +15,7 @@ use crate::live::report::Check;
 use crate::matrix::observe::{Bind, Is};
 use crate::matrix::oracle::{self, Answered, Judged};
 
-use super::kit::{answered, brief_after, called, is, run, scenario, since};
+use super::kit::{answered, brief_after, called, is, run, scenario, since, since_call};
 use super::{Extra, Known, Scenario, Step};
 
 const T1108: &str =
@@ -252,7 +252,13 @@ pub fn field() -> Vec<Scenario> {
                 steps.push(run!(
                     "accept A",
                     "task accept {A} :: I checked it by hand: the work is in",
-                    |snapshot, bindings| { called(snapshot, bindings, "A", "accept", 1) }
+                    // B, released by A's acceptance, is given the time to go in and answer.
+                    |snapshot, bindings| {
+                        answered(snapshot, bindings, "B", 0)
+                            || (called(snapshot, bindings, "A", "accept", 1)
+                                && since_call(snapshot, bindings, "A", "accept")
+                                    .is_some_and(|seconds| seconds >= 15))
+                    }
                 ));
                 steps
             },
