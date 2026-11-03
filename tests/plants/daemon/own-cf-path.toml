@@ -77,11 +77,11 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/staff.md"
 find = '''
-the evidence, and anything left open. If you cannot go on without an answer,
-ask with `{{cf}} ask "…"` and end your turn;'''
+complete: what you did, the evidence, and anything left open. If you cannot go
+on without an answer, ask with `{{cf}} ask "…"` and end your turn; the answer'''
 replace = '''
-the evidence, and anything left open. If you cannot go on without an answer,
-ask with `cf ask "…"` and end your turn;'''
+complete: what you did, the evidence, and anything left open. If you cannot go
+on without an answer, ask with `cf ask "…"` and end your turn; the answer'''
 
 [[plant]]
 name = "own cf path: the chief's command table says the word cf"
@@ -100,8 +100,10 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "Record what you did with `{{cf}} task done T-3"
-replace = "Record what you did with `cf task done T-3"
+find = """Record what you did with
+   `{{cf}} task done`"""
+replace = """Record what you did with
+   `cf task done`"""
 
 [[plant]]
 name = "own cf path: a chief's text is given the word cf in place of the path"
@@ -224,8 +226,8 @@ runs = ["engine-text-delivery"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = 'format!("\n\nDecide with: {cf} task accept T-{task} · {cf} task reopen T-{task} \"…\"")'
-replace = 'format!("\n\nDecide with: cf task accept T-{task} · cf task reopen T-{task} \"…\"")'
+find = '"\n\n{beside}Decide with: {cf} task accept T-{task} · {cf} task reopen T-{task} \"…\""'
+replace = '"\n\n{beside}Decide with: cf task accept T-{task} · cf task reopen T-{task} \"…\""'
 
 [[plant]]
 name = "own cf path: the command that reads a cut message says the word cf"
