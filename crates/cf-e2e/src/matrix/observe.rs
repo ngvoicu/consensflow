@@ -198,6 +198,8 @@ impl Snapshot {
 pub enum Is {
     Pool(&'static str),
     After(&'static str),
+    /// The chief's own step (`cf task add --self`): in no pool, the chief's, for the chief.
+    Own,
 }
 
 /// How a logical task is bound: its name, what it is, and who asked for it.
@@ -257,6 +259,7 @@ impl Bindings {
                 .filter(|task| task["requester"] == bind.requester)
                 .filter(|task| match bind.is {
                     Is::Pool(pool) => task["pool"] == pool,
+                    Is::Own => task["pool"].is_null() && task["assignee"] == "chief",
                     Is::After(earlier) => {
                         let did = bound
                             .of_name(earlier)
@@ -338,12 +341,19 @@ pub fn calls(events: &[Value]) -> Vec<Call> {
 /// The message that carried task `number`'s brief into its window, the first: its id, as the
 /// daemon's events say it.
 pub fn brief_message(events: &[Value], number: i64) -> Option<i64> {
+    // A pool's task is given its window by `task.assigned`; a follow-up queued for its window
+    // at once (`--after`, `--to`) by `task.created`; one that waited on the board (`--after` a
+    // task at work, `--self --needs`) by `task.state` from `open`. The first is the brief: a
+    // reopen's or a resume's words come later.
     events.iter().find_map(|event| {
-        // A pool's task is given its window by `task.assigned`; a follow-up queued for its
-        // window at once (`--after`, `--to`) by `task.created`.
-        (["task.assigned", "task.created"].contains(&event["kind"].as_str().unwrap_or_default())
-            && event["data"]["task"] == number)
-            .then(|| event["data"]["message"].as_i64())
+        let data = &event["data"];
+        let gives = match event["kind"].as_str().unwrap_or_default() {
+            "task.assigned" | "task.created" => true,
+            "task.state" => data["from"] == "open",
+            _ => false,
+        };
+        (gives && data["task"] == number)
+            .then(|| data["message"].as_i64())
             .flatten()
     })
 }
@@ -621,6 +631,12 @@ mod tests {
             json!({ "kind": "task.created", "data": { "task": 5, "to": "w-a", "message": 9 } }),
         ];
         assert_eq!(brief_message(&created, 5), Some(9));
+        let released = vec![
+            json!({ "kind": "task.opened", "data": { "task": 2, "to": "w-a", "needs": [1] } }),
+            json!({ "kind": "task.state", "data": { "task": 2, "from": "open", "to": "queued", "message": 3 } }),
+            json!({ "kind": "task.state", "data": { "task": 2, "from": "done", "to": "queued", "message": 7 } }),
+        ];
+        assert_eq!(brief_message(&released, 2), Some(3));
         assert_eq!(delivered_at(&events, 7), Some(20));
         assert_eq!(reached_at(&events, 2, "done"), Some(30));
         assert_eq!(reached_at(&events, 2, "accepted"), None);

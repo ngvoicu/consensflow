@@ -17,14 +17,27 @@ use super::machine::Fact;
 use super::observe::{Bind, Bindings, Snapshot, SMOKE};
 use super::oracle::{self, Judged};
 
+mod field;
+mod interrupts;
+mod kit;
+mod order;
 mod phase2;
+mod questions;
 
+pub use field::field;
+pub use interrupts::interrupts;
+pub use order::order;
 pub use phase2::{cancel, core, field6};
+pub use questions::questions;
 
 /// Every scenario the matrix has, by name.
 pub fn all() -> Vec<Scenario> {
     let mut all = vec![smoke(), cancel(), core()];
     all.extend(field6());
+    all.extend(order());
+    all.extend(interrupts());
+    all.extend(questions());
+    all.extend(field());
     all
 }
 
@@ -83,6 +96,9 @@ pub const SMOKE_FACTS: &[Fact] = &[
 /// A step of a scenario.
 #[derive(Debug, Clone, Copy)]
 pub struct Step {
+    /// What the human does on the page instead of asking the chief (a member taken off the
+    /// staff), where the step is that: the board is waited for as for an ask.
+    pub human: Option<fn(&crate::live::members::Members) -> Result<()>>,
     pub name: &'static str,
     /// What the human types to a real chief, after the step's marker, with the tasks bound so
     /// far (a step that names a task names the number the board gave it).
@@ -125,6 +141,24 @@ pub struct Scenario {
     /// apart, never passed, and a red of the scenario once one of them holds (its mark is
     /// then to go).
     pub known: &'static [Known],
+    /// The bound tasks whose failure or cancellation is the scenario's own doing: one of them
+    /// ending so does not end the run, where any other bound task's does.
+    pub ends: &'static [&'static str],
+    /// Variables every window and the daemon are given (the stand-in's own settings), and the
+    /// daemon alone.
+    pub vars: &'static [(&'static str, &'static str)],
+    pub daemon_vars: &'static [(&'static str, &'static str)],
+    /// Members besides the board's five: the stand-in at a tier of its own in a role, added as
+    /// staff as the human adds it.
+    pub extra: &'static [Extra],
+}
+
+/// A member besides a board's five: its agent's id, its one role and its tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Extra {
+    pub agent: &'static str,
+    pub role: &'static str,
+    pub tier: &'static str,
 }
 
 /// A refusal the product must answer the chief with: its call of `action` on the task bound to
@@ -146,6 +180,33 @@ pub struct Known {
 }
 
 impl Scenario {
+    /// The same scenario, with the bound tasks `ends` named as those whose failure or
+    /// cancellation is its own doing.
+    #[must_use]
+    pub fn ending(mut self, ends: &'static [&'static str]) -> Self {
+        self.ends = ends;
+        self
+    }
+
+    /// The same scenario, its windows and daemon given `vars`, and its daemon alone `daemon_vars`.
+    #[must_use]
+    pub fn with_vars(
+        mut self,
+        vars: &'static [(&'static str, &'static str)],
+        daemon_vars: &'static [(&'static str, &'static str)],
+    ) -> Self {
+        self.vars = vars;
+        self.daemon_vars = daemon_vars;
+        self
+    }
+
+    /// The same scenario, with members besides the board's five.
+    #[must_use]
+    pub fn with_extra(mut self, extra: &'static [Extra]) -> Self {
+        self.extra = extra;
+        self
+    }
+
     /// The scenario called `name`.
     pub fn named(name: &str) -> Result<Self> {
         let all = all();
@@ -204,6 +265,7 @@ pub fn smoke() -> Scenario {
         fixture: vec![("greet.cjs", GREET), ("check.cjs", CHECK)],
         steps: vec![
             Step {
+                human: None,
                 name: "advice",
                 asks: |_| {
                     "This project has greet.cjs and check.cjs: `node check.cjs` prints OK once greet(\"Ada\") returns exactly \"Hello, Ada!\", and it does not yet. Before anything changes, get advice: put one advice task on the board for our advisor, with `cf task add --advice --tier standard \"...\"`, asking how greet.cjs should change so that the check passes. Every member of our staff is at tier standard. Change no file yourself, ask me nothing, and tell me in one line when the advice is back.".to_owned()
@@ -214,6 +276,7 @@ pub fn smoke() -> Scenario {
                 reached: |snapshot, bindings| answered(snapshot, bindings, "advice"),
             },
             Step {
+                human: None,
                 name: "change",
                 asks: |_| {
                     "Now have our worker make that change: put one task on the board with `cf task add --tier standard \"...\"` to change greet.cjs so that `node check.cjs` prints OK, leaving check.cjs as it is. Do not make the change yourself, and tell me in one line when the worker's result is back.".to_owned()
@@ -224,6 +287,7 @@ pub fn smoke() -> Scenario {
                 reached: |snapshot, bindings| answered(snapshot, bindings, "change"),
             },
             Step {
+                human: None,
                 name: "review and test",
                 asks: |_| {
                     "Have the change checked: put one review task on the board for our reviewer with `cf task add --review --tier standard \"...\"` to read greet.cjs, and one test task for our tester with `cf task add --test --tier standard \"...\"` to run `node check.cjs` and say what it prints. Tell me in one line when both results are back.".to_owned()
@@ -236,6 +300,7 @@ pub fn smoke() -> Scenario {
                 },
             },
             Step {
+                human: None,
                 name: "accept",
                 asks: |_| {
                     "If the review and the test found nothing wrong, accept the four tasks: the advice, the change, the review and the test, each with `cf task accept`. Tell me in one line when they are accepted.".to_owned()
@@ -261,6 +326,10 @@ pub fn smoke() -> Scenario {
         refusals: &[],
         checks: smoke_checks,
         known: &[],
+        ends: &[],
+        vars: &[],
+        daemon_vars: &[],
+        extra: &[],
     }
 }
 

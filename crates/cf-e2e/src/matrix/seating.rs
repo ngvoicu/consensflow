@@ -222,6 +222,11 @@ pub fn plan_text() -> String {
     text
 }
 
+/// The roster row of a stand-in member besides a board's five: the agent `agent` at `tier`.
+pub fn stand_in_row(agent: &str, tier: &str) -> Value {
+    json!({ "id": agent, "kind": "claude-code", "model": STAND_IN_WORKER_MODEL, "workTier": tier })
+}
+
 /// The five positions of a board and who sits in each.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seating {

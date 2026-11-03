@@ -213,7 +213,13 @@ mod tests {
             seating: Seating::stand_ins(),
             scenario,
             stand_in: Path::new(FAKE_AGENT),
-            reports: reports.to_path_buf(),
+            // `--keep` (CONSENSFLOW_LIVE_KEEP) keeps a stand-in run's evidence where a real
+            // run's goes, for a person to read.
+            reports: if live::keep_requested() {
+                checkout::path(REPORTS)
+            } else {
+                reports.to_path_buf()
+            },
             owner: Owner::look(&[], &[]),
             replay_of: None,
         };
@@ -487,7 +493,7 @@ mod tests {
     /// A subcase of field report 6 on the stand-ins: no red but its known ones, and each known
     /// one still red (none passes unseen: a known red that holds is a red of its own, until its
     /// mark goes when I-7 lands).
-    fn field6_holds_but_its_known_reds(name: &str) {
+    fn holds_but_its_known_reds(name: &str) {
         let reports = tempfile::tempdir().unwrap();
         let scenario = Scenario::named(name).unwrap();
         let marks = scenario.known.len();
@@ -511,31 +517,126 @@ mod tests {
 
     #[test]
     fn field6_done_predecessor() {
-        field6_holds_but_its_known_reds("field6-done-predecessor");
+        holds_but_its_known_reds("field6-done-predecessor");
     }
 
     #[test]
     fn field6_acceptance_releases() {
-        field6_holds_but_its_known_reds("field6-acceptance-releases");
+        holds_but_its_known_reds("field6-acceptance-releases");
     }
 
     #[test]
     fn field6_cancel_done() {
-        field6_holds_but_its_known_reds("field6-cancel-done");
+        holds_but_its_known_reds("field6-cancel-done");
     }
 
     #[test]
     fn field6_cancel_with_waiter() {
-        field6_holds_but_its_known_reds("field6-cancel-with-waiter");
+        holds_but_its_known_reds("field6-cancel-with-waiter");
     }
 
     #[test]
     fn field6_accepted_bypass() {
-        field6_holds_but_its_known_reds("field6-accepted-bypass");
+        holds_but_its_known_reds("field6-accepted-bypass");
     }
 
     #[test]
     fn field6_paused_holder() {
-        field6_holds_but_its_known_reds("field6-paused-holder");
+        holds_but_its_known_reds("field6-paused-holder");
+    }
+
+    #[test]
+    fn order_after_working() {
+        holds_but_its_known_reds("order-after-working");
+    }
+
+    #[test]
+    fn field2_needs_repeated() {
+        holds_but_its_known_reds("field2-needs-repeated");
+    }
+
+    #[test]
+    fn order_before() {
+        holds_but_its_known_reds("order-before");
+    }
+
+    #[test]
+    fn order_self_needs() {
+        holds_but_its_known_reds("order-self-needs");
+    }
+
+    #[test]
+    fn pause_resume_mid_turn() {
+        holds_but_its_known_reds("pause-resume-mid-turn");
+    }
+
+    #[test]
+    fn pause_resume_mid_tool() {
+        holds_but_its_known_reds("pause-resume-mid-tool");
+    }
+
+    #[test]
+    fn field8_tell_resume() {
+        holds_but_its_known_reds("field8-tell-resume");
+    }
+
+    #[test]
+    fn cancel_each_state() {
+        holds_but_its_known_reds("cancel-each-state");
+    }
+
+    #[test]
+    fn edit_open() {
+        holds_but_its_known_reds("edit-open");
+    }
+
+    #[test]
+    fn finish_each_state() {
+        holds_but_its_known_reds("finish-each-state");
+    }
+
+    #[test]
+    fn question_ask_answer() {
+        holds_but_its_known_reds("question-ask-answer");
+    }
+
+    #[test]
+    fn question_in_last_words() {
+        holds_but_its_known_reds("question-in-last-words");
+    }
+
+    #[test]
+    fn question_advisor_answer() {
+        holds_but_its_known_reds("question-advisor-answer");
+    }
+
+    #[test]
+    fn field1_tier_fallback() {
+        holds_but_its_known_reds("field1-tier-fallback");
+    }
+
+    #[test]
+    fn field3_accept_failed() {
+        holds_but_its_known_reds("field3-accept-failed");
+    }
+
+    #[test]
+    fn field4_busy_model() {
+        holds_but_its_known_reds("field4-busy-model");
+    }
+
+    #[test]
+    fn field5_notices() {
+        holds_but_its_known_reds("field5-notices");
+    }
+
+    #[test]
+    fn field7_never_began() {
+        holds_but_its_known_reds("field7-never-began");
+    }
+
+    #[test]
+    fn pause_keeps_work() {
+        holds_but_its_known_reds("pause-keeps-work");
     }
 }

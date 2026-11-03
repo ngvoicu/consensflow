@@ -22,7 +22,7 @@ use super::machine::{Next, Observation, Steps};
 use super::observe::{self, Bindings, Snapshot};
 use super::oracle::{self, Answered, Judged, Records};
 use super::scenario::{Known, Scenario};
-use super::seating::{Role, Seating};
+use super::seating::{self, Role, Seating};
 
 /// How many lines of each window's screen the evidence keeps.
 const LAST_LINES: usize = 60;
@@ -178,13 +178,34 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     }
 
     let folder_name = format!("matrix-{id}");
-    let plan = seating.plan(&folder_name, &scenario.fixture);
+    let mut plan = seating.plan(&folder_name, &scenario.fixture);
+    for (name, value) in scenario.vars {
+        plan = plan.with_var(name, *value);
+    }
+    for (name, value) in scenario.daemon_vars {
+        plan = plan.with_daemon_var(name, *value);
+    }
+    for extra in scenario.extra {
+        plan = plan.with(seating::stand_in_row(extra.agent, extra.tier));
+    }
     let mut members = Members::start(&plan, stand_in, log)?;
     log.say(format!(
         "the project is open in {}",
         members.folder().display()
     ));
     let mut checks = seating.staff(&mut members);
+    for extra in scenario.extra {
+        let what = format!("{} {} is staff at {}", extra.role, extra.agent, extra.tier);
+        checks.push(match members.add(extra.agent, &[extra.role]) {
+            Ok(tier) => Check::new(
+                "staff",
+                &what,
+                tier == extra.tier,
+                format!("member.add gave {} the tier {tier:?}", extra.agent),
+            ),
+            Err(failed) => Check::failed("staff", &what, failed.to_string()),
+        });
+    }
     log.say("the staff is set up");
     let ready = members.chief_is_idle(log)?;
     checks.push(Check::new(
@@ -222,7 +243,12 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
         members: &members,
         events: snapshot.events.clone(),
     };
-    checks.extend(oracle::asks(&said, scenario.steps.len()));
+    let asked = scenario
+        .steps
+        .iter()
+        .filter(|step| step.human.is_none())
+        .count();
+    checks.extend(oracle::asks(&said, asked));
     let judged = Judged {
         seating,
         snapshot: &snapshot,
@@ -466,8 +492,19 @@ fn steps(
             (step.asks)(&bindings)
         };
         let marker = scenario.marker(id, index);
-        let asked = driver.asks(step.name, &marker, &text)?.clone();
-        if !asked.went_in() {
+        if let Some(human) = step.human {
+            // The human's own act on the page: nothing is typed into the chief's window.
+            driver
+                .log
+                .say(format!("the human, on the page: {}", step.name));
+            human(driver.members)?;
+        }
+        let asked = if step.human.is_some() {
+            None
+        } else {
+            Some(driver.asks(step.name, &marker, &text)?.clone())
+        };
+        if let Some(asked) = asked.filter(|asked| !asked.went_in()) {
             let why = asked
                 .failed
                 .unwrap_or_else(|| "it did not go in".to_owned());
@@ -484,7 +521,7 @@ fn steps(
                 elapsed: driver.bounds.elapsed(),
                 turns: snapshot.total_turns(driver.asks_in()),
                 reached: (step.reached)(&snapshot, &bindings),
-                ended: ended(&snapshot, &bindings),
+                ended: ended(&snapshot, &bindings, scenario.ends),
                 question: question.clone(),
                 settled: settled(&snapshot),
                 progress: progress(&snapshot),
@@ -523,16 +560,25 @@ fn steps(
     Ok(None)
 }
 
-/// A bound task that failed or was cancelled: its name, number and state.
-pub fn ended(snapshot: &Snapshot, bindings: &Bindings) -> Option<(String, i64, String)> {
-    bindings.found.iter().find_map(|(name, numbers)| {
-        numbers.iter().find_map(|number| {
-            let state = snapshot.task(*number)?["state"].as_str()?;
-            ["failed", "cancelled"]
-                .contains(&state)
-                .then(|| ((*name).to_owned(), *number, state.to_owned()))
+/// A bound task that failed or was cancelled, but those named in `ends` (whose end is the
+/// scenario's own doing): its name, number and state.
+pub fn ended(
+    snapshot: &Snapshot,
+    bindings: &Bindings,
+    ends: &[&str],
+) -> Option<(String, i64, String)> {
+    bindings
+        .found
+        .iter()
+        .filter(|(name, _)| !ends.contains(name))
+        .find_map(|(name, numbers)| {
+            numbers.iter().find_map(|number| {
+                let state = snapshot.task(*number)?["state"].as_str()?;
+                ["failed", "cancelled"]
+                    .contains(&state)
+                    .then(|| ((*name).to_owned(), *number, state.to_owned()))
+            })
         })
-    })
 }
 
 /// Whether the board is at rest: the chief idle, no window at work or starting, and nothing

@@ -160,6 +160,13 @@ const NO_LOGIN: &str =
 /// What a window the provider refuses says, in the record Claude writes for it.
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
 
+/// What Claude Code writes of a turn its provider refused for good, its model unknown to it.
+const GONE: &str = "API Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"model: claude-gone does not exist\"}}";
+
+/// What Claude Code writes of a turn its provider refused for a moment, its model overloaded
+/// (Anthropic's 529).
+const BUSY: &str = "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}";
+
 /// The meta prompt Claude Code sends by itself once a refused account has quota
 /// again (2.1.278 and later; this Mac's transcripts).
 const AUTO_CONTINUE: &str =
@@ -765,6 +772,27 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         },
     };
     steps::write(records, pid, &window.session, &worked).map_err(failed)?;
+    // A turn that works at a pace writes a step, works a while, and writes the next: an
+    // Escape in one of the whiles stops it there.
+    let reply = match reply {
+        Reply::Worked(steps, gap, answer) => {
+            let mut stopped = false;
+            for step in &steps {
+                steps::write(records, pid, &window.session, std::slice::from_ref(step))
+                    .map_err(failed)?;
+                if window.stop.work(gap) {
+                    stopped = true;
+                    break;
+                }
+            }
+            if stopped {
+                Reply::Stopped
+            } else {
+                Reply::Text(answer)
+            }
+        }
+        other => other,
+    };
     // The message id numbers the records so far, this one not yet among them.
     let id = format!("{}-message-{pid}-{}", window.session, records.ordinal());
     match reply {
@@ -779,6 +807,30 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     json!({
                         "type": "user",
                         "message": { "role": "user", "content": [{ "type": "text", "text": INTERRUPTED }] },
+                    }),
+                )
+                .map_err(failed)?;
+        }
+        Reply::ApiError(status) => {
+            // The provider refused with an error of its API: Claude writes it as a record.
+            let (error, words) = if status == 529 {
+                ("overloaded", BUSY)
+            } else {
+                ("invalid_request", GONE)
+            };
+            records
+                .append(
+                    pid,
+                    json!({
+                        "type": "assistant",
+                        "isApiErrorMessage": true,
+                        "apiErrorStatus": status,
+                        "error": error,
+                        "message": {
+                            "id": id,
+                            "role": "assistant",
+                            "content": [{ "type": "text", "text": words }],
+                        },
                     }),
                 )
                 .map_err(failed)?;
@@ -803,7 +855,8 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                 .map_err(failed)?;
             continue_later(records, pid, window).map_err(failed)?;
         }
-        Reply::Text(reply) => {
+        // `Worked` was turned into a text or a stop above.
+        Reply::Text(reply) | Reply::Worked(_, _, reply) => {
             // The work is done (a `cf` it ran has answered) and the answer is
             // not yet written: the turn is open in the record that long.
             wait_as_told("CF_TEST_ANSWER_MS");

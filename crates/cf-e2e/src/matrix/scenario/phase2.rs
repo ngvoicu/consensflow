@@ -149,6 +149,7 @@ fn worker_task(
     reached: fn(&Snapshot, &Bindings) -> bool,
 ) -> Step {
     Step {
+        human: None,
         name,
         asks,
         stand_in,
@@ -179,6 +180,10 @@ fn scenario(
         refusals,
         checks,
         known,
+        ends: &[],
+        vars: &[],
+        daemon_vars: &[],
+        extra: &[],
     }
 }
 
@@ -195,6 +200,7 @@ pub fn cancel() -> Scenario {
     scenario(
         "cancel",
         vec![Step {
+            human: None,
             name: "advice",
             asks: |_| {
                 "Put one advice task on the board with `cf task add --advice --tier standard \"Reply with exactly: ADVICE_OK\"`, cancel it at once with `cf task cancel` and its number, then ask to send it back with `cf task reopen` and its number and the words \"Once more.\". Tell me in one line what each command answered.".to_owned()
@@ -243,6 +249,7 @@ pub fn core() -> Scenario {
                 |snapshot, bindings| answered(snapshot, bindings, "A", 0),
             ),
             Step {
+                human: None,
                 name: "accept A",
                 asks: |bindings| {
                     format!(
@@ -255,6 +262,7 @@ pub fn core() -> Scenario {
                 reached: |snapshot, bindings| is(snapshot, bindings, "A", 0, &["accepted"]),
             },
             Step {
+                human: None,
                 name: "B after A",
                 asks: |bindings| {
                     format!("Give the window that did {} a follow-up with `cf task add --after {} \"Reply with exactly: B_DONE\"`, and tell me in one line when its result is back. Do not accept it yet.", t(bindings, "A", 0), t(bindings, "A", 0))
@@ -268,6 +276,7 @@ pub fn core() -> Scenario {
                 reached: |snapshot, bindings| answered(snapshot, bindings, "B", 0),
             },
             Step {
+                human: None,
                 name: "reopen B",
                 asks: |bindings| {
                     format!("Send {} back with `cf task reopen {} \"Reply with exactly: B_AGAIN\"`, and tell me in one line when its new result is back.", t(bindings, "B", 0), t(bindings, "B", 0))
@@ -285,6 +294,7 @@ pub fn core() -> Scenario {
                 },
             },
             Step {
+                human: None,
                 name: "accept B",
                 asks: |bindings| {
                     format!(
@@ -297,6 +307,7 @@ pub fn core() -> Scenario {
                 reached: |snapshot, bindings| is(snapshot, bindings, "B", 0, &["accepted"]),
             },
             Step {
+                human: None,
                 name: "reopen A",
                 asks: |bindings| {
                     format!("Now try to send the accepted {} back with `cf task reopen {} \"Once more.\"`, and tell me in one line what it answered.", t(bindings, "A", 0), t(bindings, "A", 0))
@@ -389,6 +400,7 @@ fn done_without_work() -> Step {
 /// The step that adds F after the done and undecided D.
 fn follow_up() -> Step {
     Step {
+        human: None,
         name: "F after D",
         asks: |bindings| {
             format!("Without accepting {}, put its follow-up on the board with `cf task add --after {} \"Reply with exactly: F_DONE\"`, and tell me in one line when it is on the board.", t(bindings, "D", 0), t(bindings, "D", 0))
@@ -407,6 +419,7 @@ fn follow_up() -> Step {
 macro_rules! act {
     ($step:literal, $action:literal, $name:literal, $times:literal) => {
         Step {
+            human: None,
             name: $step,
             asks: |bindings| {
                 format!(
@@ -422,6 +435,7 @@ macro_rules! act {
     // An action that takes words (`reopen`): the stand-in's last word, whole.
     ($step:literal, $action:literal, $name:literal, $times:literal, $words:literal) => {
         Step {
+            human: None,
             name: $step,
             asks: |bindings| {
                 format!(
@@ -482,6 +496,7 @@ pub fn field6() -> Vec<Scenario> {
                 done_without_work(),
                 follow_up(),
                 Step {
+                    human: None,
                     name: "accept D",
                     asks: |bindings| {
                         format!("Accept {} with `cf task accept {}`, and tell me in one line when the follow-up's result is back.", t(bindings, "D", 0), t(bindings, "D", 0))
@@ -533,7 +548,7 @@ pub fn field6() -> Vec<Scenario> {
                     until: T1122,
                 },
             ],
-        ),
+        ).ending(&["D"]),
         // While F waits for D, cancelling D is refused (`waited-for`); F cancelled, D is.
         scenario(
             "field6-cancel-with-waiter",
@@ -589,7 +604,7 @@ pub fn field6() -> Vec<Scenario> {
                     until: T1122,
                 },
             ],
-        ),
+        ).ending(&["D", "F"]),
         // A accepted; a newer D in A's window done and undecided; F added after A waits on the
         // board until D is accepted.
         scenario(
@@ -604,6 +619,7 @@ pub fn field6() -> Vec<Scenario> {
                     |snapshot, bindings| answered(snapshot, bindings, "A", 0),
                 ),
                 Step {
+                    human: None,
                     name: "accept A",
                     asks: |bindings| {
                         format!(
@@ -616,6 +632,7 @@ pub fn field6() -> Vec<Scenario> {
                     reached: |snapshot, bindings| is(snapshot, bindings, "A", 0, &["accepted"]),
                 },
                 Step {
+                    human: None,
                     name: "D after A",
                     asks: |bindings| {
                         format!("Give the window that did {} a follow-up with `cf task add --after {} \"Reply only that you stopped before doing any work.\"`, and tell me in one line when its result is back. Do not accept it.", t(bindings, "A", 0), t(bindings, "A", 0))
@@ -629,6 +646,7 @@ pub fn field6() -> Vec<Scenario> {
                     reached: |snapshot, bindings| answered(snapshot, bindings, "after A", 0),
                 },
                 Step {
+                    human: None,
                     name: "F after A",
                     asks: |bindings| {
                         format!("Without accepting that follow-up, give the window another one with `cf task add --after {} \"Reply with exactly: F_DONE\"`, and tell me in one line when it is on the board.", t(bindings, "A", 0))
@@ -642,6 +660,7 @@ pub fn field6() -> Vec<Scenario> {
                     reached: |snapshot, bindings| left_the_queue(snapshot, bindings, "after A", 1),
                 },
                 Step {
+                    human: None,
                     name: "accept D",
                     asks: |bindings| {
                         format!("Accept {} with `cf task accept {}`, and tell me in one line when the other follow-up's result is back.", t(bindings, "after A", 0), t(bindings, "after A", 0))
@@ -688,6 +707,7 @@ pub fn field6() -> Vec<Scenario> {
             vec![
                 done_without_work(),
                 Step {
+                    human: None,
                     name: "P after D",
                     asks: |bindings| {
                         format!("Without accepting {}, give its window a follow-up with `cf task add --after {} \"Work for two minutes, then reply with exactly: P_DONE\"`, and tell me in one line when it is at work.", t(bindings, "D", 0), t(bindings, "D", 0))
@@ -701,6 +721,7 @@ pub fn field6() -> Vec<Scenario> {
                     reached: |snapshot, bindings| is(snapshot, bindings, "P", 0, &["working"]),
                 },
                 Step {
+                    human: None,
                     name: "pause P",
                     asks: |bindings| {
                         format!(
@@ -753,6 +774,6 @@ pub fn field6() -> Vec<Scenario> {
                     until: T1122,
                 },
             ],
-        ),
+        ).ending(&["D"]),
     ]
 }

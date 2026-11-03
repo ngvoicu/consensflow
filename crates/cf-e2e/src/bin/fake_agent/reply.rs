@@ -1,6 +1,9 @@
 //! What the window answers a message with. Every message is one turn.
 //!
 //! - `Reply with exactly: X` answers X.
+//! - A line `SAY <words>` answers the words as they stand, with their spaces, in one
+//!   line: a worker whose last words are any words a case needs (T-1119: a question,
+//!   a wait), where `Reply with exactly` answers one word.
 //! - A line `SAVED <file>[,<file>...] <words>` is an image designer's turn: it saves a
 //!   picture under each name in the window's folder and answers the absolute path of
 //!   each, a line apiece, and then the words, as the designer's role asks its result
@@ -71,10 +74,19 @@
 //!   starts them so and goes on with `rest` as the line it was given, as a turn does
 //!   that starts agents and works on (T-604's, 2026-10-25): an Escape or a refusal
 //!   then ends a turn whose agents still run, and whose record counts none of them.
+//! - A line `PACED <n> <seconds> <words>` is a turn that works through `n` steps, each a message
+//!   that calls a tool, with `seconds` between one and the next, as the record of a turn at
+//!   work grows (an Escape in one of them stops it there), and then answers the words. Unlike
+//!   `STEPS`, which writes its steps at once, it can follow `REPLY … THEN`: a window that
+//!   answers the chief's tell and carries on with its work, as the field's did (T-1139).
 //! - A line `STEPS <n> <words>` is a turn that writes `n` lines of progress, each a
 //!   message that calls a tool, before its answer, and `CLAUDE-JOB [--silent] <seconds>
 //!   <words> :: <report>` a turn that starts a job in the background as Claude Code does,
 //!   whose end wakes the window with a turn that answers the report (`steps` says how).
+//! - A line `MODEL-BUSY` is a turn its provider refuses for a moment, its model overloaded:
+//!   Claude's 529 record, as fake Codex's `MODEL-BUSY` is its `server_overloaded`; a line
+//!   `MODEL-GONE` one it refuses for good, Claude's 400 record. Only the message that says it
+//!   is refused: what comes after it is answered.
 //! - A task saying `QUOTA-OUT` is refused with a 429, Claude's way, by the
 //!   window whose participant `CF_TEST_QUOTA_OUT` names, for as long as the
 //!   file `CF_TEST_QUOTA_FILE` names is there when it is set (taking it away is
@@ -112,7 +124,7 @@ use serde_json::{json, Value};
 use crate::agents::Agents;
 use crate::background::{until_up, Jobs, Server, THINKING};
 use crate::scripted;
-use crate::steps::Tasks;
+use crate::steps::{Step, Tasks};
 use crate::stop::Stop;
 
 /// How long the shell that detaches a job may take to end: a PowerShell's
@@ -163,8 +175,16 @@ pub enum Reply {
     Text(String),
     /// The provider refuses it: Claude writes the refusal as a record.
     Refused,
+    /// The provider refuses it with an error of its API, which Claude writes as a record: a
+    /// 529 for a model overloaded for a moment (`MODEL-BUSY`), a 400 for one it refuses for
+    /// good (`MODEL-GONE`).
+    ApiError(u16),
     /// An Escape stopped the turn before it answered.
     Stopped,
+    /// The turn works through these steps, a pause after each (an Escape in one of them
+    /// stops it there), and then answers the text: a turn whose record grows while it
+    /// is at work (`PACED`).
+    Worked(Vec<Step>, Duration, String),
 }
 
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever
@@ -282,6 +302,7 @@ fn print_lines(bytes: usize) -> std::io::Result<()> {
 
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
+    static PACED: OnceLock<Regex> = OnceLock::new();
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static HANG: OnceLock<Regex> = OnceLock::new();
     static PRINT: OnceLock<Regex> = OnceLock::new();
@@ -300,6 +321,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static WRITE: OnceLock<Regex> = OnceLock::new();
     static LONG: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static SAY: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
 
     if spent(window) {
@@ -321,6 +343,17 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         .collect();
     if !accepted.is_empty() {
         return Ok(Reply::Text(format!("accepted: {}", accepted.join(" | "))));
+    }
+    if let Some(paced) = pattern::once(&PACED, r"(?m)^PACED (\d+) (\d+) (.+)$").captures(text) {
+        let (steps, seconds): (u64, u64) = match (paced[1].parse(), paced[2].parse()) {
+            (Ok(steps), Ok(seconds)) => (steps, seconds),
+            _ => return Err(format!("PACED {} {}", &paced[1], &paced[2])),
+        };
+        return Ok(Reply::Worked(
+            (1..=steps).map(|at| Step::progress(at, steps)).collect(),
+            Duration::from_secs(seconds),
+            paced[3].to_owned(),
+        ));
     }
     if let Some(slow) = pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         let seconds: u64 = slow[1].parse().map_err(|_| format!("SLEEP {}", &slow[1]))?;
@@ -483,6 +516,16 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
         return written_in(&folder, &write[1], &write[2]).map(Reply::Text);
     }
+    // A model refused for a moment (a 529, Anthropic's overloaded), as fake Codex's
+    // `MODEL-BUSY` is its server_overloaded: the live matrix's field report 4 (T-1112).
+    if text.lines().any(|line| line.trim() == "MODEL-BUSY") {
+        return Ok(Reply::ApiError(529));
+    }
+    // A model its provider refuses for good (a 400): a turn that fails however it is waited
+    // for, the live matrix's field report 5 (T-1113).
+    if text.lines().any(|line| line.trim() == "MODEL-GONE") {
+        return Ok(Reply::ApiError(400));
+    }
     if refused(text, window, pattern::once(&REFUSED, "QUOTA-OUT")) {
         return Ok(Reply::Refused);
     }
@@ -495,6 +538,9 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     if let Some(saved) = pattern::once(&SAVED, r"(?m)^SAVED (\S+) (.+)$").captures(text) {
         let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
         return saved_in(&folder, &saved[1], &saved[2]).map(Reply::Text);
+    }
+    if let Some(said) = pattern::once(&SAY, r"(?m)^SAY (.+)$").captures(text) {
+        return Ok(Reply::Text(said[1].trim_end().to_owned()));
     }
     if let Some(exact) = pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(text) {
         return Ok(Reply::Text(exact[1].to_owned()));
@@ -672,6 +718,27 @@ mod tests {
     }
 
     #[test]
+    fn a_message_with_a_line_model_busy_is_refused_for_a_moment_and_the_next_is_answered() {
+        let busy = reply_to(
+            "[ConsensFlow m-4 \u{b7} T-1 \u{b7} task from @chief]\nMODEL-BUSY",
+            &window(),
+        );
+        assert_eq!(busy, Ok(Reply::ApiError(529)));
+        let gone = reply_to(
+            "[ConsensFlow m-4 \u{b7} T-1 \u{b7} task from @chief]\nMODEL-GONE",
+            &window(),
+        );
+        assert_eq!(gone, Ok(Reply::ApiError(400)));
+        let next = reply_to("Resumed: Go on where you stopped.", &window());
+        assert!(matches!(next, Ok(Reply::Text(_))), "{next:?}");
+        // Words that only name it are no refusal.
+        assert!(matches!(
+            reply_to("Say MODEL-BUSY to me", &window()),
+            Ok(Reply::Text(_))
+        ));
+    }
+
+    #[test]
     fn a_message_that_asks_for_a_word_is_answered_with_it() {
         let reply = reply_to("Reply with exactly: WORKER_OK", &window());
         assert_eq!(text(reply), "WORKER_OK");
@@ -681,6 +748,15 @@ mod tests {
             &window(),
         );
         assert_eq!(text(reply), "ONE_DONE");
+    }
+
+    #[test]
+    fn a_line_that_says_words_is_answered_with_them_whole() {
+        let reply = reply_to(
+            "[ConsensFlow m-4 · T-1 · task from @chief]\nSAY Should I continue, or stop here?",
+            &window(),
+        );
+        assert_eq!(text(reply), "Should I continue, or stop here?");
     }
 
     #[test]
@@ -780,6 +856,37 @@ mod tests {
         assert!(!is_session_of("worker2-amber-pine", "worker"));
         assert!(!is_session_of("chief", "worker"));
         assert!(!is_session_of("worker", "worker-amber"));
+    }
+
+    #[test]
+    fn a_paced_turn_works_through_its_steps_a_pause_after_each_and_answers_the_words_after_them() {
+        let reply = reply_to("PACED 3 2 Reply with exactly: REPORT", &window()).unwrap();
+        let Reply::Worked(steps, gap, answer) = reply else {
+            panic!("a paced turn: {reply:?}");
+        };
+        assert_eq!(gap, Duration::from_secs(2));
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| step.said.as_str())
+                .collect::<Vec<_>>(),
+            ["Step 1 of 3", "Step 2 of 3", "Step 3 of 3"]
+        );
+        assert_eq!(answer, "Reply with exactly: REPORT");
+    }
+
+    #[test]
+    fn a_paced_turn_follows_the_answer_to_a_tell_in_the_same_turn() {
+        // `REPLY … THEN PACED …`: the window answers the chief's tell with `cf answer` and
+        // goes on working (T-1139), the answer to the tell failing here as no `cf` is run.
+        let reply = reply_to(
+            "[ConsensFlow m-3 \u{b7} T-1 \u{b7} question from @chief]\nStop. REPLY ok THEN PACED 2 1 Reply with exactly: END",
+            &window(),
+        )
+        .unwrap();
+        assert!(
+            matches!(reply, Reply::Worked(steps, _, answer) if steps.len() == 2 && answer.ends_with("END"))
+        );
     }
 
     #[test]
