@@ -1416,6 +1416,9 @@ impl Dispatcher {
             // message of its queue, delivered by the rules of every message.
             if participant.role == "chief" {
                 self.queue_wake_up_if_due(project, participant)?;
+                // A setting its role is built from may have changed under it: it is told
+                // now, the note ahead of the wake-up's turn (`role_news`).
+                self.tell_role_news(project, participant, record)?;
             }
             let next = self.next_in_line(record)?;
             // A hold is the head's: a message that left the head of its queue (withdrawn,

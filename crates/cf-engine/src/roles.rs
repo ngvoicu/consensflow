@@ -13,6 +13,7 @@
 //! says it in full (`role_change`).
 
 mod member;
+pub(crate) mod news;
 mod skill;
 mod specs;
 

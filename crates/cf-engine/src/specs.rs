@@ -39,6 +39,11 @@ pub(crate) struct ChiefSpecs {
 }
 
 impl ChiefSpecs {
+    /// What the project says of them.
+    pub(crate) fn setting(&self) -> &SpecsSetting {
+        &self.setting
+    }
+
     /// What the chief's text says of them.
     pub(crate) fn text(&self) -> ProjectSpecs<'_> {
         ProjectSpecs {
@@ -88,6 +93,28 @@ impl Dispatcher {
         })
     }
 
+    /// What `project` says of specs for `participant` now: none for any member, and
+    /// none for a chief whose project has them off. What the app says (whether, the
+    /// folder and the variant) is asked of the roster unless the project says off,
+    /// which nothing the app says could change. A running chief is told when this
+    /// changes under it ([`Dispatcher::tell_role_news`]).
+    pub(crate) fn specs_setting(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Option<SpecsSetting> {
+        if participant.role != "chief" {
+            return None;
+        }
+        let says_off = project.specs.as_ref().and_then(|specs| specs.on) == Some(false);
+        let app = if says_off {
+            AppSpecs::default()
+        } else {
+            self.seams.roster.app_specs()
+        };
+        project.specs_setting(&app)
+    }
+
     /// The specs `participant`'s launch is given in `project`: none for any
     /// member, and none for a chief whose project has them off. What the app
     /// says (whether, the folder and the variant) is asked of the roster unless
@@ -98,16 +125,7 @@ impl Dispatcher {
         participant: &ParticipantView,
         adapter: &dyn Adapter,
     ) -> Result<Option<ChiefSpecs>, EngineError> {
-        if participant.role != "chief" {
-            return Ok(None);
-        }
-        let says_off = project.specs.as_ref().and_then(|specs| specs.on) == Some(false);
-        let app = if says_off {
-            AppSpecs::default()
-        } else {
-            self.seams.roster.app_specs()
-        };
-        let Some(setting) = project.specs_setting(&app) else {
+        let Some(setting) = self.specs_setting(project, participant) else {
             return Ok(None);
         };
         let skill = adapter

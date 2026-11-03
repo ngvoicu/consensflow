@@ -102,6 +102,7 @@ mod resume;
 mod retired_agents;
 mod review;
 mod role_change;
+mod role_news;
 mod schedules;
 mod separate_callbacks;
 mod servers;

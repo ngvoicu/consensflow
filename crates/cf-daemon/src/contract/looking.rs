@@ -10,8 +10,8 @@ use std::rc::Rc;
 
 use cf_engine::seams::Adapters;
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Interrupt, Launch, Observed, Pane, PaneHost, Prepared,
-    Readiness, Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Interrupt, Launch, LaunchId, Observed, Pane, PaneHost,
+    Prepared, Readiness, Skill, Specs, Window, Work,
 };
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
@@ -112,6 +112,10 @@ impl Adapter for LookingAdapter {
 
     fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         self.adapter.specmint(variant, folder)
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        self.adapter.place_specmint(specs, id)
     }
 }
 

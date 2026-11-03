@@ -29,8 +29,8 @@ use super::install::prepare_extension;
 use super::paths;
 use super::record::evidence::working;
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared,
+    Readiness, Records, Skill, Specs, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
@@ -196,6 +196,10 @@ impl Adapter for PiAdapter {
             folder,
             paths::global_specmint(&self.env, variant),
         )
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Pi, &self.env, Some(*specs), id).map(|_| ())
     }
 }
 

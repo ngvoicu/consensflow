@@ -30,6 +30,7 @@ mod pacing;
 mod record;
 mod resume;
 mod role_change;
+mod role_news;
 pub mod roles;
 pub mod runtime;
 mod scheduler;

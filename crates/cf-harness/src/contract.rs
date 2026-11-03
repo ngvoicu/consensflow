@@ -130,6 +130,15 @@ pub trait Adapter {
     /// the same from one launch to the next. An installed copy of any other variant
     /// is no copy of this one, and is left alone.
     fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String>;
+
+    /// Writes ConsensFlow's own copy of the skill `specs` names, for a chief whose
+    /// window is open already and is told of specs while it runs
+    /// ([`Adapter::specmint`] says where it is): the files [`Adapter::prepare`] writes
+    /// for a launch given the same `specs`, in the same place, written whole or not
+    /// at all and left alone where they are there already. Nothing is written where
+    /// the skill is the human's own ([`Skill::Global`]). `id` is the launch of the
+    /// window, which the write's temporary files are named by.
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String>;
 }
 
 /// Where a window finds the Specmint skill of its chief's variant: the file

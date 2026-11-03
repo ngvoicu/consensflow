@@ -383,6 +383,9 @@ impl Dispatcher {
             &role.instructions,
         )?;
         record.delivery.borrow_mut().greeting = Some(note.id);
+        // It says the role as it is now: what a note of a setting's change would say
+        // is said already (`role_news`).
+        self.told_by_greeting(project, participant, record, &role);
         self.changed();
         Ok(())
     }
@@ -426,7 +429,7 @@ impl Dispatcher {
     /// Whether what a launch or a switch put ahead of `record`'s queue (its prelude) is
     /// not done with: its replacement still owed ([`Dispatcher::owed`], a failed one
     /// included, which the next look settles), or the message it displaced still to go.
-    fn prelude_waits(&self, record: &Record) -> Result<bool, EngineError> {
+    pub(crate) fn prelude_waits(&self, record: &Record) -> Result<bool, EngineError> {
         if self.owed(record)?.is_some() {
             return Ok(true);
         }

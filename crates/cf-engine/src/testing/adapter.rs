@@ -23,8 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
-    Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, LaunchId, Opening, Over,
+    Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -256,6 +256,12 @@ pub struct FakeAdapter {
     /// The folder of each of those asks, in the same order: where the project keeps
     /// its specs.
     pub specmint_folders: RefCell<Vec<String>>,
+    /// The copies of the skill it was asked to put in place for a chief whose window
+    /// was open (`adapter.place_specmint`), in order: the variant, the folder and the
+    /// `SKILL.md` each named.
+    pub specmint_placed: RefCell<Vec<(Variant, String, String)>>,
+    /// Why putting a copy in place fails, while the test says so.
+    pub place_fails: RefCell<Option<String>>,
     /// Asks of whether a conversation can be gone on with that the test holds,
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
@@ -376,6 +382,8 @@ impl FakeAdapter {
             first: Cell::new(FirstMessage::Opened),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
+            specmint_placed: RefCell::new(Vec::new()),
+            place_fails: RefCell::new(None),
             specmint_folders: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
             cleared: RefCell::new(Vec::new()),
@@ -1244,5 +1252,20 @@ impl Adapter for Asked {
                 variant.skill_name()
             )),
         })
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. What the fake does is write down what it was asked, or fail as the
+    /// test says.
+    fn place_specmint(&self, specs: &Specs<'_>, _id: &LaunchId) -> Result<(), String> {
+        if let Some(cause) = self.fake.place_fails.borrow().clone() {
+            return Err(cause);
+        }
+        self.fake.specmint_placed.borrow_mut().push((
+            specs.variant,
+            specs.folder.to_owned(),
+            specs.skill.path().to_owned(),
+        ));
+        Ok(())
     }
 }

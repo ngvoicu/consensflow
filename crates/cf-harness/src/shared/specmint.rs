@@ -237,11 +237,23 @@ pub(crate) fn write_own(
     env: &Env,
     launch: &Launch,
 ) -> Result<Option<OwnCopy>, String> {
+    write_own_of(harness, env, launch.specs, launch.id)
+}
+
+/// [`write_own`] for the `specs` of a chief whose window is open already
+/// ([`Adapter::place_specmint`](crate::contract::Adapter::place_specmint)): the same
+/// files in the same place, named by the window's launch `id`.
+pub(crate) fn write_own_of(
+    harness: Harness,
+    env: &Env,
+    specs: Option<Specs>,
+    id: &LaunchId,
+) -> Result<Option<OwnCopy>, String> {
     let Some(Specs {
         variant,
         folder,
         skill: Skill::Own(_),
-    }) = launch.specs
+    }) = specs
     else {
         return Ok(None);
     };
@@ -257,7 +269,7 @@ pub(crate) fn write_own(
         if let Some(above) = file.parent() {
             make_folder(above, 0o700, Mkdir::Promise).map_err(said)?;
         }
-        put_in_place(file, &bytes, launch.id).map_err(said)?;
+        put_in_place(file, &bytes, id).map_err(said)?;
     }
     Ok(Some(copy))
 }

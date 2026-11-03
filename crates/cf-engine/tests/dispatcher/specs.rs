@@ -1,10 +1,11 @@
 //! A chief whose project has specs on is told where its Specmint skill is and
-//! is given the skill at its launch, and only then: a project that has them
-//! off, and every member, are asked about nothing and given nothing, and what
-//! one project says is not another's. A change applies at the chief's next
-//! launch (a Resume, a switch); what the human said as the project opened
-//! applies at its first, since it is kept in the write that makes the project.
-//! Node's dispatcher had no specs, so no trace holds these.
+//! is given the skill at its launch: a project that has them off, and every member,
+//! are asked about nothing and given nothing, and what one project says is not
+//! another's. A change applies at the chief's next launch (a Resume, a switch) as the
+//! launch's own text, and a chief whose window is open is told of it at its next rest,
+//! in a note, without a new launch (`role_news`); what the human said as the project
+//! opened applies at its first launch, since it is kept in the write that makes the
+//! project. Node's dispatcher had no specs, so no trace holds these.
 
 use cf_engine::testing::Context;
 use cf_ledger::{ProjectView, SpecsChange};
@@ -69,25 +70,35 @@ fn relaunch(context: &Context, project: i64) {
     context.resume_project(project).unwrap();
 }
 
-/// The dispatcher's passes go on with the chief of `project` at work, after a
-/// change of what it is to be given: its window is neither closed nor opened
-/// again, nothing is typed into it, and no Specmint skill is asked for. A change
-/// reaches a chief at its next launch, and only then.
-fn leaves_the_running_chief_as_it_was(context: &Context, project: i64) {
+/// The dispatcher's passes go on with the chief of `project` at rest, after a change of
+/// what it is to be given: its window is neither closed nor opened again, and it is told
+/// of the change in one note, whatever the passes (`role_news`). What it is given at a
+/// launch is the next launch's.
+fn tells_the_running_chief_without_a_new_launch(context: &Context, project: i64) {
+    let chief = context.id(project, "chief");
     let launched = launches(context, project, "chief").len();
-    let (killed, typed) = (context.host.killed().len(), context.host.inputs().len());
-    let asked = context.adapter.specmint_asked.borrow().len();
-    for _ in 0..3 {
+    let killed = context.host.killed().len();
+    let notes = context.ledger.borrow().role_notes_to(chief).unwrap().len();
+    for _ in 0..6 {
         context.pass().unwrap();
     }
     assert_eq!(launches(context, project, "chief").len(), launched);
     assert_eq!(context.host.killed().len(), killed, "no window was closed");
     assert_eq!(
-        context.host.inputs().len(),
-        typed,
-        "nothing was typed into it"
+        context.ledger.borrow().role_notes_to(chief).unwrap().len(),
+        notes + 1,
+        "it is told once"
     );
-    assert_eq!(context.adapter.specmint_asked.borrow().len(), asked);
+    let told = context.message(
+        *context
+            .ledger
+            .borrow()
+            .role_notes_to(chief)
+            .unwrap()
+            .last()
+            .unwrap(),
+    );
+    assert_eq!(told.state, "delivered", "{told:?}");
 }
 
 /// The launches the adapter was asked for `role` in `project`, oldest first.
@@ -130,13 +141,14 @@ fn a_chief_of_a_project_with_specs_off_is_told_nothing_of_them_and_no_adapter_is
 }
 
 #[test]
-fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at_its_next_launch_and_not_before(
+fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_at_its_next_rest_and_given_it_at_its_next_launch(
 ) {
     let context = Context::new();
     let project = project_at(&context, "/work/app");
     let first = chief_launch(&context, project.id);
     assert!(first.get("specs").is_none());
-    // The human says it while the chief runs, and the dispatcher goes on: its window is as it was.
+    // The human says it while the chief runs, and the dispatcher goes on: its window is as it was,
+    // and the chief is told of it at its rest.
     says(
         &context,
         project.id,
@@ -144,9 +156,13 @@ fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at
         "docs/specs",
         Some(Variant::TddHtml),
     );
-    leaves_the_running_chief_as_it_was(&context, project.id);
+    tells_the_running_chief_without_a_new_launch(&context, project.id);
     assert_eq!(launches(&context, project.id, "chief").len(), 1);
-    assert_eq!(context.adapter.specmint_asked.borrow().len(), 0);
+    assert_eq!(
+        context.adapter.specmint_asked.borrow().len(),
+        1,
+        "asked where the skill is, to tell it"
+    );
     // Its next launch has it.
     relaunch(&context, project.id);
     let launch = chief_launch(&context, project.id);
@@ -159,8 +175,15 @@ fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at
         launch["instructions"],
         format!("instructions for chief with specs: tdd-html in docs/specs at {skill}")
     );
-    assert_eq!(*context.adapter.specmint_asked.borrow(), [Variant::TddHtml]);
-    assert_eq!(*context.adapter.specmint_folders.borrow(), ["docs/specs"]);
+    assert_eq!(
+        *context.adapter.specmint_asked.borrow(),
+        [Variant::TddHtml, Variant::TddHtml],
+        "once for the note, once for the launch"
+    );
+    assert_eq!(
+        *context.adapter.specmint_folders.borrow(),
+        ["docs/specs", "docs/specs"]
+    );
 }
 
 #[test]
@@ -268,17 +291,31 @@ fn a_member_is_never_given_specs_whatever_the_project_says() {
     says(&context, project.id, Some(true), "", Some(Variant::Core));
     app_says(&context, true);
     context.pool_task(project.id, "worker", "Write the parser");
-    context.pass().unwrap();
-    context.pass().unwrap();
+    for _ in 0..6 {
+        context.pass().unwrap();
+    }
     let worker = launches(&context, project.id, "worker").pop().unwrap();
     assert_eq!(worker["instructions"], "instructions for worker");
     assert!(worker.get("specs").is_none(), "{worker}");
+    let chief = context.id(project.id, "chief");
+    assert_eq!(
+        context.ledger.borrow().role_notes_to(chief).unwrap().len(),
+        1,
+        "the running chief is told, and the member is told nothing"
+    );
+    let worker_id = context.id(project.id, "zeus");
+    assert!(context
+        .ledger
+        .borrow()
+        .role_notes_to(worker_id)
+        .unwrap()
+        .is_empty());
     relaunch(&context, project.id);
     assert!(chief_launch(&context, project.id).get("specs").is_some());
     assert_eq!(
         context.adapter.specmint_asked.borrow().len(),
-        1,
-        "the chief's launch alone asked"
+        2,
+        "the chief alone asked: for the note that told it, and for its launch"
     );
 }
 
@@ -407,16 +444,17 @@ fn relaunched(context: &Context, project: i64) -> Value {
 }
 
 #[test]
-fn a_project_that_said_a_variant_keeps_it_when_the_app_names_another_and_a_change_reaches_the_next_launch(
+fn a_project_that_said_a_variant_keeps_it_when_the_app_names_another_and_a_change_reaches_the_running_chief_and_the_next_launch(
 ) {
     let context = Context::new();
     let project = project_at(&context, "/work/app");
     says(&context, project.id, Some(true), "", Some(Variant::Tdd));
     app_names(&context, true, "docs", Some(Variant::CoreHtml));
     is_given(&relaunched(&context, project.id), "tdd", "docs");
-    // The app changes what it names while the chief runs, and the dispatcher goes on.
+    // The app changes what it names while the chief runs, and the dispatcher goes on: the
+    // chief is told its folder moved, and its variant is its project's own.
     app_names(&context, true, "elsewhere", Some(Variant::TddHtml));
-    leaves_the_running_chief_as_it_was(&context, project.id);
+    tells_the_running_chief_without_a_new_launch(&context, project.id);
     // Its next launch has the project's own variant, and the app's new folder.
     is_given(&relaunched(&context, project.id), "tdd", "elsewhere");
 }
@@ -436,18 +474,29 @@ fn the_roster_is_asked_what_the_app_says_unless_the_project_says_off() {
         Some(Variant::Tdd),
     );
     relaunch(&context, project.id);
-    assert_eq!(asked(&context), before, "off needs nothing of the app's");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        asked(&context),
+        before,
+        "off needs nothing of the app's, at a launch or at a running chief's looks"
+    );
     for own in [None, Some(true)] {
         says(&context, project.id, own, "", None);
         let before = asked(&context);
         relaunch(&context, project.id);
-        assert_eq!(asked(&context), before + 1, "{own:?}");
+        assert!(asked(&context) > before, "{own:?}");
     }
-    // A member's launch asks nothing of it.
+    // A member's launch asks nothing of it: with the chief's project saying off, nothing
+    // else would.
+    says(&context, project.id, Some(false), "", None);
+    relaunch(&context, project.id);
     context.pool_task(project.id, "worker", "Write the parser");
     let before = asked(&context);
-    context.pass().unwrap();
-    context.pass().unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
     assert_eq!(asked(&context), before);
 }
 

@@ -68,8 +68,8 @@ use super::paths;
 use super::wire::selected_session;
 use super::wire_log::{Said, WireLog};
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, Observed, Over, Pane,
-    PaneHost, Prepared, Readiness, Records, Skill, Window, Work, STAFF_RULES_HEADING,
+    Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, LaunchId, Observed, Over,
+    Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Window, Work, STAFF_RULES_HEADING,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -402,6 +402,10 @@ impl Adapter for DevinAdapter {
             folder,
             paths::global_specmint(env, variant),
         )
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Devin, &self.services.env, Some(*specs), id).map(|_| ())
     }
 }
 
