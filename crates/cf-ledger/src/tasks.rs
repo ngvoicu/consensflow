@@ -35,8 +35,9 @@ pub use pausing::resumed_in_vain;
 pub(crate) use pausing::{
     clear_hold, go_on_in_window, held_for_context, held_tasks_due, hold_for_context, hold_task,
     pause_again, pause_task, pause_with_project, paused_task, rest_while_resumed, resume_task,
-    resume_with_project, resume_words, resume_words_not_in, stop_asked_by, stop_of, take_over_pause,
-    task_in_hand, tell_it_goes_on, told_since_paused, unmark_pause, work_while_resumed,
+    resume_with_project, resume_words, resume_words_not_in, stop_asked_by, stop_of,
+    take_over_pause, task_in_hand, tell_it_goes_on, told_since_paused, unmark_pause,
+    work_while_resumed,
 };
 
 /// What a paused task's window is told when it goes on: the human's Resume

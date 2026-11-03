@@ -623,6 +623,12 @@ fn a_window_the_human_keeps_open_keeps_the_next_task_waiting_and_what_wakes_in_i
             waiting[0].contains("the human keeps it open"),
             "{waiting:?}"
         );
+        assert!(
+            waiting[0].contains(
+                "goes in once it has closed, or, if it closes with no proof that its program ended, is paused for your word."
+            ),
+            "the note promises no more than the hold allows: {waiting:?}"
+        );
 
         // T-1's job ends and wakes its agent in the old window: its words are no one's.
         let before = results_of(&tiers, 1);
@@ -654,6 +660,50 @@ fn a_window_the_human_keeps_open_keeps_the_next_task_waiting_and_what_wakes_in_i
         passes(&context, 2);
         assert_eq!(results_of(&tiers, 2), ["Docs written"], "{how:?}");
     }
+}
+
+#[test]
+fn a_window_the_human_keeps_open_that_closes_with_no_proof_holds_the_next_task_for_the_chiefs_word()
+{
+    // The waiting note says T-2 goes in once the window has closed, or is paused for the
+    // chief's word if it closes with no proof that its program ended: this is the second.
+    let context = Context::new();
+    let (tiers, session) = session_kept_open(&context);
+    let old = context.host.last(&session).unwrap().pane;
+    context.host.exits_with_a_survivor(4242);
+    release(&context, &tiers, Release::Result);
+    follow_up(&context, &tiers);
+    passes(&context, 3);
+    assert!(!closed(&context, &old), "the human keeps it open");
+    assert_eq!(tiers.task(2).task.state, "queued", "T-2 waits");
+
+    context.hide_window(tiers.project.id, &session).unwrap();
+    passes(&context, 4);
+    assert!(closed(&context, &old));
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "no proof that the program ended: T-2 is not given a window unasked"
+    );
+    let held: Vec<String> = tiers
+        .notes("human")
+        .into_iter()
+        .filter(|note| note.starts_with("T-2 is paused: ") && note.contains("cf task edit T-2"))
+        .collect();
+    assert_eq!(held.len(), 1, "told once: {held:?}");
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            tiers.project.id,
+            2,
+            Some("human"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
+    passes(&context, 4);
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert_ne!(context.host.last(&session).unwrap().pane, old);
 }
 
 #[test]
@@ -762,7 +812,7 @@ fn the_next_task_goes_on_in_a_new_conversation_where_the_window_before_closed_wi
     let held: Vec<String> = tiers
         .notes("human")
         .into_iter()
-        .filter(|note| note.starts_with("T-2 is paused and waits for your word"))
+        .filter(|note| note.starts_with("T-2 is paused: ") && note.contains("cf task edit T-2"))
         .collect();
     assert_eq!(held.len(), 1, "{held:?}");
     context

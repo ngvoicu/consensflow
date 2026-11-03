@@ -76,7 +76,7 @@ fn told_held(tiers: &Tiers<'_>) -> Vec<String> {
     tiers
         .notes("human")
         .into_iter()
-        .filter(|note| note.starts_with("T-2 is paused and waits for your word"))
+        .filter(|note| note.starts_with("T-2 is paused: ") && note.contains("cf task edit T-2"))
         .collect()
 }
 

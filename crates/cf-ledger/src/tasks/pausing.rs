@@ -22,8 +22,8 @@ use super::{
     RESUME_WORDS,
 };
 use crate::messages::{
-    cancel_message, fold, join_pause_note, leave_pause_notes, note_pause, reconcile,
-    release_carried, tell_goes_on, transfer, withdraw_stale, Afterwards,
+    cancel_message, fold, join_pause_note, leave_pause_notes, note_held_for_context, note_pause,
+    reconcile, release_carried, tell_goes_on, transfer, withdraw_stale, Afterwards,
 };
 use crate::model::{self, sql_list, LedgerError, ACTIVE_TASK_STATES, HELD_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
@@ -289,12 +289,16 @@ pub(crate) fn hold_task(
 
 /// The engine holds a follow-up that cannot go on in the conversation of the task it follows:
 /// the window that did that task closed with no proof its program was gone, which may still
-/// write to the conversation, so the task is not given to a window of its own unasked, whose
-/// conversation would not remember the earlier task the brief was written for (the field issue
-/// of 2026-10-29: T-68's brief said "your T-65 snapshot", and it went to a fresh window). The
-/// task is paused with the mark that it was held for this (`context` in the move's event), its
-/// requester told once by the engine; the chief rewrites its brief (`cf task edit`) and sends
-/// it on with `cf task resume`, or cancels it. Only a task still queued for its window is held.
+/// write to the conversation, or its harness holds nothing of the conversation any more. The
+/// task is not given to a window of its own unasked, whose conversation would not remember the
+/// earlier task the brief was written for (the field issue of 2026-10-29: T-68's brief said
+/// "your T-65 snapshot", and it went to a fresh window). It is paused with the mark that it was
+/// held for this (`context` in the move's event), and its requester is told once, in a pause
+/// note of its own kind ([`note_held_for_context`]: `because`, then the way on: rewrite the brief with
+/// `cf task edit` if it counts on the window before, send it on with `cf task resume`, or
+/// cancel it). That note is read as every pause note is, so a task that moves on while it is
+/// being delivered withdraws it, and a warning in `because` ([`NOT_PROVEN_GONE`]) stays in a
+/// note of its own. Only a task still queued for its window is held.
 pub(crate) fn hold_for_context(
     store: &mut Store,
     project_id: i64,
@@ -310,6 +314,8 @@ pub(crate) fn hold_for_context(
         detail.insert("because".into(), json!(because));
         detail.insert("context".into(), json!(true));
         pause(store, &task, detail, false)?;
+        let requester = store.participant_row(task.requester_id)?.handle;
+        note_held_for_context(store, project_id, &requester, number, because)?;
         task_by_id(store, task.id)
     })
 }
