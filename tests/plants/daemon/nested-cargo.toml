@@ -1,23 +1,28 @@
-# The cargo a test starts inside `cargo test` (`crates/cf-daemon/tests/api/nested_cargo.rs`, which
-# the test of `cf` uses to build it) is started without the variables cargo gave the test. With
-# them a build script that watches one (`ring`'s does, `CARGO_MANIFEST_DIR`) runs again, and the
-# build the test starts builds `ring` and what is over it over files of the build that runs the
-# test; with `RUSTC_BOOTSTRAP=1` set for this run and not for the one before, they are other
+# The cargo a test starts inside `cargo test` (`crates/cf-process/src/nested_cargo.rs`, which every
+# crate that starts one includes by its path: the test of `cf` that builds it, the rig, the dry runs,
+# the release build of the publisher, xtask's own test) is started without the variables cargo gave
+# the test. With them a build script that watches one (`ring`'s does, `CARGO_MANIFEST_DIR`) runs
+# again, and the build the test starts builds `ring` and what is over it over files of the build that
+# runs the test; with `RUSTC_BOOTSTRAP=1` set for this run and not for the one before, they are other
 # crates, and the last step of `cargo test`, rustdoc, said "can't find crate" of `cf_daemon`
-# (zeewin, 2026-10-23, T-365). Every name here begins `nested cargo:`, so
+# (zeewin, 2026-10-23, T-365). The rule over the whole workspace (T-969, 2026-10-29) is
+# `tools/xtask/tests/cargo_in_tests.rs`. Every name here begins `nested cargo:`, so
 # `npm run plants:daemon -- "nested cargo"` runs them.
 
 [run]
-nested-cargo-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api", "nested_cargo::"]
+nested-cargo = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "nested_cargo"]
+nested-cargo-rule = ["cargo", "test", "--offline", "-p", "xtask", "--target-dir", "app/src-tauri/target/xtask-check", "--test", "cargo_in_tests"]
+nested-cargo-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::"]
+nested-cargo-release = ["cargo", "test", "--offline", "-p", "cf-release", "--lib", "process::"]
 
 # The cargo that is started is told nothing of the variables.
 [[plant]]
 name = "nested cargo: the cargo a test starts keeps the variables cargo gave the test"
 meant = "the_cargo_a_test_starts_builds_nothing_over_the_files_of_the_run"
-runs = ["nested-cargo-api"]
+runs = ["nested-cargo"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/tests/api/nested_cargo.rs"
+file = "crates/cf-process/src/nested_cargo.rs"
 find = "    without_the_tests_own(&mut command, std::env::vars_os().map(|(name, _)| name));"
 replace = ""
 
@@ -25,9 +30,91 @@ replace = ""
 [[plant]]
 name = "nested cargo: the package variables cargo gave the test stay"
 meant = "what_cargo_sets_for_a_test_is_taken_from_the_cargo_it_starts_and_nothing_else_is"
-runs = ["nested-cargo-api"]
+runs = ["nested-cargo"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/tests/api/nested_cargo.rs"
+file = "crates/cf-process/src/nested_cargo.rs"
 find = 'name.starts_with("CARGO_PKG_")'
 replace = 'name.starts_with("CARGO_PKG_STAYS_")'
+
+# The sites that started a cargo of their own (T-969): the release build of the publisher, which the
+# rule found with its own `--target-dir` and no scrub, and the rig's builds.
+[[plant]]
+name = "nested cargo: the release build of the publisher starts the cargo with the tests' variables"
+meant = "the_cargo_a_test_starts_is_named_in_one_file_and_has_none_of_the_variables_cargo_gave_the_test"
+runs = ["nested-cargo-rule"]
+
+[[plant.edit]]
+file = "tools/cf-publish/tests/release_build.rs"
+find = "    let built = nested_cargo::cargo()"
+replace = '    let built = std::process::Command::new(env!("CARGO"))'
+
+[[plant]]
+name = "nested cargo: a dry run builds its stand-in with the tests' variables"
+meant = "the_cargo_a_test_starts_is_named_in_one_file_and_has_none_of_the_variables_cargo_gave_the_test"
+runs = ["nested-cargo-rule"]
+
+[[plant.edit]]
+file = "crates/cf-evals/tests/dry_run.rs"
+find = "    let ran = Run::cargo()"
+replace = '    let ran = Run::new(env!("CARGO")).inheriting_env()'
+
+[[plant]]
+name = "nested cargo: a crate keeps a copy of the file of the cargo a test starts"
+meant = "a_crate_that_uses_the_one_file_includes_that_file_and_not_a_copy_of_it"
+runs = ["nested-cargo-rule"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/lib.rs"
+find = '''
+#[path = "../../../crates/cf-process/src/nested_cargo.rs"]
+#[allow(dead_code)] // The file serves crates that start more than the probes here do.
+mod nested_cargo;
+'''
+replace = '''
+#[allow(dead_code)]
+mod nested_cargo {
+    pub const CARGO: &str = "cargo";
+    pub fn given_to_a_test(_: &str) -> bool {
+        false
+    }
+}
+'''
+
+[[plant]]
+name = "nested cargo: the rig's cargo keeps the variables cargo gave the test"
+meant = "the_cargo_a_test_starts_is_without_what_cargo_gave_the_test_and_with_the_rest"
+runs = ["nested-cargo-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = "                run = run.without(name);"
+replace = "                drop(name);"
+
+[[plant]]
+name = "nested cargo: a program told to do without a variable is given it"
+meant = "a_program_is_run_without_a_variable_it_is_told_to_do_without_of_the_tests_own"
+runs = ["nested-cargo-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''
+        for name in &self.removed {
+            command.env_remove(name);
+        }
+'''
+replace = '''
+        for name in &self.removed {
+            let _ = name;
+        }
+'''
+
+[[plant]]
+name = "nested cargo: the environment of the release tool's probes keeps the variables cargo gave the test"
+meant = "the_environment_a_cargo_is_given_has_none_of_the_variables_cargo_gave_the_test"
+runs = ["nested-cargo-release"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/lib.rs"
+find = "            .filter(|(name, _)| !name.to_str().is_some_and(nested_cargo::given_to_a_test))"
+replace = "            .filter(|(name, _)| name.to_str().is_some())"

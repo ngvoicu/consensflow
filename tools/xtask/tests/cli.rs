@@ -6,6 +6,10 @@
 
 mod common;
 
+// The cargo a test starts: one file for every crate that starts one.
+#[path = "../../../crates/cf-process/src/nested_cargo.rs"]
+mod nested_cargo;
+
 use std::fs;
 
 use common::{checkout, cwds, err, out, programs, xtask};
@@ -290,7 +294,9 @@ fn cargo_finds_the_xtask_alias_from_the_root_and_from_app() {
     let missing =
         format!(".cargo/config.toml needs, beside its [build] table:\n\n[alias]\n{ALIAS}\n");
     for cwd in [checkout(), checkout().join("app")] {
-        let ran = common::command(env!("CARGO"))
+        let mut cargo = nested_cargo::cargo();
+        cf_process::hold_only_the_streams(&mut cargo);
+        let ran = cargo
             .args(["help", "xtask"])
             .current_dir(&cwd)
             .output()

@@ -588,6 +588,7 @@ fn session_kept_open(context: &Context) -> (Tiers<'_>, String) {
 
 /// T-2, the human's follow-up of T-1, for the session that did it.
 fn follow_up(context: &Context, tiers: &Tiers<'_>) {
+    context.accept_if_done(tiers.project.id, 1);
     context.create_task(
         tiers.project.id,
         NewTask {

@@ -60,6 +60,7 @@ fn marked(answer: &str, worker: &str, place: usize) -> String {
 
 /// T-2, which follows T-1 into a window on its conversation.
 fn follow_up(context: &Context, tiers: &Tiers<'_>) {
+    context.accept_if_done(tiers.project.id, 1);
     context.create_task(
         tiers.project.id,
         NewTask {

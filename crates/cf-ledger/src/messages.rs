@@ -58,7 +58,10 @@ pub(crate) use delivery::{
 };
 pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
-pub(crate) use holds::{note_hold, note_hold_moved, note_hold_unavailable, tell_goes_on};
+pub use holds::is_busy_note;
+pub(crate) use holds::{
+    note_hold, note_hold_busy, note_hold_moved, note_hold_unavailable, tell_goes_on,
+};
 pub(crate) use paused_answers::{
     given as paused_answer_given, note as note_paused_answer, put_back as put_back_paused_answers,
     queued as queued_paused_answers, tell_on_its_way, withdraw as withdraw_paused_answers,
@@ -269,6 +272,22 @@ pub(crate) fn answer(
                 409,
             ));
         }
+        // A question the ledger withdrew with no answer ever given (its task was finished
+        // while it was open) is answered by no one: its words, if the chief took them, are the
+        // result. One whose answer failed or was cancelled still obliges, and takes another.
+        if question.state == "cancelled" && !has_any_answer(store, question_id)? {
+            return Err(LedgerError::refused_with(
+                "question-withdrawn",
+                format!(
+                    "m-{question_id} was withdrawn{}: nobody waits for this answer",
+                    question
+                        .reason
+                        .as_deref()
+                        .map_or_else(String::new, |reason| format!(" ({reason})"))
+                ),
+                409,
+            ));
+        }
         let asked: Option<Vec<Question>> = match &question.questions {
             Value::Null => None,
             questions => Some(serde_json::from_value(questions.clone())?),
@@ -349,6 +368,32 @@ fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
     LedgerError::refused_with(code, words, 409)
 }
 
+/// The questions a task's window asked, still open, are withdrawn when the task is finished
+/// while it waits for their answers (the chief's Finish, or the window's own `cf task done`):
+/// nobody waits for them now. A question not yet given to the chief is never given, and one
+/// the chief has can no longer be answered (`answer` refuses it). One with an answer that
+/// stands is the answerer's, and an urgent one is the chief's tell, not the window's.
+pub(crate) fn withdraw_open_questions(
+    store: &Store,
+    task: &TaskRow,
+    why: &str,
+) -> Result<(), LedgerError> {
+    let Some(window) = task.assignee_id else {
+        return Ok(());
+    };
+    store.db.execute(
+        &format!(
+            "UPDATE message SET state = 'cancelled', reason = ?1
+              WHERE task_id = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0
+                AND state IN ('queued', 'delivering', 'gated', 'delivered', 'read')
+                AND NOT {}",
+            has_standing_answer("message")
+        ),
+        params![format!("T-{} {why}", task.number), task.id, window],
+    )?;
+    Ok(())
+}
+
 /// SQL that says the question called `question` (a table alias) has an answer
 /// that stands: one on its way, being delivered, delivered, read, or still held
 /// at the gate. One that was cancelled (declined, withdrawn, taken back with its
@@ -367,6 +412,14 @@ fn standing_answers(question: &str) -> String {
         "SELECT a.id FROM message a WHERE a.reply_to = {question}.id AND a.kind = 'answer'
                    AND a.state NOT IN ('cancelled', 'failed')"
     )
+}
+
+/// Whether a question has any answer, whatever became of it.
+fn has_any_answer(store: &Store, question_id: i64) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare("SELECT 1 FROM message WHERE reply_to = ? AND kind = 'answer'")?
+        .exists([question_id])?)
 }
 
 /// Whether a question has an answer that stands ([`has_standing_answer`]).

@@ -179,13 +179,32 @@ struct How {
     /// harnesses start the commands their agents run, and the shell is in a group of
     /// its own.
     command: bool,
-    /// The agent detaches it from that shell (`nohup … &`, `Start-Process`), which
-    /// ends at once and leaves it with no parent.
-    detached: bool,
+    /// Whether and how the agent detaches it from that shell (`nohup … &`,
+    /// `Start-Process`), which ends at once and leaves it with no parent.
+    detach: Detach,
     /// The shell `exec`s it, and is it from then on.
     in_place: bool,
     /// What ends its shell alone, where something may ([`Jobs::start_ended_by_its_shell`]).
     shell_end: Option<ShellEnd>,
+}
+
+/// How the agent's tool detaches a command from the shell that runs it, as the agents of the
+/// harnesses do when they leave a job (`nohup … &`, `Start-Process`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Detach {
+    /// It does not: the shell waits for the command.
+    No,
+    /// The shell is in a session of its own on Unix (Pi's bash tool starts each command so, and
+    /// Claude Code's), so that what it leaves is in a session no window has: the host cannot see
+    /// it (`cf-panes`' `background`, "Where the tree does not hold it"). On Windows a PowerShell,
+    /// as in every case there.
+    Apart,
+    /// The shell stays in the window's session, in a group of its own, as the shells of the
+    /// harnesses that do not lead a session do (T-1145: what Devin's and Codex's shells are
+    /// taken to be on the Mac): what it leaves is in the window's session, which the window's
+    /// close ends. On Windows it is the same as [`Detach::Apart`]: a job holds the tree and has
+    /// no sessions.
+    Here,
 }
 
 /// The jobs one window starts.
@@ -251,7 +270,7 @@ impl Jobs {
         let how = How {
             browser: self.browser,
             command: false,
-            detached: false,
+            detach: Detach::No,
             in_place: false,
             shell_end: None,
         };
@@ -272,10 +291,23 @@ impl Jobs {
         detached: bool,
         then: impl FnOnce() + Send + 'static,
     ) -> Result<PathBuf, String> {
+        let detach = if detached { Detach::Apart } else { Detach::No };
+        self.start_detaching(label, seconds, deaf, detach, then)
+    }
+
+    /// [`Jobs::start`], where the agent's tool detaches the command as `detach` says.
+    pub fn start_detaching(
+        &self,
+        label: &str,
+        seconds: u64,
+        deaf: bool,
+        detach: Detach,
+        then: impl FnOnce() + Send + 'static,
+    ) -> Result<PathBuf, String> {
         let how = How {
             browser: false,
             command: true,
-            detached,
+            detach,
             in_place: false,
             shell_end: None,
         };
@@ -294,7 +326,7 @@ impl Jobs {
         let how = How {
             browser: false,
             command: true,
-            detached: false,
+            detach: Detach::No,
             in_place: true,
             shell_end: None,
         };
@@ -314,7 +346,7 @@ impl Jobs {
         let how = How {
             browser: false,
             command: true,
-            detached: false,
+            detach: Detach::No,
             in_place: false,
             shell_end: Some(end.clone()),
         };
@@ -398,7 +430,7 @@ impl Jobs {
                 .args(words)
                 .own_group())
         } else if how.command {
-            in_a_shell(program, words, how.detached)
+            in_a_shell_as(program, words, how.detach)
         } else {
             Ok(Run::new(program).args(words))
         }
@@ -450,8 +482,11 @@ pub fn until_up(file: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// How long a job has to write its process once it is started.
-const UP: Duration = Duration::from_secs(30);
+/// How long a job has to write its process once it is started: what its shell, a PowerShell
+/// on Windows, may take to start on a loaded machine (`cf_e2e::process::POWERSHELL_LIMIT`).
+/// Given 30 s, a stand-in under the load of a whole test program on GitHub's Windows runner
+/// took its own command for failed and left its window mid-task (CI, 2026-11-03, T-1161).
+const UP: Duration = cf_e2e::process::POWERSHELL_LIMIT;
 
 /// `program` with `words`, run as a harness's tool runs a command for its agent: by a
 /// shell (a PowerShell on Windows) that waits for it and ends with its code, in a group
@@ -459,6 +494,15 @@ const UP: Duration = Duration::from_secs(30);
 /// (`nohup … &`, `Start-Process`) and ends a moment after, which leaves the command with
 /// no parent; on Unix that shell is in a session of its own ([`SESSION`]).
 pub fn in_a_shell(program: &Path, words: Vec<OsString>, detached: bool) -> Result<Run, String> {
+    in_a_shell_as(
+        program,
+        words,
+        if detached { Detach::Apart } else { Detach::No },
+    )
+}
+
+/// [`in_a_shell`], with the way the tool detaches the command ([`Detach`]).
+pub fn in_a_shell_as(program: &Path, words: Vec<OsString>, detach: Detach) -> Result<Run, String> {
     #[cfg(windows)]
     {
         let root = own_var("SystemRoot").unwrap_or_else(|| r"C:\Windows".to_owned());
@@ -466,22 +510,28 @@ pub fn in_a_shell(program: &Path, words: Vec<OsString>, detached: bool) -> Resul
             r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"
         ))
         .args(["-NoProfile", "-NonInteractive", "-Command"])
-        .arg(powershell_script(program, &words, detached)))
+        .arg(powershell_script(program, &words, detach != Detach::No)))
     }
     #[cfg(not(windows))]
     {
-        if detached {
-            let itself = std::env::current_exe().map_err(|failed| failed.to_string())?;
-            Ok(Run::new(itself)
-                .args([SESSION, "/bin/sh", "-c", shell_script(true)])
+        match detach {
+            Detach::Apart => {
+                let itself = std::env::current_exe().map_err(|failed| failed.to_string())?;
+                Ok(Run::new(itself)
+                    .args([SESSION, "/bin/sh", "-c", shell_script(true)])
+                    .arg(program)
+                    .args(words))
+            }
+            Detach::Here => Ok(Run::new("/bin/sh")
+                .args(["-c", shell_script(true)])
                 .arg(program)
-                .args(words))
-        } else {
-            Ok(Run::new("/bin/sh")
+                .args(words)
+                .own_group()),
+            Detach::No => Ok(Run::new("/bin/sh")
                 .args(["-c", shell_script(false)])
                 .arg(program)
                 .args(words)
-                .own_group())
+                .own_group()),
         }
     }
 }

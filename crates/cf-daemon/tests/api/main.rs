@@ -32,6 +32,8 @@
 mod checks;
 mod frames;
 mod names;
+// The cargo a test starts: one file for every crate that starts one.
+#[path = "../../../cf-process/src/nested_cargo.rs"]
 mod nested_cargo;
 mod player;
 mod relay;
@@ -76,14 +78,21 @@ const ANSWERED_AS_IT_WAITED: &str = "the chief answers a question still queued f
 /// chief's way out of a working task, with the last complete answer of its worker.
 const FINISH_IN_THE_USAGE: &str = "the usage `cf help` prints inside a window lists `cf task finish`, a verb Node's `cf` had none of: the chief's way out of a working task, with the last complete answer of its worker";
 
+/// What `cf task add` tells the chief of a task put on the board for a tier: a member of that
+/// tier takes it in a new window ("it starts in a new window of one"), where Node's receipt said
+/// "the first free one gets it", as if a member could be busy and the work wait for it (T-1134).
+const RECEIPT_NEW_WINDOW: &str = "the receipt of `cf task add` says the task starts in a new window of a member of its role and tier, where Node's said the first free one gets it: a member is never busy, and the chief that read of a free one chained its work through one window (T-1134)";
+
 /// The traces the receipt and stop redesign moved on purpose: a choice answer
 /// is received, not read at its creation, a resume takes in what its window
 /// kept, a command written wrong asks the board nothing, and `cf task get`
 /// prints the brief of a task no window holds under its header; those the
 /// decision on a result moved: the result is withdrawn, not pasted after it;
 /// those a question answered as it waited moved: it is read, not pasted; and
-/// those that print the verbs of `cf task`, which have `finish` now; and the one
-/// that tells a task still open, which is told now. Found by playing them against
+/// those that print the verbs of `cf task`, which have `finish` now; the one
+/// that tells a task still open, which is told now; the one that gives a task
+/// a tier nobody holds, whose reply names the members of the tier it went to; and the ones
+/// that print the receipt of `cf task add`, which says where the task goes now. Found by playing them against
 /// the daemon.
 const DEPARTED: &[Departed] = &[
     ("core-api-003", RESULT_ACCEPTED),
@@ -104,6 +113,14 @@ const DEPARTED: &[Departed] = &[
     ),
     ("cf-board-006", ANSWERED_AS_IT_WAITED),
     ("cf-board-008", ANSWERED_AS_IT_WAITED),
+    ("cf-board-009", RECEIPT_NEW_WINDOW),
+    ("cf-board-010", RECEIPT_NEW_WINDOW),
+    ("cf-board-011", RECEIPT_NEW_WINDOW),
+    ("cf-board-014", RECEIPT_NEW_WINDOW),
+    ("cf-board-016", RECEIPT_NEW_WINDOW),
+    ("cf-board-017", RECEIPT_NEW_WINDOW),
+    ("cf-board-020", RECEIPT_NEW_WINDOW),
+    ("cf-board-021", RECEIPT_NEW_WINDOW),
     (
         "cf-board-004",
         "`cf tell` to a task still open is not refused with `T-n has no window to tell: it is open`: its words are added to its brief, for whichever window takes the task (T-534)",
@@ -111,6 +128,10 @@ const DEPARTED: &[Departed] = &[
     (
         "cf-board-015",
         "`cf task get` prints the brief of a task no window ever held (here one cancelled, then deleted, while it was open) under its header, so the whole brief can be read before it goes out: Node printed the header alone",
+    ),
+    (
+        "cf-board-020",
+        "`cf task add` for a tier nobody on the staff holds says whose the nearest tier it went to is (`heldBy`, T-1108), where Node said only that it was the nearest tier",
     ),
     (
         "cf-board-022",

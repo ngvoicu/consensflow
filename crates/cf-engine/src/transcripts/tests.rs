@@ -189,6 +189,55 @@ fn a_compaction_s_summary_is_copied_marked_as_one_where_its_reading_says_nothing
 }
 
 #[test]
+fn a_users_item_with_no_human_in_it_is_copied_as_the_harness_s_own_and_the_rest_as_they_were() {
+    let (context, chief, _) = chief_talking();
+    let record = context.dispatcher.record_of(chief.id);
+    let mut notice = item(
+        "n-1",
+        Role::User,
+        "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>",
+        true,
+    );
+    notice.synthetic = true;
+    let items = vec![
+        item("u-1", Role::User, "Ship it", true),
+        notice,
+        item("a-1", Role::Assistant, "Done", true),
+    ];
+    // The reading is the one Node wrote: the notice is a user's item there.
+    assert_eq!(
+        serde_json::to_value(&items[1]).expect("written")["role"],
+        "user"
+    );
+    context
+        .dispatcher
+        .copy(&chief, &record, &look(items))
+        .expect("copied");
+    let ask = HistoryAsk {
+        from: HistoryFrom::Newest,
+        find: None,
+        tools: false,
+        room: PAGE_BYTES,
+        scan: HISTORY_SCAN_BYTES,
+    };
+    let history = context
+        .ledger
+        .borrow()
+        .read_history(chief.project_id, "chief", &ask)
+        .expect("its history");
+    let roles: Vec<(&str, &str)> = history
+        .entries
+        .iter()
+        .rev()
+        .map(|row| (row.item.id.as_str(), row.item.role.as_str()))
+        .collect();
+    assert_eq!(
+        roles,
+        [("u-1", "user"), ("n-1", "custom"), ("a-1", "assistant")]
+    );
+}
+
+#[test]
 fn a_record_that_shrank_is_copied_over_from_the_start() {
     let (context, chief, _) = chief_talking();
     let record = context.dispatcher.record_of(chief.id);

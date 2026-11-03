@@ -15,9 +15,17 @@ use crate::Error;
 use crate::Result;
 
 #[cfg(target_os = "macos")]
-pub(super) use mac::{identity, processes};
+pub(super) use mac::{identity, processes, working_folder};
 #[cfg(windows)]
 pub(super) use win::{identity, processes};
+
+/// The folder a process runs in is read on a Mac only: the one place a check needs it is the
+/// run of a Pi or Devin worker on a Mac (`orphans_in_folder`), and Windows and Linux hold what
+/// a window starts in other ways (the pane's job) or are no machine of ours.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn working_folder(_pid: u32) -> Option<std::path::PathBuf> {
+    None
+}
 
 /// What holds a process for a check that ends it, on this machine.
 pub(super) struct Native;
@@ -174,6 +182,45 @@ mod mac {
             ppid: info.pbi_ppid,
             started: microseconds(info.pbi_start_tvsec, info.pbi_start_tvusec),
         }))
+    }
+
+    /// The folder the process `pid` runs in, as `proc_pidinfo` (`PROC_PIDVNODEPATHINFO`) says
+    /// it: the real path, with no link in it. None where no process has the number, where the
+    /// system will not say (a process that is not ours) and where the answer is no whole path.
+    pub(in super::super) fn working_folder(pid: u32) -> Option<std::path::PathBuf> {
+        use std::os::unix::ffi::OsStringExt;
+
+        let number = i32::try_from(pid).ok()?;
+        #[allow(unsafe_code)]
+        // SAFETY: proc_vnodepathinfo is plain numbers and arrays of them, for which all zeroes
+        // is a value.
+        let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+        let size = i32::try_from(std::mem::size_of::<libc::proc_vnodepathinfo>()).ok()?;
+        #[allow(unsafe_code)]
+        // SAFETY: the buffer is `info`, writable for the `size` bytes passed with it, and
+        // proc_pidinfo writes no more than that.
+        let read = unsafe {
+            libc::proc_pidinfo(
+                number,
+                libc::PROC_PIDVNODEPATHINFO,
+                0,
+                (&mut info as *mut libc::proc_vnodepathinfo).cast(),
+                size,
+            )
+        };
+        if read != size {
+            return None;
+        }
+        // The path is in a block of characters (libc spells it as 32 rows of 32), ended by a 0.
+        let bytes: Vec<u8> = info
+            .pvi_cdir
+            .vip_path
+            .iter()
+            .flatten()
+            .map(|letter| *letter as u8)
+            .take_while(|letter| *letter != 0)
+            .collect();
+        (!bytes.is_empty()).then(|| std::path::PathBuf::from(std::ffi::OsString::from_vec(bytes)))
     }
 
     /// When a process began, as `proc_pidinfo` says it (seconds since 1970 and the

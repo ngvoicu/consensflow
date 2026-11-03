@@ -597,7 +597,7 @@ replace = "                    .is_some_and(|held| Some(held.message) != head &&
 
 [[plant]]
 name = "pacing review: paced kit: the gate's kit runs without the pacing on"
-meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable"
+meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_platform_free_job_with_its_variable"
 runs = ["pacing-gate-steps"]
 
 [[plant.edit]]
@@ -607,8 +607,8 @@ find = '''
 replace = ","
 
 [[plant]]
-name = "pacing review: paced kit: CI's checks job runs the kit without the pacing on"
-meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable"
+name = "pacing review: paced kit: CI's platform-free job runs the kit without the pacing on"
+meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_platform_free_job_with_its_variable"
 runs = ["pacing-gate-steps"]
 
 [[plant.edit]]

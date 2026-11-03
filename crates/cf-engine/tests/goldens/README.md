@@ -139,3 +139,57 @@ the window's history, or one of an agent type the owner defined for Codex) acts 
 window. T-766 saw it: four of four Codex sub-agents that held a member's role and could not
 answer something asked the board as the member (`cf ask`), and none of three did with the
 member's sentence in that role.
+
+The chief's twelve rows say, in item 4 of "What you do" after "any task that needs it stays
+blocked", "A failed task whose work you checked is accepted too, with what you checked:
+`cf task accept T-3 "what I checked"`" (`skill/core/chief.md`), where Node's said nothing of
+a failed task, its `cf` the row's, as in every command of the text (T-1049, above): a
+designer's session died after it had saved both final files, `cf task accept` was refused,
+and the task that needed it stayed stuck until the chief cancelled it and added it again
+(T-1111, the field report of 2026-11-02). Changed by hand, in those words alone, on
+2026-11-02, and recorded from the engine on 2026-11-03 when it was merged onto the texts
+above (T-1176). The role-change budgets moved with it: a chief's replacement is read whole
+to 208 rows with specs on and 236 without (211 and 240), and to 42 and 71 with the most
+rules for the staff (46 and 75).
+
+The chief's text, in each of the twelve `roleInstructions` rows that hold it, says two
+things more (T-1108, `skill/core/chief.md`): after "goes to the nearest one somebody does,
+the next one up first" it says "you are told whose" (the note and the reply that say which
+member's tier took a task); and its line of `cf task edit` says what the command changes
+now, the brief, the tier, the tasks it needs and the tasks that wait for it: `cf task edit
+T-3 "…" [--tier <tier>] [--needs …] [--before …]`, with how a list is written, its `cf` the
+row's (T-1049, above). Changed by hand, in those words alone, on 2026-11-02, and recorded
+from the engine on 2026-11-03 when it was merged (T-1176). The role-change budgets moved
+with it: read whole to 205 rows with specs on and 234 without (208 and 236), and to 40 and
+69 with the most rules for the staff (42 and 71).
+
+The chief's twelve rows say two things more (T-1118 and T-1128, `skill/core/chief.md`): the
+command card has `cf task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it
+alone, in any state`, its `cf` the row's, after the line of `cf task resume`; and a follow-up
+given with `--after` "waits for T-3 and for the window's other done tasks to be accepted, and
+goes in then", where it said a window still at work on T-3 takes it once T-3 is accepted.
+Changed by hand on 2026-11-02, and recorded from the engine on 2026-11-03 when it was merged
+(T-1176). The role-change budgets moved with it: read whole to 202 rows with specs on and 231
+without (205 and 234), and to 37 and 65 with the most rules for the staff (40 and 69).
+
+The members' 27 rows end the sentence "Never wait for an answer in your shell (no `sleep`, no
+loop over `cf inbox`): it arrives only once your turn has ended." with "To wait for the
+chief's answer, ask with `cf ask`, never in your last words." (`skill/core/staff.md`), and
+the chief's twelve say, in item 5 of "What you do", that a question ending "(ConsensFlow: …
+If they are its result: `cf task finish T-5`.)" is a turn's last words: answer it, or finish
+the task (`skill/core/chief.md`). Each `cf` is the row's (T-1049, above). A worker's question
+written in its last words arrived as its result (T-1119, the field report of 2026-11-02).
+Changed by hand on 2026-11-02, and recorded from the engine on 2026-11-03 when it was merged
+(T-1176). The role-change budgets moved with it: read whole to 199 rows with specs on and 227
+without (202 and 231), and to 33 and 62 with the most rules for the staff (37 and 65).
+
+The chief's twelve rows say that each task gets a window of its own, and that a member runs
+any number of tasks at once (T-1134, `skill/core/chief.md`): the command card's `--after`
+line says a follow-up is "only when it needs what that window already knows" and that
+"reviews, parallel work and work for another role stay fresh, and start at once beside that
+window's work"; "Each task gets a new window of a member of that role and tier on this
+project's staff", where it said "ConsensFlow gives the task to a free member"; and the staff
+section ends "Each member is a model, not a person: it runs any number of tasks at once, each
+in its own window." Changed by hand on 2026-11-03, and recorded from the engine when it was
+merged (T-1176). The role-change budgets moved with it: read whole to 195 rows with specs on
+and 223 without (199 and 227), and to 29 and 58 with the most rules for the staff (33 and 62).

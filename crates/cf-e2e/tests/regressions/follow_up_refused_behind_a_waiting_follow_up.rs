@@ -12,7 +12,8 @@
 //! `decisions/2026-10-15-follow-ups-wait-one-at-a-time.md`.
 //!
 //! What should have happened: T-44 goes to the window at once, and T-43 goes to the
-//! same window after it, once T-44 and what T-43 needs are accepted.
+//! same window after it, once T-44 and what T-43 needs are accepted. (The case accepts
+//! T-1 first: since T-1118 a follow-up of a task with its result in waits for that.)
 //!
 //! The case is that shape on the rig, with the chief's own `cf` in its window: T-1,
 //! T-2 and T-3 are done, each by a session of its own; T-4 follows T-1 and needs T-2
@@ -70,6 +71,9 @@ fn a_follow_up_put_before_one_that_waits_for_the_same_idle_window_goes_to_it_and
         all_in(&project, &[1, 2, 3], "done")
     })?;
     let (_, session) = task(&project, 1)?;
+    // T-1 is accepted: a follow-up of a task whose result is in and not decided waits for
+    // that (T-1118), and the window is idle, as the owner's was, once it is.
+    cf(&rig, &chief, &["task", "accept", "T-1"])?;
 
     // T-4 follows T-1, and waits on the board for T-2 and T-3.
     cf(

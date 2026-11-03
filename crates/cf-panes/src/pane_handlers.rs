@@ -23,7 +23,7 @@ use crate::validation::{pane_key, validate_input, validate_seq, validate_size, I
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
     BackgroundProcess, CommandsRequest, MarkRequest, PaneExit, PossiblyLeft, Rest, RestRequest,
-    SnapshotRequest, BOTTOM_LINES, TAIL_LINES,
+    SilentPaste, SnapshotRequest, BOTTOM_LINES, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -50,6 +50,10 @@ struct OpenRequest {
     size: SizeRequest,
     #[serde(default = "default_backlog_bytes")]
     backlog_bytes: usize,
+    /// How the window's harness reads a human's paste, where its adapter says it reads one
+    /// silently: the human's keys after a paste then wait until it has drawn it.
+    #[serde(default)]
+    silent_paste: Option<SilentPaste>,
 }
 
 #[derive(Deserialize)]
@@ -142,7 +146,7 @@ pub fn register_pane_handlers(
             )
             .map_err(|error| error.to_string())?;
         let printed = match open_arbiter
-            .register(&streamed.key)
+            .register_with(&streamed.key, request.silent_paste)
             .map_err(|error| error.to_string())
             .and_then(|printed| open_inputs.open(&streamed.key).map(|()| printed))
         {
@@ -171,18 +175,22 @@ pub fn register_pane_handlers(
         Ok(opened)
     });
 
-    // Keys typed into a pane and an emulator's replies (a page-less peer
-    // answers a cursor query itself) are written alike.
-    for operation in ["pane.input", "pane.reply"] {
+    // Keys typed into a pane, in their order; and an emulator's replies (a page-less peer
+    // answers a cursor query itself), past whatever the pane's keys wait on
+    // (`InputWork::Reply`).
+    for (operation, reply) in [("pane.input", false), ("pane.reply", true)] {
         let input_queue = Arc::clone(&inputs);
         builder.on(operation, move |_bridge, body| {
             let request: BytesRequest = parse_body(body)?;
             validate_input(&request.bytes)?;
             let key = pane_key(&request.id, request.generation)?;
-            input_queue
-                .write(key, request.bytes)
-                .and_then(wait_for_input_blocking)
-                .map_err(|error| error.to_string())?;
+            if reply {
+                input_queue.reply(key, request.bytes)
+            } else {
+                input_queue.write(key, request.bytes)
+            }
+            .and_then(wait_for_input_blocking)
+            .map_err(|error| error.to_string())?;
             Ok(json!({"ok":true}))
         });
     }
@@ -752,7 +760,7 @@ mod tests {
         register_pane_handlers(
             &mut builder,
             Arc::clone(&panes),
-            arbiter,
+            Arc::clone(&arbiter),
             Arc::new(OutputHub::new()),
             Arc::clone(&inputs),
         );
@@ -788,6 +796,33 @@ mod tests {
                    "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024}),
         );
         assert_eq!(opened["ok"], true, "{opened}");
+        let typing = PaneKey::new("typing-pane", 1);
+        assert_eq!(
+            arbiter.silent_paste(&typing),
+            None,
+            "the daemon said nothing of it"
+        );
+        // A window whose harness reads a paste silently is opened saying how (T-1048).
+        let declared = ask(
+            "pane.open",
+            json!({"id":"declared-pane","generation":1,"cwd":"/tmp","argv":["/bin/sh","-c","sleep 30"],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024,
+                   "silentPaste":{"paceUsPerCharacter":600,"drawnAfterMs":50,"quietMs":120,
+                                  "mostMs":1000,"mostUsPerCharacter":1000}}),
+        );
+        assert_eq!(declared["ok"], true, "{declared}");
+        let declared_pane = PaneKey::new("declared-pane", 1);
+        assert_eq!(
+            arbiter.silent_paste(&declared_pane),
+            Some(SilentPaste {
+                pace_us_per_character: 600,
+                drawn_after_ms: 50,
+                quiet_ms: 120,
+                most_ms: 1_000,
+                most_us_per_character: 1_000,
+            })
+        );
+        panes.kill(&declared_pane).expect("kill the declared pane");
         let typed = ask(
             "pane.input",
             json!({"id":"typing-pane","generation":1,"bytes":b"half a thought".to_vec()}),
@@ -814,6 +849,133 @@ mod tests {
         panes
             .kill(&PaneKey::new("typing-pane", 1))
             .expect("kill the pane");
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// The terminal's answer over the bridge (`pane.reply`) goes past the human's keys held
+    /// after their paste (`pane.typed`), in a window whose harness reads a paste silently
+    /// (T-1048): the reply is answered at once, while the human's paste and Enter still wait.
+    #[cfg(unix)]
+    #[test]
+    fn a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            Arc::clone(&arbiter),
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        register_typed(&mut builder, Arc::clone(&inputs));
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut send = |id: &str, op: &str, body: Value| {
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+        };
+        let answered = |reader: &mut BufReader<UnixStream>| -> String {
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read response");
+                let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+                if frame["kind"] == "res" {
+                    assert_eq!(frame["body"]["ok"], true, "{frame}");
+                    return frame["id"].as_str().unwrap_or_default().to_owned();
+                }
+            }
+        };
+        send(
+            "n-open",
+            "pane.open",
+            json!({"id":"replied-pane","generation":1,"cwd":"/tmp",
+                   "argv":["/bin/sh","-c","stty raw -echo; printf ready; sleep 30"],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024,
+                   "silentPaste":{"paceUsPerCharacter":0,"drawnAfterMs":0,"quietMs":100,
+                                  "mostMs":1500,"mostUsPerCharacter":0}}),
+        );
+        assert_eq!(answered(&mut reader), "n-open");
+        // Once the program reads raw and echoes nothing: an echo of the paste would be the
+        // window's draw of it, and let the human's Enter go before the reply is sent.
+        let key = PaneKey::new("replied-pane", 1);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while !panes
+            .tail(&key, 5)
+            .is_ok_and(|lines| lines.iter().any(|line| line.contains("ready")))
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the program never got ready"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let pane = json!({"id":"replied-pane","generation":1});
+        let with = |bytes: &[u8]| {
+            let mut body = pane.clone();
+            body["bytes"] = json!(bytes);
+            body
+        };
+        // The reply goes once the paste is written: each request is handled on a thread of its
+        // own, and a reply sent sooner could be queued ahead of the human's keys under load.
+        let idle_ms = || {
+            panes
+                .list()
+                .expect("list the panes")
+                .into_iter()
+                .find(|pane| pane.id == key.id)
+                .map_or(u64::MAX, |pane| pane.idle_ms)
+        };
+        while idle_ms() < 150 {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        send("n-typed", "pane.typed", with(b"\x1b[200~ab\x1b[201~\r"));
+        while idle_ms() >= 150 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the paste was never written"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        send("n-reply", "pane.reply", with(b"R"));
+        // How long the reply took to be answered: held, it waits for the human's Enter, which
+        // waits 1.5 s for a draw that never comes. (Which of the two is answered first says
+        // nothing: a reply queued behind the Enter is answered a moment after it.)
+        let replied = std::time::Instant::now();
+        let mut answers = vec![answered(&mut reader)];
+        let reply_took = loop {
+            if answers.last().is_some_and(|id| id == "n-reply") {
+                break replied.elapsed();
+            }
+            answers.push(answered(&mut reader));
+        };
+        assert!(
+            reply_took < Duration::from_millis(1_000),
+            "{reply_took:?}: the reply waited behind the human's held Enter"
+        );
+        if !answers.iter().any(|id| id == "n-typed") {
+            answers.push(answered(&mut reader));
+        }
+        assert!(answers.iter().any(|id| id == "n-typed"), "{answers:?}");
+
+        panes.kill(&key).expect("kill the pane");
         inputs.close_and_drain();
         drop(reader);
         drop(node_stream);

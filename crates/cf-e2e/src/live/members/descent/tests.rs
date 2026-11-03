@@ -123,6 +123,100 @@ fn what_descends_from_a_process_is_what_it_started_and_began_after_it_and_not_it
 }
 
 #[test]
+fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone(
+) {
+    // A job the agent detached from a shell that then ended (`nohup sleep 4711 &`, in a shell
+    // that leads a session of its own) is held by no window, and says nothing of whose it is:
+    // it is the run's own by where it runs (the folder made for the run), that it began after the
+    // run's window did and that nothing started it any more (its parent is init's). A
+    // process whose command line says the same and is none of these is not.
+    let folder = std::path::Path::new("/runs/leaving-pi");
+    let elsewhere = std::path::PathBuf::from("/runs/leaving-devin");
+    let here = || Some(folder.to_path_buf());
+    let folder_of = |pid: u32| match pid {
+        200 | 202 | 203 | 205 | 207 | 208 => here(),
+        204 => Some(elsewhere.clone()),
+        // 206's folder cannot be read; 201 is in this one but began before the window did.
+        201 => here(),
+        _ => None,
+    };
+    let all = [
+        // The job: an orphan, in the run's folder, begun after the window (at 100).
+        running(200, 101, 1, "sleep 4711"),
+        // Begun before the window did: another run's, whose folder this one is later.
+        running(201, 99, 1, "sleep 4711"),
+        // Has a parent: a process of a shell that still runs, which the window's tree finds.
+        running(202, 102, 50, "sleep 4711"),
+        // Says other words.
+        running(203, 103, 1, "sleep 12"),
+        // Another folder.
+        running(204, 104, 1, "sleep 4711"),
+        // Its folder cannot be read.
+        running(206, 106, 1, "sleep 4711"),
+        // An orphan shell that runs the job, and the job it started: both are the run's.
+        running(207, 107, 1, "/bin/sh -c sleep 4711"),
+        running(208, 108, 207, "sleep 4711"),
+    ];
+    let pids = |found: Vec<Running>| -> Vec<u32> {
+        let mut pids: Vec<u32> = found.iter().map(|one| one.identity.pid).collect();
+        pids.sort_unstable();
+        pids
+    };
+    assert_eq!(
+        pids(orphans_in_folder(
+            &all,
+            "sleep 4711",
+            folder,
+            100,
+            folder_of
+        )),
+        [200, 207, 208]
+    );
+    // A window that began after every one of them leaves them all out: a child (208) is taken
+    // only with the orphan it descends from, never alone.
+    assert!(
+        orphans_in_folder(&all, "sleep 4711", folder, 108, folder_of).is_empty(),
+        "nothing orphaned began at or after 108"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
+    // The system says the real path of the folder a process runs in; the run may spell its own
+    // through a link (a Mac's temporary folder is behind `/var`).
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let real = real.canonicalize().unwrap();
+    let all = [running(200, 101, 1, "sleep 4711")];
+    let found = orphans_in_folder(&all, "sleep 4711", &link, 100, |_| Some(real.clone()));
+    assert_eq!(found.len(), 1);
+    // Its parent folder holds the other's folder, and is no folder of the process's.
+    assert!(
+        orphans_in_folder(&all, "sleep 4711", dir.path(), 100, |_| Some(real.clone())).is_empty()
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = crate::process::Run::new("/bin/sleep")
+        .arg("20")
+        .cwd(dir.path())
+        .spawn()
+        .unwrap();
+    let said = working_folder(child.id());
+    child.kill();
+    // The system says the real path: the temporary folder is behind `/var`, a link.
+    assert_eq!(said, Some(dir.path().canonicalize().unwrap()));
+    assert_eq!(working_folder(u32::MAX - 7), None);
+}
+
+#[test]
 fn a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_be_ended_is_said() {
     use super::testing::{Listed, Now};
 
@@ -667,4 +761,16 @@ fn an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spell
         let after = repaired.iter().find(|one| one.identity.pid == pid).unwrap();
         assert_eq!(before, after, "{pid}");
     }
+}
+
+/// The PowerShell that lists Windows' processes is given what one takes to start on a loaded
+/// machine, not the 30 s of a verb of `cf`: ended there under the load of a whole test program,
+/// it left a check unable to say what its window ran (CI, 2026-11-03, T-1161). Built here as on
+/// Windows, where it runs.
+#[test]
+fn the_powershell_that_lists_windows_processes_is_given_what_one_takes_on_a_loaded_machine() {
+    assert_eq!(
+        table_run().limit_given(),
+        Some(crate::process::POWERSHELL_LIMIT)
+    );
 }

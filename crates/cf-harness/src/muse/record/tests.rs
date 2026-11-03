@@ -392,8 +392,12 @@ fn a_turn_that_failed_is_settled_and_failed_in_muses_own_words() {
         Some("run ended with Failed: API error 500: upstream")
     );
     assert_eq!(
-        failed.quota, None,
-        "a server's error is no refusal for quota"
+        failed.quota.as_deref(),
+        Some(&Quota::Busy {
+            at: Some("2026-10-26T16:39:33.917Z".to_owned()),
+            because: "run ended with Failed: API error 500: upstream".to_owned(),
+        }),
+        "a server's error is no refusal for quota: a refusal for a moment (T-1112)"
     );
     // An end Muse may add later is a failure with no words: over, not known to have answered.
     let unknown = record_of(&[

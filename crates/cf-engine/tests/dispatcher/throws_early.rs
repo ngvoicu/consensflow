@@ -48,6 +48,7 @@ fn lets_go_of_its_participant_its_next_step_runs_the_failure_is_written_down_and
     context
         .open_window(tiers.project.id, "zeus-amber-pine")
         .unwrap();
+    context.accept_if_done(tiers.project.id, 1);
     context.create_task(
         tiers.project.id,
         NewTask {

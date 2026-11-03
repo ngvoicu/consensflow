@@ -16,7 +16,9 @@ fn named(pane: &Pane) -> Value {
 /// Pastes `body` into the pane (`writePaste`). The host says whether a paste
 /// it did not finish wrote nothing (`admitted: false`) or may have written
 /// some; an answer that never came (the bridge ended) or did not say (its
-/// deadline passed) may have been written: uncertain, never a refusal. A
+/// deadline passed: the bridge's thirty seconds, or, for a window whose harness declared how
+/// it reads a paste, the cap of that harness for this paste and five seconds more) may have
+/// been written: uncertain, never a refusal. A
 /// paste the host does not admit as it is asked for, after every wait of the
 /// adapter's before it, is refused unwritten ([`PaneHost::admits`]). With
 /// `read_empty`, the input box read empty at that count of the human's keys

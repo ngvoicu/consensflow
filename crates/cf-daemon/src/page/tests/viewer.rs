@@ -150,7 +150,10 @@ async fn the_tree_of_dot_specs_and_a_file_of_it_are_read_and_nothing_is_woken() 
                 held.file("user-auth/SPEC.md").await["file"]["text"],
                 "# Auth, again\n"
             );
-            assert_eq!(held.present().await, json!({ "ok": true, "present": true }));
+            assert_eq!(
+                held.present().await,
+                json!({ "ok": true, "present": true, "on": false })
+            );
             assert_eq!(held.rig.kicks.get(), 0, "a read wakes nothing");
         })
         .await;
@@ -217,7 +220,10 @@ async fn a_project_that_names_no_folder_is_read_in_the_one_the_app_names_on_or_o
                     "the app's folder",
                     "{specs}"
                 );
-                assert_eq!(held.present().await["present"], true, "{specs}");
+                let said = held.present().await;
+                assert_eq!(said["present"], true, "{specs}");
+                // Whether specs are on is the project's own word, else the app's (off here).
+                assert_eq!(said["on"], specs["on"] == true, "{specs}");
             }
             let own = asked(json!({ "on": false, "folder": "plans" }), &files);
             app_names(&own);
@@ -225,6 +231,66 @@ async fn a_project_that_names_no_folder_is_read_in_the_one_the_app_names_on_or_o
             assert_eq!(
                 own.file("registry.md").await["file"]["text"],
                 "the project's own"
+            );
+        })
+        .await;
+}
+
+/// What the board's button follows beside the folder: `on`, whether specs are
+/// on for the project — the project's own word, else the app's — resolved at
+/// every ask, the remembered folder's answer as a fresh one's; and the folder
+/// presence is read of is the one named now, the remembered answer of the
+/// folder named before notwithstanding.
+#[tokio::test]
+async fn whether_specs_are_on_is_said_at_every_ask_and_presence_follows_the_folder_named() {
+    LocalSet::new()
+        .run_until(async {
+            let agents = |home: &Path, specs: &str| {
+                fs::write(
+                    home.join("agents.json"),
+                    format!("{{\"schemaVersion\":1,\"agents\":[],{specs}}}"),
+                )
+                .unwrap();
+            };
+            // Specs on for the project and never a spec written: on alone is said.
+            let on = asked_with(
+                json!({ "on": true }),
+                &[("docs/specs/b/SPEC.md", "# B")],
+                |specs| specs.remembering_for(Duration::from_secs(60)),
+            );
+            assert_eq!(
+                on.present().await,
+                json!({ "ok": true, "present": false, "on": true })
+            );
+            // The app names the project's folder now (it names none of its own): the read of
+            // presence is the folder named now, not the one remembered a moment ago.
+            agents(on.home.path(), r#""specsDefaults":{"folder":"docs/specs"}"#);
+            assert_eq!(
+                on.present().await,
+                json!({ "ok": true, "present": true, "on": true })
+            );
+            // A project that says nothing of on or off is the app's word: turned on there, on
+            // is said of the answer the folder still remembers.
+            let unsaid = asked_with(Value::Null, &[(".specs/a/SPEC.md", "# A")], |specs| {
+                specs.remembering_for(Duration::from_secs(60))
+            });
+            assert_eq!(
+                unsaid.present().await,
+                json!({ "ok": true, "present": true, "on": false })
+            );
+            agents(unsaid.home.path(), r#""preferences":{"specs":true}"#);
+            let said = unsaid.present().await;
+            assert_eq!(said["on"], true, "{said}");
+            assert_eq!(said["present"], true, "{said}");
+            assert!(said["readAgainIn"].is_u64(), "answered from memory: {said}");
+            // And the project's own word wins either way: off over the app's on.
+            let off = asked_with(json!({ "on": false }), &[], |specs| {
+                specs.remembering_for(Duration::from_secs(60))
+            });
+            agents(off.home.path(), r#""preferences":{"specs":true}"#);
+            assert_eq!(
+                off.present().await,
+                json!({ "ok": true, "present": false, "on": false })
             );
         })
         .await;
@@ -241,7 +307,10 @@ async fn a_folder_that_is_not_there_is_found_empty_and_its_files_are_refused() {
                 held.tree().await,
                 json!({ "ok": true, "specs": { "folder": ".specs", "found": false, "entries": [] } })
             );
-            assert_eq!(held.present().await, json!({ "ok": true, "present": false }));
+            assert_eq!(
+                held.present().await,
+                json!({ "ok": true, "present": false, "on": false })
+            );
             assert_eq!(
                 held.file("registry.md").await,
                 json!({ "ok": false, "error": "the project has no specs folder .specs" })
@@ -331,7 +400,7 @@ async fn a_specs_folder_that_is_a_file_is_refused_and_holds_nothing() {
             assert_eq!(held.open("a.html").await, refused);
             assert_eq!(
                 held.present().await,
-                json!({ "ok": true, "present": false })
+                json!({ "ok": true, "present": false, "on": false })
             );
         })
         .await;

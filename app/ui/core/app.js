@@ -48,9 +48,9 @@ const state = {
   selected: null,
   board: null,
   inbox: NO_NOTES,
-  // Whether a project's specs folder holds a file (`{ project, present }`), read after its board
-  // and never waited for: whether Specs shows. The daemon stops at the first file, and remembers
-  // it for a moment.
+  // Whether Specs shows for a project (`{ project, on, present }`): specs on for it, or its
+  // specs folder holding a file, read after its board and never waited for. The daemon stops at
+  // the first file, and remembers it for a moment.
   specsPresent: null,
   agents: [],
   /** The harnesses not installed here, as `agents.list` said them last. */
@@ -511,21 +511,22 @@ let presenceReads = 0
 let presenceAgain = null
 
 /**
- * Whether the specs folder of project `project` holds a file, which shows the Specs button: read
- * apart from the board, which never waits for it (a folder on a drive that does not answer would
- * hold the board, its inbox and its windows until the daemon gave up on it), and shown when it
- * comes, for the project the board still shows. A folder that cannot be read shows no button. An
- * answer the daemon gave from memory says when it reads the folder again: it is asked once more
- * then, so the button never keeps what the folder said before a spec was written.
+ * Whether the Specs button shows for project `project`: specs on for it, or its specs folder
+ * holding a file — read apart from the board, which never waits for it (a folder on a drive
+ * that does not answer would hold the board, its inbox and its windows until the daemon gave
+ * up on it), and shown when it comes, for the project the board still shows. A folder that
+ * cannot be read holds no file, and a daemon that cannot answer says neither. An answer the
+ * daemon gave from memory says when it reads the folder again: it is asked once more then, so
+ * the button never keeps what the folder said before a spec was written.
  */
 async function readPresence(project) {
   const read = ++presenceReads
   clearTimeout(presenceAgain)
   presenceAgain = null
-  const said = await daemon('specs.present', { project }).catch(() => ({ present: false }))
+  const said = await daemon('specs.present', { project }).catch(() => ({}))
   if (read !== presenceReads || state.board?.project.id !== project) return
-  state.specsPresent = { project, present: said.present === true }
-  specsButton.hidden = !state.specsPresent.present
+  state.specsPresent = { project, on: said.on === true, present: said.present === true }
+  specsButton.hidden = !(state.specsPresent.on || state.specsPresent.present)
   if (typeof said.readAgainIn === 'number') {
     presenceAgain = setTimeout(() => void readPresence(project), said.readAgainIn + 50)
   }
@@ -547,12 +548,13 @@ function render() {
   const suspended = project?.state === 'suspended'
   main.dataset.suspended = String(suspended)
   projectSettingsButton.disabled = project === null
-  // Specs shows while the project's specs folder holds a file: from the board's first read after
-  // the chief writes its first spec, open or closed, specs on or off (`readPresence`).
+  // Specs shows while specs are on for the project or its specs folder holds a file: from the
+  // setting being saved, before anything is written, and from the board's first read after the
+  // chief writes its first spec, open or closed (`readPresence`).
   specsButton.hidden = !(
     project !== null &&
     state.specsPresent?.project === project.id &&
-    state.specsPresent.present
+    (state.specsPresent.on || state.specsPresent.present)
   )
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
@@ -934,6 +936,10 @@ const specsSettings = new SpecsSettings($('#specs-dialog'), {
   readSpecs,
   setSpecs: (specs) => {
     state.specs = specs
+    // What the app says of specs may turn them on for the project shown, or name it another
+    // folder: whether Specs shows is read again at once.
+    const project = state.board?.project.id
+    if (project !== undefined) void readPresence(project)
   },
 })
 $('#specs-settings-button').addEventListener('click', () =>

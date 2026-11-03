@@ -462,6 +462,49 @@ pub struct TaskReleased {
     pub task: TaskView,
 }
 
+/// An open task whose tier nobody on the staff holds any more, which went to
+/// the nearest one somebody does: the tier it was for, the tier it is for now,
+/// and the members of that tier.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskRetiered {
+    pub from: String,
+    pub to: String,
+    pub holders: Vec<String>,
+}
+
+/// How the tasks a task needs, or that wait for it, are changed: the list is
+/// replaced, or some are added and some removed.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Links {
+    Set(Vec<i64>),
+    Change { add: Vec<i64>, remove: Vec<i64> },
+}
+
+/// A task whose brief, tier, needs or waiters were changed before a window had
+/// it: the task as it is now; the tier asked and the members of the one it went
+/// to, when its new tier is one nobody holds and it went to the nearest; and the
+/// tasks that wait for it now, when those were changed.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskEdited {
+    pub task: TaskView,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asked: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub holders: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<Vec<i64>>,
+}
+
+/// What changes in a task no window has: its brief, its tier, the tasks it
+/// needs and the tasks that wait for it, in one step.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TaskEdit {
+    pub body: Option<String>,
+    pub tier: Option<String>,
+    pub needs: Option<Links>,
+    pub before: Option<Links>,
+}
+
 /// A held task whose time has come.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

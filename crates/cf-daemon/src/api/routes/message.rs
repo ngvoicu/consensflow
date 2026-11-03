@@ -6,8 +6,10 @@
 //! the Resume: the reader is told so (409 `waits`), and is given none of its text
 //! ([`Waits`]); and so does one a meeting with the chief holds, for its end. A
 //! note that tells its reader a role is said to be one (`"role": true`, to its
-//! recipient alone): once it was delivered, in part, `cf` says it read it whole by
-//! a bound of its own (`role_read_whole`), and the board then counts the role told.
+//! recipient alone): once it was delivered, or while it is being delivered, in
+//! part, `cf` says it read it whole by a bound of its own (`role_read_whole`), and
+//! the board then counts the role told (once the delivery is confirmed, for a note
+//! read while it was still being delivered).
 
 use serde_json::json;
 

@@ -114,9 +114,13 @@ fn two_follow_ups_of_one_window_at_work_go_to_it_in_order() {
         .expect("a result");
     assert_eq!(
         w.state(c.number),
-        "queued",
-        "the second goes with its result"
+        "open",
+        "the window takes nothing new while the first has its result in and undecided"
     );
+    w.ledger
+        .accept_task(w.project, b.number, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(c.number), "queued", "the second goes when it is");
     let head = w.next(&session).expect("the second");
     assert_eq!(w.message(head).task_number, Some(c.number));
 }
@@ -187,7 +191,7 @@ fn a_follow_up_of_a_task_whose_window_is_on_another_is_refused_as_before() {
     assert_eq!(
         refused.to_string(),
         format!(
-            "@{session} is still on its work: wait for its result, or open the task for its tier"
+            "@{session}'s window holds T-{b}, working: wait for its result, or cancel T-{b}, before giving it another task; or open the task for its tier"
         )
     );
 }
@@ -211,7 +215,7 @@ fn a_task_that_fails_leaves_its_follow_up_waiting_and_the_chief_is_told_once() {
     assert_eq!(
         notes_to_the_chief(&w, b),
         [format!(
-            "T-{b} waits for T-{a}, which failed: cancel T-{b}, or reopen T-{a} and let it finish."
+            "T-{b} waits for T-{a}, which failed: cancel T-{b}, reopen T-{a} and let it finish, or accept T-{a} with what you checked: cf task accept T-{a} \"…\""
         )]
     );
 
@@ -289,7 +293,7 @@ fn a_follow_up_that_waits_for_a_task_failing_twice_is_told_to_the_chief_each_tim
         .fail_task(w.project, a, "its pane died again")
         .expect("failed again");
     let told = format!(
-        "T-{b} waits for T-{a}, which failed: cancel T-{b}, or reopen T-{a} and let it finish."
+        "T-{b} waits for T-{a}, which failed: cancel T-{b}, reopen T-{a} and let it finish, or accept T-{a} with what you checked: cf task accept T-{a} \"…\""
     );
     assert_eq!(notes_to_the_chief(&w, b), [told.clone(), told]);
     assert_eq!(w.state(b), "open");
@@ -329,7 +333,8 @@ fn a_member_removed_with_a_task_a_follow_up_waits_behind_cancels_both_and_tells_
 }
 
 #[test]
-fn a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to_the_window_now() {
+fn a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to_the_window_first_when_it_is_accepted(
+) {
     let mut w = world();
     let (session, a) = at_work(&mut w);
     let b = w
@@ -341,12 +346,21 @@ fn a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to
         .record_result(w.project, a, "Parser, done")
         .expect("a result");
 
-    // The chief says it goes ahead of T-2: the rule of 2026-10-15 holds.
+    // The chief says it goes ahead of T-2: the rule of 2026-10-15 holds. Like T-2 it
+    // waits for T-1, which has its result in and is not decided (T-1118).
     let first = w
         .follow_up_before(a, "First", &[b])
         .expect("put before the one that waits");
-    assert_eq!(first.task.state, "queued");
+    assert_eq!(first.task.state, "open");
+    assert_eq!(first.task.blocked_by, [a]);
     let first = first.task.number;
+    assert_eq!(w.next(&session), None, "nothing is for the window yet");
+
+    w.ledger
+        .accept_task(w.project, a, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(first), "queued");
+    assert_eq!(w.state(b), "open", "T-2 waits for it");
     let head = w.next(&session).expect("for the window");
     assert_eq!(w.message(head).task_number, Some(first));
 }
@@ -566,9 +580,13 @@ fn a_follow_up_added_after_the_result_but_before_the_acceptance_lines_up_behind_
         .expect("a result");
     assert_eq!(
         w.state(c),
-        "queued",
-        "the second goes with the first's result"
+        "open",
+        "the second waits for the first to be accepted: its result is the chief's to decide"
     );
+    w.ledger
+        .accept_task(w.project, b, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(c), "queued", "and goes when it is");
 }
 
 #[test]

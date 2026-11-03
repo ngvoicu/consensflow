@@ -377,6 +377,13 @@ pub fn title_of(body: &str) -> String {
     }
 }
 
+/// A title the chief gives a task: read as a brief's first line is ([`title_of`]), and
+/// it must say something.
+pub fn checked_title(title: &str) -> Result<String, LedgerError> {
+    require_text(title, "title", MAX_BODY)?;
+    Ok(title_of(title))
+}
+
 /// `text` cut at `max` characters, then a line saying how long it was (at 0,
 /// only that line); shorter, as it is.
 pub fn cut(text: &str, max: usize) -> String {

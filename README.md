@@ -27,8 +27,8 @@ passwords and needs no API keys.
   agent's harness, and the window closes when the work is done. Its
   conversation is kept, so a follow-up continues where it stopped.
 - **Work by tier, not by name.** The chief asks for the kind of member a task
-  needs (critical, complex, standard or light), and ConsensFlow gives the task
-  to a free member of that tier. Work is shared across the staff.
+  needs (critical, complex, standard or light), and ConsensFlow gives each
+  task a new window of a member of that tier. Work is shared across the staff.
 - **Plans with an order.** A task can wait for others to be accepted first,
   so a plan of many tasks runs in its own order, in parallel where it can.
 - **Pause, resume and tell.** Stop any task and keep its window and work, or

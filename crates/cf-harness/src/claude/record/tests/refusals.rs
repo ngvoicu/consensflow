@@ -39,7 +39,8 @@ fn a_status_of_429_and_an_error_that_is_rate_limit_are_each_a_refusal_for_quota(
         (r#"{"apiErrorStatus":"429"}"#, false),
         (r#"{"apiErrorStatus":[429]}"#, false),
         (r#"{"apiErrorStatus":true}"#, false),
-        (r#"{"apiErrorStatus":500,"error":"overloaded"}"#, false),
+        // A server's error is no quota: a refusal for a moment (below).
+        (r#"{"apiErrorStatus":400,"error":"overloaded"}"#, false),
         (r#"{"error":"Rate_Limit"}"#, false),
         (r#"{"error":["rate_limit"]}"#, false),
         ("{}", false),
@@ -347,14 +348,15 @@ fn claude_code_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_u
             "{said}"
         );
     }
-    // A limit that resets is a quota still, and a server's error is neither.
+    // A limit that resets is a quota still, and a server's error is neither: a refusal for a
+    // moment (T-1112).
     assert_eq!(
         quota_of("You've hit your limit.", r#"{"apiErrorStatus":429}"#)["state"],
         "exhausted"
     );
     assert_eq!(
         quota_of("Overloaded", r#"{"apiErrorStatus":529}"#),
-        Value::Null
+        json!({ "state": "busy", "at": AT, "resetsAt": null, "because": "Overloaded" })
     );
 }
 
@@ -380,4 +382,39 @@ fn a_turn_on_a_model_the_account_lacks_fails_in_claude_codes_words_naming_it() {
     let failure = failure_of(&[hello(), refusal]);
     assert_eq!(failure.as_deref(), Some(GONE));
     assert!(crate::claude::models::gone(GONE, "claude-gone-9-9"));
+}
+
+/// A reading of a failure, its turn settled natively, that its provider refused for a moment
+/// (T-1112): `Quota::Busy`, in the refusal's words, at its time.
+fn busy(items: &str) -> String {
+    format!(
+        r#"{{"items":{items},"inFlight":false,"asking":false,"failed":true,"quota":{{"state":"busy","at":"{AT}","resetsAt":null,"because":"{LIMIT}"}},"settlement":"settled"}}"#
+    )
+}
+
+#[test]
+fn a_server_error_or_an_overloaded_model_is_a_refusal_for_a_moment_and_no_quota() {
+    // T-1112: Anthropic's 529 (`overloaded_error`), a 5xx, the error `server_error`. A 429
+    // stays the quota's, a 401 or 402 the account's, and a 400 the turn's failure.
+    let cases: &[(&str, Option<bool>)] = &[
+        (r#"{"apiErrorStatus":529}"#, Some(true)),
+        (r#"{"apiErrorStatus":500}"#, Some(true)),
+        (r#"{"apiErrorStatus":503}"#, Some(true)),
+        (r#"{"apiErrorStatus":500,"error":"overloaded"}"#, Some(true)),
+        (r#"{"error":"server_error"}"#, Some(true)),
+        (
+            r#"{"apiErrorStatus":529,"error":"rate_limit"}"#,
+            Some(false),
+        ),
+        (r#"{"apiErrorStatus":400}"#, None),
+        (r#"{"apiErrorStatus":"529"}"#, None),
+    ];
+    for &(fields, busy_or_quota) in cases {
+        let expected = match busy_or_quota {
+            Some(true) => busy(&items(&format!("\"{AT}\""))),
+            Some(false) => failed(&items(&format!("\"{AT}\"")), true),
+            None => failed(&items(&format!("\"{AT}\"")), false),
+        };
+        assert_eq!(once(&[hello(), with(fields)]), expected, "{fields}");
+    }
 }

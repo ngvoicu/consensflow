@@ -43,10 +43,11 @@ mod wake_ups;
 pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
     DeletedProject, EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead,
-    HistoryRow, Lane, LastSwitch, LatestMessages, LatestTranscript, MemberView, MessageOpening,
-    MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume,
-    Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits,
-    TaskThread, TaskTranscript, TaskView, TextCut, TextPart, TierChange,
+    HistoryRow, Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView,
+    MessageOpening, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
+    RemovedMember, Resume, Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited,
+    TaskMoved, TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView,
+    TextCut, TextPart, TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
@@ -58,8 +59,9 @@ pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
 pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
-    continuation, continuation_in, continuation_tasks, cut_turn, is_told, waiting_for_the_reopen,
-    GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN, WITHDRAWN_AFTER_HANDED,
+    continuation, continuation_in, continuation_tasks, cut_turn, is_busy_note, is_told,
+    waiting_for_the_reopen, GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN,
+    WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
@@ -72,5 +74,5 @@ pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use staff::MemberEdit;
 pub use tasks::resumed_in_vain;
-pub use tasks::{NewTask, RESUME_WORDS};
+pub use tasks::{reopen_or_accept, NewTask, RESUME_WORDS};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

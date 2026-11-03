@@ -95,7 +95,7 @@ runs = ["e2e-live-command", "e2e-stops-tool"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/command.rs"
-find = "            .is_some_and(|before| ends_with_program(before, program)),"
+find = "            .is_some_and(|before| ends_with_program(before, file_of(program))),"
 replace = "            .is_some_and(|_| true),"
 
 # What line runs a command: where the program begins and ends.
@@ -201,13 +201,13 @@ file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
 find = "    pid.parse::<u64>().ok().map(|_| line)"
 replace = "    pid.parse::<u64>().ok().map(|_| process)"
 
-# What the `stuck` case reads of the machine's processes (T-2, T-75): Git Bash's `sh.exe` and
-# `sleep.exe` are listed by their path, with backslashes, and in double quotes where it holds a
-# space (`"C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh`, zeewin,
-# 2026-10-21).
+# What the `stuck` case reads of the machine's processes (T-2, T-75): a program is listed by
+# its path, with backslashes, and in double quotes where it holds a space (Git Bash's `sh.exe`
+# on zeewin, 2026-10-21; since T-1137 the script is Node's, `"C:\Program Files\nodejs\node.exe"
+# ./ignore-signals-cf-stops-live.cjs`).
 [[plant]]
 name = "live windows: the stuck case reads a program's path with a slash only"
-meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+meant = "the_commands_process_is_the_script_by_whichever_path_of_nodes_and_not_the_shell_naming_it"
 runs = ["e2e-stops-stuck"]
 
 [[plant.edit]]
@@ -217,7 +217,7 @@ replace = '''(?:"(?:[^"]*/)?(?i:{name}(?:\.exe)?)"|(?:\S*/)?(?i:{name}(?:\.exe)?
 
 [[plant]]
 name = "live windows: the stuck case reads a program without its extension only"
-meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+meant = "the_commands_process_is_the_script_by_whichever_path_of_nodes_and_not_the_shell_naming_it"
 runs = ["e2e-stops-stuck"]
 
 [[plant.edit]]
@@ -227,7 +227,7 @@ replace = '''(?:"(?:[^"]*[\\/])?(?i:{name})"|(?:\S*[\\/])?(?i:{name}))'''
 
 [[plant]]
 name = "live windows: the stuck case reads a quoted path as no program"
-meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+meant = "the_commands_process_is_the_script_by_whichever_path_of_nodes_and_not_the_shell_naming_it"
 runs = ["e2e-stops-stuck"]
 
 [[plant.edit]]

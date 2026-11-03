@@ -130,8 +130,10 @@ fn a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_c
         Ok(!results(&project)?.is_empty())
     })?;
 
-    // A follow-up goes to the same window: its delivery is read past the torn line,
-    // and its turn's end and its answer.
+    // The chief accepts T-1 (a follow-up of a task with its result in waits for that), and a
+    // follow-up goes to the same window: its delivery is read past the torn line, and its
+    // turn's end and its answer.
+    cf(&rig, &chief, &["task", "accept", "T-1"])?;
     cf(
         &rig,
         &chief,

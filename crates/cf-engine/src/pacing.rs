@@ -267,6 +267,17 @@ impl Dispatcher {
         returning(window.recheck()).await;
     }
 
+    /// How long the window has read at rest, on the same last item, over looks that
+    /// followed each other: none while it has not (`note_rest`).
+    pub(crate) fn rested_for(&self, record: &Record) -> Option<i64> {
+        record
+            .delivery
+            .borrow()
+            .rest
+            .as_ref()
+            .map(|rest| self.now() - rest.since)
+    }
+
     /// The rest of a window is over: a look at it failed, or it refused a message for
     /// being at work.
     pub(crate) fn rest_ends(&self, record: &Record) {

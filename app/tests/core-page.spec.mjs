@@ -2110,6 +2110,24 @@ test('offers Finish for any working task of a member, held or not, and for none 
   await expect(finishOf(page, 'Task T-2')).toHaveCount(0)
 })
 
+test("offers Finish for a task that waits on a question, which the chief or the human may take as the result of its worker's last words", async ({
+  page,
+}) => {
+  // The words a turn ended on may be raised as a question that nobody meant (T-1119): the
+  // task waits, and Finish is the way to take them as the result.
+  const data = heldModel()
+  data.finishLeaves = { jobs: 0, agents: 0 }
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(14, 'Install the toolchain', 'waiting', 'chief', 'zeus', 4))
+  data.tasks['1:14'] = { ...lane.tasks.at(-1), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="14"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-14' })).toBeVisible()
+  await expect(finishOf(page, 'Task T-14')).toHaveCount(1)
+  await finishOf(page, 'Task T-14').click()
+  await expect.poll(() => calls(page, 'task.finish')).toEqual([{ project: 1, task: 14 }])
+})
+
 test('says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last', async ({
   page,
 }) => {
@@ -3231,23 +3249,31 @@ async function selecting(page, line) {
 }
 
 // On a Mac, Cmd+C copies and Ctrl+C stays the program's interrupt, selection
-// or not; Ctrl+Shift+C copies on every system.
-test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
-  page,
-}) => {
-  const { copied, sent } = await selecting(page, 'copy this line')
-  await page.keyboard.press('Control+Shift+C')
-  expect(await copied()).toEqual(['copy'])
-  expect(await sent()).toEqual([])
-  await page.mouse.dblclick(
-    ...(await page
-      .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
-      .boundingBox()
-      .then((box) => [box.x + 6, box.y + 6])),
-  )
-  await page.keyboard.press('Control+C')
-  await expect.poll(sent).toEqual([[3]])
-  expect(await copied()).toEqual(['copy'])
+// or not; Ctrl+Shift+C copies on every system. The page tells a Mac by the
+// browser's user agent, which this sets, as the cases on Windows set theirs: the
+// suite runs on Linux (T-1161).
+test.describe('on a Mac', () => {
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+  })
+  test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
+    page,
+  }) => {
+    const { copied, sent } = await selecting(page, 'copy this line')
+    await page.keyboard.press('Control+Shift+C')
+    expect(await copied()).toEqual(['copy'])
+    expect(await sent()).toEqual([])
+    await page.mouse.dblclick(
+      ...(await page
+        .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+        .boundingBox()
+        .then((box) => [box.x + 6, box.y + 6])),
+    )
+    await page.keyboard.press('Control+C')
+    await expect.poll(sent).toEqual([[3]])
+    expect(await copied()).toEqual(['copy'])
+  })
 })
 
 test.describe('on Windows', () => {

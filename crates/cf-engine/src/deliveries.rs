@@ -15,8 +15,8 @@ use cf_harness::contract::{
 use cf_harness::records::{Reading, Role};
 use cf_ledger::model::MAX_BODY;
 use cf_ledger::{
-    is_told, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver, MessageView, NewNote,
-    ParticipantView, ProjectView, TaskView,
+    is_told, reopen_or_accept, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver,
+    MessageView, NewNote, ParticipantView, ProjectView, TaskView,
 };
 use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
 use cf_proto::trace::WindowEvent;
@@ -159,6 +159,14 @@ pub(crate) struct DeliveryPart {
     /// The message whose sender and the human were told it waits on the window's work
     /// (`at_work`): once a message, however many times it is pasted.
     pub(crate) told_work: Option<i64>,
+    /// The record of the window as it stood when the words that resumed its task were
+    /// first seen waiting, for the look that finds the window acting after them
+    /// (`resumed_at_work`).
+    pub(crate) resumed: Option<crate::resumed_at_work::ResumeWatch>,
+    /// The words whose task was sent back to queued because the window rested without them
+    /// going in, and when, on the engine's clock: it is not shown working for them again
+    /// for a while (`resumed_at_work`).
+    pub(crate) sent_back: Option<(i64, i64)>,
     /// What goes into the window before anything else of its queue, in this
     /// order and while it waits and may go: a launch that is to say a role
     /// first puts the replacement here, and the message it displaced after it
@@ -1676,13 +1684,18 @@ impl Dispatcher {
     /// What the ledger withdrew did not fail, and nobody hears of it. The words that
     /// resume a paused task paused it again: its requester hears why in the note of the
     /// pause (the ledger's), and the human, once, that they did not reach the window.
-    /// The ledger says which it did ([`GivenUp`]): no state is read for it.
+    /// The ledger says which it did ([`GivenUp`]): no state is read for it. The tasks that
+    /// wait for a task this failed are told last, after the words of the failure, and the
+    /// requester's note names the ones it asked for (T-1148).
     fn fail_delivery(
         &self,
         message: &MessageView,
         because: &str,
         look: Option<&Value>,
     ) -> Result<(), EngineError> {
+        // Whether the task was failed already, as a turn that failed fails it: the tasks that
+        // wait for it were told then, and are not told again.
+        let failed_before = self.task_failed(message)?;
         let (_, given_up) = {
             let mut ledger = self.seams.ledger.borrow_mut();
             match look {
@@ -1710,6 +1723,56 @@ impl Dispatcher {
                 return self.words_back(&project, message, because, true);
             }
         }
+        let told_the_requester = self.tell_given_up(message, because, failed_before)?;
+        // Last, what the failure left behind: the tasks that wait for the task it failed are
+        // told to their requesters after the words of the failure, which the chief is given
+        // first (it is given its notes one at a time, the oldest first), the human's
+        // included. The requester of the task has them in its note, as the ledger's give-up
+        // says them (the field board of 2026-11-02: T-303 waits for T-302, which failed,
+        // reached the chief before T-302 failed; T-1148). Not where the requester was told
+        // nothing of the failure (a message that is no brief and no told words), nor where
+        // the task had failed before.
+        if failed_before || !told_the_requester {
+            return Ok(());
+        }
+        let Some(number) = message.task_number else {
+            return Ok(());
+        };
+        let project = self.known_project(message.project_id)?;
+        let task = self.seams.ledger.borrow().task(project.id, number)?;
+        if let Some(thread) = task.filter(|thread| thread.task.state == "failed") {
+            self.seams.ledger.borrow_mut().tell_waiting_for_failed(
+                project.id,
+                number,
+                &thread.task.requester,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Whether the task `message` is about has failed.
+    fn task_failed(&self, message: &MessageView) -> Result<bool, EngineError> {
+        let Some(number) = message.task_number else {
+            return Ok(false);
+        };
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .task(message.project_id, number)?;
+        Ok(task.is_some_and(|thread| thread.task.state == "failed"))
+    }
+
+    /// The words of a delivery that failed for good: whoever gave the task and whoever told
+    /// the words hear why, and the human, once, what it was. `failed_before` is whether the
+    /// task had failed already, whose waiters were told then. Whether the task's requester
+    /// was told of its failure.
+    fn tell_given_up(
+        &self,
+        message: &MessageView,
+        because: &str,
+        failed_before: bool,
+    ) -> Result<bool, EngineError> {
         let project = self.known_project(message.project_id)?;
         // The human's own words that wait for the reopen of the task this failed, where
         // the human is not its requester, said in the note of what did not reach the
@@ -1717,6 +1780,7 @@ impl Dispatcher {
         // told the human of them, and this note did not).
         let mut waiting = String::new();
         let mut told_back = false;
+        let mut told_the_requester = false;
         if let Some(number) = message.task_number {
             let task = self.seams.ledger.borrow().task(project.id, number)?;
             let failed = task.filter(|thread| {
@@ -1758,6 +1822,18 @@ impl Dispatcher {
                         ""
                     }
                 };
+                // The tasks that wait for it and were asked for by its requester are named
+                // in the requester's note, after the words of the failure.
+                let waits = if failed_before {
+                    String::new()
+                } else {
+                    self.seams.ledger.borrow().waiting_for_it(
+                        project.id,
+                        number,
+                        &task.requester,
+                    )?
+                };
+                told_the_requester = true;
                 self.tell_failed(
                     &project,
                     task,
@@ -1765,7 +1841,7 @@ impl Dispatcher {
                     &because,
                     &told,
                     None,
-                    theirs(&task.requester),
+                    &format!("{waits}{}", theirs(&task.requester)),
                 )?;
                 if let Some(teller) = teller.filter(|teller| *teller != task.requester) {
                     self.tell_failed(
@@ -1781,7 +1857,7 @@ impl Dispatcher {
                 told_back = teller.is_some();
                 // A task the human gave: that note was theirs.
                 if thread.task.requester == "human" {
-                    return Ok(());
+                    return Ok(true);
                 }
                 waiting = waiting_for_the_reopen(&told, Some("human"));
             }
@@ -1789,7 +1865,8 @@ impl Dispatcher {
         if !told_back {
             self.words_back(&project, message, because, false)?;
         }
-        self.tell_not_reached(&project, message, because, &waiting)
+        self.tell_not_reached(&project, message, because, &waiting)?;
+        Ok(told_the_requester)
     }
 
     /// Words told to a task's window (the chief's tell, `cf tell`, or words told to it
@@ -1954,7 +2031,7 @@ impl Dispatcher {
     /// `to` hears that `task` failed, `because`, which of the words `told` its window
     /// wait for the reopen, `to`'s own where `of` names it (`waiting_for_the_reopen`,
     /// the words the ledger's give-up says them in: one fate, Calliope's P3-4 of T-414
-    /// and of T-446), and how to reopen it.
+    /// and of T-446), and how to reopen it or accept it (`reopen_or_accept`).
     #[allow(clippy::too_many_arguments)]
     fn tell_failed(
         &self,
@@ -1974,8 +2051,9 @@ impl Dispatcher {
                 to: to.to_owned(),
                 task: Some(task.number),
                 body: format!(
-                    "T-{0} failed: {because}{waiting}. Reopen it with: cf task reopen T-{0} \"…\"{words}",
-                    task.number
+                    "T-{0} failed: {because}{waiting}.{1}{words}",
+                    task.number,
+                    reopen_or_accept(task.number)
                 ),
             },
         )?;

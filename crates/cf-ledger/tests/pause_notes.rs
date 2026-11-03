@@ -374,7 +374,7 @@ fn the_answer_of_a_paused_tasks_window_is_noted_once_for_each_tell() {
     world.pause(1);
     let first = world
         .ledger
-        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .note_paused_answer(world.project, 1, "zeus", 5, None, "Parser done")
         .expect("the ledger")
         .expect("a note");
     assert_eq!(first.body, paused_answer("Parser done"));
@@ -384,7 +384,7 @@ fn the_answer_of_a_paused_tasks_window_is_noted_once_for_each_tell() {
     for words in ["Parser done", "Parser done, and docs"] {
         let again = world
             .ledger
-            .note_paused_answer(world.project, 1, "zeus", 5, words)
+            .note_paused_answer(world.project, 1, "zeus", 5, None, words)
             .expect("the ledger");
         assert!(again.is_none(), "{words}");
     }
@@ -395,16 +395,118 @@ fn the_answer_of_a_paused_tasks_window_is_noted_once_for_each_tell() {
         .expect("cancelled");
     assert!(world
         .ledger
-        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .note_paused_answer(world.project, 1, "zeus", 5, None, "Parser done")
         .expect("the ledger")
         .is_none());
     // Another tell is another note.
     let next = world
         .ledger
-        .note_paused_answer(world.project, 1, "zeus", 6, "Lexer done")
+        .note_paused_answer(world.project, 1, "zeus", 6, None, "Lexer done")
         .expect("the ledger")
         .expect("a note");
     assert!(next.body.contains("(m-6)"));
+}
+
+/// The same notes where the window wrote `reply` first, before its first tool call (T-1151).
+fn paused_answer_after(reply: &str, words: &str) -> String {
+    paused_answer(words).replace(
+        "is over. What it said last:\n\n",
+        &format!(
+            "is over. What it wrote first, before any tool:\n\n{reply}\n\nWhat it said last:\n\n"
+        ),
+    )
+}
+
+fn moved_answer_after(reply: &str, words: &str) -> String {
+    moved_answer(words).replace(
+        "What the turn on those words ended with:\n\n",
+        &format!("What the turn on those words wrote first, before any tool:\n\n{reply}\n\nand ended with:\n\n"),
+    )
+}
+
+#[test]
+fn what_a_window_wrote_first_is_noted_beside_its_last_words_once_for_each_tell() {
+    let mut world = world();
+    world.pause(1);
+    let first = world
+        .ledger
+        .note_paused_answer(
+            world.project,
+            1,
+            "zeus",
+            5,
+            Some("Stopped; the lexer is next"),
+            "Parser done",
+        )
+        .expect("the ledger")
+        .expect("a note");
+    assert_eq!(
+        first.body,
+        paused_answer_after("Stopped; the lexer is next", "Parser done")
+    );
+    // The note is read back as itself: asked again, for the same tell, with or without the
+    // reply, it is the note already there, and no other is written.
+    for reply in [
+        Some("Stopped; the lexer is next"),
+        None,
+        Some("Other words"),
+    ] {
+        let again = world
+            .ledger
+            .note_paused_answer(world.project, 1, "zeus", 5, reply, "Parser done")
+            .expect("the ledger");
+        assert!(again.is_none(), "{reply:?}");
+    }
+    // Words of the note's own inside the reply do not make it another note.
+    let tricky = "It said:\n\nWhat it said last:\n\nnothing";
+    let next = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 6, Some(tricky), "Lexer done")
+        .expect("the ledger")
+        .expect("a note");
+    assert_eq!(
+        next.body,
+        paused_answer_after(tricky, "Lexer done").replace("(m-5)", "(m-6)")
+    );
+    let again = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 6, Some(tricky), "Lexer done")
+        .expect("the ledger");
+    assert!(again.is_none(), "read back whole, whatever it quotes");
+}
+
+#[test]
+fn a_resume_keeps_what_a_window_wrote_first_in_the_words_of_a_task_that_moved_on() {
+    let mut world = world();
+    world.stall(1);
+    let queued = world
+        .ledger
+        .note_paused_answer(
+            world.project,
+            1,
+            "zeus",
+            5,
+            Some("Stopped; the lexer is next"),
+            "Parser done",
+        )
+        .expect("the ledger")
+        .expect("a note");
+    world.resume(1);
+    let kept = world.message(queued.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.body),
+        (
+            "queued",
+            moved_answer_after("Stopped; the lexer is next", "Parser done")
+        )
+    );
+    // Paused again and resumed again: the same note, the same words.
+    world.pause(1);
+    world.resume(1);
+    assert_eq!(
+        world.message(queued.id).body,
+        moved_answer_after("Stopped; the lexer is next", "Parser done")
+    );
 }
 
 #[test]
@@ -414,12 +516,12 @@ fn a_resume_keeps_the_answer_of_a_paused_tasks_window_in_words_true_of_a_task_th
     let stall = world.stall(1);
     let queued = world
         .ledger
-        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .note_paused_answer(world.project, 1, "zeus", 5, None, "Parser done")
         .expect("the ledger")
         .expect("a note");
     let given = world
         .ledger
-        .note_paused_answer(world.project, 1, "zeus", 4, "Earlier")
+        .note_paused_answer(world.project, 1, "zeus", 4, None, "Earlier")
         .expect("the ledger")
         .expect("a note");
     world.ledger.begin_delivery(given.id).expect("begun");
@@ -472,7 +574,7 @@ fn a_held_tasks_window_that_goes_on_by_itself_keeps_its_answer_in_words_true_of_
         .expect("held");
     let kept = world
         .ledger
-        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .note_paused_answer(world.project, 1, "zeus", 5, None, "Parser done")
         .expect("the ledger")
         .expect("a note");
     assert_eq!(kept.body, paused_answer("Parser done"));
@@ -496,12 +598,12 @@ fn finishing_a_paused_task_withdraws_what_its_requester_was_told_of_the_pause_an
     let stall = world.stall(1);
     let queued = world
         .ledger
-        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .note_paused_answer(world.project, 1, "zeus", 5, None, "Parser done")
         .expect("the ledger")
         .expect("a note");
     let given = world
         .ledger
-        .note_paused_answer(world.project, 1, "zeus", 4, "Earlier")
+        .note_paused_answer(world.project, 1, "zeus", 4, None, "Earlier")
         .expect("the ledger")
         .expect("a note");
     world.ledger.begin_delivery(given.id).expect("begun");

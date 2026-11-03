@@ -1,0 +1,363 @@
+# The Mac's limit of a detached job, expected by the live finish case (T-1100; the chief's
+# decision of 2026-11-03, m-7121). Pi's and Devin's tool shells lead sessions of their own, so a
+# job they detach with `nohup … &` once the shell has ended has no session, parent or readable
+# marker that ties it to the window (`crates/cf-panes/src/background/work.rs`, T-1145): the host
+# never lists it, the close does not end it, and the chief is told nothing. T-1068's `live finish`
+# was red on both for it. The product is not changed. The case now:
+#
+# - expects that of Pi and Devin on a Mac, and of no other harness or machine (`Expect::of`);
+# - lets that one shape pass: every process of it has parent 1 and no terminal, it still ran after
+#   the window closed, the chief was told nothing, and the task is done with its result;
+# - ends what it can prove its own: an orphan that holds the command, began after the worker's
+#   window and runs in the folder made for the run, with what descends from it, through the
+#   descent and by which process it is (`orphans_in_folder`, `working_folder`);
+# - fails an orphan it cannot prove its own, by number, and says what it did.
+#
+# The tests are `crates/cf-e2e` `live::members::descent::` (the orphan, the real folder), the
+# step's `leaving::tests::` (the verdict, the choice) and the rig's stand-in that plays Pi on a
+# Mac (`stand_in::a_stand_in_that_plays_pi…`). Every name holds `detached limit`, so
+# `cargo xtask plants daemon "detached limit"` runs them all.
+
+[run]
+dl-descent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::"]
+dl-leaving = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "leaving::tests::"]
+dl-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "stand_in::a_stand_in_that_plays_pi"]
+
+# What is expected of whom.
+
+[[plant]]
+name = "detached limit: Claude Code is let off the ending too"
+meant = "a_worker_is_expected_to_come_to_the_limit_for_pi_and_devin_on_a_mac_and_to_the_ending_for_the_rest"
+runs = ["dl-leaving"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            Who::Harness(Harness::Pi | Harness::Devin) if cfg!(target_os = "macos") => {'''
+replace = '''            Who::Harness(Harness::Pi | Harness::Devin | Harness::Claude) if cfg!(target_os = "macos") => {'''
+
+[[plant]]
+name = "detached limit: Devin is not expected to come to the limit"
+meant = "a_worker_is_expected_to_come_to_the_limit_for_pi_and_devin_on_a_mac_and_to_the_ending_for_the_rest"
+runs = ["dl-leaving"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            Who::Harness(Harness::Pi | Harness::Devin) if cfg!(target_os = "macos") => {'''
+replace = '''            Who::Harness(Harness::Pi) if cfg!(target_os = "macos") => {'''
+
+# The shape that passes, and only it.
+
+[[plant]]
+name = "detached limit: a worker that is not expected to come to the limit passes with it"
+meant = "a_command_that_escaped_into_a_session_of_its_own_fails_the_case_as_it_was_and_holds_it_where_the_limit_is_expected"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        } else if expect == Expect::OwnSession && in_a_session_of_its_own(left) {'''
+replace = '''        } else if in_a_session_of_its_own(left) {'''
+
+[[plant]]
+name = "detached limit: the limit passes with a note of work the chief was told"
+meant = "the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            if !left.notes.is_empty() {'''
+replace = '''            if false {'''
+
+[[plant]]
+name = "detached limit: a job with a parent passes as the limit"
+meant = "the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        .all(|line| line.contains("(parent 1, ") && line.ends_with(", terminal ??)"))'''
+replace = '''        .all(|line| line.ends_with(", terminal ??)"))'''
+
+[[plant]]
+name = "detached limit: a job in the window's session, with a terminal, passes as the limit"
+meant = "the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        .all(|line| line.contains("(parent 1, ") && line.ends_with(", terminal ??)"))'''
+replace = '''        .all(|line| line.contains("(parent 1, "))'''
+
+[[plant]]
+name = "detached limit: one job in a session of its own is enough to pass the limit"
+meant = "the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        .all(|line| line.contains("(parent 1, ") && line.ends_with(", terminal ??)"))'''
+replace = '''        .any(|line| line.contains("(parent 1, ") && line.ends_with(", terminal ??)"))'''
+
+[[plant]]
+name = "detached limit: a job the close ended unsaid passes as the limit"
+meant = "the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            .is_some_and(|rest| !rest.is_empty())'''
+replace = '''            .is_some()'''
+
+[[plant]]
+name = "detached limit: the run says nothing of the limit it let pass"
+meant = "a_command_that_escaped_into_a_session_of_its_own_fails_the_case_as_it_was_and_holds_it_where_the_limit_is_expected"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        Ok(()) if left.listed.is_empty() && !left.escaped.is_empty() => format!('''
+replace = '''        Ok(()) if false => format!('''
+
+[[plant]]
+name = "detached limit: the case calls a limit it let pass an ending"
+meant = "a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_own_holds_the_case_as_the_known_limit_and_the_run_ends_the_job"
+runs = ["dl-stand-in"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        Ok(()) if !left.escaped.is_empty() => case.check('''
+replace = '''        Ok(()) if false => case.check('''
+
+# What the run ends, and what it says it cannot.
+
+[[plant]]
+name = "detached limit: the run looks for its own orphans where it expects the ending"
+meant = "the_run_looks_for_its_own_orphans_only_where_it_expects_the_limit_and_something_ran_on"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    expect == Expect::OwnSession && !left.escaped.is_empty()'''
+replace = '''    !left.escaped.is_empty()'''
+
+[[plant]]
+name = "detached limit: the run looks for its own orphans where nothing ran on"
+meant = "the_run_looks_for_its_own_orphans_only_where_it_expects_the_limit_and_something_ran_on"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    expect == Expect::OwnSession && !left.escaped.is_empty()'''
+replace = '''    expect == Expect::OwnSession'''
+
+[[plant]]
+name = "detached limit: the run never looks for its own orphans"
+meant = "a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_own_holds_the_case_as_the_known_limit_and_the_run_ends_the_job"
+runs = ["dl-stand-in"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    if looks_for_its_own_orphans(expect, &left) {'''
+replace = '''    if false {'''
+
+[[plant]]
+name = "detached limit: the run says nothing of the orphans its folder found"
+meant = "a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_own_holds_the_case_as_the_known_limit_and_the_run_ends_the_job"
+runs = ["dl-stand-in"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''                if !found.is_empty() {'''
+replace = '''                if false {'''
+
+[[plant]]
+name = "detached limit: the window's start is the last look's"
+meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            self.window_began.get_or_insert(own.started);'''
+replace = '''            self.window_began = Some(own.started);'''
+
+[[plant]]
+name = "detached limit: a run that never saw its window takes every orphan of the folder"
+meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            None => Vec::new(),'''
+replace = '''            None => orphans_in_folder(all, wanted, folder, 0, &folder_of),'''
+
+[[plant]]
+name = "detached limit: an orphan that began before the window is taken for the run's own"
+meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            Some(since) => orphans_in_folder(all, wanted, folder, since, &folder_of),'''
+replace = '''            Some(_) => orphans_in_folder(all, wanted, folder, 0, &folder_of),'''
+
+[[plant]]
+name = "detached limit: an orphan chosen at one look is chosen again at the next"
+meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''                .any(|chosen| chosen.identity == orphan.identity)'''
+replace = '''                .any(|chosen| false && chosen.identity == orphan.identity)'''
+
+[[plant]]
+name = "detached limit: a process that is no orphan is said not provably the run's own"
+meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            .filter(|process| process.ppid == 1 && process.command.contains(wanted))'''
+replace = '''            .filter(|process| process.command.contains(wanted))'''
+
+[[plant]]
+name = "detached limit: what the run chose is said not provably the run's own"
+meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''                    .any(|chosen| chosen.identity == process.identity)'''
+replace = '''                    .any(|chosen| false && chosen.identity == process.identity)'''
+
+[[plant]]
+name = "detached limit: an orphan the run cannot prove its own is not a problem of the run"
+meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        if self.strays_matter && !self.unproven.is_empty() {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "detached limit: another rig's job is a stray of the stand-in's run"
+meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        if self.strays_matter && !self.unproven.is_empty() {'''
+replace = '''        if !self.unproven.is_empty() {'''
+
+[[plant]]
+name = "detached limit: a stray of a real harness's run is no problem of the run"
+meant = "a_stray_orphan_fails_the_run_of_a_harness_and_not_the_rigs_stand_in"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    matches!(who, Who::Harness(_))'''
+replace = '''    matches!(who, Who::StandIn)'''
+
+# The orphan, and the folder a process runs in.
+
+[[plant]]
+name = "detached limit: a process with a parent is taken for an orphan"
+meant = "an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone"
+runs = ["dl-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            process.ppid == 1
+                && process.identity.started >= since'''
+replace = '''            process.identity.started >= since'''
+
+[[plant]]
+name = "detached limit: an orphan that began before the window is taken for the run's"
+meant = "an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone"
+runs = ["dl-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''                && process.identity.started >= since
+                && process.command.contains(text)'''
+replace = '''                && process.command.contains(text)'''
+
+[[plant]]
+name = "detached limit: an orphan that says other words is taken for the run's"
+meant = "an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone"
+runs = ["dl-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''                && process.command.contains(text)
+                && folder_of'''
+replace = '''                && folder_of'''
+
+[[plant]]
+name = "detached limit: an orphan in another folder is taken for the run's"
+meant = "an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone"
+runs = ["dl-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''.is_some_and(|there| there == folder)'''
+replace = '''.is_some()'''
+
+[[plant]]
+name = "detached limit: an orphan whose folder cannot be read is taken for the run's"
+meant = "an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone"
+runs = ["dl-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''.is_some_and(|there| there == folder)'''
+replace = '''.is_none_or(|there| there == folder)'''
+
+[[plant]]
+name = "detached limit: a folder is compared as it is spelled, through its links"
+meant = "a_folder_is_compared_by_its_real_path_and_another_folder_is_another"
+runs = ["dl-descent"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''    let folder = folder.canonicalize().unwrap_or_else(|_| folder.to_owned());'''
+replace = '''    let folder = folder.to_owned();'''
+
+[[plant]]
+name = "detached limit: what an orphan started is left running"
+meant = "an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone"
+runs = ["dl-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''std::iter::once(orphan.clone()).chain(descending_from(all, orphan.identity))'''
+replace = '''std::iter::once(orphan.clone())'''
+
+[[plant]]
+name = "detached limit: the folder a Mac says is read to the end of the block, not to its 0"
+meant = "a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has"
+runs = ["dl-descent"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/native.rs"
+find = '''.take_while(|letter| *letter != 0)'''
+replace = '''.take_while(|_| true)'''
+
+[[plant]]
+name = "detached limit: the folder a Mac says is the process's, read from another flavor"
+meant = "a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has"
+runs = ["dl-descent"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/native.rs"
+find = '''libc::PROC_PIDVNODEPATHINFO,'''
+replace = '''libc::PROC_PIDTBSDINFO,'''

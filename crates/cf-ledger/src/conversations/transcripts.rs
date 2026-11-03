@@ -35,7 +35,12 @@ const HEADER: &str = "[ConsensFlow m-";
 /// copied; one copied before the mark stays as it was. An item whose role is
 /// another than it was copied with (a record a daemon read as the user's, which a
 /// later one reads as the harness's own: Claude Code's companion, T-296) is
-/// brought to the role it has, as an item whose text changed is. What the history viewer
+/// brought to the role it has, as an item whose text changed is. An item is copied at its
+/// place in the record (`from` + its index) unless an older item of the copy holds that
+/// place, as it does where the record shrank (a resumed window rewrote it): it goes after
+/// every item the copy has then, so the copy is in the order the items came and the last
+/// ones are the newest (T-1118). An item the copy has keeps its place, or moves to a later
+/// one, never an earlier one. What the history viewer
 /// reads of an item besides its text is written with its row ([`write_head`]),
 /// and its text in parts where it is long ([`write_parts`]); an item written
 /// again changed is its next revision. How many rows changed.
@@ -57,6 +62,19 @@ pub(crate) fn copy_transcript(
          WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
             OR transcript.role != excluded.role
        RETURNING rowid, compaction",
+        )?;
+        // The place after every item the copy has: where an item goes that the record
+        // shows at a place an older one holds.
+        let mut next: i64 = store.db.query_row(
+            "SELECT COALESCE(MAX(seq), -1) + 1 FROM transcript WHERE conversation_id = ?",
+            [conversation_id],
+            |row| row.get(0),
+        )?;
+        let mut known = store
+            .db
+            .prepare_cached("SELECT seq FROM transcript WHERE conversation_id = ? AND item_id = ?")?;
+        let mut holder = store.db.prepare_cached(
+            "SELECT 1 FROM transcript WHERE conversation_id = ? AND seq = ? AND item_id != ?",
         )?;
         let mut written = 0;
         for (index, item) in (0_i64..).zip(items) {
@@ -83,12 +101,22 @@ pub(crate) fn copy_transcript(
                 .get("at")
                 .and_then(Value::as_str)
                 .and_then(time::canonical);
+            let wanted = from + index;
+            let place = match known
+                .query_row(params![conversation_id, id], |row| row.get::<_, i64>(0))
+                .optional()?
+            {
+                Some(held) if wanted <= held => held,
+                _ if holder.exists(params![conversation_id, wanted, id])? => next,
+                _ => wanted,
+            };
+            next = next.max(place + 1);
             let changed = upsert
                 .query_row(
                     params![
                         conversation_id,
                         id,
-                        from + index,
+                        place,
                         role,
                         text,
                         i64::from(complete),
@@ -567,32 +595,48 @@ pub(crate) fn copied_items_since(
 
 /// Whether the participant's windows hold words the human typed after the
 /// delivery of message `after`, copied since `since` (when that message was
-/// queued): a user item no delivery made, which is one with no header of
-/// ConsensFlow's, that comes after the message's own item in its window's
-/// record. What a harness put in its record before the message (Codex's
-/// `# AGENTS.md instructions`, written when its first turn begins and so first
-/// copied with the message) is no news after it, nor is the summary a
-/// compaction writes in the user's place, which the human never typed. An item
-/// copied again as it was keeps the time it was first copied, so it is not new
-/// either.
+/// queued): see [`typed_at`].
 pub(crate) fn typed_since(
     store: &Store,
     participant_id: i64,
     since: &str,
     after: i64,
 ) -> Result<bool, LedgerError> {
+    Ok(typed_at(store, participant_id, since, None, after)?.is_some())
+}
+
+/// When the human last typed to the participant's windows: the time the newest
+/// of their words was copied, among those copied since `since` and, where `until`
+/// is given, not after it. Words are a user item no delivery made, which is one
+/// with no header of ConsensFlow's, that comes after the item of message `after` in
+/// its window's record. What a harness put in its record before the message (Codex's
+/// `# AGENTS.md instructions`, written when its first turn begins and so first
+/// copied with the message) is no news after it, nor is the summary a compaction
+/// writes in the user's place, which the human never typed, nor a user's item of the
+/// harness's own words (Claude Code's `<task-notification>`), which is copied as the
+/// harness's (`custom`). An item copied again as it was keeps the time it was first
+/// copied, so it is not new either. None where there are none.
+pub(crate) fn typed_at(
+    store: &Store,
+    participant_id: i64,
+    since: &str,
+    until: Option<&str>,
+    after: i64,
+) -> Result<Option<String>, LedgerError> {
     let items = store
         .db
         .prepare(
-            "SELECT t.conversation_id, t.seq, t.text FROM transcript t
+            "SELECT t.conversation_id, t.seq, t.text, t.copied_at FROM transcript t
        JOIN conversation c ON c.id = t.conversation_id
-       WHERE c.participant_id = ? AND t.role = 'user' AND t.compaction = 0 AND t.copied_at > ?",
+       WHERE c.participant_id = ?1 AND t.role = 'user' AND t.compaction = 0 AND t.copied_at > ?2
+         AND (?3 IS NULL OR t.copied_at <= ?3)",
         )?
-        .query_map(params![participant_id, since], |row| {
+        .query_map(params![participant_id, since, until], |row| {
             Ok((
                 row.get::<_, i64>("conversation_id")?,
                 row.get::<_, i64>("seq")?,
                 row.get::<_, String>("text")?,
+                row.get::<_, String>("copied_at")?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -600,13 +644,17 @@ pub(crate) fn typed_since(
     let delivered_at = |conversation: i64| {
         items
             .iter()
-            .filter(|(of, _, text)| *of == conversation && header_of(text) == Some(after))
-            .map(|(_, seq, _)| *seq)
+            .filter(|(of, _, text, _)| *of == conversation && header_of(text) == Some(after))
+            .map(|(_, seq, _, _)| *seq)
             .min()
     };
-    Ok(items.iter().any(|(conversation, seq, text)| {
-        header_of(text).is_none() && delivered_at(*conversation).is_none_or(|at| *seq > at)
-    }))
+    Ok(items
+        .iter()
+        .filter(|(conversation, seq, text, _)| {
+            header_of(text).is_none() && delivered_at(*conversation).is_none_or(|at| *seq > at)
+        })
+        .map(|(_, _, _, copied_at)| copied_at.clone())
+        .max())
 }
 
 #[cfg(test)]

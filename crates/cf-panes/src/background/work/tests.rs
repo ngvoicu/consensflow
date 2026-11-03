@@ -182,3 +182,69 @@ fn a_list_that_names_its_processes_as_each_others_parents_is_no_tree_and_ends() 
 fn nothing_started_is_none_of_the_turns() {
     assert_eq!(turned(&[], &[]), Vec::<u32>::new());
 }
+
+/// The numbers of what is the detached work among `started`, less what `protected` holds,
+/// in order.
+fn detached_of(started: &[Member], protected: &[u32]) -> Vec<u32> {
+    let started: Vec<&Member> = started.iter().collect();
+    let protected: HashSet<ProcessKey> = protected.iter().map(|pid| key(*pid)).collect();
+    let mut detached: Vec<u32> = detached(&started, &protected)
+        .iter()
+        .map(|key| key.pid)
+        .collect();
+    detached.sort_unstable();
+    detached
+}
+
+#[test]
+fn a_process_whose_starter_has_gone_is_detached_work_with_whatever_descends_from_it() {
+    let started = [
+        // `nohup sleep 600 &` from a shell that ended, a job that started another, and a
+        // shell that lost its own parent with what it runs.
+        process(70, "sleep", None),
+        process(71, "python3", None),
+        process(72, "ffmpeg", of(71)),
+        process(73, "bash", None),
+        process(74, "sleep", of(73)),
+    ];
+    assert_eq!(detached_of(&started, &[]), [70, 71, 72, 73, 74]);
+}
+
+#[test]
+fn what_a_process_from_before_the_mark_started_is_never_detached_work() {
+    let started = [
+        // The window's program or a server started them, and they run (a program Codex
+        // starts without a shell is one): the harness's to run, and no job that lost its
+        // starter. A process of theirs is the same.
+        process(75, "sleep", of(10)),
+        process(76, "sleep", of(75)),
+    ];
+    assert_eq!(detached_of(&started, &[]), Vec::<u32>::new());
+}
+
+#[test]
+fn what_the_chain_proves_the_turns_is_not_detached_work_and_the_two_never_meet() {
+    let started = [
+        // The agent's command, a shell whose parent is the harness's, and what it started.
+        process(40, "bash", of(10)),
+        process(41, "sleep", of(40)),
+        // A job that lost its starter.
+        process(70, "sleep", None),
+    ];
+    assert_eq!(turned(&started, &[]), [40, 41]);
+    assert_eq!(detached_of(&started, &[]), [70]);
+}
+
+#[test]
+fn what_is_the_harnesss_own_is_never_detached_work_nor_is_what_descends_from_it() {
+    let started = [
+        // A helper of the harness's that outlived the process that started it, and its
+        // child; and a job that lost its starter beside them.
+        process(80, "codex-code-mode-host", None),
+        process(81, "sleep", of(80)),
+        process(70, "sleep", None),
+    ];
+    // Only the helper is told the harness's: what it started is not named for it, and
+    // the walk up from the child meets the helper.
+    assert_eq!(detached_of(&started, &[80]), [70]);
+}

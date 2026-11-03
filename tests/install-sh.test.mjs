@@ -93,12 +93,16 @@ function fakeApp(dir, version, { identifier = 'dev.ngvoicu.consensflow', extra }
   return app
 }
 
-/** A DMG holding `app`, as bytes. */
-function dmgOf(app, name) {
+/** `app` copied into a folder of its own, and the DMG `name` it is to be made into. */
+function staged(app, name) {
   const folder = mkdtempSync(path.join(work, 'dmg-'))
   run('ditto', [app, path.join(folder, 'ConsensFlow.app')])
-  const out = path.join(work, name)
-  run('hdiutil', [
+  return { folder, out: path.join(work, name) }
+}
+
+/** The words of `hdiutil` that make the DMG `out` of `folder`, as a release's is made. */
+function creation({ folder, out }) {
+  return [
     'create',
     '-quiet',
     '-fs',
@@ -110,8 +114,37 @@ function dmgOf(app, name) {
     '-format',
     'UDZO',
     out,
-  ])
-  return readFileSync(out)
+  ]
+}
+
+/** A DMG holding `app`, as bytes. */
+function dmgOf(app, name) {
+  const dmg = staged(app, name)
+  run('hdiutil', creation(dmg))
+  return readFileSync(dmg.out)
+}
+
+/**
+ * The DMGs `made` names (`{ label: [app, name] }`), as bytes by label, all made at once: one
+ * takes hdiutil about 4 s, and four together take about as long as one (T-1161).
+ */
+async function dmgsAtOnce(made) {
+  const making = Object.entries(made).map(([label, [app, name]]) => {
+    const dmg = staged(app, name)
+    return new Promise((resolve, reject) => {
+      const child = spawn('hdiutil', creation(dmg), { stdio: ['ignore', 'ignore', 'pipe'] })
+      let err = ''
+      child.stderr.on('data', (chunk) => {
+        err += chunk
+      })
+      child.on('error', reject)
+      child.on('close', (status) => {
+        if (status === 0) resolve([label, readFileSync(dmg.out)])
+        else reject(new Error(`hdiutil ${creation(dmg).join(' ')}: ${status}: ${err}`))
+      })
+    })
+  })
+  return Object.fromEntries(await Promise.all(making))
 }
 
 function run(program, args) {
@@ -132,7 +165,14 @@ function publish(version, options = {}, artifacts = { [dmgName(version)]: dmgs[v
   Object.assign(files, scriptedRelease('/releases', version, artifacts, key, options))
 }
 
-/** A fresh case: its own folders, and a test copy made with `replacements`. */
+// The first attach of an image hdiutil has not seen checks the image's own checksums, about 4 s
+// for each install here and most of this suite's time; every install downloads its DMG afresh.
+// The script checks the DMG's SHA-256 against the signed SHA256SUMS before it attaches it, which
+// that check adds nothing to, so each test copy attaches without it (T-1161). The script itself
+// keeps it, and install/real-install.mjs runs the script as it is.
+const NO_VERIFY = ['hdiutil attach -nobrowse', 'hdiutil attach -noverify -nobrowse']
+
+/** A fresh case: its own folders, and a test copy made with `replacements`, attaching unverified. */
 function freshCase(
   replacements = [
     [REQUIREMENT, AD_HOC],
@@ -141,7 +181,10 @@ function freshCase(
   ],
 ) {
   const dir = mkdtempSync(path.join(work, 'case-'))
-  const script = testCopy(INSTALL_SH, path.join(dir, 'install.sh'), key.keyLine, replacements)
+  const script = testCopy(INSTALL_SH, path.join(dir, 'install.sh'), key.keyLine, [
+    ...replacements,
+    NO_VERIFY,
+  ])
   mkdirSync(path.join(dir, 'tmp'))
   mkdirSync(path.join(dir, 'Applications'))
   return { dir, script, apps: path.join(dir, 'Applications'), tmp: path.join(dir, 'tmp') }
@@ -312,15 +355,17 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
   before(async () => {
     work = mkdtempSync(path.join(os.tmpdir(), 'cf-install-sh-'))
     key = makeKey()
+    const made = {}
     for (const version of ['3.0.7-alpha.1', '3.0.7-alpha.2', '3.0.7']) {
       const folder = mkdtempSync(path.join(work, 'app-'))
-      dmgs[version] = dmgOf(fakeApp(folder, version), dmgName(version))
+      made[version] = [fakeApp(folder, version), dmgName(version)]
     }
     // Another build of 3.0.7, which no SHA256SUMS here lists.
-    dmgs.other = dmgOf(
+    made.other = [
       fakeApp(mkdtempSync(path.join(work, 'app-')), '3.0.7', { extra: 'another build' }),
       'other.dmg',
-    )
+    ]
+    Object.assign(dmgs, await dmgsAtOnce(made))
     const notarized = path.join(work, 'spctl')
     writeFileSync(
       notarized,

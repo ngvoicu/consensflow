@@ -1986,3 +1986,17 @@ platforms = ["windows"]
 file = "install/install.ps1"
 find = '''            if ($pidOf -gt [int]::MaxValue) {'''
 replace = '''            if ($false) {'''
+
+# The test copies of install.sh attach the DMG without hdiutil's checksum pass (T-1161),
+# by a replacement of the script's own attach line: a script whose line is other words
+# fails every copy, so the copies never attach some other way than the script.
+[[plant]]
+name = "installers: install.sh attaches its DMG in words the test copies no longer find"
+meant = "the stable feed's release, by default"
+runs = [["node", "--test", "--test-name-pattern", "by default", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "hdiutil attach -nobrowse -readonly"
+replace = "hdiutil attach -readonly -nobrowse"
