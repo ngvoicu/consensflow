@@ -685,14 +685,12 @@ find = '''
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
-        store.db.execute(
-            "UPDATE message SET state = 'failed','''
+        // Served whole'''
 replace = '''
         if withdrawn_if_stale(store, &message)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
-        store.db.execute(
-            "UPDATE message SET state = 'failed','''
+        // Served whole'''
 
 [[plant]]
 name = "resume tasks: the human hears that a pause note withdrawn at its last attempt did not reach the chief"
@@ -1355,14 +1353,12 @@ find = '''
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
-        store.db.execute(
-            "UPDATE message SET state = 'failed','''
+        // Served whole'''
 replace = '''
         if withdrawn_on_its_way(store, &message)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
-        store.db.execute(
-            "UPDATE message SET state = 'failed','''
+        // Served whole'''
 
 [[plant]]
 name = "resume tasks: the transport lets go of a continuation whose task is not at work"

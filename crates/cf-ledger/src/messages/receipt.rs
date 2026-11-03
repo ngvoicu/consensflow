@@ -6,7 +6,7 @@
 //! on its way (`delivering`) is read all the same, but the paste is the window's
 //! to settle: the read is kept with the message ([`keep_read`], in its receipt as
 //! `readEarly`) and told when the delivery ends ([`told_when_confirmed`],
-//! [`settle_when_given_back`]). Withdrawing a message never resolves what it obliged:
+//! [`settle_when_given_back`], [`settle_when_given_up`]). Withdrawing a message never resolves what it obliged:
 //! only receipt does. A task moves between `queued`, `working` and `waiting`
 //! in one place, [`reconcile`], after each receipt.
 //!
@@ -183,12 +183,33 @@ pub(crate) fn settle_when_given_back(
     store: &mut Store,
     message_id: i64,
 ) -> Result<bool, LedgerError> {
+    settle_kept_read(store, message_id, "queued")
+}
+
+/// A delivery was given up (`give_up_delivery`), and the message had been served whole
+/// to its recipient while it was on its way: where a read would have received it
+/// queued, it is `read` and not failed, as it is when the paste is given back
+/// ([`settle_when_given_back`]): its recipient has it, and what a failure would tell
+/// whoever waits on it (an answer that did not arrive, a question that was not
+/// asked) is not so. A note that says a role is failed as any is: a read does not
+/// receive it. Whether the message was settled.
+pub(crate) fn settle_when_given_up(
+    store: &mut Store,
+    message_id: i64,
+) -> Result<bool, LedgerError> {
+    settle_kept_read(store, message_id, "delivering")
+}
+
+/// The read kept with message `message_id`, which is in state `now`, is told: the
+/// message is received by it where a read of its kind receives one, and its task is
+/// reconciled.
+fn settle_kept_read(store: &mut Store, message_id: i64, now: &str) -> Result<bool, LedgerError> {
     let message = known_message(store, message_id)?;
     let Some(Kept { via, .. }) = kept_read(&message) else {
         return Ok(false);
     };
     let role = says_a_role(store, message_id)?;
-    if message.state != "queued" || !via.receives(&message, role) {
+    if message.state != now || !via.receives(&message, role) {
         return Ok(false);
     }
     received_as(store, &message, &json!({ "read": via.word() }))?;

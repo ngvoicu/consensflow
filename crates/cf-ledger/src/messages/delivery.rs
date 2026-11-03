@@ -14,7 +14,8 @@ use super::carrying::{adopt, carried, release_carried};
 use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::{
-    kept_read, reconcile, settle_when_given_back, told_when_confirmed, with_kept_read,
+    kept_read, reconcile, settle_when_given_back, settle_when_given_up, told_when_confirmed,
+    with_kept_read,
 };
 use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
 use super::{known_message, message_task, messages, require_message, settle_answered, NewNote};
@@ -844,7 +845,8 @@ pub(crate) fn retry_delivery(
 /// and says its warning again in a note of its own, which has its own attempts
 /// (`withdrawn_on_its_way`). A continuation whose task is no longer at work in
 /// its window is withdrawn instead too: nothing failed that was still to go
-/// (`continuations`).
+/// (`continuations`). So is a message its recipient read whole while it was on its way: it
+/// is `read` and did not fail (`settle_when_given_up`), but for a note that says a role.
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
@@ -866,7 +868,9 @@ pub enum GivenUp {
     /// done while it was on its way (`withdrawn_late`), a pause note whose task
     /// moved on meanwhile, which says its warning again in a note of its own
     /// (`withdrawn_on_its_way`), or a continuation whose task is no longer at
-    /// work in its window (`continuations`).
+    /// work in its window (`continuations`). Or `read`, and no failure: a message
+    /// its recipient served itself whole while it was on its way
+    /// (`settle_when_given_up`).
     Withdrawn,
     /// The words that resume a paused task, which never reached its window
     /// (`pause_again`): they failed, and the task is paused again, its requester
@@ -896,6 +900,10 @@ pub(crate) fn give_up_delivery(
             }
         }
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
+        // Served whole to its recipient while it was on its way, it was received: it did not fail.
+        if settle_when_given_up(store, message_id)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
         store.db.execute(

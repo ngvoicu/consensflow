@@ -412,10 +412,10 @@ runs = ["ledger-read"]
 file = "crates/cf-ledger/src/messages/receipt.rs"
 find = '''
     let role = says_a_role(store, message_id)?;
-    if message.state != "queued" || !via.receives(&message, role) {'''
+    if message.state != now || !via.receives(&message, role) {'''
 replace = '''
     let role = says_a_role(store, message_id)?;
-    if message.state != "queued" {'''
+    if message.state != now {'''
 
 [[plant]]
 name = "role read: a role given back to the queue forgets the read made while it was on its way"
@@ -513,3 +513,41 @@ runs = ["cf-board-role"]
 file = "crates/cf/src/board/mod.rs"
 find = "            Some(\"delivered\" | \"delivering\")"
 replace = "            Some(\"delivered\")"
+
+[[plant]]
+name = "role read: a message read while its paste was on its way is failed when its delivery is given up"
+meant = "a_message_read_in_the_inbox_while_its_paste_is_on_its_way_is_read_and_not_failed_when_its_delivery_is_given_up"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if settle_when_given_up(store, message_id)? {"
+replace = "        if false {"
+
+[[plant]]
+name = "role read: a note that says a role is read by a read made while its paste was on its way and given up"
+meant = "a_role_read_while_its_paste_is_on_its_way_is_failed_as_any_when_its_delivery_is_given_up"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''
+    let role = says_a_role(store, message_id)?;
+    if message.state != now || !via.receives(&message, role) {'''
+replace = '''
+    let role = says_a_role(store, message_id)?;
+    if message.state != now {'''
+
+[[plant]]
+name = "role read: a delivery confirmed does not tell the read a cleared session made while its greeting was on its way"
+meant = "a_cleared_session_that_reads_its_long_role_while_the_note_is_still_being_delivered_is_told_it_once_the_delivery_is_confirmed"
+runs = ["engine-cleared"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if let Some(read) = early {
+            told_when_confirmed(store, message_id, read)?;
+        }
+'''
+replace = ""

@@ -156,6 +156,9 @@
 //!   it was made in. One that began between the read and the confirmation (a `/clear`
 //!   while the paste was on its way) was not shown what the read printed: it is told
 //!   nothing by it, and the role is said again at its next Resume, with the line.
+//! - A role note read while its paste was on its way and then given up (failed) is
+//!   failed as any is: the read is not looked for, as the thread is not (the bullet
+//!   above on a delivery given up). Any other message so read is `read`, not failed.
 //! - A note whose paste is given back to the queue after the window read it (the
 //!   window went before the daemon saw the paste arrive) keeps the read: a read does
 //!   not receive a role, so the note waits for its paste, and the read tells the role

@@ -26,7 +26,7 @@
 //!   proved, it is `read`, its receipt naming the answer; one the asker's own
 //!   window answered first is withdrawn, as one held at the gate is.
 
-use cf_ledger::{MessageView, Read};
+use cf_ledger::{GivenUp, MessageView, Read};
 use serde_json::{json, Value};
 
 use crate::fixture::{world, World};
@@ -488,6 +488,42 @@ fn a_message_read_in_the_inbox_while_its_paste_is_on_its_way_is_read_when_the_pa
     assert_eq!(w.next("chief"), None);
     assert!(w.ledger.pending(w.id("chief")).expect("a read").is_empty());
     assert_eq!(w.state(task), "waiting", "a read is no answer");
+}
+
+#[test]
+fn a_message_read_in_the_inbox_while_its_paste_is_on_its_way_is_read_and_not_failed_when_its_delivery_is_given_up(
+) {
+    let mut w = world();
+    let (task, question) = asked(&mut w);
+    w.begin(question.id);
+    reads(&mut w, "chief", &[question.id], Read::Inbox);
+    let (_, given_up) = w
+        .ledger
+        .give_up_delivery(question.id, "the window never took it")
+        .expect("given up");
+    assert_eq!(
+        given_up,
+        GivenUp::Withdrawn,
+        "the chief has it: it did not fail"
+    );
+    assert_eq!(w.states(&[question.id]), ["read"]);
+    assert_eq!(w.receipt(question.id), json!({ "read": "inbox" }));
+    assert_eq!(w.next("chief"), None);
+    assert_eq!(w.state(task), "waiting", "a read is no answer");
+}
+
+#[test]
+fn a_role_read_while_its_paste_is_on_its_way_is_failed_as_any_when_its_delivery_is_given_up() {
+    let mut w = world();
+    let (conversation, note) = role_on_its_way(&mut w, "the role");
+    reads(&mut w, "chief", &[note.id], Read::Inbox);
+    let (_, given_up) = w
+        .ledger
+        .give_up_delivery(note.id, "the window never took it")
+        .expect("given up");
+    assert_eq!(given_up, GivenUp::Failed, "a read does not receive a role");
+    assert_eq!(w.states(&[note.id]), ["failed"]);
+    assert_eq!(told(&w, conversation), None);
 }
 
 #[test]
