@@ -2150,9 +2150,9 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand("
+find = "                self.seams.ledger.borrow_mut().confirm_sent_by_hand("
 replace = """                record.delivery.borrow_mut().uncleared = None;
-                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand("""
+                self.seams.ledger.borrow_mut().confirm_sent_by_hand("""
 
 [[plant]]
 name = "resume tasks: words the human sent are begun in one write and confirmed in another"

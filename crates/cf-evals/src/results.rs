@@ -67,14 +67,27 @@ fn truthy(value: Option<&Value>) -> bool {
 fn held(list: Option<&Value>) -> String {
     match list.and_then(Value::as_array) {
         None => "?".to_owned(),
-        Some(checks) => format!(
-            "{}/{}",
-            checks
+        Some(checks) => {
+            // A check that judged nothing (`unmet`) is neither held nor failed: it is left out of
+            // the ratio and counted beside it, `+Nu`. A report before there were any has none.
+            let unmet = checks
                 .iter()
-                .filter(|check| truthy(check.get("ok")))
-                .count(),
-            checks.len()
-        ),
+                .filter(|check| truthy(check.get("unmet")))
+                .count();
+            format!(
+                "{}/{}{}",
+                checks
+                    .iter()
+                    .filter(|check| truthy(check.get("ok")))
+                    .count(),
+                checks.len() - unmet,
+                if unmet > 0 {
+                    format!(" +{unmet}u")
+                } else {
+                    String::new()
+                }
+            )
+        }
     }
 }
 

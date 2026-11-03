@@ -169,3 +169,5 @@ board; [bare] ran without ConsensFlow.
 | 2026-09-29T14-21 | question-trip-native | claude (claude-opus-5, high) | codex (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 8 |
 | 2026-09-29T14-29 | question-trip-native | claude (claude-opus-5, high) | opencode (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 8 |
 | 2026-09-29T14-36 | question-trip-native | claude (claude-opus-5, high) | devin (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 8 |
+| 2026-11-02T07-27 | review-loop | claude (claude-opus-5-5, high) | claude (medium) | 2/8 | 5/7 | 3 | 1 | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 8 |
+| 2026-11-02T07-39 | review-blockers | claude (claude-opus-5-5, high) | claude (medium) | 1/5 | 7/7 | 3 | 1 | 0 | 1 | 0 | 0 | 1 | 3 | 0 | 3+3p | 7 |

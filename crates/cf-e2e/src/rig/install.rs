@@ -199,8 +199,8 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
         }
         Some((install, crate::muse::Run::Live { real_home })) => {
             crate::muse::seed_live_home(&home, real_home)?;
-            // Before any window can spend it: a live run stops at 90% of Muse's allowance,
-            // whatever case seats Muse (T-1076).
+            // Before any window can spend it: a live run never starts on a Muse
+            // allowance that is used up, whatever case seats Muse (T-1076, T-1123).
             crate::muse::guard_allowance(install, real_home, &home.join(".config"))?;
             // By its real path, as `environment` gives the rig's Muse data folder.
             let rig_home = files::real_path(&home);
@@ -726,14 +726,14 @@ mod tests {
         muse_in(bin, weekly)
     }
 
-    /// T-1076: every rig that runs the machine's Muse live asks its allowance as it writes
-    /// the launcher, so no case starts on an allowance at its end: at 95% of the week the rig
-    /// is refused and its windows find no Muse to run; at 50% the launcher is written.
+    /// T-1076, at T-1123's share: every rig that runs the machine's Muse live asks its
+    /// allowance as it writes the launcher, so no case starts on an allowance that is used
+    /// up: on a week at its end the rig is refused and its windows find no Muse to run;
+    /// at 99% the launcher is written.
     #[cfg(unix)]
     #[test]
-    fn a_live_rig_that_seats_muse_is_refused_at_ninety_percent_of_its_allowance_and_runs_under_it()
-    {
-        for (weekly, runs) in [(95, false), (50, true)] {
+    fn a_live_rig_that_seats_muse_is_refused_on_an_allowance_used_up_and_runs_under_it() {
+        for (weekly, runs) in [(100, false), (99, true)] {
             let (bin, real, root) = (
                 tempfile::tempdir().unwrap(),
                 tempfile::tempdir().unwrap(),
@@ -750,7 +750,7 @@ mod tests {
                 let Err(Error::Daemon(refused)) = made else {
                     panic!("at {weekly}% the rig is refused: {made:?}");
                 };
-                assert!(refused.contains("95% of its week"), "{refused}");
+                assert!(refused.contains("100% of its week"), "{refused}");
                 assert!(!launcher.exists(), "and its windows find no Muse to run");
             }
         }

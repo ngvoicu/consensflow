@@ -34,6 +34,7 @@ use serde_json::{json, Value};
 
 use super::machine::Machine;
 use super::options::Crew;
+use super::stand_in::{self, StandIns};
 use crate::plan::{harness, ChiefSetup};
 use crate::{Error, Result};
 
@@ -128,6 +129,57 @@ fn pi_script(real: &str, model: &str, thinking: &str) -> String {
     .join("\n")
 }
 
+/// The shell script of the `claude` wrapper of a run that has stand-in members: a window on the
+/// model of the stand-in reviewer ([`stand_in::REVIEWER_MODEL`]) or of the stand-in worker
+/// ([`stand_in::WORKER_MODEL`]) is the stand-in agent, started with the folder of this run's answers
+/// for it, and only if the run's marker is in that folder and the agent is there. Where it is not (a
+/// wrapper left on disk after its run, which removed the folders) the window is refused with a word
+/// that says why, and neither the stand-in nor the real Claude runs. Any other window is started as
+/// [`script`] starts it.
+fn script_with_stand_ins(real: &str, flags: &[String], stand_ins: &StandIns) -> String {
+    let word = |path: &Path| shell_word(&path.to_string_lossy());
+    let (agent, variable) = (word(stand_ins.agent()), stand_in::FOLDER);
+    let words: Vec<String> = std::iter::once(real)
+        .chain(flags.iter().map(String::as_str))
+        .map(shell_word)
+        .collect();
+    let mut lines = vec![
+        "#!/bin/sh".to_owned(),
+        format!("# {WHY}"),
+        "# A window on the model of a stand-in member is the stand-in agent of this run, and answers in a run and nowhere else.".to_owned(),
+        "case \" $* \" in".to_owned(),
+    ];
+    for (model, role, folder) in [
+        (
+            stand_in::REVIEWER_MODEL,
+            "reviewer",
+            stand_ins.reviewer_folder(),
+        ),
+        (stand_in::WORKER_MODEL, "worker", stand_ins.worker_folder()),
+    ] {
+        let Some(folder) = folder else { continue };
+        let marker = word(&folder.join(stand_in::MARKER));
+        let refused = format!(
+            "cf-evals: {model} is the stand-in {role} of an eval run, and this is none: refused"
+        );
+        lines.extend([
+            format!("  *\" --model {model} \"*)"),
+            format!("    if [ -f {marker} ] && [ -x {agent} ]; then"),
+            format!("      {variable}={}; export {variable}", word(folder)),
+            format!("      exec {agent} \"$@\""),
+            "    fi".to_owned(),
+            format!("    echo {} >&2", shell_word(&refused)),
+            "    exit 1 ;;".to_owned(),
+        ]);
+    }
+    lines.extend([
+        "esac".to_owned(),
+        format!("exec {} \"$@\"", words.join(" ")),
+        String::new(),
+    ]);
+    lines.join("\n")
+}
+
 /// The wrapper `name` that starts `real` with `flags`, in `bin`: where a window
 /// finds it.
 fn emit(machine: &Machine, name: &str, real: &Path, flags: &[String]) -> Result<PathBuf> {
@@ -155,6 +207,30 @@ fn emit(machine: &Machine, name: &str, real: &Path, flags: &[String]) -> Result<
 /// Writes the wrappers a run needs, in a folder of its own, fresh: a wrapper
 /// written for another chief must not outlive its run.
 pub fn write(machine: &Machine, crew: &Crew, chief: &ChiefSetup) -> Result<Wrappers> {
+    write_with(machine, crew, chief, None)
+}
+
+/// [`write`], for a run that may have stand-in members (`stand_ins`): its `claude` wrapper starts
+/// the stand-in for a window on a stand-in's model. That wrapper is a shell script, the Mac's alone,
+/// and the run must have a Claude Code in it.
+pub fn write_with(
+    machine: &Machine,
+    crew: &Crew,
+    chief: &ChiefSetup,
+    stand_ins: Option<&StandIns>,
+) -> Result<Wrappers> {
+    if stand_ins.is_some() && !crew.in_run("claude") {
+        return Err(Error::Refused(
+            "the stand-in members are Claude Code windows: claude must be the chief or on the staff"
+                .to_owned(),
+        ));
+    }
+    if stand_ins.is_some() && cfg!(windows) {
+        return Err(Error::Refused(
+            "the stand-in members' wrapper is a shell script: run the review scenarios on the Mac"
+                .to_owned(),
+        ));
+    }
     let bin = machine.bin();
     // A folder that is not there is already fresh.
     let _ = fs::remove_dir_all(&bin);
@@ -162,7 +238,18 @@ pub fn write(machine: &Machine, crew: &Crew, chief: &ChiefSetup) -> Result<Wrapp
     let mut wrappers = Wrappers::default();
     if crew.in_run("claude") {
         let real = machine.install("claude")?.command();
-        wrappers.claude = Some(emit(machine, "claude", real, &claude_flags(crew))?);
+        let flags = claude_flags(crew);
+        wrappers.claude = Some(match stand_ins {
+            Some(stand_ins) => {
+                let program = bin.join("claude");
+                files::write_executable(
+                    &program,
+                    script_with_stand_ins(&real.to_string_lossy(), &flags, stand_ins),
+                )?;
+                program
+            }
+            None => emit(machine, "claude", real, &flags)?,
+        });
     }
     if crew.chief == "pi" {
         if cfg!(windows) {

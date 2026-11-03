@@ -1,0 +1,25 @@
+# The turn-end rule the members' text tells (T-1061, 2026-11-01; the engine as T-1059 read it,
+# `crates/cf-engine/src/turn_end.rs`, `background.rs`, `turn_end/finish.rs`, `windows.rs`'s
+# `close_if_free`, `cf-harness`): since `0eec91d20` (2026-10-21) a turn's end ends no process —
+# a turn whose harness record counts pending work holds its task working and stops nothing;
+# otherwise the answer is the result, and the free worker's window then closes, which ends only
+# what the host can tell is the window's, so a detached job can run on. `skill/core/staff.md`
+# said "anything you left running is stopped then": the member is now told to wait for what its
+# result needs and leave nothing running, held by `crates/cf-engine/tests/text/roles.rs` and the
+# 27 members' rows of `crates/cf-engine/tests/goldens/text.json` (the golden of Node's texts,
+# `goldens_roles`, holds them word for word and is left out of the runs here).
+#
+# Every name holds `true texts`, so `npm run plants:daemon -- "true texts"` runs them all.
+
+[run]
+engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::", "--", "--skip", "goldens_roles"]
+
+[[plant]]
+name = "true texts: the staff's text says a turn's leftovers are stopped with its answer"
+meant = "gives_every_member_one_shared_text_with_its_role_s_own_parts"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = "ends your turn: wait for what your result needs, and leave nothing running."
+replace = "ends your turn's work: anything you left running is stopped then, so wait for what your result needs."

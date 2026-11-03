@@ -12,9 +12,10 @@
 # - What its record shows it took is confirmed, a member's launch's first message too, and the
 #   Resume goes on in the same conversation without it (`in_flight.rs`'s `settle_gone`).
 # - `cargo xtask live close-early` runs every harness where none is named.
-# - Every live rig that seats Muse asks its allowance as it writes its launcher, and stops at 90% of
-#   the window or of the week before anything is spent (`cf-e2e` `rig/install.rs`, `muse.rs`'s
-#   `guard_allowance`): close-early ran Muse at 99% of its week, where only `live muse-window` asked.
+# - Every live rig that seats Muse asks its allowance as it writes its launcher, and stops only on
+#   a window or a week used up (100%; a run may use all of it, T-1123) before anything is spent
+#   (`cf-e2e` `rig/install.rs`, `muse.rs`'s `guard_allowance`): close-early ran Muse at 99% of its
+#   week, where only `live muse-window` asked.
 #
 # Every name holds `close while delivering`, so `npm run plants:daemon -- "close while delivering"`
 # runs them all.
@@ -23,7 +24,7 @@
 cwd-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "close_while_delivering::"]
 cwd-live-default = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_close_early", "tests::the_workers_are_every_harness_unless_named"]
 cwd-muse-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install::tests::a_live_rig_that_seats_muse"]
-cwd-muse-stop = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::tests::a_live_run_stops_at_ninety_percent"]
+cwd-muse-stop = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::tests::a_live_run_stops_where_the_window_or_the_week_is_used_up"]
 
 [[plant]]
 name = "close while delivering: a brief read as its window opened fails at a Close, as only owed or late ones were given back (main's shape)"
@@ -67,7 +68,7 @@ replace = "        return Ok(vec![Harness::Claude, Harness::Codex]);"
 
 [[plant]]
 name = "close while delivering: a live rig that seats Muse spends its allowance unasked, as close-early did at 99% of the week"
-meant = "a_live_rig_that_seats_muse_is_refused_at_ninety_percent_of_its_allowance_and_runs_under_it"
+meant = "a_live_rig_that_seats_muse_is_refused_on_an_allowance_used_up_and_runs_under_it"
 runs = ["cwd-muse-rig"]
 
 [[plant.edit]]
@@ -76,11 +77,11 @@ find = "            crate::muse::guard_allowance(install, real_home, &home.join(
 replace = ""
 
 [[plant]]
-name = "close while delivering: Muse's allowance stop reads the window alone, and a week at its end runs"
-meant = "a_live_run_stops_at_ninety_percent_of_the_window_or_the_week_and_runs_under_it"
+name = "close while delivering: Muse's allowance stop is back at 90%, so a run at 99% of the week never starts"
+meant = "a_live_run_stops_where_the_window_or_the_week_is_used_up_and_runs_under_it"
 runs = ["cwd-muse-stop", "cwd-muse-rig"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = "        Some((window, weekly)) if window >= STOP_AT_PERCENT || weekly >= STOP_AT_PERCENT => {"
-replace = "        Some((window, weekly)) if window >= STOP_AT_PERCENT && weekly < 101 => {"
+find = "pub const STOP_AT_PERCENT: u64 = 100;"
+replace = "pub const STOP_AT_PERCENT: u64 = 90;"

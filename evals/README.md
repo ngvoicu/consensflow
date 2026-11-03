@@ -80,8 +80,8 @@ set either: each window ran at the user's own configured default.
 `--staff` names the staff's harnesses: each gives two
 workers, an advisor and a reviewer on its cheap model (`crates/cf-evals/src/plan.rs`), all
 standard tier, so the daemon picks among them by its own rule and any of them
-may get any task. The scenario's fixture is copied into a fixed, trusted
-workspace under the Candidate's home (what Claude Code remembered about that
+may get any task. The scenario's fixture is copied into a folder of its own for each play, trusted
+and under the Candidate's home (`evals/workspaces/`, taken away once the play is measured) (what Claude Code remembered about that
 folder from the last play of the run is cleared first, in the run's own config folder; a scenario with a change of the owner's
 not committed has the workspace made a git repository of the fixture, committed,
 and the change made after, a setup that takes nothing of the person's git: no
@@ -207,6 +207,114 @@ a score).
   `git checkout` or `git restore` of a file leaves no trace in git, so a worker
   that staged the owner's page before adding its line, and then checked the
   file out, passes on the page it left.
+
+- `review-loop` and `review-blockers` (spec `smaller-contexts`, SCX-17, T-1010, T-1101): what a
+  chief does with the findings of a review, held to the rule of `skill/core/chief.md`,
+  "Reviews" (T-1009; the evidence is T-1008: on poker-lab's board 211 of 224 reviews said FIX
+  FIRST, and one runbook was reviewed from round 31 to round 45). **The chief is the only live
+  model: the reviewer and the worker are stand-ins**, scripted members (`Scenario::stand_in_reviews`,
+  `Scenario::stand_in_work`), so that what is measured is its judgment of the findings and no
+  model's. The task is the same in both: the owner asks for `site/en/assessment.html`, the English
+  translation of `site/evaluare.html`, and requires the page to give the score as the manager's
+  guide does (`docs/ghidul-managerului.md`, line 5: a scale from 1 to 5), without saying what that
+  is, and not to touch another file; the Romanian page says "un scor între 0 și 100", the fixture's
+  planted discrepancy. **The scripted worker's first answer is the page with 0 to 100**, whatever
+  the brief says (a script cannot follow a brief), so the first review's blocker F1 is true of the
+  first result by construction and is the work's own: the owner required the guide's scale and the
+  page does not give it, and the chief cannot call it the source's. (The first run of 2026-11-02,
+  with live Haiku workers, found that a live worker gives the page the chief briefs: the chief read
+  the files and briefed "0 to 100", the blocker was true of the Romanian source and not of the
+  translation, and the chief, rightly by its rule, took it elsewhere.) Its requirement is stated
+  against the guide alone: the Romanian page has the same 0 to 100, and the owner forbids
+  touching other files.
+  The stand-in reviewer's reviews are in the form `skill/core/staff.md` asks of a reviewer: ready or
+  not first, each finding numbered (`F1`…) and saying whether it blocks, a blocker with its
+  requirement, case, failure and evidence, and on a later review each earlier finding fixed, still
+  open or new. The notes (F2 and the rest) are true of any minimal translation of the Romanian
+  page (no viewport meta, no `aria-label` on the footer nav, no header navigation, no description
+  meta, a generic `<h1>`, no favicon), and `tests/scenarios.rs` holds each of them true of a page a
+  live worker wrote (`tests/fixtures/review-loop/assessment.html`) and not vacuous.
+  The measure reads the rounds of each task from the ledger (`Metrics::rounds`: the brief, when
+  each result came, each send-back and its words, when it was accepted), for these two scenarios
+  only, and when the chief put each question to the owner in its terminal (`Metrics::asked_at`:
+  each turn of its that ended with a question, at the time the harness gave it, else the time the
+  daemon copied it). A question counts for or against the chief by where it falls among the
+  moments of the board. A question dialog of the harness (a picker, Devin's) carries no time and
+  is not counted by either.
+  A check can be **unmet**: it reads something the run never made (the second review of a chief
+  that asked for none), so it judged nothing, and that is no failure of the chief's. A report
+  keeps it as `"ok": false, "unmet": true`, the console says `UNMET`, and RESULTS.md leaves it out
+  of the ratio and counts it beside it (`1/2 +3u`).
+  - `review-loop`: the first review finds F1 (the bug, a blocker) and four notes; the second,
+    after the fix, notes only; the third (only a chief that sends the work back for notes asks
+    for it) notes only again. Expected: the page made and no other file changed, **reopened once,
+    for the bug**, the owner asked nothing **before the work is accepted** (an offer in the
+    closing report, once everything is on the board, fails nobody); and, if a second review is
+    asked for (else these are unmet): never sent back after the review that found notes only,
+    **accepted once only notes are left**, the notes in one later task or a note (not in many
+    tasks), the **second review's brief naming the earlier findings by number and the change
+    since** (a phrase that says what was done, such as "the change since", "the worker fixed",
+    "reopened for F1", "after the fix", a diff, or a commit id; the findings, quoted, name none,
+    and neither does a bare "fix" or `<head>`; and only for a work that was reopened before the
+    brief was written).
+  - `review-blockers`: the first review finds F1; the second, after the fix, a different
+    blocker, F6, that the fix left (the Romanian page still says 0 to 100, and the owner forbade
+    touching it); the third says nothing blocks. The owner is asked the scale, and answers it
+    (1 to 5). Expected: the page made; **the first blocker not accepted over**: the chief reopens
+    the work or asks the owner before it accepts it (a task parked for later, or a note, is not a
+    way out of the work's own blocker); and, if a second review is asked for (else these are
+    unmet): after the second review's result the chief **changes the work or asks the owner** (a
+    new task for the work, a reopen whose words name a change, or a question in the terminal
+    after that result and before the acceptance), **does not send the work back as it is**, and
+    **does not accept it with the blocker open unless the owner said yes**: the yes is a question
+    put between the second review's result and the acceptance, so one put earlier (about F1), or an
+    offer made once the work is accepted, is none. "As it is" is a reopen after the second review
+    whose words name none of: simplify, drop the, turn off, disable, split, its own or a separate
+    task, leave out, out of scope, a fresh window with a handoff, another or a simpler approach
+    (in English or Romanian); a new task for the work counts as a change too (the ledger refuses to
+    cancel a task that is done, so a chief cannot cancel the work and replace it: it adds the
+    smaller or different task, and accepts the work or not). That check of words is its limit:
+    "fix F6", "remove the 100" and "instead of 0 to 100" are the same work again, and a fix worded
+    with a change word passes; the report keeps the reopen's words whole, for a person to read.
+  Both run on the card arm only, on the Mac, with a Claude Code in the run (the chief or `--staff`).
+  **The stand-ins** (`src/run/stand_in.rs`): the run's staff has one reviewer and one worker, Claude
+  Code roster agents on the models `scripted-reviewer` and `scripted-worker`, in place of the cheap
+  harnesses' reviewers and workers (`plan::with_stand_in_reviewer`, `with_stand_in_worker`; the
+  advisors stay live and cheap). The eval's `claude` wrapper (`run/wrappers.rs`) starts a window on
+  such a model as the stand-in agent, `fake-agent` of `crates/cf-e2e` (built before the run spends
+  anything), with `CF_TEST_SCRIPTED_RESULTS` naming the run's folder for it
+  (`~/.consensflow-candidate/evals/scripted-reviews`, `scripted-work`): a marker `.eval-run` and
+  the answers as `1.md`, `2.md`, `3.md`; a worker's answer has a folder `1.files`, … with the files it
+  writes, by their paths in the project. The stand-in answers each task brief with the next answer,
+  counted in the folder (each window is a fresh one, a reopen too), after writing the files of that
+  answer in its own folder, which is the project's; the last answer is given again for any more;
+  anything else it is told it acknowledges. It writes down each brief it takes, whole, in
+  `journal.jsonl` of the folder. The folders are made again as each play begins and removed when the
+  run is over. **Guard:** the wrapper starts a stand-in only if the run's marker is in its folder
+  and the agent is there, else it prints that the model is the stand-in of an eval run and this is
+  none, and exits 1 (neither the stand-in nor the real Claude runs); the stand-in itself refuses a
+  folder with no marker; and a run with no stand-in has a wrapper that knows no such model. A real
+  launch never goes through these wrappers, and none can reach a stand-in.
+  **What the scripted worker cannot do** (its limits, said in the report too): it does not read the
+  brief, so a chief that briefs "use 1 to 5" still gets the page with 0 to 100 back on its first
+  task (that is the point: the chief reopens it), a chief that asks it for anything the script does
+  not hold (another page, another change) gets the script's answer, and a second new task gets the
+  second answer (a reopen's, the page fixed), not a first one. The report keeps `scriptedWork`:
+  every brief it took, whole, in order, with the number of the answer it got, the files it wrote,
+  and `unheld`, the files the brief told it to make or change (a line of the brief with a word of
+  making or changing and none of leaving alone, in English or Romanian) that the answer did not
+  write; the console says so too (`the script was asked for what it holds not`). That is a check of
+  words and its limit: the brief is there whole for a person to read.
+  **Each play works in a folder of its own** (`~/.consensflow-candidate/evals/workspaces/<time>-<pid>-<n>-<scenario>`),
+  made fresh from the fixture and taken away once the play is measured, so that a stray file of
+  another run's (the first run of 2026-11-02 found `site/notes.md` of a scenario that ran at the same
+  time) cannot reach it. (Before, every play worked in one fixed folder.)
+  The offline proof (`cargo test -p cf-evals --test review_loops`, no token spent): a scripted
+  chief plays each scenario on a ledger written by hand, and the scenario judges what the
+  measure reads of it. A chief that behaves holds every expectation; each that loops, sends the
+  work back for notes, accepts a blocker as out of scope, accepts with a blocker open, or asks for
+  the second review without the earlier findings fails exactly the expectations that name what it did,
+  and one that asks for no second review leaves what reads one unmet and fails nothing for it.
 
 `--arm` compares a chief with its card (`card`, the default), with a
 one-line card that names no board (`nocard`), and as its harness alone

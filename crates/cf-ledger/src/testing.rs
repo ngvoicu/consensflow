@@ -40,8 +40,9 @@
 //! And migration 0024's column of the `conversation` table (whether the host proved
 //! the program of the last window on one gone), which Node's conversations never
 //! had: in the rows of that table and in the text of its schema. And migration
-//! 0025's of the `project` table (when a meeting with the chief began), held apart
-//! as the wake-up columns are.
+//! 0025's of the `project` table (when a meeting with the chief began), and
+//! migration 0026's two (the staff's rules and the size Claude members compact
+//! at), held apart as the wake-up columns are.
 //!
 //! What only Node's ledger had is held apart the other way round, on both
 //! sides: the mark that a project comes back by itself after a restart
@@ -59,6 +60,7 @@ mod program_gone;
 mod role_note;
 mod role_text;
 mod specs;
+mod staff_rules;
 
 use serde_json::{Map, Value};
 
@@ -68,6 +70,7 @@ pub use meeting::undo_migration_0025;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
+pub use staff_rules::undo_migration_0026;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
@@ -97,15 +100,16 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
     ("message", "door_closed_at"),
 ];
 
-/// The columns migrations 0014, 0017 and 0025 added to the `project` table, each
-/// as the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
-/// `description TEXT`, `meeting_at TEXT`, one to a line there): what Node's schema
-/// never had.
+/// The columns migrations 0014, 0017, 0025 and 0026 added to the `project` table,
+/// each as the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
+/// `description TEXT`, `meeting_at TEXT`, `staff_rules TEXT`, one to a line there):
+/// what Node's schema never had.
 fn added_columns() -> impl Iterator<Item = &'static str> {
     [
         include_str!("../migrations/0014.sql"),
         include_str!("../migrations/0017.sql"),
         include_str!("../migrations/0025.sql"),
+        include_str!("../migrations/0026.sql"),
     ]
     .into_iter()
     .flat_map(str::lines)
@@ -121,7 +125,8 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
 /// migration 0017, the one of migration 0018, the one of migration 0020, the one
-/// of migration 0021, the one of migration 0022 and the one of migration 0024
+/// of migration 0021, the one of migration 0022, the one of migration 0024, the
+/// meeting of migration 0025 and the staff's rules and Claude's compaction of 0026
 /// (their name and, in every row, the value at its place), the table migration
 /// 0020 made (a long item's parts), the stop in the event rows that paused a
 /// task, and the look in the event rows of a delivery's begin, retry or failure.
@@ -180,8 +185,8 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// `tables`), with the schema as Node's ledger had it: no version past the
 /// last Node's ledger had, no tester in the checks of the two tables that
 /// name the roles and the pools, none of the columns of a project's wake-up
-/// calls, of what it says of specs or of its description in the table of the
-/// projects, and not the column of the role text a conversation was last given,
+/// calls, of what it says of specs, of its description or of its staff's rules
+/// in the table of the projects, and not the column of the role text a conversation was last given,
 /// that of the role text a message says, that of the mark of a compaction's
 /// summary in a copy, the table and the indexes migration 0020 made, that of the
 /// mark a project's suspension leaves on the tasks it paused, that of when a
@@ -219,8 +224,8 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the
-                // column's text: the wake-up calls' columns and the description
-                // one by one, and the three of specs, which `specs` holds as the
+                // column's text: the wake-up calls' columns, the description and
+                // the staff's rules one by one, and the three of specs, which `specs` holds as the
                 // one piece they are.
                 for column in added_columns() {
                     *sql = sql.replace(&format!(", {column}"), "");

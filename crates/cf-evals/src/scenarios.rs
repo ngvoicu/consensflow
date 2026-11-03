@@ -25,6 +25,9 @@ mod control_trip;
 mod conversation;
 mod long_trip;
 mod question_trip;
+mod review_blockers;
+mod review_loop;
+mod review_rounds;
 mod round_trip;
 mod simple_fix;
 mod six_decisions;
@@ -49,11 +52,16 @@ pub struct Answer {
     pub text: String,
 }
 
+/// What an expectation says of the numbers of a run: whether it holds, none where it judged nothing.
+pub type Holds = Box<dyn Fn(&Metrics) -> Option<bool> + Send + Sync>;
+
 /// One thing a chief is held to: the name a report says it by, and whether the
 /// numbers of the run say it held.
 pub struct Expectation {
     pub name: &'static str,
-    pub holds: Box<dyn Fn(&Metrics) -> bool + Send + Sync>,
+    /// Whether it holds on the numbers of a run; none where it reads something the run never
+    /// made (the second review of a chief that asked for none), so that it judged nothing.
+    pub holds: Holds,
 }
 
 impl std::fmt::Debug for Expectation {
@@ -69,6 +77,19 @@ impl std::fmt::Debug for Expectation {
 pub fn expect(
     name: &'static str,
     holds: impl Fn(&Metrics) -> bool + Send + Sync + 'static,
+) -> Expectation {
+    Expectation {
+        name,
+        holds: Box::new(move |metrics| Some(holds(metrics))),
+    }
+}
+
+/// An expectation called `name` that is judged only where the run made what it reads: `holds`
+/// answers none where it did not, and the check is **unmet** (it judged nothing) and no failure
+/// of the chief's.
+pub fn expect_if(
+    name: &'static str,
+    holds: impl Fn(&Metrics) -> Option<bool> + Send + Sync + 'static,
 ) -> Expectation {
     Expectation {
         name,
@@ -102,6 +123,15 @@ pub struct Uncommitted {
     pub replace: &'static str,
 }
 
+/// One answer of a stand-in worker: the result it sends the chief, and the files it writes in
+/// the project first, as a worker's tools would (a path below the project's folder, and the
+/// whole text of the file).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptedWork {
+    pub result: String,
+    pub writes: Vec<(String, String)>,
+}
+
 /// A scenario.
 #[derive(Debug)]
 pub struct Scenario {
@@ -117,6 +147,19 @@ pub struct Scenario {
     pub prompt: String,
     /// What the owner says next, in turn.
     pub follow_ups: Vec<FollowUp>,
+    /// The results a stand-in reviewer sends, one for each review the chief asks for, in
+    /// order, and the last again for any more; none where the staff's reviewer is a real
+    /// model. The reviewer is scripted so that what the chief is held to is its own
+    /// judgment of the findings and no model's: the scenario's fixture and prompt make the
+    /// findings true of what a worker makes, and the stand-in says them in the form the
+    /// reviewer's role text asks for.
+    pub stand_in_reviews: Vec<String>,
+    /// The answers a stand-in worker gives, one for each task brief it is given, in order (the
+    /// last again for any more); none where the staff's workers are real models. The work is
+    /// scripted so that the bug the stand-in reviewer finds is the work's own by construction,
+    /// whatever the brief the chief wrote says: a script cannot follow a brief, and a run's
+    /// report says what it was asked and what it held.
+    pub stand_in_work: Vec<ScriptedWork>,
     /// The owner's answers, free text, by what the question is about (the specific
     /// subjects first: most questions mention publishing in passing).
     pub answers: Vec<Answer>,
@@ -142,26 +185,39 @@ impl Scenario {
         self.uncommitted.iter().map(|change| change.file).collect()
     }
 
+    /// Whether the run has a stand-in member, a reviewer or a worker.
+    pub fn has_a_stand_in(&self) -> bool {
+        !self.stand_in_reviews.is_empty() || !self.stand_in_work.is_empty()
+    }
+
+    /// Whether the measure reads the rounds of the chief's tasks ([`Metrics::rounds`]): a
+    /// scenario with a stand-in reviewer holds the chief to what it did with each review,
+    /// and the others' reports keep their shape.
+    pub fn reads_the_rounds(&self) -> bool {
+        !self.stand_in_reviews.is_empty()
+    }
+
     /// Whether the measure counts the files of the fixture the run deleted: a
     /// scenario with the owner's work does, and the others' reports keep their shape.
     pub fn counts_gone_files(&self) -> bool {
         self.uncommitted.is_some()
     }
 
-    /// Each of the expectations against the numbers: what held, what did not.
+    /// Each of the expectations against the numbers: what held, what did not, and what judged
+    /// nothing for want of what it reads.
     pub fn verdict(&self, metrics: &Metrics) -> Vec<Check> {
         self.expectations
             .iter()
-            .map(|expectation| Check {
-                name: expectation.name.to_owned(),
-                ok: (expectation.holds)(metrics),
+            .map(|expectation| match (expectation.holds)(metrics) {
+                Some(ok) => Check::new(expectation.name, ok),
+                None => Check::unmet(expectation.name),
             })
             .collect()
     }
 }
 
 /// The ids of the scenarios, in the order they are listed.
-pub const IDS: [&str; 13] = [
+pub const IDS: [&str; 15] = [
     "advice-trip",
     "chief-switch",
     "complex-launch",
@@ -170,6 +226,8 @@ pub const IDS: [&str; 13] = [
     "long-trip",
     "question-trip",
     "question-trip-native",
+    "review-blockers",
+    "review-loop",
     "round-trip",
     "simple-fix",
     "six-decisions",
@@ -189,6 +247,8 @@ pub fn by_id(id: &str) -> Option<Scenario> {
         "long-trip" => long_trip::scenario(),
         "question-trip" => question_trip::scenario(),
         "question-trip-native" => question_trip::native(),
+        "review-blockers" => review_blockers::scenario(),
+        "review-loop" => review_loop::scenario(),
         "round-trip" => round_trip::scenario(),
         "simple-fix" => simple_fix::scenario(),
         "six-decisions" => six_decisions::scenario(),
