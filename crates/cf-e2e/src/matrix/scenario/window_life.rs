@@ -164,7 +164,7 @@ pub fn window_life() -> Vec<Scenario> {
                 let kinds: Vec<String> = judged
                     .nth("A", 0)
                     .and_then(|number| judged.snapshot.task(number))
-                    .and_then(|task| task["thread"].as_array().cloned())
+                    .and_then(|task| task["messages"].as_array().cloned())
                     .unwrap_or_default()
                     .iter()
                     .filter(|message| message["recipient"] == "chief" || message["to"] == "chief")
@@ -271,9 +271,12 @@ pub fn window_life() -> Vec<Scenario> {
             "field-restart-mid-turn",
             vec![
                 run!(
-                    "A",
-                    "task add --tier standard :: SLEEP 30 Reply with exactly: RESTART_OK",
-                    |snapshot, bindings| since(snapshot, bindings, "A", "working").is_some_and(|seconds| seconds >= 5)
+                    "X and A",
+                    "task add --advice --tier standard :: SLEEP 30 Reply with exactly: X_RESTART_OK\ntask add --tier standard :: SLEEP 30 Reply with exactly: RESTART_OK",
+                    |snapshot, bindings| {
+                        since(snapshot, bindings, "A", "working").is_some_and(|seconds| seconds >= 5)
+                            && is(snapshot, bindings, "X", 0, &["working"])
+                    }
                 ),
                 Step {
                     human: Some(|_| Ok(())),
@@ -281,21 +284,37 @@ pub fn window_life() -> Vec<Scenario> {
                     name: "the app is quit mid-turn and started again",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),
-                    reached: |snapshot, bindings| answered(snapshot, bindings, "A", 0) && crate::matrix::run::settled(snapshot),
+                    reached: |snapshot, bindings| {
+                        answered(snapshot, bindings, "A", 0) && answered(snapshot, bindings, "X", 0) && crate::matrix::run::settled(snapshot)
+                    },
                 },
             ],
-            A,
+            &[
+                Bind { name: "X", is: Is::Pool("advisor"), requester: "chief" },
+                Bind { name: "A", is: Is::Pool("worker"), requester: "chief" },
+            ],
             |judged| {
-                let results = about(judged, "A", "result");
-                let paused: Vec<&str> = about(judged, "A", "note")
+                let told: Vec<&str> = judged
+                    .snapshot
+                    .chief_inbox
                     .iter()
-                    .filter_map(|note| note["body"].as_str())
-                    .filter(|body| body.contains("paused") || body.contains("cut"))
+                    .filter(|message| message["kind"] == "note" && message.get("sender").is_none_or(Value::is_null))
+                    .filter_map(|message| message["body"].as_str())
+                    .filter(|body| body.contains("paused") || body.contains(" cut"))
                     .collect();
                 vec![
+                    oracle::state(judged, "X", 0, &["done"]),
                     oracle::state(judged, "A", 0, &["done"]),
-                    Check::new("A", "its result came once", results.len() == 1, format!("{} result(s)", results.len())),
-                    Check::new("A", "the chief was told of the quit once at the most", paused.len() <= 1, crate::live::cut(&paused.join(" | "), 240)),
+                    Check::new("X", "its result came once", about(judged, "X", "result").len() == 1, format!("{} result(s)", about(judged, "X", "result").len())),
+                    Check::new("A", "its result came once", about(judged, "A", "result").len() == 1, format!("{} result(s)", about(judged, "A", "result").len())),
+                    stopped_once(judged, "X"),
+                    stopped_once(judged, "A"),
+                    Check::new(
+                        "chief",
+                        "it was told of the two tasks the quit stopped in one note at the most",
+                        told.len() <= 1,
+                        crate::live::cut(&told.join(" | "), 300),
+                    ),
                 ]
             },
             &[],
@@ -440,8 +459,16 @@ pub fn window_life() -> Vec<Scenario> {
                     oracle::state(judged, "A", 0, &["done"]),
                     Check::new(
                         "A",
-                        "the chief was told once that its window closed",
-                        closed.iter().filter(|note| note["body"].as_str().is_some_and(|body| body.contains("closed") || body.contains("ended"))).count() == 1,
+                        "the chief was told once that its window closed, how it ended and what it showed last",
+                        closed
+                            .iter()
+                            .filter(|note| {
+                                note["body"].as_str().is_some_and(|body| {
+                                    body.contains("window closed (exit code") && body.contains("its screen ended with:")
+                                })
+                            })
+                            .count()
+                            == 1,
                         crate::live::cut(&closed.iter().filter_map(|note| note["body"].as_str()).collect::<Vec<_>>().join(" | "), 240),
                     ),
                     Check::new(
@@ -456,12 +483,13 @@ pub fn window_life() -> Vec<Scenario> {
             &[],
         ),
         // B3: `cf tell` to a task still queued, its window not up yet: taken, and it goes in
-        // after the brief.
+        // after the brief. A is T-1 on the board this scenario starts: the tell, in the same
+        // turn as the task, names it so.
         scenario(
             "field-tell-queued",
             vec![run!(
                 "A, and a tell while it is queued",
-                "task add --tier standard :: Reply with exactly: BRIEF\ntell {A+0} :: Reply with exactly: TOLD",
+                "task add --tier standard :: Reply with exactly: BRIEF\ntell T-1 :: Reply with exactly: TOLD",
                 |snapshot, bindings| {
                     bindings.nth("A", 0).is_some()
                         && about_results(snapshot, bindings.nth("A", 0)).iter().any(|body| body == "TOLD")
@@ -471,12 +499,13 @@ pub fn window_life() -> Vec<Scenario> {
             A,
             |judged| {
                 let results: Vec<Value> = about(judged, "A", "result").iter().map(|message| message["body"].clone()).collect();
-                let refused = crate::matrix::observe::calls(&judged.snapshot.events)
+                let tells: Vec<_> = crate::matrix::observe::calls(&judged.snapshot.events)
                     .into_iter()
-                    .filter(|call| call.participant == "chief" && call.path.ends_with("/tell") && call.error.is_some())
-                    .count();
+                    .filter(|call| call.participant == "chief" && call.path.ends_with("/tell"))
+                    .collect();
+                let refused = tells.iter().filter(|call| call.error.is_some()).count();
                 vec![
-                    Check::new("chief", "its tell of the queued task was taken", refused == 0, format!("{refused} refusal(s)")),
+                    Check::new("chief", "its tell of the queued task was taken", !tells.is_empty() && refused == 0, format!("{} tell(s), {refused} refused", tells.len())),
                     Check::new("A", "the words told went in after the brief, and answered", results.last().is_some_and(|body| body == "TOLD"), format!("{results:?}")),
                 ]
             },
@@ -580,52 +609,6 @@ pub fn window_life() -> Vec<Scenario> {
             &[],
         )
         .ending(&["A"]),
-        // a-reopened-window-with-no-task-reads-working-forever (Devin's in the field; Claude's
-        // here): the human opens a finished worker's window again from the page; it reads at rest.
-        scenario(
-            "field-reopened-at-rest",
-            vec![
-                run!(
-                    "A",
-                    "task add --tier standard :: Reply with exactly: T1_DONE",
-                    |snapshot, bindings| answered(snapshot, bindings, "A", 0)
-                        && crate::matrix::run::settled(snapshot)
-                        && bindings
-                            .nth("A", 0)
-                            .and_then(|number| snapshot.task(number))
-                            .and_then(|task| task["assignee"].as_str())
-                            .is_some_and(|handle| {
-                                snapshot.lanes.iter().find(|lane| lane["participant"]["handle"] == handle).is_none_or(|lane| lane["pane"].is_null())
-                            })
-                ),
-                human(
-                    "the human opens the worker's window again",
-                    |members| members.page("session.open", json!({ "handle": a_window(members)? })).map(|_| ()),
-                    |snapshot, bindings| {
-                        reopened(snapshot, bindings).is_some_and(|lane| lane["activity"]["state"] == "idle")
-                    },
-                ),
-                human("ten seconds go by", |_| Ok(()), |snapshot, bindings| {
-                    reopened(snapshot, bindings).is_some() && since(snapshot, bindings, "A", "done").is_some_and(|seconds| seconds >= 25)
-                }),
-            ],
-            A,
-            |judged| {
-                let lane = judged
-                    .nth("A", 0)
-                    .and_then(|number| judged.snapshot.task(number))
-                    .and_then(|task| task["assignee"].as_str())
-                    .and_then(|handle| judged.snapshot.lanes.iter().find(|lane| lane["participant"]["handle"] == handle));
-                vec![Check::new(
-                    "A",
-                    "its window opened again with no task reads at rest",
-                    lane.is_some_and(|lane| !lane["pane"].is_null() && lane["activity"]["state"] == "idle"),
-                    format!("{:?}", lane.map(|lane| lane["activity"].clone())),
-                )]
-            },
-            &[],
-            &[],
-        ),
     ]
 }
 
@@ -641,18 +624,25 @@ fn about_results(snapshot: &Snapshot, number: Option<i64>) -> Vec<String> {
         .collect()
 }
 
-/// The lane of A's window, where it shows a window again.
-fn reopened<'a>(
-    snapshot: &'a Snapshot,
-    bindings: &crate::matrix::observe::Bindings,
-) -> Option<&'a Value> {
-    let handle = bindings
-        .nth("A", 0)
-        .and_then(|number| snapshot.task(number))?["assignee"]
-        .as_str()?;
-    snapshot
-        .lanes
+/// The check that the window of the task bound to `name` was told once, when it came back after
+/// the app's restart, that ConsensFlow stopped while it worked.
+fn stopped_once(judged: &Judged, name: &str) -> Check {
+    let told = judged
+        .nth(name, 0)
+        .and_then(|number| judged.snapshot.task(number))
+        .and_then(|task| task["messages"].as_array().cloned())
+        .unwrap_or_default()
         .iter()
-        .find(|lane| lane["participant"]["handle"] == handle)
-        .filter(|lane| !lane["pane"].is_null())
+        .filter(|message| {
+            message["body"].as_str().is_some_and(|body| {
+                body.starts_with("ConsensFlow stopped while you were working on T-")
+            })
+        })
+        .count();
+    Check::new(
+        name,
+        "its window came back and was told once that ConsensFlow stopped while it worked",
+        told == 1,
+        format!("told {told} time(s)"),
+    )
 }

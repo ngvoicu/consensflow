@@ -40,6 +40,21 @@ matrix-late-record = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "l
 matrix-recap = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_recap_not_typed"]
 matrix-image-result = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_image_result"]
 matrix-question-not-retyped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_question_not_retyped"]
+# LMX-14, window life (T-1195): the cases by name.
+matrix-builds-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_builds_daemon"]
+matrix-run-in-background = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_run_in_background"]
+matrix-hold-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_hold_notes"]
+matrix-status-line = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_status_line"]
+matrix-resume-at-rest = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_resume_at_rest"]
+matrix-restart-mid-turn = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_restart_mid_turn"]
+matrix-quota-account = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_quota_account"]
+matrix-trust-git-init = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_trust_git_init"]
+matrix-window-closed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_window_closed"]
+matrix-tell-queued = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_tell_queued"]
+matrix-failure-reason = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_failure_reason"]
+matrix-tell-keeps-work = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_tell_keeps_work"]
+matrix-switch-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_switch_chief"]
+matrix-quota-out = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_quota_out"]
 # The daemon's API, the tooling's look at it among it.
 matrix-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::tests::"]
 # The rig's environment and its live Muse launcher.
@@ -667,3 +682,172 @@ runs = ["matrix-fake-agent-reply"]
 file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
 find = """    std::env::split_paths(path).find_map(|folder| {"""
 replace = """    std::env::split_paths(path).collect::<Vec<_>>().into_iter().rev().find_map(|folder| {"""
+
+# LMX-14, window life (T-1195): each field fix a window-life case replays, taken back out as the
+# field had it; its case catches it.
+
+[[plant]]
+name = "live matrix: field fix out: a build's daemon left running is taken for the turn's work and told (A1)"
+meant = "field_builds_daemon"
+runs = ["matrix-builds-daemon"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = "            None => return at.parent.is_some() && runs_a_shell(at),"
+replace = "            None => return at.parent.is_none() || runs_a_shell(at),"
+
+[[plant]]
+name = "live matrix: field fix out: a worker whose turn left its run going has that turn taken for its result (A2)"
+meant = "field_run_in_background"
+runs = ["matrix-run-in-background"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
+        if pending.total() > 0 {'''
+replace = '''        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
+        if pending.total() > 0 && false {'''
+
+[[plant]]
+name = "live matrix: field fix out: a worker that waits on its run with Monitor has its task done at its turn's end (T-442)"
+meant = "field_hold_notes"
+runs = ["matrix-hold-notes"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    text_id(field(result, "taskId"))'''
+replace = '''    text_id(field(result, "taskId")).filter(|_| false)'''
+
+[[plant]]
+name = "live matrix: field fix out: what is in the window's group, the status line among it, is taken for the turn's work"
+meant = "field_status_line"
+runs = ["matrix-status-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/harness.rs"
+find = "        Servers::InGroup => kept.group.is_some() && member.group == kept.group,"
+replace = "        Servers::InGroup => false,"
+
+[[plant]]
+name = "live matrix: field fix out: an idle compaction's summary is read as a prompt, and the Resume tells the chief its turn was cut"
+meant = "field_resume_at_rest"
+runs = ["matrix-resume-at-rest"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        if (record.summary && !self.turn_open) || self.late_ancestor(place) {"
+replace = "        if self.late_ancestor(place) {"
+
+[[plant]]
+name = "live matrix: field fix out: the human's Resume leaves the work the quit stopped where it stopped"
+meant = "field_restart_mid_turn"
+runs = ["matrix-restart-mid-turn"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''            if state == "open" {
+                resume_with_project(store, id)?;
+            } else {'''
+replace = '''            if state != "open" {'''
+
+[[plant]]
+name = "live matrix: field fix out: a window's turn that gets through brings back only its own member, and the chief at rest never takes its worker's result"
+meant = "field_quota_account"
+runs = ["matrix-quota-account"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''            self.back_on_its_account(project.id, &owner, &news)?;
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "live matrix: field fix out: the trust question in the project's own folder is left to the human, and the worker's launch stops (dip #2)"
+meant = "field_trust_git_init"
+runs = ["matrix-trust-git-init"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/trust.rs"
+find = "    let inside = Path::new(&folder).starts_with(&project);"
+replace = "    let inside = false;"
+
+[[plant]]
+name = "live matrix: field fix out: the pause note of a window that ended under its task says only that it closed (B2)"
+meant = "field_window_closed"
+runs = ["matrix-window-closed"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    shown.after_with(&closed, &besides)"
+replace = '''                    format!("{closed}{besides}")'''
+
+[[plant]]
+name = "live matrix: field fix out: a tell to a task still queued is refused (B3)"
+meant = "field_tell_queued"
+runs = ["matrix-tell-queued"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    task.assignee.is_some() && (WINDOWED.contains(&task.state.as_str()) || task.state == QUEUED)"
+replace = "    task.assignee.is_some() && WINDOWED.contains(&task.state.as_str())"
+
+[[plant]]
+name = "live matrix: field fix out: Claude's refused turn keeps none of the API's words (dip #4)"
+meant = "field_failure_reason"
+runs = ["matrix-failure-reason"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''            self.failure = Some(record.text.clone());
+'''
+replace = '''            self.failure = Some(String::new());
+'''
+
+[[plant]]
+name = "live matrix: field fix out: a turn its record ends is taken for at work, and a stop is pressed into it"
+meant = "field_tell_keeps_work"
+runs = ["matrix-tell-keeps-work"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "} else if observed.settled || observed.over == Over::Held || self.cut_short(observed) {"
+replace = "} else if observed.settled || self.cut_short(observed) {"
+
+[[plant]]
+name = "live matrix: field fix out: the handoff of a switched chief sends it to answer a question the cancel left"
+meant = "field_switch_chief"
+runs = ["matrix-switch-chief"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = "SELECT 1 FROM task q WHERE q.id = m.task_id AND q.state IN ({finished})"
+replace = "SELECT 1 FROM task q WHERE 0 AND q.id = m.task_id AND q.state IN ({finished})"
+
+[[plant]]
+name = "live matrix: field fix out: Claude's 429 refusal is no allowance used up, and the task waiting out its quota fails (dip #3)"
+meant = "field_quota_out"
+runs = ["matrix-quota-out"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    let rate_limited = status == Some(429.0)
+        || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+        || spent;'''
+replace = '''    let rate_limited = status == Some(-429.0)
+        || record.get("error").and_then(Value::as_str) == Some("rate_limit-not")
+        || spent;'''

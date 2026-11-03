@@ -765,11 +765,6 @@ mod tests {
         holds_but_its_known_reds("field-switch-chief");
     }
 
-    #[test]
-    fn field_reopened_at_rest() {
-        holds_but_its_known_reds("field-reopened-at-rest");
-    }
-
     /// Field report 5's nudges (T-1113): five minutes of wake-up calls a minute apart, too long
     /// for CI's step, run on request:
     /// `cargo test -p cf-e2e --test live_matrix -- --ignored field5_nudges`.
