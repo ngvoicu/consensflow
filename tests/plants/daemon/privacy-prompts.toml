@@ -344,8 +344,20 @@ runs = ["pv-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/privacy.rs"
-find = "        let mut over = items != baseline || now - hold.since >= HOLD_MS;"
+find = "        let mut over = moved || now - hold.since >= HOLD_MS;"
 replace = "        let mut over = now - hold.since >= HOLD_MS;"
+
+[[plant]]
+name = "privacy prompts: a look that cannot read the record ends the wait"
+meant = "a_look_that_cannot_read_the_record_does_not_end_the_wait"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = '''
+        let items = matches!(observed.reading.as_deref(), Some(Reading::Known(_)))
+            .then(|| observed.items().len());'''
+replace = "        let items = Some(observed.items().len());"
 
 [[plant]]
 name = "privacy prompts: the wait does not end when no alert is on screen"
@@ -573,7 +585,7 @@ replace = "                None,"
 
 [[plant]]
 name = "privacy prompts: a window on Windows is denied reads of Music"
-meant = "nothing_is_denied_on_windows_and_only_the_libraries_a_folder_is_not_in_are_denied_on_a_mac"
+meant = "nothing_is_denied_on_windows_wherever_the_folder_is"
 runs = ["pv-claude-lib"]
 
 [[plant.edit]]

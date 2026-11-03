@@ -152,6 +152,40 @@ fn the_window_waits_on_the_dialog_in_its_lane_until_its_record_moves() {
 }
 
 #[test]
+fn a_look_that_cannot_read_the_record_does_not_end_the_wait() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    // The record holds something, so that a record that cannot be read (no items) is not the same.
+    let said = context.adapter.item(
+        cf_harness::records::Role::Assistant,
+        "Looking in the folder",
+    );
+    context.adapter.with("zeus", |agent| agent.items.push(said));
+    context.host.set_alerts(Some(1));
+    context
+        .dispatcher
+        .privacy_prompt(prompt(&context, &tiers, "MediaLibrary", "ls", 22913));
+    passes(&context, 2, 1_000);
+    assert!(waits_on_the_dialog(&context, &tiers));
+    // The record cannot be read for a few looks: it shows no item, which is no movement.
+    context.adapter.unread("zeus", true);
+    passes(&context, 4, 1_000);
+    assert!(waits_on_the_dialog(&context, &tiers));
+    // Readable again and as it was: still waiting. Then it moves, and the wait ends.
+    context.adapter.unread("zeus", false);
+    passes(&context, 2, 1_000);
+    assert!(waits_on_the_dialog(&context, &tiers));
+    let answered = context
+        .adapter
+        .item(cf_harness::records::Role::Assistant, "Listed the folder");
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.push(answered));
+    passes(&context, 1, 1_000);
+    assert!(!waits_on_the_dialog(&context, &tiers));
+}
+
+#[test]
 fn the_window_stops_waiting_when_no_alert_is_on_screen_any_more() {
     let context = Context::new();
     let tiers = at_work(&context);

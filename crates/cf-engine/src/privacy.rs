@@ -41,6 +41,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use cf_harness::contract::{Observed, Pane, Waiting};
+use cf_harness::records::Reading;
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
 use cf_proto::panes::{TccPrompt, TccUnreadable};
 
@@ -241,9 +242,12 @@ impl Dispatcher {
             return observed;
         };
         let now = self.now();
-        let items = observed.items().len();
-        let baseline = hold.items.unwrap_or(items);
-        let mut over = items != baseline || now - hold.since >= HOLD_MS;
+        // How many items the record holds, where it could be read: a look that could not read it
+        // shows none, which is no movement of it.
+        let items = matches!(observed.reading.as_deref(), Some(Reading::Known(_)))
+            .then(|| observed.items().len());
+        let moved = matches!((hold.items, items), (Some(before), Some(after)) if after != before);
+        let mut over = moved || now - hold.since >= HOLD_MS;
         let due = now - hold.since >= FIRST_LOOK_MS
             && hold
                 .looked
@@ -267,7 +271,9 @@ impl Dispatcher {
             let Some(held) = part.hold.as_mut() else {
                 return observed;
             };
-            held.items.get_or_insert(items);
+            if held.items.is_none() {
+                held.items = items;
+            }
             held.on.clone()
         };
         // A dialog of its harness's, or its own question, says why it waits in its words.
