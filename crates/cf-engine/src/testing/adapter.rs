@@ -293,6 +293,13 @@ pub struct FakeAdapter {
     /// the message, those lines gone, and the sources as an item of their own after it.
     /// A line is an image's path here when it is an absolute path ending in `.png`.
     pub attaches_images: Cell<bool>,
+    /// With `attaches_images`: its windows' paste handler is Claude Code 2.1.314 to
+    /// 2.1.317's, read in the binary. It takes the paths of the pictures out of the paste
+    /// and drops every blank line of what is left, and only then is the rest of the words
+    /// pasted as any paste is (in the wrapper where `wraps_pastes` says), behind the
+    /// placeholders: `[Image #1]`, a blank line, the wrapper. Off, the lines are taken
+    /// out of the paste as it is recorded, blank lines and wrapper and all.
+    pub drops_blanks: Cell<bool>,
     /// Its windows' record holds nothing of the first message a launch gives them:
     /// each goes before its harness takes it, where the fake of Node's suite recorded
     /// it as it prepared the launch.
@@ -398,6 +405,7 @@ impl FakeAdapter {
             wraps_pastes: Cell::new(false),
             splits_pastes: Cell::new(false),
             attaches_images: Cell::new(false),
+            drops_blanks: Cell::new(false),
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
             trusts: RefCell::new(None),
@@ -445,6 +453,23 @@ impl FakeAdapter {
             synthetic: false,
             compaction: false,
         }
+    }
+
+    /// The items the window of `handle` records of `paste`, which its human sent from the
+    /// window's input box: what `deliver` would make of it in this window, so the words
+    /// as the harness keeps them and, where it attaches images (`attaches_images`), the
+    /// sources as the item after them. Nothing is added to the window's record.
+    pub fn recorded_as_sent(&self, handle: &str, paste: &str) -> Vec<Item> {
+        let earlier: Vec<String> = self
+            .agent(handle)
+            .items
+            .iter()
+            .map(|item| item.text.to_string())
+            .collect();
+        let (words, sources) = self.recorded_text(paste, earlier.iter().map(String::as_str));
+        let mut items = vec![self.item(Role::User, &words)];
+        items.extend(sources.map(|sources| self.item(Role::Custom, &sources)));
+        items
     }
 
     /// Changes the latest window of `handle`: its own, or its newest session's.
@@ -865,6 +890,36 @@ impl FakeAdapter {
             )
     }
 
+    /// What this fake's windows record of `paste`, and the sources item that follows it
+    /// where pictures were attached: the paste shaped as `splits_pastes` and `wraps_pastes`
+    /// say, and its pictures taken out of it as `attaches_images` says; with `drops_blanks`
+    /// the pictures and the blank lines first, and the rest shaped.
+    fn recorded_text<'a>(
+        &self,
+        paste: &str,
+        earlier: impl Iterator<Item = &'a str>,
+    ) -> (String, Option<String>) {
+        let shaped = |words: &str| {
+            if self.splits_pastes.get() {
+                in_pieces(words)
+            } else if self.wraps_pastes.get() {
+                format!(
+                    "\n\n<pasted_content id=\"b118\">\n{words}\n</pasted_content id=\"b118\">\n"
+                )
+            } else {
+                words.to_owned()
+            }
+        };
+        if !self.attaches_images.get() {
+            return (shaped(paste), None);
+        }
+        if self.drops_blanks.get() {
+            let (marks, words, sources) = attached_first(paste, earlier);
+            return (format!("{marks}{}", shaped(&words)), sources);
+        }
+        attached(&shaped(paste), earlier)
+    }
+
     /// A delivery into `launch`'s window, as the fake takes it.
     pub(super) fn take(&self, launch: &str, text: &str) -> Admission {
         self.of_launch(launch, |agent| {
@@ -874,20 +929,8 @@ impl FakeAdapter {
                 };
             }
             if agent.arrive {
-                let recorded = if self.splits_pastes.get() {
-                    in_pieces(text)
-                } else if self.wraps_pastes.get() {
-                    format!(
-                        "\n\n<pasted_content id=\"b118\">\n{text}\n</pasted_content id=\"b118\">\n"
-                    )
-                } else {
-                    text.to_owned()
-                };
-                let (recorded, sources) = if self.attaches_images.get() {
-                    attached(&recorded, agent.items.iter().map(|item| &*item.text))
-                } else {
-                    (recorded, None)
-                };
+                let (recorded, sources) =
+                    self.recorded_text(text, agent.items.iter().map(|item| &*item.text));
                 agent.items.push(self.item(Role::User, &recorded));
                 if let Some(sources) = sources {
                     // The harness's own words, as the reader makes of the companion.
@@ -968,6 +1011,39 @@ fn attached<'a>(paste: &str, earlier: impl Iterator<Item = &'a str>) -> (String,
         format!("{}{}", marks.join(" "), rest.join("\n")),
         Some(sources.join("\n")),
     )
+}
+
+/// What a window whose paste handler is Claude Code 2.1.314 to 2.1.317's makes of `paste`
+/// before the rest of it is pasted (`drops_blanks`): the placeholders (a `[Image #N]` for each
+/// path on a line of its own, a space between, numbered on from those `earlier` items
+/// already hold), the words that are left with every blank line gone, and the sources item.
+/// The paste as it is, and no placeholders, where it names no picture.
+fn attached_first<'a>(
+    paste: &str,
+    earlier: impl Iterator<Item = &'a str>,
+) -> (String, String, Option<String>) {
+    let (images, rest): (Vec<&str>, Vec<&str>) = paste
+        .lines()
+        .partition(|line| line.starts_with('/') && line.ends_with(".png"));
+    if images.is_empty() {
+        return (String::new(), paste.to_owned(), None);
+    }
+    let first = earlier
+        .map(|text| text.matches("[Image #").count())
+        .sum::<usize>()
+        + 1;
+    let marks: Vec<String> = (first..first + images.len())
+        .map(|number| format!("[Image #{number}]"))
+        .collect();
+    let sources: Vec<String> = images
+        .iter()
+        .map(|path| format!("[Image: source: {path}]"))
+        .collect();
+    let words: Vec<&str> = rest
+        .into_iter()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    (marks.join(" "), words.join("\n"), Some(sources.join("\n")))
 }
 
 /// The adapter as the engine asks it for one harness.
