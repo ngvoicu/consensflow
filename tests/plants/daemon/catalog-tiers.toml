@@ -128,7 +128,7 @@ replace = '''const RELAYED: [&str; 1] = ["pi"];'''
 
 [[plant]]
 name = "catalog tiers: a pick list orders a harness's agents by name, not effort"
-meant = "the staff's pick list orders a tier's agents by harness, then by effort from max down to none, then by name"
+meant = "New project's staff pick list orders a tier's agents by harness, then by effort from max down to none, then by name"
 runs = ["tiers-page-pickers"]
 
 [[plant.edit]]

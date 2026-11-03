@@ -2,7 +2,7 @@
 
 use super::Ledger;
 use crate::{
-    staff, Candidate, LedgerError, MemberView, NewMember, ParticipantView, ProjectView,
+    staff, Candidate, LedgerError, MemberEdit, MemberView, NewMember, ParticipantView, ProjectView,
     RemovedMember, StaffMember, TierChange,
 };
 
@@ -14,11 +14,33 @@ impl Ledger {
         project_id: i64,
         member: &NewMember,
     ) -> Result<ParticipantView, LedgerError> {
-        staff::add_member(&mut self.store, project_id, member)
+        staff::add_member(&mut self.store, project_id, member, false)
+    }
+
+    /// A member joins the staff, or rejoins it, in a tier the human chose (T-1143): one
+    /// [`Ledger::refresh_member_tiers`] passes by.
+    pub fn add_member_in_chosen_tier(
+        &mut self,
+        project_id: i64,
+        member: &NewMember,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::add_member(&mut self.store, project_id, member, true)
+    }
+
+    /// A member runs on another saved agent from its next window, in the tier the human
+    /// chose (T-1143); so do its sessions.
+    pub fn edit_member(
+        &mut self,
+        project_id: i64,
+        handle: &str,
+        edit: &MemberEdit,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::edit_member(&mut self.store, project_id, handle, edit)
     }
 
     /// Each active member's tier becomes its saved agent's now (`tier_of`
     /// answers it, or none for an agent the roster no longer has): the members that changed.
+    /// A tier the human chose stays (T-1143).
     pub fn refresh_member_tiers(
         &mut self,
         tier_of: impl FnMut(&str) -> Option<String>,

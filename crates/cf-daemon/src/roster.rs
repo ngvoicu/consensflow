@@ -6,7 +6,8 @@
 use std::path::PathBuf;
 
 use cf_base::refusal::Refusal;
-use cf_catalog::{AgentRow, AgentView, Catalog, Harness, Roster};
+use cf_base::time::SystemClock;
+use cf_catalog::{AgentRow, AgentView, Catalog, Harness, Roster, WorkTier};
 use cf_engine::seams::SavedAgent;
 use cf_ledger::{Ledger, TierChange};
 use cf_proto::specs::AppSpecs;
@@ -29,6 +30,65 @@ impl Agents {
     /// The roster, over the file as it is now.
     pub fn roster(&self) -> Roster<'_> {
         Roster::new(&self.catalog, self.path.clone())
+    }
+
+    /// The catalog this build ships: what the presets' tier rules are read from.
+    pub fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    /// The saved agent a member picked by its model runs on (Add member and Edit member,
+    /// T-1143): the human's own agent that runs `wanted` already, or a new one under a name
+    /// made of the harness, the model and the effort (`claude-opus-5-5-high`), numbered
+    /// where another of the human's agents has that name (`…-2`). The launch reads its
+    /// model and effort from it, as it reads every member's; the tier the human chose is
+    /// the agent's own tier too, where the agent is new. A catalog agent is never one:
+    /// the catalog's agents are the presets'.
+    pub fn member_agent(&self, wanted: &MemberAgent<'_>) -> Result<String, Refusal> {
+        let roster = self.roster();
+        let agents = roster.list()?;
+        let runs_it = |agent: &&AgentView| {
+            agent.custom
+                && agent.harness.as_deref() == Some(wanted.harness.as_str())
+                && agent.model.as_deref() == Some(wanted.model)
+                && agent.effort.as_deref() == wanted.effort
+                && agent.designer == wanted.designer
+        };
+        if let Some(name) = agents
+            .iter()
+            .find(runs_it)
+            .and_then(|agent| agent.name.clone())
+        {
+            return Ok(name);
+        }
+        let base = member_agent_name(wanted.harness, wanted.model, wanted.effort);
+        let taken = |name: &str| {
+            agents
+                .iter()
+                .any(|agent| agent.name.as_deref() == Some(name))
+                || self
+                    .catalog
+                    .presets()
+                    .iter()
+                    .any(|preset| preset.id == name)
+        };
+        let name = std::iter::once(base.clone())
+            .chain((2..).map(|n| format!("{base}-{n}")))
+            .find(|name| !taken(name))
+            .unwrap_or(base);
+        let mut input = serde_json::Map::new();
+        input.insert("name".to_owned(), Value::from(name.as_str()));
+        input.insert("harness".to_owned(), Value::from(wanted.harness.as_str()));
+        input.insert("model".to_owned(), Value::from(wanted.model));
+        if wanted.designer {
+            input.insert("designer".to_owned(), Value::Bool(true));
+        }
+        if let Some(effort) = wanted.effort {
+            input.insert("effort".to_owned(), Value::from(effort));
+        }
+        input.insert("workTier".to_owned(), Value::from(wanted.tier.as_str()));
+        roster.add(&input, &mut SystemClock)?;
+        Ok(name)
     }
 
     /// The agents file folded into the shape it keeps now, and every member's
@@ -58,6 +118,47 @@ impl Agents {
             .map_err(|failed| failed.to_string())
     }
 }
+
+/// What a member picked by its model runs on (T-1143): the model as its launch passes it
+/// (Devin's exact `model_uid` for the effort, never joined; Pi's `provider/id`), the effort
+/// a launch passes beside it (none where the id holds it), whether it draws, and the tier
+/// the human chose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemberAgent<'a> {
+    pub harness: Harness,
+    pub model: &'a str,
+    pub effort: Option<&'a str>,
+    pub designer: bool,
+    pub tier: WorkTier,
+}
+
+/// A saved agent's name for `model` on `harness` at `effort`: the harness's name, then the
+/// model's and the effort's words in lowercase letters and digits, joined by `-`, the
+/// harness not said twice where the model starts with it (`claude-opus-5-5-high`, not
+/// `claude-claude-…`; `pi-openrouter-anthropic-claude-fable-5-1-high`), cut to
+/// [`MEMBER_AGENT_NAME_MAX`] characters.
+pub fn member_agent_name(harness: Harness, model: &str, effort: Option<&str>) -> String {
+    let mut words: Vec<String> = Vec::new();
+    for part in std::iter::once(model).chain(effort) {
+        words.extend(
+            part.to_ascii_lowercase()
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .filter(|word| !word.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    if words.first().map(String::as_str) != Some(harness.as_str()) {
+        words.insert(0, harness.as_str().to_owned());
+    }
+    let mut name = words.join("-");
+    // A member's handle is its agent's name, at most 64 characters: room is left for `-99`.
+    name.truncate(MEMBER_AGENT_NAME_MAX);
+    name.trim_end_matches('-').to_owned()
+}
+
+/// The longest name [`member_agent_name`] makes: a member's handle holds 64 characters, and a
+/// number may follow.
+const MEMBER_AGENT_NAME_MAX: usize = 60;
 
 impl AgentRows for Agents {
     fn row(&self, agent: &str) -> Result<Option<AgentRow>, Refusal> {

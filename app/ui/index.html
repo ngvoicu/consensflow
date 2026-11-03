@@ -228,6 +228,7 @@
         <label>Model
           <select name="chiefModel" required disabled></select>
         </label>
+        <button class="quiet-button" type="button" name="chiefRefresh">Refresh models</button>
         <p class="dialog-help chief-help" role="status" hidden></p>
       </fieldset>
       <fieldset class="project-section staff-pick">
@@ -267,6 +268,7 @@
         <label>Model
           <select name="chiefModel" required disabled></select>
         </label>
+        <button class="quiet-button" type="button" name="chiefRefresh">Refresh models</button>
         <p class="dialog-help chief-help" role="status" hidden></p>
       </fieldset>
       <fieldset>
@@ -304,11 +306,19 @@
           </thead>
           <tbody id="staff-members"></tbody>
         </table>
+        <!-- Add member and Edit member (core/dialogs.js, MemberPicker): a model its harness lists
+             of itself, at an effort it lists, in the tier the human picks (T-1143). -->
         <fieldset class="staff-add">
           <legend>Add a member</legend>
           <label>Role<select name="role"></select></label>
-          <label>Agent<select name="agent"></select></label>
+          <label>Harness<select name="memberHarness"></select></label>
+          <label>Model<select name="memberModel" disabled></select></label>
+          <label>Effort<select name="memberEffort" disabled></select></label>
+          <label>Tier<select name="memberTier"></select></label>
+          <button class="quiet-button" type="button" name="memberRefresh">Refresh models</button>
           <button class="primary-button" type="submit">Add to staff</button>
+          <button class="quiet-button" type="button" name="memberCancel" hidden>Cancel</button>
+          <p class="dialog-help member-help" role="status" hidden></p>
           <p class="staff-hint" id="staff-hint" hidden></p>
         </fieldset>
       </fieldset>

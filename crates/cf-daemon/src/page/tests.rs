@@ -46,8 +46,12 @@ fn rig_over(env: Env, engine: Option<Rc<dyn Engine>>) -> Rig {
 
 /// A rig as [`rig_over`] makes one, its specs viewer given `specs`.
 fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
+    rig_of(env, engine, specs, Context::new())
+}
+
+/// A rig as [`rig_with`] makes one, over the engine kit `kit`.
+fn rig_of(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs, kit: Context) -> Rig {
     let Worked { home, spawn } = worked();
-    let kit = Context::new();
     let kicks = Rc::new(Cell::new(0));
     let counted = Rc::clone(&kicks);
     let opened = Rc::new(RefCell::new(Vec::new()));
@@ -403,6 +407,7 @@ mod gate;
 mod held;
 mod history;
 mod meeting;
+mod members;
 mod models;
 mod opening;
 mod reading;

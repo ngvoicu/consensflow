@@ -76,6 +76,7 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::ComputerUseOpen => computer_use::open(page, body).await,
         // The models a harness lists, for the chief's picker and the chains' editor.
         PageOperation::ModelsGet => models::get(page, body).await,
+        PageOperation::MemberEdit => staff::edit(page, body).await,
     };
     served.map_err(|said| said.0)
 }

@@ -737,7 +737,7 @@ runs = ["chm-page-pick"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '        picked?.contributor ? this.#words.contributorWarning : null,'
+find = '        this.model()?.contributor ? answer?.contributorWarning : null,'
 replace = '        null,'
 
 [[plant]]
@@ -747,8 +747,8 @@ runs = ["chm-page-card"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '      option.disabled = model.disabled || (current?.harness === kind && current?.model === id)'
-replace = '      option.disabled = model.disabled'
+find = '      takenOff: (kind, id) => this.#current?.harness === kind && this.#current?.model === id,'
+replace = '      takenOff: () => false,'
 
 [[plant]]
 name = "chief: the page lets a model be picked where none could be read"
@@ -758,9 +758,9 @@ runs = ["chm-page-unread"]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''    this.#model.disabled = true
-    this.#listing = null'''
+    this.#answer = null'''
 replace = '''    this.#model.disabled = false
-    this.#listing = null'''
+    this.#answer = null'''
 
 [[plant]]
 name = "chief: the page starts a project whose chief's harness has no model to pick"
@@ -769,8 +769,8 @@ runs = ["chm-page-unread"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''    if (this.#harness.value !== '' && this.#model.value !== '') return true'''
-replace = '''    if (this.#harness.value !== '') return true'''
+find = '''    if (this.#picker.kind !== '' && this.#picker.model() !== undefined) return true'''
+replace = '''    if (this.#picker.kind !== '') return true'''
 
 [[plant]]
 name = "chief: the card says the model picked, not the one the window ran on"

@@ -141,12 +141,13 @@ function rolePicker(savedAgents, roleSelect, agentSelect, hint, holding, onRefil
   refill()
 }
 
-/** One row of a staff table: the agent, one of its roles, and a Remove for that role. */
-function staffRow(who, role, remove) {
+/** One row of a staff table: the agent, one of its roles, a Remove for that role, and an Edit of the member where it has one. */
+function staffRow(who, role, remove, edit = null) {
   const row = element('tr')
   row.dataset.role = role
   row.append(who, element('td', null, ROLE_LABEL[role]))
   const tools = element('td')
+  if (edit !== null) tools.append(edit)
   tools.append(remove)
   row.append(tools)
   return row
@@ -159,6 +160,28 @@ function whoCell(name, runs) {
     element('span', 'member-name', name),
     element('br'),
     element('span', 'member-meta', runs),
+  )
+  return cell
+}
+
+/**
+ * A staff table's first cell for a member whose harness no longer lists its model (T-1143):
+ * the model marked, and what is wrong in words.
+ */
+function goneCell(name, model, runs, harness) {
+  const cell = element('td')
+  const meta = element('span', 'member-meta')
+  meta.append(element('mark', 'model-gone', model), runs.slice(model.length))
+  cell.append(
+    element('span', 'member-name', name),
+    element('br'),
+    meta,
+    element('br'),
+    element(
+      'span',
+      'member-gone',
+      `${harness} no longer lists ${model}: edit it to a model it lists.`,
+    ),
   )
   return cell
 }
@@ -181,69 +204,191 @@ const NO_HARNESS = 'No harness is installed here: install one from Agents, Harne
 const modelOf = (model) => (model.provider ? `${model.provider}/${model.id}` : model.id)
 
 /**
- * A chief's harness and model, as New project and Switch chief pick them (CHF-07): a
- * harness installed here, then one of the models that harness lists of itself
- * (`models.get`). Both are required, nothing is picked to start with, and no effort is
- * asked: a chief runs at its harness's own. A harness whose models cannot be read leaves
- * the model unpicked, and says why. Below, the harness's own words for switching its
- * model in the chief's window, which keeps its conversation (`switchHelp`), and the
- * warning beside a contributor model.
+ * The models each harness lists of itself (`models.get`, CHF-03), read once per harness
+ * while a dialog is open: the dialog that asks a harness again is answered from that read,
+ * until the human's Refresh reads it again. A read that is refused is not kept, so the
+ * next ask reads again. The chief's picker and Add member share one per dialog.
  */
-class ChiefPicker {
-  #harness
-  #model
-  #help
+export class ModelLists {
   #daemon
-  /** The listing read for the harness picked now. */
-  #listing = null
-  #words = { switchHelp: null, contributorWarning: null }
-  /** The `{harness, model}` the chief is on: no switch. */
-  #current = null
-  /** Which ask the model select waits for: an answer to an older one is let go. */
-  #asked = 0
+  /** Each harness's answer, as asked: a promise, kept from the moment it is asked. */
+  #answers = new Map()
 
-  constructor(form, daemon) {
-    this.#harness = form.elements.chiefHarness
-    this.#model = form.elements.chiefModel
-    this.#help = form.querySelector('.chief-help')
+  constructor(daemon) {
     this.#daemon = daemon
-    this.#harness.addEventListener('change', () => void this.#fillModels())
-    this.#model.addEventListener('change', () => this.#sayHelp())
   }
 
+  /** Forgets every read: a dialog opening reads each harness again at its first ask. */
+  clear() {
+    this.#answers.clear()
+  }
+
+  /** `harness`'s answer (by its program's name, `claude`): the one read already, or a read. */
+  get(harness) {
+    return this.#answers.get(harness) ?? this.#ask(harness, false)
+  }
+
+  /** The human's Refresh: `harness`'s list read again from the harness itself. */
+  refresh(harness) {
+    return this.#ask(harness, true)
+  }
+
+  #ask(harness, refresh) {
+    const asked = this.#daemon('models.get', refresh ? { harness, refresh } : { harness })
+    this.#answers.set(harness, asked)
+    asked.catch(() => {
+      if (this.#answers.get(harness) === asked) this.#answers.delete(harness)
+    })
+    return asked
+  }
+}
+
+/** A listing's model that `agent` (a saved agent: `harness`, `model`, `effort`) runs, and at
+ * what effort; none where the listing has no such model. Devin's member names the exact id
+ * Devin lists for an effort (`launchIds`); its catalog agents name the model and the effort. */
+function whereListed(models, agent) {
+  for (const model of models) {
+    if (modelOf(model) === agent.model) return { model, effort: agent.effort ?? null }
+    for (const [effort, id] of Object.entries(model.launchIds ?? {})) {
+      if (id === agent.model) return { model, effort }
+    }
+  }
+  return null
+}
+
+/**
+ * A harness select, and a model select filled with the models that harness lists of itself
+ * (`models.get`): what the chief's picker (CHF-07) and Add member and Edit member (T-1143)
+ * share. Nothing is picked to start with. While a harness's models are read the model
+ * select says so; a harness whose models cannot be read, or that lists none, leaves it
+ * unpicked, and says why. A contributor model says so beside its name, and a stale list is
+ * said to be one. `say` shows the words under the selects; `changed` hears of each pick.
+ */
+class ModelPicker {
+  #harness
+  #model
+  #lists
+  #say
+  #changed
+  #takenOff
+  /** The listing read for the harness picked now, and the answer's words. */
+  #answer = null
+  /** Which read the model select waits for: an answer to an older one is let go. */
+  #asked = 0
+
   /**
-   * The harnesses installed here, none picked; with none it refuses, and says where to
-   * get one. `current` is the chief's own harness and model, which no switch is to.
+   * `takenOff(kind, id)` is a model listed and not to be picked (the chief's own, for
+   * Switch chief); `switchHelp` whether the harness's own words for switching its model
+   * in the chief's window are said.
    */
-  fill(missing, current = null) {
+  constructor({
+    harness,
+    model,
+    lists,
+    say,
+    changed = () => {},
+    takenOff = () => false,
+    switchHelp = false,
+  }) {
+    this.#harness = harness
+    this.#model = model
+    this.#lists = lists
+    this.#say = say
+    this.#changed = changed
+    this.#takenOff = takenOff
+    this.switchHelp = switchHelp
+    harness.addEventListener('change', () => void this.show(harness.value))
+    model.addEventListener('change', () => {
+      this.#sayHelp()
+      this.#changed()
+    })
+  }
+
+  /** The harnesses installed here, of `only` where it names some, none picked; with none it refuses, and says where to get one. */
+  fill(missing, only = null) {
     const installed = Object.entries(HARNESS_NAMES).filter(
-      ([kind]) => !missing.includes(harnessOf(kind)),
+      ([kind]) => !missing.includes(harnessOf(kind)) && (only === null || only.includes(kind)),
     )
     if (installed.length === 0) throw new Error(NO_HARNESS)
     const ask = new Option('Pick a harness', '')
     ask.disabled = true
     this.#harness.replaceChildren(ask, ...installed.map(([kind, name]) => new Option(name, kind)))
     this.#harness.value = ''
-    this.#current = current
     this.#asked += 1
     this.#none('Pick a harness first', '')
   }
 
-  /** The picked harness and model, as the daemon takes a chief. */
-  values() {
-    return { harness: this.#harness.value, model: this.#model.value }
+  /** The harness picked, by its kind (`claude-code`). */
+  get kind() {
+    return this.#harness.value
+  }
+
+  /** The model picked, as its harness lists it; none while none is. */
+  model() {
+    return this.#answer?.listing.models.find((model) => modelOf(model) === this.#model.value)
+  }
+
+  /** The presets' tiers of the harness picked, by model and effort (`models.get`'s `presetTiers`). */
+  presetTiers() {
+    return this.#answer?.presetTiers ?? {}
+  }
+
+  /** Whether the model select has anything to pick: a harness whose models could not be read says why already. */
+  get open() {
+    return !this.#model.disabled
   }
 
   /**
-   * Whether a harness and a model are picked; where not, it says what to pick. A model
-   * select a harness left with nothing to pick is disabled, and so is no form's to check.
+   * `kind`'s models, read once while the dialog is open, or read again (`refresh`, the
+   * human's Refresh); `wanted` is picked where it is listed (`{model, effort}`'s model's
+   * name). Answers whether the models came: a later pick of another harness wins.
    */
-  picked() {
-    if (this.#harness.value !== '' && this.#model.value !== '') return true
-    // A harness whose models could not be read says why already.
-    if (this.#harness.value === '') this.#say('Pick a harness for the chief.')
-    else if (!this.#model.disabled) this.#say("Pick the chief's model.")
-    return false
+  async show(kind, { refresh = false, wanted = null } = {}) {
+    this.#harness.value = kind
+    const name = HARNESS_NAMES[kind]
+    this.#asked += 1
+    const asked = this.#asked
+    this.#none(`Reading ${name}'s models…`, '')
+    let answer
+    try {
+      const harness = harnessOf(kind)
+      answer = await (refresh ? this.#lists.refresh(harness) : this.#lists.get(harness))
+    } catch (cause) {
+      if (asked !== this.#asked) return false
+      this.#none(
+        'No model to pick',
+        `${name}'s models could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+      return false
+    }
+    if (asked !== this.#asked) return false
+    const stale = staleWhy(answer.listing)
+    if (answer.listing.models.length === 0) {
+      this.#none('No model to pick', `${name} lists no model${stale ? `: ${stale}` : ''}.`)
+      return false
+    }
+    const ask = new Option('Pick a model', '')
+    ask.disabled = true
+    const options = answer.listing.models.map((model) => {
+      const id = modelOf(model)
+      const option = new Option(
+        model.contributor ? `${model.label} · Contributor` : model.label,
+        id,
+      )
+      // A model its harness lists and will not run is no pick, nor one taken off.
+      option.disabled = model.disabled || this.#takenOff(kind, id)
+      return option
+    })
+    this.#model.replaceChildren(ask, ...options)
+    this.#model.value = ''
+    if (wanted !== null && options.some((option) => option.value === wanted && !option.disabled)) {
+      this.#model.value = wanted
+    }
+    this.#model.disabled = false
+    this.#answer = answer
+    this.#sayHelp()
+    this.#changed()
+    return true
   }
 
   /** No model to pick, and why. */
@@ -253,71 +398,311 @@ class ChiefPicker {
     this.#model.replaceChildren(ask)
     this.#model.value = ''
     this.#model.disabled = true
-    this.#listing = null
-    this.#words = { switchHelp: null, contributorWarning: null }
+    this.#answer = null
     this.#say(why)
+    this.#changed()
   }
 
-  async #fillModels() {
-    const kind = this.#harness.value
-    const name = HARNESS_NAMES[kind]
-    this.#asked += 1
-    const asked = this.#asked
-    this.#none(`Reading ${name}'s models…`, '')
-    let answer
-    try {
-      answer = await this.#daemon('models.get', { harness: harnessOf(kind) })
-    } catch (cause) {
-      if (asked !== this.#asked) return
-      this.#none(
-        'No model to pick',
-        `${name}'s models could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
-      )
-      return
-    }
-    if (asked !== this.#asked) return
-    const { listing, switchHelp = null, contributorWarning = null } = answer
-    const stale = listing.freshness?.state === 'stale' ? listing.freshness.why : null
-    if (listing.models.length === 0) {
-      this.#none('No model to pick', `${name} lists no model${stale ? `: ${stale}` : ''}.`)
-      return
-    }
-    const ask = new Option('Pick a model', '')
-    ask.disabled = true
-    const current = this.#current
-    const options = listing.models.map((model) => {
-      const id = modelOf(model)
-      const option = new Option(
-        model.contributor ? `${model.label} · Contributor` : model.label,
-        id,
-      )
-      // A model its harness lists and will not run, and the one the chief is on now, are no pick.
-      option.disabled = model.disabled || (current?.harness === kind && current?.model === id)
-      return option
-    })
-    this.#model.replaceChildren(ask, ...options)
-    this.#model.value = ''
-    this.#model.disabled = false
-    this.#listing = { ...listing, stale }
-    this.#words = { switchHelp, contributorWarning }
-    this.#sayHelp()
-  }
-
-  /** The harness's own switch, a stale list's reason, and a contributor model's warning. */
+  /** A contributor model's warning, a stale list's reason, and the harness's own switch where it is said. */
   #sayHelp() {
-    const picked = this.#listing?.models.find((model) => modelOf(model) === this.#model.value)
+    const answer = this.#answer
+    const stale = answer ? staleWhy(answer.listing) : null
     this.#say(
       [
-        picked?.contributor ? this.#words.contributorWarning : null,
-        this.#listing?.stale ? `This list may be out of date: ${this.#listing.stale}.` : null,
-        this.#words.switchHelp,
+        this.model()?.contributor ? answer?.contributorWarning : null,
+        stale ? `This list may be out of date: ${stale}.` : null,
+        this.switchHelp ? answer?.switchHelp : null,
       ]
         .filter(Boolean)
         .join(' '),
     )
   }
+}
+
+/** Why a listing is stale, in its own words; none where it is the account's own. */
+const staleWhy = (listing) => (listing.freshness?.state === 'stale' ? listing.freshness.why : null)
+
+/**
+ * A chief's harness and model, as New project and Switch chief pick them (CHF-07): a
+ * harness installed here, then one of the models that harness lists of itself
+ * (`models.get`, the [`ModelPicker`] Add member shares). Both are required, nothing is
+ * picked to start with, and no effort is asked: a chief runs at its harness's own. A
+ * harness whose models cannot be read leaves the model unpicked, and says why. Below,
+ * the harness's own words for switching its model in the chief's window, which keeps
+ * its conversation (`switchHelp`), and the warning beside a contributor model. Refresh
+ * reads the picked harness's models again.
+ */
+class ChiefPicker {
+  #picker
+  #help
+  #lists
+  /** The `{harness, model}` the chief is on: no switch. */
+  #current = null
+
+  constructor(form, daemon) {
+    this.#help = form.querySelector('.chief-help')
+    this.#lists = new ModelLists(daemon)
+    this.#picker = new ModelPicker({
+      harness: form.elements.chiefHarness,
+      model: form.elements.chiefModel,
+      lists: this.#lists,
+      say: (words) => this.#say(words),
+      takenOff: (kind, id) => this.#current?.harness === kind && this.#current?.model === id,
+      switchHelp: true,
+    })
+    form.elements.chiefRefresh?.addEventListener('click', () => {
+      if (this.#picker.kind !== '') void this.#picker.show(this.#picker.kind, { refresh: true })
+    })
+  }
+
+  /**
+   * The harnesses installed here, none picked; with none it refuses, and says where to
+   * get one. `current` is the chief's own harness and model, which no switch is to. Each
+   * opening reads the harnesses' models afresh at their first ask.
+   */
+  fill(missing, current = null) {
+    this.#current = current
+    this.#lists.clear()
+    this.#picker.fill(missing)
+  }
+
+  /** The picked harness and model, as the daemon takes a chief. */
+  values() {
+    const model = this.#picker.model()
+    return { harness: this.#picker.kind, model: model ? modelOf(model) : '' }
+  }
+
+  /**
+   * Whether a harness and a model are picked; where not, it says what to pick. A model
+   * select a harness left with nothing to pick is disabled, and so is no form's to check.
+   */
+  picked() {
+    if (this.#picker.kind !== '' && this.#picker.model() !== undefined) return true
+    // A harness whose models could not be read says why already.
+    if (this.#picker.kind === '') this.#say('Pick a harness for the chief.')
+    else if (this.#picker.open) this.#say("Pick the chief's model.")
+    return false
+  }
 
   #say(words) {
+    this.#help.textContent = words
+    this.#help.hidden = words === ''
+  }
+}
+
+/** The tiers a member's tier select offers, the most critical first, as the Agents screen names them. */
+const TIER_PICK = Object.entries(TIER_LABEL)
+
+/**
+ * Add member and Edit member (T-1143): a role, a harness installed here, a model that
+ * harness lists of itself, an effort it lists for that model and the tier the human
+ * chooses, on the [`ModelPicker`] the chief's picker shares. The tier starts on the one
+ * the presets' rules give the model at that effort (`presetTiers`), and empty where the
+ * presets do not know the model: the human picks it then, and nothing is saved without
+ * one. An image designer draws on Codex. Edit member moves a member to another harness,
+ * model, effort or tier from its next window; its handle and roles stay. Refresh reads the
+ * picked harness's models again, and says what the staff's members run that it no longer
+ * lists.
+ */
+class MemberPicker {
+  #fieldset
+  #role
+  #effort
+  #tier
+  #refresh
+  #submit
+  #cancel
+  #legend
+  #help
+  #picker
+  #lists
+  /** The member being edited, by handle: none while the form adds one. */
+  editing = null
+  /** The harnesses installed here, as `agents.list` said them last. */
+  #missing = []
+  /** Told of a refresh of `harness` (its kind): the staff's marks of gone models are drawn again. */
+  #refreshed
+
+  constructor(form, lists, refreshed) {
+    this.#fieldset = form.querySelector('.staff-add')
+    this.#legend = this.#fieldset.querySelector('legend')
+    this.#role = form.elements.role
+    this.#effort = form.elements.memberEffort
+    this.#tier = form.elements.memberTier
+    this.#refresh = form.elements.memberRefresh
+    this.#submit = this.#fieldset.querySelector('[type="submit"]')
+    this.#cancel = form.elements.memberCancel
+    this.#help = this.#fieldset.querySelector('.member-help')
+    this.#refreshed = refreshed
+    this.#lists = lists
+    if (this.#role.options.length === 0) {
+      for (const role of ROLES) {
+        const option = element('option', null, ROLE_LABEL[role])
+        option.value = role
+        this.#role.append(option)
+      }
+    }
+    if (this.#tier.options.length === 0) {
+      const ask = new Option('Pick a tier', '')
+      ask.disabled = true
+      this.#tier.append(ask, ...TIER_PICK.map(([tier, label]) => new Option(label, tier)))
+    }
+    this.#picker = new ModelPicker({
+      harness: form.elements.memberHarness,
+      model: form.elements.memberModel,
+      lists,
+      say: (words) => this.#sayHelp(words),
+      changed: () => this.#fillEfforts(),
+    })
+    this.#role.addEventListener('change', () => this.#fillHarnesses())
+    this.#effort.addEventListener('change', () => this.#startTier())
+    this.#refresh.addEventListener('click', () => void this.refresh())
+  }
+
+  /** The form as it adds a member: the harnesses installed here, nothing picked. */
+  reset(missing) {
+    this.#missing = missing
+    this.editing = null
+    this.#legend.textContent = 'Add a member'
+    this.#role.disabled = false
+    this.#submit.textContent = 'Add to staff'
+    this.#cancel.hidden = true
+    this.say('')
+    this.#fillHarnesses()
+  }
+
+  /**
+   * The form as it edits `member` (a lane's participant), which runs `agent` (its saved
+   * agent, if any): its harness's models read, its model, effort and tier picked where its
+   * harness still lists them.
+   */
+  async edit(member, agent) {
+    this.editing = member.handle
+    this.#legend.textContent = `Edit @${member.handle}`
+    this.#role.disabled = true
+    this.#submit.textContent = 'Save member'
+    this.#cancel.hidden = false
+    this.say('')
+    this.#fillHarnesses(member.roles.includes('designer') ? ['codex'] : null)
+    const kind = member.harness ?? ''
+    if (!(kind in HARNESS_NAMES) || this.#missing.includes(harnessOf(kind))) return
+    let answer = null
+    try {
+      answer = await this.#lists.get(harnessOf(kind))
+    } catch {
+      // The picker says why when it reads them.
+    }
+    if (this.editing !== member.handle) return
+    const found = answer && agent ? whereListed(answer.listing.models, agent) : null
+    await this.#picker.show(kind, { wanted: found ? modelOf(found.model) : null })
+    if (this.editing !== member.handle) return
+    if ([...this.#effort.options].some((option) => option.value === found?.effort)) {
+      this.#effort.value = found.effort
+    }
+    this.#tier.value = member.tier ?? ''
+  }
+
+  /** The role picked. */
+  get role() {
+    return this.#role.value
+  }
+
+  /**
+   * What the human picked, as `member.add` and `member.edit` take it; none where something
+   * is left to pick, which it says.
+   */
+  values() {
+    const kind = this.#picker.kind
+    const model = this.#picker.model()
+    const say = (words) => {
+      this.say(words)
+      return null
+    }
+    if (kind === '') return say('Pick a harness for the member.')
+    if (model === undefined) return this.#picker.open ? say("Pick the member's model.") : null
+    if (model.efforts.length > 0 && this.#effort.value === '') {
+      return say(`Pick the effort ${HARNESS_NAMES[kind]} runs ${model.label} at.`)
+    }
+    if (this.#tier.value === '') {
+      return say("Pick the member's tier: the work the chief gives it, from critical to light.")
+    }
+    this.say('')
+    return {
+      harness: kind,
+      model: modelOf(model),
+      effort: this.#effort.value === '' ? null : this.#effort.value,
+      tier: this.#tier.value,
+    }
+  }
+
+  /** The human's Refresh: the picked harness's models read again from the harness itself. */
+  async refresh() {
+    const kind = this.#picker.kind
+    if (kind === '') {
+      this.say('Pick a harness to read its models again.')
+      return
+    }
+    const wanted = this.#picker.model()
+    const shown = await this.#picker.show(kind, {
+      refresh: true,
+      wanted: wanted ? modelOf(wanted) : null,
+    })
+    if (shown) this.#refreshed(kind)
+  }
+
+  /** The words above the button: what is left to pick, or why the daemon said no. */
+  say(words) {
+    const hint = this.#fieldset.querySelector('.staff-hint')
+    hint.textContent = words
+    hint.hidden = words === ''
+  }
+
+  /** The harnesses a member in the role picked may run on: Codex alone draws. */
+  #fillHarnesses(only = this.#role.value === 'designer' ? ['codex'] : null) {
+    try {
+      this.#picker.fill(this.#missing, only)
+      this.#submit.disabled = false
+      this.say('')
+    } catch (refused) {
+      this.say(
+        only?.includes('codex')
+          ? 'Image designers draw on Codex, which is not installed here: install it from Agents, Harnesses.'
+          : refused.message,
+      )
+      this.#submit.disabled = true
+    }
+  }
+
+  /** The efforts the model picked offers, its harness's default picked where it says one. */
+  #fillEfforts() {
+    const model = this.#picker.model()
+    if (model === undefined || model.efforts.length === 0) {
+      const none = new Option(model === undefined ? 'Pick a model first' : 'No effort to pick', '')
+      none.disabled = true
+      this.#effort.replaceChildren(none)
+      this.#effort.value = ''
+      this.#effort.disabled = true
+    } else {
+      const ask = new Option('Pick an effort', '')
+      ask.disabled = true
+      this.#effort.replaceChildren(
+        ask,
+        ...model.efforts.map((effort) => new Option(effort, effort)),
+      )
+      this.#effort.value = model.efforts.includes(model.defaultEffort) ? model.defaultEffort : ''
+      this.#effort.disabled = false
+    }
+    this.#startTier()
+  }
+
+  /** The tier the presets' rules give the model at the effort picked; none where they do not know it. */
+  #startTier() {
+    const model = this.#picker.model()
+    const tiers = model ? this.#picker.presetTiers()[modelOf(model)] : undefined
+    this.#tier.value = tiers?.[this.#effort.value] ?? ''
+  }
+
+  #sayHelp(words) {
     this.#help.textContent = words
     this.#help.hidden = words === ''
   }
@@ -593,7 +978,6 @@ export class ProjectSettingsDialog {
   #form
   #members
   #gate
-  #hint
   #page
   /** The project's wake-up calls, read when the dialog opens and saved as a whole. */
   #wakeUp
@@ -611,10 +995,22 @@ export class ProjectSettingsDialog {
   #board = null
   /** The member whose removal waits for the human's yes, kept across redraws. */
   #removing = null
+  /** Each harness's models, read once while the dialog is open (T-1143). */
+  #lists
+  /** Add member and Edit member. */
+  #member
+  /** The harnesses not installed here, as the dialog last read them. */
+  #missing = []
+  /**
+   * The models of the staff's harnesses that the harness no longer lists, by kind: what a
+   * member on one of them is marked by. A harness whose list could not be read marks none.
+   */
+  #gone = new Map()
 
   /**
    * `page.board()` is the board shown, `page.selected()` the project the human
-   * has chosen and `page.agents()` the saved agents, all as they are now;
+   * has chosen, `page.agents()` the saved agents and `page.missing()` the harnesses not
+   * installed here, all as they are now;
    * `page.daemon` asks the daemon, `page.act` runs a change and redraws the
    * page, `page.note` tells the human what came of it and `page.report` says
    * a refusal. `page.specs()` is what the app says of specs as the page last
@@ -625,7 +1021,6 @@ export class ProjectSettingsDialog {
     this.#dialog = dialog
     this.#form = dialog.querySelector('form')
     this.#members = dialog.querySelector('#staff-members')
-    this.#hint = dialog.querySelector('#staff-hint')
     this.#page = page
     // The sections save for the project the dialog is for, not for the one the page shows, and a
     // dialog that is shut is for none: what is answered after it is the status line's.
@@ -675,24 +1070,43 @@ export class ProjectSettingsDialog {
         )
       })
     })
+    this.#lists = new ModelLists(page.daemon)
+    this.#member = new MemberPicker(this.#form, this.#lists, (kind) => {
+      void this.#markGone([kind])
+    })
+    this.#form.elements.memberCancel.addEventListener('click', () => {
+      this.#member.reset(this.#missing)
+    })
     this.#form.addEventListener('submit', (event) => {
       event.preventDefault()
-      const role = this.#form.elements.role.value
-      const agent = this.#form.elements.agent.value
-      if (!agent) return
+      const picked = this.#member.values()
+      if (picked === null) return
       const project = this.#project
-      // Already on the staff: the chief runs on an agent too, but is no member.
-      const member = this.#board.lanes
-        .map((lane) => lane.participant)
-        .find((participant) => isMember(participant) && participant.agent === agent)
+      const editing = this.#member.editing
+      const role = this.#member.role
       void page.act(async () => {
-        if (member === undefined) {
-          await page.daemon('member.add', { project, agent, roles: [role] })
-          page.note(`@${agent} joined the staff as ${ROLE_LABEL[role]}.`)
-          return
+        try {
+          if (editing !== null) {
+            await page.daemon('member.edit', { project, member: editing, ...picked })
+            page.note(`@${editing} runs ${picked.model} from its next window.`)
+            this.#member.reset(this.#missing)
+            return
+          }
+          const held = this.#board.lanes
+            .map((lane) => lane.participant)
+            .filter(isMember)
+            .map((member) => member.handle)
+          const { member } = await page.daemon('member.add', { project, ...picked, roles: [role] })
+          page.note(
+            held.includes(member.handle)
+              ? `@${member.handle} is ${ROLE_LABEL[role]} now too.`
+              : `@${member.handle} joined the staff as ${ROLE_LABEL[role]}.`,
+          )
+        } catch (refused) {
+          // The daemon's words go where the human picked, as well as on the status line.
+          this.#member.say(refused instanceof Error ? refused.message : String(refused))
+          throw refused
         }
-        await page.daemon('member.roles', { project, agent, roles: [...member.roles, role] })
-        page.note(`@${agent} is ${ROLE_LABEL[role]} now too.`)
       })
     })
     dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())
@@ -715,9 +1129,14 @@ export class ProjectSettingsDialog {
     if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {
       return
     }
+    const missing = this.#page.missing()
     this.#project = project
     this.#board = board
     this.#removing = null
+    this.#missing = missing
+    this.#lists.clear()
+    this.#gone = new Map()
+    this.#member.reset(missing)
     this.#wakeUp.show(calls)
     this.#rules.show(board.project)
     this.#compaction.show(board.project)
@@ -725,6 +1144,46 @@ export class ProjectSettingsDialog {
     this.#draw()
     this.#specs.draw(board.project, true)
     this.#dialog.showModal()
+    void this.#markGone(this.#staffHarnesses())
+  }
+
+  /** The harnesses the staff's members run on, by kind, each once: an image agent's draws, whatever it lists. */
+  #staffHarnesses() {
+    const kinds = this.#board.lanes
+      .map((lane) => lane.participant)
+      .filter((member) => isMember(member) && !member.designer)
+      .map((member) => member.harness)
+      .filter((kind) => kind in HARNESS_NAMES && !this.#missing.includes(harnessOf(kind)))
+    return [...new Set(kinds)]
+  }
+
+  /**
+   * Reads what each of `kinds` lists (once while the dialog is open, or as Refresh read it),
+   * and marks the members whose model it no longer lists. A harness whose list could not be
+   * read, or lists nothing, marks nobody: what it lists is not known.
+   */
+  async #markGone(kinds) {
+    const project = this.#project
+    await Promise.all(
+      kinds.map(async (kind) => {
+        let answer
+        try {
+          answer = await this.#lists.get(harnessOf(kind))
+        } catch {
+          this.#gone.delete(kind)
+          return
+        }
+        this.#gone.set(kind, answer.listing.models.length === 0 ? null : answer.listing.models)
+      }),
+    )
+    if (this.#dialog.open && this.#project === project) this.#draw()
+  }
+
+  /** Whether `member`'s harness, as the dialog read it, no longer lists the model its saved agent runs. */
+  #modelGone(member, agent) {
+    const models = this.#gone.get(member.harness)
+    if (!models || !agent?.model || member.designer) return false
+    return whereListed(models, agent) === null
   }
 
   /**
@@ -759,17 +1218,6 @@ export class ProjectSettingsDialog {
     this.#gate.checked = board.project.gate ?? false
     this.#specs.draw(board.project)
     this.#computerUse.draw(board)
-    rolePicker(
-      this.#page.agents,
-      this.#form.elements.role,
-      this.#form.elements.agent,
-      this.#hint,
-      (agent, role) =>
-        members.some((member) => member.agent === agent && member.roles.includes(role)),
-      () => {
-        this.#form.querySelector('[type="submit"]').disabled = this.#form.elements.agent.disabled
-      },
-    )
   }
 
   /** A member as the project's board has it now, which a Remove kept across redraws acts on. */
@@ -799,10 +1247,15 @@ export class ProjectSettingsDialog {
       : retired
         ? `${member.agent} left the catalog: ${retired}. Remove it and add another agent`
         : `no agent named ${member.agent} any more: define one under Agents, or remove it`
+    // A model its harness no longer lists is marked, and said (T-1143); ending its shift
+    // and its replacement are the staff chains' (CHN-11).
+    const gone = this.#modelGone(member, saved)
+    const who = () =>
+      gone ? goneCell(name, saved.model, runs, HARNESS_NAMES[member.harness]) : whoCell(name, runs)
     if (this.#removing === member.handle) {
       const row = element('tr')
       row.dataset.handle = member.handle
-      row.append(whoCell(name, runs))
+      row.append(who())
       // The ask takes the role's column and the Remove's.
       const cell = element('td')
       cell.colSpan = 2
@@ -847,8 +1300,15 @@ export class ProjectSettingsDialog {
         },
         `Remove ${ROLE_LABEL[role]} ${name}`,
       )
-      const row = staffRow(whoCell(name, runs), role, remove)
+      const edit = button(
+        'Edit',
+        'quiet-button',
+        () => void this.#member.edit(this.#memberNow(member), saved),
+        `Edit ${name}`,
+      )
+      const row = staffRow(who(), role, remove, edit)
       row.dataset.handle = member.handle
+      if (gone) row.dataset.modelGone = saved.model
       return { role, row }
     })
   }

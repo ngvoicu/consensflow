@@ -46,7 +46,8 @@
     "computer_use.open",
     "project.rules",
     "project.compaction",
-    "models.get"
+    "models.get",
+    "member.edit"
   ],
   "ping": "{\"ok\":true}"
 }

@@ -128,10 +128,10 @@ runs = ["ledger-lib-testing"]
 file = "crates/cf-ledger/src/testing.rs"
 find = """                *sql = sql
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
-                    .replace(chief_model::COLUMN_LINES, "");"""
+                    .replace(chosen_tier::COLUMN_LINES, "")"""
 replace = """                *sql = sql
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.0)
-                    .replace(chief_model::COLUMN_LINES, "");"""
+                    .replace(chosen_tier::COLUMN_LINES, "")"""
 
 [[plant]]
 name = "tester: the ledger's replay of Node's traces does not hold the schema apart, and every recorded database differs"
@@ -301,7 +301,7 @@ replace = "            } else {"
 
 [[plant]]
 name = "tester page: Project settings does not offer the tester among the roles"
-meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
@@ -312,7 +312,7 @@ replace = "const ROLES = ['worker', 'advisor', 'reviewer', 'designer']"
 
 [[plant]]
 name = "tester page: Project settings has no word for the tester"
-meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
@@ -325,7 +325,7 @@ replace = "  designer: 'Image designer',"
 
 [[plant]]
 name = "tester page: Project settings does not say what a tester is for"
-meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 

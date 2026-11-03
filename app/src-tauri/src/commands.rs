@@ -256,6 +256,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "project.rules",
     "project.compaction",
     "models.get",
+    "member.edit",
 ];
 
 #[tauri::command]

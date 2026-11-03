@@ -17,6 +17,8 @@ pub const SITES: &[(&str, &str, Kind, usize)] = &[
     ("crates/cf-catalog/src/catalog.rs", "efforts", Kind::Match, 1),
     ("crates/cf-catalog/src/profile.rs", "Catalog::model_profile", Kind::IdMatch, 1),
     ("crates/cf-catalog/src/profile.rs", "Catalog::model_profile", Kind::IdEq, 1),
+    // Member models' (a2-m, T-1188): Pi's effort is its thinking in the presets' tier of a model, written before this list (T-1143).
+    ("crates/cf-catalog/src/profile.rs", "Catalog::preset_tier", Kind::IdEq, 1),
     ("crates/cf-catalog/src/profile.rs", "Catalog::profile", Kind::IdEq, 2),
     ("crates/cf-catalog/src/profile.rs", "harness_of_kind", Kind::IdEq, 1),
     ("crates/cf-catalog/src/roster/add.rs", "Catalog::checked_new", Kind::Eq, 1),

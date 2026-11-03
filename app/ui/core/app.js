@@ -53,6 +53,8 @@ const state = {
   // it for a moment.
   specsPresent: null,
   agents: [],
+  /** The harnesses not installed here, as `agents.list` said them last. */
+  missing: [],
   /** What the app says of specs for every project and the Specmint it bundles, as last read. */
   specs: null,
   focus: 'chief',
@@ -92,9 +94,14 @@ async function daemon(operation, body = {}) {
   return result
 }
 
-/** The saved agents, read again: what the board says members run, and what the pickers offer. */
+/**
+ * The saved agents, read again: what the board says members run, and what the pickers offer;
+ * and the harnesses not installed here, which Add member offers none of.
+ */
 async function readAgents() {
-  state.agents = (await daemon('agents.list')).agents
+  const { agents, missing = [] } = await daemon('agents.list')
+  state.agents = agents
+  state.missing = missing
 }
 
 /**
@@ -787,6 +794,7 @@ const projectSettings = new ProjectSettingsDialog($('#project-settings-dialog'),
   board: () => state.board,
   selected: () => state.selected,
   agents: () => state.agents,
+  missing: () => state.missing,
   specs: () => state.specs,
   readSpecs,
   daemon,
