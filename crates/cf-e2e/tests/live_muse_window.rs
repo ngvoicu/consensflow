@@ -442,9 +442,19 @@ fn after_case(live: &Live, restart: bool) -> Result<String> {
         rig
     };
     let project = Project::new(&rig, id);
+    // The chief accepts T-1 once it has its result, and a follow-up of T-1 waits for that
+    // acceptance (T-1118). Its stand-in runs a message's DISPATCH lines and then nothing
+    // else: the accept is a message of its own.
+    rig.wait_for("the chief to be given T-1's result", secs(120), || {
+        Ok(project
+            .inbox("chief")?
+            .iter()
+            .any(|message| message["kind"] == "result" && message["state"] == "delivered"))
+    })?;
+    rig.tell(id, "CF task accept T-1")?;
     rig.tell(
         id,
-        "CF task accept T-1\nDISPATCH --tier standard --after T-1 Reply with exactly: T2_DONE",
+        "DISPATCH --tier standard --after T-1 Reply with exactly: T2_DONE",
     )?;
     done(&rig, &project, 2, secs(240))?;
     let (same, log) = the_session(&rig);
