@@ -34,7 +34,10 @@
 //! `/bypass` switches the window to full permission and makes no turn, or makes the
 //! turn of the prompt after it. A message that says to go on where the turn stopped
 //! (the note of a quit that cut the turn) goes on with the message of the turn the
-//! session was cut in, its calls and its answer, its wait done.
+//! session was cut in, its calls and its answer, its wait done. A message that says
+//! `QUOTA-OUT`, to the window of the member `CF_TEST_QUOTA_OUT` names while the file
+//! `CF_TEST_QUOTA_FILE` names is there, ends its turn for the account's quota (cause
+//! `quota_exhausted`), with no answer.
 
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -122,6 +125,23 @@ impl Plan {
             ..self
         }
     }
+}
+
+/// What Devin said of a turn its account's quota ended (poker-lab, 2026-10-03).
+const QUOTA_WORDS: &str = "Your daily usage quota has been exhausted.";
+
+/// Whether a turn on `text` is refused for its account's quota: the message says `QUOTA-OUT`, the
+/// window is of the member `CF_TEST_QUOTA_OUT` names, and the file `CF_TEST_QUOTA_FILE` names is
+/// there (from the window's folder; taking it away is the human logging Devin into another
+/// account), as the other stand-ins take theirs (T-1207).
+fn refused_for_quota(text: &str) -> bool {
+    let wanted = cf_e2e::process::own_var("CF_TEST_QUOTA_OUT").unwrap_or_default();
+    let participant = cf_e2e::process::own_var("CONSENSFLOW_PARTICIPANT").unwrap_or_default();
+    let ours = !wanted.is_empty()
+        && (participant == wanted || participant.starts_with(&format!("{wanted}-")));
+    let spent = cf_e2e::process::own_var("CF_TEST_QUOTA_FILE")
+        .is_none_or(|file| std::path::Path::new(&file).exists());
+    text.contains("QUOTA-OUT") && ours && spent
 }
 
 /// What the message `text` asks of a turn, which takes as long as `pace` says
@@ -447,6 +467,13 @@ impl<W: Write> Window<W> {
             self.store.assistant("Interrupted", false)?;
             self.wire.ended("cancelled", &client).map_err(said)?;
             return self.say("Interrupted\n").map_err(said);
+        }
+        // Its account out of quota: the turn ends for it, with Devin's words and no answer.
+        if refused_for_quota(text) {
+            self.wire
+                .ended_for_quota(&client, QUOTA_WORDS)
+                .map_err(said)?;
+            return self.say(&format!("{QUOTA_WORDS}\n")).map_err(said);
         }
         self.wire.said(&answer, &stream, &client).map_err(said)?;
         if plan.compact {

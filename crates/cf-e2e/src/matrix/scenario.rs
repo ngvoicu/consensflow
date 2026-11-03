@@ -26,6 +26,7 @@ mod order;
 mod phase2;
 mod questions;
 mod reports;
+mod seat_fields;
 mod seats;
 mod window_life;
 
@@ -48,6 +49,7 @@ pub fn all() -> Vec<Scenario> {
     all.extend(branches::branches());
     all.extend(window_life::window_life());
     all.extend(seats::seats());
+    all.extend(seat_fields::seat_fields());
     all
 }
 
@@ -168,6 +170,9 @@ pub struct Scenario {
     /// How long the scenario waits by design on the stand-ins (minutes of wake-up calls), which
     /// their deadline grants it on top of its own ([`crate::matrix::run::stand_in_deadline`]).
     pub waits: Duration,
+    /// Whether the app's daemon starts on the `PATH` the Finder gives it, its login shell too
+    /// slow to give it its own (the slow login shell of 2026-10-15).
+    pub finder: bool,
 }
 
 /// A member besides a board's five: its agent's id, its one role and its tier.
@@ -221,6 +226,13 @@ impl Scenario {
     #[must_use]
     pub fn with_extra(mut self, extra: &'static [Extra]) -> Self {
         self.extra = extra;
+        self
+    }
+
+    /// The same scenario, its app's daemon started on the Finder's `PATH`.
+    #[must_use]
+    pub fn started_by_the_finder(mut self) -> Self {
+        self.finder = true;
         self
     }
 
@@ -359,6 +371,7 @@ pub fn smoke() -> Scenario {
         daemon_vars: &[],
         extra: &[],
         waits: Duration::ZERO,
+        finder: false,
     }
 }
 

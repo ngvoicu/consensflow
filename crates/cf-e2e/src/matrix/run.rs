@@ -198,6 +198,7 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
 
     let folder_name = format!("matrix-{id}");
     let mut plan = seating.plan(&folder_name, &scenario.fixture);
+    plan.finder = scenario.finder;
     for (name, value) in scenario.vars {
         plan = plan.with_var(name, *value);
     }

@@ -5,15 +5,17 @@
 //!
 //! - `seat-tell`: the chief tells a worker at work something; its answer comes back to the
 //!   chief as an answer, and the task resumed goes on to its result.
-//! - `seat-finish`: a worker's turn answers and leaves a command running; the chief finishes the
-//!   task with what it said.
+//! - `seat-finish`: a worker's turn ends on a question; the chief finishes the task with what
+//!   it said (a known red until T-1119).
 
 use crate::live::report::Check;
 use crate::matrix::observe::{Bind, Is};
 use crate::matrix::oracle::{self, Judged};
 
 use super::kit::{answered, is, run, scenario, since};
-use super::{Scenario, Step};
+use super::{Known, Scenario, Step};
+
+const T1119: &str = "T-1119 (wt/questions-not-results, a3-1): a task that waits on its question is finished with what it said";
 
 const A: &[Bind] = &[Bind {
     name: "A",
@@ -74,7 +76,20 @@ pub fn seats() -> Vec<Scenario> {
             |judged| {
                 let answers = bodies(judged, "A", "answer");
                 let results = bodies(judged, "A", "result");
+                let ignored = judged
+                    .snapshot
+                    .chief_inbox
+                    .iter()
+                    .filter_map(|message| message["body"].as_str())
+                    .filter(|body| body.contains("did not stop") || body.contains("ignored the interrupt"))
+                    .count();
                 vec![
+                    Check::new(
+                        "A",
+                        "the tell's stop stopped its window's turn, which was kept",
+                        ignored == 0,
+                        format!("{ignored} note(s) of a window that did not stop"),
+                    ),
                     Check::new(
                         "A",
                         "its window's answer to the tell reached the chief once",
@@ -94,38 +109,34 @@ pub fn seats() -> Vec<Scenario> {
             &[],
             &[],
         ),
+        // The worker's turn ends on a question to the chief; the chief takes what it said as the
+        // result, with Finish. Today's code refuses to finish a task that waits (T-1119's
+        // field report); a working task with words to finish is Claude's alone today
+        // (`finish-each-state`): a command left running holds no task of any harness's.
         scenario(
             "seat-finish",
             vec![
                 run!(
-                    "A",
-                    "task add --tier standard :: BACKGROUND 300 W_ANSWERED",
-                    |snapshot, bindings| {
-                        is(snapshot, bindings, "A", 0, &["working", "done"])
-                            && since(snapshot, bindings, "A", "working")
-                                .is_some_and(|seconds| seconds >= 10)
-                    }
+                    "A asks",
+                    "task add --tier standard :: CF ask :: Should I stop here, or go on with the second half?",
+                    |snapshot, bindings| is(snapshot, bindings, "A", 0, &["waiting"]) && crate::matrix::run::settled(snapshot)
                 ),
                 run!("finish A", "task finish {A}", |snapshot, bindings| {
-                    is(snapshot, bindings, "A", 0, &["done"])
-                        && crate::matrix::run::settled(snapshot)
+                    super::kit::called(snapshot, bindings, "A", "finish", 1)
                 }),
             ],
             A,
             |judged| {
-                let results = bodies(judged, "A", "result");
                 vec![
+                    oracle::chief_call(judged, "A", "finish", 0, oracle::Answered::Done),
                     oracle::state(judged, "A", 0, &["done"]),
-                    Check::new(
-                        "A",
-                        "its one result is what its turn said",
-                        results.len() == 1 && results[0].contains("W_ANSWERED"),
-                        format!("{results:?}"),
-                    ),
                 ]
             },
             &[],
-            &[],
+            &[
+                Known { who: "A", what: "the chief's first finish of it was done", until: T1119 },
+                Known { who: "A", what: "it is done", until: T1119 },
+            ],
         ),
     ]
 }

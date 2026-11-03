@@ -817,11 +817,6 @@ mod tests {
         holds_with(Harness::Devin, "seat-tell");
     }
 
-    #[test]
-    fn devin_worker_seat_finish() {
-        holds_with(Harness::Devin, "seat-finish");
-    }
-
     /// The rig's Codex stand-in starts through a script, so Unix's only.
     #[cfg(unix)]
     #[test]
@@ -855,6 +850,50 @@ mod tests {
     #[test]
     fn codex_worker_seat_tell() {
         holds_with(Harness::Codex, "seat-tell");
+    }
+
+    #[test]
+    fn devin_worker_seat_finish() {
+        holds_with(Harness::Devin, "seat-finish");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_seat_finish() {
+        holds_with(Harness::Codex, "seat-finish");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_compaction() {
+        holds_with(Harness::Devin, "field-devin-compaction");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_command_left() {
+        holds_with(Harness::Devin, "field-devin-command-left");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_resumed_writes() {
+        holds_with(Harness::Devin, "field-devin-resumed-writes");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_reopened() {
+        holds_with(Harness::Devin, "field-devin-reopened");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_quota() {
+        holds_with(Harness::Devin, "field-devin-quota");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_field_codex_slow_login_shell() {
+        holds_with(Harness::Codex, "field-codex-slow-login-shell");
     }
 
     /// Field report 5's nudges (T-1113): five minutes of wake-up calls a minute apart, too long

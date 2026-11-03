@@ -194,6 +194,11 @@ impl Members {
                 config.daemon_var(name, value)
             });
         let config = with_shaped_stand_ins(config, &plan.roster, stand_in);
+        let config = if plan.finder {
+            config.as_the_finder_starts_it()
+        } else {
+            config
+        };
         let mut rig = Rig::start(config.clone())?;
         if super::keep_requested() {
             log.say(format!(

@@ -130,6 +130,9 @@ pub struct Plan {
     /// The folder the harnesses' homes of the run's own are made in, as it spells it,
     /// where not the temporary folder ([`Plan::homes_made_in`]).
     pub homes_in: Option<PathBuf>,
+    /// Whether the daemon starts on the `PATH` the Finder gives an app, its login shell too slow
+    /// to give it its own ([`Config::as_the_finder_starts_it`](crate::rig::Config::as_the_finder_starts_it)).
+    pub finder: bool,
 }
 
 impl Plan {
@@ -147,6 +150,7 @@ impl Plan {
             roster: vec![chief],
             repository: false,
             homes_in: None,
+            finder: false,
         }
     }
 
