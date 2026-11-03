@@ -1,0 +1,281 @@
+# What a board's reader is told, in what order and how often (3.0.7-alpha.2, T-1113; the field board
+# of 2026-11-02). The chief is given its notes one at a time, the oldest first, so the order a step
+# writes them in is the order the chief reads them in:
+#
+# - a task the daemon gives up on is told to its requester in one note, the failure first, with the
+#   tasks that wait for it and were asked for by the same requester named in it (it was two notes,
+#   the waiting task's first, a millisecond apart: the chief acted on the consequence with the cause
+#   unknown and was given the cause a turn later, as news it had dealt with);
+# - a member's removal is told before the tasks that waited on its work (the same inversion);
+# - a user's item of the harness's own words (Claude Code's `<task-notification>`, which wakes the
+#   chief when a background command ends) is copied as the harness's, so the wake-up calls do not
+#   take it for the human typing to the chief: nothing had moved on the board between a project's
+#   second and third wake-up, and the notice was the whole of the "news".
+#
+# - the wake-up calls do not ask a chief that waits on the human: a call that something moved
+#   before is skipped, and the skip logged, while the chief's newest note to the human is
+#   unread, three intervals in a row at the most; the human's words to the chief restart the
+#   interval; and the interval doubles for each of the newest calls, in a row, that the chief
+#   answered only by writing to the human (eight intervals at the most);
+# - Codex's own messages in the model's context (`<environment_context>`, `# AGENTS.md
+#   instructions`, a subagent's notification) are the harness's, not the human's words.
+#
+# One plant takes one rule out; a test of it fails. Every name holds `board notices:`, so
+# `npm run plants:daemon -- "board notices:"` runs them all.
+
+[run]
+bn-ledger-cause-first = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "cause_first"]
+bn-engine-wake-ups = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "wake_ups::what_the_harness"]
+bn-engine-copy = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "transcripts::"]
+bn-ledger-waiting = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups", "waiting::"]
+bn-harness-codex-words = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record::tests::harness_words"]
+
+# --- a task given up on: the failure first, and one note ---
+
+[[plant]]
+name = "board notices: a task given up on is told to its requester after the tasks that wait for it"
+meant = "a_task_the_daemon_gives_up_on_is_told_to_its_requester_before_the_task_that_waits_for_it"
+runs = ["bn-ledger-cause-first"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            if given_up && waiter.requester_id == task.requester_id {"
+replace = "            if false {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if given_up {\n            let words = failed(told.waiting_for_the_reopen(None));"
+replace = "        if given_up && false {\n            let words = failed(told.waiting_for_the_reopen(None));"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        task_by_id(store, task.id)\n    })\n}\n\n/// The human takes finished tasks off the board for good"
+replace = "        if given_up {\n            send(\n                store,\n                project_id,\n                &Sent {\n                    to: &requester.handle,\n                    task: Some(number),\n                    kind: \"note\",\n                    body: &failed(told.waiting_for_the_reopen(None)),\n                    ..Sent::default()\n                },\n            )?;\n        }\n        task_by_id(store, task.id)\n    })\n}\n\n/// The human takes finished tasks off the board for good"
+
+[[plant]]
+name = "board notices: the tasks that wait for a task given up on are told to its requester in notes of their own"
+meant = "a_task_given_up_on_and_the_one_waiting_for_it_are_one_note_to_their_requester"
+runs = ["bn-ledger-cause-first"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            if given_up && waiter.requester_id == task.requester_id {"
+replace = "            if false {"
+
+[[plant]]
+name = "board notices: several tasks that wait for a task given up on are not named together in its note"
+meant = "several_tasks_waiting_for_one_given_up_on_are_named_in_the_one_note"
+runs = ["bn-ledger-cause-first"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        _ => format!(\n            \" {} wait for it: cancel them, or reopen T-{number} and let it finish.\",\n            task_numbers(waiting)\n        ),"
+replace = "        _ => format!(\n            \" {} waits for it: cancel them, or reopen T-{number} and let it finish.\",\n            task_numbers(waiting)\n        ),"
+
+# --- a member's removal ---
+
+[[plant]]
+name = "board notices: a member's removal is told after the tasks that waited on its work"
+meant = "a_member_removed_is_told_to_the_chief_before_the_task_that_waited_on_its_work"
+runs = ["bn-ledger-cause-first"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "        // Last: what waited on the work that went is told after the word of its going, which the\n        // chief is given first (it is given its notes one at a time, the oldest first; a wait told\n        // before its cause reached it as news with the cause unknown).\n        for (task, _) in &open {\n            tell_stranded_waiters(store, project_id, task)?;\n        }\n"
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "        for id in &windows {\n            let kept = kept_through_leaving(store, *id, &reason)?;"
+replace = "        for (task, _) in &open {\n            tell_stranded_waiters(store, project_id, task)?;\n        }\n        for id in &windows {\n            let kept = kept_through_leaving(store, *id, &reason)?;"
+
+# --- the wake-up calls and what the harness writes in the user's place ---
+
+[[plant]]
+name = "board notices: a notice the harness wrote in the user's place is taken for the human typing to the chief"
+meant = "what_the_harness_writes_in_the_users_place_is_no_news_and_what_the_user_types_beside_it_is"
+runs = ["bn-engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = "        if item.synthetic && item.role == Role::User {"
+replace = "        if false && item.synthetic && item.role == Role::User {"
+
+[[plant]]
+name = "board notices: a user's item with no human in it is copied as the user's"
+meant = "a_users_item_with_no_human_in_it_is_copied_as_the_harness_s_own_and_the_rest_as_they_were"
+runs = ["bn-engine-copy"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = "        if item.synthetic && item.role == Role::User {"
+replace = "        if false && item.synthetic && item.role == Role::User {"
+
+[[plant]]
+name = "board notices: every user's item is copied as the harness's own"
+meant = "a_users_item_with_no_human_in_it_is_copied_as_the_harness_s_own_and_the_rest_as_they_were"
+runs = ["bn-engine-copy"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = "        if item.synthetic && item.role == Role::User {"
+replace = "        if item.role == Role::User {"
+
+# --- a chief that waits on the human ---
+
+[[plant]]
+name = "board notices: a chief whose newest note to the human is unread is nudged"
+meant = "a_chief_whose_newest_note_to_the_human_is_unread_is_not_nudged_and_the_skip_is_logged"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "            if !unread.is_empty()"
+replace = "            if false && !unread.is_empty()"
+
+[[plant]]
+name = "board notices: a chief is skipped for every interval its note to the human is unread"
+meant = "a_chief_is_skipped_for_three_intervals_in_a_row_and_nudged_in_the_fourth"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "                    < waiting::MOST_SILENT_SKIPS"
+replace = "                    < i64::MAX"
+
+[[plant]]
+name = "board notices: an older unread note holds the wake-up back after the newest was read"
+meant = "the_newest_note_read_ends_the_wait_though_an_older_one_is_unread"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = '    if newest.first().is_none_or(|(_, state)| state != "queued") {'
+replace = '    if newest.is_empty() {'
+
+[[plant]]
+name = "board notices: a note the chief wrote to a member holds the wake-up back"
+meant = "a_note_the_chief_wrote_to_a_member_is_no_wait_on_the_human"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = "             WHERE m.project_id = ?1 AND sender.role = 'chief' AND reader.role = 'human'"
+replace = "             WHERE m.project_id = ?1 AND sender.role = 'chief'"
+
+[[plant]]
+name = "board notices: the human typing to the chief does not restart the interval"
+meant = "a_wake_up_overdue_since_the_human_was_away_is_not_sent_the_moment_they_type"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "    let origin = typed_origin(store, project_id, last.as_ref(), origin)?;"
+replace = "    let origin = typed_origin(store, project_id, last.as_ref(), origin)?.min(origin);"
+
+[[plant]]
+name = "board notices: the interval does not double after a nudge the chief answered only by writing to the human"
+meant = "a_nudge_the_chief_answered_only_by_writing_to_the_human_is_followed_two_intervals_later"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "        .saturating_mul(1 << waiting::doublings(store, project_id)?);"
+replace = "        .saturating_mul(1 << (waiting::doublings(store, project_id)? * 0));"
+
+[[plant]]
+name = "board notices: the interval doubles without end after nudges answered only to the human"
+meant = "each_such_nudge_in_a_row_doubles_the_interval_again_to_eight_and_no_further"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = "pub(super) const MOST_DOUBLINGS: usize = 3;"
+replace = "pub(super) const MOST_DOUBLINGS: usize = 30;"
+
+[[plant]]
+name = "board notices: a word to a member is not acting on a nudge"
+meant = "a_nudge_the_chief_answered_by_telling_a_member_is_followed_after_one_interval"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = "                 AND json_extract(data, '$.to') IS NOT 'human')"
+replace = "                 AND 0)"
+
+[[plant]]
+name = "board notices: a task given and decided is not acting on a nudge"
+meant = "a_nudge_the_chief_answered_by_giving_a_task_is_followed_after_one_interval"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = "                OR (kind IN ('task.created', 'task.opened')"
+replace = "                OR (kind IN ('task.nothing')"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = "                OR (kind = 'task.state' AND json_extract(data, '$.by') = 'chief')))"
+replace = "                OR (kind = 'task.nothing')))"
+
+[[plant]]
+name = "board notices: the human typing after a nudge does not end the run of nudges answered only to the human"
+meant = "a_nudge_after_which_the_human_typed_to_the_chief_is_followed_after_one_interval"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = "    let typed = typed_at(store, chief, at, until.map(|(_, at)| at), message)?;"
+replace = "    let typed = typed_at(store, chief, at, until.map(|(_, at)| at), message)?.filter(|_| false);"
+
+[[plant]]
+name = "board notices: a nudge the chief did not answer at all doubles the interval"
+meant = "a_nudge_the_chief_did_not_answer_is_followed_after_one_interval"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = "    if !wrote {"
+replace = "    if false && !wrote {"
+
+[[plant]]
+name = "board notices: a Resume does not end the run of nudges answered only to the human"
+meant = "a_resume_ends_the_run_of_nudges_answered_only_to_the_human"
+runs = ["bn-ledger-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/waiting.rs"
+find = "        if begun_after(store, project_id, event)? {"
+replace = "        if false && begun_after(store, project_id, event)? {"
+
+# --- Codex writes in the model's context ---
+
+[[plant]]
+name = "board notices: a message Codex wrote in the model's context is taken for the person's"
+meant = "what_codex_writes_in_the_context_is_its_own_and_what_a_person_typed_is_not"
+runs = ["bn-harness-codex-words"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/inputs.rs"
+find = "        .any(|opening| head.starts_with(opening))"
+replace = "        .any(|opening| head.starts_with(opening) && false)"
+
+[[plant]]
+name = "board notices: a person's message that quotes what Codex writes is taken for Codex's"
+meant = "a_message_that_quotes_what_codex_writes_further_in_is_the_persons"
+runs = ["bn-harness-codex-words"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/inputs.rs"
+find = "        .any(|opening| head.starts_with(opening))"
+replace = "        .any(|opening| head.contains(opening))"
+
+[[plant]]
+name = "board notices: a message Codex tells twice is not marked as its own"
+meant = "what_codex_writes_is_its_own_whichever_telling_comes_first_and_is_one_item"
+runs = ["bn-harness-codex-words"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/inputs.rs"
+find = "        self.items[place].item.synthetic |= harness;"
+replace = "        if telling == Telling::Model { self.items[place].item.synthetic |= harness; }"

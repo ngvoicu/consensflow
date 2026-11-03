@@ -567,32 +567,48 @@ pub(crate) fn copied_items_since(
 
 /// Whether the participant's windows hold words the human typed after the
 /// delivery of message `after`, copied since `since` (when that message was
-/// queued): a user item no delivery made, which is one with no header of
-/// ConsensFlow's, that comes after the message's own item in its window's
-/// record. What a harness put in its record before the message (Codex's
-/// `# AGENTS.md instructions`, written when its first turn begins and so first
-/// copied with the message) is no news after it, nor is the summary a
-/// compaction writes in the user's place, which the human never typed. An item
-/// copied again as it was keeps the time it was first copied, so it is not new
-/// either.
+/// queued): see [`typed_at`].
 pub(crate) fn typed_since(
     store: &Store,
     participant_id: i64,
     since: &str,
     after: i64,
 ) -> Result<bool, LedgerError> {
+    Ok(typed_at(store, participant_id, since, None, after)?.is_some())
+}
+
+/// When the human last typed to the participant's windows: the time the newest
+/// of their words was copied, among those copied since `since` and, where `until`
+/// is given, not after it. Words are a user item no delivery made, which is one
+/// with no header of ConsensFlow's, that comes after the item of message `after` in
+/// its window's record. What a harness put in its record before the message (Codex's
+/// `# AGENTS.md instructions`, written when its first turn begins and so first
+/// copied with the message) is no news after it, nor is the summary a compaction
+/// writes in the user's place, which the human never typed, nor a user's item of the
+/// harness's own words (Claude Code's `<task-notification>`), which is copied as the
+/// harness's (`custom`). An item copied again as it was keeps the time it was first
+/// copied, so it is not new either. None where there are none.
+pub(crate) fn typed_at(
+    store: &Store,
+    participant_id: i64,
+    since: &str,
+    until: Option<&str>,
+    after: i64,
+) -> Result<Option<String>, LedgerError> {
     let items = store
         .db
         .prepare(
-            "SELECT t.conversation_id, t.seq, t.text FROM transcript t
+            "SELECT t.conversation_id, t.seq, t.text, t.copied_at FROM transcript t
        JOIN conversation c ON c.id = t.conversation_id
-       WHERE c.participant_id = ? AND t.role = 'user' AND t.compaction = 0 AND t.copied_at > ?",
+       WHERE c.participant_id = ?1 AND t.role = 'user' AND t.compaction = 0 AND t.copied_at > ?2
+         AND (?3 IS NULL OR t.copied_at <= ?3)",
         )?
-        .query_map(params![participant_id, since], |row| {
+        .query_map(params![participant_id, since, until], |row| {
             Ok((
                 row.get::<_, i64>("conversation_id")?,
                 row.get::<_, i64>("seq")?,
                 row.get::<_, String>("text")?,
+                row.get::<_, String>("copied_at")?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -600,13 +616,17 @@ pub(crate) fn typed_since(
     let delivered_at = |conversation: i64| {
         items
             .iter()
-            .filter(|(of, _, text)| *of == conversation && header_of(text) == Some(after))
-            .map(|(_, seq, _)| *seq)
+            .filter(|(of, _, text, _)| *of == conversation && header_of(text) == Some(after))
+            .map(|(_, seq, _, _)| *seq)
             .min()
     };
-    Ok(items.iter().any(|(conversation, seq, text)| {
-        header_of(text).is_none() && delivered_at(*conversation).is_none_or(|at| *seq > at)
-    }))
+    Ok(items
+        .iter()
+        .filter(|(conversation, seq, text, _)| {
+            header_of(text).is_none() && delivered_at(*conversation).is_none_or(|at| *seq > at)
+        })
+        .map(|(_, _, _, copied_at)| copied_at.clone())
+        .max())
 }
 
 #[cfg(test)]
