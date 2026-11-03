@@ -72,6 +72,7 @@ use cf_base::{js, time};
 use cf_harness::contract::Observed;
 use cf_harness::records::{Command, Item, Monitor, Pending, Reading, Role, Source};
 use cf_ledger::{NewNote, NewQuestion, ParticipantView, ProjectView, TaskThread};
+use cf_proto::ledger::MessageView;
 use serde_json::Value;
 
 use crate::delivery_text::{header_id, is_paste_of};
@@ -81,6 +82,7 @@ use crate::role_change::answers_to_the_task;
 use crate::seams::{CommandsSeen, EngineError};
 
 use self::asks::asks_the_chief;
+use self::while_asking::with_earlier;
 
 /// What a result says of a turn that wrote nothing after its last tool call.
 pub(crate) const WITHOUT_ANSWER: &str = "(the agent ended its turn without a written answer)";
@@ -417,6 +419,16 @@ impl Dispatcher {
             self.changed();
             return Ok(Turn::Asked);
         }
+        // The turns that ended with a question of the worker's out, whose words no result
+        // took (T-1204): the result begins with them.
+        let earlier = self.written_while_asking(
+            &thread,
+            participant,
+            items,
+            &replacements,
+            &words_of(&answers.final_run),
+        )?;
+        let words = with_earlier(words, &earlier);
         let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));
         self.seams
             .ledger
@@ -582,7 +594,19 @@ impl Dispatcher {
         let Some(latest) = latest else {
             return Ok(None);
         };
-        let receipt = latest.receipt.get("item").and_then(Value::as_str);
+        self.paste_of(&latest, items)
+    }
+
+    /// The place among `items`, the window's record, of the paste of `message`: the item its
+    /// arrival was proved by (`receipt`), or, where the receipt names none of the record's,
+    /// the last item that is its paste (see [`Dispatcher::delivered_at`]). None where the
+    /// record holds no proof of it.
+    pub(crate) fn paste_of(
+        &self,
+        message: &MessageView,
+        items: &[Item],
+    ) -> Result<Option<usize>, EngineError> {
+        let receipt = message.receipt.get("item").and_then(Value::as_str);
         if let Some(found) = receipt.and_then(|item| {
             items
                 .iter()
@@ -590,11 +614,11 @@ impl Dispatcher {
         }) {
             return Ok(Some(found));
         }
-        let first = self.brief_given_first(&latest)?;
+        let first = self.brief_given_first(message)?;
         Ok(items.iter().rposition(|item| {
             item.role == Role::User
                 && !item.compaction
-                && is_paste_of(&item.text, latest.id, first.as_deref())
+                && is_paste_of(&item.text, message.id, first.as_deref())
         }))
     }
 
@@ -1247,6 +1271,7 @@ pub(crate) fn pending_after_look(observed: &Observed, watching: Watching) -> Pen
 mod asks;
 mod finish;
 mod paused;
+mod while_asking;
 
 pub use finish::Finished;
 

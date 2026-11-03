@@ -52,6 +52,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
+use super::while_asking::with_earlier;
 use super::{
     first_on_its_way, leftovers, lost_in_turn, pending_after_look, watching_of, with_leftovers,
     with_lost, words_of,
@@ -249,7 +250,19 @@ impl Dispatcher {
         // What the turn left, as the note to the chief counts it: a monitor that said it ended
         // is over where a look found no command in the window.
         let pending = pending_after_look(&observed, watching_of(&record.held.borrow()));
-        let words = with_lost(words_of(&run), &participant.handle, lost);
+        // The turns that ended with a question of the worker's out come first, as in a
+        // result the worker's own turn end records (T-1204).
+        let earlier = self.written_while_asking(
+            &thread,
+            &participant,
+            items,
+            &replacements,
+            &words_of(&run),
+        )?;
+        let words = with_earlier(
+            with_lost(words_of(&run), &participant.handle, lost),
+            &earlier,
+        );
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
