@@ -630,8 +630,8 @@ runs = ["app-selftest"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
-find = ', "stepMs": config.step_ms}),'
-replace = '}),'
+find = ', "stepMs": config.step_ms, "panicProbe": config.panic_probe}),'
+replace = ', "panicProbe": config.panic_probe}),'
 
 [[plant]]
 name = "packaged smoke: the app is told the step of the page at 45 s whatever the patience"

@@ -73,7 +73,7 @@ fn a_chief_given_specs_has_the_skill_kept_for_every_launch_and_claude_is_given_t
             "{variant:?}: the variant as it is vendored"
         );
         assert_eq!(
-            home.adapter().specmint(variant).unwrap(),
+            home.adapter().specmint(variant, ".specs").unwrap(),
             Skill::Own(path::join(&[&skill, "SKILL.md"])),
             "{variant:?}: the place the role text names is the place written"
         );
@@ -122,7 +122,7 @@ fn a_chief_whose_claude_has_the_variant_installed_is_given_nothing_of_it_and_a_v
     let adapter = home.adapter();
     // The variant the project chose is installed: that copy is the window's.
     assert_eq!(
-        adapter.specmint(Variant::Tdd).unwrap(),
+        adapter.specmint(Variant::Tdd, ".specs").unwrap(),
         Skill::Global(tdd.clone())
     );
     // An adapter of its own for each launch: the session it names is its own too.
@@ -147,7 +147,7 @@ fn a_chief_whose_claude_has_the_variant_installed_is_given_nothing_of_it_and_a_v
     };
     let before = fs::read(&tdd).unwrap();
     assert!(matches!(
-        adapter.specmint(Variant::Core).unwrap(),
+        adapter.specmint(Variant::Core, ".specs").unwrap(),
         Skill::Own(_)
     ));
     let own = prepare(&home.adapter(), &request).unwrap();
@@ -164,5 +164,45 @@ fn a_chief_whose_claude_has_the_variant_installed_is_given_nothing_of_it_and_a_v
         fs::read(&tdd).unwrap(),
         before,
         "the human's own is as it was"
+    );
+}
+
+#[test]
+fn a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_names_it_whether_or_not_claude_has_the_variant_installed(
+) {
+    let home = Home::new();
+    // Installed by the human, and never edited for one project: its files call `.specs` the
+    // folder (T-662).
+    let folder = path::join(&[home.var("CLAUDE_CONFIG_DIR"), "skills", "specmint-core"]);
+    fs::create_dir_all(&folder).unwrap();
+    let installed = path::join(&[&folder, "SKILL.md"]);
+    let words = "---\nname: specmint-core\n---\nthe human's own, in .specs/registry.md\n";
+    fs::write(&installed, words).unwrap();
+    let adapter = home.adapter();
+    assert_eq!(
+        adapter.specmint(Variant::Core, ".specs").unwrap(),
+        Skill::Global(installed.clone())
+    );
+    let Skill::Own(copy) = adapter.specmint(Variant::Core, "docs/specs").unwrap() else {
+        panic!("a copy of its own for another folder");
+    };
+    let request = Request {
+        specs: Some(Variant::Core),
+        folder: "docs/specs",
+        ..Request::chief()
+    };
+    let on = prepare(&home.adapter(), &request).unwrap();
+    assert!(
+        on.argv
+            .iter()
+            .any(|arg| copy.starts_with(arg.as_str()) && arg.contains("specmint")),
+        "Claude is given the folder the copy is kept in: {:?}",
+        on.argv
+    );
+    kept::names_only(&copy, "docs/specs");
+    assert_eq!(
+        fs::read_to_string(&installed).unwrap(),
+        words,
+        "not touched"
     );
 }

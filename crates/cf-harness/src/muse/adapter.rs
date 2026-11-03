@@ -147,7 +147,7 @@ impl Adapter for MuseAdapter {
 
     /// Muse reads skills from its own folder (`muse/skills` in its config) and from
     /// `~/.agents/skills`, as its docs say.
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         let env = self.env();
         let mut roots = Vec::new();
         roots.extend(
@@ -161,6 +161,7 @@ impl Adapter for MuseAdapter {
             Harness::Muse,
             env,
             variant,
+            folder,
             specmint::installed(&roots, variant),
         )
     }

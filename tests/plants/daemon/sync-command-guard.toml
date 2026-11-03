@@ -1,0 +1,127 @@
+# A panic in a command the page asks does not end the app (T-1050). On macOS the page's invoke
+# reaches the app inside wry's `extern "C"` handler of the `ipc` protocol, on Windows inside
+# WebView2's handler of a request, and Tauri runs a synchronous command right there with nothing
+# to catch a panic: one that unwinds into those frames aborts the app. Every command the page may
+# ask is run inside `panics::answered` (`page_commands`, app/src-tauri/src/lib.rs), which stops a
+# panic at the app's edge, writes it down, tells the person, and answers the page with the error;
+# an asynchronous command runs as a task, whose panic left the page's promise unsettled and told
+# nobody, so its body runs inside `panics::settled`, which answers and tells; a rule reads every
+# `#[tauri::command]` of the app and holds that each is run there, and each async one's body in
+# `settled`.
+# One plant takes one rule out; a test fails.
+#
+# Every name holds `sync-command-guard`, so `npm run plants:daemon -- "sync-command-guard:"` runs them all.
+
+[run]
+app-command-panic = ["cargo", "xtask", "app", "test", "a_panic_in_a_command_the_page_asks_is_answered_and_the_app_runs_on"]
+app-command-rule = ["cargo", "xtask", "app", "test", "every_command_of_the_app_is_run_where_its_panic_is_stopped"]
+app-async-command-panic = ["cargo", "xtask", "app", "test", "a_panic_in_an_async_command_the_page_asks_is_answered_and_told"]
+
+[[plant]]
+name = "sync-command-guard: the page's commands are run past the app's edge, a panic in one unwinding into the webview's frame"
+meant = "panics::tests::a_panic_in_a_command_the_page_asks_is_answered_and_the_app_runs_on"
+runs = ["app-command-panic"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "        panics::answered(invoke, |invoke| {"
+replace = "        unguarded(invoke, |invoke| {"
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "/// What the app's builder is given for its page, by `with_page`: Tauri's builder, or"
+replace = '''fn unguarded<R: Runtime>(
+    invoke: tauri::ipc::Invoke<R>,
+    run: impl FnOnce(tauri::ipc::Invoke<R>) -> bool,
+) -> bool {
+    run(invoke)
+}
+
+/// What the app's builder is given for its page, by `with_page`: Tauri's builder, or'''
+
+[[plant]]
+name = "sync-command-guard: a command's panic is not stopped at the app's edge"
+meant = "panics::tests::a_panic_in_a_command_the_page_asks_is_answered_and_the_app_runs_on"
+runs = ["app-command-panic"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = '''    contained(&format!("the app's command {command}"), || run(invoke)).unwrap_or_else(|| {'''
+replace = '''    Some(run(invoke)).unwrap_or_else(|| {'''
+
+[[plant]]
+name = "sync-command-guard: the page is never answered of a command whose panic was stopped"
+meant = "panics::tests::a_panic_in_a_command_the_page_asks_is_answered_and_the_app_runs_on"
+runs = ["app-command-panic"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = '''            resolver.resolve(serde_json::json!({"ok": false, "error": failed(&command)}));'''
+replace = '''            let _ = (&resolver, &command);'''
+
+[[plant]]
+name = "sync-command-guard: a new command of the app is not one of the page's, run where its panic is stopped"
+meant = "panics::tests::every_command_of_the_app_is_run_where_its_panic_is_stopped"
+runs = ["app-command-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = "pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {"
+replace = '''#[tauri::command]
+pub fn pane_planted() -> Value {
+    json!({"ok":true})
+}
+
+pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {'''
+
+[[plant]]
+name = "sync-command-guard: the app is given a second handler of the page's invokes, past the edge"
+meant = "panics::tests::every_command_of_the_app_is_run_where_its_panic_is_stopped"
+runs = ["app-command-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "        .invoke_handler(page_commands())"
+replace = '''        .invoke_handler(page_commands())
+        .invoke_handler(|invoke: tauri::ipc::Invoke<R>| invoke.message.command() == "planted")'''
+
+[[plant]]
+name = "sync-command-guard: an async command's task panics past `settled`, the page never answered"
+meant = "panics::tests::a_panic_in_an_async_command_the_page_asks_is_answered_and_told"
+runs = ["app-async-command-panic"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/panics.rs"
+find = "    match tauri::async_runtime::spawn(work).await {"
+replace = "    match Ok::<_, tauri::Error>(work.await) {"
+
+[[plant]]
+name = "sync-command-guard: an async command's body is not run inside `settled`"
+meant = "panics::tests::every_command_of_the_app_is_run_where_its_panic_is_stopped"
+runs = ["app-command-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = '''    crate::panics::settled("update_check", async move {'''
+replace = '''    std::convert::identity(async move {'''
+
+[[plant]]
+name = "sync-command-guard: a new async command of the page's is not run inside `settled`"
+meant = "panics::tests::every_command_of_the_app_is_run_where_its_panic_is_stopped"
+runs = ["app-command-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = "pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {"
+replace = '''#[tauri::command]
+pub async fn pane_planted_async() -> Value {
+    json!({"ok":true})
+}
+
+pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "        commands::daemon_request,"
+replace = '''        commands::daemon_request,
+        commands::pane_planted_async,'''

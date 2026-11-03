@@ -7,7 +7,9 @@ use super::*;
 #[test]
 fn a_turn_that_ended_is_settled_once_the_file_has_been_quiet_a_hundred_and_twenty_seconds() {
     let steps = |stop: &str| vec![header(), user("u1", "go"), assistant("a1", stop, "done")];
-    for stop in ["stop", "aborted"] {
+    // A failed step is a turn that ended as the others are (T-781): Pi writes a new
+    // step for each retry, so one with nothing after it for that long is the last.
+    for stop in ["stop", "aborted", "error"] {
         let mut stage = Stage::with(&steps(stop));
         // Written exactly then: 120,000 milliseconds is enough, 119,999 is not.
         assert_eq!(stage.at(119_999).settlement, Settlement::InFlight, "{stop}");
@@ -20,11 +22,7 @@ fn a_turn_that_ended_is_settled_once_the_file_has_been_quiet_a_hundred_and_twent
         assert_eq!(stage.at(120_000).settlement, Settlement::InFlight, "{stop}");
         assert_eq!(stage.at(120_001).settlement, Settlement::Settled, "{stop}");
     }
-    // An error is not settled by waiting; nor is a step that stopped with a call open.
-    let mut stage = Stage::with(&steps("error"));
-    let record = stage.at(1_000_000);
-    assert!(!record.in_flight);
-    assert_eq!(record.settlement, Settlement::Unknown);
+    // A step that stopped with a call open is not settled by waiting.
     let mut stage = Stage::with(&[
         header(),
         user("u1", "go"),

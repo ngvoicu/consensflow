@@ -67,7 +67,12 @@ fn settings(rig: &Rig, planned: &Planned, options: &Options) -> Result<Settings>
     for name in VARIANTS {
         have.push((
             name,
-            ask::specmint(planned.chief.kind(), name, rig.environment())?,
+            ask::specmint(
+                planned.chief.kind(),
+                name,
+                &options.folder,
+                rig.environment(),
+            )?,
         ));
     }
     let installed = |name: &str| {

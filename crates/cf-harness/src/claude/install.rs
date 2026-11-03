@@ -12,6 +12,7 @@ use serde_json::json;
 use crate::contract::{Launch, LaunchId};
 use crate::shared::launch_files::launch_folder;
 use crate::shared::role::write_role;
+use crate::shared::shell::cf_hook;
 use crate::shared::specmint;
 
 /// How long a member's question waits for the board's answer.
@@ -41,18 +42,21 @@ pub(crate) fn settings(
     launch: &LaunchId,
     board_questions: bool,
     compaction: Option<u32>,
+    pane_cf: &str,
 ) -> Result<Vec<String>, String> {
     let root = launch_folder("claude", env, launch)?;
     let said = |error: FileError| error.to_string();
     make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(said)?;
     let turn_end = json!({ "hooks": [{ "type": "command", "command": "exit 0" }] });
     // Claude's question tool prompts even in full-permission mode. A
-    // member's is answered from the board through this hook (`cf` is first
-    // on a pane's PATH); when nobody answers within the hour, the hook is
-    // cancelled and the window shows Claude's own dialog.
+    // member's is answered from the board through this hook, run by the
+    // window's own `cf` named in full (a login shell, as Claude Code's Git Bash
+    // is on Windows, can put another `cf` ahead of it on the PATH); when nobody
+    // answers within the hour, the hook is cancelled and the window shows
+    // Claude's own dialog.
     let question = json!({
         "matcher": "AskUserQuestion",
-        "hooks": [{ "type": "command", "command": "cf hook claude", "timeout": QUESTION_HOOK_SECONDS }],
+        "hooks": [{ "type": "command", "command": cf_hook(pane_cf, "claude", &[]), "timeout": QUESTION_HOOK_SECONDS }],
     });
     let settings = path::join(&[&root, "settings.json"]);
     let mut file = json!({
@@ -83,13 +87,23 @@ pub(crate) fn settings(
 /// from its first turn. A chief given specs has ConsensFlow's own copy of its
 /// Specmint skill written where it is kept for every launch, and that folder
 /// is added to what Claude reads as well, so the skill loads with the role's.
+///
+/// The role's file is a skill in the role's folder (the layout of 3.0.0's first
+/// windows, which loaded the role as a skill alone), and Claude lists every skill it
+/// reads to a sub-agent: a `general-purpose` sub-agent of a member listed the role's
+/// and, asked to, loaded the whole role (T-766, Claude Code 2.1.310). Nothing has the
+/// model load it, for the window has the role in its system prompt from the first
+/// turn; so its front matter says the model may not ([`not_for_the_model`]), and the
+/// window keeps the role where a sub-agent never sees it. A sub-agent forked from the
+/// window carries the window's whole prompt, the role with it: the role text's own
+/// sentence for a sub-agent is for that one (`skill/core`).
 pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
     let written = write_role(
         Harness::Claude,
         launch.role,
         env,
         launch.id,
-        launch.instructions,
+        &not_for_the_model(launch.instructions),
     )?;
     let mut args = vec!["--add-dir".to_owned(), written.root];
     if let Some(copy) = specmint::write_own(Harness::Claude, env, launch)? {
@@ -102,6 +116,23 @@ pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
         "off".to_owned(),
     ]);
     Ok(args)
+}
+
+/// The front matter line of a skill the model may not load: Claude lists it to no
+/// agent, sub-agents included, and only a person may run it.
+const NOT_FOR_THE_MODEL: &str = "disable-model-invocation: true";
+
+/// `text`, a role's, with [`NOT_FOR_THE_MODEL`] first in its front matter: in the one
+/// it opens with, or in one of its own put before a text that has none (a card's).
+/// An empty text stays empty, for the role refuses it.
+fn not_for_the_model(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    match text.strip_prefix("---\n") {
+        Some(rest) => format!("---\n{NOT_FOR_THE_MODEL}\n{rest}"),
+        None => format!("---\n{NOT_FOR_THE_MODEL}\n---\n\n{text}"),
+    }
 }
 
 #[cfg(test)]

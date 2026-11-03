@@ -336,9 +336,8 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                KEPT,
-                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
-replace = '''                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
 
 [[plant]]
 name = "codex role: the copy's folder is named by the variant and not by the commit it is vendored at"
@@ -347,8 +346,8 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{}", variant.as_str(), &commit[..0]),'''
+find = '''format!("{}-{commit}", variant.as_str())'''
+replace = '''format!("{}-{}", variant.as_str(), &commit[..0])'''
 
 [[plant]]
 name = "codex role: a copy's file that is what the build ships is written again at every launch"
@@ -1061,8 +1060,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''        Ok(says_a_role.then(|| goes_whole(message, &[])))'''
-replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[]) || true))'''
+find = '''        Ok(says_a_role.then(|| goes_whole(message, &[], &cf)))'''
+replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[], &cf) || true))'''
 
 [[plant]]
 name = "codex role: the human is not told that a role told in part was not read by the next Resume"
@@ -1091,8 +1090,8 @@ runs = ["engine-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = '''    fits_whole(&words_of(message, carried).0)'''
-replace = '''    fits_whole(&words_of(message, &[]).0)'''
+find = '''    fits_whole(&words_of(message, carried, cf).0)'''
+replace = '''    fits_whole(&words_of(message, &[], cf).0)'''
 
 # What the ledger knows a replacement by, and what a record's turn is a replacement's by: the id
 # the ledger has, and never the words.
@@ -1520,6 +1519,20 @@ find = '''                set_conversation_role_text(store, conversation.id, &ro
 replace = '''                let _ = (conversation.id, &role);
 '''
 
+# The chief's role with specs on goes in part (T-1009, and with the window's cf in every
+# command T-1049): it is recorded where `cf inbox read` read it (T-1021), not where it was
+# delivered. Both recordings out: the text said is recorded nowhere (T-1093).
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''        set_conversation_role_text(store, conversation.id, &role)?;
+    }
+    Ok(())
+'''
+replace = '''        let _ = (conversation.id, &role);
+    }
+    Ok(())
+'''
+
 [[plant]]
 name = "codex role rig: the copy of the skill is kept in the harness's folder of launches (the Claude rig)"
 meant = "a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_next_launch_and_a_worker_never_is"
@@ -1528,9 +1541,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                KEPT,
-                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
-replace = '''                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
 
 [[plant]]
 name = "codex role rig: Claude is not given the folder the copy is kept in (the Claude rig)"
@@ -1551,8 +1563,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &format!("{name}{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos()))],'''
 
 [[plant]]
 name = "codex role rig: the copy's place differs at every launch, as it did in a launch's own folder (the regression)"
@@ -1562,8 +1574,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &format!("{name}{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos()))],'''
 
 [[plant]]
 name = "codex role rig: a resumed thread is given its role again, by the broker and a stand-in Codex that takes it (the rig)"

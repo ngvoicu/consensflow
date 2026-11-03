@@ -24,6 +24,7 @@
 //! that finds it ended by something else when it ends fails: the pane host ends a
 //! window's own and nothing of the machine's.
 
+mod commands;
 mod homes;
 mod install;
 mod jobs;
@@ -53,6 +54,7 @@ use crate::outcome::{self, Verdict};
 use crate::process::{Ran, Run, Sink, Spawned};
 use crate::{checkout, files, wire, Error, Result};
 
+pub use commands::names_command;
 pub use homes::HarnessHome;
 pub use jobs::Job;
 pub use names::project_name;

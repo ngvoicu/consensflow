@@ -26,7 +26,7 @@ use crate::testing::{Fakes, FIRST_MESSAGE_MS};
 
 /// The bundle whose `cf` is the program at `cf`: the folder it is in, and the
 /// name a window gives it (forward slashes, which Git Bash keeps).
-fn bundle_of(cf: &Path) -> Bundle {
+pub(super) fn bundle_of(cf: &Path) -> Bundle {
     Bundle {
         bin: cf.parent().map(Path::to_path_buf).unwrap_or_default(),
         cf: cf.to_path_buf(),

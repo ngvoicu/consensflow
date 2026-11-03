@@ -14,7 +14,7 @@
 //! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation, or with `resume` true on the one `session` names | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
 //! | `window_text` | `text`: as a window can take it | the text |
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
-//! | `claude_settings` | `env`, `launch`, `boardQuestions`, and `compaction` (tokens) where the window is a member's of a project that chose a size: the settings file of a Claude window | `["--settings", file]`, the file written |
+//! | `claude_settings` | `env`, `launch`, `boardQuestions`, `cf`, and `compaction` (tokens) where the window is a member's of a project that chose a size: the settings file of a Claude window, its hooks run by the `cf` at that path | `["--settings", file]`, the file written |
 //! | `interrupt` | `kind`: the keys that interrupt a turn in the harness's window | `{presses, closeAfterMs}`: Escape that many times in a row and, where `closeAfterMs` is not null, once more that long after |
 //! | `input` | `kind`: how the harness's windows take what they are handed | `{pasted, clear}`: whether it is pasted into the window's input box, and the keys that empty the box (null for a harness whose windows take it over a channel) |
 //! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
@@ -31,6 +31,7 @@
 //! | `muse_models` | `env`: the models Muse's host lists (`model/list` of one bounded `muse serve`, no model turn), as the daemon reads them | `{stale, models: [{id, label, efforts, defaultEffort, contributor, markedDefault}], default, warnings}`: whether the list is Muse's bundled one, each model with its efforts, the model a member is given where its agent names none (never a contributor model), and the warning of each contributor model |
 //! | `muse_usage` | `env`: what `muse usage --json` says of the account (no model turn), as the daemon reads it | the quota as the engine is told it (`{state, ...}`), or null where it says nothing known |
 //! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
+//! | `codex_agent_types` | nothing: Codex's own agent types, whose sub-agents a Codex window starts from its own file with Codex's words for each (`cf_proto::codex::agent_types`), which the live sub-agent suite holds to the Codex the machine runs | `{codex, types: [{name, description}]}`: the Codex they are of, and each type with its words |
 //!
 //! The last nine are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
@@ -57,7 +58,7 @@ use cf_base::env::Env;
 use cf_base::text::{console_text, window_text};
 use cf_base::time::{Clock, SystemClock};
 use cf_proto::agents::Harness;
-use cf_proto::specs::Variant;
+use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
 
 use crate::claude::install;
@@ -95,8 +96,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "trust" => trust(question),
         "input_box" => input_box(question),
         "unsent" => unsent(question),
+        "codex_agent_types" => Ok(codex_agent_types()),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box and unsent"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent and codex_agent_types"
         )),
     }
 }
@@ -281,7 +283,8 @@ fn start(question: &Value) -> Result<Value, String> {
     Ok(invocation.map_or(Value::Null, |invocation| invocation.written()))
 }
 
-/// The settings file of a Claude window, written under the home `env` names.
+/// The settings file of a Claude window, written under the home `env` names, its hooks run by
+/// the bundle's `cf` the question names (`cf`, a path).
 fn claude_settings(question: &Value) -> Result<Value, String> {
     let launch = LaunchId::new(text(question, "launch")?)
         .ok_or("the question's launch is not a launch id (a lowercase uuid)")?;
@@ -294,11 +297,13 @@ fn claude_settings(question: &Value) -> Result<Value, String> {
         .and_then(Value::as_u64)
         .map(|size| u32::try_from(size).map_err(|_| format!("the compaction {size} is too large")))
         .transpose()?;
+    let cf = launch::bundle_of(Path::new(text(question, "cf")?)).pane_cf;
     Ok(json!(install::settings(
         &env(question)?,
         &launch,
         board_questions,
-        compaction
+        compaction,
+        &cf
     )?))
 }
 
@@ -340,14 +345,17 @@ fn newest_session(question: &Value) -> Result<Value, String> {
 
 /// Where the harness has the Specmint variant installed for its user: the
 /// adapter's own answer (`Adapter::specmint`) with the home `env` names, which
-/// is the one the daemon would ask it in. Where it has none, the answer is where
+/// is the one the daemon would ask it in, for a project that keeps its specs in the
+/// question's `folder` (`.specs` where it names none). Where the harness has none, or
+/// the folder is another than the one an installed copy names, the answer is where
 /// ConsensFlow's own copy is kept for it, which is the same for every launch.
 fn specmint(question: &Value) -> Result<Value, String> {
     let variant = Variant::from_name(text(question, "variant")?)
         .ok_or("the question's variant is none of core, core-html, tdd and tdd-html")?;
+    let folder = optional(question, "folder").unwrap_or(DEFAULT_FOLDER);
     let env = env(question)?;
     let services = Fakes::new(&env).services(&env, Path::new(""));
-    let skill = adapter(harness(text(question, "kind")?)?, &services).specmint(variant)?;
+    let skill = adapter(harness(text(question, "kind")?)?, &services).specmint(variant, folder)?;
     Ok(json!({
         "installed": matches!(skill, Skill::Global(_)),
         "skill": skill.path(),
@@ -379,6 +387,18 @@ fn input(question: &Value) -> Result<Value, String> {
             Input::Pasted { clear } => json!({ "pasted": true, "clear": clear }),
         },
     )
+}
+
+/// Codex's own agent types as a window's supervisor defines them again for its sub-agents.
+fn codex_agent_types() -> Value {
+    use cf_proto::codex::agent_types::{AGENT_TYPES, AGENT_TYPES_OF};
+    json!({
+        "codex": AGENT_TYPES_OF,
+        "types": AGENT_TYPES
+            .iter()
+            .map(|kind| json!({ "name": kind.name, "description": kind.description }))
+            .collect::<Vec<_>>(),
+    })
 }
 
 #[cfg(test)]

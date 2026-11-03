@@ -27,6 +27,7 @@ use super::paths;
 use super::version::{self, Version};
 use crate::contract::LaunchId;
 use crate::shared::launch_files::launch_folder;
+use crate::shared::shell::cf_hook;
 
 /// The variable that keeps a run of Muse's launcher from updating it, which a window
 /// is given though it runs the binary itself: a Muse it starts may read it too.
@@ -85,11 +86,6 @@ fn really(launcher: &Path) -> PathBuf {
     }
 }
 
-/// `value` as one word of a shell's line, as `quote` quotes it.
-fn quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
-}
-
 /// The hook ConsensFlow adds for a launch's SessionStart: `cf hook muse-session` of the
 /// window's `cf` (`pane_cf`, named in full, as Muse's hook shell has a `PATH` of its
 /// own), with the role file and the file it writes the window's sessions in. A check
@@ -99,12 +95,7 @@ pub(crate) fn added_hook(pane_cf: &str, role_file: &str, said: &str) -> Value {
         "matcher": "",
         "hooks": [{
             "type": "command",
-            "command": format!(
-                "{} hook muse-session {} {}",
-                quote(pane_cf),
-                quote(role_file),
-                quote(said)
-            ),
+            "command": cf_hook(pane_cf, "muse-session", &[role_file, said]),
             "timeout": SESSION_HOOK_SECONDS,
         }],
     })

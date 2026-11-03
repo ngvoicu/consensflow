@@ -1561,7 +1561,8 @@ impl Dispatcher {
             .last_pastes(participant.id, PASTES_ON_SCREEN)?
             .into_iter()
             .map(|begun| {
-                // As it was pasted: sent again, or naming a note (Calliope's T-987).
+                // As it was pasted: sent again, or naming a note (Calliope's T-987), its
+                // commands started by the window's own `cf` (`cf_for`).
                 Ok(Paste {
                     id: begun.message.id,
                     text: self.delivery_text_of(&begun.message, &begun.carried)?,

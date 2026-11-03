@@ -409,7 +409,10 @@ fn ready(run: &Run, scene: &mut Scene, said: &mut Account) -> Result<()> {
 /// window that is open, and its turn is waited for: the engine's own note.
 fn note(scene: &mut Scene, again: &mut Again, said: &mut Account) -> Result<()> {
     let (message, task) = Case::note_of();
-    let text = scene.window.given(&ask::cut_note(message, &[task])?)?;
+    let window = ask::For::new(scene.rig.cf(), "devin");
+    let text = scene
+        .window
+        .given(&ask::cut_note(message, &[task], window)?)?;
     let keys = scene.trail.len();
     let turn = deliver(scene, NOTE, &text, SETTLE, |scene| again.look(scene))?;
     said.say(turn_line("the note, pasted", &turn));

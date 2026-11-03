@@ -420,6 +420,34 @@ fn a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them() {
 }
 
 #[test]
+fn a_failed_step_is_a_turn_that_ended_once_nothing_follows_it_for_the_quiet_spell() {
+    // A window the extension left no evidence of (a conversation followed with
+    // `/resume`, a launch folder swept, a write that failed) must not read at work for
+    // good after a failed turn (T-781): Pi writes a new step for each retry.
+    let failed = || failing("a1", &json!("Connection error."), &json!(0));
+    let mut stage = Stage::with(&[header(), user("u1", "go"), failed()]);
+    // Just written: Pi may be about to retry, so it is at work.
+    let record = stage.at(1_000);
+    assert!(record.failed && record.in_flight);
+    assert_eq!(record.settlement, Settlement::InFlight);
+    // Past two retries' worth of quiet it is over, with Pi's words for it kept.
+    let record = stage.at(120_000);
+    assert!(record.failed && !record.in_flight);
+    assert_eq!(record.settlement, Settlement::Settled);
+    assert_eq!(record.failure.as_deref(), Some("Connection error."));
+    // A retry that went through is no failed turn.
+    stage.write(&[
+        header(),
+        user("u1", "go"),
+        failed(),
+        assistant("a2", "stop", "done"),
+    ]);
+    let record = stage.at(120_000);
+    assert!(!record.failed && !record.in_flight);
+    assert_eq!(record.settlement, Settlement::Settled);
+}
+
+#[test]
 fn a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time() {
     // A message with no time of its own is at its place among the records; the
     // next append, the newline before it lost, ran on from it (T-246).

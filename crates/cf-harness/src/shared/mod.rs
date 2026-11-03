@@ -18,6 +18,7 @@ pub(crate) mod record;
 pub(crate) mod record_state;
 pub(crate) mod resumable;
 pub(crate) mod role;
+pub(crate) mod shell;
 pub(crate) mod specmint;
 pub(crate) mod token;
 pub(crate) mod trust;

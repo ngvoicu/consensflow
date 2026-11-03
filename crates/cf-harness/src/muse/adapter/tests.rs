@@ -273,7 +273,39 @@ fn a_specmint_muse_has_installed_is_used_where_it_is_and_consensflow_s_own_copy_
     let env = installed(home.path(), Some("1.4.13-R6996.1"));
     let muse = adapter(&env);
     assert!(matches!(
-        muse.specmint(Variant::Core).unwrap(),
+        muse.specmint(Variant::Core, ".specs").unwrap(),
         Skill::Own(_)
+    ));
+}
+
+#[test]
+fn a_specmint_muse_has_installed_serves_only_a_project_that_keeps_its_specs_where_it_says() {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.13-R6996.1"));
+    // As components: the adapter joins a path with its system's separator, which a `/` in a
+    // literal is not on Windows.
+    let skill = home
+        .path()
+        .join(".agents")
+        .join("skills")
+        .join("specmint-core")
+        .join("SKILL.md");
+    fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    fs::write(
+        &skill,
+        "---\nname: specmint-core\n---\nin .specs/registry.md\n",
+    )
+    .unwrap();
+    let muse = adapter(&env);
+    let own = skill.to_string_lossy().into_owned();
+    assert_eq!(
+        muse.specmint(Variant::Core, ".specs").unwrap(),
+        Skill::Global(own.clone())
+    );
+    // Its files call `.specs` the folder, and are never edited for one project (T-662): any
+    // other folder is given ConsensFlow's own copy of it.
+    assert!(matches!(
+        muse.specmint(Variant::Core, "docs/specs").unwrap(),
+        Skill::Own(copy) if copy != own
     ));
 }

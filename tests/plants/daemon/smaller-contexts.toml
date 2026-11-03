@@ -313,7 +313,7 @@ runs = ["engine-text-roles"]
 file = "skill/core/chief.md"
 find = '''
  A result
-   already in your conversation needs no `cf task get`.'''
+   already in your conversation needs no `{{cf}} task get`.'''
 replace = ""
 
 [[plant]]

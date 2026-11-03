@@ -25,7 +25,8 @@
 //! wait is given: 180000; the page's step at each of its own, a quarter of it,
 //! and the app's deadline for the whole run, a minute over it, follow it) and
 //! `CONSENSFLOW_SMOKE_KEEP=1` (keep the machine of a run that passed: a failed
-//! one is always kept).
+//! one is always kept) and `CONSENSFLOW_SMOKE_TEST_SUPPORT=1` (the app was built
+//! with the feature `test-support`, and has the command that panics: `command_panic`).
 //!
 //! It is a macOS bundle's: `Contents/`, `Info.plist`. The Windows app is held by
 //! `app/scripts/windows-smoke.mjs`.
@@ -37,6 +38,8 @@
 mod app;
 #[path = "smoke/bundle.rs"]
 mod bundle;
+#[path = "smoke/command_panic.rs"]
+mod command_panic;
 #[path = "smoke/extension.rs"]
 mod extension;
 #[path = "smoke/hidden.rs"]

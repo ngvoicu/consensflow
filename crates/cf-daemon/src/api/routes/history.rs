@@ -6,6 +6,7 @@ use cf_base::js;
 use cf_base::refusal::Refusal;
 use cf_engine::handoff::history_page;
 use cf_ledger::{LedgerError, MessageView};
+use cf_proto::cf_word::CfWord;
 
 use super::{Answer, Caller, Context, Failure, Request};
 use crate::api::views::value;
@@ -32,6 +33,12 @@ pub(super) async fn handle(
     let page = js::number(request.param("page").unwrap_or("1"));
     let find = request.param("find").filter(|find| !find.is_empty());
     let tools = request.param("tools") == Some("1");
+    // The commands the page names start with the `cf` of the window that reads it, which
+    // its `cf history` says (`CONSENSFLOW_CF`): the page is as long as they make it.
+    let cf = request
+        .param("cf")
+        .and_then(CfWord::of_word)
+        .unwrap_or_else(CfWord::bare);
     let project = caller.project.id;
     let history = context.ledger.borrow().chief_history(project)?;
     // A line may name any number: only this project's messages are read out, and
@@ -43,7 +50,7 @@ pub(super) async fn handle(
             .filter(|found| found.project_id == project)
             .map(|found| waits.shown(found)))
     };
-    let shown = history_page(&history, &message, page, find, tools)?;
+    let shown = history_page(&history, &message, page, find, tools, &cf)?;
     context
         .ledger
         .borrow_mut()

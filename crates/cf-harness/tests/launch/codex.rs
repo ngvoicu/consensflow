@@ -109,6 +109,8 @@ struct Request {
     starts_given_up: u32,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
+    /// The folder its project keeps its specs in, relative to the project.
+    folder: &'static str,
 }
 
 impl Default for Request {
@@ -122,6 +124,7 @@ impl Default for Request {
             first_message_ms: FIRST_MESSAGE_MS,
             starts_given_up: 0,
             specs: None,
+            folder: ".specs",
         }
     }
 }
@@ -150,7 +153,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
     let id = LaunchId::new(LAUNCH).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant).unwrap());
+        .map(|variant| adapter.specmint(variant, request.folder).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -165,7 +168,11 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
         specs: request
             .specs
             .zip(skill.as_ref())
-            .map(|(variant, skill)| Specs { variant, skill }),
+            .map(|(variant, skill)| Specs {
+                variant,
+                folder: request.folder,
+                skill,
+            }),
         compaction: None,
         first_message_ms: request.first_message_ms,
         starts_given_up: request.starts_given_up,
@@ -324,7 +331,8 @@ fn runs_codex_under_its_supervisor_in_full_permission_mode_its_task_on_no_comman
     // (`FirstMessage::Delivered`): every process on the machine reads a command line.
     assert_eq!(without_role(&plan.argv), expected);
     assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
-    let [(name, bridge), (role, file)] = &plan.env[..] else {
+    let [(name, bridge), (role, file), (children, children_file), (types, kinds)] = &plan.env[..]
+    else {
         panic!("{:?}", plan.env);
     };
     assert_eq!(name, "CF_CODEX_SESSION_BRIDGE");
@@ -342,6 +350,30 @@ fn runs_codex_under_its_supervisor_in_full_permission_mode_its_task_on_no_comman
             "developer-instructions.md"
         ])
     );
+    // What its sub-agents start with in place of the role, beside it, for each of Codex's
+    // own agent types (the owner's configuration here defines none).
+    assert_eq!(children, "CF_CODEX_SUBAGENT_FILE");
+    assert_eq!(types, "CF_CODEX_SUBAGENT_TYPES");
+    assert_eq!(kinds, "default,explorer,worker");
+    assert_eq!(
+        *children_file,
+        path::join(&[
+            &home.root,
+            "consensflow",
+            "integrations",
+            "codex",
+            LAUNCH,
+            "sub-agents.toml"
+        ])
+    );
+    let configured: toml::Table =
+        toml::from_str(&fs::read_to_string(children_file).unwrap()).unwrap();
+    let told = configured["developer_instructions"].as_str().unwrap();
+    assert!(
+        told.ends_with("You are a sub-agent that a ConsensFlow worker started. You are not the worker: you have no board identity, so never run cf; answer your parent in your final message."),
+        "{told}"
+    );
+    assert!(!told.contains(ROLE), "a sub-agent is given no role: {told}");
     assert_eq!(plan.drop_env, ["OPENAI_API_KEY"]);
 }
 

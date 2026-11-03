@@ -295,7 +295,8 @@ fn look(members: &mut Members, harness: Harness, log: &Log) -> Result<(bool, See
             .unwrap_or_default();
         // The thread holds the worker's result to the chief too: the engine reads what
         // went into the window by its recipient.
-        let ours = ask::ours(&lines, &handle, &pasted)?;
+        let window = ask::For::new(members.rig().cf(), harness.name());
+        let ours = ask::ours(&lines, &handle, &pasted, window)?;
         seen.wrong = misread(&lines, &ours);
         // A screen the rule misread is said whole, each line with the rule's word on it,
         // so the red case can be read and kept (T-1000, T-784): what it holds is the

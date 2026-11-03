@@ -292,7 +292,7 @@ fn each_went_in_once_whole_and_apart(rig: &Rig, ids: [i64; 2], pasted: [usize; 2
         assert!(
             text.starts_with(&marker)
                 && text.contains(asked.words)
-                && text.contains(&format!("cf task accept T-{}", asked.task)),
+                && cf_e2e::rig::names_command(text, &format!("task accept T-{}", asked.task)),
             "{} (m-{id}) did not go in whole: {text:?}",
             asked.words
         );

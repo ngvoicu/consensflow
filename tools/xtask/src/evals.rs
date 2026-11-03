@@ -1,15 +1,16 @@
-//! `cargo xtask eval`, `eval summary`, `eval long` and `watch`: the chief evals, their
-//! summary, the long run and the look at a project that is running. The code is
-//! `crates/cf-evals` (a library and a binary), which these commands hand their words
-//! to: `eval` is its `run`, `eval summary` its `summary`, `eval long` its `long` and
-//! `watch` its `watch`, with the words after the command as they are. A run spends
+//! `cargo xtask eval`, `eval summary`, `eval chiefs`, `eval long` and `watch`: the chief
+//! evals, their summary, one scenario played by each chief harness, the long run and the
+//! look at a project that is running. The code is `crates/cf-evals` (a library and a
+//! binary), which these commands hand their words to: `eval` is its `run`, `eval summary`
+//! its `summary`, `eval chiefs` its `chiefs`, `eval long` its `long` and `watch` its
+//! `watch`, with the words after the command as they are. A run spends
 //! real tokens on the machine's own harnesses and is no part of `check`.
 //!
 //! The long run is built in release: it looks at its project every few seconds for
 //! hours, reading the ledger and every Claude Code record as they grow, which a
 //! debug build reads ten times slower.
 //!
-//! `eval summary` and `eval long` come before `eval` in the table: a command is
+//! `eval summary`, `eval chiefs` and `eval long` come before `eval` in the table: a command is
 //! found by the first row whose words begin the command line.
 
 use std::ffi::OsString;
@@ -25,6 +26,12 @@ pub const COMMANDS: &[Command] = &[
         about: "Write the summary of the eval reports kept in evals/reports (evals/RESULTS.md)",
         usage: "[--reports DIR] [--results FILE]",
         run: Run::Native(summary),
+    },
+    Command {
+        words: &["eval", "chiefs"],
+        about: "Play a scenario (conversation) once with each harness that can be a chief, on its cheap model, and say what each came to: how much of the work went to the board (it spends real tokens, and is no part of check)",
+        usage: "[--scenario NAME] [--chiefs HARNESS,...] [--effort LEVEL] [--timeout-min N] [--reports DIR]",
+        run: Run::Native(chiefs),
     },
     Command {
         words: &["eval", "long"],
@@ -48,6 +55,10 @@ pub const COMMANDS: &[Command] = &[
 
 fn summary(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
     hand_over(context, "summary", args)
+}
+
+fn chiefs(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
+    hand_over(context, "chiefs", args)
 }
 
 fn eval(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {

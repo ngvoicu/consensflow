@@ -18,6 +18,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use cf_e2e::live::ask;
 use cf_e2e::live::machine::{home, live_folder};
 #[cfg(unix)]
 use cf_e2e::live::members::{self, Machine};
@@ -263,41 +264,39 @@ fn member_words(made: &Path) -> Result<Vec<String>> {
         &skill,
         "# ConsensFlow worker\n\nThe live parity check's role.\n",
     )?;
-    let settings = made.join("settings.json");
-    files::write(
-        &settings,
-        json!({
-            "permissions": { "defaultMode": "bypassPermissions" },
-            "skipDangerousModePermissionPrompt": true,
-            "tui": "default",
-            "hooks": {
-                "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "cf hook claude", "timeout": 3600 }] }],
-                "Stop": [{ "hooks": [{ "type": "command", "command": "exit 0" }] }],
-            },
-        })
-        .to_string(),
+    // The settings file is the one the adapter writes (a member's, its question tool answered
+    // from the board), in a ConsensFlow folder of this run's own, and not a copy of it: the
+    // hook in it is run by a `cf` by its whole path, as the daemon's launches say it.
+    let home = made.join("consensflow").to_string_lossy().into_owned();
+    let launch = format!("{:08x}-4a2b-4c3d-8e4f-0a1b2c3d4e5f", now_ms() & 0xffff_ffff);
+    let settings = ask::claude_settings(
+        &[("CONSENSFLOW_HOME".to_owned(), home)],
+        &launch,
+        true,
+        &made.join("bin").join("cf"),
     )?;
     let session = format!("{:08x}-1f26-4d34-bb42-4950575e656c", now_ms() & 0xffff_ffff);
-    Ok([
-        "--settings",
-        &settings.to_string_lossy(),
-        "--add-dir",
-        &role.to_string_lossy(),
-        "--append-system-prompt-file",
-        &skill.to_string_lossy(),
-        "--system-prompt-snapshot",
-        "off",
-        "--session-id",
-        &session,
-        "--model",
-        MODEL,
-        "--effort",
-        "low",
-        "--permission-mode",
-        "bypassPermissions",
-    ]
-    .map(str::to_owned)
-    .to_vec())
+    let mut words = settings;
+    words.extend(
+        [
+            "--add-dir",
+            &role.to_string_lossy(),
+            "--append-system-prompt-file",
+            &skill.to_string_lossy(),
+            "--system-prompt-snapshot",
+            "off",
+            "--session-id",
+            &session,
+            "--model",
+            MODEL,
+            "--effort",
+            "low",
+            "--permission-mode",
+            "bypassPermissions",
+        ]
+        .map(str::to_owned),
+    );
+    Ok(words)
 }
 
 /// Opens `claude` with `words` in a terminal of ConsensFlow's, in `folder`, on the config

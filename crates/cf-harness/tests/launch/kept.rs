@@ -53,3 +53,31 @@ pub fn names_in(folder: &str) -> Vec<String> {
     names.sort();
     names
 }
+
+/// That the copy of the skill whose `SKILL.md` is `file` is the project's: no file of its
+/// folder (`references`, `assets`) says `.specs`, which the vendored files call the folder
+/// of the specs and the registry, and its `SKILL.md` names `folder`'s registry (T-662).
+pub fn names_only(file: &str, folder: &str) {
+    let skill = Path::new(file).parent().unwrap();
+    let mut pending = vec![skill.to_path_buf()];
+    let mut seen = 0;
+    while let Some(next) = pending.pop() {
+        for entry in fs::read_dir(&next).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let text = fs::read_to_string(&path).unwrap();
+            assert!(
+                !text.contains(".specs"),
+                "{} sends the chief to .specs",
+                path.display()
+            );
+            seen += 1;
+        }
+    }
+    assert!(seen >= 4, "the skill's files, not a lone SKILL.md: {seen}");
+    let named = fs::read_to_string(file).unwrap();
+    assert!(named.contains(&format!("{folder}/registry.md")), "{named}");
+}

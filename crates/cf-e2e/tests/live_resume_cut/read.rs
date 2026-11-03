@@ -112,9 +112,45 @@ fn last_line(text: &str) -> Option<&str> {
     text.lines().map(str::trim).rfind(|line| !line.is_empty())
 }
 
+/// Whether the record holds the turn of `message` ended: an answer of the assistant's after
+/// the message that ends in its closing word `last` (`COUNTED`, `FINISHED`). A cut made
+/// then cut nothing: the turn was over before the window's process was ended (Codex on
+/// GPT-5.6-Luna counted to 40 in two seconds and wrote its whole answer, 2026-10-31).
+pub fn ended(items: &[Item], message: &str, last: &str) -> bool {
+    let Some(at) = items
+        .iter()
+        .rposition(|item| item.role == "user" && item.text.contains(message))
+    else {
+        return false;
+    };
+    items[at + 1..]
+        .iter()
+        .any(|item| item.role == "assistant" && item.text.trim_end().ends_with(last))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_turn_ended_where_an_answer_after_the_message_ends_in_its_closing_word() {
+        let message = "Count from 1 to 1000";
+        let counted = [
+            item("user", "Count from 1 to 1000, one number to a line"),
+            item("assistant", "1\n2\n3\nCOUNTED\n"),
+        ];
+        assert!(ended(&counted, message, "COUNTED"));
+        // Cut while it counted: no closing word yet.
+        let counting = [counted[0].clone(), item("assistant", "1\n2\n3")];
+        assert!(!ended(&counting, message, "COUNTED"));
+        // An answer to an earlier message is not this turn's.
+        let earlier = [
+            item("assistant", "COUNTED"),
+            item("user", "Count from 1 to 1000, again"),
+        ];
+        assert!(!ended(&earlier, message, "COUNTED"));
+        assert!(!ended(&[], message, "COUNTED"));
+    }
 
     fn item(role: &str, text: &str) -> Item {
         Item {

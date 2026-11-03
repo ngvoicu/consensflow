@@ -198,6 +198,7 @@ impl<'a> Chief<'a> {
             read.stdout.contains("## Reviews"),
             "the rest of the role: {read}"
         );
+        assert!(read.stdout.contains(SECTION), "the section: {read}");
         self.rig.wait_for("the note to be read", secs(60), || {
             Ok(self
                 .project
@@ -208,11 +209,14 @@ impl<'a> Chief<'a> {
         Ok(read.stdout)
     }
 
-    /// The user messages of the chief's thread that hold the section of specs.
+    /// The user messages of the chief's thread that tell it its role again, for its specs:
+    /// the opening of the note, which says it replaces the instructions it began with. The
+    /// section itself is past that opening once every command names the window's `cf` by
+    /// its whole path (T-1049), and is in what `cf inbox read` prints ([`Self::reads_its_role`]).
     fn told_of_specs(&self) -> Result<Vec<String>, cf_e2e::Error> {
         Ok(rollout::said_by(&self.record()?, "user")
             .into_iter()
-            .filter(|said| said.contains(SECTION))
+            .filter(|said| said.contains(REPLACES))
             .collect())
     }
 }
@@ -227,7 +231,7 @@ fn skill_named_in(message: &str) -> Option<String> {
 
 /// The folder the message says Specmint's `.specs` means.
 fn folder_named_in(message: &str) -> Option<String> {
-    Regex::new(r"Where Specmint says `\.specs`, it means `([^`]+)`")
+    Regex::new(r"Your specs and their registry are in `([^`]+)`:")
         .ok()?
         .captures(message)
         .map(|found| found[1].to_owned())
@@ -260,7 +264,7 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
         .ok_or("the window's environment names no role file")?;
     assert_eq!(fs::read_to_string(file)?.matches(SECTION).count(), 1);
     rig.wait_for(
-        "the chief's own record to hold the section",
+        "the chief's own record to be told its role again",
         secs(60),
         || Ok(!chief.told_of_specs()?.is_empty()),
     )?;

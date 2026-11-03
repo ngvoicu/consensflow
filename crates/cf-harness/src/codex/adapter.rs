@@ -129,7 +129,7 @@ impl Adapter for CodexAdapter {
             let executable = executable(Harness::Codex, &services.env)?;
             let launched =
                 launch::configuration(services, launch.id, launch.directory, &executable).await?;
-            let role = role::text(
+            let texts = role::text(
                 services,
                 launch.role,
                 &executable,
@@ -169,8 +169,11 @@ impl Adapter for CodexAdapter {
                 }
                 None => None,
             };
-            // The role goes by a file the window's broker reads, never its command line.
-            let role = role::write(&services.env, launch.id, &role)?;
+            // The role goes by a file the window's broker reads, never its command line;
+            // what the window's sub-agents start with in its place, by a file the
+            // supervisor names to the app-server.
+            let role = role::write(&services.env, launch.id, &texts.role)?;
+            let children = role::write_children(&services.env, launch.id, &texts)?;
             let mut args = Vec::new();
             if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
@@ -179,7 +182,12 @@ impl Adapter for CodexAdapter {
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),
-                env: launched.env.into_iter().chain([role]).collect(),
+                env: launched
+                    .env
+                    .into_iter()
+                    .chain([role])
+                    .chain(children)
+                    .collect(),
                 drop_env: invocation
                     .drop_env
                     .iter()
@@ -247,12 +255,13 @@ impl Adapter for CodexAdapter {
         FirstMessage::Delivered
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
             Harness::Codex,
             env,
             variant,
+            folder,
             paths::global_specmint(env, variant),
         )
     }

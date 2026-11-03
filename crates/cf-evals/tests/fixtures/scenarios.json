@@ -121,9 +121,10 @@
     "nudge": null,
     "quietMs": 120000,
     "expectations": [
-      "at least three changes go to the board",
-      "the English page is a worker’s (a translation runs on its own)",
-      "the work is done: the English evaluation page exists"
+      "at least three of the owner's changes go to the board",
+      "the English evaluation page is a worker’s task (a translation runs on its own)",
+      "the work is done: the English evaluation page exists",
+      "the chief makes no change itself: its own edits are 0 (counted for a Claude chief only)"
     ]
   },
   {

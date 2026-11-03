@@ -110,8 +110,8 @@ impl Adapter for LookingAdapter {
         self.adapter.first_message()
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
-        self.adapter.specmint(variant)
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
+        self.adapter.specmint(variant, folder)
     }
 }
 

@@ -217,16 +217,19 @@ fn answer(
 /// (`Dropped::looked_up`).
 #[tauri::command]
 pub async fn short_paths<R: Runtime>(app: AppHandle<R>, id: u64, paths: Vec<String>) -> Value {
-    match app.try_state::<Dropped>() {
-        Some(dropped) => {
-            dropped
-                .inner()
-                .clone()
-                .looked_up(id, paths, short_name)
-                .await
+    crate::panics::settled("short_paths", async move {
+        match app.try_state::<Dropped>() {
+            Some(dropped) => {
+                dropped
+                    .inner()
+                    .clone()
+                    .looked_up(id, paths, short_name)
+                    .await
+            }
+            None => json!({"ok":false,"error":"the app hears no drops"}),
         }
-        None => json!({"ok":false,"error":"the app hears no drops"}),
-    }
+    })
+    .await
 }
 
 /// Brings the app's window in front after the page has typed the paths of the drop

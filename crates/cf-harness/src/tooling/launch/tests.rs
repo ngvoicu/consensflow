@@ -165,7 +165,8 @@ fn the_config_has_the_hook_that_gives_a_session_its_role_and_a_members_question_
     );
     assert_eq!(
         config["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
-        "cf hook devin"
+        json!(format!("'{cf}' hook devin")),
+        "the question hook runs the bundle's cf by its whole path, as the session's does"
     );
     assert_eq!(config["auto_update"], false);
 }

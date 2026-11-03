@@ -268,6 +268,16 @@ impl Members {
         }
     }
 
+    /// The variable `name` of the environment the rig gives its windows, where it gives it
+    /// something: a harness's folder of the run's own among them ([`super::isolation`],
+    /// Devin's `XDG_DATA_HOME`, where its sessions are).
+    pub fn var(&self, name: &str) -> Option<String> {
+        self.rig
+            .var(name)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    }
+
     /// The tier the member `agent` was given when it was added.
     pub fn tier_of(&self, agent: &str) -> Option<&str> {
         self.tiers.get(agent).map(String::as_str)

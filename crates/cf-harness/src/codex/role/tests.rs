@@ -52,6 +52,11 @@ impl Stage {
 
     /// The role text of a worker, with the app-server as scripted.
     fn text(&self, content: &str) -> Result<String, String> {
+        self.texts(content).map(|texts| texts.role)
+    }
+
+    /// The texts of a worker and of its sub-agents, with the app-server as scripted.
+    fn texts(&self, content: &str) -> Result<Texts, String> {
         finished(Box::pin(text(
             &self.services,
             "worker",
@@ -77,6 +82,28 @@ fn the_role_follows_what_codex_has_of_its_own_in_one_text() {
     assert_eq!(
         stage.text("# The role\n\nIts text."),
         Ok("User instructions.\n\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n# The role\n\nIts text.".to_owned())
+    );
+}
+
+#[test]
+fn a_sub_agent_starts_from_what_codex_has_of_its_own_and_that_it_is_not_the_windows_agent_never_the_role(
+) {
+    let stage = Stage::new();
+    stage.app_server(
+        &[INITIALIZED, &Stage::configured("User instructions.")],
+        Ends::Asked,
+    );
+    let texts = stage.texts("# The role\n\nIts text.").unwrap();
+    assert_eq!(
+        texts.children,
+        "User instructions.\n\nYou are a sub-agent that a ConsensFlow worker started. You are not the worker: you have no board identity, so never run cf; answer your parent in your final message."
+    );
+    assert!(!texts.children.contains("Its text."), "{}", texts.children);
+    assert!(!texts.children.contains("Your ConsensFlow role is"));
+    // A chief's sub-agent is told the same of the chief.
+    assert_eq!(
+        children("chief"),
+        "You are a sub-agent that a ConsensFlow chief started. You are not the chief: you have no board identity, so never run cf; answer your parent in your final message."
     );
 }
 
@@ -419,4 +446,109 @@ fn the_text_is_written_in_the_launchs_own_folder_readable_by_its_owner_alone_and
     // It goes with the window.
     crate::shared::launch_files::forget_launch(home.path().to_str().unwrap(), &launch).unwrap();
     assert!(!folder.exists());
+}
+
+#[test]
+fn the_sub_agents_configuration_is_written_beside_the_role_as_private_and_named_by_its_own_variable(
+) {
+    let home = tempfile::tempdir().unwrap();
+    let env = Env::from_vars([("CONSENSFLOW_HOME", home.path().to_str().unwrap())]);
+    let launch = LaunchId::new("11111111-1111-4111-8111-111111111111").unwrap();
+    let texts = Texts {
+        role: "the role".to_owned(),
+        children: "Codex's own.\n\nNot the worker.".to_owned(),
+        kinds: vec!["default", "explorer", "worker"],
+    };
+    let said = write_children(&env, &launch, &texts).unwrap();
+    let [(name, file), (types, kinds)] = &said[..] else {
+        panic!("{said:?}");
+    };
+    assert_eq!(name, "CF_CODEX_SUBAGENT_FILE");
+    assert_eq!(types, "CF_CODEX_SUBAGENT_TYPES");
+    assert_eq!(kinds, "default,explorer,worker");
+    let folder = home
+        .path()
+        .join("integrations")
+        .join("codex")
+        .join(launch.as_str());
+    assert_eq!(
+        std::path::PathBuf::from(file),
+        folder.join("sub-agents.toml")
+    );
+    assert_eq!(
+        std::fs::read_to_string(file).unwrap(),
+        "developer_instructions = \"Codex's own.\\n\\nNot the worker.\"\n"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(std::path::Path::new(file)), 0o600);
+        assert_eq!(mode(&folder), 0o700);
+    }
+    crate::shared::launch_files::forget_launch(home.path().to_str().unwrap(), &launch).unwrap();
+    assert!(!folder.exists());
+}
+
+#[test]
+fn an_agent_type_the_owner_defines_stays_the_owners_and_one_they_do_not_is_ours() {
+    let stage = Stage::new();
+    let owners = json!({ "id": 2, "result": { "config": {
+        "developer_instructions": "User instructions.",
+        "agents": {
+            "max_threads": 4,
+            "worker": { "description": "My own worker.", "config_file": null },
+            "helper": { "description": "A helper." },
+            "explorer": null,
+        },
+    } } })
+    .to_string();
+    stage.app_server(&[INITIALIZED, &owners], Ends::Asked);
+    let texts = stage.texts("# The role").unwrap();
+    // `worker` is the owner's; a setting or a type of their own is no type of Codex's.
+    assert_eq!(texts.kinds, ["default", "explorer"]);
+    // With none of their own, every type of Codex's is ours.
+    let stage = Stage::new();
+    stage.app_server(&[INITIALIZED, &Stage::configured("x")], Ends::Asked);
+    assert_eq!(
+        stage.texts("# The role").unwrap().kinds,
+        ["default", "explorer", "worker"]
+    );
+}
+
+#[test]
+fn where_the_owner_defines_every_type_no_file_is_written_and_nothing_said() {
+    let home = tempfile::tempdir().unwrap();
+    let env = Env::from_vars([("CONSENSFLOW_HOME", home.path().to_str().unwrap())]);
+    let launch = LaunchId::new("11111111-1111-4111-8111-111111111111").unwrap();
+    let texts = Texts {
+        role: "the role".to_owned(),
+        children: "Not the worker.".to_owned(),
+        kinds: Vec::new(),
+    };
+    assert_eq!(write_children(&env, &launch, &texts).unwrap(), []);
+    assert!(
+        !home.path().join("integrations").exists(),
+        "nothing written"
+    );
+}
+
+#[test]
+fn the_sub_agents_instructions_are_one_toml_string_that_reads_back_as_they_were() {
+    for text in [
+        "plain",
+        "Back\\slash, \"quoted\", 'single', \u{2028} \u{7f} \u{1} \u{8} \u{c} \u{1f600}",
+        "lines\r\nand\ttabs\u{0}, \u{e9}, \"\"\" and ''' and \\u0041",
+        "",
+    ] {
+        let written = format!("developer_instructions = {}\n", toml_string(text));
+        let read: toml::Table = toml::from_str(&written).unwrap();
+        assert_eq!(read.len(), 1, "{written}");
+        assert_eq!(
+            read["developer_instructions"].as_str(),
+            Some(text),
+            "{written}"
+        );
+    }
 }

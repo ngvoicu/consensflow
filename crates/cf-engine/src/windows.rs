@@ -1362,13 +1362,14 @@ impl Dispatcher {
         else {
             return Ok(None);
         };
+        let cf = self.cf_for(message)?;
         let ledger = self.seams.ledger.borrow();
         let Some(thread) = ledger.task(message.project_id, number)? else {
             return Ok(None);
         };
         Ok(ledger
             .first_received(message.recipient_id, thread.task.id)?
-            .map(|brief| brief_first(&brief.message, &brief.carried)))
+            .map(|brief| brief_first(&brief.message, &brief.carried, &cf)))
     }
 
     /// A launch that did not come up. A member's first message fails with

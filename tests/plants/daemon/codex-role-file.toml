@@ -137,13 +137,13 @@ runs = ["harness-launch-codex", "harness-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''            let role = role::write(&services.env, launch.id, &role)?;
+find = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
             let mut args = Vec::new();'''
-replace = '''            let setting = format!(
+replace = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
+            let setting = format!(
                 "developer_instructions={}",
-                cf_base::js::stringify(&serde_json::Value::String(role.clone()))
+                cf_base::js::stringify(&serde_json::Value::String(texts.role.clone()))
             );
-            let role = role::write(&services.env, launch.id, &role)?;
             let mut args = vec!["-c".to_owned(), setting];'''
 
 [[plant]]
@@ -154,13 +154,13 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''            let role = role::write(&services.env, launch.id, &role)?;
+find = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
             let mut args = Vec::new();'''
-replace = '''            let setting = format!(
+replace = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
+            let setting = format!(
                 "developer_instructions={}",
-                cf_base::js::stringify(&serde_json::Value::String(role.clone()))
+                cf_base::js::stringify(&serde_json::Value::String(texts.role.clone()))
             );
-            let role = role::write(&services.env, launch.id, &role)?;
             let mut args = vec!["-c".to_owned(), setting];'''
 
 [[plant]]
@@ -170,8 +170,10 @@ runs = ["harness-launch-codex", "harness-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''                env: launched.env.into_iter().chain([role]).collect(),'''
-replace = '''                env: { let _ = role; launched.env },'''
+find = '''                    .chain([role])
+                    .chain(children)'''
+replace = '''                    .chain(Some(role).filter(|_| false))
+                    .chain(children)'''
 
 [[plant]]
 name = "codex role file: the role's file is readable by everyone"
@@ -190,11 +192,13 @@ runs = ["harness-codex-role", "harness-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/role.rs"
-find = '''    let folder = launch_folder(CODEX_FOLDER, env, launch)?;'''
+find = '''    let folder = launch_folder(CODEX_FOLDER, env, launch)?;
+    let file = path::join(&[&folder, FILE]);'''
 replace = '''    let folder = launch_folder(CODEX_FOLDER, env, launch)?;
     let folder = std::path::Path::new(&folder)
         .parent()
-        .map_or(folder.clone(), |up| up.to_string_lossy().into_owned());'''
+        .map_or(folder.clone(), |up| up.to_string_lossy().into_owned());
+    let file = path::join(&[&folder, FILE]);'''
 
 [[plant]]
 name = "codex role file: the role leaves out what Codex has of its own"
@@ -203,15 +207,8 @@ runs = ["harness-codex-role", "harness-launch-codex"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/role.rs"
-find = '''        "{existing}\n\nYour ConsensFlow role is {role}.'''
-replace = '''        "{}Your ConsensFlow role is {role}.'''
-
-[[plant.edit]]
-file = "crates/cf-harness/src/codex/role.rs"
-find = '''wait for the user's request.\n\n{content}"
-    ))'''
-replace = '''wait for the user's request.\n\n{content}", if existing.is_empty() { "" } else { "" }
-    ))'''
+find = '''            "{existing}\n\nYour ConsensFlow role is {role}.'''
+replace = '''            "Your ConsensFlow role is {role}.'''
 
 # --- the stand-in Codex ---
 

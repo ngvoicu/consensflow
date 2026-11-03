@@ -58,6 +58,20 @@ impl Files {
         }
     }
 
+    /// That nothing of specs is outside `folder`: no spec file and no registry anywhere
+    /// else below the project. The chief that goes by the skill's `.specs` writes its
+    /// spec and its registry there (T-662), and one spec in the folder beside a stray
+    /// registry outside it is as much the bug as none in it.
+    pub fn none_outside(&self, folder: &str) -> Result<(), String> {
+        if self.elsewhere.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "the chief also wrote outside {folder}: {}",
+            self.elsewhere.join(", ")
+        ))
+    }
+
     /// That no spec was written anywhere below the project: no spec file and no
     /// registry, in the specs folder or outside it.
     pub fn nothing_of_specs(&self) -> Result<(), String> {

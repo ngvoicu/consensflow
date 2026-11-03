@@ -76,11 +76,12 @@
 //! begun goes back to its queue with its attempt, to go in after the note
 //! ([`prelude`]).
 //!
-//! A role too long for one message (more than 16,000 units: a chief's with specs
-//! on at any staff, and one without at a staff of more than 24 rows, two roles to
-//! a row, on the real text; it was 37 and 65 before the chief's rules for smaller
-//! contexts, T-1009, 2 and 30 before the sentence on the staff's rules, T-1012,
-//! and 0 and 27 before the words the critical review asked back, T-1074) is
+//! A role too long for one message (more than 16,000 units: a chief's at any staff,
+//! with specs on or not, on the real text, each command of which names the window's
+//! `cf` by its whole path, T-1049; a staff of more than 24 rows without specs, two
+//! roles to a row, before that path; it was 37 and 65 before the chief's rules for
+//! smaller contexts, T-1009, 2 and 30 before the sentence on the staff's rules,
+//! T-1012, and 0 and 27 before the words the critical review asked back, T-1074) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`),
 //! and its opening says to read the rest now ([`OPENING_IN_PART`]). It is not given
 //! in several messages. Delivered so, it is a role told in part, and not recorded
@@ -88,15 +89,15 @@
 //! note whole and said so, and the ledger then records the role told, in the
 //! write that marks the note read (`receive_read`). `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 240
-//! rows with specs on, 250 without, on the same text (its lines are the bound).
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 211
+//! rows with specs on, 240 without, on the same text (its bytes are the bound).
 //!
 //! The project's rules for its staff (`roles::with_staff_rules`) are part of
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
-//! the most rules and a staff of up to 85 rows (95 without specs) is read whole,
-//! a staff of 25 with 3,200 bytes and 60 lines to spare.
+//! the most rules and a staff of up to 46 rows (75 without specs) is read whole,
+//! a staff of 25 with 1,049 bytes and 62 lines to spare.
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).
@@ -527,7 +528,8 @@ impl Dispatcher {
             .borrow()
             .role_notes_to(message.recipient_id)?
             .contains(&message.id);
-        Ok(says_a_role.then(|| goes_whole(message, &[])))
+        let cf = self.cf_for(message)?;
+        Ok(says_a_role.then(|| goes_whole(message, &[], &cf)))
     }
 
     /// The last note that told `participant` the role `instructions` and that
@@ -540,6 +542,7 @@ impl Dispatcher {
         participant: &ParticipantView,
         instructions: &str,
     ) -> Result<Option<MessageView>, EngineError> {
+        let cf = self.seams.roles.cf(participant);
         let ledger = self.seams.ledger.borrow();
         for id in ledger.role_notes_to(participant.id)?.into_iter().rev() {
             let Some(note) = ledger.message(id)? else {
@@ -549,7 +552,7 @@ impl Dispatcher {
                 continue;
             }
             let unread = note.state == "delivered"
-                && !goes_whole(&note, &[])
+                && !goes_whole(&note, &[], &cf)
                 && ledger.role_of_note(id)?.as_deref() == Some(instructions);
             return Ok(unread.then_some(note));
         }

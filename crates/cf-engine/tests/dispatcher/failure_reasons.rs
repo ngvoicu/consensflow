@@ -525,6 +525,7 @@ fn the_rows_a_paste_carried_are_part_of_it_while_it_is_still_on_its_way() {
     let pasted = cf_engine::delivery_text::delivery_text(
         &context.message(carrier.id),
         &[context.message(answer), context.message(note)],
+        &cf_proto::cf_word::CfWord::bare(),
     );
     assert!(pasted.contains("(kept for you: "), "{pasted}");
     let error = "Error: provider unreachable";

@@ -100,6 +100,8 @@ pub struct ClaudeAdapter {
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     entropy: Rc<dyn Entropy>,
+    /// The bundle's `cf` as a window names it: what the launch's hooks run.
+    pane_cf: String,
     /// Where Claude keeps its own status of each of its processes, made
     /// whole once, as Node resolved it when it made the adapter; or why
     /// there is none.
@@ -114,6 +116,7 @@ impl ClaudeAdapter {
             records: Rc::clone(&services.records),
             time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
+            pane_cf: services.bundle.pane_cf.clone(),
             statuses: status::folder(&services.env),
         }
     }
@@ -128,6 +131,7 @@ impl Adapter for ClaudeAdapter {
                 launch.id,
                 launch.role != "chief",
                 launch.compaction,
+                &self.pane_cf,
             )?;
             let role = install::role(&self.env, launch)?;
             // Claude keeps a conversation only once something was said in
@@ -294,11 +298,12 @@ impl Adapter for ClaudeAdapter {
         }
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         specmint::place(
             Harness::Claude,
             &self.env,
             variant,
+            folder,
             paths::global_specmint(&self.env, variant),
         )
     }

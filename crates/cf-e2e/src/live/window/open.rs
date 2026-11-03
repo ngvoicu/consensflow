@@ -417,7 +417,7 @@ impl<'a> Open<'a> {
         if claude {
             // The settings the app writes for each launch (which skip the full-permission
             // warning), and no MCP server, connector or browser.
-            let settings = ask::claude_settings(&env, LAUNCH, false)?;
+            let settings = ask::claude_settings(&env, LAUNCH, false, self.rig.cf())?;
             match &self.claude_alone {
                 Some(hooks) => argv.extend(with_hooks(&settings, hooks)?),
                 None => argv.extend(settings),

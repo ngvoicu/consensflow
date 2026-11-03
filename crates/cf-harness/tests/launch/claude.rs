@@ -147,6 +147,8 @@ struct Request {
     specs: Option<Variant>,
     /// The size the project chose for its Claude members' windows to compact at.
     compaction: Option<u32>,
+    /// The folder its project keeps its specs in, relative to the project.
+    folder: &'static str,
 }
 
 impl Default for Request {
@@ -166,6 +168,7 @@ impl Default for Request {
             }),
             specs: None,
             compaction: None,
+            folder: ".specs",
         }
     }
 }
@@ -196,7 +199,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
     let id = LaunchId::new(LAUNCH).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant).unwrap());
+        .map(|variant| adapter.specmint(variant, request.folder).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -211,7 +214,11 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
         specs: request
             .specs
             .zip(skill.as_ref())
-            .map(|(variant, skill)| Specs { variant, skill }),
+            .map(|(variant, skill)| Specs {
+                variant,
+                folder: request.folder,
+                skill,
+            }),
         compaction: request.compaction,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
@@ -334,11 +341,19 @@ fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_tas
         written["hooks"]["Stop"],
         json!([{ "hooks": [{ "type": "command", "command": "exit 0" }] }])
     );
+    // The bundle's own `cf` by its whole path, quoted: Claude Code's Git Bash on Windows is
+    // a login shell, whose PATH puts the user's `~/bin` before the window's folder
+    // (2.1.312, 2026-10-31), so the word `cf` there can be another program.
+    let cf = format!(
+        "{}/bundle/bin/cf{}",
+        home.root.replace('\\', "/"),
+        if cfg!(windows) { ".exe" } else { "" }
+    );
     assert_eq!(
         written["hooks"]["PreToolUse"],
         json!([{
             "matcher": "AskUserQuestion",
-            "hooks": [{ "type": "command", "command": "cf hook claude", "timeout": 3600 }],
+            "hooks": [{ "type": "command", "command": format!("'{cf}' hook claude"), "timeout": 3600 }],
         }]),
         "Claude's question tool is answered from the board, for an hour, then in the window"
     );
@@ -469,9 +484,10 @@ fn gives_a_chief_its_role_instructions_and_no_model_of_its_own() {
             && file.ends_with("consensflow-chief/SKILL.md"),
         "{file}"
     );
+    // Its front matter says no model may load it as a skill: a sub-agent lists none.
     assert_eq!(
         fs::read_to_string(&plan.argv[at + 1]).unwrap(),
-        "CHIEF INSTRUCTIONS"
+        "---\ndisable-model-invocation: true\n---\n\nCHIEF INSTRUCTIONS"
     );
     assert!(!plan.argv.iter().any(|arg| arg == "--model"));
 }

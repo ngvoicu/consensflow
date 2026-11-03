@@ -494,3 +494,342 @@ fn the_app_records_its_panics_and_contains_its_callbacks_from_its_start() {
     let updates = include_str!("../updates.rs");
     assert!(updates.contains(r#"crate::panics::contained("the app's handler of its menu""#));
 }
+
+/// The page's origin, as the app's webview has it on this system: Tauri refuses a page of any
+/// other the app's commands, as a remote one's.
+const PAGE_ORIGIN: &str = if cfg!(windows) {
+    "http://tauri.localhost"
+} else {
+    "tauri://localhost"
+};
+
+/// A command the page asks through the app's own commands (`crate::page_commands`), on Tauri's
+/// stand-in runtime, and what the page was answered: the response, or the panic that left the
+/// app's edge, which in the app is an abort.
+fn asked_of_the_page(command: &str, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    let app = crate::with_page(mock_builder())
+        .build(mock_context(noop_assets()))
+        .expect("build mock app");
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .expect("build mock webview");
+    let request = tauri::webview::InvokeRequest {
+        cmd: command.into(),
+        callback: tauri::ipc::CallbackFn(0),
+        error: tauri::ipc::CallbackFn(1),
+        url: PAGE_ORIGIN.parse().expect("invoke URL"),
+        body: tauri::ipc::InvokeBody::Json(args),
+        headers: Default::default(),
+        invoke_key: INVOKE_KEY.to_string(),
+    };
+    let answered = panic::catch_unwind(AssertUnwindSafe(|| get_ipc_response(&webview, request)))
+        .map_err(|panicked| {
+            // The stand-in's wait for the answer panics when the request's responder is dropped
+            // unanswered, as a task that panicked drops it: in the app the page's promise then
+            // never settles.
+            if panicked
+                .downcast_ref::<String>()
+                .is_some_and(|said| said.contains("Failed to receive result from command"))
+            {
+                format!("{command}'s request was dropped unanswered")
+            } else {
+                format!("{command}'s panic left the app's edge")
+            }
+        })?;
+    match answered {
+        Ok(body) => body.deserialize().map_err(|error| error.to_string()),
+        Err(refused) => Err(format!("refused: {refused}")),
+    }
+}
+
+/// `asked_of_the_page` on a thread of its own, its answer waited for up to `limit`: none where
+/// the page was never answered.
+fn asked_within(
+    command: &'static str,
+    args: serde_json::Value,
+    limit: Duration,
+) -> Option<Result<serde_json::Value, String>> {
+    let (answer, answered) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = answer.send(asked_of_the_page(command, args));
+    });
+    answered.recv_timeout(limit).ok()
+}
+
+/// A panic in an asynchronous command the page asks is stopped in its task (T-1050): Tauri's
+/// task of the command catches it too, but never answers the page, whose promise then never
+/// settles, and tells nobody. Written down, told once, and the page answered with the error.
+#[test]
+fn a_panic_in_an_async_command_the_page_asks_is_answered_and_told() {
+    if the_childs_log().is_some() {
+        record_in(the_childs_log);
+        tell_by_printing();
+        let answer = asked_within(
+            "selftest_panic_async",
+            serde_json::json!({}),
+            Duration::from_secs(20),
+        );
+        assert_eq!(
+            answer,
+            Some(Ok(
+                serde_json::json!({"ok": false, "error": failed("selftest_panic_async")})
+            )),
+            "the page was answered of the command whose task panicked (None: never)"
+        );
+        println!("the app runs on");
+        wait_for_the_telling();
+        return;
+    }
+    let (ran, written) =
+        in_a_child("panics::tests::a_panic_in_an_async_command_the_page_asks_is_answered_and_told");
+    let said = said(&ran);
+    // The child's own failure is written in its log, by the hook it records its panics with.
+    assert!(ran.status.success(), "{said}\nthe child's log:\n{written}");
+    assert!(said.contains("the app runs on"), "{said}");
+    assert_eq!(
+        said.matches("told the person").count(),
+        1,
+        "told once: {said}"
+    );
+    assert!(
+        written.contains(&format!("\n{}\n", crate::SELFTEST_PANIC)),
+        "{written}"
+    );
+    assert!(
+        written.contains(
+            "consensflow: the app's command selftest_panic_async panicked; the app stopped it \
+             there and runs on"
+        ),
+        "{written}"
+    );
+}
+
+/// A panic in a command the page asks is stopped at the app's edge (T-1050): written down, the
+/// person told once, the page answered with the error, and the app answers the page after it.
+/// In the app the command runs in the webview's own frame, which cannot unwind: past the edge
+/// the panic aborts the app.
+#[test]
+fn a_panic_in_a_command_the_page_asks_is_answered_and_the_app_runs_on() {
+    if the_childs_log().is_some() {
+        record_in(the_childs_log);
+        tell_by_printing();
+        let answer = asked_of_the_page("selftest_panic", serde_json::json!({}));
+        assert_eq!(
+            answer,
+            Ok(serde_json::json!({"ok": false, "error": failed("selftest_panic")}))
+        );
+        // Asked after it, a command is answered as ever: here the self-test's channel, which
+        // refuses an app not started for a self-test.
+        let after = asked_of_the_page(
+            "selftest_report",
+            serde_json::json!({"event": "after", "data": {}}),
+        );
+        assert_eq!(
+            after,
+            Ok(serde_json::json!({"ok": false, "error": "self-test reporting is not enabled"}))
+        );
+        println!("the app runs on");
+        wait_for_the_telling();
+        return;
+    }
+    let (ran, written) = in_a_child(
+        "panics::tests::a_panic_in_a_command_the_page_asks_is_answered_and_the_app_runs_on",
+    );
+    let said = said(&ran);
+    // The child's own failure is written in its log, by the hook it records its panics with.
+    assert!(ran.status.success(), "{said}\nthe child's log:\n{written}");
+    assert!(said.contains("the app runs on"), "{said}");
+    assert_eq!(
+        said.matches("told the person").count(),
+        1,
+        "told once: {said}"
+    );
+    assert!(
+        written.contains(&format!("\n{}\n", crate::SELFTEST_PANIC)),
+        "{written}"
+    );
+    assert!(
+        written.contains(
+            "consensflow: the app's command selftest_panic panicked; the app stopped it there and \
+             runs on"
+        ),
+        "{written}"
+    );
+}
+
+/// The app's sources as the rule reads them: every file under `src`, but the tests'.
+fn the_apps_sources() -> Vec<(PathBuf, String)> {
+    fn walk(folder: &Path, found: &mut Vec<(PathBuf, String)>) {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(folder)
+            .expect("read a folder of the sources")
+            .map(|entry| entry.expect("an entry").path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if path.is_dir() {
+                if name != "tests" {
+                    walk(&path, found);
+                }
+            } else if name.ends_with(".rs") && name != "tests.rs" {
+                let text = std::fs::read_to_string(&path).expect("read a source");
+                // A file's own tests are its `mod tests` at its end.
+                let code = text
+                    .find("#[cfg(test)]\nmod tests {")
+                    .map_or(text.as_str(), |at| &text[..at]);
+                found.push((path, code.to_owned()));
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut found,
+    );
+    found
+}
+
+/// A `#[tauri::command]` as the rule reads it: its name, whether it is asynchronous, and what
+/// its body starts with.
+struct Declared {
+    name: String,
+    asynchronous: bool,
+    body: String,
+}
+
+/// Each `#[tauri::command]` of `code`.
+fn commands_in(code: &str) -> Vec<Declared> {
+    code.match_indices("#[tauri::command]")
+        .map(|(at, _)| {
+            let after = &code[at..];
+            let fn_at = after.find("fn ").expect("a command's fn");
+            let name = &after[fn_at + 3..];
+            let end = name
+                .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .expect("a command's name ends");
+            let body = &name[name.find('{').expect("a command's body") + 1..];
+            Declared {
+                name: name[..end].to_owned(),
+                asynchronous: after[..fn_at].contains("async "),
+                body: body.trim_start().chars().take(120).collect(),
+            }
+        })
+        .collect()
+}
+
+/// The name of each `#[tauri::command]` of `code`.
+fn commands_of(code: &str) -> Vec<String> {
+    commands_in(code)
+        .into_iter()
+        .map(|command| command.name)
+        .collect()
+}
+
+/// Every command of the app, synchronous or not, is one of the page's commands
+/// (`crate::page_commands`), the app's one handler of the page's invokes, and that handler runs
+/// each of them inside `answered`, past which a panic does not go (T-1050): a command added to
+/// the app is run there, or this fails, and so it does on a second handler, of the app's or a
+/// plugin's of its own. An asynchronous command runs as a task, past `answered`: its body is run
+/// inside `settled`, under its own name.
+#[test]
+fn every_command_of_the_app_is_run_where_its_panic_is_stopped() {
+    let sources = the_apps_sources();
+    let mut commands: Vec<String> = sources
+        .iter()
+        .flat_map(|(_, code)| commands_of(code))
+        .collect();
+    commands.sort();
+    assert!(
+        commands.len() >= 17 && commands.contains(&"selftest_panic".to_owned()),
+        "the rule reads the commands: {commands:?}"
+    );
+
+    let handlers: Vec<String> = sources
+        .iter()
+        .flat_map(|(path, code)| {
+            code.matches("generate_handler!")
+                .map(move |_| path.display().to_string())
+        })
+        .collect();
+    assert_eq!(
+        handlers.len(),
+        1,
+        "one list of the page's commands: {handlers:?}"
+    );
+    let given: Vec<String> = sources
+        .iter()
+        .flat_map(|(_, code)| {
+            code.match_indices("invoke_handler(").map(move |(at, _)| {
+                let rest = &code[at..];
+                rest[..rest.find(')').map_or(rest.len(), |end| end + 1)].to_owned()
+            })
+        })
+        .collect();
+    assert_eq!(
+        given,
+        [
+            "invoke_handler(self, handler)",
+            "invoke_handler(page_commands()"
+        ],
+        "the page's commands are the one handler the app is given"
+    );
+
+    let lib = include_str!("../lib.rs");
+    let page = &lib[lib
+        .find("pub(crate) fn page_commands")
+        .expect("page_commands")..];
+    let list =
+        &page[page.find("generate_handler![").expect("the list") + "generate_handler![".len()..];
+    // Up to the line that closes it: an entry's `#[cfg(…)]` holds a `]` of its own.
+    let list = &list[..list.find("\n    ];").expect("the list's end")];
+    let mut listed: Vec<String> = list
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("#["))
+        .map(|line| {
+            let path = line.trim_end_matches(',');
+            path.rsplit("::").next().unwrap_or(path).to_owned()
+        })
+        .collect();
+    listed.sort();
+    assert_eq!(
+        listed, commands,
+        "every command of the app is one of the page's"
+    );
+
+    // An asynchronous command runs as a task, past `answered`: its body is run inside `settled`,
+    // under its own name.
+    let unsettled: Vec<String> = sources
+        .iter()
+        .flat_map(|(_, code)| commands_in(code))
+        .filter(|command| command.asynchronous)
+        .filter(|command| {
+            let settled = format!("panics::settled(\"{}\", ", command.name);
+            !(command.body.starts_with(&format!("crate::{settled}"))
+                || command.body.starts_with(&settled))
+        })
+        .map(|command| command.name)
+        .collect();
+    assert_eq!(
+        unsettled,
+        Vec::<String>::new(),
+        "every asynchronous command's body is run inside `panics::settled`"
+    );
+
+    let guarded = page
+        .find("move |invoke| {\n        panics::answered(invoke, |invoke| {")
+        .expect("the page's commands are run inside `answered`");
+    assert_eq!(
+        lib.matches("handler(invoke)").count(),
+        1,
+        "the list is run in one place"
+    );
+    assert!(
+        page.find("handler(invoke)").is_some_and(|at| at > guarded),
+        "the list is run inside `answered`"
+    );
+}

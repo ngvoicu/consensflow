@@ -106,3 +106,36 @@ ends only what the host can tell is the window's, so a detached job can run on. 
 sentence now says "Your answer ends your turn: wait for what your result needs, and
 leave nothing running", in those words alone. The rows were moved by a script that
 put the new text where the old stood.
+
+The 39 rows of the role texts, the 27 members' and the twelve of the chief's that hold the role's own text
+(the other chief rows read an eval's card, and hold the card), name `cf` in a different way
+(`skill/core/chief.md` and `skill/core/staff.md`, T-1049, 2026-11-01). A window's shell can
+find another `cf` first on its PATH (Devin's login zsh on the Mac, Claude Code's login Git
+Bash on Windows, the Cloud Foundry CLI: T-972's live kit, 2026-10-31), so each command a text
+teaches starts with the window's own `cf` by its full path, where Node's said `cf`: the
+`cf` of the row's input, quoted as one word where a shell would read it otherwise (the rows
+whose path has a space, quotes, a backtick or a `$`), and `cf` where the row gives none (the
+undefined `cf` and the empty one). Two more changes follow from it. The sentence "`cf` is on
+this window's PATH and its output says what happened" is now "Its output says what
+happened", for it is no longer the PATH that finds the `cf`. And the section at the end,
+"## This window's cf" ("Here `cf` is …; if `cf` says a command is unknown, or answers as
+another program, … run … instead"), is gone from the rows that had it (those with a `cf`):
+the commands say it. Changed by hand, in those words alone, as a regular edit of each text
+(a command's `cf` put through the row's path, the sentence and the section), on 2026-11-01.
+
+The members' 27 rows have one paragraph Node's did not, after the one that ends "it arrives
+only once your turn has ended": "If you are a sub-agent that a member started (your prompt
+came from the member's own agent, not from the chief), you are not the member: you have no
+board identity, so never run `cf`; answer your parent in your final message."
+(`skill/core/staff.md`). The chief's twelve rows have one Node's did not either, after the
+paragraph that opens the text: "If you are a sub-agent that the chief started (your prompt
+came from the chief's own agent, not from the human), you are not the chief: you have no
+board identity, so never run `cf`; answer your parent in your final message."
+(`skill/core/chief.md`). The `cf` in both is the row's, as in every command of the text
+(T-1049, above). Both were changed by hand, in those words alone, on 2026-11-01
+(T-1053): a sub-agent a window starts has the window's board token in its shell, on every
+harness, and one that keeps the window's role (a Codex or Claude Code sub-agent forked with
+the window's history, or one of an agent type the owner defined for Codex) acts as the
+window. T-766 saw it: four of four Codex sub-agents that held a member's role and could not
+answer something asked the board as the member (`cf ask`), and none of three did with the
+member's sentence in that role.

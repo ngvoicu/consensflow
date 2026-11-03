@@ -8,9 +8,10 @@ use super::*;
 /// chief in the home `fake` made, or why it could not be.
 fn write_for(fake: &Fake, id: &LaunchId, variant: Variant) -> Result<Option<OwnCopy>, String> {
     let env = home_env(fake);
-    let skill = place(Harness::Claude, &env, variant, None).expect("a place");
+    let skill = place(Harness::Claude, &env, variant, ".specs", None).expect("a place");
     let specs = Specs {
         variant,
+        folder: ".specs",
         skill: &skill,
     };
     write_own(Harness::Claude, &env, &launch(id, Some(specs)))
@@ -158,9 +159,10 @@ fn a_write_that_cannot_be_put_in_place_leaves_no_temporary_and_what_was_there() 
     fs::remove_file(copy.file()).expect("a removal");
     fs::create_dir(copy.file()).expect("a folder in the way");
     let env = home_env(&fake);
-    let skill = place(Harness::Claude, &env, Variant::Core, None).expect("a place");
+    let skill = place(Harness::Claude, &env, Variant::Core, ".specs", None).expect("a place");
     let specs = Specs {
         variant: Variant::Core,
+        folder: ".specs",
         skill: &skill,
     };
     let failed = write_own(Harness::Claude, &env, &launch(&id(), Some(specs)))
@@ -188,9 +190,10 @@ fn a_write_is_made_to_a_name_of_the_launch_s_own_and_another_launch_s_is_left_al
     let mine = format!("{}.{}.tmp", copy.file(), id().as_str());
     fs::create_dir(&mine).expect("a folder at the launch's name");
     let env = home_env(&fake);
-    let skill = place(Harness::Claude, &env, Variant::Core, None).expect("a place");
+    let skill = place(Harness::Claude, &env, Variant::Core, ".specs", None).expect("a place");
     let specs = Specs {
         variant: Variant::Core,
+        folder: ".specs",
         skill: &skill,
     };
     write_own(Harness::Claude, &env, &launch(&id(), Some(specs)))
