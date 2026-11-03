@@ -90,8 +90,10 @@ runs = ["ledger-pause-words"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "    [false, true].into_iter().find_map(|harness_gone| {\n"
-replace = "    [false].into_iter().find_map(|harness_gone| {\n"
+find = '''    [Way::Resume, Way::Gone, Way::Held]
+        .into_iter()'''
+replace = '''    [Way::Resume, Way::Held]
+        .into_iter()'''
 
 [[plant]]
 name = "harness gone: a note of tasks on gone harnesses alone says their windows come back"
@@ -100,7 +102,7 @@ runs = ["ledger-pause-words"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "            if many.iter().any(|paused| !paused.harness_gone) {\n"
+find = "            if many.iter().any(|paused| paused.way == Way::Resume) {\n"
 replace = "            if true {\n"
 
 # The words told to the window of a task paused on a harness with no adapter reach nothing,
@@ -133,5 +135,7 @@ runs = ["engine-no-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "        named.because = with_kept(&named.because, message.id, why, held, named.harness_gone);\n"
-replace = "        named.because = with_kept(&named.because, message.id, why, held, false);\n"
+find = '''            held,
+            named.way == Way::Gone,'''
+replace = '''            held,
+            false,'''

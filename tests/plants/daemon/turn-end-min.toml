@@ -780,13 +780,13 @@ runs = ["tem-engine-turn-end"]
 [[plant.edit]]
 file = "crates/cf-engine/src/ownership.rs"
 find = '''
-        if gone {
-            return Ok(Kept::On(Some(conversation)));
-        }'''
+                if self.seams.ledger.borrow().program_gone(conversation.id)? {
+                    return Ok(Kept::On(found));
+                }'''
 replace = '''
-        if gone || true {
-            return Ok(Kept::On(Some(conversation)));
-        }'''
+                if self.seams.ledger.borrow().program_gone(conversation.id)? || true {
+                    return Ok(Kept::On(found));
+                }'''
 
 [[plant]]
 name = "turn-end-min ownership: another task goes on in a conversation after a restart, which never saw its window close"
@@ -812,13 +812,13 @@ runs = ["tem-engine-sessions"]
 [[plant.edit]]
 file = "crates/cf-engine/src/ownership.rs"
 find = '''
-        if gone {
-            return Ok(Kept::On(Some(conversation)));
-        }'''
+                if self.seams.ledger.borrow().program_gone(conversation.id)? {
+                    return Ok(Kept::On(found));
+                }'''
 replace = '''
-        if gone && false {
-            return Ok(Kept::On(Some(conversation)));
-        }'''
+                if self.seams.ledger.borrow().program_gone(conversation.id)? && false {
+                    return Ok(Kept::On(found));
+                }'''
 
 # A session the human deleted keeps how its window ended: since T-541 the ledger keeps it on the
 # session's conversation, and the plant that made the record forget it is `exit-proof.toml`'s
