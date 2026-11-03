@@ -657,3 +657,13 @@ find = """
         settle_answered(store, question_id)?;"""
 replace = """
         }"""
+
+[[plant]]
+name = "live matrix: the stand-in runs the last cf on its PATH, not the first"
+meant = "cf_is_the_first_on_the_path_and_nothing_else_is_looked_at"
+runs = ["matrix-fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = """    std::env::split_paths(path).find_map(|folder| {"""
+replace = """    std::env::split_paths(path).collect::<Vec<_>>().into_iter().rev().find_map(|folder| {"""
