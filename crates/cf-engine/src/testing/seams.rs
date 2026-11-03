@@ -104,14 +104,21 @@ impl crate::seams::ComputerUse for FakeComputerUse {
 /// Each window's environment names its participant.
 pub struct FakePaneEnv {
     pub(crate) recorder: Recorder,
+    /// The window's environment says its home is the project's folder (`HOME`), as a window
+    /// opened on the home folder has it: none of the recorded traces has it.
+    pub home_is_the_project: std::cell::Cell<bool>,
 }
 
 impl PaneEnv for FakePaneEnv {
-    fn env(&self, participant: &ParticipantView, _project: &ProjectView) -> Vec<(String, String)> {
-        let env = vec![(
+    fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)> {
+        let mut env = vec![(
             "CONSENSFLOW_PARTICIPANT".to_owned(),
             participant.handle.clone(),
         )];
+        // Not among the recorded: the traces are Node's, which knew no such variable.
+        if self.home_is_the_project.get() {
+            env.push(("HOME".to_owned(), project.directory.clone()));
+        }
         self.recorder.called(
             "paneEnv",
             None,

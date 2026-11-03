@@ -138,6 +138,8 @@ pub struct Context {
     pub roles: Rc<FakeRoles>,
     pub trace: Rc<FakeTrace>,
     pub log: Rc<FakeLog>,
+    /// What the engine gives a window's environment: a test may say its home is the project's.
+    pub pane_env: Rc<FakePaneEnv>,
     pub launch_files: Rc<FakeLaunchFiles>,
     /// What the machine says of computer use: none of it, unless a test says so.
     pub computer_use: Rc<FakeComputerUse>,
@@ -198,6 +200,10 @@ impl Context {
             forgets: Cell::new(false),
             forgotten: RefCell::new(Vec::new()),
         });
+        let pane_env = Rc::new(FakePaneEnv {
+            recorder: recorder.clone(),
+            home_is_the_project: std::cell::Cell::new(false),
+        });
         let log = Rc::new(FakeLog {
             recorder: recorder.clone(),
             failures: RefCell::new(Vec::new()),
@@ -220,9 +226,7 @@ impl Context {
                 recorder: recorder.clone(),
                 ledger: Rc::clone(&ledger),
             }),
-            pane_env: Rc::new(FakePaneEnv {
-                recorder: recorder.clone(),
-            }),
+            pane_env: Rc::clone(&pane_env) as Rc<_>,
             roster: Rc::clone(&roster) as Rc<_>,
             roles: Rc::clone(&roles) as Rc<_>,
             trace: Rc::clone(&trace) as Rc<_>,
@@ -263,6 +267,7 @@ impl Context {
             roles,
             trace,
             log,
+            pane_env,
             launch_files,
             computer_use,
             dispatcher,

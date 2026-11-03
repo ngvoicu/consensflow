@@ -57,6 +57,8 @@ mod bound;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) mod guard;
 #[cfg(test)]
+mod holds_tests;
+#[cfg(test)]
 mod left_tests;
 #[cfg(test)]
 mod machine_tests;
@@ -194,6 +196,21 @@ impl ProcessTree {
         self.bound.observe(&Table::of(&snapshot));
         let tree = self.select(&snapshot, &HashMap::new());
         Ok(self.members_in(&snapshot, &tree))
+    }
+
+    /// Whether the process `pid` is in the tree now: the window's program, or what a look at
+    /// the tree finds below it or in its session ([`ProcessTree::members`]). A process the
+    /// look does not find (one that left the session with no shell to show it) is not held,
+    /// whatever it is.
+    pub fn holds(&self, pid: u32) -> io::Result<bool> {
+        self.holds_by(&Native, pid)
+    }
+
+    fn holds_by(&self, system: &impl System, pid: u32) -> io::Result<bool> {
+        Ok(self
+            .members_by(system)?
+            .iter()
+            .any(|member| member.key.pid == pid))
     }
 
     /// What may be the window's and runs on, not ended, for the exit to name: each

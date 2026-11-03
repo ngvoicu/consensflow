@@ -28,6 +28,7 @@ use crate::deliveries::Delivering;
 use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
+use crate::privacy::PrivacyPart;
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
 use crate::runtime::{begin, caught, returning};
@@ -535,6 +536,9 @@ impl Dispatcher {
         // What its task was held for went with it: a task held again in a window opened
         // again is told again (`turn_end`).
         *record.held.borrow_mut() = HeldPart::default();
+        // A privacy dialog it waited on, and the services told of, went with the window: a
+        // window opened again is told of them again (`privacy`).
+        *record.privacy.borrow_mut() = PrivacyPart::default();
         if let Some(token) = token {
             self.seams.credentials.revoke(&token);
         }
@@ -766,6 +770,11 @@ impl Dispatcher {
         if let Some(id) = resumed_on {
             self.seams.ledger.borrow_mut().set_program_gone(id, false)?;
         }
+        // Where the window's program finds its home: a window opened on it is told of (`privacy`).
+        let home = env
+            .iter()
+            .find(|(name, _)| name == "HOME")
+            .map(|(_, value)| value.clone());
         // The host watches a window's process before it answers the open, so
         // an exit can come first, even in the same read: the exit finds it here.
         let asked_at = self.now();
@@ -842,6 +851,7 @@ impl Dispatcher {
         // The window's own process: an adapter may find the harness's own
         // status by it from its first look.
         planned.window.opened(pid);
+        self.home_note(project, participant, home.as_deref(), &workspace(project));
         if self.forgotten(record) {
             {
                 let mut part = record.window.borrow_mut();

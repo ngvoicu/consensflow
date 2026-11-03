@@ -171,6 +171,13 @@ pub fn register_pane_handlers(
         Ok(opened)
     });
 
+    // How many alerts of the system's notification centre are on screen: a privacy dialog
+    // raised in the app's name is one, and its being gone is how the daemon knows a window's wait
+    // on it is over (T-1194). Null where the system gives no list of windows.
+    builder.on("pane.alerts", |_bridge, _body| {
+        Ok(json!({"ok":true,"alerts":crate::alerts::on_screen()}))
+    });
+
     // Keys typed into a pane and an emulator's replies (a page-less peer
     // answers a cursor query itself) are written alike.
     for operation in ["pane.input", "pane.reply"] {
@@ -674,6 +681,58 @@ mod tests {
             (&answer["typed"], &answer["typedQuietMs"], &answer["unsent"]),
             (&json!(2), &json!(40), &json!(true))
         );
+    }
+
+    /// The daemon asks how many alerts of the system's notification centre are on screen (a
+    /// privacy dialog is one) to end the wait it holds a window in (T-1194): the host answers a
+    /// number, or null where the system gives no list of windows.
+    #[cfg(unix)]
+    #[test]
+    fn the_host_says_how_many_alerts_the_system_has_on_screen() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            arbiter,
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut frame = serde_json::to_vec(
+            &json!({"v":1,"id":"n-alerts-1","kind":"req","op":"pane.alerts","body":{}}),
+        )
+        .expect("serialize request");
+        frame.push(b'\n');
+        node_stream.write_all(&frame).expect("write request");
+        let answer = loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read response");
+            let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+            if frame["kind"] == "res" && frame["id"] == "n-alerts-1" {
+                break frame["body"].clone();
+            }
+        };
+        assert_eq!(answer["ok"], true, "{answer}");
+        assert!(
+            answer
+                .get("alerts")
+                .is_some_and(|alerts| alerts.is_null() || alerts.is_u64()),
+            "{answer}"
+        );
+        drop(connected);
     }
 
     /// Over the bridge as the daemon speaks it: its own keys are not the

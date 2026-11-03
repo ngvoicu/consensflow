@@ -240,7 +240,7 @@ impl Dispatcher {
 
     /// The note of a dialog in `participant`'s window, `body`, to the human and to whoever gave
     /// the window's task, where that is another than the human.
-    fn tell_dialog(
+    pub(crate) fn tell_dialog(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,

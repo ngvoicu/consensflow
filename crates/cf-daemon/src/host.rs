@@ -24,7 +24,7 @@ use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::{Role, DEADLINE};
 use cf_proto::panes::{
     Background, CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
-    TAIL_LINES,
+    TccPrompt, TccUnreadable, TAIL_LINES, TCC_PROMPT_EVENT, TCC_UNREADABLE_EVENT,
 };
 use serde_json::{json, Map, Value};
 
@@ -127,6 +127,24 @@ impl EngineHost for BridgeHost {
             .request("pane.snapshot", screen_request(pane), None);
         Box::pin(async move { sent.await.map_err(host_error) })
     }
+
+    fn alerts(&self) -> Work<'_, Result<Option<usize>, HostError>> {
+        let sent = self.bridge.request("pane.alerts", json!({}), None);
+        Box::pin(async move {
+            sent.await
+                .map(|answer| alerts_on_screen(&answer))
+                .map_err(host_error)
+        })
+    }
+}
+
+/// How many alerts the host says the system has on screen: its `pane.alerts`' `alerts`, none
+/// where it says null or nothing (a host that has no such look refuses it as an unknown op).
+fn alerts_on_screen(answer: &Value) -> Option<usize> {
+    answer
+        .get("alerts")
+        .and_then(Value::as_u64)
+        .and_then(|alerts| usize::try_from(alerts).ok())
 }
 
 /// The `pane.snapshot` of a pane's last lines, for the engine's look at its screen.
@@ -326,6 +344,54 @@ pub fn watch_exits(
             Err(panicked) => spawn.errors().caught("a window's exit failed", &panicked),
         }
     })
+}
+
+/// What the host says of the system's privacy dialogs (`pane.tcc`, `pane.tcc_unreadable`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrivacyEvent {
+    /// A dialog is raised in the app's name for a process of a window, or of the app's own.
+    Prompt(TccPrompt),
+    /// The host cannot read the system's log of those dialogs.
+    Unreadable(TccUnreadable),
+}
+
+/// The two subscriptions of [`watch_privacy`], held for as long as the events are wanted.
+pub struct PrivacyWatching {
+    _prompts: Subscription,
+    _unreadable: Subscription,
+}
+
+/// The host's word of a privacy dialog, told to `told` where it is read, as an exit is. A body
+/// that says no service, no process or no program (an older host's, or a test's) is no dialog,
+/// and is not told. A panic in `told` is written down and the reader goes on.
+pub fn watch_privacy(
+    bridge: &Bridge,
+    spawn: Rc<DaemonSpawn>,
+    told: impl Fn(PrivacyEvent) + 'static,
+) -> PrivacyWatching {
+    let told: Rc<dyn Fn(PrivacyEvent)> = Rc::new(told);
+    let (told_prompts, spawn_prompts) = (Rc::clone(&told), Rc::clone(&spawn));
+    PrivacyWatching {
+        _prompts: bridge.on_event(TCC_PROMPT_EVENT, move |body| {
+            if let Ok(prompt) = serde_json::from_value::<TccPrompt>(body.clone()) {
+                tell_privacy(&*told_prompts, &spawn_prompts, PrivacyEvent::Prompt(prompt));
+            }
+        }),
+        _unreadable: bridge.on_event(TCC_UNREADABLE_EVENT, move |body| {
+            if let Ok(unreadable) = serde_json::from_value::<TccUnreadable>(body.clone()) {
+                tell_privacy(&*told, &spawn, PrivacyEvent::Unreadable(unreadable));
+            }
+        }),
+    }
+}
+
+/// `event`, told to `told`; a panic in it is written down, and the reader goes on.
+fn tell_privacy(told: &dyn Fn(PrivacyEvent), spawn: &DaemonSpawn, event: PrivacyEvent) {
+    if let Err(panicked) = contain_now(|| told(event)) {
+        spawn
+            .errors()
+            .caught("a privacy dialog's word failed", &panicked);
+    }
 }
 
 #[cfg(test)]

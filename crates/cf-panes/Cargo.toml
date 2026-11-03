@@ -44,6 +44,12 @@ serde_json.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+# The reader of the system's log of privacy dialogs (src/tcc/real.rs) is started through
+# cf-process, the one place a process starts, on a runtime of its own.
+[target.'cfg(target_os = "macos")'.dependencies]
+cf-process.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "time"] }
+
 # A window's pseudoconsole and its program, started in the window's job
 # (src/pty/conpty.rs), answer portable-pty's traits, whose errors are anyhow's. Its
 # environment is read whole from portable-pty's own serde form (`serde_support`:

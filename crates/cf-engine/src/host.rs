@@ -68,4 +68,10 @@ pub trait EngineHost: PaneHost {
     /// read of the screen that changes nothing, which the Node traces have none of, as
     /// [`EngineHost::quiet`].
     fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>>;
+    /// How many alerts of the system's notification centre are on the Mac's screen now (a
+    /// macOS privacy dialog raised in the app's name is one): none said where the host does
+    /// not say (a Windows host, an older one, a Mac with no window server). The engine's look
+    /// at whether the dialog a window waits on is still up (`Dispatcher::watch_privacy`, T-1194).
+    /// A read that changes nothing, which the Node traces have none of, as [`EngineHost::screen`].
+    fn alerts(&self) -> Work<'_, Result<Option<usize>, HostError>>;
 }

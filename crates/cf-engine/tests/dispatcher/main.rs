@@ -89,6 +89,7 @@ mod pause_notes;
 mod paused_answers;
 mod paused_left;
 mod pending_agents;
+mod privacy_prompts;
 mod queued_tells;
 mod quota;
 mod quota_accounts;
