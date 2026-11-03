@@ -285,3 +285,28 @@ fn a_decline_whose_look_finds_the_dialog_gone_presses_nothing() {
     passes(&context, 12, 1_000);
     assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
 }
+
+#[test]
+fn a_decline_whose_look_finds_another_dialog_where_its_harness_still_says_one_is_open_presses_nothing(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context, &LSP);
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some(DIALOG_OPEN.to_owned()),
+        });
+    });
+    passes(&context, 4, 1_000);
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(told[0].contains("ConsensFlow declines it"), "{}", told[0]);
+    // Before the next look the offer went and a permission prompt came, its harness saying a
+    // dialog is open all along: the key of the offer's decline would answer the prompt.
+    context.host.set_snapshot(json!({ "tail": PROMPT }));
+    passes(&context, 12, 1_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    // And where its screen shows nothing it can read, nothing either.
+    context.host.set_snapshot(json!({ "tail": [" (drawing)"] }));
+    passes(&context, 12, 1_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+}

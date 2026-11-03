@@ -282,7 +282,7 @@ replace = "            let Some(decline) = watch.decline.as_ref() else {"
 
 [[plant]]
 name = "harness dialogs: a decline whose look finds the dialog gone presses its key all the same"
-meant = "a_decline_whose_look_finds_the_dialog_gone_presses_nothing"
+meant = "a_decline_whose_look_finds_another_dialog_where_its_harness_still_says_one_is_open_presses_nothing"
 runs = ["hd-engine"]
 
 [[plant.edit]]
