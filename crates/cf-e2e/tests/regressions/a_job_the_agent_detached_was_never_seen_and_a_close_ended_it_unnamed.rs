@@ -172,7 +172,9 @@ fn a_busy_worker_that_detached_a_job_and_ignores_its_pause_keeps_its_window_and_
     })?;
     the_window_is_kept_for_the_job_until_the_human_ends_its_session(
         &rig, &project, &handle, &pane, &job,
-    )
+    )?;
+    rig.close()?;
+    Ok(())
 }
 
 /// A tell is pasted after the agent detached its job, and the turn it starts ignores every key
@@ -235,7 +237,9 @@ fn a_tell_pasted_after_the_agent_detached_a_job_does_not_make_the_host_forget_it
     })?;
     the_window_is_kept_for_the_job_until_the_human_ends_its_session(
         &rig, &project, &handle, &pane, &job,
-    )
+    )?;
+    rig.close()?;
+    Ok(())
 }
 
 #[test]

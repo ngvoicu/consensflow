@@ -117,5 +117,6 @@ fn a_busy_worker_that_ignores_its_pause_keeps_its_window_and_its_work_until_the_
     rig.wait_for("the window's work to end with it", secs(60), || {
         Ok(!is_alive(job.pid()))
     })?;
+    rig.close()?;
     Ok(())
 }
