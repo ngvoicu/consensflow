@@ -182,3 +182,14 @@ written in its last words arrived as its result (T-1119, the field report of 202
 Changed by hand on 2026-11-02, and recorded from the engine on 2026-11-03 when it was merged
 (T-1176). The role-change budgets moved with it: read whole to 199 rows with specs on and 227
 without (202 and 231), and to 33 and 62 with the most rules for the staff (37 and 65).
+
+The chief's twelve rows say that each task gets a window of its own, and that a member runs
+any number of tasks at once (T-1134, `skill/core/chief.md`): the command card's `--after`
+line says a follow-up is "only when it needs what that window already knows" and that
+"reviews, parallel work and work for another role stay fresh, and start at once beside that
+window's work"; "Each task gets a new window of a member of that role and tier on this
+project's staff", where it said "ConsensFlow gives the task to a free member"; and the staff
+section ends "Each member is a model, not a person: it runs any number of tasks at once, each
+in its own window." Changed by hand on 2026-11-03, and recorded from the engine when it was
+merged (T-1176). The role-change budgets moved with it: read whole to 195 rows with specs on
+and 223 without (199 and 227), and to 29 and 58 with the most rules for the staff (33 and 62).

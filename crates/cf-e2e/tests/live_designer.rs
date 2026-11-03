@@ -270,11 +270,11 @@ mod tests {
 
     #[test]
     fn the_task_put_on_the_board_for_a_designer_is_the_one_the_chief_is_told() {
-        let said = "T-12 is on the board for an image designer; the first free one gets it, \
+        let said = "T-12 is on the board for an image designer; it starts in a new window of one, \
                     and its result arrives in your inbox.\n";
         assert_eq!(task_for_a_designer(said), Some(12));
         // A task for a worker is no designer's; a refusal and nothing are none.
-        let worker = "T-3 is on the board for a standard worker; the first free one gets it.";
+        let worker = "T-3 is on the board for a standard worker; it starts in a new window of one.";
         assert_eq!(task_for_a_designer(worker), None);
         assert_eq!(
             task_for_a_designer("cf: no image designer on the staff"),

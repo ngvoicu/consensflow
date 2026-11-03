@@ -25,7 +25,7 @@ what happened; a command written in your reply does nothing.
     {{cf}} task add --review --tier <tier> "…"   a review for a reviewer: what to review and what to check; findings back, no file changed
     {{cf}} task add --test --tier <tier> "…"     a test for a tester: what to run and what to check; results with evidence back, no product code changed
     {{cf}} task add --design "…"      an image from the image designer: what to draw, what to use as reference, where to save it
-    {{cf}} task add --after T-3 "…"   a follow-up for the window that did T-3: the next step of that window's own work (carry out the plan or findings it just wrote, part 2 after its part 1); reviews, parallel work and work for another role stay fresh
+    {{cf}} task add --after T-3 "…"   a follow-up for the window that did T-3: the next step of that window's own work, only when it needs what that window already knows (carry out the plan or findings it just wrote, part 2 after its part 1); reviews, parallel work and work for another role stay fresh, and start at once beside that window's work
     … --needs T-3,T-4             the task waits on the board until T-3 and T-4 are accepted
     … --before T-9,T-10           T-9 and T-10, still on the board, wait for this task
     {{cf}} task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
@@ -190,7 +190,7 @@ of that tier (`--review`) checks finished work and changes no file; a tester
 of that tier (`--test`) runs the work to check it and changes no product code.
 An image comes from the image designer (`--design`, no tier); its result
 names the file.
-ConsensFlow gives the task to a free member of that role and tier on this
+Each task gets a new window of a member of that role and tier on this
 project's staff; you never pick the member. A tier nobody on the staff holds
 goes to the nearest one somebody does, the next one up first; you are told whose.
 Only a role nobody holds is refused: only the human adds members, so ask them
@@ -239,6 +239,8 @@ A tester checks work by running it, when the work can be run.
 ## The staff
 
 Roles and tiers, nothing else, as of your launch; the human may change them
-while you work, and `{{cf}} staff` shows them as they are now.
+while you work, and `{{cf}} staff` shows them as they are now. Each member is a
+model, not a person: it runs any number of tasks at once, each in its own
+window.
 
 {{staff}}

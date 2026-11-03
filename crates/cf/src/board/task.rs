@@ -235,7 +235,7 @@ fn add(
             ),
         };
         format!(
-            "T-{number} is on the board for {}{nearest}; the first free one gets it, and its result arrives in your inbox.{waits}{holds}{gated}",
+            "T-{number} is on the board for {}{nearest}; it starts in a new window of one, and its result arrives in your inbox.{waits}{holds}{gated}",
             a_pool(pool, tier.as_ref())
         )
     };
@@ -1064,7 +1064,7 @@ and 2 idle sessions (`cf task list --all`)";
         );
         assert_eq!(
             said,
-            "T-3 is on the board for a standard tester; the first free one gets it, and its result arrives in your inbox.\nSent: 7 characters, ending \"Run T-2\"."
+            "T-3 is on the board for a standard tester; it starts in a new window of one, and its result arrives in your inbox.\nSent: 7 characters, ending \"Run T-2\"."
         );
         // Beside the others, and with none of them it is a plain task.
         let (posted, _) = added(
@@ -1078,6 +1078,72 @@ and 2 idle sessions (`cf task list --all`)";
         );
         let (posted, _) = added(&["--tier", "light", "Write it"], &answer);
         assert_eq!(posted, Some(json!({ "tier": "light", "body": "Write it" })));
+    }
+
+    /// A chief that read of a free member after every task it added took a member
+    /// for a person who can be busy, and chained its work through one window (T-1129, T-1134):
+    /// whatever the task waits for, the receipt says a member of its role and tier takes it in a
+    /// new window, and says nothing of a member free or busy.
+    #[test]
+    fn a_task_added_is_never_said_to_wait_for_a_free_member_and_goes_to_a_new_window() {
+        let task = |pool: &str, tier: Value, blocked: Value| {
+            json!({ "task": { "number": 3, "state": "open", "assignee": null, "requester": "chief",
+                "title": "T", "blockedBy": blocked, "pool": pool, "tier": tier },
+                "message": null, "gated": false })
+        };
+        let mut gated = task("worker", json!("standard"), json!([]));
+        gated["gated"] = json!(true);
+        let mut nearest = task("worker", json!("complex"), json!([]));
+        nearest["asked"] = json!("critical");
+        let cases = [
+            (
+                vec!["--tier", "standard", "A"],
+                task("worker", json!("standard"), json!([])),
+            ),
+            (
+                vec!["--advice", "--tier", "complex", "A"],
+                task("advisor", json!("complex"), json!([])),
+            ),
+            (
+                vec!["--review", "--tier", "light", "A"],
+                task("reviewer", json!("light"), json!([])),
+            ),
+            (
+                vec!["--test", "--tier", "standard", "A"],
+                task("tester", json!("standard"), json!([])),
+            ),
+            (
+                vec!["--design", "A"],
+                task("designer", Value::Null, json!([])),
+            ),
+            (vec!["--tier", "critical", "A"], nearest),
+            (
+                vec!["--tier", "standard", "--needs", "T-2", "A"],
+                task("worker", json!("standard"), json!([2])),
+            ),
+            (
+                vec!["--tier", "standard", "--before", "T-9,T-10", "A"],
+                task("worker", json!("standard"), json!([])),
+            ),
+            (vec!["--tier", "standard", "A"], gated),
+        ];
+        for (words, answer) in cases {
+            let (_, said) = added(&words, &answer);
+            let line = said.lines().next().unwrap_or_default();
+            for word in line.split(|c: char| !c.is_alphabetic()) {
+                let word = word.to_lowercase();
+                assert!(
+                    word != "free" && word != "busy",
+                    "`cf task add {words:?}` says a member is {word}: {line}"
+                );
+            }
+            assert!(
+                line.contains(
+                    "; it starts in a new window of one, and its result arrives in your inbox."
+                ),
+                "`cf task add {words:?}` does not say the task gets a new window: {line}"
+            );
+        }
     }
 
     /// What `cf task edit words…` posted and printed, the board answering with `answer`.

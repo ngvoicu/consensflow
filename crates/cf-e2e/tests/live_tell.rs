@@ -518,7 +518,7 @@ mod tests {
     #[test]
     fn a_task_number_is_read_from_the_chiefs_words() {
         assert_eq!(
-            number_in("T-1 is on the board for a complex worker; the first free one gets it"),
+            number_in("T-1 is on the board for a complex worker; it starts in a new window of one"),
             Some(1)
         );
         assert_eq!(number_in("nothing"), None);
