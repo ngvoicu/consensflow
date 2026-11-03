@@ -32,6 +32,7 @@ dw-panes-baseline = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "b
 dw-panes-leaving = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::turn::leaving_tests::"]
 dw-panes-machine = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::machine_tests::"]
 dw-panes-births = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::births::"]
+dw-panes-listener = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "job_object::listener_tests::"]
 dw-rig-regression = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_the_agent_detached_was_never_seen"], builds = true }
 
 [[plant]]
@@ -66,17 +67,17 @@ replace = "        if false && protected.contains(&at.key) {"
 
 [[plant]]
 name = "detached work: what the tree had when the turn began is named"
-meant = "a_job_that_lost_its_starter_before_the_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work"
+meant = "a_job_that_lost_its_starter_before_the_first_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work"
 runs = ["dw-panes-baseline"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background.rs"
-find = "            tree.iter().partition(|member| before.contains(&member.key));"
-replace = "            tree.iter().partition(|member| before.contains(&member.key) && false);"
+find = "            before.contains(&member.key) && !self.carried.contains(&member.key)"
+replace = "            before.contains(&member.key) && !self.carried.contains(&member.key) && false"
 
 [[plant]]
 name = "detached work: a window never marked names detached work"
-meant = "a_job_that_lost_its_starter_before_the_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work"
+meant = "a_job_that_lost_its_starter_before_the_first_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work"
 runs = ["dw-panes-baseline"]
 
 [[plant.edit]]
@@ -224,8 +225,8 @@ runs = ["dw-panes-births"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/births.rs"
-find = "        while self.order.len() > BIRTHS {"
-replace = "        while self.order.len() > BIRTHS * 1000 {"
+find = "        while self.order.len() > self.cap {"
+replace = "        while self.order.len() > self.cap * 1000 {"
 
 [[plant]]
 name = "detached work: a job only the window's marker ties to it is work a close ends"
@@ -270,3 +271,139 @@ platforms = ["windows"]
 file = "crates/cf-panes/src/job_object.rs"
 find = "                    .record(pid, began, by_a_shell);"
 replace = "                    .record(pid, began, false);"
+
+# T-1153's D1, D2 and D3 (2026-11-03): the detached work a mark carries, a birth that lasts as long
+# as its process, and the listener's port.
+
+[[plant]]
+name = "detached work: a mark forgets the job the turn before detached"
+meant = "a_detached_job_is_still_named_at_the_turns_after_the_one_it_was_detached_in"
+runs = ["dw-panes-baseline"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = "        self.carried = carried;"
+replace = '''        let _ = carried;
+        self.carried = HashSet::new();'''
+
+[[plant]]
+name = "detached work: a mark forgets the job the turn before detached, on a pane of the Mac"
+meant = "a_detached_job_is_still_named_after_a_note_is_pasted_and_a_close_after_that_ends_it_and_names_it"
+runs = ["dw-panes-leaving"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = "        self.carried = carried;"
+replace = '''        let _ = carried;
+        self.carried = HashSet::new();'''
+
+[[plant]]
+name = "detached work: a mark forgets the job the turn before detached, on a pane of Windows"
+meant = "a_detached_ping_is_still_named_after_a_note_is_pasted_and_a_build_tools_is_not"
+runs = ["dw-panes-leaving"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = "        self.carried = carried;"
+replace = '''        let _ = carried;
+        self.carried = HashSet::new();'''
+
+[[plant]]
+name = "detached work: a mark forgets the job the turn before detached, on the rig"
+meant = "a_tell_pasted_after_the_agent_detached_a_job_does_not_make_the_host_forget_it_and_the_window_is_kept"
+runs = ["dw-rig-regression"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = "        self.carried = carried;"
+replace = '''        let _ = carried;
+        self.carried = HashSet::new();'''
+
+[[plant]]
+name = "detached work: a job that ended is carried for good"
+meant = "what_a_carried_job_starts_in_a_later_turn_is_named_with_it_and_a_job_that_ended_is_forgotten"
+runs = ["dw-panes-baseline"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '''        let carried: HashSet<ProcessKey> = self
+            .detached(tree)
+            .iter()
+            .map(|member| member.key)
+            .collect();'''
+replace = '''        let carried: HashSet<ProcessKey> = self
+            .detached(tree)
+            .iter()
+            .map(|member| member.key)
+            .chain(self.carried.iter().copied())
+            .collect();'''
+
+[[plant]]
+name = "detached work: a look does not name a job the turns before carried"
+meant = "a_detached_job_is_still_named_at_the_turns_after_the_one_it_was_detached_in"
+runs = ["dw-panes-baseline"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = "            before.contains(&member.key) && !self.carried.contains(&member.key)"
+replace = "            before.contains(&member.key)"
+
+[[plant]]
+name = "detached work: a birth outlives its process"
+meant = "a_birth_is_let_go_of_when_its_process_exits_and_an_unknown_number_is_no_matter"
+runs = ["dw-panes-births"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/births.rs"
+find = '''        if let Some(birth) = self.by_number.remove(&pid) {
+            self.order.remove(&birth.recorded);
+        }'''
+replace = '''        let _ = pid;'''
+
+[[plant]]
+name = "detached work: a number recorded again keeps its place in the line"
+meant = "a_number_recorded_again_goes_to_the_back_of_the_line_to_be_let_go_of"
+runs = ["dw-panes-births"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/births.rs"
+find = '''        self.forget(pid);
+        let recorded = self.next;'''
+replace = '''        let recorded = self.next;'''
+
+[[plant]]
+name = "detached work: on Windows the listener lets go of no birth when a process exits"
+meant = "a_birth_of_a_server_that_runs_is_kept_while_more_short_lived_processes_than_the_bound_come_and_go"
+runs = ["dw-panes-listener"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/job_object.rs"
+find = "            JOB_OBJECT_MSG_EXIT_PROCESS | JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS => births"
+replace = "            JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS => births"
+
+[[plant]]
+name = "detached work: on Windows a job that is dropped does not tell its listener to stop"
+meant = "a_job_that_is_dropped_ends_its_listener_and_closes_its_port"
+runs = ["dw-panes-listener"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/job_object.rs"
+find = "            unsafe { PostQueuedCompletionStatus(port.0, 0, STOP, ptr::null()) };"
+replace = "            let _ = (port, STOP);"
+
+[[plant]]
+name = "detached work: on Windows the port of a job is never closed"
+meant = "a_job_that_is_dropped_ends_its_listener_and_closes_its_port"
+runs = ["dw-panes-listener"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/job_object.rs"
+find = '''        // SAFETY: the handle is ours, and closed here once.
+        unsafe { CloseHandle(self.0) };'''
+replace = '''        let _ = self.0;'''

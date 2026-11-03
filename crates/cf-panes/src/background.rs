@@ -48,7 +48,11 @@
 //! be the harness's it keeps for its own as long as it runs ([`Baseline::turn_work`]
 //! remembers it), whatever becomes of the process that started it. So what is listed and named
 //! is the turn's work, the detached work of the window that is proved, and nothing of the
-//! rest, and a process that cannot be told is not named.
+//! rest, and a process that cannot be told is not named. Every paste marks a turn (a tell, the
+//! words of a resume), and a mark takes the tree as what came before: the detached work the
+//! look at the mark names is carried over it ([`Baseline::mark`]), so that a job detached in
+//! an earlier turn is named at the pause of a later one, and is proved again each time
+//! (T-1153's D1). The turn's own work is not carried, as before.
 //!
 //! **A moment later.** A harness runs short commands of its own at any time, and the
 //! host cannot tell one from the agent's by anything it is. Claude Code runs its status

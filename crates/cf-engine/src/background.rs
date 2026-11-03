@@ -33,16 +33,18 @@
 //! has ended (`nohup … &`, `setsid`, `disown`, a double fork, `Start-Process`) is no work of the
 //! *turn* by a chain of processes that run, and the host does not end it as the turn's: but where
 //! the window's tree holds it, the host **names** it as work the window's close ends, so that a
-//! pause keeps the window for it, the chief is told it runs, and a close says what it ended.
-//! The tree holds it on Windows always (the pane's job holds what a process starts wherever it
+//! pause keeps the window for it, the chief is told it runs, and a close says what it ended; it
+//! stays named through the marks of the later turns (every paste marks one: T-1153's D1). The
+//! tree holds it on Windows always (the pane's job holds what a process starts wherever it
 //! goes; the host names it when a shell started it, which the job's port told as it began, for
 //! the job holds a build's daemon too, and the chief is not told of that), and on the Mac when it
 //! is in the session the window's program leads or under the program by the process that started
 //! each. Before T-1145 neither Muse's `Start-Process` ping on Windows (T-1126) nor a job
 //! detached with `&` in a window's own session was named, a paused window with only that running
 //! was closed, and the close ended it unnamed. **What is still not named** is a
-//! job on the Mac that left the window's session (`setsid`, and the shells of Claude Code and Pi,
-//! which lead sessions of their own) with its shell gone, whose program is a system binary: it has
+//! job on the Mac that left the window's session (`setsid`, and the tool shells of Claude Code, Pi
+//! and Devin, which lead sessions of their own) with its shell gone, whose program is a system
+//! binary (T-1100's answer A keeps it a written limit for 3.0.7): it has
 //! no marker the host can read, no session and no parent that tie it to the window (`cf-panes`'
 //! `background::work` says what was tried), and no close of the window ends it either: it runs on
 //! orphaned, as it did before. The window's close ends it where the tree finds it the window's,
