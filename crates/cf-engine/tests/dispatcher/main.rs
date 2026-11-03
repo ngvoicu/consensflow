@@ -98,6 +98,7 @@ mod restart;
 mod resumable;
 mod resume;
 mod resumed_at_work;
+mod resumed_at_work_claims;
 mod retired_agents;
 mod review;
 mod role_change;

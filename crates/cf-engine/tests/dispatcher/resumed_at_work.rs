@@ -30,7 +30,7 @@ use crate::paused_answers::{
 
 /// The agent of T-1's window writes another step of its turn: a tool call and its result, as
 /// the harness's record shows them while the turn goes on.
-fn works_on(context: &Context, step: &str) {
+pub(crate) fn works_on(context: &Context, step: &str) {
     let mut call: Item = context.adapter.item(Role::Tool, step);
     call.complete = true;
     context
@@ -39,7 +39,7 @@ fn works_on(context: &Context, step: &str) {
 }
 
 /// The resume's words as the ledger has them: T-1's last task message to its window.
-fn resume_words(context: &Context, project: i64) -> MessageView {
+pub(crate) fn resume_words(context: &Context, project: i64) -> MessageView {
     context
         .task(project, 1)
         .messages
@@ -48,13 +48,13 @@ fn resume_words(context: &Context, project: i64) -> MessageView {
         .expect("the resume's words")
 }
 
-fn state(context: &Context, project: i64) -> String {
+pub(crate) fn state(context: &Context, project: i64) -> String {
     context.task(project, 1).task.state
 }
 
 /// The chief resumes T-1 after the window answered the tell and went on, and the window's
 /// turn goes on: two passes, the second after the record grew.
-fn resumed_while_the_turn_goes_on(context: &Context) -> (i64, MessageView, MessageView) {
+pub(crate) fn resumed_while_the_turn_goes_on(context: &Context) -> (i64, MessageView, MessageView) {
     let (project, told) = told_at_work(context);
     answers_and_goes_on(context, &told);
     context.pass().unwrap();
@@ -441,7 +441,7 @@ fn a_turn_the_record_says_is_over_but_has_not_said_so_a_moment_shows_no_work() {
 }
 
 /// A context whose windows are given a message only after the settle, as a live daemon's are.
-fn paced() -> Context {
+pub(crate) fn paced() -> Context {
     Context::made(Made {
         settle_ms: 3_000,
         ..Made::default()
