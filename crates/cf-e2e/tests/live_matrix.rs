@@ -639,4 +639,58 @@ mod tests {
     fn pause_keeps_work() {
         holds_but_its_known_reds("pause-keeps-work");
     }
+
+    #[test]
+    fn field_stale_transcript() {
+        holds_but_its_known_reds("field-stale-transcript");
+    }
+
+    #[test]
+    fn field_retitle() {
+        holds_but_its_known_reds("field-retitle");
+    }
+
+    #[test]
+    fn field_draft_kept() {
+        holds_but_its_known_reds("field-draft-kept");
+    }
+
+    #[test]
+    fn field_retyped_under_load() {
+        holds_but_its_known_reds("field-retyped-under-load");
+    }
+
+    #[test]
+    fn field_late_record() {
+        holds_but_its_known_reds("field-late-record");
+    }
+
+    #[test]
+    fn field_recap_not_typed() {
+        holds_but_its_known_reds("field-recap-not-typed");
+    }
+
+    #[test]
+    fn field_long_paste() {
+        holds_but_its_known_reds("field-long-paste");
+    }
+
+    #[test]
+    fn field_image_result() {
+        holds_but_its_known_reds("field-image-result");
+    }
+
+    #[test]
+    fn field_question_not_retyped() {
+        holds_but_its_known_reds("field-question-not-retyped");
+    }
+
+    /// Field report 5's nudges (T-1113): five minutes of wake-up calls a minute apart, too long
+    /// for CI's step, run on request:
+    /// `cargo test -p cf-e2e --test live_matrix -- --ignored field5_nudges`.
+    #[test]
+    #[ignore = "on request: five minutes of wake-up calls; cargo test -p cf-e2e --test live_matrix -- --ignored field5_nudges"]
+    fn field5_nudges() {
+        holds_but_its_known_reds("field5-nudges");
+    }
 }

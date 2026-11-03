@@ -346,6 +346,7 @@ pub(super) fn scenario(
         vars: &[],
         daemon_vars: &[],
         extra: &[],
+        waits: std::time::Duration::ZERO,
     }
 }
 

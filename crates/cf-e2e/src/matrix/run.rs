@@ -46,6 +46,12 @@ pub struct Matrix<'a> {
 /// that waits longer is a red to say, not to wait out.
 pub const STAND_IN_DEADLINE: Duration = Duration::from_secs(180);
 
+/// The deadline of `scenario` on a stand-in board: [`STAND_IN_DEADLINE`] and what it waits by
+/// design, never more than its own.
+pub fn stand_in_deadline(scenario: &Scenario) -> Duration {
+    scenario.deadline.min(STAND_IN_DEADLINE + scenario.waits)
+}
+
 /// What a run came to.
 pub struct Outcome {
     pub checks: Vec<Check>,
@@ -123,6 +129,14 @@ impl Records for RigRecords<'_> {
     fn items(&self, kind: &str, handle: &str) -> Result<Vec<Item>> {
         observe::record(self.members, &self.events, kind, handle)
     }
+
+    fn transcript(&self, number: i64, last: usize) -> Result<Vec<Value>> {
+        let answer = self.members.page(
+            "task.transcript",
+            serde_json::json!({ "task": number, "limit": last }),
+        )?;
+        Ok(answer["items"].as_array().cloned().unwrap_or_default())
+    }
 }
 
 /// Runs `matrix`: the checks and the evidence; the error is the rig's, a run that could not be
@@ -138,7 +152,7 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     } = matrix;
     let mut scenario = scenario.clone();
     if seating.control {
-        scenario.deadline = scenario.deadline.min(STAND_IN_DEADLINE);
+        scenario.deadline = stand_in_deadline(&scenario);
     }
     let scenario = &scenario;
     let id = run_id(&seating.label(), scenario.name);
@@ -684,6 +698,23 @@ fn windows(members: &Members, evidence: &Evidence) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in board ends a scenario at three minutes, and one that waits by design (minutes
+    /// of wake-up calls) at three and what it waits; never past the scenario's own deadline.
+    #[test]
+    fn a_stand_in_deadline_is_three_minutes_and_what_its_scenario_waits_by_design() {
+        let plain = Scenario::named("smoke").unwrap();
+        assert_eq!(stand_in_deadline(&plain), STAND_IN_DEADLINE);
+        let waiting = plain.clone().waiting(Duration::from_secs(360));
+        assert_eq!(stand_in_deadline(&waiting), Duration::from_secs(540));
+        let mut short = waiting;
+        short.deadline = Duration::from_secs(200);
+        assert_eq!(stand_in_deadline(&short), Duration::from_secs(200));
+        assert_eq!(
+            stand_in_deadline(&Scenario::named("field5-nudges").unwrap()),
+            Duration::from_secs(540)
+        );
+    }
 
     const KNOWN: &[Known] = &[
         Known {

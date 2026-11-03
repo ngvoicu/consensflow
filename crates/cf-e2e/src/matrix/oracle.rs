@@ -19,6 +19,13 @@ use super::seating::{Seating, TIER};
 /// `kind`. The rig's, in a run; a test's own in the oracle's tests.
 pub trait Records {
     fn items(&self, kind: &str, handle: &str) -> Result<Vec<crate::live::ask::Item>>;
+
+    /// The last `last` items of the transcript of task `number`, as the page's drawer and
+    /// `cf task get --transcript --last` read it: ConsensFlow's copy of its window's record.
+    fn transcript(&self, number: i64, last: usize) -> Result<Vec<serde_json::Value>> {
+        let _ = (number, last);
+        Ok(Vec::new())
+    }
 }
 
 /// The checks of the tasks of `snapshot`, bound as `bindings` binds them, against `seating`.

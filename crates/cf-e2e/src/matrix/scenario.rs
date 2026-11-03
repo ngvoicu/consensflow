@@ -17,12 +17,14 @@ use super::machine::Fact;
 use super::observe::{Bind, Bindings, Snapshot, SMOKE};
 use super::oracle::{self, Judged};
 
+mod deliveries;
 mod field;
 mod interrupts;
 mod kit;
 mod order;
 mod phase2;
 mod questions;
+mod reports;
 
 pub use field::field;
 pub use interrupts::interrupts;
@@ -38,6 +40,8 @@ pub fn all() -> Vec<Scenario> {
     all.extend(interrupts());
     all.extend(questions());
     all.extend(field());
+    all.extend(reports::reports());
+    all.extend(deliveries::deliveries());
     all
 }
 
@@ -151,6 +155,9 @@ pub struct Scenario {
     /// Members besides the board's five: the stand-in at a tier of its own in a role, added as
     /// staff as the human adds it.
     pub extra: &'static [Extra],
+    /// How long the scenario waits by design on the stand-ins (minutes of wake-up calls), which
+    /// their deadline grants it on top of its own ([`crate::matrix::run::stand_in_deadline`]).
+    pub waits: Duration,
 }
 
 /// A member besides a board's five: its agent's id, its one role and its tier.
@@ -204,6 +211,13 @@ impl Scenario {
     #[must_use]
     pub fn with_extra(mut self, extra: &'static [Extra]) -> Self {
         self.extra = extra;
+        self
+    }
+
+    /// The same scenario, waiting `waits` by design on the stand-ins.
+    #[must_use]
+    pub fn waiting(mut self, waits: Duration) -> Self {
+        self.waits = waits;
         self
     }
 
@@ -330,6 +344,7 @@ pub fn smoke() -> Scenario {
         vars: &[],
         daemon_vars: &[],
         extra: &[],
+        waits: Duration::ZERO,
     }
 }
 
