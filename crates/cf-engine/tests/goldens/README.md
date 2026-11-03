@@ -106,3 +106,19 @@ ends only what the host can tell is the window's, so a detached job can run on. 
 sentence now says "Your answer ends your turn: wait for what your result needs, and
 leave nothing running", in those words alone. The rows were moved by a script that
 put the new text where the old stood.
+
+The 39 rows of the role texts, the 27 members' and the twelve of the chief's that hold the role's own text
+(the other chief rows read an eval's card, and hold the card), name `cf` in a different way
+(`skill/core/chief.md` and `skill/core/staff.md`, T-1049, 2026-11-01). A window's shell can
+find another `cf` first on its PATH (Devin's login zsh on the Mac, Claude Code's login Git
+Bash on Windows, the Cloud Foundry CLI: T-972's live kit, 2026-10-31), so each command a text
+teaches starts with the window's own `cf` by its full path, where Node's said `cf`: the
+`cf` of the row's input, quoted as one word where a shell would read it otherwise (the rows
+whose path has a space, quotes, a backtick or a `$`), and `cf` where the row gives none (the
+undefined `cf` and the empty one). Two more changes follow from it. The sentence "`cf` is on
+this window's PATH and its output says what happened" is now "Its output says what
+happened", for it is no longer the PATH that finds the `cf`. And the section at the end,
+"## This window's cf" ("Here `cf` is …; if `cf` says a command is unknown, or answers as
+another program, … run … instead"), is gone from the rows that had it (those with a `cf`):
+the commands say it. Changed by hand, in those words alone, as a regular edit of each text
+(a command's `cf` put through the row's path, the sentence and the section), on 2026-11-01.

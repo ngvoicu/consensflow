@@ -106,7 +106,8 @@ impl Dispatcher {
             Ok(found.filter(|found| found.project_id == project.id))
         };
         let last = last_words(&history);
-        let pages = history_pages(&history, &message)?;
+        // The pages are as long as the chief's own `cf` makes the commands they name.
+        let pages = history_pages(&history, &message, &self.seams.roles.cf(chief))?;
         let body = handoff_text(&Handoff {
             from: &from,
             to: chief,

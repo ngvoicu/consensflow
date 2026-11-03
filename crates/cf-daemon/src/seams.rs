@@ -17,6 +17,7 @@ use cf_harness::launch::adapter;
 use cf_harness::seams::{uuid, Services, SystemEntropy};
 use cf_ledger::{ParticipantView, ProjectView};
 use cf_proto::agents::{is_parent_session_variable, Harness};
+use cf_proto::cf_word::{CfWord, Shell, ENV as CF_ENV};
 
 use crate::errors::{contain, Errors};
 
@@ -38,6 +39,10 @@ pub struct WindowEnv {
     path: String,
     /// What the app took of a terminal's environment, as the daemon was given it.
     terminal: Vec<(String, String)>,
+    /// The bundle's `cf` as a window names it, and whether the windows run on Windows: each
+    /// window is told how a command starts in it ([`cf_proto::cf_word::ENV`]), for the
+    /// harness it is and the platform, and every `cf` it runs says its own hints so.
+    cf: Option<(String, bool)>,
 }
 
 impl WindowEnv {
@@ -52,8 +57,29 @@ impl WindowEnv {
                 None => bin.to_owned(),
             },
             terminal: terminal_of(env),
+            cf: None,
         }
     }
+
+    /// These windows told how a command starts in them: the bundle's `cf`, `pane_cf`, as the
+    /// shell of each harness takes it, `windows` where they run on Windows.
+    #[must_use]
+    pub fn with_cf(mut self, pane_cf: &str, windows: bool) -> Self {
+        self.cf = Some((pane_cf.to_owned(), windows));
+        self
+    }
+}
+
+/// How a command starts in the window of `participant`: the bundle's `cf`, `pane_cf`, as its
+/// harness's shell takes it on the platform (`windows`): a participant that names no harness,
+/// or one this build does not run, has a bash-like shell's.
+fn cf_word_of(participant: &ParticipantView, pane_cf: &str, windows: bool) -> CfWord {
+    let shell = participant
+        .harness
+        .as_deref()
+        .and_then(Harness::from_kind)
+        .map_or(Shell::Posix, |harness| harness.shell(windows));
+    CfWord::new(pane_cf, shell)
 }
 
 /// The variables of `env` that [`TERMINAL_ENV`] names, as `env` holds them: none of
@@ -87,23 +113,40 @@ impl PaneEnv for WindowEnv {
             ),
         ]);
         env.push(("PATH".to_owned(), self.path.clone()));
+        if let Some((pane_cf, windows)) = &self.cf {
+            let word = cf_word_of(participant, pane_cf, *windows);
+            env.push((CF_ENV.to_owned(), word.as_str().to_owned()));
+        }
         env
     }
 }
 
 /// The text each role's window starts with (`roles`): the role's own, with the
-/// project's staff in the chief's, and the `cf` of this window named.
+/// project's staff in the chief's, and every command starting with the `cf` of
+/// this window, by its whole path as the window's shell takes it.
 pub struct RoleTexts {
     env: Env,
     /// The bundle's `cf` as a window names it.
     pane_cf: String,
+    /// Whether the windows run on Windows, where a harness's shell can be PowerShell.
+    windows: bool,
 }
 
 impl RoleTexts {
     /// The role texts of a daemon given `env`, naming the bundle's `cf` as
-    /// `pane_cf` does.
+    /// `pane_cf` does, on the platform the daemon runs on.
     pub fn new(env: Env, pane_cf: String) -> Self {
-        Self { env, pane_cf }
+        Self {
+            env,
+            pane_cf,
+            windows: cfg!(windows),
+        }
+    }
+
+    /// These texts for windows that run on Windows, or not, whatever the daemon runs on.
+    #[must_use]
+    pub fn on_windows(self, windows: bool) -> Self {
+        Self { windows, ..self }
     }
 }
 
@@ -118,10 +161,14 @@ impl Roles for RoleTexts {
             &self.env,
             &participant.role,
             &staff_of(project),
-            Some(&self.pane_cf),
+            &self.cf(participant),
             specs,
         )
         .map_err(|failed| failed.to_string())
+    }
+
+    fn cf(&self, participant: &ParticipantView) -> CfWord {
+        cf_word_of(participant, &self.pane_cf, self.windows)
     }
 }
 

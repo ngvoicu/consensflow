@@ -141,7 +141,10 @@ fn a_result_the_chief_read_and_decided_on_in_its_own_turn_is_withdrawn_and_the_n
         "the chief was never given the result it had decided on"
     );
     assert!(
-        !transcript.contains("Decide with: cf task accept T-1"),
+        !transcript.contains(&format!(
+            "Decide with: {} task accept T-1",
+            rig.cf().to_string_lossy().replace('\\', "/")
+        )) && !transcript.contains("Decide with: cf task accept T-1"),
         "nor its footer"
     );
     let given = Regex::new(&format!(

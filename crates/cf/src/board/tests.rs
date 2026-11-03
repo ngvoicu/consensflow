@@ -696,3 +696,152 @@ fn a_list_of_the_inbox_prints_first_lines_and_says_nothing_of_the_answers_in_it(
         assert_eq!(asked(&ran), [("GET", "/api/inbox")], "json: {json}");
     }
 }
+
+/// `cf words…` run in the window whose `cf` is `word`, the board answering with `replies`.
+fn cf_as(word: &str, words: &[&str], json: bool, replies: Vec<Reply>) -> Ran {
+    let api = scripted(replies);
+    let board = Board::new(Some(&api.url), "tok")
+        .with_cf(cf_proto::cf_word::CfWord::of_word(word).unwrap());
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = run(&words, json, &board, &mut io::empty(), &mut out, &mut err)
+        .map_err(|failure| failure.kind());
+    Ran {
+        code,
+        out: String::from_utf8_lossy(&out).into_owned(),
+        err: String::from_utf8_lossy(&err).into_owned(),
+        asked: api
+            .received()
+            .into_iter()
+            .map(|received| {
+                let body = received.json();
+                (received.method, received.path, body)
+            })
+            .collect(),
+        flushed_at: None,
+    }
+}
+
+const WORD: &str = "& 'C:/Program Files/ConsensFlow/bin/cf.exe'";
+
+/// A usage names its commands (`cf task add …`): in the window of a `cf` by a path, they start
+/// with it, in the sentence and in the JSON (T-1049: a shell can find another `cf` first).
+#[test]
+fn a_usage_starts_the_commands_it_names_with_the_cf_of_the_window() {
+    for json in [false, true] {
+        let ran = cf_as(WORD, &["help"], json, vec![]);
+        assert_eq!(ran.code.unwrap(), 0);
+        assert!(
+            ran.out.contains(&format!("{WORD} task add --tier")),
+            "{}",
+            ran.out
+        );
+        let left = ran.out.replace(WORD, "");
+        for command in [
+            "task", "ask", "inbox", "answer", "note", "tell", "staff", "history",
+        ] {
+            assert!(
+                !left.contains(&format!("cf {command}")),
+                "cf {command} in {}",
+                ran.out
+            );
+        }
+        let task = cf_as(WORD, &["task", "--help"], json, vec![]);
+        assert!(task.out.contains(&format!("{WORD} task ")), "{}", task.out);
+    }
+    // In a window that was told no word, it is as it always was.
+    let plain = cf(&["help"], vec![]);
+    assert!(plain.out.contains("cf task add --tier"));
+    // A command written wrong says its usage the same way, on stderr.
+    let wrong = cf_as(WORD, &["task", "done", "T-3"], false, vec![]);
+    assert_eq!(wrong.code.unwrap(), 2);
+    assert!(
+        wrong.err.contains(&format!("{WORD} task done T-3")),
+        "{}",
+        wrong.err
+    );
+}
+
+/// What the board refuses in its own words (the ledger's and the daemon's, which Node's traces
+/// hold with the word `cf`) is printed with the window's own.
+#[test]
+fn a_refusal_starts_the_commands_it_names_with_the_cf_of_the_window() {
+    let ran = cf_as(
+        WORD,
+        &["task", "cancel", "T-3"],
+        false,
+        vec![reply(
+            409,
+            json!({ "error": "refused", "message": "T-3 failed, so nobody waits: reopen it (cf task reopen T-3 \"…\")" }),
+        )],
+    );
+    assert_eq!(ran.code.unwrap(), 1);
+    assert_eq!(
+        ran.err,
+        format!("cf: T-3 failed, so nobody waits: reopen it ({WORD} task reopen T-3 \"…\")\n")
+    );
+}
+
+/// A note ConsensFlow wrote (no sender) is printed with the window's `cf`, as it was pasted; what
+/// a participant wrote is as it was written.
+#[test]
+fn the_notes_of_consensflow_a_thread_and_the_inbox_print_start_their_commands_with_the_cf_of_the_window(
+) {
+    let mut task = thread();
+    task["task"]["messages"][3]["sender"] = Value::Null;
+    task["task"]["messages"][3]["body"] = json!("Resume it with: cf task resume T-3 \"…\"");
+    task["task"]["messages"][1]["body"] = json!("Run cf task get T-3 yourself");
+    let ran = cf_as(
+        WORD,
+        &["task", "get", "T-3"],
+        false,
+        vec![reply(200, task), reply(200, json!({}))],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert!(
+        ran.out
+            .contains(&format!("Resume it with: {WORD} task resume T-3")),
+        "{}",
+        ran.out
+    );
+    assert!(
+        ran.out.contains("\nRun cf task get T-3 yourself"),
+        "{}",
+        ran.out
+    );
+    let mut note = message("note", "read");
+    note["message"]["sender"] = Value::Null;
+    note["message"]["body"] = json!("Answer it again: cf answer m-9 \"…\"");
+    let read = cf_as(
+        WORD,
+        &["inbox", "read", "m-12"],
+        false,
+        vec![reply(200, note)],
+    );
+    assert!(
+        read.out
+            .ends_with(&format!("Answer it again: {WORD} answer m-9 \"…\"\n")),
+        "{}",
+        read.out
+    );
+}
+
+/// `cf history` says the `cf` of its window to the board, so that the page it asks for names its
+/// commands with it and is measured so; a window with no word says none.
+#[test]
+fn cf_history_says_the_cf_of_its_window_to_the_board() {
+    let page = json!({ "page": 1, "pages": 1, "text": "The chief's history." });
+    let ran = cf_as(
+        "/x/bin/cf",
+        &["history", "--page", "2"],
+        false,
+        vec![reply(200, page.clone())],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert_eq!(
+        asked(&ran),
+        [("GET", "/api/history?page=2&cf=%2Fx%2Fbin%2Fcf")]
+    );
+    let plain = cf(&["history"], vec![reply(200, page)]);
+    assert_eq!(asked(&plain), [("GET", "/api/history")]);
+}

@@ -13,6 +13,7 @@ use cf_engine::delivery_text::{delivery_text, marker_of};
 use cf_engine::testing::Context;
 use cf_harness::records::Role;
 use cf_ledger::{MessageView, NewTask};
+use cf_proto::cf_word::CfWord;
 
 use crate::fixtures::Tiers;
 
@@ -170,9 +171,10 @@ fn a_result_being_pasted_when_the_chief_accepts_its_task_arrives_all_the_same() 
     );
 
     // The harness's record shows it after all, and the delivery is proved.
-    let shown = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(result.id), &[]));
+    let shown = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(result.id), &[], &CfWord::bare()),
+    );
     context
         .adapter
         .with("chief", |agent| agent.items.push(shown));

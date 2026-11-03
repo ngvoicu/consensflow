@@ -18,6 +18,7 @@ use cf_harness::testing::ManualTime;
 use cf_ledger::{
     open_ledger, Ledger, NewProject, NewTask, Options, ProjectView, TaskCreated, TaskThread,
 };
+use cf_proto::cf_word::CfWord;
 use cf_proto::specs::AppSpecs;
 use serde_json::{json, Value};
 
@@ -191,6 +192,7 @@ impl Context {
         let roles = Rc::new(FakeRoles {
             recorder: recorder.clone(),
             rewritten: RefCell::new(String::new()),
+            cf: RefCell::new(CfWord::bare()),
         });
         let trace = Rc::new(FakeTrace {
             recorder: recorder.clone(),

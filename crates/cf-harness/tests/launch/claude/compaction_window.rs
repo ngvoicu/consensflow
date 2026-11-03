@@ -10,8 +10,19 @@ use super::*;
 
 /// A worker's settings file as it has always been written, byte for byte: Claude's
 /// permission mode, the classic renderer, the board's answer to a question and the
-/// Stop hook.
-const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"cf hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
+/// Stop hook. The question hook runs the bundle's own `cf` by its whole path, quoted
+/// (`{cf}`, T-1049): a login shell can find another `cf` first.
+const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
+
+/// [`WORKER_SETTINGS`] as `home`'s adapter writes it: its bundle's `cf`, quoted.
+fn worker_settings(home: &Home) -> String {
+    let cf = format!(
+        "{}/bundle/bin/cf{}",
+        home.root.replace('\\', "/"),
+        if cfg!(windows) { ".exe" } else { "" }
+    );
+    WORKER_SETTINGS.replacen("{cf}", &format!("'{cf}'"), 1)
+}
 
 /// The chief's: the same, with Claude's own question dialog in place of the board's.
 const CHIEF_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
@@ -36,7 +47,7 @@ fn a_launch_with_no_size_writes_the_settings_file_it_always_wrote_byte_for_byte(
     let adapter = home.adapter();
     assert_eq!(
         settings_text(&prepare(&adapter, &Request::default()).unwrap()),
-        WORKER_SETTINGS
+        worker_settings(&home)
     );
     assert_eq!(
         settings_text(&prepare(&adapter, &Request::chief()).unwrap()),

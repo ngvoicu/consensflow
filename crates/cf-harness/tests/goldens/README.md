@@ -298,3 +298,12 @@ and the hash that names a bundle of an extension is `$HASH`.
   leaves a step already moved as it is: after a merge brings rows of the old shape,
   run it on each file and let the scenarios test check it, rather than merging these
   files by hand.
+- **A hook run by the window's own `cf` by its whole path** (2026-11-01, T-1049). A window's
+  shell can find another `cf` first on its PATH (Devin's login zsh on the Mac, Claude Code's
+  login Git Bash on Windows, the Cloud Foundry CLI: T-972's live kit), so the question hooks of
+  Claude Code and Devin, which Node wrote as the word (`cf hook claude`, `cf hook devin`), are run
+  as Devin's session hook always was: by the bundle's `cf`, quoted (`'$ROOT/bundle/bin/cf' hook
+  claude`; `cf.exe` on Windows). `launch/scenarios.darwin.json` and `scenarios.win32.json` moved
+  for it, by hand: the `command` of that hook in the settings file of every Claude member's
+  launch (42 a file) and in the config of every Devin member's (104 on the Mac, 105 on Windows),
+  and nothing else.

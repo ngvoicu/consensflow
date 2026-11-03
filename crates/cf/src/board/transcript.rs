@@ -10,6 +10,7 @@
 use cf_base::js;
 use cf_base::text::{utf16_len, utf16_prefix};
 use cf_board::Board;
+use cf_proto::cf_word::CfWord;
 use serde_json::{Map, Value};
 
 use super::words::{quoted, Split};
@@ -107,6 +108,7 @@ pub(super) fn read(
         ),
         Asked::Page { find, .. } => {
             let paged = Paged {
+                cf: board.cf(),
                 number,
                 page: at("page").unwrap_or_default(),
                 pages: at("pages").unwrap_or_default(),
@@ -128,6 +130,8 @@ pub(super) fn read(
 
 /// A page of a transcript, as the board answered it.
 struct Paged<'a> {
+    /// How a command starts in the window that reads it.
+    cf: &'a CfWord,
     number: u64,
     page: u64,
     pages: u64,
@@ -166,7 +170,8 @@ impl Paged<'_> {
                 .find
                 .map_or_else(String::new, |find| format!(" --find {}", quoted(find)));
             format!(
-                "Older: cf task get T-{} --transcript --page {}{search}",
+                "Older: {} task get T-{} --transcript --page {}{search}",
+                self.cf,
                 self.number,
                 page + 1
             )

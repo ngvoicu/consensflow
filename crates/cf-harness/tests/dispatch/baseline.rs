@@ -66,6 +66,8 @@ pub const SITES: &[(&str, &str, Kind, usize)] = &[
     ("crates/cf-proto/src/agents.rs", "Harness::kind", Kind::Match, 1),
     // Product boundaries' (I-1, T-1091): each harness's own session variables, written before this list (T-971).
     ("crates/cf-proto/src/agents.rs", "Harness::session_variables", Kind::Match, 1),
+    // Own cf's (I-3, T-1093): the shell a harness's window runs a command in, PowerShell for Codex on Windows alone, written before this list (T-1049).
+    ("crates/cf-proto/src/agents.rs", "Harness::shell", Kind::Eq, 1),
 
     // The CLI's hooks: `cf hook claude|devin|muse-session` picks the adapter's handler, and the doctor reads Claude's.
     ("crates/cf/src/hook.rs", "run", Kind::IdMatch, 1),

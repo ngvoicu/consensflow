@@ -173,12 +173,70 @@ fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
         chief.contains("| zeus | worker | Standard work |"),
         "{chief}"
     );
-    assert!(chief.contains("Here `cf` is /bundle/bin/cf."), "{chief}");
+    assert!(
+        chief.contains("\n    /bundle/bin/cf task add --tier "),
+        "{chief}"
+    );
+    assert!(!chief.contains("This window's cf"), "{chief}");
     assert!(!chief.contains("specs"), "specs off: told nothing of them");
     let worker = texts
         .instructions(participant(&scene.project, "zeus"), &scene.project, None)
         .unwrap();
-    assert!(worker.contains("Here `cf` is /bundle/bin/cf."), "{worker}");
+    assert!(
+        worker.contains("\n    /bundle/bin/cf ask \"…\" "),
+        "{worker}"
+    );
+}
+
+/// The default install of Windows (`install.ps1`) is in `Program Files`, a path with a space: a
+/// quoted word is one word to bash and a string to PowerShell, which runs it only after `&`.
+#[test]
+fn a_windows_first_word_is_the_path_as_its_harness_s_shell_runs_a_program_by_it() {
+    let scene = scene();
+    let spaced = "C:/Program Files/ConsensFlow/bin/cf.exe";
+    let member_of = |harness: Option<Harness>| {
+        let mut member = participant(&scene.project, "zeus").clone();
+        member.harness = harness.map(|harness| harness.kind().to_owned());
+        member
+    };
+    let texts = |windows| RoleTexts::new(Env::default(), spaced.to_owned()).on_windows(windows);
+    for windows in [false, true] {
+        for harness in Harness::ALL {
+            let powershell = windows && harness == Harness::Codex;
+            let expected = if powershell {
+                format!("& '{spaced}'")
+            } else {
+                format!("'{spaced}'")
+            };
+            let member = member_of(Some(harness));
+            assert_eq!(
+                texts(windows).cf(&member).as_str(),
+                expected,
+                "{harness:?}, windows {windows}"
+            );
+            let text = texts(windows)
+                .instructions(&member, &scene.project, None)
+                .unwrap();
+            assert!(
+                text.contains(&format!("\n    {expected} ask \"…\" ")),
+                "{harness:?}, windows {windows}: {text}"
+            );
+        }
+        // A participant that names no harness (or one this build does not run) is a bash-like
+        // shell's.
+        assert_eq!(
+            texts(windows).cf(&member_of(None)).as_str(),
+            format!("'{spaced}'")
+        );
+    }
+    // A path every shell takes as one word is that word, in each.
+    let plain = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned()).on_windows(true);
+    for harness in Harness::ALL {
+        assert_eq!(
+            plain.cf(&member_of(Some(harness))).as_str(),
+            "/bundle/bin/cf"
+        );
+    }
 }
 
 #[test]
@@ -442,4 +500,42 @@ async fn work_woken_from_outside_a_drain_is_run_by_the_driver() {
             assert!(ran.get(), "the driver ran it");
         })
         .await;
+}
+
+#[test]
+fn a_window_is_told_how_a_command_starts_in_it_for_its_harness_and_the_platform() {
+    // The default install of Windows has a space in its path: the word of a Git Bash harness
+    // is one quoted word, and of Codex's PowerShell an `&` call (T-1049).
+    let scene = scene();
+    let spaced = "C:/Program Files/ConsensFlow/bin/cf.exe";
+    let member_of = |harness: Harness| {
+        let mut member = participant(&scene.project, "zeus").clone();
+        member.harness = Some(harness.kind().to_owned());
+        member
+    };
+    let told = |windows: bool, harness: Harness| {
+        let window = WindowEnv::new(&Env::default(), "http://127.0.0.1:1", "/bundle/bin")
+            .with_cf(spaced, windows);
+        window
+            .env(&member_of(harness), &scene.project)
+            .into_iter()
+            .filter(|(name, _)| name == "CONSENSFLOW_CF")
+            .map(|(_, word)| word)
+            .collect::<Vec<_>>()
+    };
+    for harness in Harness::ALL {
+        assert_eq!(told(false, harness), [format!("'{spaced}'")]);
+        let on_windows = if harness == Harness::Codex {
+            format!("& '{spaced}'")
+        } else {
+            format!("'{spaced}'")
+        };
+        assert_eq!(told(true, harness), [on_windows], "{harness:?}");
+    }
+    // A daemon that was given no `cf` tells no window of one.
+    let silent = WindowEnv::new(&Env::default(), "http://127.0.0.1:1", "/bundle/bin");
+    assert!(silent
+        .env(participant(&scene.project, "zeus"), &scene.project)
+        .iter()
+        .all(|(name, _)| name != "CONSENSFLOW_CF"));
 }

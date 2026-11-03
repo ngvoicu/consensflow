@@ -12,6 +12,7 @@ use serde_json::json;
 use crate::contract::{Launch, LaunchId};
 use crate::shared::launch_files::launch_folder;
 use crate::shared::role::write_role;
+use crate::shared::shell::cf_hook;
 use crate::shared::specmint;
 
 /// How long a member's question waits for the board's answer.
@@ -41,18 +42,21 @@ pub(crate) fn settings(
     launch: &LaunchId,
     board_questions: bool,
     compaction: Option<u32>,
+    pane_cf: &str,
 ) -> Result<Vec<String>, String> {
     let root = launch_folder("claude", env, launch)?;
     let said = |error: FileError| error.to_string();
     make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(said)?;
     let turn_end = json!({ "hooks": [{ "type": "command", "command": "exit 0" }] });
     // Claude's question tool prompts even in full-permission mode. A
-    // member's is answered from the board through this hook (`cf` is first
-    // on a pane's PATH); when nobody answers within the hour, the hook is
-    // cancelled and the window shows Claude's own dialog.
+    // member's is answered from the board through this hook, run by the
+    // window's own `cf` named in full (a login shell, as Claude Code's Git Bash
+    // is on Windows, can put another `cf` ahead of it on the PATH); when nobody
+    // answers within the hour, the hook is cancelled and the window shows
+    // Claude's own dialog.
     let question = json!({
         "matcher": "AskUserQuestion",
-        "hooks": [{ "type": "command", "command": "cf hook claude", "timeout": QUESTION_HOOK_SECONDS }],
+        "hooks": [{ "type": "command", "command": cf_hook(pane_cf, "claude", &[]), "timeout": QUESTION_HOOK_SECONDS }],
     });
     let settings = path::join(&[&root, "settings.json"]);
     let mut file = json!({

@@ -18,11 +18,12 @@ use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
 use cf_board::{Board, BoardError};
+use cf_proto::cf_word::CfWord;
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
 use cf_base::role_read::role_read_whole;
-use lines::{list, message_line};
+use lines::{list, message_line, printed_body};
 use usage::usage;
 use words::{message_id, quoted, require_text, split, task_number, Shape};
 
@@ -66,6 +67,10 @@ pub struct Said {
     data: Value,
     text: String,
     wrote: Option<Wrote>,
+    /// Whether every word of `text` is `cf`'s own (a usage), so that each command it names
+    /// is started by the window's `cf` as it is printed. What holds a task's, a message's or
+    /// the human's words is not: those are printed as they were written.
+    own: bool,
 }
 
 /// The messages a command's output carries whole, and how it was read: what
@@ -83,7 +88,28 @@ impl Said {
             data,
             text,
             wrote: None,
+            own: false,
         }
+    }
+
+    /// A usage: `cf`'s own words, in the sentence and in the JSON's `usage`.
+    fn usage(text: String) -> Self {
+        Self {
+            own: true,
+            ..Self::new(json!({ "usage": text }), text)
+        }
+    }
+
+    /// This output as it is printed in the window of `cf`: where it is all `cf`'s own words,
+    /// each command it names started by the window's `cf`.
+    fn in_words_of(mut self, cf: &CfWord) -> Self {
+        if self.own {
+            self.text = cf.in_text(&self.text).into_owned();
+            if let Some(usage) = self.data.get("usage").and_then(Value::as_str) {
+                self.data["usage"] = json!(cf.in_text(usage));
+            }
+        }
+        self
     }
 
     /// Of an output that carries the whole body of each of `answers` (one that
@@ -132,8 +158,7 @@ impl Wrote {
 /// What `cf <path…> --help` answers: the usage of that command, and nothing
 /// asked of the board.
 fn help_of(path: &[&str]) -> Said {
-    let usage = usage::of(path);
-    Said::new(json!({ "usage": usage }), usage)
+    Said::usage(usage::of(path))
 }
 
 /// Runs the command in `given`, its words as the system gave them, against
@@ -157,8 +182,10 @@ pub fn run(
         .iter()
         .map(|word| word.to_string_lossy().into_owned())
         .collect();
-    match command(&words, given, board, input) {
-        Ok(Said { data, text, wrote }) => {
+    match command(&words, given, board, input).map(|said| said.in_words_of(board.cf())) {
+        Ok(Said {
+            data, text, wrote, ..
+        }) => {
             let printed = if json {
                 let data = cf_base::json::js_order(data);
                 format!("{}\n", serde_json::to_string_pretty(&data)?)
@@ -172,12 +199,15 @@ pub fn run(
             }
             Ok(0)
         }
+        // What `cf` says of a command written wrong, and what the board refused (its own
+        // words, the daemon's and the ledger's: `cf task resume T-3 "…"`), start each command
+        // they name with the window's `cf`.
         Err(Failure::Usage(message)) => {
-            writeln!(err, "cf: {message}")?;
+            writeln!(err, "cf: {}", board.cf().in_text(&message))?;
             Ok(2)
         }
         Err(Failure::Failed(message)) => {
-            writeln!(err, "cf: {message}")?;
+            writeln!(err, "cf: {}", board.cf().in_text(&message))?;
             Ok(1)
         }
     }
@@ -195,7 +225,7 @@ fn command(
         None => ("help", words),
     };
     match verb {
-        "help" | "--help" | "-h" => Ok(Said::new(json!({ "usage": usage() }), usage().to_string())),
+        "help" | "--help" | "-h" => Ok(Said::usage(usage().to_string())),
         "task" => task::command(rest, given, board, input),
         "inbox" => inbox(rest, board),
         "note" => note(rest, board, input),
@@ -243,7 +273,7 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
         let text = format!(
             "{}\n\n{}",
             message_line(&message),
-            js::text(message.get("body"))
+            printed_body(&message, board.cf())
         );
         let delivered = message.get("state").and_then(Value::as_str) == Some("delivered");
         let told = message
@@ -351,7 +381,8 @@ fn tell(
         )
     } else {
         format!(
-            "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: cf task resume T-{number} \"…\""
+            "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: {} task resume T-{number} \"…\"",
+            board.cf()
         )
     };
     Ok(Said::new(message, format!("{text}\n{sent}")))
@@ -428,6 +459,11 @@ fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
     }
     if words.on("--tools") {
         query.append_pair("tools", "1");
+    }
+    // The page says the commands it names (`Older: cf history --page 2`) started by the
+    // window's `cf`, which its length is made with.
+    if board.cf().as_str() != "cf" {
+        query.append_pair("cf", board.cf().as_str());
     }
     let query = query.finish();
     let path = if query.is_empty() {

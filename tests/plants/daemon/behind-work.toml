@@ -340,7 +340,7 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "    cf task edit T-3 \"…\"          replace the brief of a task no window has yet (open, queued, or paused)\n"
+find = "    {{cf}} task edit T-3 \"…\"          replace the brief of a task no window has yet (open, queued, or paused)\n"
 replace = ""
 
 [[plant]]

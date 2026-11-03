@@ -38,6 +38,7 @@
 //! half an hour, within 30 min + N of that end; B leaves a fix one more N, to count from
 //! the first look that found it held no longer, and a minute.
 
+use cf_proto::cf_word::CfWord;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -371,9 +372,10 @@ fn run(schedule: &Schedule) -> Outcome {
     }));
     context.adapter.with("chief", |agent| agent.arrive = false);
     let note = context.note(project.id, "zeus", "chief", "hello");
-    let item = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let item = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(note.id), &[], &CfWord::bare()),
+    );
     let (mut clock, mut recorded) = (0, false);
     let mut rows = Vec::new();
     let mut state = note.state;
