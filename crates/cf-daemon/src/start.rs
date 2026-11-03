@@ -290,7 +290,6 @@ async fn run(
     let time = Rc::new(DaemonTime::new(Rc::clone(&spawn)));
     let screens = Rc::new(Screens {
         token: token.clone(),
-        env: env.clone(),
         admin: HarnessAdmin::new(
             env.clone(),
             Rc::clone(&time) as _,

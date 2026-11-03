@@ -30,7 +30,6 @@ mod harnesses;
 pub mod network;
 mod pages;
 
-use cf_base::env::Env;
 use cf_harness::admin::HarnessAdmin;
 use hyper::Method;
 use serde_json::{json, Map, Value};
@@ -65,8 +64,6 @@ pub fn recognize(path: &str) -> Option<Screen> {
 pub struct Screens {
     /// The app's own token, which opens these screens and nothing else.
     pub token: String,
-    /// The environment the daemon runs in, which says what is installed here.
-    pub env: Env,
     /// What is known of each harness's CLI, and its update.
     pub admin: HarnessAdmin,
 }

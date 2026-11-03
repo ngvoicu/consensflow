@@ -39,11 +39,15 @@ runs = ["live-wrapper"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine/wrapper.rs"
 find = '''
-                [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL]
-                    .map(|model| format!("word === '{model}'"))'''
+                [
+                    STAND_IN_WORKER_MODEL,
+                    STAND_IN_CHIEF_MODEL,
+                    STAND_IN_MEMBER_MODEL
+                ]
+                .map(|model| format!("word === '{model}'"))'''
 replace = '''
                 [STAND_IN_WORKER_MODEL, STAND_IN_MEMBER_MODEL]
-                    .map(|model| format!("word === '{model}'"))'''
+                .map(|model| format!("word === '{model}'"))'''
 
 [[plant]]
 name = "windows live: the window's words go before the flags the wrapper adds"

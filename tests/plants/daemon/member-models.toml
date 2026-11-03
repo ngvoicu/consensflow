@@ -11,8 +11,8 @@
 [run]
 mm-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members::"]
 mm-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Add member|adds a member on a model|Edit member|no longer lists its model"]
+mm-page-listing = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "adds a member on a model its harness lists"]
 mm-page-chief = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Refresh beside the chief"]
-
 
 # --- the catalog: the presets' tier only of a model they know ---
 
@@ -110,8 +110,8 @@ replace = '''
 
 [[plant]]
 name = "member models: Add member's model select lists none of the harness's models"
-meant = "adds a member on a model its harness lists, the harness's own listing, never the catalog's agents"
-runs = ["mm-page"]
+meant = "adds a member on a model its harness lists, the harness's own listing, never a saved agent"
+runs = ["mm-page-listing"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
@@ -121,7 +121,7 @@ replace = "    const options = answer.listing.models.slice(0, 1).map((model) => 
 
 [[plant]]
 name = "member models: Add member saves a member with no tier"
-meant = "Add member saves nothing until a tier is picked: the presets' tier where they know the model at its effort, and none where they do not"
+meant = "Add member saves nothing until a tier is picked: the tier starts empty, whatever the model and its effort"
 runs = ["mm-page"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 

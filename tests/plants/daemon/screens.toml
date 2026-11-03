@@ -240,8 +240,10 @@ runs = [
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
-        env: env.clone(),
-        admin: HarnessAdmin::new('''
+        token: token.clone(),
+        admin: HarnessAdmin::new(
+            env.clone(),'''
 replace = '''
-        env: Env::default(),
-        admin: HarnessAdmin::new('''
+        token: token.clone(),
+        admin: HarnessAdmin::new(
+            Env::default(),'''

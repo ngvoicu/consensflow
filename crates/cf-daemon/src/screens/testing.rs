@@ -43,12 +43,11 @@ impl Rig {
         let screens = Screens {
             token: TOKEN.to_owned(),
             admin: HarnessAdmin::new(
-                env.clone(),
+                env,
                 Rc::new(ManualTime::new(EPOCH_MS)),
                 Rc::clone(&latest) as _,
                 Rc::clone(&capture) as _,
             ),
-            env,
         };
         Self {
             _home: home,
@@ -62,16 +61,14 @@ impl Rig {
 
 /// Screens over no home at all: for the tests that never reach a route that reads one.
 pub(crate) fn inert() -> Screens {
-    let env = Env::default();
     Screens {
         token: TOKEN.to_owned(),
         admin: HarnessAdmin::new(
-            env.clone(),
+            Env::default(),
             Rc::new(ManualTime::new(EPOCH_MS)),
             Rc::new(ScriptedLatest::default()),
             Rc::new(ScriptedCapture::default()),
         ),
-        env,
     }
 }
 

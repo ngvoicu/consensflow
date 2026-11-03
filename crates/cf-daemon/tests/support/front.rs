@@ -82,12 +82,11 @@ pub fn screens(token: &str, env: Env) -> Rc<Screens> {
     Rc::new(Screens {
         token: token.to_owned(),
         admin: HarnessAdmin::new(
-            env.clone(),
+            env,
             Rc::new(ManualTime::new(EPOCH_MS)),
             Rc::new(ScriptedLatest::default()),
             Rc::new(ScriptedCapture::default()),
         ),
-        env,
     })
 }
 
