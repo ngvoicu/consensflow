@@ -2560,6 +2560,11 @@ test("names a compaction's summary in what a window wrote as one, never as what 
     'Compaction summary',
   ])
   await expect(items.nth(1)).toHaveAttribute('data-compaction', 'true')
+  // Drawn as one: its border and its label in the theme's amber, the other's not.
+  const amber = 'rgb(231, 185, 104)'
+  await expect(items.nth(1)).toHaveCSS('border-left-color', amber)
+  await expect(items.nth(1).locator('.transcript-head')).toHaveCSS('color', amber)
+  await expect(items.nth(0)).not.toHaveCSS('border-left-color', amber)
 })
 
 /** T-2 with a long answer in what its window wrote. */

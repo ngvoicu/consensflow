@@ -774,6 +774,8 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 }
 .transcript-more, .story-more { font-size: 12px; color: var(--muted); }
 .transcript-more { margin: 0 0 8px; }
+.transcript-item[data-compaction="true"] { border-color: var(--amber); }
+.transcript-item[data-compaction="true"] > .transcript-head { color: var(--amber); }
 .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
 /* The live windows. */
@@ -1107,19 +1109,19 @@ dialog.history-viewer {
   --history-field: #2a2e32;
   --history-line: #34383c;
   --history-words: #e6e8ea;
-  --history-quiet: #9aa0a6;
+  --history-quiet: #b0b5ba;
   --history-thinking: #a3a8ae;
   --history-prompt: #1f4a63;
   --history-ok: #2a4a35;
   --history-failed: #6e2828;
   --history-grey: #34383c;
   --history-compaction: #3e2e5c;
-  --history-path: #c792ea;
-  --history-range: #e5a33a;
+  --history-path: #d4a5f0;
+  --history-range: #ebb050;
   --history-heading: #f2b134;
   --history-marker: #e06c9f;
   --history-code: #b98cf5;
-  --history-removed: #f28b82;
+  --history-removed: #f7a097;
   --history-added: #81e08f;
   --history-refusal: #ff8a80;
   width: min(1100px, calc(100vw - 48px));
@@ -1134,20 +1136,20 @@ dialog.history-viewer {
     --history-field: #e8e7e2;
     --history-line: #d6d5cf;
     --history-words: #222426;
-    --history-quiet: #686c70;
-    --history-thinking: #6e7276;
+    --history-quiet: #5b5f63;
+    --history-thinking: #686c70;
     --history-prompt: #d6e6f0;
     --history-ok: #dcebd9;
     --history-failed: #f2d4d4;
     --history-grey: #e4e4e1;
     --history-compaction: #e6dcf2;
     --history-path: #6f42c1;
-    --history-range: #9a6700;
-    --history-heading: #9a6700;
+    --history-range: #825700;
+    --history-heading: #825700;
     --history-marker: #3b5bdb;
     --history-code: #8250df;
     --history-removed: #b42318;
-    --history-added: #1a7f37;
+    --history-added: #166b2e;
     --history-refusal: #b42318;
   }
 }
@@ -1163,6 +1165,7 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
   color: var(--history-words);
   font: 14px var(--ui);
 }
+.history-search input::placeholder { color: var(--history-quiet); opacity: 1; }
 .history-search input:focus-visible { outline: 2px solid var(--history-path); outline-offset: 0; }
 .history-icon {
   width: 32px;

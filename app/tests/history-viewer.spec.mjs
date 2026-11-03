@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import { expect, test } from '@playwright/test'
 
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
@@ -77,6 +79,17 @@ const call = (conversation, n, id, header, text, extra = {}) =>
   item(conversation, n, id, 'tool', text, { kind: 'tool', name: 'Bash', header, ...extra })
 
 const DELIVERY = '[ConsensFlow m-12 · T-1 · result from @zeus]\nParser done, 14 tests.'
+
+/**
+ * What Muse Code returned for a command that failed, as its live record wrote it (the
+ * reader's fixture, line 11): JSON whose exit code is its fifth line of twelve.
+ */
+const MUSE_FAILED = JSON.parse(
+  readFileSync(
+    new URL('../../crates/cf-harness/tests/fixtures/history-items/muse.jsonl', import.meta.url),
+    'utf8',
+  ).split('\n')[10],
+).payload.event.results[0].text
 
 /** A failing test run's output: 35 lines of progress, then the failure and the exit line. */
 const FAILING_RUN = [
@@ -290,12 +303,18 @@ async function open(page, data = model()) {
           newer = before ? (placeOf(items.at(-1)) ?? before) : null
         }
         if (find && model.partial) older = { conversation: 1, row: 0 }
+        // A search that stops short once, before anything it shows; Older goes on to the end.
+        const once = !!(find && model.partialOnce && !before)
+        if (once) {
+          items = []
+          older = { conversation: 3, row: 0 }
+        }
         // A read the model says went through as much as one may before anything it shows.
         if (!find && model.readStops && !before) {
           items = []
           older = { conversation: 3, row: 0 }
         }
-        const partial = !!(find ? model.partial : model.readStops && !before)
+        const partial = !!(find ? model.partial || once : model.readStops && !before)
         return answer({ history: { items, older, newer, partial } })
       },
       // A long item's text, a part at a time, as the daemon reads it, by the item's
@@ -399,9 +418,30 @@ async function openSession(page) {
   return viewer
 }
 
-/** The items shown, in order, by the ids the stand-in gave them. */
-const ids = (viewer) =>
-  viewer.locator('.history-item').evaluateAll((items) => items.map((it) => it.dataset.id))
+/** The items shown, in order, each by the first line it shows. */
+const heads = (viewer) =>
+  viewer
+    .locator('.history-item')
+    .evaluateAll((items) => items.map((it) => it.innerText.trim().split('\n')[0]))
+
+/** The mock's items by the first line each shows. */
+const HEAD = {
+  'u-1': 'Fix the crash when the task filter is empty.',
+  'th-1': 'I’ll check how the filter handles an empty query.',
+  't-1': 'read src/filter.ts:1-3',
+  't-2': '$ npm test',
+  't-3': 'edit src/filter.ts',
+  't-4': '$ npm test',
+  'a-1': 'Fixed the empty filter',
+  'c-1': '[compaction]',
+  'u-2': 'Also cover a query containing only spaces.',
+  'a-2': 'I’ll add a whitespace case to the same test file.',
+  'a-6': 'And more.',
+}
+const headsOf = (...names) => names.map((name) => HEAD[name])
+
+/** The last item shown. */
+const lastItem = (viewer) => viewer.locator('.history-item').last()
 
 /** The block that draws item `id`. */
 const block = (viewer, id) => viewer.locator(`.history-item[data-id="${id}"]`)
@@ -475,18 +515,9 @@ test.describe('the history viewer', () => {
     ).toHaveCount(0)
     // Both conversations, in one list, oldest first.
     await expect(viewer.locator('.history-body ol.history-items')).toHaveCount(1)
-    expect(await ids(viewer)).toEqual([
-      'u-1',
-      'th-1',
-      't-1',
-      't-2',
-      't-3',
-      't-4',
-      'a-1',
-      'c-1',
-      'u-2',
-      'a-2',
-    ])
+    expect(await heads(viewer)).toEqual(
+      headsOf('u-1', 'th-1', 't-1', 't-2', 't-3', 't-4', 'a-1', 'c-1', 'u-2', 'a-2'),
+    )
     // No item is headed by a label or a time: the block's look says what it is.
     await expect(viewer.locator('.history-item .transcript-head')).toHaveCount(0)
     const said = await viewer.textContent()
@@ -773,12 +804,17 @@ test.describe('the history viewer', () => {
     ]
     await open(page, data)
     const viewer = await openChief(page)
-    for (const id of ['x-1', 'x-2', 'x-3', 'x-4', 'x-5', 'x-6', 'x-7', 'x-8']) {
-      await expect(block(viewer, id)).toContainText(HOSTILE)
-    }
-    await block(viewer, 'x-3').locator('.history-fold').click()
-    await block(viewer, 'x-6').locator('.history-expand').click()
-    await expect(block(viewer, 'x-6').locator('.history-text')).toHaveText(HOSTILE)
+    // Every item shows the markup as its words, whatever it is drawn as; unfolded and opened,
+    // every word of it is there.
+    const items = viewer.locator('.history-item')
+    await expect(items).toHaveCount(8)
+    await viewer.getByRole('button', { name: /earlier lines, click to expand/ }).click()
+    await viewer.getByRole('button', { name: /^Compacted/ }).click()
+    for (let at = 0; at < 8; at += 1) await expect(items.nth(at)).toContainText(HOSTILE)
+    const said = (await viewer.locator('.history-body').textContent()).split(HOSTILE).length - 1
+    // 2 in the prompt, 1 thought, 12 in the failed call (header, change, 9 lines), 2 in the
+    // read, 3 in the markdown, the summary, the notice, the plain answer.
+    expect(said).toBe(23)
     await expect(viewer.locator('img, script')).toHaveCount(0)
     expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
   })
@@ -792,7 +828,7 @@ test.describe('the history viewer', () => {
     await page.setViewportSize({ width: 1000, height: 320 })
     await open(page, data)
     const viewer = await openChief(page)
-    expect(await ids(viewer)).toEqual(['a-1', 'c-1', 'u-2', 'a-2'])
+    expect(await heads(viewer)).toEqual(headsOf('a-1', 'c-1', 'u-2', 'a-2'))
     const row = earlier(viewer)
     await expect(row).toHaveText('… earlier history, click to load')
     const first = viewer.locator('ol.history-items > :first-child .history-earlier')
@@ -810,23 +846,16 @@ test.describe('the history viewer', () => {
     const before = await top()
     await row.click()
     await expect(block(viewer, 't-1')).toHaveCount(1)
-    expect(await ids(viewer)).toEqual(['t-1', 't-2', 't-3', 't-4', 'a-1', 'c-1', 'u-2', 'a-2'])
+    expect(await heads(viewer)).toEqual(
+      headsOf('t-1', 't-2', 't-3', 't-4', 'a-1', 'c-1', 'u-2', 'a-2'),
+    )
     expect(Math.abs((await top()) - before)).toBeLessThan(2)
     await expect(first).toHaveCount(1)
     await row.focus()
     await page.keyboard.press('Enter')
-    expect(await ids(viewer)).toEqual([
-      'u-1',
-      'th-1',
-      't-1',
-      't-2',
-      't-3',
-      't-4',
-      'a-1',
-      'c-1',
-      'u-2',
-      'a-2',
-    ])
+    expect(await heads(viewer)).toEqual(
+      headsOf('u-1', 'th-1', 't-1', 't-2', 't-3', 't-4', 'a-1', 'c-1', 'u-2', 'a-2'),
+    )
     // Nothing older: the row goes.
     await expect(earlier(viewer)).toHaveCount(0)
     expect(
@@ -841,7 +870,7 @@ test.describe('the history viewer', () => {
     ])
     // Refresh reads the most recent again: what the chief said meanwhile is there.
     await viewer.getByRole('button', { name: 'Refresh' }).click()
-    expect(await ids(viewer)).toEqual(['c-1', 'u-2', 'a-2', 'a-6'])
+    expect(await heads(viewer)).toEqual(headsOf('c-1', 'u-2', 'a-2', 'a-6'))
     await expect(body.locator('.history-earlier')).toHaveCount(1)
   })
 
@@ -854,7 +883,7 @@ test.describe('the history viewer', () => {
     await find.fill('NPM TEST')
     await find.press('Enter')
     // Found in the calls' headers, the output alone holding none of it.
-    expect(await ids(viewer)).toEqual(['t-2', 't-4'])
+    expect(await heads(viewer)).toEqual(headsOf('t-2', 't-4'))
     await expect(block(viewer, 't-4').locator('.history-call')).toHaveText('$ npm test')
     expect((await asked(page)).at(-1)).toEqual({
       project: 1,
@@ -864,7 +893,7 @@ test.describe('the history viewer', () => {
     })
     await find.fill('typeerror')
     await find.press('Enter')
-    expect(await ids(viewer)).toEqual(['t-2'])
+    expect(await heads(viewer)).toEqual(headsOf('t-2'))
     await find.fill('zzz')
     await find.press('Enter')
     await expect(viewer.locator('.history-note')).toHaveText('Nothing in this history holds "zzz".')
@@ -907,7 +936,7 @@ test.describe('the history viewer', () => {
       before: { conversation: 3, row: 0 },
     })
     await expect(viewer.locator('.history-note')).toHaveCount(0)
-    expect((await ids(viewer)).length).toBe(10)
+    expect((await heads(viewer)).length).toBe(10)
   })
 
   test('shows a long item by a part, and the whole of it on a click row, read a part at a time', async ({
@@ -915,12 +944,12 @@ test.describe('the history viewer', () => {
   }) => {
     await open(page)
     const viewer = await openSession(page)
-    const long = block(viewer, 'w-7')
+    const long = lastItem(viewer)
     await expect(long.locator('.history-text, p').first()).toHaveText('The first part')
     const more = long.getByRole('button', { name: '… (684 KB in all, click to load the rest)' })
     await more.click()
-    await expect(block(viewer, 'w-7')).toHaveText('The first part and the rest, to its end.')
-    await expect(block(viewer, 'w-7').locator('.history-more')).toHaveCount(0)
+    await expect(lastItem(viewer)).toHaveText('The first part and the rest, to its end.')
+    await expect(lastItem(viewer).locator('.history-more')).toHaveCount(0)
     const read = (await asked(page, 'history.part')).map(({ from }) => from)
     expect(read).toEqual([0, 14, 29])
     expect((await asked(page, 'history.part'))[0]).toEqual({
@@ -938,7 +967,7 @@ test.describe('the history viewer', () => {
       }
     })
     await viewer.getByRole('button', { name: 'Refresh' }).click()
-    await expect(block(viewer, 'w-7').locator('.history-more')).toHaveText(
+    await expect(lastItem(viewer).locator('.history-more')).toHaveText(
       '… (684 KB in all, shown from character 5,001, click to load it whole)',
     )
   })
@@ -959,9 +988,9 @@ test.describe('the history viewer', () => {
     }
     await open(page, data)
     const viewer = await openSession(page)
-    const more = () => block(viewer, 'w-7').locator('.history-more')
+    const more = () => lastItem(viewer).locator('.history-more')
     await more().click()
-    await expect(block(viewer, 'w-7')).toHaveText('The FIRST part grown, and now ends.')
+    await expect(lastItem(viewer)).toHaveText('The FIRST part grown, and now ends.')
     // Never a text of two copies: the second copy is read again from its start.
     expect((await asked(page, 'history.part')).map(({ from }) => from)).toEqual([0, 14, 0, 14, 22])
     // An item copied again at every part, as one still being written fast may be:
@@ -974,7 +1003,7 @@ test.describe('the history viewer', () => {
     }, first)
     await viewer.getByRole('button', { name: 'Refresh' }).click()
     await more().click()
-    await expect(block(viewer, 'w-7').locator('.history-refusal')).toHaveText(
+    await expect(lastItem(viewer).locator('.history-refusal')).toHaveText(
       'It changed each time it was read: show it again to read it as it is now.',
     )
     await expect(more()).toBeEnabled()
@@ -996,12 +1025,12 @@ test.describe('the history viewer', () => {
     data.parts['w-8'] = [`Typed ${header}Parser done`, ', all of it.']
     await open(page, data)
     const viewer = await openSession(page)
-    await block(viewer, 'w-8').locator('.history-more').click()
-    await expect(block(viewer, 'w-8').locator('.history-text')).toHaveText([
+    await lastItem(viewer).locator('.history-more').click()
+    await expect(lastItem(viewer).locator('.history-text')).toHaveText([
       'Typed',
       `${header}Parser done, all of it.`,
     ])
-    await expect(block(viewer, 'w-8')).toHaveAttribute('data-kind', 'prompt')
+    await expect(lastItem(viewer)).toHaveAttribute('data-kind', 'prompt')
     // Copied again since the page was read, the human's words in its place: drawn as it is,
     // not split where the delivery the page showed began.
     await page.evaluate(() => {
@@ -1010,8 +1039,8 @@ test.describe('the history viewer', () => {
       }
     })
     await viewer.getByRole('button', { name: 'Refresh' }).click()
-    await block(viewer, 'w-8').locator('.history-more').click()
-    await expect(block(viewer, 'w-8').locator('.history-text')).toHaveText([
+    await lastItem(viewer).locator('.history-more').click()
+    await expect(lastItem(viewer).locator('.history-text')).toHaveText([
       'Typed instead by the human.',
     ])
   })
@@ -1095,6 +1124,279 @@ test.describe('the history viewer', () => {
       // The Mac's faces before Windows', and a monospace last.
       expect(font.indexOf('Menlo')).toBeLessThan(font.indexOf('Consolas'))
       expect(font.at(-1)).toBe('monospace')
+    })
+  }
+})
+
+test.describe('the history viewer, after its review (T-1210)', () => {
+  test("keeps each harness's exit line of a failed call in sight, Muse Code's JSON line too, its colour from the status alone", async ({
+    page,
+  }) => {
+    const nine = Array.from({ length: 9 }, (_, at) => `line ${at + 1}`)
+    // Each as its harness writes it, above the last 5 lines.
+    const forms = [
+      ['$ claude', ['Exit code 1', ...nine].join('\n'), 'Exit code 1'],
+      ['$ devin', ['Exit code: 1', ...nine].join('\n'), 'Exit code: 1'],
+      ['$ pi', ['Command exited with code 1', ...nine].join('\n'), 'Command exited with code 1'],
+      [
+        '$ codex',
+        ['Chunk ID: 1', 'Wall time: 0.0500 seconds', 'Process exited with code 1', ...nine].join(
+          '\n',
+        ),
+        'Process exited with code 1',
+      ],
+      ['$ ls no-such-folder', MUSE_FAILED, '"exit_code": 1,'],
+    ]
+    const data = model()
+    data.histories.chief.items = [
+      ...forms.map(([header, text], at) =>
+        call(1, at, `f-${at}`, header, text, { status: 'failed' }),
+      ),
+      // The same words where the call went well, or said nothing of how it stands.
+      call(1, 5, 'f-ok', '$ muse ok', MUSE_FAILED, { status: 'ok' }),
+      call(1, 6, 'f-unknown', '$ muse unknown', MUSE_FAILED, { status: undefined }),
+    ]
+    await open(page, data)
+    const viewer = await openChief(page)
+    const callOf = (header) =>
+      viewer.locator('.history-item').filter({
+        has: page.locator('.history-call', { hasText: new RegExp(`^\\${header}$`) }),
+      })
+    for (const [header, , exit] of forms) {
+      const failed = callOf(header)
+      await expect(
+        failed.getByRole('button', { name: /earlier lines, click to expand/ }),
+      ).toBeVisible()
+      await expect(failed.locator('.history-exit')).toHaveText(exit)
+      await expect(failed.locator('.history-exit')).toBeVisible()
+    }
+    // Muse's: the 7 lines above the last 5, its code pinned below them.
+    await expect(callOf('$ ls no-such-folder').locator('.history-fold')).toHaveText(
+      '… (7 earlier lines, click to expand)',
+    )
+    const red = await colour(callOf('$ ls no-such-folder'))
+    const green = await colour(callOf('$ muse ok'))
+    const grey = await colour(callOf('$ muse unknown'))
+    expect(new Set([red, green, grey]).size).toBe(3)
+    for (const header of ['$ muse ok', '$ muse unknown']) {
+      await expect(callOf(header).locator('.history-exit')).toHaveCount(0)
+    }
+  })
+
+  test('shows what a search matched: a line above the fold, a successful edit’s output, a summary', async ({
+    page,
+  }) => {
+    const data = model()
+    data.histories.chief.items.push(
+      call(
+        2,
+        2,
+        's-1',
+        '$ grep',
+        ['NEEDLE in the first line', ...Array.from({ length: 9 }, (_, at) => `line ${at}`)].join(
+          '\n',
+        ),
+        { status: 'ok' },
+      ),
+      call(2, 3, 's-2', 'edit src/a.ts', 'needle-warning: line endings changed', {
+        name: 'Edit',
+        status: 'ok',
+        diff: '-a\n+b',
+      }),
+    )
+    await open(page, data)
+    const viewer = await openChief(page)
+    // Drawn as always without a search: folded, and the edit's own words not drawn.
+    await expect(viewer.getByText('NEEDLE in the first line')).toBeHidden()
+    await expect(viewer.getByText('needle-warning: line endings changed')).toHaveCount(0)
+    const find = viewer.getByRole('searchbox', { name: 'Search history' })
+    await find.fill('needle')
+    await find.press('Enter')
+    await expect(viewer.locator('.history-item')).toHaveCount(2)
+    const above = viewer.locator('.history-output', { hasText: 'NEEDLE in the first line' })
+    await expect(above).toBeVisible()
+    expect(await above.evaluate((it) => it.textContent.split('\n')[0])).toBe(
+      'NEEDLE in the first line',
+    )
+    await expect(viewer.getByText('needle-warning: line endings changed')).toBeVisible()
+    // A compaction's summary that holds the words is open.
+    await find.fill('IS FIXED')
+    await find.press('Enter')
+    await expect(
+      viewer.getByText('Summary: the empty filter is fixed, 12 tests pass.'),
+    ).toBeVisible()
+    await expect(viewer.getByRole('button', { name: /^Compacted from/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+  })
+
+  test('a search that stopped short and goes on to the end says what the last read found', async ({
+    page,
+  }) => {
+    const data = model()
+    data.partialOnce = true
+    await open(page, data)
+    const viewer = await openChief(page)
+    const find = viewer.getByRole('searchbox', { name: 'Search history' })
+    // Stopped short, then nothing more: the notice is the end's.
+    await find.fill('zzz')
+    await find.press('Enter')
+    await expect(viewer.locator('.history-note')).toHaveText('Nothing found yet that holds "zzz".')
+    await earlier(viewer).click()
+    await expect(viewer.locator('.history-note')).toHaveText('Nothing in this history holds "zzz".')
+    await expect(earlier(viewer)).toHaveCount(0)
+    // Stopped short, then found: the items, and no notice.
+    await find.fill('npm test')
+    await find.press('Enter')
+    await expect(viewer.locator('.history-note')).toHaveText(
+      'Nothing found yet that holds "npm test".',
+    )
+    await earlier(viewer).click()
+    await expect(viewer.locator('.history-note')).toHaveCount(0)
+    expect(await heads(viewer)).toEqual(headsOf('t-2', 't-4'))
+  })
+
+  test('reaches every click row and header control by Tab, and acts on Enter and Space', async ({
+    page,
+  }) => {
+    const data = model()
+    data.pageSize = 9
+    await open(page, data)
+    const viewer = await openChief(page)
+    await expect(viewer.locator('.history-item')).toHaveCount(9)
+    const focused = () =>
+      page.evaluate(() => {
+        const at = document.activeElement
+        return at?.getAttribute('aria-label') || at?.textContent?.trim() || at?.tagName
+      })
+    /** Presses `key` until what has the keyboard says `name`, and says what it went through. */
+    const press = async (key, name) => {
+      const through = []
+      for (let at = 0; at < 30; at += 1) {
+        await page.keyboard.press(key)
+        through.push(await focused())
+        if (through.at(-1) === name) return through
+      }
+      throw new Error(`${key} never reached ${name}: ${through.join(' → ')}`)
+    }
+    // The stream has the keyboard as the viewer opens; Tab goes down its rows in order.
+    await expect(viewer.locator('.history-body')).toBeFocused()
+    const down = await press('Tab', 'Compacted from 3,903 tokens (click to expand)')
+    expect(down).toEqual([
+      '… earlier history, click to load',
+      '… (33 earlier lines, click to expand)',
+      'Compacted from 3,903 tokens (click to expand)',
+    ])
+    // Space opens the summary; Enter on the fold above unfolds the output.
+    await page.keyboard.press(' ')
+    await expect(
+      viewer.getByText('Summary: the empty filter is fixed, 12 tests pass.'),
+    ).toBeVisible()
+    await page.keyboard.press('Shift+Tab')
+    expect(await focused()).toBe('… (33 earlier lines, click to expand)')
+    await page.keyboard.press('Enter')
+    await expect(viewer.getByRole('button', { name: /earlier lines/ })).toHaveCount(0)
+    // Back up past the stream, the header's controls: Close, Refresh, the search.
+    await viewer.locator('.history-body').click({ position: { x: 5, y: 5 } })
+    const up = await press('Shift+Tab', 'Search history')
+    expect(up.slice(-3)).toEqual(['Close', 'Refresh', 'Search history'])
+    // Enter on the earlier row loads it.
+    await press('Tab', '… earlier history, click to load')
+    await page.keyboard.press('Enter')
+    await expect(viewer.locator('.history-item')).toHaveCount(10)
+  })
+
+  for (const scheme of ['dark', 'light']) {
+    test(`draws every text of the viewer at 4.5:1 or more on its own background, ${scheme}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      const data = model()
+      // Everything but the first prompt, so the earlier row is drawn too.
+      data.pageSize = 14
+      data.histories.chief.items.push(
+        call(2, 2, 'k-1', '$ cargo test', '', { status: 'running' }),
+        item(2, 3, 'k-2', 'tool', 'ok 12 passed'),
+        item(2, 4, 'k-3', 'custom', 'A hook said this.', { kind: 'notice' }),
+        item(2, 5, 'k-4', 'assistant', 'Still going', { kind: 'text', complete: false }),
+        call(
+          2,
+          6,
+          'k-5',
+          '$ make',
+          ['Exit code 2', ...Array.from({ length: 9 }, (_, at) => `line ${at}`)].join('\n'),
+          { status: 'failed', tookMs: 10 },
+        ),
+      )
+      await open(page, data)
+      const viewer = await openChief(page)
+      await viewer.getByRole('button', { name: /^Compacted from/ }).click()
+      // What each text is drawn in, against what it stands on: the first background of its own
+      // or of what holds it that is not transparent.
+      const failures = await viewer.evaluate((dialog) => {
+        const linear = (value) => {
+          const v = value / 255
+          return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+        }
+        const luminance = (colour) => {
+          const [r, g, b] = colour.match(/[\d.]+/g).map(Number)
+          return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+        }
+        const ground = (element) => {
+          for (let at = element; at; at = at.parentElement) {
+            const colour = getComputedStyle(at).backgroundColor
+            const parts = colour.match(/[\d.]+/g)
+            if (parts && (parts.length < 4 || Number(parts[3]) > 0)) return colour
+          }
+          return 'rgb(255, 255, 255)'
+        }
+        const TEXTS = [
+          ['.history-title'],
+          ['.history-icon'],
+          ['.history-search input'],
+          ['.history-search input', '::placeholder'],
+          ['.history-earlier'],
+          ['.history-item[data-kind="prompt"] .history-text'],
+          ['.history-thinking'],
+          ['.history-markdown p'],
+          ['.history-markdown .md-heading'],
+          ['.history-markdown li code'],
+          ['.history-markdown ul > li', '::before'],
+          ['.history-markdown pre'],
+          ['.history-call .history-verb'],
+          ['.history-call .history-path'],
+          ['.history-call .history-range'],
+          ['.history-item[data-kind="compaction"] .history-call'],
+          ['.history-output'],
+          ['.history-exit'],
+          ['.history-fold'],
+          ['.history-expand'],
+          ['.history-took'],
+          ['.history-quiet'],
+          ['.history-diff-row[data-sign="place"]'],
+          ['.history-diff-row[data-sign="removed"]'],
+          ['.history-diff-row[data-sign="added"]'],
+          ['.history-item[data-kind="notice"] .history-text'],
+          ['.history-item[data-kind="compaction"] .history-text'],
+        ]
+        const said = []
+        for (const [selector, pseudo] of TEXTS) {
+          const found = [...dialog.querySelectorAll(selector)]
+          if (found.length === 0) said.push(`${selector}: none drawn`)
+          for (const element of found) {
+            const text = getComputedStyle(element, pseudo ?? null).color
+            const back = ground(element)
+            const [light, dark] = [luminance(text), luminance(back)].sort((a, b) => b - a)
+            const ratio = (light + 0.05) / (dark + 0.05)
+            if (ratio < 4.5) {
+              said.push(`${selector}${pseudo ?? ''}: ${ratio.toFixed(2)} (${text} on ${back})`)
+            }
+          }
+        }
+        return [...new Set(said)]
+      })
+      expect(failures).toEqual([])
     })
   }
 })

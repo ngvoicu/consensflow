@@ -79,6 +79,9 @@ tl-ledger-undo = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features",
 tl-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::"]
 tl-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::history::"]
 tl-ui = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs"]
+# Tab in WebKit, the engine of the app's window on the Mac: Chromium's Tab reaches a button of itself.
+tl-ui-webkit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "--config", "app/playwright.webkit.config.mjs", "app/tests/history-viewer.spec.mjs", "-g", "by Tab"]
+tl-ui-drawer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "names a compaction's summary in what a window wrote"]
 it-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::drawn::"]
 it-shared = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::drawn::"]
 it-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::drawn::"]
@@ -1806,7 +1809,7 @@ runs = ["tl-ui"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "  if (lines.length <= FOLDED_LINES) {"
+find = "  if (hidden === 0) {"
 replace = "  if (lines.length > 0) {"
 
 [[plant]]
@@ -1876,8 +1879,8 @@ runs = ["tl-ui"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "  if (!item.diff || status === 'failed') entry.append(...drawOutput(item.text, status))"
-replace = "  entry.append(...drawOutput(item.text, status))"
+find = "  if (!item.diff || status === 'failed' || holds(item.text, find)) {"
+replace = "  if (true) {"
 
 [[plant]]
 name = "view: a compaction's summary is shown before any click"
@@ -1886,7 +1889,7 @@ runs = ["tl-ui"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "  summary.hidden = true"
+find = "  summary.hidden = !holds(item.text, find)"
 replace = "  summary.hidden = false"
 
 [[plant]]
@@ -1978,3 +1981,117 @@ runs = ["tl-ledger"]
 file = "crates/cf-ledger/src/conversations/history.rs"
 find = "        if from_part == 0 && header.is_some_and(|header| folded(header).contains(needle)) {"
 replace = "        if from_part == 0 && header.is_some_and(|header| header.contains(needle)) {"
+
+# The review of Phase 4 (T-1210, T-731's second round): Muse's exit line, what a search
+# matched in sight, a search that ends with nothing, Tab in WebKit, the light and dark
+# contrast, and the task drawer's compaction colours.
+
+[[plant]]
+name = "view: Muse Code's JSON exit line of a failed call is not kept in sight"
+meant = "keeps each harness's exit line of a failed call in sight, Muse Code's JSON line too, its colour from the status alone"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = '''  /^\s*(?:(?:exit code:?|(?:command|process) exited with code)\s*-?\d+|"exit_code"\s*:\s*-?\d+\s*,?)\s*$/i'''
+replace = '''  /^\s*(?:(?:exit code:?|(?:command|process) exited with code)\s*-?\d+)\s*$/i'''
+
+[[plant]]
+name = "view: a search unfolds no output to the line it matched"
+meant = "shows what a search matched: a line above the fold, a successful edit’s output, a summary"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    hidden = Math.min(hidden, first === -1 ? 0 : first)"
+replace = ""
+
+[[plant]]
+name = "view: a successful edit's output that holds the search is not drawn"
+meant = "shows what a search matched: a line above the fold, a successful edit’s output, a summary"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (!item.diff || status === 'failed' || holds(item.text, find)) {"
+replace = "  if (!item.diff || status === 'failed') {"
+
+[[plant]]
+name = "view: a compaction's summary that holds the search stays shut"
+meant = "shows what a search matched: a line above the fold, a successful edit’s output, a summary"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  summary.hidden = !holds(item.text, find)"
+replace = "  summary.hidden = true"
+
+[[plant]]
+name = "view: a search that stopped short and found nothing at its end keeps its start's notice"
+meant = "a search that stopped short and goes on to the end says what the last read found"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "        if (!list.querySelector('.history-item')) {"
+replace = "        if (false) {"
+
+[[plant]]
+name = "view: WebKit's Tab passes the click rows by"
+meant = "reaches every click row and header control by Tab, and acts on Enter and Space"
+runs = ["tl-ui-webkit"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  row.tabIndex = 0"
+replace = ""
+
+[[plant]]
+name = "view: WebKit's Tab passes the header's Close by"
+meant = "reaches every click row and header control by Tab, and acts on Enter and Space"
+runs = ["tl-ui-webkit"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''<button class="history-icon" type="submit" tabindex="0" aria-label="Close"'''
+replace = '''<button class="history-icon" type="submit" aria-label="Close"'''
+
+[[plant]]
+name = "view: the light viewer's quiet words are the shade the review measured short"
+meant = "draws every text of the viewer at 4.5:1 or more on its own background, light"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "    --history-quiet: #5b5f63;"
+replace = "    --history-quiet: #686c70;"
+
+[[plant]]
+name = "view: the dark viewer's quiet words are too dim on a call's block"
+meant = "draws every text of the viewer at 4.5:1 or more on its own background, dark"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "  --history-quiet: #b0b5ba;"
+replace = "  --history-quiet: #9aa0a6;"
+
+[[plant]]
+name = "view: the search's placeholder is the engine's own grey"
+meant = "draws every text of the viewer at 4.5:1 or more on its own background, dark"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = ".history-search input::placeholder { color: var(--history-quiet); opacity: 1; }"
+replace = ""
+
+[[plant]]
+name = "view: the task drawer's compaction summary is bordered as any item"
+meant = "names a compaction's summary in what a window wrote as one, never as what was sent to it"
+runs = ["tl-ui-drawer"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''.transcript-item[data-compaction="true"] { border-color: var(--amber); }'''
+replace = ""

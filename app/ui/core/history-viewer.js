@@ -14,9 +14,11 @@ const FOLDED_LINES = 5
 /**
  * A line in which a command's output says how it exited, as each harness writes one:
  * Claude Code's `Exit code 1` (first), Devin's `Exit code: 1`, Pi's `Command exited with
- * code 1` (last), Codex's `Process exited with code 1`.
+ * code 1` (last), Codex's `Process exited with code 1`, and Muse Code's JSON line
+ * `"exit_code": 1,` (fifth of twelve).
  */
-const EXIT_LINE = /^\s*(?:exit code:?|(?:command|process) exited with code)\s*-?\d+\s*$/i
+const EXIT_LINE =
+  /^\s*(?:(?:exit code:?|(?:command|process) exited with code)\s*-?\d+|"exit_code"\s*:\s*-?\d+\s*,?)\s*$/i
 
 /** A header of a call that reads, edits or writes a file: its verb, its path, its lines. */
 const FILE_CALL = /^(read|edit|write) (.+?)(:\d+(?:-\d+)?)?$/
@@ -128,7 +130,8 @@ export class HistoryViewer {
       if (read !== this.#reads) return
       shown.find = find
       shown.older = history.older
-      const items = history.items.map((item) => drawItem(item, (shown) => this.#whole(shown)))
+      const whole = (shown) => this.#whole(shown)
+      const items = history.items.map((item) => drawItem(item, whole, find))
       const list = this.#body.querySelector('ol.history-items')
       if (before && list) {
         const below = this.#body.scrollHeight - this.#body.scrollTop
@@ -136,6 +139,10 @@ export class HistoryViewer {
         this.#body.querySelector('.history-note')?.remove()
         list.prepend(...this.#earlier(history, find), ...items)
         this.#body.scrollTop = this.#body.scrollHeight - below
+        // Still nothing to show: the notice says what this read found, not the one before.
+        if (!list.querySelector('.history-item')) {
+          this.#body.replaceChildren(...this.#draw(history, find, items))
+        }
         return
       }
       this.#body.replaceChildren(...this.#draw(history, find, items))
@@ -179,7 +186,7 @@ export class HistoryViewer {
         : '… the read stopped here to stay quick, click to read further back'
     }
     const row = element('li', 'history-earlier-row')
-    const load = button(said, 'history-row history-earlier', () => {
+    const load = rowButton(said, 'history-earlier', () => {
       load.disabled = true
       void this.#read(this.#shown.older)
     })
@@ -229,17 +236,30 @@ function kindOf(item) {
 }
 
 /**
- * One item, drawn by its kind; a part of a long one with the row that reads it whole,
- * which draws it again.
+ * A quiet row a click acts on, in the keyboard's way too: WebKit's Tab passes a button by
+ * unless it says it takes the keyboard.
  */
-function drawItem(item, whole) {
+function rowButton(text, className, action) {
+  const row = button(text, `history-row ${className}`, action)
+  row.tabIndex = 0
+  return row
+}
+
+/** Whether `text` holds the search `find` (folded, as the daemon folds), where there is one. */
+const holds = (text, find) => !!find && !!text && text.toLowerCase().includes(find.toLowerCase())
+
+/**
+ * One item, drawn by its kind; a part of a long one with the row that reads it whole,
+ * which draws it again. During a search (`find`), what holds its words is drawn in sight.
+ */
+function drawItem(item, whole, find = '') {
   const kind = kindOf(item)
   const entry = element('li', 'history-item')
   entry.dataset.id = item.id
   entry.dataset.kind = kind
   if (item.at) entry.title = clock(item.at)
-  if (kind === 'tool') drawCall(entry, item)
-  else if (kind === 'compaction') drawCompaction(entry, item)
+  if (kind === 'tool') drawCall(entry, item, find)
+  else if (kind === 'compaction') drawCompaction(entry, item, find)
   else if (kind === 'text') {
     const words = element('div', 'history-markdown')
     words.append(...render(item.text))
@@ -248,7 +268,7 @@ function drawItem(item, whole) {
   if (!item.complete && kind !== 'tool') {
     entry.append(element('p', 'history-quiet', 'still writing…'))
   }
-  if (item.cut) drawCut(entry, item, whole)
+  if (item.cut) drawCut(entry, item, whole, find)
   return entry
 }
 
@@ -269,13 +289,16 @@ function said(kind, item) {
  * kept in sight where it failed, and the time it took; green, red or grey by how it
  * stands (`unknown` where an older build said nothing of it).
  */
-function drawCall(entry, item) {
+function drawCall(entry, item, find) {
   const status = ['ok', 'failed', 'running'].includes(item.status) ? item.status : 'unknown'
   entry.dataset.status = status
   entry.append(callHeader(item.header ?? item.name ?? itemLabel(item)))
   if (item.diff) entry.append(drawDiff(item.diff))
-  // An edit's change says what it did: its tool's words of it only where it failed.
-  if (!item.diff || status === 'failed') entry.append(...drawOutput(item.text, status))
+  // An edit's change says what it did: its tool's words of it only where it failed, or
+  // where they hold what a search looks for.
+  if (!item.diff || status === 'failed' || holds(item.text, find)) {
+    entry.append(...drawOutput(item.text, status, find))
+  }
   if (status === 'running') entry.append(element('p', 'history-took', 'Still running'))
   else if (typeof item.tookMs === 'number') {
     entry.append(element('p', 'history-took', `Took ${took(item.tookMs)}`))
@@ -316,17 +339,23 @@ function drawDiff(diff) {
 
 /**
  * A call's output: its last lines, under a row that unfolds the rest, and a failed call's
- * exit line where they do not hold it. Blank lines at its end are no lines of it.
+ * exit line where they do not hold it. Blank lines at its end are no lines of it. During a
+ * search, the lines are shown from the first that holds its words, where that is further up.
  */
-function drawOutput(text, status) {
+function drawOutput(text, status, find) {
   const lines = text.replace(/\s+$/, '').split('\n')
   if (lines.length === 1 && lines[0] === '') return []
   const output = element('pre', 'history-output')
-  if (lines.length <= FOLDED_LINES) {
+  let hidden = Math.max(0, lines.length - FOLDED_LINES)
+  if (holds(text, find)) {
+    const first = lines.findIndex((line) => holds(line, find))
+    // Words that span lines are shown with the whole output.
+    hidden = Math.min(hidden, first === -1 ? 0 : first)
+  }
+  if (hidden === 0) {
     output.textContent = lines.join('\n')
     return [output]
   }
-  const hidden = lines.length - FOLDED_LINES
   const shown = lines.slice(hidden)
   output.textContent = shown.join('\n')
   const exit =
@@ -334,20 +363,19 @@ function drawOutput(text, status) {
       ? lines.slice(0, hidden).findLast((line) => EXIT_LINE.test(line))
       : undefined
   const pinned = exit === undefined ? null : element('pre', 'history-exit', exit.trim())
-  const fold = button(
-    `… (${hidden} earlier lines, click to expand)`,
-    'history-row history-fold',
-    () => {
-      output.textContent = lines.join('\n')
-      pinned?.remove()
-      fold.remove()
-    },
-  )
+  const fold = rowButton(`… (${hidden} earlier lines, click to expand)`, 'history-fold', () => {
+    output.textContent = lines.join('\n')
+    pinned?.remove()
+    fold.remove()
+  })
   return pinned ? [fold, output, pinned] : [fold, output]
 }
 
-/** A compaction: its mark, its tokens, and its summary on a click where it wrote one. */
-function drawCompaction(entry, item) {
+/**
+ * A compaction: its mark, its tokens, and its summary on a click where it wrote one, or
+ * open where it holds what a search looks for.
+ */
+function drawCompaction(entry, item, find) {
   entry.append(element('div', 'history-call', '[compaction]'))
   const tokens =
     typeof item.tokens === 'number'
@@ -358,12 +386,12 @@ function drawCompaction(entry, item) {
     return
   }
   const summary = element('pre', 'history-text', item.text)
-  summary.hidden = true
-  const expand = button(`${tokens} (click to expand)`, 'history-row history-expand', () => {
+  summary.hidden = !holds(item.text, find)
+  const expand = rowButton(`${tokens} (click to expand)`, 'history-expand', () => {
     summary.hidden = !summary.hidden
     expand.setAttribute('aria-expanded', String(!summary.hidden))
   })
-  expand.setAttribute('aria-expanded', 'false')
+  expand.setAttribute('aria-expanded', String(!summary.hidden))
   entry.append(expand, summary)
 }
 
@@ -372,20 +400,20 @@ function drawCompaction(entry, item) {
  * showed a part from further on): read, the item is drawn again whole, a delivery said
  * only of the copy the page showed.
  */
-function drawCut(entry, item, whole) {
+function drawCut(entry, item, whole, find) {
   const size = measure(item.cut.bytes)
   const said =
     item.cut.from > 0
       ? `… (${size} in all, shown from character ${(item.cut.from + 1).toLocaleString('en')}, click to load it whole)`
       : `… (${size} in all, click to load the rest)`
-  const more = button(said, 'history-row history-more', async () => {
+  const more = rowButton(said, 'history-more', async () => {
     more.disabled = true
     try {
       const { text, revision } = await whole(item)
       // A delivery is said only of the copy the page showed: another, copied since, is
       // drawn as it is.
       const delivery = revision === item.cut.revision ? item.delivery : undefined
-      entry.replaceWith(drawItem({ ...item, text, delivery, cut: undefined }, whole))
+      entry.replaceWith(drawItem({ ...item, text, delivery, cut: undefined }, whole, find))
     } catch (cause) {
       more.disabled = false
       entry.querySelector('.history-refusal')?.remove()
