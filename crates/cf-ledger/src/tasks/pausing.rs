@@ -130,7 +130,7 @@ fn pause_task_as(
             if let Some(because) = because {
                 detail.insert("because".into(), json!(because));
             }
-            pause(store, &task, detail, with_project)?;
+            pause(store, &task, detail, with_project, Stops::Asked)?;
         }
         task_by_id(store, task.id)
     })
@@ -185,24 +185,42 @@ pub(crate) fn take_over_pause(
     Ok(taken)
 }
 
-/// The move to paused, which is a stop of its own: the task counts it, so two
-/// pauses in one millisecond are two. Its time is kept as the task's last
-/// pause (a tell that reaches the window from then on counts,
-/// `told_since_paused`), and, `with_project`, that its project's suspension
-/// paused it, while the project is suspended. Its window's questions have their
-/// doors shut before anything presses a key, and what a door claimed and nobody
+/// Whether a move to paused asks the task's window to stop.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stops {
+    /// A pause of the chief's or the human's, a tell, ConsensFlow's own of a window that
+    /// went or began nothing, a project's Close: a stop its window owes until it pays it.
+    Asked,
+    /// A wait that is no stop: a hold for quota, whose turn a refusal ended already and
+    /// whose window goes on by itself, or a resume whose words never reached the window.
+    /// Nothing is pressed into the window for it, and nothing closes it (T-1199, bugs 9
+    /// and 10: a hold's stop, pressed into a window that waited to continue by itself,
+    /// closed it, and was left owed through its task's result to the reopen after).
+    NotAsked,
+}
+
+/// The move to paused. One that asks a stop (`stops`) counts it, so two pauses in one
+/// millisecond are two; one that does not leaves the count, and what the window owes,
+/// as it was. Its time is kept as the task's last pause (a tell that reaches the window
+/// from then on counts, `told_since_paused`), and, `with_project`, that its project's
+/// suspension paused it, while the project is suspended. Its window's questions have
+/// their doors shut before anything presses a key, and what a door claimed and nobody
 /// acknowledged is the ledger's again.
 fn pause(
     store: &mut Store,
     task: &TaskRow,
     mut detail: Map<String, Value>,
     with_project: bool,
+    stops: Stops,
 ) -> Result<(), LedgerError> {
-    detail.insert("stop".into(), json!(task.stop_seq + 1));
+    let asked = i64::from(stops == Stops::Asked);
+    if asked == 1 {
+        detail.insert("stop".into(), json!(task.stop_seq + 1));
+    }
     store.move_task(task, "paused", Value::Object(detail))?;
     store.db.execute(
-        "UPDATE task SET paused_at = updated_at, stop_seq = stop_seq + 1 WHERE id = ?",
-        [task.id],
+        "UPDATE task SET paused_at = updated_at, stop_seq = stop_seq + ? WHERE id = ?",
+        params![asked, task.id],
     )?;
     if with_project {
         store.db.execute(
@@ -253,9 +271,11 @@ pub(super) fn shut_doors(store: &Store, task: &TaskRow, window: i64) -> Result<(
 
 /// The daemon holds a task with its window while its member is out of
 /// quota: paused, with the time it goes on by itself (`until`, an ISO
-/// time). Its agent stops as any paused task's does, its window waits to go
-/// on at the reset, and what was on its way to it waits too: the daemon
-/// resumes it with fixed words, and the chief's own are what is kept.
+/// time). A hold asks no stop: the refusal ended the window's turn, and a harness
+/// that waits to continue by itself is left to (Claude Code's "continuing
+/// automatically"); nothing is pressed into the window and nothing closes it. Its
+/// window waits to go on at the reset, and what was on its way to it waits too:
+/// the daemon resumes it with fixed words, and the chief's own are what is kept.
 pub(crate) fn hold_task(
     store: &mut Store,
     project_id: i64,
@@ -278,7 +298,7 @@ pub(crate) fn hold_task(
         detail.insert("by".into(), Value::Null);
         detail.insert("because".into(), json!(because));
         detail.insert("until".into(), json!(until));
-        pause(store, &task, detail, false)?;
+        pause(store, &task, detail, false, Stops::NotAsked)?;
         store.db.execute(
             "UPDATE task SET held_until = ? WHERE id = ?",
             params![until, task.id],
@@ -453,8 +473,10 @@ pub(crate) fn paused_task(
 /// words fail, for they never went in, and its requester is told so, and why, in the
 /// note of the pause (the engine's, [`resumed_in_vain`]); what they carried waits for
 /// the next resume, which carries it
-/// (`fold`). Whether they were such words (T-77: a resume whose window never came up
-/// failed its task, and left the words kept for it queued under a failed task).
+/// (`fold`). The pause asks no stop: a resume never interrupts a window, and one whose
+/// words never went in has nothing of them to stop. Whether they were such words (T-77:
+/// a resume whose window never came up failed its task, and left the words kept for it
+/// queued under a failed task).
 pub(crate) fn pause_again(
     store: &mut Store,
     message: &MessageView,
@@ -490,7 +512,7 @@ pub(crate) fn pause_again(
     let mut detail = Map::new();
     detail.insert("by".into(), Value::Null);
     detail.insert("because".into(), json!(resumed_in_vain(message, reason)));
-    pause(store, task, detail, false)?;
+    pause(store, task, detail, false, Stops::NotAsked)?;
     Ok(true)
 }
 

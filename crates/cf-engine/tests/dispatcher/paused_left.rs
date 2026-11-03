@@ -302,10 +302,11 @@ fn a_window_kept_open_for_its_work_pays_the_pause_once_its_turn_ends_and_stays_o
 }
 
 #[test]
-fn once_the_work_a_window_was_kept_for_ends_fresh_rounds_go_in_and_ignored_with_nothing_running_it_is_closed(
+fn once_the_work_a_window_was_kept_for_ends_fresh_rounds_go_in_and_ignored_with_nothing_running_it_is_kept(
 ) {
     let context = Context::new();
     let project = ignored_while_its_work_runs(&context);
+    let zeus = context.id(project, "zeus");
     // The tests end and the turn is still at work: at the next look, three fresh rounds.
     context.background.leaves(Some(Background::default()));
     context.advance(10_000);
@@ -320,23 +321,21 @@ fn once_the_work_a_window_was_kept_for_ends_fresh_rounds_go_in_and_ignored_with_
         context.pass().unwrap();
     }
     assert_eq!(context.host.inputs().len(), 6);
-    assert!(
-        context.host.killed().is_empty(),
-        "not before the fresh rounds are over"
-    );
-    // Ignored too, with nothing of its own running: a hung turn, closed, and what was
-    // checked said. Nothing more of the work it was kept for: that was said.
-    context.host.exits_showing(Some(0), None, None);
+    // Ignored too, with nothing of its own running: a hung turn, kept, never closed.
+    // Nothing more is said: the window that did not stop was said once.
     context.advance(3_100);
     context.pass().unwrap();
-    assert_eq!(context.host.killed().len(), 1);
+    assert!(context.host.killed().is_empty(), "a pause closes nothing");
+    assert!(context.dispatcher.unstopped(zeus).is_some());
     assert_eq!(context.task(project, 1).task.state, "paused");
     let told = did_not_stop(&context, project, "chief");
-    assert_eq!(told.len(), 2, "{told:?}");
-    assert_eq!(
-        told[1],
-        "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed."
-    );
+    assert_eq!(told.len(), 1, "{told:?}");
+    // A minute on, asked again: three fresh rounds, and still nothing said.
+    context.advance(60_000);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs().len(), 7);
+    assert!(context.host.killed().is_empty());
+    assert_eq!(did_not_stop(&context, project, "chief").len(), 1);
     context.close();
 }
 

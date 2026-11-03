@@ -186,8 +186,6 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-016", 10, KEPT_BY_PAUSE),
     ("ledger-tasks-018", 16, KEPT_BY_PAUSE),
     ("ledger-tasks-020", 19, REASON_PAUSE),
-    ("ledger-tasks-023", 10, STOP_IN_EVENT),
-    ("ledger-tasks-024", 13, STOP_IN_EVENT),
     ("ledger-tasks-025", 12, RESULT_ACCEPTED),
     ("ledger-tasks-026", 29, STOP_IN_EVENT),
     ("ledger-tasks-027", 6, WAITED_FOR),

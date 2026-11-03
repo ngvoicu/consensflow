@@ -234,13 +234,14 @@ pub fn lane_words(said: &str) -> Option<Vec<&str>> {
         .collect()
 }
 
-/// Whether the lane read working over the stop and then closed: the window was at work
-/// when the stop was first looked at, and the daemon closed it. When that look came is no
-/// part of it: it is looked at as soon as the pause is answered, and the answer is the
-/// daemon's to give when its machine lets it (a daemon that took a fifth of a second to
-/// answer is a stop like any other).
-pub fn lane_went_working_then_closed(said: &str) -> bool {
-    lane_words(said).is_some_and(|words| words.starts_with(&["working", "closed"]))
+/// Whether the lane read working over the stop and was kept: the window was at work when
+/// the stop was first looked at, and the daemon never closed it (T-1199: a pause never
+/// closes a window). When that look came is no part of it: it is looked at as soon as the
+/// pause is answered, and the answer is the daemon's to give when its machine lets it (a
+/// daemon that took a fifth of a second to answer is a stop like any other).
+pub fn lane_went_working_and_was_kept(said: &str) -> bool {
+    lane_words(said)
+        .is_some_and(|words| words.first() == Some(&"working") && !words.contains(&"closed"))
 }
 
 #[cfg(test)]
@@ -255,35 +256,35 @@ mod tests {
     }
 
     #[test]
-    fn a_lane_that_read_working_and_then_closed_did_so_whenever_it_was_first_looked_at() {
+    fn a_lane_that_read_working_and_was_kept_did_so_whenever_it_was_first_looked_at() {
         // The first look is the pause's answer and the next thing the case does: a daemon
         // that answers in a few milliseconds is looked at "+0.0 s", one that took longer
         // (a loaded machine, a daemon stopped for a moment) at "+0.1 s", "+0.2 s", or more.
         for first in ["+0.0 s", "+0.1 s", "+0.2 s", "+1.5 s"] {
-            let said = lane(&format!("working at {first}, closed at +9.4 s"));
-            assert!(lane_went_working_then_closed(&said), "{said}");
-            assert_eq!(lane_words(&said), Some(vec!["working", "closed"]));
+            let said = lane(&format!("working at {first}"));
+            assert!(lane_went_working_and_was_kept(&said), "{said}");
+            assert_eq!(lane_words(&said), Some(vec!["working"]));
         }
-        // And more after it, as the line may say if the lane changed again.
-        let said = lane("working at +0.2 s, closed at +9.4 s, idle at +11.0 s");
-        assert!(lane_went_working_then_closed(&said), "{said}");
+        // And more after it, as the line may say if the lane changed again: its turn ended.
+        let said = lane("working at +0.2 s, idle at +11.0 s");
+        assert!(lane_went_working_and_was_kept(&said), "{said}");
     }
 
     #[test]
-    fn a_lane_that_never_closed_or_that_closed_without_working_is_not_that() {
+    fn a_lane_that_closed_or_that_never_read_working_is_not_that() {
         for words in [
-            // The window that ignored the stop and was left open.
-            "working at +0.1 s",
+            // The window that ignored the stop and was closed.
+            "working at +0.1 s, closed at +9.4 s",
             // Looked at once it was closed, or at rest.
             "closed at +0.1 s",
-            "working at +0.1 s, idle at +2.1 s",
+            "idle at +0.1 s",
             // Closed first, then working again.
             "closed at +0.1 s, working at +3.0 s",
             // Working, something else, and only then closed.
             "working at +0.1 s, idle at +2.1 s, closed at +9.4 s",
         ] {
             let said = lane(words);
-            assert!(!lane_went_working_then_closed(&said), "{said}");
+            assert!(!lane_went_working_and_was_kept(&said), "{said}");
         }
         // No line, a word with no time, a time that is no number.
         assert_eq!(lane_words("round 1: 1 Escape: +0.3 s"), None);
@@ -292,7 +293,7 @@ mod tests {
             lane_words(&lane("working at +soon s, closed at +9.4 s")),
             None
         );
-        assert!(!lane_went_working_then_closed("no such line"));
+        assert!(!lane_went_working_and_was_kept("no such line"));
     }
 
     #[test]
@@ -335,7 +336,7 @@ mod tests {
         show(&mut case, &seen, &watched, &[], "p");
         let said = case.text();
         assert_eq!(lane_words(&said), Some(vec!["working", "closed"]), "{said}");
-        assert!(lane_went_working_then_closed(&said), "{said}");
+        assert!(!lane_went_working_and_was_kept(&said), "{said}");
     }
 
     fn seen() -> Seen {

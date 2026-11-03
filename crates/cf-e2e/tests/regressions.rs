@@ -93,6 +93,8 @@ mod a_pause_a_hung_worker_ignored_stranded_its_task;
 mod a_question_the_chief_answered_was_typed_in_later;
 #[path = "regressions/a_quota_wait_ended_failed.rs"]
 mod a_quota_wait_ended_failed;
+#[path = "regressions/a_reopen_or_a_quota_wait_closed_a_window_still_on_its_turn.rs"]
+mod a_reopen_or_a_quota_wait_closed_a_window_still_on_its_turn;
 #[path = "regressions/a_reopened_window_with_no_task_read_working_for_good.rs"]
 mod a_reopened_window_with_no_task_read_working_for_good;
 #[path = "regressions/a_reply_written_before_the_tools_of_a_tells_turn_reached_nobody.rs"]

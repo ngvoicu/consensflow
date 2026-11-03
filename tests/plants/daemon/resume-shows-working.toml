@@ -330,24 +330,24 @@ find = '''                "because": format!("{why}, and m-{words}, the words th
 replace = '''                "because": format!("and m-{words}, the words that resumed it, have not gone in"),'''
 
 [[plant]]
-name = "resume shows working: the close of a window with the claim says it is working"
-meant = "a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended"
+name = "resume shows working: the kept note of a task shown working for its words promises them nothing"
+meant = "a_kept_windows_notes_say_what_its_task_is_as_they_are_told"
 runs = ["engine-lib-stops"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = '        Some("working" | "waiting") if ours && words_wait => Some("queued"),'
-replace = '        Some("working" | "waiting") if false && ours && words_wait => Some("queued"),'
+find = '        Some("queued" | "working" | "waiting") => {'
+replace = '        Some("queued") => {'
 
 [[plant]]
-name = "resume shows working: the close note promises words for a window that has not the claim"
-meant = "a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended"
+name = "resume shows working: the kept note of a task shown working tells the human to delete a session that holds work"
+meant = "a_kept_windows_notes_say_what_its_task_is_as_they_are_told"
 runs = ["engine-lib-stops"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = '        Some("working" | "waiting") if ours && words_wait => Some("queued"),'
-replace = '        Some("working" | "waiting") if ours => Some("queued"),'
+find = '    let held = matches!(state, Some("queued" | "working" | "waiting"));'
+replace = '    let held = matches!(state, Some("queued"));'
 
 [[plant]]
 name = "resume shows working: the Resume brings a window back for a task shown working for words that never went in"

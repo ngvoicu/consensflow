@@ -341,11 +341,14 @@ fn a_brief_a_channel_harness_never_began_is_pressed_nothing_and_its_task_paused(
     );
 }
 
-/// A window read in flight that never began, whose pause's rounds it ignored too, is closed by
-/// them, as a pause closes any such: the resume opens a window on its conversation, and the
-/// task works again there, its brief above the resume's words.
+/// A window read in flight that never began, whose pause's rounds it ignored too, is kept, as
+/// a pause keeps any such (T-1199: a pause never closes a window): its requester and the
+/// human are told once that it may be hung and that only the human can end it, and once its
+/// turn ends the resume's words go into that window, on its conversation, its brief above
+/// them.
 #[test]
-fn a_task_paused_for_a_brief_its_window_read_in_flight_never_began_resumes_on_its_conversation() {
+fn a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_kept_and_resumes_in_that_window(
+) {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     a_follow_up_whose_window_never_begins(&context, &tiers, false);
@@ -360,17 +363,39 @@ fn a_task_paused_for_a_brief_its_window_read_in_flight_never_began_resumes_on_it
     assert_eq!(tiers.task(2).task.state, "paused");
     let session = tiers.assignee(2);
     let native = native_of(&context, tiers.id(&session));
+    let launches = context.adapter.prepared().len();
+    let killed = context.host.killed().len();
     for _ in 0..6 {
         context.advance(5_000);
         context.pass().unwrap();
     }
-    context.adapter.never_begins.set(None);
+    assert_eq!(
+        context.host.killed().len(),
+        killed,
+        "a pause closes nothing"
+    );
+    assert!(context.dispatcher.unstopped(tiers.id(&session)).is_some());
+    let told: Vec<String> = context
+        .inbox(context.id(tiers.project.id, "human"))
+        .into_iter()
+        .filter(|message| message.kind == "note" && message.body.contains("did not stop"))
+        .map(|message| message.body)
+        .collect();
+    assert_eq!(told.len(), 1, "the human is told once: {told:?}");
     context.resume_task(tiers.project.id, 2, "Begin it now");
+    // Its turn ends: the words go in, in the same window, and the task works again.
+    context.adapter.never_begins.set(None);
+    context.adapter.answer("zeus", "");
     for _ in 0..4 {
         context.pass().unwrap();
     }
     assert_eq!(tiers.task(2).task.state, "working");
     assert_eq!(tiers.assignee(2), session, "the same session");
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "the same window"
+    );
     assert_eq!(
         native_of(&context, tiers.id(&session)),
         native,

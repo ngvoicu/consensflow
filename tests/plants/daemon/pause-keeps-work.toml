@@ -5,20 +5,21 @@
 # its harness's record says run. One that runs any is kept open, its task paused, the
 # chief and the human told once (only deleting its session ends it sooner), asked again
 # every ten seconds with no key, and given three fresh rounds once that work has ended; a
-# window that ignores those too with nothing running is closed, its note saying what was
-# checked. The engine's tests are `crates/cf-engine/tests/dispatcher/paused_left.rs`; the
+# window that ignores those too with nothing running is kept as well (T-1199: a pause never
+# closes a window), its note saying what was checked. The engine's tests are `crates/cf-engine/tests/dispatcher/paused_left.rs`; the
 # rig's case, `crates/cf-e2e/tests/regressions/
 # a_pause_a_busy_worker_ignored_closed_its_window_and_ended_its_work.rs`, is the real
 # daemon and pane host on a stand-in that leaves a job in its tree and takes no Escape.
 #
-# - a window that runs work is closed anyway (the engine's tests, and the rig's case);
+# - a window that runs work is taken for one that runs nothing (the engine's tests, and the
+#   rig's case);
 # - a host that gives no answer is read as one that says nothing runs;
 # - the jobs and the agents the harness's record counts are not counted;
 # - a kept window is pressed while its work runs;
 # - a kept window is never asked again, and stays kept after its work ended;
-# - once its work ended, it is closed with no fresh rounds;
+# - once its work ended, it is given no fresh rounds;
 # - the chief is told again at each look; the human is not told;
-# - the close's note does not say what was checked;
+# - the note of a window kept running nothing does not say what was checked;
 # - the live kit's command matching (T-1117's kit fix);
 # - T-1137: what the harness says it keeps running (Codex's background terminals, from its
 #   broker's GET /terminals, which asks Codex's server) is not asked, or a harness that
@@ -41,25 +42,25 @@ live-stops-stuck-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test",
 live-stops-tool-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
 
 [[plant]]
-name = "pause keeps work: a window that runs work is closed anyway"
+name = "pause keeps work: a window that runs work is taken for one that runs nothing"
 meant = "a_window_that_ignores_every_round_while_its_work_runs_stays_open_and_its_work_runs_on"
 runs = ["engine-dispatcher-paused-left"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                if let Some(runs) = self.close_would_end(record, observed).await {"
-replace = "                if let Some(runs) = None::<String> {"
+find = "                let runs = self.close_would_end(record, observed).await;"
+replace = "                let runs: Option<String> = None;"
 
 [[plant]]
-name = "pause keeps work: a window that runs work is closed anyway, on the rig"
+name = "pause keeps work: a window that runs work is taken for one that runs nothing, on the rig"
 meant = "a_busy_worker_that_ignores_its_pause_keeps_its_window_and_its_work_until_the_human_ends_its_session"
 runs = ["rig-regression-busy-pause"]
 builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                if let Some(runs) = self.close_would_end(record, observed).await {"
-replace = "                if let Some(runs) = None::<String> {"
+find = "                let runs = self.close_would_end(record, observed).await;"
+replace = "                let runs: Option<String> = None;"
 
 [[plant]]
 name = "pause keeps work: a host that gives no answer is read as one that says nothing runs"
@@ -98,12 +99,12 @@ runs = ["engine-dispatcher-paused-left"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                    self.keep(record, key, stop.number, rounds, Kept::ForWork);"
-replace = "                    self.keep(record, key, stop.number, rounds, Kept::ForWork);\n                    self.press(record).await;"
+find = "                self.keep(record, key, stop.number, rounds, now);"
+replace = "                self.keep(record, key, stop.number, rounds, now);\n                self.press(record).await;"
 
 [[plant]]
 name = "pause keeps work: a kept window is never asked again"
-meant = "once_the_work_a_window_was_kept_for_ends_fresh_rounds_go_in_and_ignored_with_nothing_running_it_is_closed"
+meant = "once_the_work_a_window_was_kept_for_ends_fresh_rounds_go_in_and_ignored_with_nothing_running_it_is_kept"
 runs = ["engine-dispatcher-paused-left"]
 
 [[plant.edit]]
@@ -112,14 +113,19 @@ find = "        Kept::ForWork => Some(RECHECK_EVERY_MS),"
 replace = "        Kept::ForWork => Some(i64::MAX),"
 
 [[plant]]
-name = "pause keeps work: once its work ended it is closed with no fresh rounds"
-meant = "once_the_work_a_window_was_kept_for_ends_fresh_rounds_go_in_and_ignored_with_nothing_running_it_is_closed"
+name = "pause keeps work: once its work ended it is given no fresh rounds"
+meant = "once_the_work_a_window_was_kept_for_ends_fresh_rounds_go_in_and_ignored_with_nothing_running_it_is_kept"
 runs = ["engine-dispatcher-paused-left"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                if kept == Kept::ForWork {"
-replace = "                if false {"
+find = "                    (None, Kept::ForWork | Kept::Ignored) => {"
+replace = "                    (None, Kept::Ignored) => {"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "                    (None, Kept::No) => Kept::Ignored,"
+replace = "                    (None, _) => Kept::Ignored,"
 
 [[plant]]
 name = "pause keeps work: the chief is told again at each look"
@@ -128,8 +134,8 @@ runs = ["engine-dispatcher-paused-left"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                    if told_work {"
-replace = "                    if false {"
+find = "                if told {"
+replace = "                if false {"
 
 [[plant]]
 name = "pause keeps work: the human is not told of a kept window"
@@ -138,18 +144,18 @@ runs = ["engine-dispatcher-paused-left"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = '        if board && !readers.iter().any(|reader| reader == "human") {'
-replace = '        if false && board && !readers.iter().any(|reader| reader == "human") {'
+find = '        if !readers.iter().any(|reader| reader == "human") {'
+replace = '        if false && !readers.iter().any(|reader| reader == "human") {'
 
 [[plant]]
-name = "pause keeps work: the close's note does not say what was checked"
-meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
+name = "pause keeps work: the note of a window kept running nothing does not say what was checked"
+meant = "three_rounds_ignored_keep_the_window_said_once_its_task_paused_and_asked_again_every_minute"
 runs = ["engine-dispatcher-stops-keeps"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = 'const CHECKED: &str = "First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names.";'
-replace = 'const CHECKED: &str = "";'
+find = "and ConsensFlow can see nothing it runs: the host lists no work of its turn, and its harness no job or agent, so its harness may be hung (in a model request, or a tool it does not name)."
+replace = "and ConsensFlow can see nothing it runs."
 
 [[plant]]
 name = "pause keeps work: the kit matches a program told by its path by the whole path"

@@ -1,28 +1,30 @@
-# A pause closes a window that ignores it (the zeewin long run of 2026-10-19: a Pi
-# worker hung in a model request ignored the pause's Escape, its window read working
-# for good, and the words that resumed its task waited 1 h 48 min with 0 attempts).
-# Every round of Escape ignored, the window of the pause's task is closed, the task
-# stays paused, and the notes say why; resumed, the window opens again on its
-# conversation. The engine's tests are in `crates/cf-engine/tests/dispatcher/stops.rs`;
-# the case of the regressions, `crates/cf-e2e/tests/regressions/
-# a_pause_a_hung_worker_ignored_stranded_its_task.rs`, is the real daemon and pane host
-# on a stand-in whose turn takes no Escape (`HANG`), and its run builds the native `cf`
-# from the sources as they are planted, so its plant says `builds`.
+# A pause never closes a window (T-1199, the owner's rule of 2026-11-03: "pause should never
+# close the window"; before it, from the zeewin long run of 2026-10-19, a window that ignored
+# every round of Escape was closed). A window that ignores every round of a pause is kept,
+# its task paused, and whoever gave the task and the human are told once that it did not
+# stop, what it runs as far as ConsensFlow can tell (nothing it can see, for a hung harness),
+# and that only the human can end it, by deleting its session; it is asked again every
+# minute, and pays the stop at rest once its turn ends. Only a pause asks a stop: a hold for
+# quota, the daemon's resume after it, a resume whose words never went in, a reopen and its
+# words ask none (T-1199's bugs 9 and 10: a hold's stop, pressed into a window that waited at
+# work to continue by itself, closed it; and one no look paid waited through its task's
+# result for the reopen). The engine's tests are in `crates/cf-engine/tests/dispatcher/
+# stops.rs`, the ledger's in `crates/cf-ledger/tests/receipt/sessions.rs`; the case of the
+# regressions, `crates/cf-e2e/tests/regressions/a_pause_a_hung_worker_ignored_stranded_its_
+# task.rs`, is the real daemon and pane host on a stand-in whose turn takes no Escape
+# (`HANG`), and its run builds the native `cf` from the sources as they are planted, so its
+# plant says `builds`.
 #
-# - a window that ignores every round is left open, as on main (the engine's tests,
-#   and the rig's case);
+# - a window that ignores every round is closed (the engine's tests, and the rig's case);
 # - a window that did stop is closed;
-# - the close loses the paused state: the task goes on by itself;
-# - the notes promise words to a task cancelled or ended while its window closed, or
-#   queued for another window (Astra on round 1);
-# - a window whose member is out of quota is never closed;
-# - the rig's case reads the close by sampling the lane for its closed pane, which a
-#   look that comes after the window came back never sees (both reviewers on round 1);
+# - a window kept running nothing is never asked again;
+# - the kept note says a task resumed meanwhile is paused, or offers a cancelled one a resume;
+# - a hold asks a stop (bug 10), or a resume whose words never went in does;
+# - a reopen, or a resume, asks a stop (bug 9's class);
 # - the live suite's cases against the stand-in agent (`crates/cf-e2e/tests/live_stops/
-#   midturn/`) read the lane over the stop as working and then closed, at whatever look
-#   the first came: held to "+0.0 s" they failed when the daemon answered the pause late
-#   (T-403), and a lane that never closed must still fail them; and a close is read
-#   from the pane host's closes of the window, never from a note's words alone (T-807).
+#   midturn/`) read the lane over the stop, at whatever look the first came (T-403), and a
+#   close is read from the pane host's closes of the window, never from a note's words
+#   alone (T-807).
 #
 # Every name holds `pause closes`, so `cargo xtask plants daemon "pause closes"` runs
 # them all.
@@ -42,25 +44,31 @@ live-stops-judge = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "liv
 live-stops-ignored = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::stand_in::a_stand_in_that_goes_on_through_three_rounds"], builds = true }
 
 [[plant]]
-name = "pause closes: a window that ignores every round is left open"
-meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
+name = "pause closes: a window that ignores every round is closed"
+meant = "three_rounds_ignored_keep_the_window_said_once_its_task_paused_and_asked_again_every_minute"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                if self.retire(record).await? {"
-replace = "                if false {"
+find = "                    (None, Kept::No) => Kept::Ignored,"
+replace = """                    (None, Kept::No) => {
+                        self.retire(record).await?;
+                        return Ok(());
+                    }"""
 
 [[plant]]
-name = "pause closes: a window that ignores every round is left open, on the rig"
-meant = "a_worker_hung_in_its_turn_is_closed_by_its_pause_and_goes_on_in_the_window_its_resume_opens"
+name = "pause closes: a window that ignores every round is closed, on the rig"
+meant = "a_worker_hung_in_its_turn_is_kept_by_its_pause_told_once_and_its_resume_waits_for_the_human"
 runs = ["rig-regression-hung-pause"]
 builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                if self.retire(record).await? {"
-replace = "                if false {"
+find = "                    (None, Kept::No) => Kept::Ignored,"
+replace = """                    (None, Kept::No) => {
+                        self.retire(record).await?;
+                        return Ok(());
+                    }"""
 
 [[plant]]
 name = "pause closes: a window that stopped is closed at rest"
@@ -78,96 +86,138 @@ replace = '''
                     // The window stays: what its turn left runs on, named and never ended.'''
 
 [[plant]]
-name = "pause closes: the close resumes the task by itself"
-meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
+name = "pause closes: a window kept running nothing is never asked again"
+meant = "three_rounds_ignored_keep_the_window_said_once_its_task_paused_and_asked_again_every_minute"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = '''
-                if self.retire(record).await? {
-                    return'''
-replace = '''
-                if self.retire(record).await? {
-                    self.seams.ledger.borrow_mut().resume_task(project.id, stop.number, None, "Go on")?;
-                    return'''
+find = "        Kept::Ignored => Some(KEPT_EVERY_MS),"
+replace = "        Kept::Ignored => Some(i64::MAX),"
 
 [[plant]]
-name = "pause closes: the notes promise words to a task that ended while its window closed"
-meant = "a_task_cancelled_while_its_window_is_closed_is_said_to_be_cancelled_and_no_words_are_promised"
+name = "pause closes: the kept note says a task resumed meanwhile is paused"
+meant = "a_task_resumed_while_its_window_ignores_the_rounds_has_its_words_go_into_that_window_once_its_turn_ends"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = '        Some("queued") if ours => ('
-replace = '        Some(_) if ours => ('
+find = '        Some("paused") => format!(" and T-{number} paused"),'
+replace = '        Some(_) => format!(" and T-{number} paused"),'
 
 [[plant]]
-name = "pause closes: the notes promise words to a task queued for another window"
-meant = "a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended"
+name = "pause closes: the kept note offers a cancelled task a resume"
+meant = "a_kept_windows_notes_say_what_its_task_is_as_they_are_told"
 runs = ["engine-lib-stops"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = '        Some("queued") if ours => ('
-replace = '        Some("queued") => ('
+find = '        Some("cancelled") => format!(" T-{number} was cancelled;"),'
+replace = '        Some("cancelled") => format!(" `cf task resume T-{number} \\"…\\"` gives the window your words once its turn ends;"),'
 
 [[plant]]
-name = "pause closes: a window whose member is out of quota is never closed"
-meant = "a_window_held_for_quota_that_ignores_the_rounds_is_closed_and_the_reset_reopens_it_and_gives_the_words_once"
+name = "pause closes: a hold asks a stop"
+meant = "a_window_held_for_quota_at_work_while_out_is_pressed_nothing_and_closed_never_and_its_words_go_in_once_it_rests"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = '''
-            Round::Close => {'''
-replace = '''
-            Round::Close if self.is_out(&self.member_of(project, participant)) => Ok(()),
-            Round::Close => {'''
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''        detail.insert("until".into(), json!(until));
+        pause(store, &task, detail, false, Stops::NotAsked)?;'''
+replace = '''        detail.insert("until".into(), json!(until));
+        pause(store, &task, detail, false, Stops::Asked)?;'''
 
 [[plant]]
-name = "pause closes: the rig case samples the lane for the closed window"
-meant = "a_worker_hung_in_its_turn_resumed_before_its_pause_closed_it_goes_on_in_the_window_that_opens_again"
-runs = ["rig-regression-hung-pause"]
-builds = true
+name = "pause closes: a hold asks a stop, which waits through the result for the reopen"
+meant = "a_reopen_after_a_hold_its_window_waited_out_at_work_presses_nothing_and_its_words_go_in_after_the_turn"
+runs = ["engine-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/tests/regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"
-find = '''
-            Ok(closed_by_the_daemon(&rig, &window) && human.is_empty() && !to_chief.is_empty())
-        },
-    )?;
-    if at_once {
-        assert_ne!(project.task(1)?["state"], "paused", "resumed, it stays so");
-    } else {
-        assert_eq!(project.task(1)?["state"], "paused");
-    }'''
-replace = '''
-            Ok(project.lane("worker")?["pane"].is_null() && human.is_empty() && !to_chief.is_empty())
-        },
-    )?;
-    let state = if at_once { "queued" } else { "paused" };
-    assert_eq!(project.task(1)?["state"], state);'''
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''        detail.insert("until".into(), json!(until));
+        pause(store, &task, detail, false, Stops::NotAsked)?;'''
+replace = '''        detail.insert("until".into(), json!(until));
+        pause(store, &task, detail, false, Stops::Asked)?;'''
 
 [[plant]]
-name = "pause closes: the lane over the stop is taken for a closed one whether or not the window closed"
-meant = "a_lane_that_never_closed_or_that_closed_without_working_is_not_that"
+name = "pause closes: a resume whose words never went in asks a stop"
+meant = "a_resume_whose_words_never_went_in_is_paused_again_with_no_stop_asked"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''    pause(store, task, detail, false, Stops::NotAsked)?;
+    Ok(true)'''
+replace = '''    pause(store, task, detail, false, Stops::Asked)?;
+    Ok(true)'''
+
+[[plant]]
+name = "pause closes: a reopen asks a stop"
+meant = "a_hold_a_resume_and_a_reopen_ask_no_stop_and_only_a_pause_counts_one"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        store.move_task(&task, "queued", json!({ "by": by, "message": message_id }))?;
+        tell_sent_back(store, &task, assignee.id, by)?;'''
+replace = '''        store.move_task(&task, "queued", json!({ "by": by, "message": message_id }))?;
+        store.db.execute("UPDATE task SET stop_seq = stop_seq + 1 WHERE id = ?", [task.id])?;
+        tell_sent_back(store, &task, assignee.id, by)?;'''
+
+[[plant]]
+name = "pause closes: a reopen asks a stop, pressed into the turn at work"
+meant = "a_resume_an_answer_a_follow_up_and_a_reopen_given_a_window_at_work_press_nothing_and_wait_for_its_turn"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        store.move_task(&task, "queued", json!({ "by": by, "message": message_id }))?;
+        tell_sent_back(store, &task, assignee.id, by)?;'''
+replace = '''        store.move_task(&task, "queued", json!({ "by": by, "message": message_id }))?;
+        store.db.execute("UPDATE task SET stop_seq = stop_seq + 1 WHERE id = ?", [task.id])?;
+        tell_sent_back(store, &task, assignee.id, by)?;'''
+
+[[plant]]
+name = "pause closes: a resume asks a stop"
+meant = "a_hold_a_resume_and_a_reopen_ask_no_stop_and_only_a_pause_counts_one"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''        fold(store, &task, assignee.id, message_id)?;
+        store.move_task(
+            &task,
+            "queued",
+            json!({ "by": by, "message": message_id }),
+        )?;'''
+replace = '''        fold(store, &task, assignee.id, message_id)?;
+        store.move_task(
+            &task,
+            "queued",
+            json!({ "by": by, "message": message_id }),
+        )?;
+        store.db.execute("UPDATE task SET stop_seq = stop_seq + 1 WHERE id = ?", [task.id])?;'''
+
+[[plant]]
+name = "pause closes: the lane over the stop is taken for a kept one whether or not the window closed"
+meant = "a_lane_that_closed_or_that_never_read_working_is_not_that"
 runs = ["live-stops-judge"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_stops/midturn/judge.rs"
-find = 'words.starts_with(&["working", "closed"])'
-replace = 'words.starts_with(&["working"])'
+find = '        .is_some_and(|words| words.first() == Some(&"working") && !words.contains(&"closed"))'
+replace = '        .is_some_and(|words| words.first() == Some(&"working"))'
 
 [[plant]]
 name = "pause closes: the first look at the lane over the stop is held to +0.0 s"
-meant = "a_lane_that_read_working_and_then_closed_did_so_whenever_it_was_first_looked_at"
+meant = "a_lane_that_read_working_and_was_kept_did_so_whenever_it_was_first_looked_at"
 runs = ["live-stops-judge"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_stops/midturn/judge.rs"
-find = '    lane_words(said).is_some_and(|words| words.starts_with(&["working", "closed"]))'
-replace = '    said.contains("     the lane over the stop: working at +0.0 s, closed at +")'
+find = '''    lane_words(said)
+        .is_some_and(|words| words.first() == Some(&"working") && !words.contains(&"closed"))'''
+replace = '''    said.contains("     the lane over the stop: working at +0.0 s") && !said.contains("closed at +")'''
 
 [[plant]]
 name = "pause closes: the live suite's judge takes a closed window for one open"
@@ -180,15 +230,18 @@ find = "        *closed == 0,"
 replace = "        true,"
 
 [[plant]]
-name = "pause closes: a window that ignores every round is left open, on the live suite's case"
+name = "pause closes: a window that ignores every round is closed, on the live suite's case"
 meant = "a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_says_each_round_of"
 runs = ["live-stops-ignored"]
 builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                if self.retire(record).await? {"
-replace = "                if false {"
+find = "                    (None, Kept::No) => Kept::Ignored,"
+replace = """                    (None, Kept::No) => {
+                        self.retire(record).await?;
+                        return Ok(());
+                    }"""
 
 [[plant]]
 name = "pause closes: a program told to stall is never stopped"
