@@ -528,9 +528,18 @@ fn the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the
     let mut no_result = limit();
     no_result.result = None;
     for (name, left) in [
-        ("a terminal: the window's session, which its close ends", with_a_terminal),
-        ("a parent: a shell that still runs started it", with_a_parent),
-        ("one of two is in the window's session", one_of_two_in_the_window),
+        (
+            "a terminal: the window's session, which its close ends",
+            with_a_terminal,
+        ),
+        (
+            "a parent: a shell that still runs started it",
+            with_a_parent,
+        ),
+        (
+            "one of two is in the window's session",
+            one_of_two_in_the_window,
+        ),
         ("the host listed it", listed),
         ("the chief was told of work, which this job was not", told),
         ("the close ended it, unsaid", ended_unsaid),
@@ -556,18 +565,26 @@ fn the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the
 }
 
 #[test]
-fn a_worker_is_expected_to_come_to_the_limit_for_pi_and_devin_on_a_mac_and_to_the_ending_for_the_rest()
-{
+fn a_worker_is_expected_to_come_to_the_limit_for_pi_and_devin_on_a_mac_and_to_the_ending_for_the_rest(
+) {
     let mac = cfg!(target_os = "macos");
     for harness in [Harness::Pi, Harness::Devin] {
-        let expected = if mac { Expect::OwnSession } else { Expect::Ended };
+        let expected = if mac {
+            Expect::OwnSession
+        } else {
+            Expect::Ended
+        };
         assert_eq!(Expect::of(Who::Harness(harness)), expected, "{harness:?}");
     }
     // Claude Code keeps the shell it runs a background command in, Codex's and Muse's
     // harnesses end the command with the tool call: both pass the ending, and nothing else
     // is let off.
     for harness in [Harness::Claude, Harness::Codex, Harness::Muse] {
-        assert_eq!(Expect::of(Who::Harness(harness)), Expect::Ended, "{harness:?}");
+        assert_eq!(
+            Expect::of(Who::Harness(harness)),
+            Expect::Ended,
+            "{harness:?}"
+        );
     }
     assert_eq!(Expect::of(Who::StandIn), Expect::Ended);
 }
@@ -585,9 +602,13 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
         running(300, 20, 1, "sleep 4711"),
         // Another's: the same command, and a folder of its own.
         running(301, 21, 1, "sleep 4711"),
+        // A child of a shell that still runs, in no folder the run made: not an orphan.
+        running(302, 22, 50, "sleep 4711"),
+        // In the run's folder, and begun before the worker's window did: another run's.
+        running(303, 5, 1, "sleep 4711"),
     ];
     let folder_of = |pid: u32| match pid {
-        300 => Some(folder.to_path_buf()),
+        300 | 303 => Some(folder.to_path_buf()),
         301 => Some(PathBuf::from("/elsewhere")),
         _ => None,
     };
@@ -598,26 +619,53 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
             .map(|one| one.identity.pid)
             .collect()
     };
-    let mut chosen = Chosen::default();
+    let mut chosen = Chosen {
+        strays_matter: true,
+        ..Chosen::default()
+    };
     chosen.choose(&all, Some(window), &[], "sleep 4711");
     assert_eq!(chosen.window_began, Some(10), "the window's start is kept");
-    assert!(chosen.processes.is_empty(), "nothing descends from the window");
-    chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
+    // The first look's, whatever a later one says of the number.
+    chosen.choose(
+        &all,
+        Some(Identity {
+            pid: 100,
+            started: 15,
+        }),
+        &[],
+        "sleep 4711",
+    );
+    assert_eq!(chosen.window_began, Some(10));
+    assert!(
+        chosen.processes.is_empty(),
+        "nothing descends from the window"
+    );
+    let found = chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
     assert_eq!(pids(&chosen), [300]);
-    // Once, however often it looks.
-    chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
+    assert_eq!(found.len(), 1, "what the folder found is answered");
+    // Once, however often it looks, and what the folder found is answered each time.
+    let again = chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
     assert_eq!(pids(&chosen), [300]);
+    assert_eq!(again.len(), 1);
     // The other is not ended, and is a problem of the run: it may still run.
     assert_eq!(
         chosen.problems(&Ended::default()),
-        ["the command escaped the window and is not provably the run's own (an orphan of the run's folder that began after its window), so it was not ended and may still run: 301 sleep 4711"]
+        ["the command escaped the window and cannot be proved the run's own (only an orphan that began after the worker's window and runs in the run's folder is), so it was not ended and may still run: 301 sleep 4711; 303 sleep 4711"]
     );
+    // The stand-in's strays are other rigs' jobs, which tell their own by their files: they
+    // are looked at and are no problem of the run.
+    chosen.strays_matter = false;
+    assert!(chosen.problems(&Ended::default()).is_empty());
     // A run that never saw its window's process proves nothing its own.
-    let mut blind = Chosen::default();
+    let mut blind = Chosen {
+        strays_matter: true,
+        ..Chosen::default()
+    };
     blind.take_orphans(&all, folder, "sleep 4711", folder_of);
     assert!(blind.processes.is_empty());
     assert_eq!(blind.problems(&Ended::default()).len(), 1);
-    assert!(blind.problems(&Ended::default())[0].ends_with("300 sleep 4711; 301 sleep 4711"));
+    assert!(blind.problems(&Ended::default())[0]
+        .ends_with("300 sleep 4711; 301 sleep 4711; 303 sleep 4711"));
 }
 
 #[cfg(target_os = "macos")]
@@ -633,14 +681,17 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
         .unwrap()
         .expect("this process is there")
         .started;
-    let ran = std::process::Command::new("/bin/sh")
+    let ran = cf_e2e::process::Run::new("/bin/sh")
         .args(["-c", "sleep 25 > /dev/null 2>&1 &"])
-        .current_dir(&folder)
-        .status()
+        .cwd(&folder)
+        .inheriting_env()
+        .run()
         .unwrap();
-    assert!(ran.success());
-    let mut chosen = Chosen::default();
-    chosen.window_began = Some(began);
+    assert_eq!(ran.code, Some(0));
+    let mut chosen = Chosen {
+        window_began: Some(began),
+        ..Chosen::default()
+    };
     let mut found = Vec::new();
     for _ in 0..100 {
         let all = ThisMachine.processes().unwrap();
@@ -665,4 +716,24 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
         "the orphan {pid} is left running"
     );
     assert!(chosen.problems(&ended).is_empty());
+}
+
+#[test]
+fn the_run_looks_for_its_own_orphans_only_where_it_expects_the_limit_and_something_ran_on() {
+    let ran_on = in_a_session_of_its_own();
+    let mut nothing = in_a_session_of_its_own();
+    nothing.escaped.clear();
+    assert!(looks_for_its_own_orphans(Expect::OwnSession, &ran_on));
+    assert!(!looks_for_its_own_orphans(Expect::OwnSession, &nothing));
+    // A harness whose close ends what it detaches is not looked after: nothing of its own is
+    // ended without the limit being expected, and a command that escaped fails the run.
+    assert!(!looks_for_its_own_orphans(Expect::Ended, &ran_on));
+}
+
+#[test]
+fn a_stray_orphan_fails_the_run_of_a_harness_and_not_the_rigs_stand_in() {
+    for harness in Harness::ALL {
+        assert!(strays_matter(Who::Harness(harness)), "{harness:?}");
+    }
+    assert!(!strays_matter(Who::StandIn));
 }

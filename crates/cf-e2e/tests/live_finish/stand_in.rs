@@ -139,10 +139,21 @@ fn a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_
         &log,
     )?;
     let text = finished.case.text();
-    assert!(finished.case.held(), "{text}");
+    // The harness of the plants keeps the end of a long failure: what went wrong comes last.
+    assert!(
+        finished.case.held(),
+        "{text}\n\nthe first thing wrong: {}",
+        finished.summary
+    );
     assert!(
         text.contains("the known limit on a Mac"),
         "the run says what it let pass: {text}"
+    );
+    assert!(
+        text.contains(
+            "ok   the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing: T-1 done "
+        ),
+        "{text}"
     );
     assert!(
         text.contains("what the chief was told of work the turn left: nothing"),
@@ -150,6 +161,11 @@ fn a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_
     );
     assert!(text.contains(", terminal ??)"), "{text}");
     assert!(!text.contains("FAIL"), "{text}");
+    // The run found the job in its own folder: an orphan that began after the window.
+    assert!(
+        text.contains("the run found what the agent detached in its own folder"),
+        "{text}"
+    );
     // It ended the job: nothing of the run's is left on the machine for what its seconds are.
     let job = process_after(&text, "still running: ").expect("the line names the job's process");
     let gone = (0..100).any(|_| {

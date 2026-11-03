@@ -27,6 +27,17 @@
 //!   command in the window's own tree and the jobs the rig's stand-in wrote it started
 //!   ([`choose`]): never a process by what its command line says, so a command a harness
 //!   detached before any look saw it runs on until its seconds are out;
+//!   The one shape that does not fail is the known macOS limit, which the run expects of Pi
+//!   and Devin on a Mac alone ([`Expect`]; the chief's decision of 2026-11-03, T-1100). Their
+//!   tool shells lead sessions of their own, so a job detached with `nohup … &` once its
+//!   shell has ended has no session, parent or readable marker that ties it to the window:
+//!   the host never lists it and the close does not end it (`work.rs`). It passes when the task
+//!   is done and its result delivered, every process of the job has parent 1 and no terminal,
+//!   it still ran once the window had closed, and the chief was told nothing; the run then
+//!   ends what it can prove its own, an orphan begun after its window that runs in the folder
+//!   made for the run ([`Chosen::take_orphans`]), through the descent and by which process
+//!   it is. Any other shape fails as above, and so does a job it cannot prove its own, by its
+//!   number;
 //! - the command is gone once the window has closed;
 //! - and the chief was told, in the note of the window's close, that it closed with the
 //!   work still running.
@@ -38,8 +49,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::live::members::{
-    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, working_folder,
-    Account, Ended, Identity, Machine, Members, Plan, Running, ThisMachine,
+    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, orphans_in_folder,
+    working_folder, Account, Ended, Identity, Machine, Members, Plan, Running, ThisMachine,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Harness, Log, Who};
@@ -198,8 +209,6 @@ pub struct Left {
 /// running, it is gone, and the chief was told the window closed with it running: or
 /// every way it was not.
 pub fn judge(left: &Left, expect: Expect) -> Result<(), Vec<String>> {
-    // (red: the expectation is read by nothing yet)
-    let _ = expect;
     let mut problems = Vec::new();
     if left.state != "done" {
         problems.push(format!(
@@ -227,7 +236,21 @@ pub fn judge(left: &Left, expect: Expect) -> Result<(), Vec<String>> {
         }
     };
     if left.listed.is_empty() {
-        if !left.escaped.is_empty() {
+        if left.escaped.is_empty() {
+            // The harness ended the command with its tool call: nothing of it runs.
+        } else if expect == Expect::OwnSession && in_a_session_of_its_own(left) {
+            // The known limit, expected of this harness on this machine: the job is in a
+            // session of its own, its shell has gone, and nothing ties it to the window. The
+            // chief is told nothing of it, and a note that says otherwise says what the close
+            // did not do.
+            if !left.notes.is_empty() {
+                problems.push(format!(
+                    "the chief was told of work the window closed with ({}), while the command the agent detached into a session of its own went on running after the window closed, which found nothing of it: {}; if the host names such a job now, the limit is out of date, and so is the expectation that lets it pass (`Expect::OwnSession`)",
+                    left.notes.join(" | "),
+                    left.escaped.join("; ")
+                ));
+            }
+        } else {
             problems.push(format!(
                 "the command escaped the ending: the pane host never listed it, and it still ran {} (the agent detached it from the shell that started it, which ended, so no chain of processes that run led from it to a shell the harness started): {}; {}{}",
                 when("once"),
@@ -267,6 +290,38 @@ pub fn judge(left: &Left, expect: Expect) -> Result<(), Vec<String>> {
     }
 }
 
+/// Whether an orphan of the command that the run cannot prove its own fails the run: one of a real
+/// harness's run does, as a stray that may be an earlier run's or an agent's that left its folder.
+/// The rig's stand-in tells its own jobs by their files, and other trees' runs of it on the same
+/// machine have jobs of the same number, which are theirs: they are not strays of this run.
+fn strays_matter(who: Who) -> bool {
+    matches!(who, Who::Harness(_))
+}
+
+/// Whether the run looks for what it can prove its own among the processes that escaped every
+/// window: where it expects the known macOS limit, and something ran on.
+fn looks_for_its_own_orphans(expect: Expect, left: &Left) -> bool {
+    expect == Expect::OwnSession && !left.escaped.is_empty()
+}
+
+/// Whether what the host never listed (`judge` asks only of a command it did not list and that
+/// ran on) is the known macOS limit and nothing else: each process of it has no terminal (a
+/// session of its own, which no pane has) and its parent is init's (the shell that started it has
+/// gone), and it still ran once the window had closed, which found nothing of it. One that has a
+/// terminal is in the window's session, and one that has a parent is a shell's that still runs:
+/// the window's close finds those, so they are no limit. In the limit the shell, the session and
+/// the marker that would tie the job to the window are all gone, and a system binary shows no
+/// environment (`process_tree`, `work.rs`).
+fn in_a_session_of_its_own(left: &Left) -> bool {
+    left.escaped
+        .iter()
+        .all(|line| line.contains("(parent 1, ") && line.ends_with(", terminal ??)"))
+        && left
+            .after_close
+            .as_ref()
+            .is_some_and(|rest| !rest.is_empty())
+}
+
 /// What to read of a command that escaped and has no terminal (`terminal ??`, [`standing`]):
 /// that it is in a session of its own, and the window's close ends only what runs in the
 /// session its program leads. Nothing where no line says it.
@@ -299,6 +354,11 @@ fn after_the_close(left: &Left) -> Option<String> {
 /// window's close and the chief told, and else the first thing that was wrong with it.
 pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
     match verdict {
+        Ok(()) if left.listed.is_empty() && !left.escaped.is_empty() => format!(
+            "T-1 done after {} s; the agent detached the command into a session of its own, the known limit on a Mac: the host never listed it, the window's close left it running and the chief was told nothing; still running: {}; the run ends what it can prove its own",
+            secs(left.took),
+            left.escaped.join("; ")
+        ),
         Ok(()) if left.listed.is_empty() => format!(
             "T-1 done after {} s; the harness ended the command with its tool call: the host never listed it, and nothing of it runs on the machine",
             secs(left.took)
@@ -361,7 +421,10 @@ pub fn run_asked(
     let waits = Waits::of(who);
     // What the run chose to end is ended whatever came of the run, and what could not be
     // ended, or looked for, fails it (Astra and Sol on round 6).
-    let mut chosen = Chosen::default();
+    let mut chosen = Chosen {
+        strays_matter: strays_matter(who),
+        ..Chosen::default()
+    };
     let finished = observe(
         &mut members,
         (&agent(who), brief, &wanted(who)),
@@ -500,9 +563,25 @@ fn observe(
     if !left.escaped.is_empty() && exit.is_some() {
         left.after_close = Some(on_the_machine(wanted));
     }
-    if expect == Expect::OwnSession && !left.escaped.is_empty() {
+    if looks_for_its_own_orphans(expect, &left) {
         match ThisMachine.processes() {
-            Ok(all) => chosen.take_orphans(&all, members.folder(), wanted, working_folder),
+            Ok(all) => {
+                let found = chosen.take_orphans(&all, members.folder(), wanted, working_folder);
+                if !found.is_empty() {
+                    case.say(format!(
+                        "the run found what the agent detached in its own folder, an orphan that began after the worker's window: {}; it ends it by which process it is",
+                        found
+                            .iter()
+                            .map(|process| format!(
+                                "{} {}",
+                                process.identity.pid,
+                                cut(&process.command, 60)
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ));
+                }
+            }
             Err(failed) => chosen.failed.push(failed.to_string()),
         }
     }
@@ -523,6 +602,11 @@ fn observe(
         None => "the pane host said nothing of what the window left when it closed".to_owned(),
     });
     match &verdict {
+        Ok(()) if !left.escaped.is_empty() => case.check(
+            "the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing",
+            true,
+            summary(&left, &verdict),
+        ),
         Ok(()) => case.check(
             "the command was ended by the window's close after the result, and the chief told",
             true,
@@ -581,10 +665,12 @@ struct Chosen {
     jobs: Vec<String>,
     /// Why a look at the machine's processes failed, each time one did.
     failed: Vec<String>,
-    /// When the worker's window began, as the earliest look at its process said.
+    /// When the worker's window began, as the first look at its process said.
     window_began: Option<u64>,
     /// What escaped the window and cannot be proved the run's own, each as the machine lists it.
     unproven: Vec<String>,
+    /// Whether `unproven` is a problem of the run ([`strays_matter`]).
+    strays_matter: bool,
 }
 
 impl Chosen {
@@ -608,8 +694,8 @@ impl Chosen {
         wanted: &str,
     ) {
         if let Some(own) = own {
-            let began = self.window_began.get_or_insert(own.started);
-            *began = (*began).min(own.started);
+            // The window's process is read once as the host answered the open: its start is kept.
+            self.window_began.get_or_insert(own.started);
         }
         let in_window = own.map(|own| holding(all, own, wanted)).unwrap_or_default();
         let mut of_jobs = Vec::new();
@@ -636,15 +722,48 @@ impl Chosen {
         }
     }
 
-    /// Adds what escaped every window and is provably the run's own (red: none yet).
+    /// Adds what escaped every window and is provably the run's own, as the machine lists its
+    /// processes now (`all`): an orphan that holds `wanted`, began no earlier than the worker's
+    /// window did, and runs in the run's own `folder` as `folder_of` says it, with what it
+    /// started ([`orphans_in_folder`]). A job a tool shell that leads a session of its own
+    /// detached, once the shell has ended, has nothing else that ties it to the window; the
+    /// folder is the worker's alone, made for the run, and the start tells the job from a
+    /// process of an earlier run in it. A command line that says the same is not enough, as it
+    /// never was ([`Chosen::choose`]). An orphan that holds `wanted` and is none of these is not
+    /// ended, and the run says so ([`Chosen::problems`]): it may be another run's. Answers
+    /// what the folder found, each time, whether or not an earlier look had chosen it.
     fn take_orphans(
         &mut self,
         all: &[Running],
         folder: &Path,
         wanted: &str,
         folder_of: impl Fn(u32) -> Option<PathBuf>,
-    ) {
-        let _ = (all, folder, wanted, folder_of);
+    ) -> Vec<Running> {
+        let found = match self.window_began {
+            Some(since) => orphans_in_folder(all, wanted, folder, since, &folder_of),
+            None => Vec::new(),
+        };
+        for orphan in &found {
+            if !self
+                .processes
+                .iter()
+                .any(|chosen| chosen.identity == orphan.identity)
+            {
+                self.processes.push(orphan.clone());
+            }
+        }
+        self.unproven = all
+            .iter()
+            .filter(|process| process.ppid == 1 && process.command.contains(wanted))
+            .filter(|process| {
+                !self
+                    .processes
+                    .iter()
+                    .any(|chosen| chosen.identity == process.identity)
+            })
+            .map(|process| format!("{} {}", process.identity.pid, process.command))
+            .collect();
+        found
     }
 
     /// What may still run of what the run chose, a problem of the run each: what could not
@@ -660,6 +779,12 @@ impl Chosen {
             problems.push(format!(
                 "the machine's processes could not be read at {} look(s) while the task was watched, and what the window ran then may still run: {first}",
                 self.failed.len()
+            ));
+        }
+        if self.strays_matter && !self.unproven.is_empty() {
+            problems.push(format!(
+                "the command escaped the window and cannot be proved the run's own (only an orphan that began after the worker's window and runs in the run's folder is), so it was not ended and may still run: {}",
+                self.unproven.join("; ")
             ));
         }
         problems

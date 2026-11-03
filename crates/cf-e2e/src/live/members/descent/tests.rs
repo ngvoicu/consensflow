@@ -163,7 +163,13 @@ fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by
         pids
     };
     assert_eq!(
-        pids(orphans_in_folder(&all, "sleep 4711", folder, 100, folder_of)),
+        pids(orphans_in_folder(
+            &all,
+            "sleep 4711",
+            folder,
+            100,
+            folder_of
+        )),
         [200, 207, 208]
     );
     // A window that began after every one of them leaves them all out: a child (208) is taken
@@ -174,18 +180,37 @@ fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
+    // The system says the real path of the folder a process runs in; the run may spell its own
+    // through a link (a Mac's temporary folder is behind `/var`).
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let real = real.canonicalize().unwrap();
+    let all = [running(200, 101, 1, "sleep 4711")];
+    let found = orphans_in_folder(&all, "sleep 4711", &link, 100, |_| Some(real.clone()));
+    assert_eq!(found.len(), 1);
+    // Its parent folder holds the other's folder, and is no folder of the process's.
+    assert!(
+        orphans_in_folder(&all, "sleep 4711", dir.path(), 100, |_| Some(real.clone())).is_empty()
+    );
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has() {
     let dir = tempfile::tempdir().unwrap();
-    let mut child = std::process::Command::new("/bin/sleep")
+    let mut child = crate::process::Run::new("/bin/sleep")
         .arg("20")
-        .current_dir(dir.path())
+        .cwd(dir.path())
         .spawn()
         .unwrap();
     let said = working_folder(child.id());
-    child.kill().unwrap();
-    child.wait().unwrap();
+    child.kill();
     // The system says the real path: the temporary folder is behind `/var`, a link.
     assert_eq!(said, Some(dir.path().canonicalize().unwrap()));
     assert_eq!(working_folder(u32::MAX - 7), None);
