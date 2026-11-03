@@ -20,7 +20,7 @@ mod tests {
             "task accept T-1"
         ));
         assert!(names_command(
-            "Decide with: /Applications/ConsensFlow.app/Contents/Resources/bin/cf task accept T-1 · …",
+            "Decide with: /opt/consensflow/bin/cf task accept T-1 · …",
             "task accept T-1"
         ));
         assert!(names_command(
