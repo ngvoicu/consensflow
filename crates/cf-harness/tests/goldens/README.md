@@ -298,3 +298,14 @@ and the hash that names a bundle of an extension is `$HASH`.
   leaves a step already moved as it is: after a merge brings rows of the old shape,
   run it on each file and let the scenarios test check it, rather than merging these
   files by hand.
+- **The offers a launch turns off** (2026-11-03, T-1183). Node started Claude Code with no
+  variable of its own and Codex with two settings. Their offers that wait in a window for a
+  key nobody presses are turned off for each launch alone: every Claude Code window starts
+  with `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` (its surveys take a digit under the prompt),
+  and every Codex window with `-c notice.hide_rate_limit_model_nudge=true`,
+  `-c features.tool_suggest=false` and `-c features.skill_mcp_dependency_install=false` after
+  `allow_login_shell=false`. `launch/` moved for it in each prepared answer of those two
+  harnesses, 39 of Claude Code's and 92 of Codex's in each platform's file, and in nothing
+  else. The move is `tools/move_harness_dialog_goldens.py`, which leaves an answer already
+  moved as it is: after a merge brings rows of the old shape, run it on each file and let
+  the scenarios test check it.
