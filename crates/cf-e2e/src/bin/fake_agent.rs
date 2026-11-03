@@ -140,7 +140,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_e2e::pattern;
-use cf_e2e::process::own_var;
+use cf_e2e::process::{own_var, started};
 use regex::Regex;
 use serde_json::json;
 
@@ -245,9 +245,12 @@ fn run(
     let mut records = Records::new(Path::new(&config), &launch.session, pid)
         .map_err(|failed| failed.to_string())?;
     let status_file: PathBuf = records.status_file().to_path_buf();
-    // The ids of the processes started, for the test beside the daemon's home.
+    // The ids of the processes started, for the test beside the daemon's home,
+    // with when this one began: a number a run of minutes gave out again is
+    // held to the process it is now, not the number (T-1077).
     let beside = Path::new(&home).parent().unwrap_or(Path::new("."));
-    note_process(beside, pid, &launch.session).map_err(|failed| failed.to_string())?;
+    note_process(beside, pid, &launch.session, started(pid).as_deref())
+        .map_err(|failed| failed.to_string())?;
     // Ended when its terminal hangs up or it is asked to: the status file goes,
     // and the code is 0, as the Node stand-in's was.
     let leaving = status_file.clone();

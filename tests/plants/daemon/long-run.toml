@@ -45,6 +45,10 @@ fake-devin-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", 
 # The rig's stranger, which runs beside every window: its own tests, and a real rig's close.
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
 e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
+# The rig's look at what the windows left behind once the pane host is gone.
+e2e-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left::"]
+# What the stand-in writes a window's process down as.
+fake-agent-records = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "records::tests::"]
 rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
 # The rig's last word, once it has closed: a real daemon and pane host.
 e2e-rig-last-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "last_exits"]
@@ -4209,3 +4213,29 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/watcher/exits.rs"
 find = "    } else if known.quit_from.is_some_and(|from| at >= from) {"
 replace = "    } else if known.quit_from.is_some_and(|from| at < from) {"
+
+# T-1077 (2026-11-02): three of nine 20-minute runs failed the rig's close on a number a
+# window had given back — `caffeinate` children of other sessions held them, 37–44 s old.
+# A number is held to the process it is: the stand-in writes down when its process began
+# (`began.jsonl`), and what the look finds still there began at another time it is no
+# window's.
+
+[[plant]]
+name = "long run: a number still held is a window's whoever holds it"
+meant = "a_program_that_took_an_ended_windows_number_is_none_of_the_windows"
+runs = ["e2e-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = "        if another_holds(pid, &began, pids_file) {"
+replace = "        if began_after(pid, pids_file) {"
+
+[[plant]]
+name = "long run: a window writes nothing of when its process began"
+meant = "the_processes_a_window_writes_down_go_to_the_files_beside_the_home_in_order"
+runs = ["fake-agent-records"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
+find = "    if let Some(began) = began.filter(|began| !began.is_empty()) {"
+replace = "    if let Some(began) = began.filter(|_| false) {"

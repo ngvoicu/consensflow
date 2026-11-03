@@ -216,10 +216,12 @@ fn write_line(out: &mut impl Write, record: &Value) -> io::Result<()> {
     out.write_all(line.as_bytes())
 }
 
-/// Writes down that the window's process `pid` runs `session`, in the two
-/// files the test reads, beside the daemon's home: its ids alone, and with the
-/// session.
-pub fn note_process(beside: &Path, pid: u32, session: &str) -> io::Result<()> {
+/// Writes down that the window's process `pid` runs `session`, in the files
+/// the test reads, beside the daemon's home: its id alone, with the session, and
+/// when it began (`began`, in the words `cf_e2e::process::started` says it), which
+/// the rig's look at what was left holds a still-held number to: a process is a
+/// window's only while it is the one that began then.
+pub fn note_process(beside: &Path, pid: u32, session: &str, began: Option<&str>) -> io::Result<()> {
     for (name, line) in [
         ("pids.jsonl", format!("{pid}\n")),
         ("processes.jsonl", format!("{pid}\t{session}\n")),
@@ -229,6 +231,13 @@ pub fn note_process(beside: &Path, pid: u32, session: &str) -> io::Result<()> {
             .create(true)
             .open(beside.join(name))?;
         file.write_all(line.as_bytes())?;
+    }
+    if let Some(began) = began.filter(|began| !began.is_empty()) {
+        let mut file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(beside.join("began.jsonl"))?;
+        file.write_all(format!("{pid}\t{began}\n").as_bytes())?;
     }
     Ok(())
 }
@@ -459,17 +468,22 @@ mod tests {
     }
 
     #[test]
-    fn the_processes_a_window_writes_down_go_to_the_two_files_beside_the_home_in_order() {
+    fn the_processes_a_window_writes_down_go_to_the_files_beside_the_home_in_order() {
         let root = tempfile::tempdir().unwrap();
-        note_process(root.path(), 11, "a").unwrap();
-        note_process(root.path(), 22, "b").unwrap();
+        note_process(root.path(), 11, "a", Some("when-a")).unwrap();
+        note_process(root.path(), 22, "b", Some("when-b")).unwrap();
+        note_process(root.path(), 33, "c", None).unwrap();
         assert_eq!(
             fs::read_to_string(root.path().join("pids.jsonl")).unwrap(),
-            "11\n22\n"
+            "11\n22\n33\n"
         );
         assert_eq!(
             fs::read_to_string(root.path().join("processes.jsonl")).unwrap(),
-            "11\ta\n22\tb\n"
+            "11\ta\n22\tb\n33\tc\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join("began.jsonl")).unwrap(),
+            "11\twhen-a\n22\twhen-b\n"
         );
     }
 }
