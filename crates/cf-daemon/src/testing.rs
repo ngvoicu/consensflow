@@ -303,6 +303,7 @@ pub fn scene() -> Scene {
         roster: Rc::new(NoRows),
         log: Rc::new(Log::new(home.path())),
         trace: Rc::new(Trace::new(home.path())),
+        tooling_calls: false,
     });
     Scene {
         _home: home,

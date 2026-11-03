@@ -18,6 +18,7 @@
 pub mod answer;
 pub mod body;
 pub mod callers;
+pub mod calls;
 pub mod context;
 pub mod credentials;
 pub mod request;
@@ -71,10 +72,17 @@ pub async fn handle(
         return Ok(answer);
     }
     let caller = callers::caller_of(context, &request)?;
-    match routes::recognize(&request.method, &request.path) {
+    let (method, path) = (request.method.to_string(), request.path.clone());
+    let answered = match routes::recognize(&request.method, &request.path) {
         Some(route) => routes::dispatch(context, &caller, route, request).await,
         None => Err(request.unknown_route()),
+    };
+    // The tooling's look at what a window asked and how it was answered, where a test
+    // switched it on ([`calls`]).
+    if context.tooling_calls {
+        calls::answered(&context.trace, &caller, &method, &path, &answered);
     }
+    answered
 }
 
 #[cfg(test)]

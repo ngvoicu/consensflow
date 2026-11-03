@@ -332,6 +332,7 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
         roster: Rc::new(NoRows),
         log: Rc::new(Log::new(home)),
         trace: Rc::new(Trace::new(home)),
+        tooling_calls: false,
     });
     (rig, context, token, pane)
 }

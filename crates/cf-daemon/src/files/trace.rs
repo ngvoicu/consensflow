@@ -73,6 +73,20 @@ impl Trace {
         });
     }
 
+    /// A line of the tooling's own (`kind`, of `project`, with `data`) at the time now: what
+    /// only a test switches on ([`crate::api::calls`]), in the shape of an event's line.
+    pub fn tooling(&self, project: i64, kind: &str, data: Value) {
+        let at = iso(self.clock.borrow_mut().now_ms());
+        self.write(&TraceLine {
+            at,
+            what: Traced::Event {
+                project,
+                kind: kind.to_owned(),
+                data,
+            },
+        });
+    }
+
     /// An error nobody caught (`daemon.error`): `reason` says what failed and
     /// what it said, and the line names no project.
     pub fn error(&self, reason: &str) {
