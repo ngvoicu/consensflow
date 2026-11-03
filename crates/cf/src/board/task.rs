@@ -13,7 +13,7 @@ use super::lines::{
 use super::usage::{task_usage, ADD_USAGE};
 use super::words::{quoted, require_text, split, task_number, task_numbers, Shape};
 use super::{brief, transcript};
-use super::{help_of, text_of, Failure, Said};
+use super::{help_of, Failure, Said};
 
 /// The flags of `cf task add`.
 const ADD: Shape = Shape {
@@ -96,12 +96,12 @@ pub fn command(
     }
 }
 
-/// The flags of the task command `verb`, after its task.
+/// The flags of the task command `verb`, after its task. Every command that
+/// moves a task takes words, so every one takes a file of them too.
 fn shape_of(verb: &str) -> Shape {
     match verb {
         "get" => GET,
-        "reopen" | "resume" | "edit" => BRIEFED,
-        _ => Shape::TEXT,
+        _ => BRIEFED,
     }
 }
 
@@ -115,13 +115,13 @@ fn add(
     if words.asks_for_help() {
         return Ok(help_of(&["task", "add"]));
     }
-    let tier = words.value("--tier");
+    let tier = words.value("--tier")?;
     let after = words
-        .value("--after")
+        .value("--after")?
         .map(|after| task_number(Some(after)))
         .transpose()?;
-    let needs = task_numbers(words.value("--needs"))?;
-    let before = task_numbers(words.value("--before"))?;
+    let needs = task_numbers(words.each("--needs"))?;
+    let before = task_numbers(words.each("--before"))?;
     let mine = words.on("--self");
     // Your own work needs no board while you are at it; on the board it is a
     // wake-up: the brief comes back to this window when what it waits for is accepted.
@@ -157,7 +157,7 @@ fn add(
         if words.on("--test") {
             body.insert("test".into(), true.into());
         }
-        if let Some(purpose) = words.value("--purpose") {
+        if let Some(purpose) = words.value("--purpose")? {
             body.insert("purpose".into(), purpose.into());
         }
     }
@@ -411,11 +411,7 @@ fn moved(
 ) -> Result<Said, Failure> {
     let briefed = matches!(action, "reopen" | "resume" | "edit");
     let words = split(rest, shape_of(action));
-    let text = if briefed {
-        brief::brief_of(&words, given, input)?
-    } else {
-        text_of(words.text, input)?
-    };
+    let text = brief::brief_of(&words, given, input)?;
     if matches!(action, "done" | "reopen" | "edit" | "resume") && js::trim(&text).is_empty() {
         let what = match action {
             "done" => "your result",

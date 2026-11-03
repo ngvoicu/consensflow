@@ -30,7 +30,20 @@ use words::{message_id, quoted, require_text, split, task_number, Shape};
 /// The flags of `cf note`.
 const NOTE: Shape = Shape {
     switches: &["--human"],
+    valued: &[brief::FILE],
     ..Shape::TEXT
+};
+
+/// The flags of `cf ask`.
+const ASK: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::TEXT
+};
+
+/// The flags of `cf answer`, which names its message first.
+const ANSWER: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::NUMBERED
 };
 
 /// The flags of `cf tell`, which names its task first.
@@ -228,10 +241,10 @@ fn command(
         "help" | "--help" | "-h" => Ok(Said::usage(usage().to_string())),
         "task" => task::command(rest, given, board, input),
         "inbox" => inbox(rest, board),
-        "note" => note(rest, board, input),
-        "ask" => ask(rest, board, input),
+        "note" => note(rest, given, board, input),
+        "ask" => ask(rest, given, board, input),
         "tell" => tell(rest, given, board, input),
-        "answer" => answer(rest, board, input),
+        "answer" => answer(rest, given, board, input),
         "staff" => staff(rest, board),
         "history" => history(rest, board),
         "whoami" => whoami(rest, board),
@@ -296,7 +309,12 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     Ok(Said::new(messages, text))
 }
 
-fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+fn note(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
     let words = split(rest, NOTE);
     if words.asks_for_help() {
         return Ok(help_of(&["note"]));
@@ -305,7 +323,11 @@ fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
     let mut body = Map::new();
     body.insert(
         "body".into(),
-        require_text(text_of(words.text, input)?, "cf note \"what to know\"")?.into(),
+        require_text(
+            brief::brief_of(&words, given, input)?,
+            "cf note \"what to know\"",
+        )?
+        .into(),
     );
     if human {
         body.insert("to".into(), "human".into());
@@ -319,8 +341,13 @@ fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
     Ok(Said::new(message, text))
 }
 
-fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, Shape::TEXT);
+fn ask(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
+    let words = split(rest, ASK);
     if words.asks_for_help() {
         return Ok(help_of(&["ask"]));
     }
@@ -330,7 +357,10 @@ fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
             "the human is not asked with cf ask: the chief asks them in its own terminal".into(),
         ));
     }
-    let question = require_text(text_of(words.text, input)?, "cf ask \"your question\"")?;
+    let question = require_text(
+        brief::brief_of(&words, given, input)?,
+        "cf ask \"your question\"",
+    )?;
     let message = posted(board, "/api/questions", body_of(question))?;
     let text = format!(
         "m-{} asked @{}. The answer arrives as a message; end your turn now.",
@@ -388,8 +418,13 @@ fn tell(
     Ok(Said::new(message, format!("{text}\n{sent}")))
 }
 
-fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, Shape::NUMBERED);
+fn answer(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
+    let words = split(rest, ANSWER);
     if words.asks_for_help() {
         return Ok(help_of(&["answer"]));
     }
@@ -399,7 +434,7 @@ fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, 
     body.insert(
         "body".into(),
         require_text(
-            text_of(words.text, input)?,
+            brief::brief_of(&words, given, input)?,
             "cf answer m-<id> \"your answer\"",
         )?
         .into(),
@@ -451,10 +486,10 @@ fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
         return Ok(help_of(&["history"]));
     }
     let mut query = form_urlencoded::Serializer::new(String::new());
-    if let Some(page) = words.value("--page") {
+    if let Some(page) = words.value("--page")? {
         query.append_pair("page", page);
     }
-    if let Some(find) = words.value("--find") {
+    if let Some(find) = words.value("--find")? {
         query.append_pair("find", find);
     }
     if words.on("--tools") {

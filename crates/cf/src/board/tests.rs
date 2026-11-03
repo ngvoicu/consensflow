@@ -845,3 +845,186 @@ fn cf_history_says_the_cf_of_its_window_to_the_board() {
     let plain = cf(&["history"], vec![reply(200, page)]);
     assert_eq!(asked(&plain), [("GET", "/api/history")]);
 }
+
+/// Task 45 as the board answers a `task add` with: on the board for a light
+/// worker, waiting on `blocked`.
+fn added_task(blocked: &[u64]) -> Value {
+    json!({ "task": {
+        "number": 45, "state": "open", "assignee": null, "requester": "chief",
+        "title": "Fix it", "blockedBy": blocked, "pool": "worker", "tier": "light",
+        "deletedAt": null,
+    } })
+}
+
+/// The body `cf task add` posted, when it posted.
+fn posted_needs(ran: &Ran, key: &str) -> Value {
+    assert_eq!(asked(ran), [("POST", "/api/tasks")]);
+    ran.asked[0].2.as_ref().unwrap()[key].clone()
+}
+
+/// The field bug Gabriel found (2026-11-02): `--needs` given again dropped what
+/// the flags before it named, and T-45 went on the board waiting on T-44 alone.
+/// Every flag of the command adds to the list, as every comma list's parts do.
+#[test]
+fn every_needs_flag_of_a_task_add_adds_to_the_list() {
+    let ran = cf(
+        &[
+            "task", "add", "--tier", "light", "--needs", "T-41", "--needs", "T-42", "--needs",
+            "T-43", "--needs", "T-44", "Fix it",
+        ],
+        vec![reply(200, added_task(&[41, 42, 43, 44]))],
+    );
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    assert_eq!(posted_needs(&ran, "needs"), json!([41, 42, 43, 44]));
+}
+
+/// A list flag and a comma list mix in the order the command gave them, a task
+/// named twice kept once.
+#[test]
+fn needs_flags_and_comma_lists_mix_in_the_order_given_each_task_once() {
+    let ran = cf(
+        &[
+            "task",
+            "add",
+            "--tier",
+            "light",
+            "--needs",
+            "T-41,T-42",
+            "--needs",
+            "T-43",
+            "--needs",
+            "T-42,T-44",
+            "Fix it",
+        ],
+        vec![reply(200, added_task(&[41, 42, 43, 44]))],
+    );
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    assert_eq!(posted_needs(&ran, "needs"), json!([41, 42, 43, 44]));
+}
+
+/// `--before`, the board's other list of tasks, takes repeats the same way.
+#[test]
+fn a_before_flag_given_again_holds_every_task_that_waits() {
+    let ran = cf(
+        &[
+            "task",
+            "add",
+            "--tier",
+            "light",
+            "--before",
+            "T-9",
+            "--before",
+            "T-10,T-11",
+            "Fix it",
+        ],
+        vec![reply(200, added_task(&[]))],
+    );
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    assert_eq!(posted_needs(&ran, "before"), json!([9, 10, 11]));
+}
+
+/// A flag that takes one value, given twice, is refused with a plain message
+/// before the board is asked anything; the last one's word is never silently
+/// taken.
+#[test]
+fn a_flag_of_one_value_given_twice_is_refused() {
+    for (words, flag) in [
+        (
+            &[
+                "task", "add", "--tier", "light", "--tier", "standard", "Fix it",
+            ][..],
+            "--tier",
+        ),
+        (
+            &["task", "add", "--after", "T-3", "--after", "T-4", "Fix it"][..],
+            "--after",
+        ),
+        (
+            &[
+                "task",
+                "add",
+                "--tier",
+                "light",
+                "--purpose",
+                "a",
+                "--purpose",
+                "b",
+                "Fix it",
+            ][..],
+            "--purpose",
+        ),
+        (
+            &[
+                "task", "add", "--tier", "light", "--file", "a.md", "--file", "b.md",
+            ][..],
+            "--file",
+        ),
+        (
+            &[
+                "task",
+                "get",
+                "T-3",
+                "--transcript",
+                "--last",
+                "2",
+                "--last",
+                "3",
+            ][..],
+            "--last",
+        ),
+        (
+            &[
+                "task",
+                "get",
+                "T-3",
+                "--transcript",
+                "--page",
+                "1",
+                "--page",
+                "2",
+            ][..],
+            "--page",
+        ),
+        (
+            &[
+                "task",
+                "get",
+                "T-3",
+                "--transcript",
+                "--find",
+                "a",
+                "--find",
+                "b",
+            ][..],
+            "--find",
+        ),
+        (&["history", "--page", "1", "--page", "2"][..], "--page"),
+        (&["history", "--find", "a", "--find", "b"][..], "--find"),
+        (
+            &["tell", "T-3", "--file", "a.md", "--file", "b.md"][..],
+            "--file",
+        ),
+        (
+            &["task", "reopen", "T-3", "--file", "a.md", "--file", "b.md"][..],
+            "--file",
+        ),
+        (
+            &["task", "resume", "T-3", "--file", "a.md", "--file", "b.md"][..],
+            "--file",
+        ),
+        (
+            &["task", "edit", "T-3", "--file", "a.md", "--file", "b.md"][..],
+            "--file",
+        ),
+    ] {
+        let ran = cf(words, vec![reply(200, json!({}))]);
+        assert_eq!(ran.code.unwrap(), 2, "{words:?}");
+        assert_eq!(
+            ran.err,
+            format!("cf: {flag} takes one value: it was given more than once\n"),
+            "{words:?}"
+        );
+        assert!(ran.out.is_empty(), "{words:?}: {}", ran.out);
+        assert!(ran.asked.is_empty(), "{words:?}: {:?}", ran.asked);
+    }
+}
