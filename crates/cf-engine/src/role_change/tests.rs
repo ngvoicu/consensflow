@@ -248,13 +248,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_while(true, &read),
-        217,
-        "docs: read to 217 rows with specs on"
+        212,
+        "docs: read to 212 rows with specs on"
     );
     assert_eq!(
         rows_while(false, &read),
-        245,
-        "docs: read to 245 rows without"
+        240,
+        "docs: read to 240 rows without"
     );
     // With the most rules for the staff the ledger takes.
     let most = the_most_rules();
@@ -272,13 +272,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     };
     assert_eq!(
         rows_with_the_most(true),
-        52,
-        "docs: read to 52 rows with specs on and the most rules"
+        46,
+        "docs: read to 46 rows with specs on and the most rules"
     );
     assert_eq!(
         rows_with_the_most(false),
-        80,
-        "docs: read to 80 rows without specs and the most rules"
+        75,
+        "docs: read to 75 rows without specs and the most rules"
     );
 }
 

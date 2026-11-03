@@ -31,6 +31,7 @@
 //! | `muse_models` | `env`: the models Muse's host lists (`model/list` of one bounded `muse serve`, no model turn), as the daemon reads them | `{stale, models: [{id, label, efforts, defaultEffort, contributor, markedDefault}], default, warnings}`: whether the list is Muse's bundled one, each model with its efforts, the model a member is given where its agent names none (never a contributor model), and the warning of each contributor model |
 //! | `muse_usage` | `env`: what `muse usage --json` says of the account (no model turn), as the daemon reads it | the quota as the engine is told it (`{state, ...}`), or null where it says nothing known |
 //! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
+//! | `codex_agent_types` | nothing: Codex's own agent types, whose sub-agents a Codex window starts from its own file with Codex's words for each (`cf_proto::codex::agent_types`), which the live sub-agent suite holds to the Codex the machine runs | `{codex, types: [{name, description}]}`: the Codex they are of, and each type with its words |
 //!
 //! The last nine are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
@@ -95,8 +96,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "trust" => trust(question),
         "input_box" => input_box(question),
         "unsent" => unsent(question),
+        "codex_agent_types" => Ok(codex_agent_types()),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box and unsent"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent and codex_agent_types"
         )),
     }
 }
@@ -382,6 +384,18 @@ fn input(question: &Value) -> Result<Value, String> {
             Input::Pasted { clear } => json!({ "pasted": true, "clear": clear }),
         },
     )
+}
+
+/// Codex's own agent types as a window's supervisor defines them again for its sub-agents.
+fn codex_agent_types() -> Value {
+    use cf_proto::codex::agent_types::{AGENT_TYPES, AGENT_TYPES_OF};
+    json!({
+        "codex": AGENT_TYPES_OF,
+        "types": AGENT_TYPES
+            .iter()
+            .map(|kind| json!({ "name": kind.name, "description": kind.description }))
+            .collect::<Vec<_>>(),
+    })
 }
 
 #[cfg(test)]

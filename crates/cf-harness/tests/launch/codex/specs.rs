@@ -51,9 +51,12 @@ fn integrations(home: &Home) -> Vec<String> {
     found
 }
 
-/// What a launch writes of its own: its role's file.
+/// What a launch writes of its own: its role's file, and its sub-agents' beside it.
 fn the_role_alone() -> Vec<String> {
-    vec![format!("codex/{LAUNCH}/developer-instructions.md")]
+    vec![
+        format!("codex/{LAUNCH}/developer-instructions.md"),
+        format!("codex/{LAUNCH}/sub-agents.toml"),
+    ]
 }
 
 #[test]
@@ -102,8 +105,8 @@ fn a_chief_given_specs_has_the_skill_written_where_its_role_text_names_it_and_co
         );
         assert_eq!(
             fs::read_dir(launch_folder(&home)).unwrap().count(),
-            1,
-            "the launch's folder holds its role alone: the copy outlasts it"
+            2,
+            "the launch's folder holds its role and its sub-agents' alone: the copy outlasts it"
         );
     }
 }

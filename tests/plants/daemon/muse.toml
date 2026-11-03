@@ -2229,8 +2229,8 @@ runs = ["muse-tooling"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/tooling.rs"
-find = "devin_config, trust, muse_models, muse_usage, input_box and unsent"
-replace = "devin_config, trust, input_box and unsent"
+find = "devin_config, trust, muse_models, muse_usage, input_box, unsent and codex_agent_types"
+replace = "devin_config, trust, input_box, unsent and codex_agent_types"
 
 
 [[plant]]

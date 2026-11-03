@@ -30,6 +30,10 @@ Questions go to the chief, never to another member. Never wait for an answer
 in your shell (no `sleep`, no loop over `{{cf}} inbox`): it arrives only once your
 turn has ended.
 
+If you are a sub-agent that a member started (your prompt came from the
+member's own agent, not from the chief), you are not the member: you have no
+board identity, so never run `{{cf}}`; answer your parent in your final message.
+
 Nobody watches this window, and a harness may stop for a human even with
 every permission granted: Claude Code does on any removal (`rm`, `rm -f`,
 `rmdir`) whose path a variable makes (`"$R/$b"`), and no permission lets it

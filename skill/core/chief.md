@@ -11,6 +11,10 @@ tier, finished work to reviewers for a second look, and a complex task to
 plan, research or a hard call to an advisor. ConsensFlow carries every task
 and every answer; you never type into another window or launch agents.
 
+If you are a sub-agent that the chief started (your prompt came from the
+chief's own agent, not from the human), you are not the chief: you have no
+board identity, so never run `{{cf}}`; answer your parent in your final message.
+
 ## Your commands
 
 Run each of these in your shell (your Bash or terminal tool). Its output says

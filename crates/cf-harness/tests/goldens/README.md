@@ -307,3 +307,32 @@ and the hash that names a bundle of an extension is `$HASH`.
   for it, by hand: the `command` of that hook in the settings file of every Claude member's
   launch (42 a file) and in the config of every Devin member's (104 on the Mac, 105 on Windows),
   and nothing else.
+
+- **A sub-agent starts without the window's role** (2026-11-01, T-1053, from T-766's
+  probes of 2026-10-26). A member's sub-agent was given the member's role: a Codex child
+  held it in its developer message on every route, and four of four children that could
+  not answer something asked the board as the member (`cf ask`); a Claude Code
+  `general-purpose` child listed the role's skill and, asked to, loaded it. Node wrote
+  neither file below. `launch/` moved for it in 134 steps of each platform's
+  recordings, and in nothing but these:
+  - 41 steps of 40 Claude Code scenarios: the role's file
+    (`role/.claude/skills/consensflow-<role>/SKILL.md`) opens with
+    `disable-model-invocation: true` in its front matter, in one of its own before a text
+    that has none (every scenario's role is such a text), so no model lists or loads it
+    as a skill (`claude::install::not_for_the_model`); the window has the role in its
+    system prompt as before;
+  - 93 steps of 81 Codex scenarios: beside the role's file is `sub-agents.toml`, with its
+    mode, whose `developer_instructions` are Codex's own and then the sentence that the
+    child is not the window's agent (`codex::role::children`), made and removed with the
+    role's file; and the launch's environment names it in `CF_CODEX_SUBAGENT_FILE`, after
+    the role's variable, and the agent types it is for in `CF_CODEX_SUBAGENT_TYPES` after
+    that: `default,explorer,worker`, Codex's own three, for no recording's configuration
+    defines one of its own (one the owner defines stays theirs). The supervisor names the
+    file to the app-server alone, for each of those types, with Codex 0.166.0's own words
+    for it (`-c agents.<type>.config_file=…`, `-c agents.<type>.description=…`,
+    `cf_proto::codex::agent_types`), which no recording holds.
+  `no_codex_launch_of_either_platform_puts_its_role_on_a_command_line` holds every Codex
+  launch of both files to naming it. The move is `tools/move_subagent_role_goldens.py`,
+  which replays each scenario's files and says each step's `tree` again; a step already
+  moved is moved to itself, so after a merge brings rows of the old shape, run it on each
+  file and let the scenarios test check it.

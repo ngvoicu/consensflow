@@ -122,3 +122,20 @@ happened", for it is no longer the PATH that finds the `cf`. And the section at 
 another program, … run … instead"), is gone from the rows that had it (those with a `cf`):
 the commands say it. Changed by hand, in those words alone, as a regular edit of each text
 (a command's `cf` put through the row's path, the sentence and the section), on 2026-11-01.
+
+The members' 27 rows have one paragraph Node's did not, after the one that ends "it arrives
+only once your turn has ended": "If you are a sub-agent that a member started (your prompt
+came from the member's own agent, not from the chief), you are not the member: you have no
+board identity, so never run `cf`; answer your parent in your final message."
+(`skill/core/staff.md`). The chief's twelve rows have one Node's did not either, after the
+paragraph that opens the text: "If you are a sub-agent that the chief started (your prompt
+came from the chief's own agent, not from the human), you are not the chief: you have no
+board identity, so never run `cf`; answer your parent in your final message."
+(`skill/core/chief.md`). The `cf` in both is the row's, as in every command of the text
+(T-1049, above). Both were changed by hand, in those words alone, on 2026-11-01
+(T-1053): a sub-agent a window starts has the window's board token in its shell, on every
+harness, and one that keeps the window's role (a Codex or Claude Code sub-agent forked with
+the window's history, or one of an agent type the owner defined for Codex) acts as the
+window. T-766 saw it: four of four Codex sub-agents that held a member's role and could not
+answer something asked the board as the member (`cf ask`), and none of three did with the
+member's sentence in that role.
