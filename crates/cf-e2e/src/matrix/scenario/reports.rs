@@ -5,9 +5,12 @@
 //!   shorter than the copy ConsensFlow kept, and the copy gave the new items the places of old
 //!   ones, so `cf task get --transcript --last` ended on old items.
 //! - Retitle: a task's title follows its scope, `cf task edit --title`, in any state.
-//! - Nudges: the wake-up calls on, the chief waiting on the human (its note to the human
-//!   unread); at most one call in that spell. Minutes of wake-up intervals: a case run on
-//!   request only, not in CI's step (`field5_nudges` in tests/live_matrix.rs).
+//! - Nudges: the wake-up calls on, a minute apart, the chief waiting on the human (its note to
+//!   the human unread) and answering each call by writing to the human again; a call is
+//!   skipped, and no second call comes before three are. On the fix's branch the interval also
+//!   doubles after such an answer, so five minutes see one call and a skip. Minutes of wake-up
+//!   intervals: a case run on request only, not in CI's step (`field5_nudges` in
+//!   tests/live_matrix.rs).
 
 use serde_json::Value;
 
@@ -253,7 +256,12 @@ pub fn reports() -> Vec<Scenario> {
                         .map(|(at, _)| at)
                         .collect()
                 };
-                let (calls, skipped) = (at("project.wake_up"), at("project.wake_up_skipped"));
+                let calls = at("project.wake_up");
+                // The skips for the chief's unread notes, not those for work on its way.
+                let skipped: Vec<usize> = at("project.wake_up_skipped")
+                    .into_iter()
+                    .filter(|at| !judged.snapshot.events[*at]["data"]["waitingOnTheHuman"].is_null())
+                    .collect();
                 let waited = match (calls.get(1), skipped.get(2)) {
                     (None, _) => true,
                     (Some(second), Some(third)) => third < second,
@@ -269,8 +277,8 @@ pub fn reports() -> Vec<Scenario> {
                     ),
                     Check::new(
                         "chief",
-                        "three calls in a row were skipped for its unread note, and logged",
-                        skipped.len() >= 3,
+                        "a call was skipped for its unread note, and the skip logged",
+                        !skipped.is_empty(),
                         format!("{} skipped", skipped.len()),
                     ),
                 ]
@@ -282,7 +290,7 @@ pub fn reports() -> Vec<Scenario> {
                     what: "no second call came while its note to the human was unread, before three were skipped",
                     until: T1113,
                 },
-                Known { who: "chief", what: "three calls in a row were skipped for its unread note, and logged", until: T1113 },
+                Known { who: "chief", what: "a call was skipped for its unread note, and the skip logged", until: T1113 },
             ],
         )
         .waiting(std::time::Duration::from_secs(360)),

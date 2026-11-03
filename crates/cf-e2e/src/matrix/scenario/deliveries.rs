@@ -114,6 +114,15 @@ fn into_the_chief_once(judged: &Judged, name: &str, kind: &str) -> Vec<Check> {
     ]
 }
 
+/// Whether the chief's window is at rest: the field's human typed into a chief at rest, its turn
+/// over, while the board's messages waited.
+fn chief_idle(snapshot: &Snapshot) -> bool {
+    snapshot
+        .lanes
+        .iter()
+        .any(|lane| lane["participant"]["handle"] == "chief" && lane["activity"]["state"] == "idle")
+}
+
 /// The chief's pane, as the board names it.
 fn chief_pane(members: &Members) -> Result<Value> {
     Ok(members.lane("chief")?["pane"].clone())
@@ -152,7 +161,7 @@ pub fn deliveries() -> Vec<Scenario> {
                 run!(
                     "A",
                     "task add --tier standard :: SLEEP 10 Reply with exactly: A_DONE",
-                    |snapshot, bindings| is(snapshot, bindings, "A", 0, &["working"])
+                    |snapshot, bindings| is(snapshot, bindings, "A", 0, &["working"]) && chief_idle(snapshot)
                 ),
                 Step {
                     human: Some(|members| members.rig().types(&chief_pane(members)?, DRAFT.as_bytes())),
@@ -332,6 +341,19 @@ pub fn deliveries() -> Vec<Scenario> {
                     .and_then(|message| message["body"].as_str())
                     .is_some_and(|body| body.lines().next().is_some_and(|line| line.ends_with("hero.png")));
                 checks.push(Check::new("A", "its result begins with the path of its picture", starts, format!("{starts}")));
+                // The field's shape: Claude Code made the path an attachment, its placeholder
+                // ahead of the header, which no longer begins the item.
+                let id = of_task(judged, "A", "result").first().map(|message| message["id"].clone());
+                let items = chief_record(judged);
+                let attached = id.as_ref().is_some_and(|id| {
+                    typed_at(&items, id).first().is_some_and(|at| items[*at].text.starts_with("[Image #"))
+                });
+                checks.push(Check::new(
+                    "A",
+                    "the chief's window took its picture as an attachment ahead of the header",
+                    attached,
+                    format!("{attached}"),
+                ));
                 checks
             },
             &[],

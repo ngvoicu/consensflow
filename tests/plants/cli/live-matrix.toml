@@ -621,16 +621,23 @@ file = "crates/cf-panes/src/arbiter.rs"
 find = '''            0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {'''
 replace = '''            0x1b if false => {'''
 
+# T-215's fix is held in more than one place now (a paste behind its pictures' placeholders is
+# confirmed with that reading planted out, as the rig's own case of it is): what the case holds of
+# the field is its shape, the picture an attachment ahead of the header, and that the result goes
+# in once.
 [[plant]]
-name = "live matrix: field fix out: a paste behind the placeholders of its pictures is taken for none (T-215)"
+name = "live matrix: the stand-in Claude attaches no picture, and the image case holds nothing of the field"
 meant = "field_image_result"
 runs = ["matrix-image-result"]
-builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/delivery_text.rs"
-find = "    let paste = match after_placeholders(text) {"
-replace = "    let paste = match after_placeholders(text).filter(|_| false) {"
+file = "crates/cf-e2e/src/bin/fake_agent/images.rs"
+find = '''    if files.is_empty() {
+        return None;
+    }'''
+replace = '''    if files.is_empty() || !files.is_empty() {
+        return None;
+    }'''
 
 [[plant]]
 name = "live matrix: field fix out: a question the chief answered while it waited is typed in when the chief's turn ends (3.0.5)"
