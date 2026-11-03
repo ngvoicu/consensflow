@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use crate::{Error, Result};
 
-use super::observe::{Bindings, Snapshot};
+use super::machine::Fact;
+use super::observe::{Bind, Bindings, Snapshot, SMOKE};
 
 /// The fixture's code, before the change: what the checker refuses.
 pub const GREET: &str =
@@ -32,6 +33,26 @@ if (said === "Hello, Ada!") {
 
 /// The stand-in worker's change: the line it writes over the fixture's code.
 const STAND_IN_CHANGE: &str = "module.exports = (name) => `Hello, ${name}!`;";
+
+/// What the smoke scenario's human answers the chief's questions with.
+pub const SMOKE_FACTS: &[Fact] = &[
+    Fact {
+        asked_by: &["which file", "what file", "check.cjs", "greet.cjs"],
+        answer: "The file to change is greet.cjs, and check.cjs stays as it is.",
+    },
+    Fact {
+        asked_by: &["return", "output", "what should", "message", "greeting"],
+        answer: "greet(\"Ada\") must return exactly \"Hello, Ada!\", so that `node check.cjs` prints OK.",
+    },
+    Fact {
+        asked_by: &["tier", "which member", "who should"],
+        answer: "Every member of our staff is at tier standard: one advisor, one worker, one reviewer, one tester.",
+    },
+    Fact {
+        asked_by: &["accept", "proceed", "go ahead", "shall i", "should i", "approve", "confirm"],
+        answer: "Yes, go ahead as I asked.",
+    },
+];
 
 /// A step of a scenario.
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +78,27 @@ pub struct Scenario {
     pub deadline: Duration,
     /// The most turns all the windows together may begin.
     pub turns: u32,
+    /// What the human answers the chief's questions from.
+    pub facts: &'static [Fact],
+    /// What the human types to a chief that has stopped short of a milestone.
+    pub nudge: &'static str,
+    /// How its tasks are bound.
+    pub binds: &'static [Bind],
+    /// Which tasks' briefs may go in only once another is done: each earlier task's name, and
+    /// the later ones'.
+    pub order: &'static [(&'static str, &'static [&'static str])],
+    /// The refusals the product must answer a window with, by their codes, as the daemon wrote
+    /// them (`api.answered`): never a model's words of them.
+    pub refusals: &'static [Refused],
+}
+
+/// A refusal the product must answer: who asked, the method, words of the path, the code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Refused {
+    pub participant: &'static str,
+    pub method: &'static str,
+    pub path: &'static str,
+    pub code: &'static str,
 }
 
 impl Scenario {
@@ -150,6 +192,11 @@ pub fn smoke() -> Scenario {
         ],
         deadline: Duration::from_secs(15 * 60),
         turns: 20,
+        facts: SMOKE_FACTS,
+        nudge: "Please carry on with what I asked last: the board does not show it done yet.",
+        binds: &SMOKE,
+        order: &[("advice", &["change"]), ("change", &["review", "test"])],
+        refusals: &[],
     }
 }
 

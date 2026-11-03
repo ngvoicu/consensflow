@@ -17,14 +17,14 @@ use crate::live::members::Members;
 use crate::live::Log;
 use crate::Result;
 
+use super::machine::{self, Question, Sending, Sent};
 use super::observe::{self, Snapshot};
 
 /// How often a wait looks.
-const LOOK: Duration = Duration::from_secs(2);
+pub const LOOK: Duration = Duration::from_secs(2);
 
-/// How long an ask has to show in the chief's record once Enter is pressed, before the
-/// human looks at whether it was sent at all.
-const IN_RECORD: Duration = Duration::from_secs(45);
+/// How long the human waits between two keys of a dialog's answer.
+const KEY_PAUSE: Duration = Duration::from_millis(300);
 
 /// How long the chief has to begin its turn once the ask is in its record.
 const TURN_BEGUN: Duration = Duration::from_secs(60);
@@ -190,17 +190,10 @@ impl<'a> Driver<'a> {
     }
 
     /// The chief's pane as the pane host takes it: its newest generation.
+    /// Read at each key, so a window opened again (after a restart) is followed.
     fn chief_pane(&self) -> Value {
         let id = observe::pane_id(self.members, "chief");
-        let generation = self
-            .members
-            .rig()
-            .open_frames()
-            .into_iter()
-            .rev()
-            .find(|frame| frame["id"] == id.as_str())
-            .and_then(|frame| frame["generation"].as_u64())
-            .unwrap_or(1);
+        let generation = machine::newest_generation(&self.members.rig().open_frames(), &id);
         json!({ "id": id, "generation": generation })
     }
 
@@ -286,26 +279,38 @@ impl<'a> Driver<'a> {
             crate::live::cut(&words, 160)
         ));
         self.type_words(&words)?;
-        let mut seen = self.wait("the ask in the chief's record", IN_RECORD, || {
-            self.in_record(marker)
-        })?;
-        if seen == Waited::NotYet && self.enter_left && self.turn_since(said.typed_ms).is_none() {
-            // The record has no such item and the chief began no turn: the words wait unsent
-            // in its box. One Enter again, once in the scenario.
-            self.enter_left = false;
-            said.enter_again = true;
-            self.log
-                .say("the ask is not in the chief's record and no turn began: Enter again, once");
-            self.press_enter()?;
-            seen = self.wait(
-                "the ask in the chief's record, after Enter again",
-                IN_RECORD,
-                || self.in_record(marker),
-            )?;
-        }
-        if let Some(failed) = failed(&seen, "the ask never showed in the chief's record") {
-            said.failed = Some(failed);
-            return Ok(self.keep(said));
+        let mut typed = Instant::now();
+        loop {
+            if let Some(why) = self.over_now()? {
+                said.failed = Some(why);
+                return Ok(self.keep(said));
+            }
+            let seen = Sending {
+                since: typed.elapsed(),
+                in_record: self.in_record(marker)?.is_some(),
+                turn_begun: self.turn_since(said.typed_ms).is_some(),
+                entered_again: said.enter_again,
+                enter_left: self.enter_left,
+            };
+            match machine::submission(seen) {
+                Sent::In => break,
+                Sent::Wait => std::thread::sleep(LOOK),
+                Sent::EnterAgain => {
+                    // The record has no such item and the chief began no turn: the words wait
+                    // unsent in its box. One Enter again, once in the scenario.
+                    self.enter_left = false;
+                    said.enter_again = true;
+                    self.log.say(
+                        "the ask is not in the chief's record and no turn began: Enter again, once",
+                    );
+                    self.press_enter()?;
+                    typed = Instant::now();
+                }
+                Sent::Lost(why) => {
+                    said.failed = Some(why);
+                    return Ok(self.keep(said));
+                }
+            }
         }
         said.in_record_ms = Some(jiff::Timestamp::now().as_millisecond());
         let turn = self.wait("the chief's turn after the ask", TURN_BEGUN, || {
@@ -323,6 +328,90 @@ impl<'a> Driver<'a> {
             other => said.failed = failed(&other, "the chief began no turn after the ask"),
         }
         Ok(self.keep(said))
+    }
+
+    /// The chief's open question to the human in `snapshot`, where it has one: its harness's
+    /// own dialog while its window waits on one (a Devin chief's read from Devin's store, with
+    /// its options, which the human has the keys for; any other's unrecognised), or the words
+    /// of a turn it ended asking, since the human last typed.
+    pub fn question(&self, snapshot: &Snapshot) -> Result<Option<Question>> {
+        let lane = snapshot
+            .lanes
+            .iter()
+            .find(|lane| lane["participant"]["handle"] == "chief");
+        let activity = lane.map_or(Value::Null, |lane| lane["activity"].clone());
+        match activity["state"].as_str() {
+            Some("waiting") => {
+                if self.chief_kind == "devin" {
+                    if let Some((id, asked)) = self.devin_dialog(&snapshot.events)? {
+                        let text: Vec<&str> = asked
+                            .iter()
+                            .map(|(question, _)| question.as_str())
+                            .collect();
+                        return Ok(Some(Question {
+                            id,
+                            text: text.join(" "),
+                            dialog: Some(true),
+                        }));
+                    }
+                }
+                let reason = activity["reason"]
+                    .as_str()
+                    .unwrap_or("its window waits")
+                    .to_owned();
+                Ok(Some(Question {
+                    id: format!("waiting: {reason}"),
+                    text: reason,
+                    dialog: Some(false),
+                }))
+            }
+            Some("idle") => {
+                let items =
+                    observe::record(self.members, &snapshot.events, self.chief_kind, "chief")?;
+                Ok(open_question(&items))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// The questions of a Devin chief's open dialog, each with how many options it has, and
+    /// the id of its call, from Devin's store where the rig keeps it.
+    fn devin_dialog(&self, events: &[Value]) -> Result<Option<Dialog>> {
+        let Some(session) = observe::session(self.members, events, "chief") else {
+            return Ok(None);
+        };
+        let rig = self.members.rig();
+        let store = crate::devin_store::location(
+            cfg!(windows),
+            rig.var("HOME").unwrap_or_default(),
+            rig.var("APPDATA"),
+            rig.var("XDG_DATA_HOME").filter(|data| !data.is_empty()),
+        );
+        if !store.is_file() {
+            return Ok(None);
+        }
+        Ok(open_dialog(&crate::devin_store::messages_of(
+            &store, &session,
+        )?))
+    }
+
+    /// The human answers the open dialog of a Devin chief with `answer`, a question at a time,
+    /// as the eval's owner does (Devin 3000.11.3, probed 2026-10-03): its "Other" after the
+    /// options, the answer typed there.
+    pub fn answer_dialog(
+        &self,
+        snapshot: &Snapshot,
+        facts: &[machine::Fact],
+        answer: &str,
+    ) -> Result {
+        let Some((_, asked)) = self.devin_dialog(&snapshot.events)? else {
+            return Ok(());
+        };
+        for keys in dialog_keys(&asked, facts, answer) {
+            self.members.rig().types(&self.chief_pane(), &keys)?;
+            std::thread::sleep(KEY_PAUSE);
+        }
+        Ok(())
     }
 
     fn keep(&mut self, said: Said) -> &Said {
@@ -352,6 +441,94 @@ impl<'a> Driver<'a> {
         let taken = Snapshot::of(self.members)?.total_turns(self.asks_in());
         Ok(self.bounds.over(taken))
     }
+}
+
+/// A Devin chief's open dialog: the id of its call, and each question with how many options
+/// it has.
+pub type Dialog = (String, Vec<(String, usize)>);
+
+/// The chief's open question in its record `items`: the newest turn it ended with a question
+/// (a line that ends with `?`) since the human last typed into its window (a user item that is
+/// no ConsensFlow message), or none.
+pub fn open_question(items: &[crate::live::ask::Item]) -> Option<Question> {
+    let mut open = None;
+    for item in items {
+        if item.role == "user" && !item.text.starts_with("[ConsensFlow ") {
+            open = None;
+        } else if item.role == "assistant"
+            && item.complete
+            && item.text.lines().any(|line| line.trim_end().ends_with('?'))
+        {
+            open = Some(Question {
+                id: item.id.clone(),
+                text: item.text.clone(),
+                dialog: None,
+            });
+        }
+    }
+    open
+}
+
+/// The newest call of Devin's question tool in `messages` (a session's, oldest first) that no
+/// tool message answered: its id, and each of its questions with how many options it has.
+pub fn open_dialog(messages: &[crate::devin_store::Message]) -> Option<Dialog> {
+    let mut answered: Vec<&str> = Vec::new();
+    for message in messages.iter().rev() {
+        if let Some(call) = message.answers() {
+            answered.push(call);
+        }
+        let Some(call) = message
+            .calls()
+            .into_iter()
+            .find(|call| call.name == "ask_user_question")
+        else {
+            continue;
+        };
+        if answered.contains(&call.id.as_str()) {
+            return None;
+        }
+        let raw: Value = serde_json::from_str(&call.text).unwrap_or(Value::Null);
+        let questions = raw["arguments"]["questions"]
+            .as_array()
+            .map(|questions| {
+                questions
+                    .iter()
+                    .map(|question| {
+                        (
+                            question["question"].as_str().unwrap_or_default().to_owned(),
+                            question["options"].as_array().map_or(0, Vec::len),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        return Some((call.id, questions));
+    }
+    None
+}
+
+/// The keys that answer each question of a Devin dialog, one press at a time: Down once per
+/// option to its "Other", Enter, the answer (the fact sheet's for that question, else
+/// `answer`), Enter.
+pub fn dialog_keys(
+    asked: &[(String, usize)],
+    facts: &[machine::Fact],
+    answer: &str,
+) -> Vec<Vec<u8>> {
+    const DOWN: &[u8] = b"\x1b[B";
+    let mut keys = Vec::new();
+    for (question, options) in asked {
+        keys.extend((0..*options).map(|_| DOWN.to_vec()));
+        keys.push(b"\r".to_vec());
+        keys.push(
+            machine::answer_of(facts, question)
+                .unwrap_or(answer)
+                .as_bytes()
+                .to_vec(),
+        );
+        keys.push(b"\r".to_vec());
+    }
+    keys
 }
 
 /// What a wait that found nothing says, or none where it found.
@@ -429,6 +606,106 @@ mod tests {
         assert_eq!(
             failed::<()>(&Waited::Over("late".to_owned()), "x").as_deref(),
             Some("late")
+        );
+    }
+
+    fn item(id: &str, role: &str, text: &str, complete: bool) -> crate::live::ask::Item {
+        crate::live::ask::Item {
+            id: id.to_owned(),
+            role: role.to_owned(),
+            text: text.to_owned(),
+            complete,
+        }
+    }
+
+    #[test]
+    fn the_chiefs_open_question_is_its_newest_turn_ending_asking_since_the_human_typed() {
+        let asked = [
+            item("1", "user", "[matrix r ask 1/4] Get advice.", true),
+            item("2", "assistant", "Which file should change?", true),
+        ];
+        let open = open_question(&asked).unwrap();
+        assert_eq!((open.id.as_str(), open.dialog), ("2", None));
+        // A result delivered after it leaves it open; the human's own words close it.
+        let mut later = asked.to_vec();
+        later.push(item(
+            "3",
+            "user",
+            "[ConsensFlow m-4 · T-1 · result from @a]\nDone.",
+            true,
+        ));
+        assert_eq!(open_question(&later).unwrap().id, "2");
+        later.push(item("4", "user", "[matrix r answer] greet.cjs", true));
+        assert_eq!(open_question(&later), None);
+        // A turn still at work, or one that asks nothing, is no open question.
+        assert_eq!(
+            open_question(&[item("5", "assistant", "Which file?", false)]),
+            None
+        );
+        assert_eq!(
+            open_question(&[item("6", "assistant", "Done. Is it? No: it is.", true)]),
+            None
+        );
+    }
+
+    fn message(id: &str, raw: Value) -> crate::devin_store::Message {
+        crate::devin_store::Message {
+            id: id.to_owned(),
+            role: raw["role"].as_str().unwrap_or_default().to_owned(),
+            text: String::new(),
+            raw,
+        }
+    }
+
+    #[test]
+    fn a_devin_chiefs_dialog_is_its_newest_question_call_no_tool_answered() {
+        let call = |id: &str| {
+            json!({ "role": "assistant", "tool_calls": [{ "id": id, "name": "ask_user_question", "arguments": {
+                "questions": [{ "question": "Which file?", "options": [{ "label": "a" }, { "label": "b" }] }]
+            } }] })
+        };
+        let open = [
+            message("1", call("c1")),
+            message("2", json!({ "role": "tool", "tool_call_id": "c1" })),
+            message("3", call("c2")),
+        ];
+        assert_eq!(
+            open_dialog(&open),
+            Some(("c2".to_owned(), vec![("Which file?".to_owned(), 2)]))
+        );
+        assert_eq!(
+            open_dialog(&open[..2]),
+            None,
+            "the newest call was answered"
+        );
+        assert_eq!(open_dialog(&[]), None);
+    }
+
+    #[test]
+    fn a_devin_dialog_is_answered_in_its_other_after_the_options_with_the_fact_sheets_words() {
+        const FACTS: &[machine::Fact] = &[machine::Fact {
+            asked_by: &["file"],
+            answer: "greet.cjs",
+        }];
+        let keys = dialog_keys(
+            &[("Which file?".to_owned(), 2), ("Colour?".to_owned(), 1)],
+            FACTS,
+            "all I know",
+        );
+        let down = b"\x1b[B".to_vec();
+        assert_eq!(
+            keys,
+            [
+                down.clone(),
+                down.clone(),
+                b"\r".to_vec(),
+                b"greet.cjs".to_vec(),
+                b"\r".to_vec(),
+                down,
+                b"\r".to_vec(),
+                b"all I know".to_vec(),
+                b"\r".to_vec(),
+            ]
         );
     }
 

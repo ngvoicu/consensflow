@@ -20,6 +20,7 @@
 
 pub mod evidence;
 pub mod human;
+pub mod machine;
 pub mod observe;
 pub mod oracle;
 pub mod run;

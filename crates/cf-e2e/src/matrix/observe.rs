@@ -14,7 +14,7 @@ use crate::Result;
 
 use super::seating::{Role, Seating};
 
-/// The logical tasks of a scenario, by what they are: the pool a task for it is put in.
+/// The logical tasks of the smoke scenario and the position each is for ([`SMOKE`] binds them).
 pub const LOGICAL: [(&str, Role); 4] = [
     ("advice", Role::Advisor),
     ("change", Role::Worker),
@@ -68,14 +68,6 @@ impl Snapshot {
     /// The task `number`.
     pub fn task(&self, number: i64) -> Option<&Value> {
         self.tasks.iter().find(|task| task["number"] == number)
-    }
-
-    /// The tasks the chief put in `pool`, oldest first.
-    pub fn of_pool(&self, pool: &str) -> Vec<&Value> {
-        self.tasks
-            .iter()
-            .filter(|task| task["pool"] == pool && task["requester"] == "chief")
-            .collect()
     }
 
     /// The result of the task `number` delivered into the chief's window, where one is.
@@ -200,8 +192,49 @@ impl Snapshot {
     }
 }
 
-/// Which task is which, bound by what each is (the pool the chief put it in), never by its
-/// number: the oldest of each pool. Several of one pool are kept, for the oracle to say.
+/// What a logical task is, as the board says it: the pool the chief put it in, or a follow-up
+/// (`cf task add --after`) of another bound task, which is in no pool and goes to the session
+/// that did the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Is {
+    Pool(&'static str),
+    After(&'static str),
+}
+
+/// How a logical task is bound: its name, what it is, and who asked for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Bind {
+    pub name: &'static str,
+    pub is: Is,
+    pub requester: &'static str,
+}
+
+/// The smoke scenario's tasks: each the chief's, in its pool.
+pub const SMOKE: [Bind; 4] = [
+    Bind {
+        name: "advice",
+        is: Is::Pool("advisor"),
+        requester: "chief",
+    },
+    Bind {
+        name: "change",
+        is: Is::Pool("worker"),
+        requester: "chief",
+    },
+    Bind {
+        name: "review",
+        is: Is::Pool("reviewer"),
+        requester: "chief",
+    },
+    Bind {
+        name: "test",
+        is: Is::Pool("tester"),
+        requester: "chief",
+    },
+];
+
+/// Which task is which, bound by what each is ([`Bind`]), never by its number: the oldest that
+/// fits. Several that fit are kept, for the oracle to say.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Bindings {
     /// The logical name of each task and its numbers, oldest first.
@@ -209,23 +242,43 @@ pub struct Bindings {
 }
 
 impl Bindings {
-    /// The tasks of `snapshot`, bound.
+    /// The tasks of `snapshot`, bound as the smoke scenario binds them ([`SMOKE`]).
     pub fn of(snapshot: &Snapshot) -> Self {
-        let mut found = BTreeMap::new();
-        for (name, role) in LOGICAL {
+        Self::by(snapshot, &SMOKE)
+    }
+
+    /// The tasks of `snapshot`, bound by `binds`, in their order: a follow-up's is read
+    /// after the task it follows is bound.
+    pub fn by(snapshot: &Snapshot, binds: &[Bind]) -> Self {
+        let mut bound = Self::default();
+        for bind in binds {
             let numbers: Vec<i64> = snapshot
-                .of_pool(role.pool().unwrap_or_default())
+                .tasks
                 .iter()
+                .filter(|task| task["requester"] == bind.requester)
+                .filter(|task| match bind.is {
+                    Is::Pool(pool) => task["pool"] == pool,
+                    Is::After(earlier) => {
+                        let did = bound
+                            .of_name(earlier)
+                            .and_then(|number| snapshot.task(number))
+                            .map(|earlier| earlier["assignee"].clone());
+                        task["pool"].is_null()
+                            && task["requester"] != task["assignee"]
+                            && did.is_some_and(|did| !did.is_null() && task["assignee"] == did)
+                            && bound.of_name(earlier) != task["number"].as_i64()
+                    }
+                })
                 .filter_map(|task| task["number"].as_i64())
                 .collect();
             if !numbers.is_empty() {
-                found.insert(name, numbers);
+                bound.found.insert(bind.name, numbers);
             }
         }
-        Self { found }
+        bound
     }
 
-    /// The task bound to `name`: the oldest of its pool.
+    /// The task bound to `name`: the oldest that fits.
     pub fn of_name(&self, name: &str) -> Option<i64> {
         self.found
             .get(name)
@@ -236,6 +289,91 @@ impl Bindings {
     pub fn manifest(&self) -> Value {
         serde_json::to_value(&self.found).unwrap_or(Value::Null)
     }
+}
+
+/// A request a window's token made of the API, as a tooling daemon writes it
+/// (`api.answered`, `cf_daemon::api::calls`): who, what, and how it was answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Call {
+    pub participant: String,
+    pub method: String,
+    pub path: String,
+    pub status: u64,
+    /// The refusal's code; none where it was answered.
+    pub error: Option<String>,
+    pub at_ms: Option<i64>,
+}
+
+/// The variable a tooling daemon is started with, that has it write [`Call`]s.
+pub const TOOLING_API_CALLS: &str = "CONSENSFLOW_TOOLING_API_CALLS";
+
+/// Every request of `events` a tooling daemon wrote, in order.
+pub fn calls(events: &[Value]) -> Vec<Call> {
+    events
+        .iter()
+        .filter(|event| event["kind"] == "api.answered")
+        .map(|event| {
+            let data = &event["data"];
+            Call {
+                participant: data["participant"].as_str().unwrap_or_default().to_owned(),
+                method: data["method"].as_str().unwrap_or_default().to_owned(),
+                path: data["path"].as_str().unwrap_or_default().to_owned(),
+                status: data["status"].as_u64().unwrap_or_default(),
+                error: data["error"].as_str().map(str::to_owned),
+                at_ms: super::human::at_ms(event),
+            }
+        })
+        .collect()
+}
+
+/// The message that carried task `number`'s brief (or a reopen's words) into its window, the
+/// first: its id, as the daemon's events say it.
+pub fn brief_message(events: &[Value], number: i64) -> Option<i64> {
+    events.iter().find_map(|event| {
+        (event["kind"] == "task.assigned" && event["data"]["task"] == number)
+            .then(|| event["data"]["message"].as_i64())
+            .flatten()
+    })
+}
+
+/// When the message `id` was confirmed delivered, first, as the daemon's events say it.
+pub fn delivered_at(events: &[Value], id: i64) -> Option<i64> {
+    events.iter().find_map(|event| {
+        (event["kind"] == "delivery.confirmed" && event["data"]["message"] == id)
+            .then(|| super::human::at_ms(event))
+            .flatten()
+    })
+}
+
+/// When task `number` first went to `state`, as the daemon's events say it.
+pub fn reached_at(events: &[Value], number: i64, state: &str) -> Option<i64> {
+    events.iter().find_map(|event| {
+        (event["kind"] == "task.state"
+            && event["data"]["task"] == number
+            && event["data"]["to"] == state)
+            .then(|| super::human::at_ms(event))
+            .flatten()
+    })
+}
+
+/// Every native session the participant `handle`'s conversations were bound to, oldest first:
+/// a window opened again (a restart, a reopened task) has a conversation of its own.
+pub fn sessions_of(events: &[Value], handle: &str) -> Vec<String> {
+    events
+        .iter()
+        .filter(|event| {
+            event["kind"] == "conversation.started" && event["data"]["participant"] == handle
+        })
+        .filter_map(|started| {
+            let conversation = &started["data"]["conversation"];
+            events.iter().find_map(|bound| {
+                (bound["kind"] == "conversation.bound"
+                    && bound["data"]["conversation"] == *conversation)
+                    .then(|| bound["data"]["nativeSession"].as_str().map(str::to_owned))
+                    .flatten()
+            })
+        })
+        .collect()
 }
 
 /// The pane id of the window of the participant `handle` in `members`' project.
@@ -382,6 +520,106 @@ mod tests {
         // A review a member asked for is not the chief's.
         assert_eq!(bound.of_name("review"), None);
         assert_eq!(bound.of_name("test"), Some(4));
+    }
+
+    fn at(ms: i64) -> String {
+        jiff::Timestamp::from_millisecond(ms).unwrap().to_string()
+    }
+
+    #[test]
+    fn a_follow_up_is_bound_to_the_task_whose_window_it_went_to_and_never_by_its_number() {
+        let snapshot = Snapshot {
+            tasks: vec![
+                json!({ "number": 1, "pool": "worker", "requester": "chief", "assignee": "w-a" }),
+                json!({ "number": 2, "pool": "worker", "requester": "chief", "assignee": "w-b" }),
+                json!({ "number": 3, "pool": null, "requester": "chief", "assignee": "w-b" }),
+                json!({ "number": 4, "pool": null, "requester": "chief", "assignee": "w-a" }),
+                json!({ "number": 5, "pool": null, "requester": "w-a", "assignee": "w-a" }),
+            ],
+            ..Snapshot::default()
+        };
+        let binds = [
+            Bind {
+                name: "a",
+                is: Is::Pool("worker"),
+                requester: "chief",
+            },
+            Bind {
+                name: "b",
+                is: Is::After("a"),
+                requester: "chief",
+            },
+            Bind {
+                name: "none",
+                is: Is::After("missing"),
+                requester: "chief",
+            },
+        ];
+        let bound = Bindings::by(&snapshot, &binds);
+        assert_eq!(bound.found["a"], [1, 2]);
+        // The follow-up of T-1 is the one that went to T-1's window, and a member's own step is none.
+        assert_eq!(bound.found["b"], [4]);
+        assert!(!bound.found.contains_key("none"));
+    }
+
+    #[test]
+    fn a_call_a_tooling_daemon_wrote_is_read_with_its_refusal_code() {
+        let events = vec![
+            json!({ "at": at(1_000), "kind": "api.answered", "data": { "participant": "chief", "method": "POST", "path": "/api/tasks/1/reopen", "status": 409, "error": "not-done" } }),
+            json!({ "at": at(2_000), "kind": "api.answered", "data": { "participant": "chief", "method": "GET", "path": "/api/staff", "status": 200, "error": null } }),
+            json!({ "kind": "task.state", "data": {} }),
+        ];
+        assert_eq!(
+            calls(&events),
+            [
+                Call {
+                    participant: "chief".to_owned(),
+                    method: "POST".to_owned(),
+                    path: "/api/tasks/1/reopen".to_owned(),
+                    status: 409,
+                    error: Some("not-done".to_owned()),
+                    at_ms: Some(1_000)
+                },
+                Call {
+                    participant: "chief".to_owned(),
+                    method: "GET".to_owned(),
+                    path: "/api/staff".to_owned(),
+                    status: 200,
+                    error: None,
+                    at_ms: Some(2_000)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_brief_its_delivery_and_a_tasks_states_are_timed_by_the_events() {
+        let events = vec![
+            json!({ "at": at(10), "kind": "task.assigned", "data": { "task": 2, "message": 7 } }),
+            json!({ "at": at(20), "kind": "delivery.confirmed", "data": { "message": 7 } }),
+            json!({ "at": at(25), "kind": "delivery.confirmed", "data": { "message": 7 } }),
+            json!({ "at": at(30), "kind": "task.state", "data": { "task": 2, "to": "done" } }),
+            json!({ "at": at(40), "kind": "task.state", "data": { "task": 2, "to": "done" } }),
+        ];
+        assert_eq!(brief_message(&events, 2), Some(7));
+        assert_eq!(brief_message(&events, 3), None);
+        assert_eq!(delivered_at(&events, 7), Some(20));
+        assert_eq!(reached_at(&events, 2, "done"), Some(30));
+        assert_eq!(reached_at(&events, 2, "accepted"), None);
+    }
+
+    #[test]
+    fn each_conversation_of_a_window_is_one_of_its_sessions() {
+        let events = vec![
+            json!({ "kind": "conversation.started", "data": { "participant": "h", "conversation": 1 } }),
+            json!({ "kind": "conversation.bound", "data": { "conversation": 1, "nativeSession": "s1" } }),
+            json!({ "kind": "conversation.started", "data": { "participant": "other", "conversation": 2 } }),
+            json!({ "kind": "conversation.bound", "data": { "conversation": 2, "nativeSession": "s2" } }),
+            json!({ "kind": "conversation.started", "data": { "participant": "h", "conversation": 3 } }),
+            json!({ "kind": "conversation.bound", "data": { "conversation": 3, "nativeSession": "s3" } }),
+        ];
+        assert_eq!(sessions_of(&events, "h"), ["s1", "s3"]);
+        assert!(sessions_of(&events, "nobody").is_empty());
     }
 
     #[test]

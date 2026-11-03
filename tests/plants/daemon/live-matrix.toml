@@ -15,6 +15,11 @@ matrix-control = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_
 matrix-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
 # The stand-in agent's replies.
 matrix-fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "reply::"]
+# The live suite's own tests, the controls among them, by name.
+matrix-control-end = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_cancelled"]
+matrix-control-smoke = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::the_matrix_passes"]
+# The daemon's API, the tooling's look at it among it.
+matrix-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::tests::"]
 # The rig's environment and its live Muse launcher.
 matrix-rig-install = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install::"]
 
@@ -65,8 +70,8 @@ runs = ["matrix-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/matrix/observe.rs"
-find = '''            .filter(|task| task["pool"] == pool && task["requester"] == "chief")'''
-replace = '''            .filter(|task| task["pool"] == pool)'''
+find = '''                .filter(|task| task["requester"] == bind.requester)'''
+replace = '''                .filter(|task| task["requester"] == bind.requester || true)'''
 
 [[plant]]
 name = "live matrix: the turn ceiling is checked before the deadline"
@@ -140,3 +145,128 @@ runs = ["matrix-rig-install"]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''const KIT_FOLDERS: &[&str] = &["devin", "muse"];'''
 replace = '''const KIT_FOLDERS: &[&str] = &["devin"];'''
+
+# T-1152, rows 2 and 3 of T-1133's design: the driver's machine, the oracle's primitives and the
+# tooling's look at the API.
+[[plant]]
+name = "live matrix: the oracle takes a brief delivered before its task was waited for as in time (a delivery too early)"
+meant = "the_matrix_passes_its_scenario_on_the_rigs_stand_ins"
+runs = ["matrix-control-smoke"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/oracle.rs"
+find = '''                    delivered_ms >= done_ms,'''
+replace = '''                    delivered_ms < done_ms,'''
+
+[[plant]]
+name = "live matrix: the oracle reads a refusal by its status, not its code (a wrong refusal code)"
+meant = "a_refusal_is_judged_by_the_code_the_daemon_answered_and_nothing_else"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/oracle.rs"
+find = '''        asked.iter().any(|call| call.error.as_deref() == Some(code)),'''
+replace = '''        asked.iter().any(|call| call.status >= 400),'''
+
+[[plant]]
+name = "live matrix: the daemon writes a refusal under another code"
+meant = "a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code"
+runs = ["matrix-control-end"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/calls.rs"
+find = '''        Err(Failure::Refused(refusal)) => (refusal.status, json!(refusal.code)),'''
+replace = '''        Err(Failure::Refused(refusal)) => (refusal.status, json!("refused")),'''
+
+[[plant]]
+name = "live matrix: a daemon the tooling did not start writes the API's requests"
+meant = "a_tooling_daemon_writes_each_window_request_it_answered_with_its_refusal_code_and_no_token"
+runs = ["matrix-daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/mod.rs"
+find = '''    if context.tooling_calls {'''
+replace = '''    if context.tooling_calls || true {'''
+
+[[plant]]
+name = "live matrix: a cancelled task does not end the run"
+meant = "a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code"
+runs = ["matrix-control-end"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''            ["failed", "cancelled"]'''
+replace = '''            ["failed"]'''
+
+[[plant]]
+name = "live matrix: a task that ended comes before the deadline"
+meant = "the_deadline_comes_before_everything_else_and_the_turns_before_the_rest"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/machine.rs"
+find = '''        if seen.elapsed >= self.deadline {'''
+replace = '''        if seen.elapsed >= self.deadline && seen.ended.is_none() {'''
+
+[[plant]]
+name = "live matrix: a question observed twice is answered twice"
+meant = "a_question_is_answered_from_the_fact_sheet_once_however_often_it_is_observed"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/machine.rs"
+find = '''            .filter(|asked| !self.answered.contains(&asked.id))'''
+replace = '''            .filter(|asked| true || !self.answered.contains(&asked.id))'''
+
+[[plant]]
+name = "live matrix: every unexpected question gets the whole fact sheet"
+meant = "an_unexpected_question_gets_the_whole_sheet_once_and_a_second_ends_the_run_as_a_divergence"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/machine.rs"
+find = '''                self.whole_sheet_given = true;'''
+replace = '''                self.whole_sheet_given = false;'''
+
+[[plant]]
+name = "live matrix: the human nudges a board that is still at work"
+meant = "a_nudge_comes_once_a_milestone_after_the_board_is_settled_and_still_and_two_in_all"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/machine.rs"
+find = '''        if seen.settled
+            && still_for >= NUDGE_AFTER'''
+replace = '''        if still_for >= NUDGE_AFTER'''
+
+[[plant]]
+name = "live matrix: Enter is pressed again after a turn began"
+meant = "a_turn_begun_is_never_given_enter_again_and_its_late_record_is_waited_for"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/machine.rs"
+find = '''    if !seen.turn_begun && !seen.entered_again && seen.enter_left {'''
+replace = '''    if !seen.entered_again && seen.enter_left {'''
+
+[[plant]]
+name = "live matrix: a dialog the human has no keys for is pressed anyway"
+meant = "a_dialog_without_keys_is_never_pressed_and_more_than_four_questions_end_the_run"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/machine.rs"
+find = '''        if question.dialog == Some(false) {'''
+replace = '''        if question.dialog == Some(false) && false {'''
+
+[[plant]]
+name = "live matrix: the chief's pane is followed at its first generation after a restart"
+meant = "the_pane_followed_is_its_newest_generation_across_a_restart"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/machine.rs"
+find = '''        .find(|open| open["id"] == id)'''
+replace = '''        .filter(|open| open["id"] == id)
+        .last()'''

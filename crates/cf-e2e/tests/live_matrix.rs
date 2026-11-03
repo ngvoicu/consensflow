@@ -144,6 +144,73 @@ mod tests {
         assert!(refused(None, None, &["claude".to_owned()]).contains("takes none by name: claude"));
     }
 
+    /// The control of the run's end and of the product's refusals (T-1152): the stand-in chief,
+    /// in one turn, puts the advice task on the board, cancels it, and asks to send it back,
+    /// which the product refuses. The run ends at once, as a red that names the cancelled task,
+    /// long before its deadline; the refusal's code is the daemon's, read from what a tooling
+    /// daemon writes of each request (`api.answered`), and no line of it holds a token.
+    #[test]
+    fn a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code() {
+        use cf_e2e::matrix::scenario::Refused;
+        let log = Log::new("live matrix control: an end");
+        let reports = tempfile::tempdir().unwrap();
+        let mut scenario = Scenario::named("smoke").unwrap();
+        scenario.steps.truncate(1);
+        scenario.steps[0].stand_in = |_| {
+            "CF task add --advice --tier standard :: SLEEP 60 Reply with exactly: ADVICE_OK\nCF task cancel T-1\nCF task reopen T-1 :: Once more."
+                .to_owned()
+        };
+        scenario.refusals = &[Refused {
+            participant: "chief",
+            method: "POST",
+            path: "/api/tasks/1/reopen",
+            code: "invalid-transition",
+        }];
+        let matrix = Matrix {
+            seating: Seating::stand_ins(),
+            scenario,
+            stand_in: Path::new(FAKE_AGENT),
+            reports: reports.path().to_path_buf(),
+            owner: Owner::look(&[], &[]),
+        };
+        let outcome = run(&matrix, &log).unwrap();
+        let table = report::table(&outcome.checks);
+        log.report("what each check of the control came to", &table);
+        let check = |who: &str, what: &str| {
+            outcome
+                .checks
+                .iter()
+                .find(|check| check.who == who && check.what.contains(what))
+                .unwrap_or_else(|| panic!("no check of {who} {what}:\n{table}"))
+                .clone()
+        };
+        let step = check("steps", "step 1 (advice) was reached");
+        assert!(!step.ok, "{table}");
+        assert_eq!(step.detail, "T-1, the advice task, is cancelled", "{table}");
+        assert!(
+            outcome.elapsed.as_secs() < 120,
+            "ended at once: {} s",
+            outcome.elapsed.as_secs()
+        );
+        let refused = check(
+            "chief",
+            "POST /api/tasks/1/reopen was refused with invalid-transition",
+        );
+        assert!(refused.ok, "{table}");
+        let events = std::fs::read_to_string(outcome.evidence.folder.join("events.jsonl")).unwrap();
+        let answered: Vec<&str> = events
+            .lines()
+            .filter(|line| line.contains("\"api.answered\""))
+            .collect();
+        assert!(answered.len() >= 3, "{answered:?}");
+        assert!(
+            answered
+                .iter()
+                .all(|line| !line.contains("Bearer") && !line.contains("token")),
+            "{answered:?}"
+        );
+    }
+
     /// The control: the same driver and oracle, on a board whose five positions the rig's
     /// stand-in plays. The human asks the stand-in chief in its own words, which hands out the
     /// advice, the change, the review and the test and accepts them; the oracle reads the

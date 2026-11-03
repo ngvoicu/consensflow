@@ -17,7 +17,8 @@ use crate::live::Log;
 use crate::Result;
 
 use super::evidence::{run_id, Evidence, Owner};
-use super::human::{Bounds, Driver, Waited};
+use super::human::{Bounds, Driver, LOOK};
+use super::machine::{Next, Observation, Steps};
 use super::observe::{self, Bindings, Snapshot};
 use super::oracle::{self, Records};
 use super::scenario::Scenario;
@@ -145,13 +146,26 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     drop(driver);
 
     let snapshot = Snapshot::of(&members)?;
-    let bindings = Bindings::of(&snapshot);
+    let bindings = Bindings::by(&snapshot, scenario.binds);
     let records = RigRecords {
         members: &members,
         events: snapshot.events.clone(),
     };
     checks.extend(oracle::asks(&said, scenario.steps.len()));
     checks.extend(oracle::tasks(seating, &snapshot, &bindings, &records));
+    let calls = observe::calls(&snapshot.events);
+    for refused in scenario.refusals {
+        checks.push(oracle::refused(
+            &calls,
+            refused.participant,
+            refused.method,
+            refused.path,
+            refused.code,
+        ));
+    }
+    for (earlier, later) in scenario.order {
+        checks.extend(oracle::after_done(&snapshot, &bindings, earlier, later));
+    }
     checks.extend(oracle::fixture(members.folder()));
     let turns = snapshot.turns_by_seat(seating, asks_in);
     let total_turns = snapshot.total_turns(asks_in);
@@ -172,6 +186,11 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     manifest["elapsedSeconds"] = json!(elapsed.as_secs());
     manifest["turns"] = json!(turns);
     manifest["totalTurns"] = json!(total_turns);
+    // Assisted is not unassisted: what the human said besides the steps is said apart.
+    manifest["assisted"] = json!({
+        "answers": said.iter().filter(|said| said.step == "answer").count(),
+        "nudges": said.iter().filter(|said| said.step == "nudge").count(),
+    });
     manifest["project"] = json!(members.folder());
     evidence.json("manifest.json", &manifest)?;
     evidence.json(
@@ -221,9 +240,9 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     })
 }
 
-/// Asks each step and waits for it on the board, within the bounds: why the scenario was
-/// ended, where its bounds ended it. A step that did not go in, or was not reached, is a check
-/// that failed, and the steps after it are not asked.
+/// Asks each step and runs the scenario's machine ([`Steps`]) on the board until the step is
+/// reached: why the scenario was ended, where it was. A step that did not go in, or was not
+/// reached, is a check that failed, and the steps after it are not asked.
 fn steps(
     driver: &mut Driver,
     seating: &Seating,
@@ -231,60 +250,124 @@ fn steps(
     id: &str,
     checks: &mut Vec<Check>,
 ) -> Result<Option<String>> {
+    let mut machine = Steps::new(scenario.deadline, scenario.turns, scenario.facts);
+    let mut said = 0;
     for (index, step) in scenario.steps.iter().enumerate() {
         if let Some(why) = driver.over_now()? {
             return Ok(Some(why));
         }
         let snapshot = Snapshot::of(driver.members)?;
-        let bindings = Bindings::of(&snapshot);
+        let bindings = Bindings::by(&snapshot, scenario.binds);
         let text = if seating.chief_is_stand_in() {
             format!("\n{}", (step.stand_in)(&bindings))
         } else {
             step.asks.to_owned()
         };
         let marker = scenario.marker(id, index);
-        let said = driver.asks(step.name, &marker, &text)?.clone();
-        if !said.went_in() {
-            let why = said.failed.unwrap_or_else(|| "it did not go in".to_owned());
+        let asked = driver.asks(step.name, &marker, &text)?.clone();
+        if !asked.went_in() {
+            let why = asked
+                .failed
+                .unwrap_or_else(|| "it did not go in".to_owned());
             return Ok(driver
                 .over_now()?
                 .or(Some(format!("ask {} did not go in: {why}", index + 1))));
         }
-        let reached = driver.wait(
-            &format!("the step {} on the board", step.name),
-            scenario.deadline,
-            || {
-                let snapshot = Snapshot::of(driver.members)?;
-                let bindings = Bindings::of(&snapshot);
-                Ok((step.reached)(&snapshot, &bindings).then_some(()))
-            },
-        )?;
-        let seconds = driver.bounds.elapsed().as_secs();
-        match reached {
-            Waited::Found(()) => checks.push(Check::passed(
-                "steps",
-                &format!("step {} ({}) was reached", index + 1, step.name),
-                format!("at {seconds} s"),
-            )),
-            Waited::NotYet => {
-                checks.push(Check::failed(
-                    "steps",
-                    &format!("step {} ({}) was reached", index + 1, step.name),
-                    format!("not by {seconds} s"),
-                ));
-                return Ok(Some(format!("step {} was not reached", index + 1)));
-            }
-            Waited::Over(why) => {
-                checks.push(Check::failed(
-                    "steps",
-                    &format!("step {} ({}) was reached", index + 1, step.name),
-                    why.clone(),
-                ));
-                return Ok(Some(why));
+        let what = format!("step {} ({}) was reached", index + 1, step.name);
+        loop {
+            let snapshot = Snapshot::of(driver.members)?;
+            let bindings = Bindings::by(&snapshot, scenario.binds);
+            let question = driver.question(&snapshot)?;
+            let seen = Observation {
+                elapsed: driver.bounds.elapsed(),
+                turns: snapshot.total_turns(driver.asks_in()),
+                reached: (step.reached)(&snapshot, &bindings),
+                ended: ended(&snapshot, &bindings),
+                question: question.clone(),
+                settled: settled(&snapshot),
+                progress: progress(&snapshot),
+            };
+            let seconds = seen.elapsed.as_secs();
+            match machine.next(&seen) {
+                Next::Wait => std::thread::sleep(LOOK),
+                Next::Reached => {
+                    checks.push(Check::passed("steps", &what, format!("at {seconds} s")));
+                    break;
+                }
+                Next::Answer { answer, .. } => {
+                    said += 1;
+                    if question.is_some_and(|question| question.dialog == Some(true)) {
+                        driver
+                            .log
+                            .say(format!("the human answers the chief's dialog: {answer}"));
+                        driver.answer_dialog(&snapshot, scenario.facts, &answer)?;
+                    } else {
+                        let marker = format!("[matrix {id} answer {said}]");
+                        driver.asks("answer", &marker, &answer)?;
+                    }
+                }
+                Next::Nudge => {
+                    said += 1;
+                    let marker = format!("[matrix {id} nudge {said}]");
+                    driver.asks("nudge", &marker, scenario.nudge)?;
+                }
+                Next::End(why) => {
+                    checks.push(Check::failed("steps", &what, why.clone()));
+                    return Ok(Some(why));
+                }
             }
         }
     }
     Ok(None)
+}
+
+/// A bound task that failed or was cancelled: its name, number and state.
+pub fn ended(snapshot: &Snapshot, bindings: &Bindings) -> Option<(String, i64, String)> {
+    bindings.found.iter().find_map(|(name, numbers)| {
+        numbers.iter().find_map(|number| {
+            let state = snapshot.task(*number)?["state"].as_str()?;
+            ["failed", "cancelled"]
+                .contains(&state)
+                .then(|| ((*name).to_owned(), *number, state.to_owned()))
+        })
+    })
+}
+
+/// Whether the board is at rest: the chief idle, no window at work or starting, and nothing
+/// waiting to be delivered into the chief's window.
+pub fn settled(snapshot: &Snapshot) -> bool {
+    let chief_idle = snapshot.lanes.iter().any(|lane| {
+        lane["participant"]["handle"] == "chief" && lane["activity"]["state"] == "idle"
+    });
+    let at_work = snapshot.lanes.iter().any(|lane| {
+        ["working", "starting"].contains(&lane["activity"]["state"].as_str().unwrap_or_default())
+    });
+    let waiting = snapshot.chief_inbox.iter().any(|message| {
+        ["queued", "delivering", "gated"].contains(&message["state"].as_str().unwrap_or_default())
+    });
+    chief_idle && !at_work && !waiting
+}
+
+/// What the board has done so far, as one text: each task's state, and how many messages were
+/// delivered. A window's activity alone does not change it.
+pub fn progress(snapshot: &Snapshot) -> String {
+    let tasks: Vec<String> = snapshot
+        .tasks
+        .iter()
+        .map(|task| {
+            format!(
+                "{}:{}",
+                task["number"],
+                task["state"].as_str().unwrap_or_default()
+            )
+        })
+        .collect();
+    let delivered = snapshot
+        .events
+        .iter()
+        .filter(|event| event["kind"] == "delivery.confirmed")
+        .count();
+    format!("{} delivered {delivered}", tasks.join(","))
 }
 
 /// Each task's binding, as the evidence has it: the logical name, the numbers, and each

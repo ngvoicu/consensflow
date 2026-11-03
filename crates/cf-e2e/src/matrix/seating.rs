@@ -238,7 +238,9 @@ impl Seating {
         for (path, text) in files {
             plan = plan.with_file(path, *text);
         }
-        plan
+        // The daemon writes what each window asked of the API and how it was answered, the
+        // refusals' codes among it, for the oracle (`cf_daemon::api::calls`): its own alone.
+        plan.with_daemon_var(super::observe::TOOLING_API_CALLS, "1")
     }
 
     /// The human's staff setup: each member added with its one role, as the page adds it,
