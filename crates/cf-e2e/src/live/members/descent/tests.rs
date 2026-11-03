@@ -668,3 +668,15 @@ fn an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spell
         assert_eq!(before, after, "{pid}");
     }
 }
+
+/// The PowerShell that lists Windows' processes is given what one takes to start on a loaded
+/// machine, not the 30 s of a verb of `cf`: ended there under the load of a whole test program,
+/// it left a check unable to say what its window ran (CI, 2026-11-03, T-1161). Built here as on
+/// Windows, where it runs.
+#[test]
+fn the_powershell_that_lists_windows_processes_is_given_what_one_takes_on_a_loaded_machine() {
+    assert_eq!(
+        table_run().limit_given(),
+        Some(crate::process::POWERSHELL_LIMIT)
+    );
+}

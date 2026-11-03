@@ -508,13 +508,22 @@ fn table_script(which: &str) -> String {
     )
 }
 
+/// The PowerShell that lists Windows' process table, given what one takes to start on a
+/// loaded machine ([`crate::process::POWERSHELL_LIMIT`]): ended at a verb of `cf`'s 30 s
+/// under the load of a whole test program, it left a check unable to say what its window
+/// ran (T-1161).
+#[cfg(any(windows, test))]
+fn table_run() -> Run {
+    Run::new("powershell")
+        .args(["-NoProfile", "-Command", &table_script("")])
+        .inheriting_env()
+        .limit(crate::process::POWERSHELL_LIMIT)
+}
+
 /// What Windows' process table says of every process.
 #[cfg(windows)]
 fn table() -> Result<Vec<Running>> {
-    let ran = Run::new("powershell")
-        .args(["-NoProfile", "-Command", &table_script("")])
-        .inheriting_env()
-        .run()?;
+    let ran = table_run().run()?;
     if ran.code != Some(0) {
         return Err(Error::Program {
             action: "list the processes with",

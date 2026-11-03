@@ -37,6 +37,10 @@ regressions-idle = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "reg
 regressions-finder = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "a_window_of_a_daemon_on_the_finders_path"]
 panes-headless-eof = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "stdin_eof_reaps_every_spawned_process"]
 process-execute = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_out_of_time_that_writes"]
+# What a PowerShell is given on Windows (T-1161): the rig's ask of when a process began, the
+# live checks' process table, and the stand-in's wait for the shell of its command.
+rig-lib-powershell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "powershell"]
+stand-in-job-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "background::tests::a_job_is_waited"]
 
 [[plant]]
 name = "load flakes: a free port of loopback is not let go"
@@ -236,3 +240,48 @@ find = """
     }"""
 replace = """
     fn drop(&mut self) {}"""
+
+# A PowerShell starts in 11 to 17 s on GitHub's Windows runner, and past 30 s under the load of a
+# whole test program: CI's run of the live suites' offline cases (T-1161) saw a check that could not
+# list its processes and a stand-in that took its own command for failed and left its window. Each
+# PowerShell the rig, its checks or its stand-ins start is given `cf_e2e::process::POWERSHELL_LIMIT`.
+
+[[plant]]
+name = "load flakes: the stand-in waits only 30 s for its command's shell to start"
+meant = "a_job_is_waited_for_as_long_as_its_shell_may_take_to_start_on_a_loaded_machine"
+runs = ["stand-in-job-wait"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
+find = "const UP: Duration = cf_e2e::process::POWERSHELL_LIMIT;"
+replace = "const UP: Duration = Duration::from_secs(30);"
+
+[[plant]]
+name = "load flakes: the live checks' process table is given a verb of cf's 30 s"
+meant = "the_powershell_that_lists_windows_processes_is_given_what_one_takes_on_a_loaded_machine"
+runs = ["rig-lib-powershell"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = """
+        .inheriting_env()
+        .limit(crate::process::POWERSHELL_LIMIT)
+}"""
+replace = """
+        .inheriting_env()
+}"""
+
+[[plant]]
+name = "load flakes: when a process began is asked of a PowerShell given a verb of cf's 30 s"
+meant = "the_powershell_asked_when_a_process_began_is_given_what_one_takes_on_a_loaded_machine"
+runs = ["rig-lib-powershell"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/pid.rs"
+find = """
+        .finding_programs()
+        .limit(super::POWERSHELL_LIMIT)
+}"""
+replace = """
+        .finding_programs()
+}"""
