@@ -362,7 +362,8 @@ pub fn window_life() -> Vec<Scenario> {
         .with_vars(&[("CF_TEST_QUOTA_OUT", "matrix-worker"), ("CF_TEST_QUOTA_FILE", SPENT)], &[]),
         // results-stay-queued-after-a-quota-pause, quota-other-windows…: the chief and its worker
         // share an account that runs out while the worker works; the human switches the account
-        // and tries the chief again: the worker's result goes into the chief's window.
+        // and tries the worker again: its turn gets through, which brings back the chief on the
+        // same account, and the worker's result goes into the chief's window.
         scenario(
             "field-quota-account",
             vec![
@@ -377,11 +378,10 @@ pub fn window_life() -> Vec<Scenario> {
                     |snapshot, bindings| is(snapshot, bindings, "A", 0, &["paused"]),
                 ),
                 human(
-                    "the human switches the account and tries the chief again",
+                    "the human switches the account and tries the worker again: its turn gets through, and the chief on the same account is back",
                     |members| {
                         let spent = members.folder().join(SPENT);
                         std::fs::remove_file(&spent).map_err(crate::Error::file("remove", &spent))?;
-                        members.page("member.back", json!({ "participant": "chief" })).map(|_| ())?;
                         members.page("member.back", json!({ "participant": "matrix-worker" })).map(|_| ())
                     },
                     |snapshot, bindings| answered(snapshot, bindings, "A", 0) && crate::matrix::run::settled(snapshot),
@@ -566,6 +566,15 @@ pub fn window_life() -> Vec<Scenario> {
                         format!("{} answer(s)", about(judged, "A", "answer").len()),
                     ),
                     told_none_of(judged, "A", "nothing said its window did not stop or that a close ended its work", &["did not stop", "its close ended", "ignored the interrupt"]),
+                    {
+                        let handle = judged
+                            .nth("A", 0)
+                            .and_then(|number| judged.snapshot.task(number))
+                            .and_then(|task| task["assignee"].as_str())
+                            .unwrap_or_default();
+                        let escapes = judged.records.escapes(handle);
+                        Check::new("A", "the tell's stop pressed one Escape into its window", escapes == 1, format!("{escapes} Escape(s)"))
+                    },
                 ]
             },
             &[],

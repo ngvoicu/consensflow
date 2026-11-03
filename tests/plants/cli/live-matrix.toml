@@ -722,39 +722,60 @@ find = '''    text_id(field(result, "taskId"))'''
 replace = '''    text_id(field(result, "taskId")).filter(|_| false)'''
 
 [[plant]]
-name = "live matrix: field fix out: what is in the window's group, the status line among it, is taken for the turn's work"
+name = "live matrix: field fix out: a close names what its first look found, the user's status line among it"
 meant = "field_status_line"
 runs = ["matrix-status-line"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-panes/src/background/harness.rs"
-find = "        Servers::InGroup => kept.group.is_some() && member.group == kept.group,"
-replace = "        Servers::InGroup => false,"
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '''        thread::sleep(SETTLE);
+        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+replace = '''        let _ = SETTLE;
+        Ok(first)'''
 
 [[plant]]
-name = "live matrix: field fix out: an idle compaction's summary is read as a prompt, and the Resume tells the chief its turn was cut"
+name = "live matrix: field fix out: the sites chief's record after an idle compaction is read as cut at the Resume"
 meant = "field_resume_at_rest"
 runs = ["matrix-resume-at-rest"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/record/replay.rs"
-find = "        if (record.summary && !self.turn_open) || self.late_ancestor(place) {"
-replace = "        if self.late_ancestor(place) {"
+file = "crates/cf-harness/src/contract.rs"
+find = "        .find(|item| item.role != Role::Custom && !item.compaction)"
+replace = "        .find(|item| item.role != Role::Custom)"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = "        if !begins_no_turn(&taken) {"
+replace = "        if !begins_no_turn(&taken) || !taken.is_empty() {"
 
 [[plant]]
-name = "live matrix: field fix out: the human's Resume leaves the work the quit stopped where it stopped"
+name = "live matrix: field fix out: poker-lab's chief, at rest while its job ran, is read as cut at the Resume"
+meant = "field_resume_at_rest"
+runs = ["matrix-resume-at-rest"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = "        if !begins_no_turn(&taken) {"
+replace = "        if !begins_no_turn(&taken) || !taken.is_empty() {"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = "                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),"
+replace = ""
+
+[[plant]]
+name = "live matrix: field fix out: the engine never marks the pause of the windows a stop of the app ended, and the Resume leaves their work"
 meant = "field_restart_mid_turn"
 runs = ["matrix-restart-mid-turn"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/projects.rs"
-find = '''            if state == "open" {
-                resume_with_project(store, id)?;
-            } else {'''
-replace = '''            if state != "open" {'''
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let stop = self.stall(&project, &thread.task, &because, &why, except, is_own)?;"
+replace = "                let stop = self.stall(&project, &thread.task, &because, &why, except, false)?;"
 
 [[plant]]
 name = "live matrix: field fix out: a window's turn that gets through brings back only its own member, and the chief at rest never takes its worker's result"

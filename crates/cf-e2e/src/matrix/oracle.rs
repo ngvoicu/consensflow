@@ -26,6 +26,12 @@ pub trait Records {
         let _ = (number, last);
         Ok(Vec::new())
     }
+
+    /// How many times the daemon pressed Escape into the window of the participant `handle`.
+    fn escapes(&self, handle: &str) -> usize {
+        let _ = handle;
+        0
+    }
 }
 
 /// The checks of the tasks of `snapshot`, bound as `bindings` binds them, against `seating`.

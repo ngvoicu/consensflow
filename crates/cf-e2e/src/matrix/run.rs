@@ -137,6 +137,11 @@ impl Records for RigRecords<'_> {
         )?;
         Ok(answer["items"].as_array().cloned().unwrap_or_default())
     }
+
+    fn escapes(&self, handle: &str) -> usize {
+        let id = observe::pane_id(self.members, handle);
+        self.members.rig().keys_pressed(&id, &[27])
+    }
 }
 
 /// Runs `matrix`: the checks and the evidence; the error is the rig's, a run that could not be
