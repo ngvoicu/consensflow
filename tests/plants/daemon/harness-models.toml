@@ -21,6 +21,7 @@ hm-cf-task-list = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::ta
 hm-evals-plan = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "plan"]
 hm-e2e-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
 hm-page-chief = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "asks the chief's effort"]
+hm-page-history = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "the name a member had before"]
 hm-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a project in a chosen folder|shows the staff as one row per member"]
 
 [[plant]]
@@ -274,6 +275,7 @@ replace = '''
 name = "harness models: the chief's effort is not sent"
 meant = "asks the chief's effort where its model lists efforts, and sends it with the harness and the model, in New project and Switch chief"
 runs = ["hm-page-chief"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
@@ -287,6 +289,7 @@ replace = '''
 name = "harness models: New project sends a member per role, not one member holding its roles"
 meant = "starts a project in a chosen folder with the chosen chief, the staff ticked from the last one"
 runs = ["hm-page-staff"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
@@ -301,6 +304,7 @@ replace = '''
 name = "harness models: a member's row says its model's id, not the name its harness gives it"
 meant = "starts a project in a chosen folder with the chosen chief, the staff ticked from the last one"
 runs = ["hm-page-staff"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
@@ -309,4 +313,19 @@ find = '''
 '''
 replace = '''
   [member.model, member.harness && harnessOf(member.harness), member.effort, member.tier]
+'''
+
+[[plant]]
+name = "harness models: the history viewer says nothing of the name a renamed member had"
+meant = "says on its page line the name a member had before members were named by their model"
+runs = ["hm-page-history"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = '''
+  return (participant.member ?? participant.handle) === participant.agent ? null : participant.agent
+'''
+replace = '''
+  return null
 '''
