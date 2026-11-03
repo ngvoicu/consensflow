@@ -255,12 +255,13 @@ impl Adapter for CodexAdapter {
         FirstMessage::Delivered
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
             Harness::Codex,
             env,
             variant,
+            folder,
             paths::global_specmint(env, variant),
         )
     }

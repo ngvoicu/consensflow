@@ -94,8 +94,9 @@ fn specmint_named(frame: &Value) -> Vec<String> {
 
 /// Whether `root` is where ConsensFlow keeps its copy of `variant` for `harness`
 /// (`claude`, `codex`) in the rig's home: `integrations/specmint/<harness>`, in a
-/// folder named by the variant and the commit it is vendored at, and in no
-/// launch's folder.
+/// folder named by the variant and the commit it is vendored at, with the hash of the
+/// project's folder after them where that is not `.specs` (T-662), and in no launch's
+/// folder.
 pub(crate) fn is_kept(rig: &Rig, root: &Path, harness: &str, variant: &str) -> bool {
     let beside = rig
         .home()
@@ -106,9 +107,15 @@ pub(crate) fn is_kept(rig: &Rig, root: &Path, harness: &str, variant: &str) -> b
         .file_name()
         .and_then(|name| name.to_str())
         .and_then(|name| name.strip_prefix(&format!("{variant}-")));
+    let hex = |text: &str, len: usize| {
+        text.len() == len && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+    };
     root.parent() == Some(beside.as_path())
-        && commit.is_some_and(|commit| {
-            commit.len() == 40 && commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && commit.is_some_and(|rest| {
+            hex(rest, 40)
+                || rest
+                    .split_once('-')
+                    .is_some_and(|(commit, key)| hex(commit, 40) && hex(key, 12))
         })
 }
 
@@ -183,6 +190,12 @@ fn a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_
         installed.starts_with("---\nname: specmint-tdd\n"),
         "{installed}"
     );
+    // The project keeps its specs in `plans`, and the skill's files call `.specs` the
+    // folder: the copy the chief is given names the project's (T-662).
+    assert!(
+        !installed.contains(".specs") && installed.contains("plans/registry.md"),
+        "the copy sends the chief to .specs: {installed}"
+    );
     assert!(
         skill.join(TDD_REFERENCE).is_file(),
         "the references the skill names are beside it"
@@ -191,7 +204,7 @@ fn a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_
     assert!(role.contains("## This project's specs"), "{role}");
     assert!(role.contains("`specmint-tdd`"), "{role}");
     assert!(
-        role.contains("Where Specmint says `.specs`, it means `plans`"),
+        role.contains("Your specs and their registry are in `plans`"),
         "{role}"
     );
     assert!(
@@ -284,7 +297,7 @@ fn a_project_opened_with_specs_on_has_its_chief_given_the_skill_beside_its_role_
     let role = role_of(&first);
     assert!(role.contains("## This project's specs"), "{role}");
     assert!(
-        role.contains("Where Specmint says `.specs`, it means `plans`"),
+        role.contains("Your specs and their registry are in `plans`"),
         "{role}"
     );
     rig.close()?;
@@ -302,7 +315,7 @@ fn with_specs_on_for_every_project_a_project_that_says_nothing_follows_and_one_t
     assert_eq!(skills_named(&first), ["consensflow-chief"]);
     assert_eq!(specmint_named(&first), ["specmint-core"]);
     assert!(
-        role_of(&first).contains("it means `.specs`"),
+        role_of(&first).contains("Your specs and their registry are in `.specs`"),
         "the documented folder"
     );
 
@@ -352,7 +365,7 @@ fn what_settings_says_for_every_project_is_the_folder_and_the_variant_a_chief_is
     assert!(is_kept(&rig, &kept, "claude", "core-html"), "{kept:?}");
     let role = role_of(&first);
     assert!(
-        role.contains("Where Specmint says `.specs`, it means `docs/specs`"),
+        role.contains("Your specs and their registry are in `docs/specs`"),
         "{role}"
     );
     // It names its own variant: that is the one, in the app's folder still.
@@ -369,7 +382,7 @@ fn what_settings_says_for_every_project_is_the_folder_and_the_variant_a_chief_is
         next["argv"]
     );
     assert!(
-        role_of(&next).contains("it means `docs/specs`"),
+        role_of(&next).contains("Your specs and their registry are in `docs/specs`"),
         "{}",
         role_of(&next)
     );

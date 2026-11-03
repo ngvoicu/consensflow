@@ -119,13 +119,17 @@ pub trait Adapter {
 
     /// Where the window of a chief given specs finds the Specmint skill of
     /// `variant`, asked before the window is prepared, as its role text names
-    /// the file. The copy the human installed where this harness looks for
-    /// skills, if it is the chosen variant: used where it is. Otherwise the
-    /// copy ConsensFlow keeps for this harness, at the place [`Adapter::prepare`]
-    /// will have it written: the same place for every launch, so that the role
-    /// text that names it is the same from one launch to the next. An installed
-    /// copy of any other variant is no copy of this one, and is left alone.
-    fn specmint(&self, variant: Variant) -> Result<Skill, String>;
+    /// the file, for a project that keeps its specs in `folder`. The copy the
+    /// human installed where this harness looks for skills, if it is the chosen
+    /// variant: used where it is, but only for a project whose folder is the one
+    /// Specmint's files name (`.specs`), since such a copy is never edited for one
+    /// project and would send the chief to the wrong folder (T-662). Otherwise the
+    /// copy ConsensFlow keeps for this harness and this folder, with the folder in
+    /// its paths, at the place [`Adapter::prepare`] will have it written: the same
+    /// place for every launch of the project, so that the role text that names it is
+    /// the same from one launch to the next. An installed copy of any other variant
+    /// is no copy of this one, and is left alone.
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String>;
 }
 
 /// Where a window finds the Specmint skill of its chief's variant: the file
@@ -151,11 +155,13 @@ impl Skill {
     }
 }
 
-/// What a chief's launch is given of specs: the variant it plans with, and
-/// where the skill of it is ([`Adapter::specmint`]).
+/// What a chief's launch is given of specs: the variant it plans with, the folder its
+/// project keeps its specs in (relative to the project, in slashes), and where the skill
+/// of it is ([`Adapter::specmint`]).
 #[derive(Debug, Clone, Copy)]
 pub struct Specs<'a> {
     pub variant: Variant,
+    pub folder: &'a str,
     pub skill: &'a Skill,
 }
 

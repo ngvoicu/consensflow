@@ -219,7 +219,10 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
         whole.contains(SECTION),
         "the section, in all of the role: {whole}"
     );
-    assert!(whole.contains("it means `plans`"), "{whole}");
+    assert!(
+        whole.contains("Your specs and their registry are in `plans`"),
+        "{whole}"
+    );
     // It names ConsensFlow's copy of the skill, in the folder that is kept for the
     // harness and the variant, and that file is there: the one the window's role
     // names too.

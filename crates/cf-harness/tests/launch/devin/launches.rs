@@ -345,7 +345,7 @@ fn a_chief_given_specs_has_the_skill_kept_for_every_launch_and_devin_is_given_no
         let consensflow = path::join(&[&home.root, "consensflow"]);
         let skill = path::join(&[&kept::skill(&consensflow, "devin", variant), "SKILL.md"]);
         assert_eq!(
-            adapter.specmint(variant).unwrap(),
+            adapter.specmint(variant, ".specs").unwrap(),
             Skill::Own(skill.clone()),
             "{variant:?}: the place the role text names is the place written"
         );
@@ -388,7 +388,7 @@ fn a_devin_that_has_the_variant_installed_in_its_config_or_the_agents_skills_is_
     {
         let id = format!("3d4e5f60-7182-4394-8dbe-2f3a4b5c6d8{n}");
         assert_eq!(
-            adapter.specmint(variant).unwrap(),
+            adapter.specmint(variant, ".specs").unwrap(),
             Skill::Global(file.clone())
         );
         let chief = Request {
@@ -420,5 +420,39 @@ fn a_devin_that_has_the_variant_installed_in_its_config_or_the_agents_skills_is_
     assert_eq!(
         (fs::read(&own).unwrap(), fs::read(&shared).unwrap()),
         before
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_names_it_whether_or_not_devin_has_the_variant_installed(
+) {
+    let home = Home::new();
+    let adapter = home.adapter();
+    // Installed by the human, and never edited for one project: its files call `.specs` the
+    // folder (T-662).
+    let dir = path::join(&[&home.root, "home/.agents/skills", "specmint-tdd"]);
+    fs::create_dir_all(&dir).unwrap();
+    let installed = path::join(&[&dir, "SKILL.md"]);
+    let words = "---\nname: specmint-tdd\n---\nthe human's own, in .specs/registry.md\n";
+    fs::write(&installed, words).unwrap();
+    assert_eq!(
+        adapter.specmint(Variant::Tdd, ".specs").unwrap(),
+        Skill::Global(installed.clone())
+    );
+    let Skill::Own(copy) = adapter.specmint(Variant::Tdd, "docs/specs").unwrap() else {
+        panic!("a copy of its own for another folder");
+    };
+    let chief = Request {
+        specs: Some(Variant::Tdd),
+        folder: "docs/specs",
+        ..Request::chief()
+    };
+    prepare_as(&adapter, &chief, "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d90").unwrap();
+    kept::names_only(&copy, "docs/specs");
+    assert_eq!(
+        fs::read_to_string(&installed).unwrap(),
+        words,
+        "not touched"
     );
 }

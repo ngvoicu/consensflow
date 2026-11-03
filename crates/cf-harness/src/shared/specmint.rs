@@ -15,6 +15,19 @@
 //! harness and variant, in `integrations/specmint/<harness>/<variant>-<commit>`
 //! (the upstream commit the build vendors the variant at, from its manifest) and
 //! in the layout Claude loads a skill from (`.claude/skills/specmint-<variant>`).
+//!
+//! **A project's folder wins** (T-662). The skill's files name `.specs` as the
+//! folder the specs and the registry are in, in their paths (the `SKILL.md` calls
+//! it canonical), and a chief of a project that keeps its specs in `docs/specs`
+//! followed the skill and wrote them to `.specs`, with the role text telling it
+//! the folder. So a project whose folder is another is given a copy of its own: the
+//! files as they are vendored but for the folder, which stands for `.specs` in
+//! every path, kept beside the others as `<variant>-<commit>-<key>` (the key is
+//! the folder's hash), the same at every launch of the project. An installed copy
+//! is never edited for one project, so it serves only the project whose folder is
+//! `.specs`; for any other the chief is given ConsensFlow's own, whether or not the
+//! harness has the variant installed.
+//!
 //! No launch's folder holds it, so its place is the same at every launch: the
 //! chief's role text, which names it, is the same from one launch to the next,
 //! and a conversation that is resumed is told nothing of its skill that it was
@@ -38,6 +51,7 @@ pub(crate) mod testing;
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Cow;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::Read;
@@ -47,7 +61,8 @@ use cf_base::env::Env;
 use cf_base::file::{make_folder, rename, rm_force, write_file, FileError, Mkdir};
 use cf_base::path;
 use cf_proto::agents::Harness;
-use cf_proto::specs::Variant;
+use cf_proto::specs::{Variant, DEFAULT_FOLDER};
+use sha2::{Digest, Sha256};
 
 pub use bundled::bundled_specmint;
 
@@ -122,22 +137,31 @@ pub(crate) struct OwnCopy {
 }
 
 impl OwnCopy {
-    /// The copy `variant` has for `harness`, at the place that is the same for
-    /// every launch, or the failure of an environment that names no ConsensFlow
-    /// folder.
-    fn of(harness: Harness, env: &Env, variant: Variant) -> Result<Self, String> {
-        Self::at(harness, env, variant, &files::commit_of(variant)?)
+    /// The copy `variant` has for `harness` and a project that keeps its specs in
+    /// `folder`, at the place that is the same for every launch, or the failure of
+    /// an environment that names no ConsensFlow folder.
+    fn of(harness: Harness, env: &Env, variant: Variant, folder: &str) -> Result<Self, String> {
+        Self::at(harness, env, variant, &files::commit_of(variant)?, folder)
     }
 
-    /// The copy of `variant` as it is vendored at `commit`, for `harness`.
-    fn at(harness: Harness, env: &Env, variant: Variant, commit: &str) -> Result<Self, String> {
+    /// The copy of `variant` as it is vendored at `commit`, for `harness` and
+    /// `folder`. The folder the files name is the vendored copy as it is, and any
+    /// other has its hash in the name.
+    fn at(
+        harness: Harness,
+        env: &Env,
+        variant: Variant,
+        commit: &str,
+        folder: &str,
+    ) -> Result<Self, String> {
+        let name = if folder == DEFAULT_FOLDER {
+            format!("{}-{commit}", variant.as_str())
+        } else {
+            format!("{}-{commit}-{}", variant.as_str(), key(folder))
+        };
         let root = integrations_path(
             env,
-            &[
-                KEPT,
-                harness_folder(harness).unwrap_or(CODEX_FOLDER),
-                &format!("{}-{commit}", variant.as_str()),
-            ],
+            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],
         )?;
         let folder = path::join(&[&root, SKILLS[1], SKILLS[2], variant.skill_name()]);
         Ok(Self { root, folder })
@@ -149,27 +173,64 @@ impl OwnCopy {
     }
 }
 
-/// Where the window of `harness` finds the skill of `variant`: the copy the
-/// harness found installed (`global`, its own `global_specmint`) or, where it
-/// found none, the place ConsensFlow's own is written ([`write_own`]), which is
-/// the same for every launch.
+/// The first twelve hex digits of the SHA-256 of `folder`: what names the copy
+/// made for a project that keeps its specs there. A folder is any text, so its
+/// name is no part of a path.
+fn key(folder: &str) -> String {
+    Sha256::digest(folder.as_bytes())
+        .iter()
+        .take(6)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// `bytes`, a vendored file, with `folder` where it names `.specs` ([`DEFAULT_FOLDER`]),
+/// in every path and every sentence: the folder the project keeps its specs in, and the
+/// only one the chief is told of. The file as it is for the folder it names.
+fn in_folder<'a>(bytes: &'a [u8], folder: &str) -> Cow<'a, [u8]> {
+    let named = DEFAULT_FOLDER.as_bytes();
+    if folder == DEFAULT_FOLDER || !bytes.windows(named.len()).any(|window| window == named) {
+        return Cow::Borrowed(bytes);
+    }
+    let mut made = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at..].starts_with(named) {
+            made.extend_from_slice(folder.as_bytes());
+            at += named.len();
+        } else {
+            made.push(bytes[at]);
+            at += 1;
+        }
+    }
+    Cow::Owned(made)
+}
+
+/// Where the window of `harness` finds the skill of `variant` for a project that
+/// keeps its specs in `folder`: the copy the harness found installed (`global`, its
+/// own `global_specmint`) where the folder is the one that copy names, else the place
+/// ConsensFlow's own is written ([`write_own`]), which is the same for every launch.
 pub(crate) fn place(
     harness: Harness,
     env: &Env,
     variant: Variant,
+    folder: &str,
     global: Option<String>,
 ) -> Result<Skill, String> {
     match global {
-        Some(file) => Ok(Skill::Global(file)),
-        None => Ok(Skill::Own(OwnCopy::of(harness, env, variant)?.file())),
+        Some(file) if folder == DEFAULT_FOLDER => Ok(Skill::Global(file)),
+        _ => Ok(Skill::Own(
+            OwnCopy::of(harness, env, variant, folder)?.file(),
+        )),
     }
 }
 
 /// Writes ConsensFlow's own copy of the skill where the launch's chief is given
-/// one, and says where it is: at the place the chief's text names. A file that is
-/// there and is what this build ships is left as it is, one that is missing or
-/// differs is written ([`put_in_place`]), and what else is in the folder is none
-/// of its business. None where there is nothing to write: no specs, or the
+/// one, and says where it is: at the place the chief's text names, with the
+/// project's folder where the vendored files name `.specs` ([`in_folder`]). A file
+/// that is there and is what this build ships for the folder is left as it is, one
+/// that is missing or differs is written ([`put_in_place`]), and what else is in the
+/// folder is none of its business. None where there is nothing to write: no specs, or the
 /// harness has the variant installed.
 pub(crate) fn write_own(
     harness: Harness,
@@ -178,14 +239,16 @@ pub(crate) fn write_own(
 ) -> Result<Option<OwnCopy>, String> {
     let Some(Specs {
         variant,
+        folder,
         skill: Skill::Own(_),
     }) = launch.specs
     else {
         return Ok(None);
     };
-    let copy = OwnCopy::of(harness, env, variant)?;
+    let copy = OwnCopy::of(harness, env, variant, folder)?;
     let said = |error: FileError| error.to_string();
     for (name, bytes) in files::of(variant) {
+        let bytes = in_folder(bytes, folder);
         let file = path::join(&[&copy.folder, name]);
         let file = Path::new(&file);
         if fs::read(file).is_ok_and(|held| held == *bytes) {
@@ -194,7 +257,7 @@ pub(crate) fn write_own(
         if let Some(above) = file.parent() {
             make_folder(above, 0o700, Mkdir::Promise).map_err(said)?;
         }
-        put_in_place(file, bytes, launch.id).map_err(said)?;
+        put_in_place(file, &bytes, launch.id).map_err(said)?;
     }
     Ok(Some(copy))
 }

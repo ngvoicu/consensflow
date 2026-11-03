@@ -58,7 +58,7 @@ use cf_base::env::Env;
 use cf_base::text::{console_text, window_text};
 use cf_base::time::{Clock, SystemClock};
 use cf_proto::agents::Harness;
-use cf_proto::specs::Variant;
+use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
 
 use crate::claude::install;
@@ -345,14 +345,17 @@ fn newest_session(question: &Value) -> Result<Value, String> {
 
 /// Where the harness has the Specmint variant installed for its user: the
 /// adapter's own answer (`Adapter::specmint`) with the home `env` names, which
-/// is the one the daemon would ask it in. Where it has none, the answer is where
+/// is the one the daemon would ask it in, for a project that keeps its specs in the
+/// question's `folder` (`.specs` where it names none). Where the harness has none, or
+/// the folder is another than the one an installed copy names, the answer is where
 /// ConsensFlow's own copy is kept for it, which is the same for every launch.
 fn specmint(question: &Value) -> Result<Value, String> {
     let variant = Variant::from_name(text(question, "variant")?)
         .ok_or("the question's variant is none of core, core-html, tdd and tdd-html")?;
+    let folder = optional(question, "folder").unwrap_or(DEFAULT_FOLDER);
     let env = env(question)?;
     let services = Fakes::new(&env).services(&env, Path::new(""));
-    let skill = adapter(harness(text(question, "kind")?)?, &services).specmint(variant)?;
+    let skill = adapter(harness(text(question, "kind")?)?, &services).specmint(variant, folder)?;
     Ok(json!({
         "installed": matches!(skill, Skill::Global(_)),
         "skill": skill.path(),

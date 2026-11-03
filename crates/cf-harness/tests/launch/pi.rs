@@ -114,6 +114,8 @@ struct Request {
     role: &'static str,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
+    /// The folder its project keeps its specs in, relative to the project.
+    folder: &'static str,
     /// The folder the window opens in.
     directory: String,
 }
@@ -126,6 +128,7 @@ impl Default for Request {
             instructions: ROLE.to_owned(),
             role: "worker",
             specs: None,
+            folder: ".specs",
             directory: "/work/app".to_owned(),
         }
     }
@@ -135,7 +138,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant).unwrap());
+        .map(|variant| adapter.specmint(variant, request.folder).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -155,7 +158,11 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
         specs: request
             .specs
             .zip(skill.as_ref())
-            .map(|(variant, skill)| Specs { variant, skill }),
+            .map(|(variant, skill)| Specs {
+                variant,
+                folder: request.folder,
+                skill,
+            }),
         compaction: None,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
@@ -679,6 +686,7 @@ fn reads_each_turn_s_end_from_the_extension_s_settled_marker() {
     );
 }
 
+mod failed;
 mod install;
 mod resumed;
 mod roles;

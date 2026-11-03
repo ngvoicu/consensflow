@@ -150,17 +150,17 @@ fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at
     // Its next launch has it.
     relaunch(&context, project.id);
     let launch = chief_launch(&context, project.id);
-    let skill =
-        "/consensflow/integrations/specmint/fake/tdd-html/.claude/skills/specmint-tdd-html/SKILL.md";
+    let skill = "/consensflow/integrations/specmint/fake/tdd-html-docs-specs/.claude/skills/specmint-tdd-html/SKILL.md";
     assert_eq!(
         launch["specs"],
-        json!({ "variant": "tdd-html", "skill": skill, "installed": false })
+        json!({ "variant": "tdd-html", "folder": "docs/specs", "skill": skill, "installed": false })
     );
     assert_eq!(
         launch["instructions"],
         format!("instructions for chief with specs: tdd-html in docs/specs at {skill}")
     );
     assert_eq!(*context.adapter.specmint_asked.borrow(), [Variant::TddHtml]);
+    assert_eq!(*context.adapter.specmint_folders.borrow(), ["docs/specs"]);
 }
 
 #[test]
@@ -176,11 +176,10 @@ fn a_chief_is_given_the_specs_its_project_was_opened_with_at_its_very_first_laun
     // The chief launched once, as the project opened: nothing relaunched it.
     assert_eq!(launches(&context, opened.id, "chief").len(), 1);
     let launch = chief_launch(&context, opened.id);
-    let skill =
-        "/consensflow/integrations/specmint/fake/tdd-html/.claude/skills/specmint-tdd-html/SKILL.md";
+    let skill = "/consensflow/integrations/specmint/fake/tdd-html-docs-specs/.claude/skills/specmint-tdd-html/SKILL.md";
     assert_eq!(
         launch["specs"],
-        json!({ "variant": "tdd-html", "skill": skill, "installed": false })
+        json!({ "variant": "tdd-html", "folder": "docs/specs", "skill": skill, "installed": false })
     );
     assert_eq!(
         launch["instructions"],
@@ -326,12 +325,18 @@ fn the_app_s_default_applies_where_the_project_says_nothing_and_the_project_s_ow
 /// The words a chief's role text and its launch have of specs kept in `folder`
 /// and planned with `variant`, as the fake adapter says them.
 fn is_given(launch: &Value, variant: &str, folder: &str) {
+    // A project whose folder is another has a copy of its own, in a place of its own.
+    let kept = if folder == ".specs" {
+        variant.to_owned()
+    } else {
+        format!("{variant}-{}", folder.replace('/', "-"))
+    };
     let skill = format!(
-        "/consensflow/integrations/specmint/fake/{variant}/.claude/skills/specmint-{variant}/SKILL.md"
+        "/consensflow/integrations/specmint/fake/{kept}/.claude/skills/specmint-{variant}/SKILL.md"
     );
     assert_eq!(
         launch["specs"],
-        json!({ "variant": variant, "skill": skill, "installed": false }),
+        json!({ "variant": variant, "folder": folder, "skill": skill, "installed": false }),
         "{launch}"
     );
     assert_eq!(
@@ -494,10 +499,47 @@ fn a_skill_the_harness_has_installed_is_the_one_the_window_is_given_and_its_text
     let launch = chief_launch(&context, project.id);
     assert_eq!(
         launch["specs"],
-        json!({ "variant": "tdd", "skill": installed, "installed": true })
+        json!({ "variant": "tdd", "folder": ".specs", "skill": installed, "installed": true })
     );
     assert_eq!(
         launch["instructions"],
         format!("instructions for chief with specs: tdd in .specs at {installed}")
     );
+}
+
+#[test]
+fn a_skill_the_harness_has_installed_serves_only_a_project_that_keeps_its_specs_where_it_says() {
+    // The installed copy calls `.specs` the folder and is never edited for one project:
+    // a chief of a project on `docs/specs` that was pointed at it went by it (T-662).
+    let context = Context::new();
+    let project = project_at(&context, "/work/app");
+    says(
+        &context,
+        project.id,
+        Some(true),
+        "docs/specs",
+        Some(Variant::Tdd),
+    );
+    let installed = "/home/me/.claude/skills/specmint-tdd/SKILL.md";
+    *context.adapter.specmint_installed.borrow_mut() = Some(installed.to_owned());
+    relaunch(&context, project.id);
+    let launch = chief_launch(&context, project.id);
+    is_given(&launch, "tdd", "docs/specs");
+    assert_eq!(launch["specs"]["installed"], false, "{launch}");
+    assert!(
+        !launch["instructions"].as_str().unwrap().contains(installed),
+        "the text does not name the installed copy: {launch}"
+    );
+    assert_eq!(*context.adapter.specmint_folders.borrow(), ["docs/specs"]);
+    // The same project with its specs in `.specs` is given the installed one, as it was.
+    says(
+        &context,
+        project.id,
+        Some(true),
+        ".specs",
+        Some(Variant::Tdd),
+    );
+    relaunch(&context, project.id);
+    let launch = chief_launch(&context, project.id);
+    assert_eq!(launch["specs"]["installed"], true, "{launch}");
 }

@@ -172,5 +172,6 @@ fn plain_copy(request: &Request) -> Request {
         agent: request.agent,
         specs: request.specs,
         compaction: request.compaction,
+        folder: request.folder,
     }
 }

@@ -59,7 +59,7 @@ fn a_chief_s_text_with_specs_on_has_one_section_more_after_the_rest_and_the_rest
 }
 
 #[test]
-fn the_section_names_the_skill_where_its_file_is_the_folder_and_where_specmint_says_dot_specs() {
+fn the_section_names_the_skill_where_its_file_is_and_the_folder_the_specs_are_in_and_no_other() {
     for variant in Variant::ALL {
         let section = given(variant).section();
         assert!(
@@ -78,9 +78,12 @@ fn the_section_names_the_skill_where_its_file_is_the_folder_and_where_specmint_s
             "{section}"
         );
         assert!(
-            section.contains("Where Specmint says `.specs`, it means `docs/specs`"),
+            section.contains("Your specs and their registry are in `docs/specs`:"),
             "{section}"
         );
+        // The folder the skill's files name is not the project's, and a section that said it
+        // sent a chief to it (T-662): a project's folder is the only one it names.
+        assert!(!section.contains(".specs"), "{section}");
         // The live test of specs reads the skill's file and the folder out of these
         // words (`crates/cf-e2e/tests/live_specs/launched.rs`): a change of them is
         // a change of its patterns.
@@ -89,6 +92,27 @@ fn the_section_names_the_skill_where_its_file_is_the_folder_and_where_specmint_s
             "{section}"
         );
     }
+}
+
+#[test]
+fn a_chief_of_a_project_whose_folder_is_another_is_told_no_dot_specs_anywhere_in_its_text() {
+    // The field's failure (T-662, a Pi chief on `docs/specs`): the text said where Specmint
+    // says `.specs` and the skill called `.specs` the canonical folder, and the chief went by
+    // the skill. Nothing the chief is told names the skill's folder, whatever the variant.
+    for variant in Variant::ALL {
+        let specs = given(variant);
+        let chief = text("chief", Some(&specs));
+        assert!(!chief.contains(".specs"), "{variant:?}: {chief}");
+        assert!(chief.contains("`docs/specs`"), "{variant:?}");
+    }
+    // A project that keeps its specs in `.specs` is told so, as any folder is.
+    let specs = ProjectSpecs {
+        folder: ".specs",
+        ..given(Variant::Core)
+    };
+    assert!(specs
+        .section()
+        .contains("Your specs and their registry are in `.specs`:"));
 }
 
 #[test]

@@ -6,11 +6,13 @@
 //! at a launch, which is when a change of the setting applies (a Resume, a
 //! switch).
 //! The harness says where its window finds the Specmint skill of the project's
-//! variant ([`Adapter::specmint`]); that place is named in the chief's role
+//! variant and folder ([`Adapter::specmint`]); that place is named in the chief's role
 //! text ([`ProjectSpecs`]) and given the adapter, which has the skill there,
 //! written or its own, when it prepares the window ([`Launch::specs`]). The
-//! place is the harness's and the variant's, never a launch's, so the role text
-//! of a chief whose project's specs did not change is the same at every launch.
+//! place is the harness's, the variant's and the folder's, never a launch's, so the
+//! role text of a chief whose project's specs did not change is the same at every
+//! launch. The folder is in it because the skill's own files name `.specs`: a
+//! project's folder wins only if the chief is given a copy that names it (T-662).
 //! A project with specs off, and every member, are asked about nothing and given
 //! nothing: their launch is as it was.
 
@@ -50,6 +52,7 @@ impl ChiefSpecs {
     pub(crate) fn launch(&self) -> Specs<'_> {
         Specs {
             variant: self.setting.variant,
+            folder: &self.setting.folder,
             skill: &self.skill,
         }
     }
@@ -108,7 +111,7 @@ impl Dispatcher {
             return Ok(None);
         };
         let skill = adapter
-            .specmint(setting.variant)
+            .specmint(setting.variant, &setting.folder)
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
         Ok(Some(ChiefSpecs { setting, skill }))
     }

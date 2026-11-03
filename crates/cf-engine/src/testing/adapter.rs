@@ -28,7 +28,7 @@ use cf_harness::contract::{
 };
 use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
-use cf_proto::specs::Variant;
+use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
 
 use super::holds::{Holds, Wrapped};
@@ -246,12 +246,16 @@ pub struct FakeAdapter {
     /// are up as any later message is, as Claude Code's, Pi's and Codex's are.
     pub first: Cell<FirstMessage>,
     /// Where its harness has the Specmint variant installed, when the test says
-    /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
-    /// keep for it, which is the same for every launch.
+    /// it has: the `SKILL.md` it answers, for a project whose specs are in the folder
+    /// that copy names (`.specs`). Without, or for any other folder, the copy
+    /// ConsensFlow would keep for it, which is the same for every launch.
     pub specmint_installed: RefCell<Option<String>>,
     /// The variants it was asked where its harness has them, in order: a launch
     /// that is given no specs asks none.
     pub specmint_asked: RefCell<Vec<Variant>>,
+    /// The folder of each of those asks, in the same order: where the project keeps
+    /// its specs.
+    pub specmint_folders: RefCell<Vec<String>>,
     /// Asks of whether a conversation can be gone on with that the test holds,
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
@@ -372,6 +376,7 @@ impl FakeAdapter {
             first: Cell::new(FirstMessage::Opened),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
+            specmint_folders: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
             cleared: RefCell::new(Vec::new()),
             record_holds: Holds::default(),
@@ -1132,6 +1137,7 @@ impl Adapter for Asked {
         if let Some(specs) = launch.specs {
             asked["specs"] = json!({
                 "variant": specs.variant.as_str(),
+                "folder": specs.folder,
                 "skill": specs.skill.path(),
                 "installed": matches!(specs.skill, Skill::Global(_)),
             });
@@ -1214,13 +1220,27 @@ impl Adapter for Asked {
     /// traces. What the fake says is where the test says its harness has the
     /// variant installed, else the copy ConsensFlow would keep for it: at a
     /// place that no launch is in, as the adapters' is.
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         self.fake.specmint_asked.borrow_mut().push(variant);
-        Ok(match self.fake.specmint_installed.borrow().clone() {
-            Some(file) => Skill::Global(file),
-            None => Skill::Own(format!(
+        self.fake
+            .specmint_folders
+            .borrow_mut()
+            .push(folder.to_owned());
+        let installed = self.fake.specmint_installed.borrow().clone();
+        Ok(match (installed, folder == DEFAULT_FOLDER) {
+            // An installed copy names the default folder, and serves only a project that
+            // keeps its specs there.
+            (Some(file), true) => Skill::Global(file),
+            (None, true) => Skill::Own(format!(
                 "/consensflow/integrations/specmint/fake/{}/.claude/skills/{}/SKILL.md",
                 variant.as_str(),
+                variant.skill_name()
+            )),
+            // Another folder is a copy of its own, in a place of its own.
+            (_, false) => Skill::Own(format!(
+                "/consensflow/integrations/specmint/fake/{}-{}/.claude/skills/{}/SKILL.md",
+                variant.as_str(),
+                folder.replace('/', "-"),
                 variant.skill_name()
             )),
         })

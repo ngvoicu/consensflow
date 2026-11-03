@@ -248,8 +248,8 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_while(true, &read),
-        212,
-        "docs: read to 212 rows with specs on"
+        211,
+        "docs: read to 211 rows with specs on"
     );
     assert_eq!(
         rows_while(false, &read),

@@ -188,11 +188,12 @@ impl Adapter for PiAdapter {
         FirstMessage::Delivered
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         specmint::place(
             Harness::Pi,
             &self.env,
             variant,
+            folder,
             paths::global_specmint(&self.env, variant),
         )
     }
