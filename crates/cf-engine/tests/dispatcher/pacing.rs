@@ -326,6 +326,67 @@ fn a_window_read_by_the_fallback_that_prints_and_shows_the_same_is_let_in() {
     );
 }
 
+/// T-1139's live night, T-1155: a Muse worker's task was stopped by the chief's tell inside a
+/// long command, and resumed; the turn ended and its record said so, and the pane wrote every
+/// 50 ms or so (the pacing found it printing 45 ms before) while its screen had shown the same
+/// for 4.3 s. The words that resumed the task, a `task` message and no one's urgent row, were
+/// held for four minutes and never went (the base T-1139 ran on judged the window by its
+/// output). They go at the first look the screen has held still for the settle, once, on their
+/// first attempt, the worker reading working meanwhile, and the look keeps both clocks.
+#[test]
+fn the_words_that_resumed_a_task_go_into_a_worker_whose_pane_never_stops_writing() {
+    let context = paced();
+    context.adapter.idle_word.set(false);
+    context.host.set_snapshot(
+        json!({ "outputQuietMs": 45, "screenQuietMs": 4_346, "bottom": [TRUST_PROMPT] }),
+    );
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    context.pass().unwrap();
+    // The chief's tell stopped it; the turn that answered the tell ended.
+    context.pause_task(project.id, 1);
+    context.pass().unwrap();
+    context.resume_task(project.id, 1, "Go on");
+    let words = context
+        .task(project.id, 1)
+        .messages
+        .into_iter()
+        .find(|message| message.body == "Resumed: Go on")
+        .unwrap();
+    context.pass().unwrap();
+    assert!(
+        !pasted(&context, "zeus").contains(&words.id),
+        "the window has not rested the settle"
+    );
+    context.advance(SETTLE);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        pasted(&context, "zeus")
+            .iter()
+            .filter(|&&id| id == words.id)
+            .count(),
+        1,
+        "the words went in, once"
+    );
+    let begun: Vec<Value> = logged(&context, "delivery.begun")
+        .into_iter()
+        .filter(|data| data["message"] == words.id)
+        .collect();
+    assert_eq!(begun.len(), 1, "{begun:?}");
+    assert_eq!(begun[0]["attempt"], 1, "{begun:?}");
+    assert_eq!(
+        (
+            &begun[0]["look"]["status"],
+            &begun[0]["look"]["outputQuietMs"],
+            &begun[0]["look"]["screenQuietMs"]
+        ),
+        (&json!("idle by the fallback"), &json!(45), &json!(4_346))
+    );
+}
+
 /// T-946: Muse 1.4.14 held still six seconds as it started, before its first frame, and the
 /// fallback read its window at rest by its record and a quiet screen: the live pacing run
 /// typed its turn into a Muse that took no keys yet, and the words stayed in its box. A

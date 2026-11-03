@@ -1,0 +1,87 @@
+# A Muse worker whose pane went on writing at rest got the words that resumed its task
+# (T-1155, found by T-1139's live runs on a base without T-1083's screen clock). Muse, at
+# rest after a command it ran was stopped, writes colour resets every 50 ms and shows the
+# same; the daemon read a window with no word of its own that it is at rest by its output
+# going quiet, so the resume's words were held for good. T-1083's screen clock is the fix;
+# these hold what it left without an end-to-end case:
+#
+# - the engine: the words of a resumed task go into a fallback window whose pane printed 45 ms
+#   ago and whose screen has shown the same for 4.3 s, once, on the first attempt, the look
+#   saying both (the numbers of the night);
+# - the rig's Muse on echo repaints at rest when a case asks (`CF_TEST_MUSE_REPAINT_MS`), for
+#   as long as Muse lives, and not otherwise, because echo never gets into the state alone;
+# - the rig regression: a stopped and resumed task of the real Muse on echo, its pane
+#   repainting, ends with its result, the resume's look keeping both clocks.
+#
+# Every name holds `muse rest takes words`, so `cargo xtask plants daemon "muse rest takes words"`
+# runs them.
+
+[run]
+mrw-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::the_words_that_resumed"]
+mrw-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "--", "muse::tests::the_rigs_muse_repaints"]
+mrw-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "a_muse_worker_whose_pane_repainted"]
+
+[[plant]]
+name = "muse rest takes words: engine: the fallback judges a window by what its pane printed"
+meant = "pacing::the_words_that_resumed_a_task_go_into_a_worker_whose_pane_never_stops_writing"
+runs = ["mrw-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if fallback && screen_quiet_ms.is_none_or(|quiet| quiet < settle) {"
+replace = "        if fallback && ms(&snapshot, \"outputQuietMs\").is_none_or(|quiet| quiet < settle) {"
+
+[[plant]]
+name = "muse rest takes words: rig: the fallback judges a window by what its pane printed"
+meant = "a_muse_worker_whose_pane_repainted_at_rest_got_the_words_that_resumed_its_task"
+runs = ["mrw-rig"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if fallback && screen_quiet_ms.is_none_or(|quiet| quiet < settle) {"
+replace = "        if fallback && ms(&snapshot, \"outputQuietMs\").is_none_or(|quiet| quiet < settle) {"
+
+[[plant]]
+name = "muse rest takes words: the delivery's look leaves out how long the screen showed the same"
+meant = "pacing::the_words_that_resumed_a_task_go_into_a_worker_whose_pane_never_stops_writing"
+runs = ["mrw-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "            \"screenQuietMs\": self.screen_quiet_ms,"
+replace = "            \"screenQuietMs\": Value::Null,"
+
+[[plant]]
+name = "muse rest takes words: the rig's Muse writes nothing at rest when asked to repaint"
+meant = "muse::tests::the_rigs_muse_repaints_at_rest_when_asked_for_as_long_as_it_lives_and_not_otherwise"
+runs = ["mrw-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = "printf '\\033[39m\\033[49m\\033[59m\\033[0m'; sleep \"$nap\"; done ) &"
+replace = ": ; sleep \"$nap\"; done ) &"
+
+[[plant]]
+name = "muse rest takes words: the rig's Muse stops repainting after three repaints"
+meant = "muse::tests::the_rigs_muse_repaints_at_rest_when_asked_for_as_long_as_it_lives_and_not_otherwise"
+runs = ["mrw-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = "  ( while kill -0 $$ 2>/dev/null; do printf"
+replace = "  ( for _n in 1 2 3; do printf"
+
+[[plant]]
+name = "muse rest takes words: the rig's Muse repaints though no case asked"
+meant = "muse::tests::the_rigs_muse_repaints_at_rest_when_asked_for_as_long_as_it_lives_and_not_otherwise"
+runs = ["mrw-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = "if [ -n \"${CF_TEST_MUSE_REPAINT_MS:-}\" ]; then"
+replace = "if [ -n \"${CF_TEST_MUSE_REPAINT_MS:-x}\" ]; then"
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = "awk -v ms=\"$CF_TEST_MUSE_REPAINT_MS\""
+replace = "awk -v ms=\"${CF_TEST_MUSE_REPAINT_MS:-50}\""

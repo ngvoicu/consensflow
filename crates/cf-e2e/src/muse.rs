@@ -118,13 +118,26 @@ while [ $# -gt 0 ]; do
     *) words+=("$1"); shift ;;
   esac
 done
+{repaint}
 exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{delay_ms}}}" "${{words[@]}}"
 "#,
         argv = argv.display(),
         binary = install.binary.display(),
+        repaint = REPAINT_AT_REST,
     );
     files::write_executable(&pinned, script)
 }
+
+/// The part of the rig's Muse that repaints at rest when a case asks
+/// (`CF_TEST_MUSE_REPAINT_MS=<ms>`): Muse 1.4.14, at rest after a command it ran in the
+/// background was stopped, writes colour resets every 50 ms and shows the same (T-1081,
+/// T-1139). Echo never works in the background, so it never gets there, and the window's
+/// terminal is written the same bytes by a sibling of Muse's, which ends with it (it looks
+/// for Muse's pid, this shell's, which `exec` keeps).
+const REPAINT_AT_REST: &str = r#"if [ -n "${CF_TEST_MUSE_REPAINT_MS:-}" ]; then
+  nap=$(awk -v ms="$CF_TEST_MUSE_REPAINT_MS" 'BEGIN { printf "%.3f", ms / 1000 }')
+  ( while kill -0 $$ 2>/dev/null; do printf '\033[39m\033[49m\033[59m\033[0m'; sleep "$nap"; done ) &
+fi"#;
 
 /// Writes the rig's Muse in `dir` for a live run: its launcher, the version line, and
 /// the binary that runs `install`'s on the real model, with the model and effort it is
@@ -515,6 +528,43 @@ mod tests {
         assert!(found
             .binary
             .starts_with(std::fs::canonicalize(real.path()).unwrap()));
+    }
+
+    /// The rig's Muse, run as a window runs it, with a program of 0.6 s in Muse's place.
+    #[cfg(unix)]
+    fn the_rigs_muse_run(repaint_ms: Option<&str>) -> crate::process::Ran {
+        let dir = tempfile::tempdir().unwrap();
+        let install = super::Installed {
+            binary: dir.path().join("program"),
+            version: "9.9.9".to_owned(),
+        };
+        files::write_executable(&install.binary, "#!/bin/sh\nsleep 0.6\n").unwrap();
+        super::write_stand_in(dir.path(), &install, 1_000, &dir.path().join("argv.log")).unwrap();
+        let mut run = crate::process::Run::new(dir.path().join("muse-bin-9.9.9"))
+            .finding_programs()
+            .limit(std::time::Duration::from_secs(20));
+        if let Some(ms) = repaint_ms {
+            run = run.var("CF_TEST_MUSE_REPAINT_MS", ms);
+        }
+        run.run().unwrap()
+    }
+
+    /// T-1139: Muse at rest after a stopped command writes colour resets every 50 ms and
+    /// shows the same; echo never gets there, so a case that asks has the terminal written
+    /// them (`CF_TEST_MUSE_REPAINT_MS`) for as long as Muse lives, and none otherwise.
+    #[cfg(unix)]
+    #[test]
+    fn the_rigs_muse_repaints_at_rest_when_asked_for_as_long_as_it_lives_and_not_otherwise() {
+        let ran = the_rigs_muse_run(Some("30"));
+        let times = ran
+            .stdout
+            .matches("\x1b[39m\x1b[49m\x1b[59m\x1b[0m")
+            .count();
+        assert!(times >= 10, "{times} repaints in 0.6 s at 30 ms: {ran}");
+        assert!(!ran.timed_out, "{ran}");
+        assert!(!ran.held, "it went on after Muse was gone: {ran}");
+        let ran = the_rigs_muse_run(None);
+        assert!(ran.stdout.is_empty(), "{ran}");
     }
 
     /// T-829's live run (Muse 1.4.14, 2026-10-28): a window of the subscription in which
