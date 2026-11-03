@@ -7,12 +7,14 @@
 //! name the folder (not to a `find ~` that walks into it: the role's sentence is for that). A
 //! project that lives in one of them is not denied its own folder, and Windows' file is as it was.
 
+#[cfg(not(windows))]
 use super::compaction_window::settings_of;
 #[cfg(windows)]
 use super::compaction_window::settings_text;
 use super::*;
 
 /// What the deny rules of a Mac's window say, in the order they are written.
+#[cfg(not(windows))]
 const DENIED: [&str; 4] = [
     "Read(~/Music)",
     "Read(~/Music/**)",
@@ -20,6 +22,7 @@ const DENIED: [&str; 4] = [
     "Read(~/Pictures/*.photoslibrary/**)",
 ];
 
+#[cfg(not(windows))]
 fn denied(plan: &Prepared) -> Option<Vec<String>> {
     settings_of(plan)["permissions"]
         .get("deny")
@@ -136,4 +139,5 @@ fn a_window_on_windows_has_the_settings_file_it_always_had() {
 }
 
 const WORKER_SETTINGS_BEFORE: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"cf hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
+#[cfg(not(windows))]
 const CHIEF_SETTINGS_BEFORE: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;

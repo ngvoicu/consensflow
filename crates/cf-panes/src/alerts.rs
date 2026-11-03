@@ -6,9 +6,11 @@
 //! listed any more, the dialog was answered.
 
 /// The program that draws the system's alerts, privacy dialogs among them.
+#[cfg(any(target_os = "macos", test))]
 const OWNER: &str = "UserNotificationCenter";
 
 /// A window of the screen, as the list of windows names it.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Window {
     pub owner: String,
@@ -17,6 +19,7 @@ pub(crate) struct Window {
 
 /// How many of `windows` are alerts: the notification centre's own, above the level of an
 /// ordinary window.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn count(windows: &[Window]) -> usize {
     windows
         .iter()

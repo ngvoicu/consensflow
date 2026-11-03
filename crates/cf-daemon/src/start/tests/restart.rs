@@ -715,7 +715,7 @@ async fn a_privacy_dialog_the_host_tells_reaches_the_engine_and_the_human_is_tol
     LocalSet::new()
         .run_until(async {
             let root = tempfile::tempdir().unwrap();
-            let (mut ledger, project) = ledger_before_the_start(root.path());
+            let (ledger, project) = ledger_before_the_start(root.path());
             ledger.close().unwrap();
             let (options, app, _opened) = app_that_opens_windows(root.path());
             let daemon = start(environment(root.path()), options).await.unwrap();
