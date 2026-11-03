@@ -84,8 +84,9 @@ pub(crate) struct ResumeWatch {
 
 /// Whether the look reads the window's turn in flight and its record whole: a turn the
 /// record says is over, or may be ending (`Over`), one that failed, a window waiting on a
-/// dialog of its own or starting, one another program of the harness's writes into, or a
-/// record that could not be read, is no work shown. (A window the human switched to
+/// dialog of its own or starting (a window that has not named its conversation says it
+/// waits, in every adapter's look: `unnamed` is a kind of `waiting`), one another program of
+/// the harness's writes into, or a record that could not be read, is no work shown. (A window the human switched to
 /// another conversation is never looked at here: the step handles it first.)
 fn in_flight(observed: &Observed) -> bool {
     matches!(observed.reading.as_deref(), Some(Reading::Known(_)))
@@ -94,7 +95,6 @@ fn in_flight(observed: &Observed) -> bool {
         && !observed.failed
         && !observed.took_back
         && !observed.shared
-        && !observed.unnamed
         && observed.waiting.is_none()
 }
 

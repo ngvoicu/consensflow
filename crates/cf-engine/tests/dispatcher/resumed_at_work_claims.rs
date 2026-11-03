@@ -87,7 +87,7 @@ fn the_claim_a_window_leaves_when_it_exits_says_so_in_the_log() {
         .into_iter()
         .filter(|event| event["seam"] == "event" && event["event"]["kind"] == "task.state")
         .map(|event| event["event"]["data"].clone())
-        .last()
+        .next_back()
         .expect("a move of the task");
     assert_eq!(
         (said["from"].as_str(), said["to"].as_str()),

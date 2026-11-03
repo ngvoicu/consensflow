@@ -24,7 +24,7 @@
 #   its Close and a quit take the claim with them; go_on passes over it; every door of a
 #   waiting task is shut; a second tell is kept behind the words; a task sent back is not
 #   shown working again for 30 s; each guard of the look (a failed turn, another program in
-#   the conversation, an unnamed window, a dialog, a turn taken back, a closed project on both
+#   the conversation, a dialog (an unnamed window says it waits), a turn taken back, a closed project on both
 #   moves, a settled look for the send back, the second resume's baseline) is held;
 # - what the task needs once it reads working with its words waiting: the one-task rules of
 #   the queue and of the begin of a delivery hold its own words back; the turn before the words
@@ -467,16 +467,6 @@ runs = ["engine-dispatcher-resumed-at-work"]
 [[plant.edit]]
 file = "crates/cf-engine/src/resumed_at_work.rs"
 find = "        && !observed.shared\n"
-replace = ""
-
-[[plant]]
-name = "resume shows working: a window that has not named its conversation counts as work shown"
-meant = "a_window_that_has_not_named_its_conversation_is_no_work_shown"
-runs = ["engine-dispatcher-resumed-at-work"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/resumed_at_work.rs"
-find = "        && !observed.unnamed\n"
 replace = ""
 
 [[plant]]
