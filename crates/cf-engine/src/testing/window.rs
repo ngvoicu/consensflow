@@ -40,6 +40,13 @@ pub const COMPACTING: &str = "• Compacting the conversation (a test's compacti
 /// offer to install an LSP plugin asks it, and its choice that declines it ([`Window::safe_decline`]).
 pub const DECLINED_OFFER: &str = "Would you like to install this LSP plugin?";
 pub const DECLINE_CHOICE: &str = "No, not now";
+/// The question of a hook's ask on a test window's list, whose words above it begin "Hook ":
+/// answered "No" once nobody answered it for [`HOOK_ASK_MS`], and the window told
+/// [`HOOK_ASK_THEN`] once it rests, as Claude Code's is (T-1198).
+pub const HOOK_ASK_QUESTION: &str = "Do you want to proceed?";
+pub const HOOK_ASK_MS: i64 = 600_000;
+pub const HOOK_ASK_THEN: &str =
+    "Nobody answered the hook; go on without that call (a test's words)";
 /// Why a test window waits where its harness says a dialog of its own is open, as Claude
 /// Code's status says one ([`DialogSign::Open`]); any other reason is its own question's.
 pub const DIALOG_OPEN: &str = "dialog open (a test's harness dialog)";
@@ -158,6 +165,18 @@ impl Window for FakeWindow {
     /// Its list of safe declines holds [`DECLINED_OFFER`], declined by the digit of
     /// [`DECLINE_CHOICE`] in its choices.
     fn safe_decline(&self, dialog: &Dialog) -> Option<Decline> {
+        if dialog.question == HOOK_ASK_QUESTION
+            && dialog.detail.iter().any(|line| line.starts_with("Hook "))
+        {
+            let at = dialog.options.iter().position(|option| option == "No")?;
+            return Some(Decline {
+                choice: "No".to_owned(),
+                key: vec![b'0' + u8::try_from(at + 1).ok()?],
+                after_ms: Some(HOOK_ASK_MS),
+                then_tell: Some(HOOK_ASK_THEN.to_owned()),
+                what: "hook prompt on its call".to_owned(),
+            });
+        }
         if dialog.question != DECLINED_OFFER {
             return None;
         }
@@ -169,6 +188,9 @@ impl Window for FakeWindow {
         Some(Decline {
             choice: DECLINE_CHOICE.to_owned(),
             key: vec![b'0' + digit],
+            after_ms: None,
+            then_tell: None,
+            what: "offer".to_owned(),
         })
     }
 

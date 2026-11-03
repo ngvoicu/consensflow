@@ -74,6 +74,22 @@ fn claude_codes_lsp_offer_as_a_live_window_drew_it_is_read_numbers_and_spinner_a
     );
     assert!(shown.dialog.asks);
     assert_eq!(shown.below.len(), 2);
+    // What it says above its question is its own paragraph, the plugin's: a conversation's lines
+    // above it, which change as the turn works, are none of it.
+    assert_eq!(
+        shown.dialog.detail,
+        [
+            "Plugin: clangd-lsp",
+            "Marketplace: claude-plugins-official",
+            "Triggered by: .c files",
+            "Description: C/C++ language server (clangd) for code intelligence"
+        ]
+    );
+    let below_work = format!("⏺ Writing probe_dialog.c (12s)\n{CLAUDE_LSP_LIVE}");
+    assert_eq!(
+        read(&lines(&below_work)).unwrap().dialog.detail,
+        shown.dialog.detail
+    );
 }
 
 #[test]

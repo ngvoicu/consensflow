@@ -110,6 +110,9 @@ fn its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_
         Some(Decline {
             choice: "No, not now".to_owned(),
             key: b"2".to_vec(),
+            after_ms: None,
+            then_tell: None,
+            what: "offer".to_owned(),
         })
     );
     // Its hint to install a plugin a command named: every answer but a cancel writes the
@@ -142,4 +145,43 @@ fn its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_
     let without = LSP.replace("2. No, not now", "2. Maybe later");
     let without = plan.window.dialog(&lines(&without)).expect("the offer");
     assert_eq!(plan.window.safe_decline(&without), None);
+}
+
+/// Claude Code 2.1.317's ask of a plugin's PreToolUse hook on a Bash call, as a worker's window
+/// on the owner's kluris board showed it (2026-11-03, T-1198).
+const HOOK_ASK: &str = "\u{2502} git status -s\n\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\n\u{2502} Hook tool.check requires confirmation for this\n\u{2502} command:\n\u{2502} This call's input holds your account email\n\u{2502} address, which may leave this machine. If nobody\n\u{2502} asked to send it, go on without it.\n\u{2502} [plugin:cc-plugin-privacy]\nplugin hooks.json to update hooks\n\nDo you want to proceed?\n\u{276f} 1. Yes\n  2. No\n\nEsc to cancel \u{b7} Tab to amend";
+
+#[test]
+fn a_hooks_ask_is_answered_no_after_ten_minutes_and_the_window_told_to_go_on_with_the_hooks_reason()
+{
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let ask = plan.window.dialog(&lines(HOOK_ASK)).expect("the ask");
+    let decline = plan.window.safe_decline(&ask).expect("on the list");
+    assert_eq!(decline.choice, "No");
+    assert_eq!(decline.key, b"2");
+    assert_eq!(decline.after_ms, Some(600_000));
+    assert_eq!(decline.what, "hook prompt on its call");
+    assert_eq!(
+        decline.then_tell.as_deref(),
+        Some("A hook asked for confirmation of your last call, and nobody answered it within 10 minutes, so ConsensFlow answered \u{201c}No\u{201d} for you: that call did not run. The hook said: \u{201c}This call's input holds your account email address, which may leave this machine. If nobody asked to send it, go on without it.\u{201d} Go on without that call, or say in your result that you could not do the task without it.")
+    );
+    // Never "Yes", whatever the order of the choices.
+    let swapped = HOOK_ASK.replace("\u{276f} 1. Yes\n  2. No", "\u{276f} 1. No\n  2. Yes");
+    let swapped = plan.window.dialog(&lines(&swapped)).expect("the ask");
+    assert_eq!(
+        plan.window.safe_decline(&swapped).expect("on the list").key,
+        b"1"
+    );
+    // A permission rule's ask, or a classifier's, is no hook's: not on the list.
+    let rule = HOOK_ASK.replace(
+        "Hook tool.check requires",
+        "Permission rule Bash(git:*) requires",
+    );
+    let rule = plan.window.dialog(&lines(&rule)).expect("the ask");
+    assert_eq!(plan.window.safe_decline(&rule), None);
+    // An ask that offers no "No" is never pressed.
+    let no_no = HOOK_ASK.replace("2. No", "2. Later");
+    let no_no = plan.window.dialog(&lines(&no_no)).expect("the ask");
+    assert_eq!(plan.window.safe_decline(&no_no), None);
 }

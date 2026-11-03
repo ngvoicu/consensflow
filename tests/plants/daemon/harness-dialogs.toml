@@ -349,3 +349,108 @@ runs = ["hd-reader"]
 file = "crates/cf-harness/src/shared/dialog.rs"
 find = "        .any(|line| hints_an_answer(line));"
 replace = "        .any(|line| hints_an_answer(line) && line.is_empty());"
+
+# T-1198: a hook's ask on a call (Claude Code's "Do you want to proceed?" under "Hook …
+# requires confirmation for this command: …"), told with the hook's own words, answered "No"
+# once nobody answered it for ten minutes, and the window sent on once it rests.
+
+[[plant]]
+name = "harness dialogs: a hook's ask is answered at the next look, before the human's ten minutes"
+meant = "a_hooks_ask_nobody_answers_is_answered_no_after_ten_minutes_and_its_window_sent_on_to_its_result"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "                .is_none_or(|after| watch.told_at.is_some_and(|told_at| now - told_at >= after));"
+replace = "                .is_none_or(|after| watch.told_at.is_some_and(|told_at| now - told_at >= after) || after > 0);"
+
+[[plant]]
+name = "harness dialogs: a decline is pressed into another dialog that asks the same question"
+meant = "a_hooks_ask_whose_window_shows_another_dialog_at_its_ten_minutes_is_never_pressed"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "                        && told.detail == shown.detail"
+replace = "                        && !told.detail.is_empty()"
+
+[[plant]]
+name = "harness dialogs: the window a hook's ask was answered No in is never sent on, and its task sits working"
+meant = "a_hooks_ask_nobody_answers_is_answered_no_after_ten_minutes_and_its_window_sent_on_to_its_result"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "                to: participant.handle.clone(),\n                task: number,\n                body: words,"
+replace = "                to: \"human\".to_owned(),\n                task: number,\n                body: words,"
+
+[[plant]]
+name = "harness dialogs: the stand-in Claude's worker, its hook's ask answered No, is never sent on"
+meant = "a_hooks_ask_nobody_answers_is_answered_no_and_the_worker_sent_on_to_its_result"
+runs = ["hd-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "                to: participant.handle.clone(),\n                task: number,\n                body: words,"
+replace = "                to: \"human\".to_owned(),\n                task: number,\n                body: words,"
+
+[[plant]]
+name = "harness dialogs: nobody hears that ConsensFlow answered a hook's ask No"
+meant = "a_hooks_ask_nobody_answers_is_answered_no_after_ten_minutes_and_its_window_sent_on_to_its_result"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        self.tell_dialog(project, participant, &body)\n    }\n\n    /// The task of"
+replace = "        let _ = body;\n        Ok(())\n    }\n\n    /// The task of"
+
+[[plant]]
+name = "harness dialogs: Claude's list takes a permission rule's ask for a hook's"
+meant = "a_hooks_ask_is_answered_no_after_ten_minutes_and_the_window_told_to_go_on_with_the_hooks_reason"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "    if dialog.question != HOOK_QUESTION || !HOOK_SAYS.iter().all(|words| says.contains(words)) {"
+replace = "    if dialog.question != HOOK_QUESTION || !HOOK_SAYS.iter().any(|words| says.contains(words)) {"
+
+[[plant]]
+name = "harness dialogs: Claude's hook decline presses the first choice, Yes"
+meant = "a_hooks_ask_is_answered_no_after_ten_minutes_and_the_window_told_to_go_on_with_the_hooks_reason"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "        key: vec![b'0' + no],"
+replace = "        key: vec![b'0' + no - no + 1],"
+
+[[plant]]
+name = "harness dialogs: the window sent on after a hook's ask is not told the hook's reason"
+meant = "a_hooks_ask_is_answered_no_after_ten_minutes_and_the_window_told_to_go_on_with_the_hooks_reason"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "    let reason = hook_reason(&says).map_or_else(String::new, |reason| {"
+replace = "    let reason = hook_reason(\"\").map_or_else(String::new, |reason| {"
+
+[[plant]]
+name = "harness dialogs: what a dialog says above its question reaches into the conversation above it"
+meant = "claude_codes_lsp_offer_as_a_live_window_drew_it_is_read_numbers_and_spinner_and_all"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            if detail.is_empty() {\n                continue;\n            }\n            break;"
+replace = "            continue;"
+
+[[plant]]
+name = "harness dialogs: what a hook's ask says above its question reaches past the rule into the call"
+meant = "a_hooks_ask_is_read_with_its_question_its_two_choices_and_the_hooks_own_words"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "        if rule_across(&screen[at]) || detail.len() == DETAIL_LINES {"
+replace = "        if detail.len() == DETAIL_LINES {"

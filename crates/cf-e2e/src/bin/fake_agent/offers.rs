@@ -145,22 +145,24 @@ fn note(config: &Path, name: &str, line: &str) -> io::Result<()> {
 /// The offer, open `open`: the screen shows it while the turn is at work; then it closes by
 /// itself and the turn goes on.
 pub fn offer(open: Duration) -> io::Result<()> {
-    open_for(&DIALOG, "", open)
+    open_for(&DIALOG, "", open).map(|_| ())
 }
 
 /// The ask of a plugin's PreToolUse hook, open `open`: the screen shows it as Claude Code
 /// 2.1.317 drew it in a worker's window on 2026-11-03 (T-1198), and the window's status says it
 /// waits on a permission prompt; then it closes, as a person would answer it, and the turn goes
-/// on. How it was answered is written down with the offers', after `hook:`.
-pub fn hook_ask(records: &Records, pid: u32, open: Duration) -> io::Result<()> {
+/// on. How it was answered is written down with the offers', after `hook:`; true where it was
+/// answered "No" (`2`), which ends the turn in Claude Code: the model is told to stop and wait.
+pub fn hook_ask(records: &Records, pid: u32, open: Duration) -> io::Result<bool> {
     records.waiting(pid, "permission prompt")?;
-    open_for(&HOOK_ASK, "hook:", open)?;
-    records.status(pid, "busy")
+    let answer = open_for(&HOOK_ASK, "hook:", open)?;
+    records.status(pid, "busy")?;
+    Ok(answer == Some(b'2'))
 }
 
 /// The dialog `lines`, open `open` or until a digit answers it, its answer written down after
 /// `tag`.
-fn open_for(lines: &[&str], tag: &str, open: Duration) -> io::Result<()> {
+fn open_for(lines: &[&str], tag: &str, open: Duration) -> io::Result<Option<u8>> {
     ANSWER.store(0, Ordering::SeqCst);
     OPEN.store(true, Ordering::SeqCst);
     say(&format!("{}\r\n", lines.join("\r\n")))?;
@@ -171,14 +173,16 @@ fn open_for(lines: &[&str], tag: &str, open: Duration) -> io::Result<()> {
         waited += step;
     }
     OPEN.store(false, Ordering::SeqCst);
-    let answer = match ANSWER.swap(0, Ordering::SeqCst) {
+    let digit = ANSWER.swap(0, Ordering::SeqCst);
+    let answer = match digit {
         0 => "timeout".to_owned(),
         digit => char::from(digit).to_string(),
     };
     if let Some(config) = own_var("CLAUDE_CONFIG_DIR") {
         note(Path::new(&config), ANSWERS, &format!("{tag}{answer}"))?;
     }
-    say(PROMPT)
+    say(PROMPT)?;
+    Ok((digit != 0).then_some(digit))
 }
 
 /// What is typed into the window's box, where an offer is open and it is a digit of one of its

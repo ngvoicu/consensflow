@@ -49,6 +49,9 @@ fn a_note_of_a_dialog_on_its_harnesss_list_says_it_is_declined_and_how() {
     let decline = Decline {
         choice: "No, not now".to_owned(),
         key: b"2".to_vec(),
+        after_ms: None,
+        then_tell: None,
+        what: "offer".to_owned(),
     };
     let body = told("zeus", Some(&offer(Some(30))), Some(&decline));
     assert!(

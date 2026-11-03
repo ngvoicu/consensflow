@@ -214,14 +214,24 @@ pub(crate) fn read(screen: &[String]) -> Option<Shown> {
         None => (*near.first()?, hinted),
     };
     let question = lines[said_at].trim().to_owned();
-    // What it says above its words, back to a rule across it or to [`DETAIL_LINES`] lines: a
-    // hook's own words of why it asks (T-1198), the plugin an offer is of.
+    // What it says right above its words, the lines of one paragraph, back to a blank line, a
+    // rule across it or [`DETAIL_LINES`] lines: a hook's own words of why it asks (T-1198), the
+    // plugin an offer is of. A conversation's lines above a dialog change as it works, and
+    // never count.
     let mut detail: Vec<String> = Vec::new();
     for at in (0..said_at).rev() {
         if rule_across(&screen[at]) || detail.len() == DETAIL_LINES {
             break;
         }
         let words = lines[at].trim();
+        if words.is_empty() {
+            // The blank lines between it and its words are passed over; one above them ends
+            // its paragraph, and what the conversation drew above is none of it.
+            if detail.is_empty() {
+                continue;
+            }
+            break;
+        }
         if words.chars().any(char::is_alphanumeric) {
             detail.push(words.to_owned());
         }
