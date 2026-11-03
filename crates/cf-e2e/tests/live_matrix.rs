@@ -214,6 +214,66 @@ mod tests {
         );
     }
 
+    /// The control of the chief's question in words (T-1152): the stand-in chief ends its turn
+    /// asking, which the human reads in its own record, answers from the fact sheet (the whole
+    /// sheet, for a question it has no single answer for) through the human's door, and sees go
+    /// in. Nothing reaches the milestone, so the run ends red at its short deadline.
+    #[test]
+    fn a_chiefs_question_in_its_record_is_answered_through_the_humans_door_and_goes_in() {
+        let log = Log::new("live matrix control: a question");
+        let reports = tempfile::tempdir().unwrap();
+        let mut scenario = Scenario::named("smoke").unwrap();
+        scenario.steps.truncate(1);
+        scenario.steps[0].stand_in = |_| "Reply with exactly: Which-one?".to_owned();
+        scenario.deadline = std::time::Duration::from_secs(60);
+        let matrix = Matrix {
+            seating: Seating::stand_ins(),
+            scenario,
+            stand_in: Path::new(FAKE_AGENT),
+            reports: reports.path().to_path_buf(),
+            owner: Owner::look(&[], &[]),
+        };
+        let outcome = run(&matrix, &log).unwrap();
+        let table = report::table(&outcome.checks);
+        log.report("what each check of the control came to", &table);
+        let human: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(outcome.evidence.folder.join("human.json")).unwrap(),
+        )
+        .unwrap();
+        let answers: Vec<&serde_json::Value> = human
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|said| said["step"] == "answer")
+            .collect();
+        assert_eq!(answers.len(), 1, "{human:#}");
+        assert!(
+            answers[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Everything I can tell you:"),
+            "{human:#}"
+        );
+        assert!(
+            answers[0]["inRecordAt"].is_string() && answers[0]["failed"].is_null(),
+            "{human:#}"
+        );
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(outcome.evidence.folder.join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["assisted"]["answers"], 1, "{manifest:#}");
+        let step = outcome
+            .checks
+            .iter()
+            .find(|check| check.who == "steps")
+            .unwrap();
+        assert!(
+            !step.ok && step.detail.contains("deadline of 60 s"),
+            "{table}"
+        );
+    }
+
     /// The control: the same driver and oracle, on a board whose five positions the rig's
     /// stand-in plays. The human asks the stand-in chief in its own words, which hands out the
     /// advice, the change, the review and the test and accepts them; the oracle reads the

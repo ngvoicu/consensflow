@@ -2,7 +2,9 @@
 //! per change of a window's activity and per error nobody caught, appended as
 //! it happens, for whoever watches the daemon from outside (a tail, a reviewer
 //! reading along). The ledger's own log stays the record; this is its running
-//! copy. Append-only, one previous file kept once it passes its limit, as the
+//! copy. A daemon a test starts with `CONSENSFLOW_TOOLING_API_CALLS=1` also writes an
+//! `api.answered` line for each request a window's token answered ([`crate::api::calls`]): the
+//! app never sets it. Append-only, one previous file kept once it passes its limit, as the
 //! daemon's log does, and never a reason for the daemon to fail.
 //! [`Trace::forget`] drops a deleted project's lines from both files: a project
 //! deleted leaves no trace but the line that says it was.

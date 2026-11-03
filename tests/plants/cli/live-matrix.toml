@@ -15,6 +15,7 @@ matrix-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
 matrix-fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "reply::"]
 # The live suite's own tests, the controls among them, by name.
 matrix-control-end = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_cancelled"]
+matrix-control-question = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_chiefs"]
 matrix-control-smoke = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::the_matrix_passes"]
 # The daemon's API, the tooling's look at it among it.
 matrix-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::tests::"]
@@ -268,3 +269,13 @@ file = "crates/cf-e2e/src/matrix/machine.rs"
 find = '''        .find(|open| open["id"] == id)'''
 replace = '''        .filter(|open| open["id"] == id)
         .last()'''
+
+[[plant]]
+name = "live matrix: the human never finds the chief's question in its record"
+meant = "a_chiefs_question_in_its_record_is_answered_through_the_humans_door_and_goes_in"
+runs = ["matrix-control-question"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/human.rs"
+find = '''            && item.text.lines().any(|line| line.trim_end().ends_with('?'))'''
+replace = '''            && item.text.lines().any(|line| line.trim_end().ends_with("?!"))'''
