@@ -781,11 +781,11 @@ runs = ["tem-engine-turn-end"]
 file = "crates/cf-engine/src/ownership.rs"
 find = '''
         if gone {
-            return Ok(Some(conversation));
+            return Ok(Kept::On(Some(conversation)));
         }'''
 replace = '''
         if gone || true {
-            return Ok(Some(conversation));
+            return Ok(Kept::On(Some(conversation)));
         }'''
 
 [[plant]]
@@ -797,11 +797,11 @@ runs = ["tem-engine-turn-end"]
 file = "crates/cf-engine/src/ownership.rs"
 find = '''
         let Some(before) = before else {
-            return Ok(found);
+            return Ok(Kept::On(found));
         };'''
 replace = '''
         let Some(before) = before.filter(|_| false) else {
-            return Ok(found);
+            return Ok(Kept::On(found));
         };'''
 
 [[plant]]
@@ -813,11 +813,11 @@ runs = ["tem-engine-sessions"]
 file = "crates/cf-engine/src/ownership.rs"
 find = '''
         if gone {
-            return Ok(Some(conversation));
+            return Ok(Kept::On(Some(conversation)));
         }'''
 replace = '''
         if gone && false {
-            return Ok(Some(conversation));
+            return Ok(Kept::On(Some(conversation)));
         }'''
 
 # A session the human deleted keeps how its window ended: since T-541 the ledger keeps it on the
