@@ -68,7 +68,7 @@ fn before_0029() -> Connection {
            (3, 1, 'poseidon', 'worker', '[\"worker\"]', 'poseidon', 'claude-code', 'complex', NULL, 't', NULL, 0),
            (4, 1, 'pygmalion', 'designer', '[\"designer\"]', 'pygmalion', 'codex', 'light', NULL, 't', NULL, 1),
            (5, 1, 'sobek', 'worker', '[\"worker\"]', 'sobek', 'devin', 'light', NULL, 't', NULL, 0),
-           (6, 1, 'buri', 'worker', '[\"worker\"]', 'buri', 'opencode', 'light', NULL, 't', 't', 0),
+           (6, 1, 'buri', 'worker', '[\"worker\"]', 'buri', 'hermes-code', 'light', NULL, 't', 't', 0),
            (7, 1, 'artemis', 'worker', '[\"worker\"]', 'artemis', 'claude-code', 'standard', NULL, 't', NULL, 0),
            (8, 1, 'poseidon-frosty-cliff', 'worker', '[\"worker\"]', 'poseidon', 'claude-code', 'complex', 3, 't', NULL, 0),
            (9, 1, 'zeus', 'worker', '[\"worker\"]', 'zeus', 'claude-code', 'critical', NULL, 't', NULL, 0),
@@ -120,7 +120,7 @@ fn migration_0029_runs_each_ready_made_agent_s_member_on_its_model_and_names_it_
             // Devin's model is the id its launch passed, the effort joined as it joined it.
             (5, "swe-2-max".to_owned(), s("sobek"), s("devin"), s("swe-2-max"), s("max"), s("SWE-2"), s("light")),
             // An agent the catalog never had keeps its harness and no model.
-            (6, "opencode-default".to_owned(), s("buri"), s("opencode"), None, None, None, s("light")),
+            (6, "hermes-code-default".to_owned(), s("buri"), s("hermes-code"), None, None, None, s("light")),
             (7, "opus-medium".to_owned(), s("artemis"), s("claude-code"), s("claude-opus-5-5"), s("medium"), s("Opus"), s("standard")),
             // A window: its member's new handle and its own two words.
             (8, "opus-high-frosty-cliff".to_owned(), s("poseidon"), s("claude-code"), s("claude-opus-5-5"), s("high"), s("Opus"), s("complex")),

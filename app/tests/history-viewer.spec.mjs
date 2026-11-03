@@ -176,7 +176,7 @@ async function open(page, data = model()) {
     const placeOf = (it) => it && { conversation: it.conversation, row: it.row }
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'agents.list': () => answer({ agents: [], missing: [] }),
+      'harnesses.missing': () => answer({ missing: [] }),
       'board.get': () => answer({ board: window.__model.board }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       // The daemon's pages: the most recent, the one before a place or the one after it,

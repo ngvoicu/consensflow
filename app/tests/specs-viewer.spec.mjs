@@ -121,7 +121,7 @@ async function open(page, data = model()) {
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'agents.list': () => answer({ agents: [], missing: [] }),
+      'harnesses.missing': () => answer({ missing: [] }),
       'board.get': ({ project }) => answer({ board: data.boards[project] }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       // What the daemon reads of a project's specs folder: the folder the project names, else
@@ -1368,14 +1368,14 @@ test.describe('a hostile spec', () => {
     // Long enough for its refresh (a second) and its mockups' moves to have fired, had they run.
     await page.waitForTimeout(1_500)
     await expect(viewer).toBeVisible()
-    // No frame but the Agents and Harnesses screens' own, empty, and no script it brought.
+    // No frame but the Harnesses screen's own, empty, and no script it brought.
     await expect(page.locator('iframe:not(dialog.screen iframe), script:not([src])')).toHaveCount(0)
     expect(
       page
         .frames()
         .filter((frame) => frame !== page.mainFrame())
         .map((frame) => frame.url()),
-    ).toEqual(['about:blank', 'about:blank'])
+    ).toEqual(['about:blank'])
     expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
     // It opens in the browser, asked of the daemon by its path, and only there.
     await fileIn(viewer, 'evil-html/SPEC.html').click()

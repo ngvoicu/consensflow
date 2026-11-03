@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use super::path;
-use crate::live::agents::{STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL};
+use crate::live::agents::{STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL, STAND_IN_WORKER_MODEL};
 use crate::live::ask;
 use crate::process::own_var;
 use crate::{files, Result};
@@ -132,7 +132,8 @@ fn on_windows(
 /// it opens, then its flags) with the arguments the window is given after them, in the
 /// same console, and ends as it ends; Ctrl+C is the program's to answer, not the script's.
 /// Where `stand_in` is given, a window whose arguments name a stand-in's model
-/// (`fake`, `fake-chief`) starts the stand-in with them instead. `why` is what both
+/// (`fake`, `fake-chief`, or the stand-in member's, `worker`) starts the stand-in with them
+/// instead. `why` is what both
 /// files say of themselves, and `search` the `PATH` a shim among `words` is read on.
 /// Where the `.cmd` is.
 pub fn windows_wrapper(
@@ -177,7 +178,7 @@ fn relay(why: &str, argv: &[String], stand_in: Option<&Path>) -> String {
             format!("const stand_in = {}", json!([agent.to_string_lossy()])),
             format!(
                 "const fake = process.argv.slice(2).some((word) => {})",
-                [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL]
+                [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL]
                     .map(|model| format!("word === '{model}'"))
                     .join(" || ")
             ),
@@ -220,7 +221,8 @@ fn isolating_script(claude: &Path) -> String {
 }
 
 /// The shell script that is [`shimmed_claude`]. A window is the stand-in's when
-/// one of its words is its agent's model, `fake` or `fake-chief`. `servers` is
+/// one of its words is a stand-in's model, `fake` or `fake-chief`, or the stand-in
+/// member's, `worker`. `servers` is
 /// the file of the MCP servers the real Claude Code loads (alone: the isolation
 /// flags shut the rest out); it comes first, before a flag that ends its list.
 fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> String {
@@ -229,16 +231,17 @@ fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> St
     });
     format!(
         "#!/bin/sh\n\
-         # Written by a live test: a window whose agent's model is fake or fake-chief is the\n\
-         # stand-in's, which writes its records where the daemon reads Claude's (the folder\n\
-         # CLAUDE_CONFIG_DIR names, as it does for the real Claude); every other Claude window\n\
-         # reaches no MCP server and no browser.\n\
+         # Written by a live test: a window whose model is fake, fake-chief or worker (the\n\
+         # stand-in member's) is the stand-in's, which writes its records where the daemon\n\
+         # reads Claude's (the folder CLAUDE_CONFIG_DIR names, as it does for the real\n\
+         # Claude); every other Claude window reaches no MCP server and no browser.\n\
          for arg in \"$@\"; do\n\
          \x20 case \"$arg\" in\n\
-         \x20   fake | fake-chief) exec {} \"$@\" ;;\n\
+         \x20   {}) exec {} \"$@\" ;;\n\
          \x20 esac\n\
          done\n\
          exec {} {servers}{} \"$@\"\n",
+        [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL].join(" | "),
         shell_word(&stand_in.to_string_lossy()),
         shell_word(&claude.to_string_lossy()),
         ISOLATION.join(" ")
@@ -286,7 +289,7 @@ mod tests {
         );
         // The stand-in's window is as it was: it has no server of the harness's.
         assert!(
-            script.contains("fake | fake-chief) exec '/the/fake-agent' \"$@\" ;;"),
+            script.contains("fake | fake-chief | worker) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -303,7 +306,7 @@ mod tests {
             None,
         );
         assert!(
-            script.contains("fake | fake-chief) exec '/the/fake-agent' \"$@\" ;;"),
+            script.contains("fake | fake-chief | worker) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -549,7 +552,7 @@ mod tests {
         // A word that is the model of a stand-in, as the shell script reads it.
         assert!(
             text.contains(
-                "const fake = process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-chief')"
+                "const fake = process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-chief' || word === 'worker')"
             ),
             "{text}"
         );

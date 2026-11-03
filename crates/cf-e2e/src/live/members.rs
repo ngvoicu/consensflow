@@ -321,7 +321,9 @@ impl Members {
     /// (`rig::member_body`). Its tier, which the tasks for it name.
     pub fn add(&mut self, agent: &str, roles: &[&str]) -> Result<String> {
         let roles = (!roles.is_empty()).then(|| json!(roles));
-        let request = crate::rig::member_body(&self.rig, agent, roles)?;
+        // A member no stand-in runs on is refused as the daemon's refusals are said.
+        let request = crate::rig::member_body(&self.rig, agent, roles)
+            .map_err(|refused| Error::Daemon(format!("member.add {agent}: {refused}")))?;
         let added = self.page("member.add", request)?;
         if added["ok"] != true {
             return Err(Error::Daemon(format!("member.add {agent}: {added}")));

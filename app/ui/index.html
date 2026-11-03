@@ -120,19 +120,12 @@
     <form class="dialog-form" method="dialog">
       <h2 id="settings-title">Settings</h2>
       <menu class="settings-menu">
-        <li><button class="quiet-button" type="button" data-agents-page="" aria-controls="agents-dialog">Agents</button><span>The catalog and your own agents: model, effort and tier.</span></li>
         <li><button class="quiet-button" type="button" data-agents-page="harnesses" aria-controls="harnesses-dialog">Harnesses</button><span>Which coding tools are installed, and their updates.</span></li>
         <li><button class="quiet-button" type="button" id="specs-settings-button" aria-controls="specs-dialog">Specs</button><span>Plan big work as specs in every project, and the Specmint ConsensFlow brings.</span></li>
       </menu>
       <div class="dialog-actions">
         <button class="quiet-button" type="submit">Close</button>
       </div>
-    </form>
-  </dialog>
-  <dialog id="agents-dialog" class="screen" aria-label="Agents">
-    <iframe title="Agents" sandbox="allow-forms allow-same-origin allow-scripts" referrerpolicy="no-referrer"></iframe>
-    <form class="dialog-actions" method="dialog">
-      <button class="quiet-button" type="submit" autofocus>Close</button>
     </form>
   </dialog>
   <dialog id="harnesses-dialog" class="screen" aria-label="Harnesses">
@@ -228,24 +221,35 @@
         <label>Model
           <select name="chiefModel" required disabled></select>
         </label>
+        <label>Effort
+          <select name="chiefEffort" disabled></select>
+        </label>
         <button class="quiet-button" type="button" name="chiefRefresh">Refresh models</button>
         <p class="dialog-help chief-help" role="status" hidden></p>
       </fieldset>
       <fieldset class="project-section staff-pick">
         <legend>Staff</legend>
-        <p class="dialog-help">Pick a role, then an agent. The last project's staff is here already.</p>
-        <table class="staff" aria-label="Agents for the staff">
+        <p class="dialog-help">Pick a role, a harness, one of its models, an effort and a tier, then Add. The last project's staff is here already.</p>
+        <table class="staff" aria-label="Members for the staff">
           <thead>
-            <tr><th>Agent</th><th>Role</th><th></th></tr>
+            <tr><th>Member</th><th>Role</th><th></th></tr>
           </thead>
           <tbody id="new-project-staff"></tbody>
         </table>
-        <div class="staff-add">
-          <label>Role<select name="pickRole"></select></label>
-          <label>Agent<select name="pickAgent"></select></label>
-          <button class="quiet-button" type="button" id="new-project-add">Add</button>
-        </div>
-        <p class="staff-hint" id="new-project-hint" hidden></p>
+        <!-- A member as Add member picks one (core/dialogs.js, MemberPicker). -->
+        <fieldset class="staff-add">
+          <legend>Add a member</legend>
+          <label>Role<select name="role"></select></label>
+          <label>Harness<select name="memberHarness"></select></label>
+          <label>Model<select name="memberModel" disabled></select></label>
+          <label>Effort<select name="memberEffort" disabled></select></label>
+          <label>Tier<select name="memberTier"></select></label>
+          <button class="quiet-button" type="button" name="memberRefresh">Refresh models</button>
+          <button class="quiet-button" type="button" name="memberAdd">Add</button>
+          <button class="quiet-button" type="button" name="memberCancel" hidden>Cancel</button>
+          <p class="dialog-help member-help" role="status" hidden></p>
+          <p class="staff-hint" id="new-project-hint" hidden></p>
+        </fieldset>
       </fieldset>
       <div data-project-sections></div>
       <p class="dialog-refusal" role="alert" hidden></p>
@@ -267,6 +271,9 @@
         </label>
         <label>Model
           <select name="chiefModel" required disabled></select>
+        </label>
+        <label>Effort
+          <select name="chiefEffort" disabled></select>
         </label>
         <button class="quiet-button" type="button" name="chiefRefresh">Refresh models</button>
         <p class="dialog-help chief-help" role="status" hidden></p>
@@ -299,7 +306,7 @@
       <h2 id="project-settings-title">Project settings</h2>
       <fieldset class="project-section">
         <legend>Staff</legend>
-        <p class="dialog-help">The chief names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks. An image designer draws: only an image agent is one, and an image agent takes no other role. A member may hold more than one role: one row here per role.</p>
+        <p class="dialog-help">The chief names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks. An image designer draws, on Codex, and takes no other role. A member is a harness, one of its models, an effort and a tier, and is named by the model. A member may hold more than one role: one row here per role.</p>
         <table class="staff" aria-label="On the staff">
           <thead>
             <tr><th>Member</th><th>Role</th><th></th></tr>
@@ -316,7 +323,7 @@
           <label>Effort<select name="memberEffort" disabled></select></label>
           <label>Tier<select name="memberTier"></select></label>
           <button class="quiet-button" type="button" name="memberRefresh">Refresh models</button>
-          <button class="primary-button" type="submit">Add to staff</button>
+          <button class="primary-button" type="submit" name="memberAdd">Add to staff</button>
           <button class="quiet-button" type="button" name="memberCancel" hidden>Cancel</button>
           <p class="dialog-help member-help" role="status" hidden></p>
           <p class="staff-hint" id="staff-hint" hidden></p>

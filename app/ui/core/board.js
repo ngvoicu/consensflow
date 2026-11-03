@@ -143,12 +143,14 @@ function age(iso, now = Date.now()) {
 }
 
 /**
- * A member of the staff, as the ledger counts one: the lane of an agent of
- * its own, neither one of its sessions nor the chief, which runs on a saved
- * agent too.
+ * A member of the staff, as the ledger counts one: a participant on a harness,
+ * neither one of a member's sessions, nor the chief, nor the human.
  */
 export const isMember = (participant) =>
-  participant.agent !== null && participant.member === null && participant.role !== 'chief'
+  participant.harness !== null &&
+  participant.member === null &&
+  participant.role !== 'chief' &&
+  participant.role !== 'human'
 
 /** The role a member's task is for: its pool's. */
 const roleOf = (task, roles) => task.pool ?? roles[0]
@@ -347,18 +349,27 @@ export const HARNESS_NAMES = {
 const chiefModel = (participant) => participant.ranOn ?? participant.model
 
 /**
- * A session's row says whose window it is; the member's row says what it
- * is. Each says what its agent runs: its model, and its effort when it has
- * one, as Project settings does. The chief's card in the dock says its
- * harness and the model it runs on: a chief runs on no saved agent.
+ * What a member's model is called (harness-models): the name its harness's list gave it,
+ * else its id, else its harness's default (the image designer from before, on Codex's).
  */
-export const identity = (participant, agent) =>
+export const modelShown = (participant) =>
+  participant.modelName?.trim() ||
+  participant.model ||
+  `${HARNESS_NAMES[participant.harness] ?? participant.harness} default`
+
+/**
+ * A session's row says whose window it is; the member's row says what it
+ * is. Each says what it runs on: its harness, its model's name, and its effort when it
+ * has one, as Project settings does. The chief's card in the dock says its
+ * harness and the model it runs on.
+ */
+export const identity = (participant) =>
   (participant.member
     ? [
         `${participant.role} session of @${participant.member}`,
         participant.harness,
-        agent?.model,
-        agent?.effort,
+        modelShown(participant),
+        participant.effort,
       ]
     : participant.role === 'chief'
       ? [HARNESS_NAMES[participant.harness] ?? participant.harness, chiefModel(participant)]
@@ -366,8 +377,8 @@ export const identity = (participant, agent) =>
           participant.roles.join('+'),
           participant.tier,
           participant.harness,
-          agent?.model,
-          agent?.effort,
+          modelShown(participant),
+          participant.effort,
         ]
   )
     .filter(Boolean)
@@ -375,27 +386,12 @@ export const identity = (participant, agent) =>
 
 /**
  * What a row, or the chief's card in the dock, says its participant is
- * doing, and the state that colours it: an agent gone, a chief being
- * switched or a member out of quota say so before anything its window
- * does. A member with no terminal open says nothing (null): its row has no
+ * doing, and the state that colours it: a chief being switched or a member out of
+ * quota say so before anything its window does. A member with no terminal open says nothing (null): its row has no
  * status line.
  */
 export function laneStatus(lane, board, now) {
   const { participant, activity } = lane
-  // A member's: a chief runs on no saved agent, and never misses one.
-  if (lane.agentMissing) {
-    // One a release took out of the catalog cannot be defined again: its harness no longer has its model.
-    if (lane.agentRetired) {
-      return [
-        'missing',
-        `${participant.agent} left the catalog: ${lane.agentRetired}. Remove @${participant.handle} from the staff and add another agent`,
-      ]
-    }
-    return [
-      'missing',
-      `No agent named ${participant.agent} any more: define one under Agents, or remove @${participant.handle} from the staff`,
-    ]
-  }
   if (lane.switching) {
     const { harness, model } = lane.switching
     return [
@@ -533,15 +529,14 @@ export class BoardView {
   }
 
   /** Redraw from the daemon's state; `shows(participant)` says whose terminals the human asked to see. */
-  render({ board, inbox, agents = [], shows, now = Date.now() }) {
-    this.#drawn = { board, inbox, agents, shows }
+  render({ board, inbox, shows, now = Date.now() }) {
+    this.#drawn = { board, inbox, shows }
     this.#board = board
     this.#shows = shows
-    const models = new Map(agents.map((agent) => [agent.name, agent]))
     redraw(this.#root, [
       ...(acts(board) ? [] : [this.#closed(board.resume)]),
       this.#forYou(inbox, board, now),
-      this.#kanban(board, models, now),
+      this.#kanban(board, now),
     ])
     // An open stack dialog follows the board, as the cell it lists does.
     if (this.#stack.open) this.#drawStack()
@@ -758,7 +753,7 @@ export class BoardView {
   }
 
   /** The grid: a row per participant in lane order, a column per state. */
-  #kanban(board, models, now) {
+  #kanban(board, now) {
     const table = element('table', 'kanban')
     table.setAttribute('aria-label', 'Tasks')
     const head = element('thead')
@@ -774,10 +769,10 @@ export class BoardView {
     const body = element('tbody')
     for (const row of boardRows(board)) {
       const folded = this.#folded(board, row)
-      body.append(this.#row(row, board, models.get(row.participant.agent), now, folded))
+      body.append(this.#row(row, board, now, folded))
       if (folded !== false) continue
       for (const session of row.sessions) {
-        body.append(this.#row(session, board, models.get(session.participant.agent), now, null))
+        body.append(this.#row(session, board, now, null))
       }
     }
     // A project with nobody on its staff looks like any other board, and every
@@ -787,7 +782,7 @@ export class BoardView {
       const cell = element(
         'td',
         null,
-        'No members yet: add the agents this project may use under Project settings.',
+        'No members yet: add the members this project may use under Project settings.',
       )
       cell.colSpan = COLUMNS.length + 1
       row.append(cell)
@@ -827,14 +822,14 @@ export class BoardView {
     return !this.#unfolded.has(foldKey(board, row.participant))
   }
 
-  #row(lane, board, agent, now, folded) {
+  #row(lane, board, now, folded) {
     const { participant } = lane
     const row = element('tr')
     row.dataset.handle = participant.handle
     row.dataset.role = participant.role
     if (participant.member) row.dataset.session = participant.member
     if (folded !== null) row.dataset.folded = String(folded)
-    row.append(this.#rowHead(lane, board, agent, now, folded))
+    row.append(this.#rowHead(lane, board, now, folded))
     const mine = rowCards(lane, board, folded === true)
     for (const [state, label] of COLUMNS) {
       const cell = element('td')
@@ -852,7 +847,7 @@ export class BoardView {
     return row
   }
 
-  #rowHead(lane, board, agent, now, folded) {
+  #rowHead(lane, board, now, folded) {
     const { participant } = lane
     const head = element('th', 'row-head')
     head.setAttribute('scope', 'row')
@@ -863,7 +858,7 @@ export class BoardView {
     // The chief's row only holds its tasks: what it is doing, what it runs on
     // and Switch chief are on its card in the dock.
     if (participant.role === 'chief') return head
-    head.append(element('span', 'row-meta', identity(participant, agent)))
+    head.append(element('span', 'row-meta', identity(participant)))
     const said = laneStatus(lane, board, now)
     if (said !== null) {
       const [state, text] = said

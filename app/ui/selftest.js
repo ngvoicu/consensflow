@@ -100,12 +100,16 @@ export async function runSelftest({
       ],
     })
 
-    // A project on the smoke's folder, its chief and one worker on terpsichore,
-    // a catalog agent of Claude Code, which is the fake `claude` here.
+    // A project on the smoke's folder, its chief and one worker on Claude Code, which is
+    // the fake `claude` here: the worker's model, which the fake harness lists none of, is
+    // taken at its word and names it (`@terpsichore`).
     const opened = await daemon('project.open', {
       directory: config.dir,
-      agent: 'terpsichore',
-      staff: [{ agent: 'terpsichore', roles: ['worker'] }],
+      harness: 'claude-code',
+      model: 'claude-fable-5-1',
+      staff: [
+        { harness: 'claude-code', model: 'terpsichore', tier: 'standard', roles: ['worker'] },
+      ],
     })
     await report('project', opened)
     if (opened?.ok !== true) throw new Error(`project.open refused: ${JSON.stringify(opened)}`)
@@ -246,7 +250,7 @@ export async function runSelftest({
     }
     await report('board', { result: result.id, hex: delivered, delivered: true })
 
-    // The agents screens, opened from Settings as a human opens them: each
+    // The daemon's screens, opened from Settings as a human opens them: each
     // in its dialog over the board, framed at the daemon's address with the
     // UI token, the frame loaded. The frame is the daemon's page, which this
     // page cannot read; the pages themselves are proven elsewhere.

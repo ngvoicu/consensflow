@@ -226,7 +226,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "message.read",
     "message.approve",
     "message.decline",
-    "agents.list",
+    "harnesses.missing",
     "staff.last",
     "wakeup.get",
     "wakeup.set",
@@ -322,7 +322,7 @@ pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value
     // Off the async runtime: asked while the daemon is starting, it waits.
     run_blocking("agents_screen", move || {
         let Some(roster) = daemon.roster() else {
-            return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
+            return json!({"ok":false,"error":"the harnesses screen is not available: the daemon is not up"});
         };
         match agents_url(&roster, &page) {
             Ok(url) => json!({"ok":true,"url":url.as_str()}),

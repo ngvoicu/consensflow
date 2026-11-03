@@ -40,6 +40,12 @@ pub const DESIGNER: &str = "pygmalion";
 pub const STAND_IN_CHIEF_MODEL: &str = "fake-chief";
 pub const STAND_IN_WORKER_MODEL: &str = "fake";
 
+/// The member a fresh rig seats on the stand-in (`rig::install`'s stand-ins): a member is
+/// asked for by its model, and one on a stand-in model by its own name, which is its
+/// handle (`rig::member_body`), so a shim hands a window asked for on this model to the
+/// stand-in as well (spec harness-models).
+pub const STAND_IN_MEMBER_MODEL: &str = "worker";
+
 /// The harness an agent (a roster row, or what a window is asked for) runs on,
 /// when it is a real one: the stand-in agent's (a Claude Code agent whose model is
 /// a fake one) are none.
