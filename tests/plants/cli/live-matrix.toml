@@ -29,6 +29,17 @@ matrix-field4 = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_m
 matrix-field5 = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field5_notices"]
 matrix-field8 = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field8_tell_resume"]
 matrix-control-smoke = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::the_matrix_passes"]
+# LMX-12's rest and LMX-13's deliveries (T-1186): the stand-in's records and its main tests, and
+# the cases by name.
+matrix-fake-agent-records = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "records::"]
+matrix-fake-agent-main = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "tests::a_result_is_recorded_late"]
+matrix-stale-transcript = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_stale_transcript"]
+matrix-draft-kept = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_draft_kept"]
+matrix-retyped-under-load = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_retyped_under_load"]
+matrix-late-record = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_late_record"]
+matrix-recap = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_recap_not_typed"]
+matrix-image-result = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_image_result"]
+matrix-question-not-retyped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_question_not_retyped"]
 # The daemon's API, the tooling's look at it among it.
 matrix-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::tests::"]
 # The rig's environment and its live Muse launcher.
@@ -494,3 +505,148 @@ runs = ["matrix-field4"]
 file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
 find = '''    if text.lines().any(|line| line.trim() == "MODEL-BUSY") {'''
 replace = '''    if text.lines().any(|line| line.trim() == "MODEL-BUSY-NOT") {'''
+
+# LMX-12's rest and LMX-13's deliveries (T-1186). The stand-in's new ways and the runner's
+# allowance, each held by its own test; then each field fix the delivery cases replay, put back
+# as the field had it, which its case catches: the cases are green because the fix is there.
+
+[[plant]]
+name = "live matrix: a window opened again keeps the record it had, for all CF_TEST_RESUMED_ANEW says"
+meant = "a_window_that_begins_its_record_anew_keeps_only_what_it_is_given_after"
+runs = ["matrix-fake-agent-records"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
+find = """        fs::write(&self.transcript, "")?;"""
+replace = """        let _ = &self.transcript;"""
+
+[[plant]]
+name = "live matrix: the stand-in's window opened again never writes its record anew (the stale transcript's shape)"
+meant = "field_stale_transcript"
+runs = ["matrix-stale-transcript"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = """    if launch.resuming && named("CF_TEST_RESUMED_ANEW") {"""
+replace = """    if launch.resuming && named("CF_TEST_RESUMED_ANEW_NOT") {"""
+
+[[plant]]
+name = "live matrix: the stand-in holds back every message but a result"
+meant = "a_result_is_recorded_late_by_the_window_named_and_nothing_else_is"
+runs = ["matrix-fake-agent-main"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = """    if text.contains(" result from @") {
+        slow_start(said, participant)"""
+replace = """    if !text.contains(" result from @") {
+        slow_start(said, participant)"""
+
+[[plant]]
+name = "live matrix: a stand-in deadline grants no scenario what it waits by design"
+meant = "a_stand_in_deadline_is_three_minutes_and_what_its_scenario_waits_by_design"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = """    scenario.deadline.min(STAND_IN_DEADLINE + scenario.waits)"""
+replace = """    scenario.deadline.min(STAND_IN_DEADLINE)"""
+
+[[plant]]
+name = "live matrix: field fix out: Claude's box that holds the human's words takes a result over them (T-716)"
+meant = "field_draft_kept"
+runs = ["matrix-draft-kept"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """                    Unsent::Held => Readiness::Held(Held::Unsent),"""
+replace = """                    Unsent::Held => Readiness::Ready,"""
+
+[[plant]]
+name = "live matrix: field fix out: a paste goes again inside a stall of the pane host's (3.0.5 under load)"
+meant = "field_retyped_under_load"
+runs = ["matrix-retyped-under-load"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+        let Some(snapshot) = self.snapshot_now(&pane, true).await else {
+            self.unknown(record, NO_ANSWER);
+            return Ok(false);
+        };'''
+replace = '''
+        let snapshot = json!({});'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if let Some(pasted) = pasted.filter(|&pasted| pasted < self.seams.limits.arrival_ms as f64)"
+replace = "        if let Some(pasted) = pasted.filter(|_| false)"
+
+[[plant]]
+name = "live matrix: field fix out: a window whose screen prints is pasted again when its record shows nothing (T-760)"
+meant = "field_late_record"
+runs = ["matrix-late-record"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);"
+replace = "            .is_some_and(|quiet| (quiet as f64) < 0.0);"
+
+[[plant]]
+name = "live matrix: the stand-in that holds a result back draws nothing meanwhile (a lost paste, not the field's)"
+meant = "field_late_record"
+runs = ["matrix-late-record"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = """        let _ = say(&format!("✻ Taking it in… ({frame})\\r\\n"));"""
+replace = """        let _ = frame;"""
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = """    let _ = say(&format!("> {first}\\n"));"""
+replace = """    let _ = first;"""
+
+[[plant]]
+name = "live matrix: field fix out: a terminal's reports on the human's path are counted as keys typed (T-839)"
+meant = "field_recap_not_typed"
+runs = ["matrix-recap"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''            0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {'''
+replace = '''            0x1b if false => {'''
+
+[[plant]]
+name = "live matrix: field fix out: a paste behind the placeholders of its pictures is taken for none (T-215)"
+meant = "field_image_result"
+runs = ["matrix-image-result"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let paste = match after_placeholders(text) {"
+replace = "    let paste = match after_placeholders(text).filter(|_| false) {"
+
+[[plant]]
+name = "live matrix: field fix out: a question the chief answered while it waited is typed in when the chief's turn ends (3.0.5)"
+meant = "field_question_not_retyped"
+runs = ["matrix-question-not-retyped"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
+replace = 'Read::Inbox => message.kind == "answer",'
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = """
+        }
+        settle_answered(store, question_id)?;"""
+replace = """
+        }"""

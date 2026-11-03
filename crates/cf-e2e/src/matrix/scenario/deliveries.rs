@@ -16,8 +16,8 @@
 //!   once (T-760, T-763).
 //! - `field-image-result`: a result that begins with the path of a picture, which Claude Code
 //!   makes an attachment of, goes in once (T-215, m-2619).
-//! - `field-question-not-retyped`: a question the chief answered is not typed into it again
-//!   (3.0.5, m-2927).
+//! - `field-question-not-retyped`: a question that came while the chief was in a turn, and that
+//!   it answered there, is never typed into its window (3.0.5, m-2927).
 
 use std::time::Duration;
 
@@ -337,14 +337,21 @@ pub fn deliveries() -> Vec<Scenario> {
             &[],
             &[],
         ),
+        // The field's shape: the question came while the chief was in a turn, and the chief
+        // answered it there with `cf answer`, the question still waiting behind the turn.
         scenario(
             "field-question-not-retyped",
             vec![
+                run!(
+                    "A",
+                    "task add --tier standard :: SLEEP 8 CF ask :: Which format, JSON or text?",
+                    |snapshot, bindings| is(snapshot, bindings, "A", 0, &["working"])
+                ),
                 Step {
                     human: None,
-                    name: "A asks, and is answered",
-                    asks: |_| "Put one task on the board for our worker with `cf task add --tier standard \"Ask the chief with cf ask which format to use, JSON or text, then reply with exactly the format you were told.\"`. When its question comes, answer it with `cf answer` and the word JSON. Tell me in one line when its result is back.".to_owned(),
-                    stand_in: |_| "CF task add --tier standard :: CF ask :: Which format, JSON or text? REPLY JSON".to_owned(),
+                    name: "the chief answers it in a turn of its own",
+                    asks: |_| "Work for half a minute on the plan in your head. Our worker will ask you a question meanwhile: answer it with `cf answer` and the word JSON, without waiting for it to be typed to you. Tell me in one line when its result is back.".to_owned(),
+                    stand_in: |_| "SLEEP 30 CF answer m-2 :: JSON".to_owned(),
                     reached: |snapshot, bindings| answered(snapshot, bindings, "A", 0),
                 },
                 Step {
@@ -352,14 +359,33 @@ pub fn deliveries() -> Vec<Scenario> {
                     name: "two minutes go by",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),
-                    reached: |snapshot, bindings| since(snapshot, bindings, "A", "done").is_some_and(|seconds| seconds >= 120),
+                    reached: |snapshot, bindings| {
+                        since(snapshot, bindings, "A", "done").is_some_and(|seconds| seconds >= 120)
+                            && crate::matrix::run::settled(snapshot)
+                    },
                 },
             ],
             A,
             |judged| {
-                let mut checks = into_the_chief_once(judged, "A", "question");
-                checks.push(oracle::state(judged, "A", 0, &["done"]));
-                checks
+                let asked = of_task(judged, "A", "question");
+                let typed = asked
+                    .first()
+                    .map_or(0, |question| typed_at(&chief_record(judged), &question["id"]).len());
+                let answers = observe::calls(&judged.snapshot.events)
+                    .into_iter()
+                    .filter(|call| call.participant == "chief" && call.path == "/api/answers" && call.error.is_none())
+                    .count();
+                vec![
+                    Check::new("A", "its window asked the chief one question", asked.len() == 1, format!("{} question(s)", asked.len())),
+                    Check::new("chief", "the chief answered it with cf answer while it waited", answers == 1, format!("{answers} answer call(s)")),
+                    Check::new(
+                        "A",
+                        "the question it answered was never typed into the chief's window",
+                        typed == 0,
+                        format!("in the chief's record {typed} time(s)"),
+                    ),
+                    oracle::state(judged, "A", 0, &["done"]),
+                ]
             },
             &[],
             &[],
