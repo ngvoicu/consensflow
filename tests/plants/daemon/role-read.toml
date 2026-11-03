@@ -74,7 +74,7 @@ file = "crates/cf-engine/src/role_change.rs"
 find = '''
             ledger.confirm_delivery(message.id, Some(receipt))?;
         }
-        Ok(())'''
+        // Its window took work'''
 replace = '''
             ledger.confirm_delivery(message.id, Some(receipt))?;
         }
@@ -82,7 +82,7 @@ replace = '''
         if tells == Some(false) {
             self.not_read(message, message.id)?;
         }
-        Ok(())'''
+        // Its window took work'''
 
 [[plant]]
 name = "role read: a role not read by the next Resume is said again with no line to the human"

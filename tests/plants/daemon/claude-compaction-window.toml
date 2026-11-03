@@ -187,8 +187,8 @@ runs = ["cc-proto-page"]
 [[plant.edit]]
 file = "app/src-tauri/src/commands.rs"
 find = '''    "project.compaction",
-];'''
-replace = '''];'''
+    "models.get",'''
+replace = '''    "models.get",'''
 
 [[plant]]
 name = "claude compaction: the page's lowest size is not the ledger's"
