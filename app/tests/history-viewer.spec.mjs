@@ -1270,15 +1270,17 @@ test.describe('the history viewer, after its review (T-1210)', () => {
         const at = document.activeElement
         return at?.getAttribute('aria-label') || at?.textContent?.trim() || at?.tagName
       })
-    /** Presses `key` until what has the keyboard says `name`, and says what it went through. */
+    /**
+     * Presses `key` until what has the keyboard says `name` (30 presses at most), and says what
+     * it went through: a key that never gets there fails the assertion on the path, not the run.
+     */
     const press = async (key, name) => {
       const through = []
-      for (let at = 0; at < 30; at += 1) {
+      for (let at = 0; at < 30 && through.at(-1) !== name; at += 1) {
         await page.keyboard.press(key)
         through.push(await focused())
-        if (through.at(-1) === name) return through
       }
-      throw new Error(`${key} never reached ${name}: ${through.join(' → ')}`)
+      return through
     }
     // The stream has the keyboard as the viewer opens; Tab goes down its rows in order.
     await expect(viewer.locator('.history-body')).toBeFocused()
@@ -1302,7 +1304,9 @@ test.describe('the history viewer, after its review (T-1210)', () => {
     const up = await press('Shift+Tab', 'Search history')
     expect(up.slice(-3)).toEqual(['Close', 'Refresh', 'Search history'])
     // Enter on the earlier row loads it.
-    await press('Tab', '… earlier history, click to load')
+    expect((await press('Tab', '… earlier history, click to load')).at(-1)).toBe(
+      '… earlier history, click to load',
+    )
     await page.keyboard.press('Enter')
     await expect(viewer.locator('.history-item')).toHaveCount(10)
   })
