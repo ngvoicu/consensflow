@@ -1,10 +1,12 @@
 //! A chief on the stand-in Codex, whose resumed thread keeps the instructions it
-//! began with: told of the specs its project turned on by a message when it is
-//! resumed (by paste, once the window is up: its command line has the role once),
-//! once, and of nothing at the Resume after, for its role text names the same copy
-//! of Specmint at every launch, kept where no launch's folder holds it. The role is
-//! on no command line: it is a file of the launch's, which the window's broker gives
-//! its thread as it starts.
+//! began with. Specs turned on while its window is open reach it at its next rest, in
+//! a note it takes as a message, once, with no new window (T-1182); a Resume after that
+//! says nothing of them. What no note tells (the staff table is as of the chief's launch)
+//! is the Resume's: it says the role again, by a message once the window is up (by paste:
+//! its command line has the role once), once, and of nothing at the Resume after, for its
+//! role text names the same copy of Specmint at every launch, kept where no launch's folder
+//! holds it. The role is on no command line: it is a file of the launch's, which the
+//! window's broker gives its thread as it starts.
 //! (The windows run the stand-in `codex`, a script that runs it, so Unix's; the
 //! cases of the stand-in `claude` are in `specs`.)
 
@@ -15,7 +17,7 @@ use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::rollout;
 use serde_json::{json, Value};
 
-use crate::specs::{is_kept, relaunch};
+use crate::specs::{chief_windows, is_kept, relaunch};
 use crate::{after, config, secs, Outcome};
 
 /// The stand-in for Codex, which the windows of Codex's agents run.
@@ -76,8 +78,9 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
 ) -> Outcome {
     // The human has no Specmint installed for Codex: the skill is ConsensFlow's copy.
     let rig = Rig::start(config().codex(FAKE_CODEX))?;
-    let project = Project::open(&rig, "maia", json!({}))?;
-    let added = project.add_member("worker")?;
+    // The worker is on the staff as the project opens, so the staff table the chief's thread
+    // begins with is the one its launches say: only the specs are news.
+    let project = Project::open_with_staff(&rig, "maia", None, &[("worker", "worker")])?;
     let first = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     assert!(
         first["argv"]
@@ -93,7 +96,8 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
 
     // The chief has a turn, which is what gives its thread the instructions it
     // begins with (and what lets Codex resume it): a worker's result comes to it.
-    let tier = added["member"]["tier"].as_str().unwrap_or_default();
+    let tiers = project.tiers()?;
+    let tier = tiers.get("worker").map_or("", String::as_str);
     let ran = rig.cf_in_window(
         &first,
         [
@@ -138,17 +142,84 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
     assert!(!began_with[0].contains(SECTION));
     let thread = rollout::thread_of(&thread_text()?).expect("its thread");
 
-    // The human turns specs on, and Closes and Resumes: the window resumes the
-    // thread, and its role's file holds the section as every launch's does, which
-    // the thread is not given (its broker gives the role to a thread that starts).
-    // It has no first message: the note that says the role again goes in by paste
-    // once the window is up. Neither is on the command line.
+    // The human turns specs on while the chief's window is open. It is told at its next
+    // rest, in a note its thread takes as a message (T-1182): no new window, and the thread
+    // keeps the instructions it began with. The note is short, so it goes in whole, and the
+    // thread is recorded as told it.
     let said = rig.page(
         "project.specs",
         json!({ "project": project.id(), "on": true, "folder": "plans", "variant": "core" }),
     )?;
     assert_eq!(said["ok"], true, "{said}");
-    let next = relaunch(&rig, &project, 2)?;
+    const NOW: &str = "Specs are now on in this project: ";
+    rig.wait_for(
+        "the chief's thread to be told of the specs",
+        secs(60),
+        || {
+            Ok(rollout::said_by(&thread_text()?, "user")
+                .iter()
+                .any(|said| said.contains(NOW)))
+        },
+    )?;
+    rig.wait_for("the note to be delivered", secs(60), || {
+        Ok(project
+            .inbox("chief")?
+            .iter()
+            .any(|note| note["state"] == "delivered" && note["body"].to_string().contains(NOW)))
+    })?;
+    rig.wait_for("the chief to be idle", secs(60), || chief_is_idle(&project))?;
+    let told_now: Vec<String> = rollout::said_by(&thread_text()?, "user")
+        .into_iter()
+        .filter(|said| said.contains(NOW))
+        .collect();
+    assert_eq!(told_now.len(), 1, "told once: {told_now:?}");
+    assert!(
+        told_now[0].contains("Your specs and their registry are in `plans`"),
+        "{}",
+        told_now[0]
+    );
+    assert!(
+        !told_now[0].contains(REPLACES),
+        "the section alone, not the whole role again"
+    );
+    assert_eq!(rollout::said_by(&thread_text()?, "developer"), began_with);
+    let now_skill = skill_named_in(&told_now[0]).expect("the note names the skill's file");
+    assert!(
+        Path::new(&now_skill).is_file(),
+        "{now_skill} is there before the chief is told where it is"
+    );
+    assert_eq!(chief_windows(&rig, &project).len(), 1, "no new window");
+    // Resumed with nothing changed since: it is told nothing again, not the section and not
+    // the whole role.
+    let resumed = relaunch(&rig, &project, 2)?;
+    assert_eq!(after(&resumed, "resume"), thread, "{}", resumed["argv"]);
+    assert_eq!(
+        notes_of_the_role(&project)?,
+        0,
+        "told already: the Resume writes no note of the role"
+    );
+    rig.wait_for("the chief to be idle", secs(60), || chief_is_idle(&project))?;
+    assert_eq!(
+        rollout::said_by(&thread_text()?, "user")
+            .iter()
+            .filter(|said| said.contains(NOW))
+            .count(),
+        1,
+        "not told the same again"
+    );
+
+    // What no note tells (the staff table says it is as of the chief's launch) is the
+    // Resume's, in the whole role: the human gives the worker a second role, and Closes and
+    // Resumes. The window resumes the thread, and its role's file holds the section as every
+    // launch's does, which the thread is not given (its broker gives the role to a thread
+    // that starts). It has no first message: the note that says the role again goes in by
+    // paste once the window is up. Neither is on the command line.
+    let said = rig.page(
+        "member.roles",
+        json!({ "project": project.id(), "agent": "worker", "roles": ["worker", "reviewer"] }),
+    )?;
+    assert_eq!(said["ok"], true, "{said}");
+    let next = relaunch(&rig, &project, 3)?;
     assert_eq!(after(&next, "resume"), thread, "{}", next["argv"]);
     let next_role = codex_role_of(&next);
     assert!(next_role.contains(SECTION));
@@ -248,7 +319,7 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
     // The next Resume has nothing to tell: the role is what it was told, and names
     // the same copy of the skill, which the window before it left where it was.
     rig.wait_for("the chief to be idle", secs(60), || chief_is_idle(&project))?;
-    let third = relaunch(&rig, &project, 3)?;
+    let third = relaunch(&rig, &project, 4)?;
     assert_eq!(after(&third, "resume"), thread);
     assert!(
         !third["argv"].to_string().contains(REPLACES),
