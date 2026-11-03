@@ -139,7 +139,11 @@ impl Channel {
     /// The commands the broker says Codex keeps running for the window's thread (`GET
     /// /terminals`: its background terminals), each by its command line; none where it does
     /// not answer for this launch with a list of them.
-    pub async fn terminals(&self, time: &dyn Time, loopback: &dyn Loopback) -> Option<Vec<String>> {
+    pub(crate) async fn terminals(
+        &self,
+        time: &dyn Time,
+        loopback: &dyn Loopback,
+    ) -> Option<Vec<String>> {
         let request = self.request("/terminals", None)?;
         let attempt = arm(time, TERMINALS_TIMEOUT_MS);
         let mut reply = attempt.bound(loopback.send(request)).await?.ok()?;
