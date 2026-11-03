@@ -12,12 +12,28 @@
 //! as the run does and a margin; one that does not is a reason to refuse the run, said
 //! in words, and never a copy that would refresh.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
 
 use super::super::login::span;
+use super::super::renew::{self, Renewal, TestMachine};
+use super::watch::Seen;
 use crate::{Error, Result};
+
+/// The entry `entry`, the owner's, as a run is given it: all but its refresh token. A copy that
+/// holds only the access token cannot renew it, so it cannot use up the refresh token the owner's
+/// file keeps (T-1067, measured on zeewin2: Pi 1.4.0 runs on such a copy, and where less than five
+/// minutes of the access token are left it tries to renew, is refused (`invalid_grant`) and fails
+/// the run loudly, the owner's file untouched).
+fn without_renewal(entry: &Value) -> Value {
+    let mut copy = entry.clone();
+    if let Some(fields) = copy.as_object_mut() {
+        fields.remove("refresh");
+    }
+    copy
+}
 
 /// The provider a Pi model name is on: what comes before the first `/`
 /// (`openrouter/meta/muse-spark-1.3` is on `openrouter`). A name with no `/` leaves it to
@@ -53,6 +69,35 @@ impl Unfit {
     }
 }
 
+/// When the OAuth `entry` ends: its `expires`, milliseconds since the epoch.
+fn expires(entry: &Value) -> Option<i64> {
+    entry["expires"]
+        .as_i64()
+        // Pi writes a number, which JSON may have given as a float.
+        .or_else(|| entry["expires"].as_f64().map(|expires| expires as i64))
+}
+
+/// When the OAuth entry of `provider` in `text`, the owner's `auth.json`, ends; none where it
+/// holds none.
+pub fn expiry(text: &str, provider: &str) -> Option<i64> {
+    expires(serde_json::from_str::<Value>(text).ok()?.get(provider)?)
+}
+
+/// Whether the entry of `provider` in `text` has run short of `left` from `now`, and Pi could
+/// renew it: an OAuth login with a refresh token, that has ended or ends within `left`. An entry
+/// that is a key, that is missing or unknown, or that has no refresh token is not for a renewal
+/// to mend.
+pub fn renewable(text: &str, provider: &str, now: i64, left: Duration) -> bool {
+    let Some(held) = serde_json::from_str::<Value>(text).ok() else {
+        return false;
+    };
+    let entry = held.get(provider);
+    let has_refresh = entry
+        .and_then(|entry| entry["refresh"].as_str())
+        .is_some_and(|token| !token.is_empty());
+    has_refresh && matches!(fit(entry, now, left), Err(Unfit::Expired | Unfit::Short(_)))
+}
+
 /// Whether the entry can be copied for a run that needs it to last `left` from `now`
 /// (milliseconds since the epoch).
 fn fit(entry: Option<&Value>, now: i64, left: Duration) -> std::result::Result<(), Unfit> {
@@ -64,10 +109,7 @@ fn fit(entry: Option<&Value>, now: i64, left: Duration) -> std::result::Result<(
             let access = entry["access"]
                 .as_str()
                 .is_some_and(|text| !text.is_empty());
-            let expires = entry["expires"]
-                .as_i64()
-                // Pi writes a number, which JSON may have given as a float.
-                .or_else(|| entry["expires"].as_f64().map(|expires| expires as i64));
+            let expires = expires(entry);
             // The refresh token is not asked for: OpenRouter's login is an API key kept as an OAuth
             // entry with an empty one, that ends at the largest number there is. What matters is
             // whether Pi finds the entry ended in the run, and then refreshes it.
@@ -112,7 +154,7 @@ pub fn login(
     for provider in wanted {
         match fit(held.get(provider), now, left) {
             Ok(()) => {
-                copied.insert(provider.to_owned(), held[provider].clone());
+                copied.insert(provider.to_owned(), without_renewal(&held[provider]));
             }
             Err(why) => unfit.push(format!("`{provider}` {}", why.said())),
         }
@@ -136,9 +178,39 @@ pub fn login(
         "Pi's login in {from} cannot be used for this run: {who}. The run needs a login that lasts at \
          least {} more (its own length and a margin): a run's Pi refreshes an OAuth login that has ended, \
          and the refresh would leave the login this machine keeps unusable (the owner is logged out of \
-         that provider the next time they use it). Run again after the owner's own Pi has refreshed it \
-         (use Pi once on that provider), run on a model of a provider whose login lasts or is a key \
+         that provider the next time they use it). Pi renews an entry itself once it has ended: run again \
+         then (use Pi once on that provider; on a test machine the kit asks it to), run on a model of a provider whose login lasts or is a key \
          (--models pi=…), or make the run shorter",
         span(left)
     )))
+}
+
+/// Pi's renewal on `machine`, for the owner whose home is `home` and whose Pi folder is `agent`,
+/// started as `program` finds it: Pi run once on the model the run uses ([`renew::pi_words`]),
+/// and the owner's files compared before and after, so that nothing but `auth.json` is changed.
+pub fn renewal(
+    machine: TestMachine,
+    home: &Path,
+    agent: &Path,
+    model: &str,
+    program: impl Fn() -> Result<PathBuf> + Send + Sync + 'static,
+) -> Renewal {
+    let (home, agent, model) = (home.to_path_buf(), agent.to_path_buf(), model.to_owned());
+    Renewal::new(machine, "Pi", "only once the entry has ended", move || {
+        let program = program()?;
+        let files: Vec<_> = ["settings.json", "models.json", "mcp-auth.json"]
+            .map(|name| agent.join(name))
+            .into();
+        let records = [agent.join("sessions")];
+        let before = Seen::look(&files, &records);
+        let ended = renew::one_shot(&program, &renew::pi_words(&model))?;
+        let changed = before.changes_to(&Seen::look(&files, &records), &home);
+        if changed.is_empty() {
+            return Ok(ended);
+        }
+        Err(Error::Daemon(format!(
+            "it changed the owner's Pi files beside its login: {}",
+            changed.join("; ")
+        )))
+    })
 }

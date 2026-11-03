@@ -1,0 +1,430 @@
+# The live kit renews the logins of Claude Code and Pi on a test machine (T-1067, Gabriel's decision of
+# 2026-11-01). On zeewin2 the owner rarely uses either, so their access tokens ended between his visits and
+# the kit refused a live run as "expired" even where the refresh token behind it worked. Now, on a machine
+# the Windows runner started the command on (it gives it `CONSENSFLOW_TEST_MACHINE`, which nothing else
+# sets), a login that has run short of the run and its margin is renewed by the harness itself, run once as
+# the owner with a tiny prompt (`live/renew.rs`), and then copied as before. Never on the owner's Mac (no
+# runner, no variable), never `/login`, never anything of the owner's changed but the login, and a renewal
+# that ran and failed is said in the refusal. One plant takes one rule out; a test of it fails. The
+# runner's own plants are of `tools/xtask/src/windows`, and are caught by its tests. Every name holds
+# `kit renews logins`.
+
+[run]
+renew-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "renew"]
+planned-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "--", "planned", "forty_two", "too_short", "twenty_five", "ten_minutes_left", "no_refresh_token", "codex_copy", "renews_it"]
+renew-windows = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--lib", "windows::"]
+
+# ---------------------------------------------------------------------------- the signal
+
+[[plant]]
+name = "kit renews logins: a run is on a test machine without the runner's word"
+meant = "a_run_is_on_a_test_machine_only_where_the_runner_says_which"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        let name = signal?.trim();'''
+replace = '''        let name = signal.unwrap_or("zeewin2").trim();'''
+
+[[plant]]
+name = "kit renews logins: a signal that names no machine is a machine"
+meant = "a_run_is_on_a_test_machine_only_where_the_runner_says_which"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        (!name.is_empty()).then(|| Self(name.to_owned()))'''
+replace = '''        Some(Self(name.to_owned()))'''
+
+[[plant]]
+name = "kit renews logins: Claude Code's login is renewed on a machine that is no test machine"
+meant = "off_a_test_machine_an_ended_login_is_not_renewed_but_refused_as_it_always_was_and_nothing_is_run"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        login.renewal = machine.map(|machine| {'''
+replace = '''        login.renewal = Some(machine.unwrap_or_else(|| TestMachine::signalled(Some("mac")).unwrap())).map(|machine| {'''
+
+[[plant]]
+name = "kit renews logins: Pi's login is renewed on a machine that is no test machine"
+meant = "off_a_test_machine_an_ended_pi_entry_is_not_renewed_but_refused_as_it_always_was_and_nothing_is_run"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                pi.renewal = test_machine.map(|machine| {'''
+replace = '''                pi.renewal = Some(test_machine.unwrap_or_else(|| TestMachine::signalled(Some("mac")).unwrap())).map(|machine| {'''
+
+[[plant]]
+name = "kit renews logins: the runner gives its command no word of the machine"
+meant = "a_run_tells_its_command_which_machine_it_is_on_before_the_steps_and_the_command_run"
+runs = ["renew-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''$env:«test_machine» = «machine»
+'''
+replace = '''$env:«test_machine» = ''
+'''
+
+[[plant]]
+name = "kit renews logins: the runner names the same machine for every run"
+meant = "a_run_gives_its_command_the_name_of_the_machine_it_is_sent_to"
+runs = ["renew-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''            ("machine", &quoted(script.machine)),'''
+replace = '''            ("machine", &quoted("zeewin2")),'''
+
+# ---------------------------------------------------------------------------- the renewal
+
+[[plant]]
+name = "kit renews logins: the login is not read again after the harness ran"
+meant = "a_login_that_ended_on_a_test_machine_is_renewed_by_claude_code_once_and_the_run_goes_on"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        let fresh = (kept.read)().map_err(|failed| {'''
+replace = '''        let fresh = Ok::<String, Error>(text.to_owned()).map_err(|failed| {'''
+
+[[plant]]
+name = "kit renews logins: a harness that failed to renew is taken for one that did"
+meant = "a_harness_that_could_not_renew_is_a_renewal_that_failed_and_the_login_is_not_read_again"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        let ended = (self.shot)().map_err(|failed| self.failed(&failed.to_string()))?;'''
+replace = '''        let ended = (self.shot)().unwrap_or(None);'''
+
+[[plant]]
+name = "kit renews logins: a refusal after the renewal does not say it ran and failed"
+meant = "a_renewal_that_fails_refuses_the_run_in_words_that_say_so_and_makes_no_folder"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''once as the owner to renew it (T-1067), and the renewal ran and failed: {why}",'''
+replace = '''once as the owner to renew it (T-1067): {why}",'''
+
+[[plant]]
+name = "kit renews logins: a login that is short is not renewed"
+meant = "a_login_that_ended_on_a_test_machine_is_renewed_by_claude_code_once_and_the_run_goes_on"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''remaining(expires) < left)'''
+replace = '''remaining(expires) > left)'''
+
+[[plant]]
+name = "kit renews logins: a login with no refresh token is renewed"
+meant = "a_login_that_lasts_the_run_or_cannot_be_renewed_is_never_renewed"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''    has_refresh && expires_at(text)'''
+replace = '''    let _ = has_refresh;
+    expires_at(text)'''
+
+[[plant]]
+name = "kit renews logins: a Pi entry with no refresh token is renewed"
+meant = "an_entry_that_lasts_the_run_or_cannot_be_renewed_is_never_renewed"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''    has_refresh && matches!('''
+replace = '''    let _ = has_refresh;
+    matches!('''
+
+[[plant]]
+name = "kit renews logins: Claude Code is run on a model of its own, not the run's"
+meant = "a_login_that_ended_on_a_test_machine_is_renewed_by_claude_code_once_and_the_run_goes_on"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            let model = super::agents::asked()?.of(Harness::Claude).name.clone();'''
+replace = '''            let model = "haiku".to_owned();'''
+
+[[plant]]
+name = "kit renews logins: Pi is run on a model of its own, not the run's"
+meant = "a_pi_entry_that_ended_on_a_test_machine_is_renewed_by_pi_once_and_the_run_goes_on"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''renew::pi_words(&model))?;'''
+replace = '''renew::pi_words("openai/other"))?;'''
+
+[[plant]]
+name = "kit renews logins: the renewal of Claude Code is not kept for the report"
+meant = "a_login_that_ended_on_a_test_machine_is_renewed_by_claude_code_once_and_the_run_goes_on"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            services: keychain_services(),
+            renewed,
+        });'''
+replace = '''            services: keychain_services(),
+            renewed: None,
+        });'''
+
+[[plant]]
+name = "kit renews logins: the renewal of Pi is not kept for the report"
+meant = "a_pi_entry_that_ended_on_a_test_machine_is_renewed_by_pi_once_and_the_run_goes_on"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            .push(renewed);
+        entries'''
+replace = '''            .push(renewed.clone());
+        self.renewed.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        entries'''
+
+# ---------------------------------------------------------------------------- what the harness may change
+
+[[plant]]
+name = "kit renews logins: Claude Code may change the owner's setup beside its login"
+meant = "a_renewal_that_changes_the_owners_setup_beside_the_login_fails_and_names_the_file"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            let changed = owner.changes_since(&before);'''
+replace = '''            let changed = owner.changes_since(&owner.look());
+            let _ = &before;'''
+
+[[plant]]
+name = "kit renews logins: Pi may change the owner's files beside its login"
+meant = "a_renewal_that_changes_the_owners_pi_files_beside_the_login_fails_and_names_the_file"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        let changed = before.changes_to(&Seen::look(&files, &records), &home);'''
+replace = '''        let changed = before.changes_to(&before, &home);'''
+
+[[plant]]
+name = "kit renews logins: the harness may take as long as it likes"
+meant = "a_harness_that_goes_on_past_its_limit_is_ended_and_the_renewal_has_failed"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        .limit(limit)
+        .run()?;'''
+replace = '''        .unlimited()
+        .run()?;'''
+
+[[plant]]
+name = "kit renews logins: the harness is started in a folder that is no folder of a run"
+meant = "the_harness_runs_once_in_a_folder_of_a_run_that_goes_with_it"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''const FOLDER: &str = "consensflow-integration-renew-";'''
+replace = '''const FOLDER: &str = "renew-";'''
+
+[[plant]]
+name = "kit renews logins: what the harness printed is said when it fails"
+meant = "a_harness_that_ended_badly_says_how_in_what_it_said_and_not_what_it_printed"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''    let said: String = ran.stderr.split_whitespace().collect::<Vec<_>>().join(" ");'''
+replace = '''    let said: String = ran.output().split_whitespace().collect::<Vec<_>>().join(" ");'''
+
+[[plant]]
+name = "kit renews logins: Claude Code saves a session of the renewal"
+meant = "claude_code_is_asked_for_one_word_in_its_print_mode_on_the_runs_model_and_nothing_else"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        "--no-session-persistence",
+'''
+replace = ''
+
+[[plant]]
+name = "kit renews logins: Pi saves a session of the renewal"
+meant = "pi_is_asked_for_one_word_in_its_print_mode_on_the_runs_model_and_nothing_else"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        "--no-session",
+        "--no-tools",'''
+replace = '''        "--no-tools",'''
+
+# ---------------------------------------------------------------------------- the case's own length (T-1066)
+
+[[plant]]
+name = "kit renews logins: a login must last the case's length and not its margin"
+meant = "a_login_must_last_the_cases_planned_length_and_the_margin_whatever_the_harness"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''    Duration::from_secs(planned.as_secs() + MARGIN.as_secs())'''
+replace = '''    planned'''
+
+[[plant]]
+name = "kit renews logins: Pi's login is asked for the run and not its margin"
+meant = "a_login_that_is_too_short_is_refused_before_anything_is_made_and_one_that_fits_the_run_is_not"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''Plan::pi(agent, providers, lasting(run))'''
+replace = '''Plan::pi(agent, providers, run)'''
+
+[[plant]]
+name = "kit renews logins: a case that says nothing of its length is planned for two hours"
+meant = "a_pi_login_with_forty_two_minutes_left_runs_a_case_of_ten_minutes_and_not_one_of_an_hour"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mod.rs"
+find = '''pub const PLANNED: Duration = Duration::from_secs(10 * 60);'''
+replace = '''pub const PLANNED: Duration = Duration::from_secs(2 * 60 * 60);'''
+
+[[plant]]
+name = "kit renews logins: a scope of a case forgets the length the case stated"
+meant = "a_case_is_planned_for_ten_minutes_unless_it_says_more_and_each_scope_of_it_says_the_same"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mod.rs"
+find = '''            left_out: Arc::clone(&self.left_out),
+            planned: self.planned,'''
+replace = '''            left_out: Arc::clone(&self.left_out),
+            planned: PLANNED,'''
+
+[[plant]]
+name = "kit renews logins: a case that states its length is planned for the default"
+meant = "a_case_is_planned_for_ten_minutes_unless_it_says_more_and_each_scope_of_it_says_the_same"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mod.rs"
+find = '''        Self { planned, ..self }'''
+replace = '''        let _ = planned;
+        self'''
+
+[[plant]]
+name = "kit renews logins: a refusal does not say the harness renews a login itself once it has ended"
+meant = "a_renewal_that_ran_and_failed_says_so_and_how"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''            (false, Some(after)) if after > now => format!('''
+replace = '''            (false, Some(after)) if after > i64::MAX => format!('''
+
+# ---------------------------------------------------------------------------- a copy that cannot renew (T-1067)
+#
+# Measured on zeewin2, 2026-11-01. Claude Code 2.1.316 runs on a copy with no refresh token, does not
+# look at its expiry (a copy that ended a minute ago ran), and fails with a 401 where the server refuses
+# the token; Pi 1.4.0 runs on one too, and where less than five minutes of the access token are left it
+# tries to renew, is refused (`invalid_grant`) and fails the run loudly, even in the middle of one.
+# Neither touched the owner's file (hashed before and after), and the owner's next run worked.
+
+[[plant]]
+name = "kit renews logins: Claude Code is given the refresh token in its copy"
+meant = "a_run_is_given_the_access_token_and_nothing_that_renews_it_and_the_machines_login_is_held_to_all_of_it"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        let copy = without_renewal(&oauth);'''
+replace = '''        let copy = oauth.clone();'''
+
+[[plant]]
+name = "kit renews logins: Claude Code is given when its refresh token ends"
+meant = "a_run_is_given_the_access_token_and_nothing_that_renews_it_and_the_machines_login_is_held_to_all_of_it"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''const RENEWING: [&str; 2] = ["refreshToken", "refreshTokenExpiresAt"];'''
+replace = '''const RENEWING: [&str; 2] = ["refreshToken", "refreshToken"];'''
+
+[[plant]]
+name = "kit renews logins: the machine's Claude login is held to the copy and not to what was read"
+meant = "a_run_is_given_the_access_token_and_nothing_that_renews_it_and_the_machines_login_is_held_to_all_of_it"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        touched.extend(self.owner_login_changed(&made.login));'''
+replace = '''        touched.extend(self.owner_login_changed(&made.oauth));'''
+
+[[plant]]
+name = "kit renews logins: Pi is given the refresh token in its copy"
+meant = "a_pi_run_is_given_the_access_token_and_no_refresh_token_and_the_owners_file_is_held_to_all_of_it"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''copied.insert(provider.to_owned(), without_renewal(&held[provider]));'''
+replace = '''copied.insert(provider.to_owned(), held[provider].clone());'''
+
+[[plant]]
+name = "kit renews logins: a Pi copy that was written is said to have used up the owner's refresh token"
+meant = "a_pi_run_is_given_the_access_token_and_no_refresh_token_and_the_owners_file_is_held_to_all_of_it"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        let hazard = if harness == Harness::Pi {'''
+replace = '''        let hazard = if harness == Harness::Pi && false {'''
+
+[[plant]]
+name = "kit renews logins: a login must last the case and thirty minutes"
+meant = "a_login_must_last_the_cases_planned_length_and_the_margin_whatever_the_harness"
+runs = ["planned-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''pub const MARGIN: Duration = Duration::from_secs(10 * 60);'''
+replace = '''pub const MARGIN: Duration = Duration::from_secs(30 * 60);'''
+
+[[plant]]
+name = "kit renews logins: a harness that ended badly is taken for one that did not renew"
+meant = "a_claude_code_that_ended_badly_after_it_renewed_its_login_has_renewed_it_and_the_run_goes_on"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        if let (Some(how), false) = (&renewed.ended, renewed.moved()) {'''
+replace = '''        if let Some(how) = &renewed.ended {'''
+
+[[plant]]
+name = "kit renews logins: a harness that ended badly and moved nothing is taken for one that renewed"
+meant = "a_harness_that_ended_badly_after_it_renewed_its_login_has_renewed_it_and_one_that_did_not_has_not"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        if let (Some(how), false) = (&renewed.ended, renewed.moved()) {'''
+replace = '''        if let (Some(how), true) = (&renewed.ended, renewed.moved()) {'''
+
+[[plant]]
+name = "kit renews logins: a harness that ended with a status is taken for one that ended well"
+meant = "a_harness_that_ended_badly_says_how_in_what_it_said_and_not_what_it_printed"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''    if ran.code == Some(0) {'''
+replace = '''    if ran.code.is_some() {'''

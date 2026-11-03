@@ -264,6 +264,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             command: &command,
             env: &env,
             node: r"C:\Program Files\nodejs",
+            machine: "zeewin",
             limits: None,
         })
     );
@@ -302,6 +303,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             command: &command,
             env: &env,
             node: r"C:\Program Files\nodejs",
+            machine: "zeewin",
             limits: None,
         })
     );
@@ -366,6 +368,43 @@ fn asked(log: &[String], host: &str) -> Vec<String> {
 }
 
 #[test]
+fn a_run_gives_its_command_the_name_of_the_machine_it_is_sent_to() {
+    // The one signal the live kit has that it was started by this runner, on a machine to test
+    // on (T-1067): each machine's own name, and a host the runner reaches as zeewin is, as it
+    // was named.
+    let options = Options {
+        machine: None,
+        build: false,
+        dir: DEFAULT_DIR.into(),
+        inside: ".".into(),
+        env: Vec::new(),
+        command: vec![
+            "cargo".into(),
+            "xtask".into(),
+            "live".into(),
+            "login".into(),
+        ],
+        wait: 0,
+    };
+    for machine in [
+        Machine::named("zeewin2").unwrap(),
+        Machine::named("zeewin").unwrap(),
+        Machine::at("lab-pc"),
+    ] {
+        let plan = Plan::new(&machine, &options, "0000abcd-12345678").unwrap();
+        assert!(
+            plan.script.contains(&format!(
+                "$env:CONSENSFLOW_TEST_MACHINE = '{}'\n",
+                machine.name
+            )),
+            "{}: {}",
+            machine.name,
+            plan.script
+        );
+    }
+}
+
+#[test]
 fn a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_ci_s_node() {
     let rig = Rig::new();
     rig.program("scp", SENDS);
@@ -413,6 +452,7 @@ fn a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_ci_s_no
         command: &command,
         env: &env,
         node: r"$env:USERPROFILE\cf-tools\node",
+        machine: "zeewin2",
         limits: None,
     };
     assert_eq!(script_of(encoded), remote_script(&script));

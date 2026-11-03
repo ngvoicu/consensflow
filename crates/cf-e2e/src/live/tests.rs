@@ -418,3 +418,21 @@ fn a_run_that_left_a_harness_out_says_so_in_its_report() {
         "what each step came to"
     );
 }
+
+#[test]
+fn a_case_is_planned_for_ten_minutes_unless_it_says_more_and_each_scope_of_it_says_the_same() {
+    // T-1066: Pi's `openai` login was refused at 42 minutes left for a case of about ten minutes,
+    // because every case was held to a fixed two hours. A case now states its length, and the
+    // logins of its harnesses must last that and the margin.
+    assert_eq!(PLANNED, Duration::from_secs(10 * 60));
+    let log = Log::new("live x");
+    assert_eq!(log.planned, PLANNED);
+    assert_eq!(log.scoped("claude").planned, PLANNED);
+    let longer = Duration::from_secs(90 * 60);
+    let approval = log.lasting(longer);
+    assert_eq!(approval.planned, longer);
+    assert_eq!(approval.scoped("pi").planned, longer);
+    // The run that begins on the shared models is planned the same way.
+    let begun = Log::begun("live x", Ok(agents::parse(None, None).unwrap())).unwrap();
+    assert_eq!(begun.planned, PLANNED);
+}

@@ -134,7 +134,7 @@ impl Members {
             .map(|harness| {
                 let found = log.found(*harness)?;
                 match &plan.homes_in {
-                    Some(folder) => found.with_homes_in(folder),
+                    Some(folder) => found.with_homes_in(folder, log.planned),
                     None => Ok(found),
                 }
             })

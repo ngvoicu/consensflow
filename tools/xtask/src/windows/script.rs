@@ -37,6 +37,13 @@ use super::machine::Limits;
 /// `== <step>` are.
 pub const EXIT_MARK: &str = "== exit ";
 
+/// The variable the run script gives the process, with the name of the machine as the runner calls
+/// it (`zeewin2`): the one signal that a program on a Windows machine was started by this runner,
+/// there to test on. Nothing else sets it: no machine's own shell does, and a Mac has no runner to.
+/// The live kit renews the logins of Claude Code and Pi on a machine that has it, and nowhere else
+/// (T-1067, `cf-e2e`'s `live::renew`, which spells the same name).
+pub const TEST_MACHINE: &str = "CONSENSFLOW_TEST_MACHINE";
+
 /// The list of what went over, kept beside it there, so the next run knows what left the tree.
 pub const SYNCED: &str = ".synced-files";
 
@@ -333,6 +340,10 @@ pub struct Script<'a> {
     /// The folder of the Node the run puts first on its PATH, in PowerShell's words
     /// ([`super::machine::Machine::node`]).
     pub node: &'a str,
+    /// What the runner calls the machine ([`super::machine::Machine::name`]): the run script
+    /// gives the command [`TEST_MACHINE`] with it, which is how a program on the machine
+    /// knows it was started by this runner, on a machine that is the runner's to test on.
+    pub machine: &'a str,
     /// What the machine takes at once, if less than all it has ([`Limits`]).
     pub limits: Option<Limits>,
 }
@@ -415,6 +426,8 @@ pub fn run_script(script: &Script) -> String {
             ("node", script.node),
             ("in_job", IN_JOB),
             ("command_file", COMMAND_FILE),
+            ("test_machine", TEST_MACHINE),
+            ("machine", &quoted(script.machine)),
             ("limits", &limits_of(script.limits)),
             ("steps", &steps.join(", ")),
             ("prepare", &prepare.join(", ")),
@@ -701,6 +714,8 @@ $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorA
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir
 $ErrorActionPreference = 'Continue'
+$env:«test_machine» = «machine»
+Write-Output "== test machine: $env:«test_machine»"
 «limits»foreach ($step in @(«steps»)) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"

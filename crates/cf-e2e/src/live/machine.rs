@@ -31,9 +31,11 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
-use super::isolation::Isolation;
+use super::isolation::{lasting, Isolation};
 use super::login::Login;
+use super::PLANNED;
 use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config, HarnessHome};
 use crate::{checkout, files, Error, Result};
@@ -195,10 +197,10 @@ impl Installed {
     }
 
     /// This harness, whose home of the run's own, if it has one, is made in `folder` as
-    /// `folder` spells it ([`Isolation::made_in`]).
-    pub fn with_homes_in(mut self, folder: &Path) -> Result<Self> {
+    /// `folder` spells it ([`Isolation::made_in`]), for a run that takes `planned`.
+    pub fn with_homes_in(mut self, folder: &Path, planned: Duration) -> Result<Self> {
         if self.isolation.is_some() {
-            self.isolation = Isolation::of_machine(self.harness, &self.home)?
+            self.isolation = Isolation::of_machine_lasting(self.harness, &self.home, planned)?
                 .map(|isolation| Arc::new(isolation.made_in(folder)));
         }
         Ok(self)
@@ -624,8 +626,16 @@ pub fn rig_with_stand_ins(
 
 /// The machine's `harness`, found as a person's shell finds it, with the home
 /// its login is read from. A machine without it, or without the home it logs
-/// in at, is an error that says what to do.
+/// in at, is an error that says what to do. The logins it runs on must last a case
+/// of the length [`PLANNED`] and its margin; a case that is longer says so
+/// ([`installed_for`], [`Log::lasting`](super::Log::lasting)).
 pub fn installed(harness: Harness) -> Result<Installed> {
+    installed_for(harness, PLANNED)
+}
+
+/// [`installed`], for a case planned to take `planned`: the logins its windows run on must
+/// last that much and [`super::isolation::MARGIN`] when the home is made, or the run is refused.
+pub fn installed_for(harness: Harness, planned: Duration) -> Result<Installed> {
     let name = harness.name();
     let command = command(name)?;
     let home = home_of(
@@ -645,7 +655,7 @@ pub fn installed(harness: Harness) -> Result<Installed> {
     if !has_login(&places) {
         return Err(no_login(harness, &places));
     }
-    let installed = with_homes(Installed::at(harness, command, home))?;
+    let installed = with_homes(Installed::at(harness, command, home), planned)?;
     // A machine with no Node has a harness that needs none (a native one).
     Ok(match command_folder("node") {
         Some(node) => installed.with_node(node),
@@ -658,12 +668,14 @@ pub fn installed(harness: Harness) -> Result<Installed> {
 /// with a copy of the login and none of the person's other files, and the person's setup
 /// checked when the run is over. Every harness found goes through here, so that no live
 /// case has to make one, or can forget to.
-fn with_homes(mut installed: Installed) -> Result<Installed> {
+fn with_homes(mut installed: Installed, planned: Duration) -> Result<Installed> {
     let harness = installed.harness;
-    if let Some(login) = Login::of_machine().filter(|_| harness == Harness::Claude) {
+    if let Some(login) =
+        Login::of_machine_lasting(lasting(planned)).filter(|_| harness == Harness::Claude)
+    {
         installed = installed.with_claude_config(Arc::new(login));
     }
-    if let Some(isolation) = Isolation::of_machine(harness, installed.home())? {
+    if let Some(isolation) = Isolation::of_machine_lasting(harness, installed.home(), planned)? {
         installed = installed.with_isolation(Arc::new(isolation));
     }
     Ok(installed)

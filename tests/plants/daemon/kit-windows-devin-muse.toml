@@ -1,0 +1,251 @@
+# The live kit gives Devin and Muse Code a home of the run's own on Windows (T-1084). Until then the
+# kit had no row for them there (`Harness::Devin | Harness::Muse => None`), so a live case that
+# seated either on a Windows machine ran on the owner's own folders: Devin's config, its sessions and
+# the folders it trusts. One plant takes one rule out; a test of it fails. The tests are path arithmetic
+# over a profile laid out as Windows lays it (`live/isolation/windows.rs`), so a Mac catches them; the
+# arms that pick a plan by the system are caught on Windows alone. Every name holds `kit windows`.
+#
+# Devin's rules, found on zeewin2 with test files only: it ignores the XDG variables and `APPDATA`, and
+# the system's known folders it finds its own by expand `%USERPROFILE%` from the window's environment
+# (and fail with "path not found" where the folders below it are missing); the daemon reads Devin's
+# sessions by `APPDATA` first.
+
+[run]
+windows-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::windows::"]
+isolation-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::"]
+
+# ---------------------------------------------------------------------------- Devin: the variables
+
+[[plant]]
+name = "kit windows: Devin's window keeps the owner's profile, which is where it finds its folders"
+meant = "a_devin_run_on_windows_is_given_a_profile_of_its_own_and_the_three_variables_that_name_it"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                ("USERPROFILE", profile),
+'''
+replace = ''''''
+
+[[plant]]
+name = "kit windows: the daemon reads Devin's sessions in the owner's Roaming folder"
+meant = "a_devin_run_on_windows_is_given_a_profile_of_its_own_and_the_three_variables_that_name_it"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                ("APPDATA", roaming.clone()),
+'''
+replace = ''''''
+
+[[plant]]
+name = "kit windows: Devin's cache is the owner's Local folder"
+meant = "a_devin_run_on_windows_is_given_a_profile_of_its_own_and_the_three_variables_that_name_it"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                ("LOCALAPPDATA", local),
+'''
+replace = ''''''
+
+[[plant]]
+name = "kit windows: the profile's AppData folders are not made, and the known-folder call fails"
+meant = "a_devin_run_on_windows_is_given_a_profile_of_its_own_and_the_three_variables_that_name_it"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            folders: vec![roaming.clone(), local.clone()],'''
+replace = '''            folders: Vec::new(),'''
+
+[[plant]]
+name = "kit windows: Devin's variables take HOME from the person"
+meant = "a_devin_run_on_windows_keeps_the_owners_home_for_what_reads_it_by_home"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                ("USERPROFILE", profile),
+'''
+replace = '''                ("HOME", profile.clone()),
+                ("USERPROFILE", profile),
+'''
+
+# ---------------------------------------------------------------------------- Devin: what is copied
+
+[[plant]]
+name = "kit windows: a run with no Devin login on the machine goes on"
+meant = "a_devin_login_that_is_not_there_stops_the_run_naming_the_file_before_anything_is_made"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                    to: roaming.join("devin").join("credentials.toml"),
+                    login: true,'''
+replace = '''                    to: roaming.join("devin").join("credentials.toml"),
+                    login: false,'''
+
+[[plant]]
+name = "kit windows: a run with no Devin config on the machine stops"
+meant = "a_devin_config_that_is_not_there_is_no_reason_to_stop"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                    to: roaming.join("devin").join("config.json"),
+                    login: false,'''
+replace = '''                    to: roaming.join("devin").join("config.json"),
+                    login: true,'''
+
+[[plant]]
+name = "kit windows: Devin's config is not copied to the run's Roaming folder"
+meant = "a_devin_run_on_windows_copies_its_login_and_config_to_the_roaming_folder_and_nothing_else"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                    to: roaming.join("devin").join("config.json"),'''
+replace = '''                    to: roaming.join("devin-config").join("config.json"),'''
+
+[[plant]]
+name = "kit windows: Devin's login is copied to a folder Devin does not read"
+meant = "a_devin_run_on_windows_copies_its_login_and_config_to_the_roaming_folder_and_nothing_else"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                    to: roaming.join("devin").join("credentials.toml"),'''
+replace = '''                    to: roaming.join("devin-login").join("credentials.toml"),'''
+
+# ---------------------------------------------------------------------------- Devin: what is watched
+
+[[plant]]
+name = "kit windows: the owner's Devin login is not watched"
+meant = "a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            watched: vec![
+                owner.join("credentials.toml"),
+                owner.join("config.json"),
+                owner.join("cli").join("trusted_workspaces.json"),
+            ],'''
+replace = '''            watched: vec![
+                owner.join("config.json"),
+                owner.join("cli").join("trusted_workspaces.json"),
+            ],'''
+
+[[plant]]
+name = "kit windows: the owner's Devin config is not watched"
+meant = "a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            watched: vec![
+                owner.join("credentials.toml"),
+                owner.join("config.json"),
+                owner.join("cli").join("trusted_workspaces.json"),
+            ],'''
+replace = '''            watched: vec![
+                owner.join("credentials.toml"),
+                owner.join("cli").join("trusted_workspaces.json"),
+            ],'''
+
+[[plant]]
+name = "kit windows: the folders the owner's Devin trusts are not watched"
+meant = "a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it"
+runs = ["windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            watched: vec![
+                owner.join("credentials.toml"),
+                owner.join("config.json"),
+                owner.join("cli").join("trusted_workspaces.json"),
+            ],'''
+replace = '''            watched: vec![owner.join("credentials.toml"), owner.join("config.json")],'''
+
+# ---------------------------------------------------------------------------- Devin: the arm (Windows)
+
+[[plant]]
+name = "kit windows: Devin has no home of the run's own on Windows again"
+meant = "on_windows_devin_has_a_home_of_the_runs_own_made_from_the_machines_roaming_folder"
+runs = ["windows-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                Some(Self::devin_on_windows(home, &roaming))'''
+replace = '''                let _ = roaming;
+                None'''
+
+[[plant]]
+name = "kit windows: Devin's home is copied from the profile's Roaming folder, not the machine's APPDATA"
+meant = "on_windows_devin_has_a_home_of_the_runs_own_made_from_the_machines_roaming_folder"
+runs = ["windows-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                let roaming = machine("APPDATA")
+                    .map_or_else(|| home.join("AppData").join("Roaming"), PathBuf::from);'''
+replace = '''                let roaming = home.join("AppData").join("Roaming");'''
+
+# ---------------------------------------------------------------------------- what a run says (Windows)
+
+[[plant]]
+name = "kit windows: a path below the owner's home is said with the system's separator"
+meant = "a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it"
+runs = ["windows-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/watch.rs"
+find = '''            format!("~/{}", parts.join("/"))'''
+replace = '''            format!("~/{}", below.display())'''
+
+# ---------------------------------------------------------------------------- Muse: the arm
+
+[[plant]]
+name = "kit windows: Muse has no home of the run's own to watch again"
+meant = "every_harness_the_kit_can_launch_has_a_home_of_the_runs_own_or_a_reason_it_has_none"
+runs = ["isolation-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            Harness::Muse => Some(Self::muse(
+                home,
+                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+            )),'''
+replace = '''            Harness::Muse => None,'''
+
+[[plant]]
+name = "kit windows: Muse has no home on Windows, as a Windows-only test finds"
+meant = "every_harness_the_kit_can_launch_on_windows_has_a_home_of_the_runs_own_or_a_reason_it_has_none"
+runs = ["windows-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            Harness::Muse => Some(Self::muse(
+                home,
+                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+            )),'''
+replace = '''            Harness::Muse => None,'''
+
+[[plant]]
+name = "kit windows: Muse's session index is not among the owner's files watched"
+meant = "on_windows_muse_watches_the_owners_login_settings_trust_and_session_index"
+runs = ["windows-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                data.join("muse").join("session-index.db"),
+'''
+replace = ''''''
