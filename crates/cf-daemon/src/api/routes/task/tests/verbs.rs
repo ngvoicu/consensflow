@@ -6,7 +6,6 @@
 //! answers went with Node's API).
 
 use cf_base::refusal::Refusal;
-use cf_ledger::NewTask;
 use hyper::Method;
 use serde_json::json;
 
@@ -722,93 +721,4 @@ async fn the_chief_replaces_the_brief_of_a_task_no_window_has_and_is_refused_for
         )
     );
     assert_eq!(scene.kicks.get(), kicks);
-}
-
-/// The stage of the board (T-798): an open task, and one that waits for it.
-fn a_stage_and_a_task_that_waits_for_it(scene: &crate::testing::Scene) -> (i64, i64) {
-    let stage = open_task(scene);
-    let waiter = scene
-        .context
-        .ledger
-        .borrow_mut()
-        .create_task(
-            scene.project.id,
-            &NewTask {
-                from: "chief".to_owned(),
-                pool: Some("worker".to_owned()),
-                tier: Some("standard".to_owned()),
-                body: "Parser".to_owned(),
-                needs: vec![u64::try_from(stage).unwrap()],
-                ..NewTask::default()
-            },
-        )
-        .unwrap()
-        .task
-        .number;
-    (stage, waiter)
-}
-
-#[tokio::test]
-async fn the_chief_lets_a_task_go_of_the_one_it_waits_for_and_a_member_may_not() {
-    let scene = scene();
-    let (stage, waiter) = a_stage_and_a_task_that_waits_for_it(&scene);
-    let said = post(&scene, &scene.zeus, &format!("{waiter}/release"), "{}").await;
-    assert_eq!(
-        refused(&said),
-        (
-            403,
-            "not-a-coordinator",
-            format!("only the chief or @chief may release T-{waiter}").as_str()
-        )
-    );
-    assert_eq!(scene.kicks.get(), 0);
-
-    let body = json!({ "from": stage }).to_string();
-    let said = post(&scene, &scene.chief, &format!("{waiter}/release"), &body).await;
-    assert_eq!(said.0, 200, "{:?}", said.1);
-    assert_eq!(said.1["from"], json!([stage]));
-    assert_eq!(said.1["task"]["blockedBy"], json!([]));
-    assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken once");
-    assert_eq!(state_of(&scene, stage), "open", "the stage is as it was");
-}
-
-#[tokio::test]
-async fn a_release_with_no_task_named_lets_go_of_all_and_a_from_that_is_no_number_is_refused() {
-    let scene = scene();
-    let (stage, waiter) = a_stage_and_a_task_that_waits_for_it(&scene);
-    for written in [
-        r#"{"from":"T-1"}"#,
-        r#"{"from":0}"#,
-        r#"{"from":-2}"#,
-        r#"{"from":2.5}"#,
-        r#"{"from":true}"#,
-    ] {
-        let said = post(&scene, &scene.chief, &format!("{waiter}/release"), written).await;
-        assert_eq!(
-            refused(&said),
-            (400, "invalid-from", "from is the number of a task (T-3)"),
-            "{written}"
-        );
-    }
-    assert_eq!(scene.kicks.get(), 0);
-    // A task that does not wait for the one named is refused in the ledger's words.
-    let said = post(
-        &scene,
-        &scene.chief,
-        &format!("{waiter}/release"),
-        r#"{"from":99}"#,
-    )
-    .await;
-    assert_eq!(
-        refused(&said),
-        (
-            409,
-            "not-waiting",
-            format!("T-{waiter} does not wait for T-99; it waits for T-{stage}").as_str()
-        )
-    );
-    // None named: everything it waits for.
-    let said = post(&scene, &scene.chief, &format!("{waiter}/release"), "{}").await;
-    assert_eq!(said.0, 200, "{:?}", said.1);
-    assert_eq!(said.1["from"], json!([stage]));
 }

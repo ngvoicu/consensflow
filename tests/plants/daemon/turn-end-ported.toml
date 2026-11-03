@@ -71,7 +71,7 @@ runs = ["tep-turn-end-finish-cf-goldens"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "use add, list, get, done, accept, reopen, edit, cancel, pause, resume, finish or release"
+find = "use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish"
 replace = "use add, list, get, done, accept, reopen, edit, cancel, pause or resume"
 
 [[plant]]
@@ -81,7 +81,7 @@ runs = ["tep-turn-end-finish-daemon-api"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "use add, list, get, done, accept, reopen, edit, cancel, pause, resume, finish or release"
+find = "use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish"
 replace = "use add, list, get, done, accept, reopen, edit, cancel, pause or resume"
 
 [[plant]]

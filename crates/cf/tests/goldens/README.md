@@ -145,19 +145,6 @@ case's own first word (`T-3 is on the board …` gives `T-3`), and nothing else 
 The daemon's traces changed with them, by hand and in the same words alone
 (`crates/cf-daemon/tests/goldens/README.md`).
 
-## `cf task release` (T-798)
-
-Board task T-957 (3.0.7, from T-798) added `cf task release T-3 [--from T-1]`: a task that waits
-for others goes on early, without T-1, or without any task it waits for. The usage names it in
-one line, `  cf task release T-3 [--from T-1]  let a waiting task go on early: without T-1, or
-without any task it waits for`, which follows the line of `cf task resume`: the six prints of
-`board.json` that hold the usage (`cf`, `cf help`, `cf --help`, `cf -h --json`, `cf task --help`
-and `cf task help`; the fifth is the usage inside the JSON of `--json`) have it, as
-`crates/cf/src/board/usage.txt` has it. The sentence `cf` says of a task command it does not know
-(`unknown task command "frobnicate": use add, list, get, done, accept, reopen, edit, cancel,
-pause, resume, finish or release`) names it too. Changed by hand, in those words alone. The
-daemon's traces hold no `cf task release` line, and `cf-board-028` and `-029` depart already.
-
 The line of a task given to a window says what it waits for (`T-7 [open] blocked by T-1, T-2 ·
 @chief ← @chief: …`), as the line of a task for a tier did (T-957, from T-798). No case of
 `board.json` prints such a line, so none changed; the daemon's trace `cf-board-021` did.

@@ -2,8 +2,8 @@
 
 use super::Ledger;
 use crate::{
-    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskLetGo, TaskMoved, TaskReleased,
-    TaskThread, TaskView,
+    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskMoved, TaskReleased, TaskThread,
+    TaskView,
 };
 
 impl Ledger {
@@ -34,18 +34,6 @@ impl Ledger {
         because: &str,
     ) -> Result<TaskReleased, LedgerError> {
         tasks::release_task(&mut self.store, project_id, number, because)
-    }
-
-    /// A task that waits for others is let go of what it waits for (`from`, one of
-    /// them, or all that are not accepted) by the chief or the human, `by`.
-    pub fn let_go(
-        &mut self,
-        project_id: i64,
-        number: i64,
-        by: &str,
-        from: Option<i64>,
-    ) -> Result<TaskLetGo, LedgerError> {
-        tasks::let_go(&mut self.store, project_id, number, by, from)
     }
 
     /// The engine holds a queued follow-up that cannot go on in the conversation of the task it

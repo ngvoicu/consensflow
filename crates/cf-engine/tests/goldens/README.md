@@ -57,8 +57,3 @@ it, and resume it once the new task is accepted; or cancel it and add it again w
 where it said `finish it, or cancel it and add it again with the need`. The refusal of
 `--before` for such a task says the same (`crates/cf-ledger/src/tasks/giving.rs`). Changed by
 hand, in those words alone, in the twelve role prints of `text.json` that hold the chief's text.
-
-The chief's role text lists `cf task release T-3 [--from T-1]` (board task T-957, 3.0.7, from
-T-798): `let a waiting task go on early, without T-1 or any task it waits for`, one line after
-`cf task resume`. Changed by hand, in that line alone, in the twelve role prints of `text.json`
-that hold the chief's text.

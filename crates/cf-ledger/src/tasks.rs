@@ -4,15 +4,13 @@
 //! and resumed (`pausing`); finished with a result and accepted, sent back,
 //! cancelled, failed, and deleted from the board by the human (`finishing`),
 //! the chief's own step by its word (`own_steps`); their briefs replaced before
-//! a window has them (`editing`); let go of what they wait for before it is
-//! accepted (`releasing`); and read with their threads.
+//! a window has them (`editing`); and read with their threads.
 
 mod editing;
 mod finishing;
 mod giving;
 mod own_steps;
 mod pausing;
-mod releasing;
 
 use cf_proto::ledger::{TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
