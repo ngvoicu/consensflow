@@ -14,6 +14,7 @@ friction-cancel = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "c
 friction-last-need = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "edit_last_need"]
 friction-hold-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "hold_for_context"]
 friction-hold-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "exit_proof::"]
+friction-hold-given = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::"]
 
 # --- T-689: the last line of a reply names its task ---
 
@@ -245,8 +246,18 @@ runs = ["friction-hold-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/ownership.rs"
-find = '        if waiting.task.state == "queued" {'
+find = '        if waiting.task.state == "queued" && never_in_a_window {'
 replace = '        if false {'
+
+[[plant]]
+name = "board friction: hold: a task a window had is held again"
+meant = "the_chief_s_commands_as_its_note_words_them_resume_a_session_of_two_one_at_a_time"
+runs = ["friction-hold-given"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '        if waiting.task.state == "queued" && never_in_a_window {'
+replace = '        if waiting.task.state == "queued" {'
 
 [[plant]]
 name = "board friction: hold: a task the chief sent on is held a second time"
