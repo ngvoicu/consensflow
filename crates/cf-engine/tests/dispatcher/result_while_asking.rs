@@ -411,13 +411,15 @@ fn a_report_that_ends_asking_whether_to_go_on_is_kept_when_the_turn_worked_on() 
 }
 
 /// A question ConsensFlow raised from the turn's last words (T-1119) is on the board with
-/// those words: the result does not give them again.
+/// those words: the result does not give them again, though the turn worked and wrote more
+/// than a line.
 #[test]
 fn a_question_raised_from_a_turns_last_words_is_not_given_again_in_the_result() {
     let context = Context::new();
     let tiers = working(&context);
-    let words = "Both hosts are measured; the A/B runs are half done. Should I continue with the live runs, or stop here?";
-    context.adapter.answer("zeus", words);
+    works_on(&context);
+    let words = format!("{WRITE_UP}\n\nShould I continue with the live runs, or stop here?");
+    context.adapter.answer("zeus", &words);
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "waiting");
     let raised = context
@@ -425,6 +427,7 @@ fn a_question_raised_from_a_turns_last_words_is_not_given_again_in_the_result() 
         .into_iter()
         .find(|message| message.kind == "question")
         .expect("the question ConsensFlow raised");
+    assert!(raised.body.starts_with(&words), "{}", raised.body);
 
     context.answer(tiers.project.id, raised.id, "Stop here.");
     context.pass().unwrap();
@@ -438,6 +441,123 @@ fn a_question_raised_from_a_turns_last_words_is_not_given_again_in_the_result() 
     assert_eq!(
         results(&context, &tiers),
         ["Stopped; the findings are in the report."]
+    );
+}
+
+/// The turn was cut off before the answer went in (its last words are not complete: Claude
+/// Code marks the text of a turn it was stopped in so): those are no one's last words.
+#[test]
+fn a_turn_cut_off_before_the_answer_went_in_leaves_no_words_in_the_result() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let question = asks(&context, &tiers, "disk notice, no answer needed");
+    works_on(&context);
+    let mut cut = context.adapter.item(Role::Assistant, "Half of a thou");
+    cut.complete = false;
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(cut);
+        agent.settled = true;
+    });
+    answers(&context, &tiers, &question, "Noted.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", REPLY);
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(results(&context, &tiers), [REPLY]);
+}
+
+/// A turn that wrote no words (it ended on a tool's output) has none to give.
+#[test]
+fn a_turn_that_wrote_no_words_before_the_answer_adds_none_to_the_result() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let question = asks(&context, &tiers, "disk notice, no answer needed");
+    works_on(&context);
+    context.adapter.answer("zeus", "  \n ");
+    context.pass().unwrap();
+    answers(&context, &tiers, &question, "Noted.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", REPLY);
+    context.pass().unwrap();
+
+    assert_eq!(results(&context, &tiers), [REPLY]);
+}
+
+/// Where the line is drawn: a line about the question is at most 500 characters (the longest
+/// of six measured in recorded transcripts was 249), and one character more is words.
+#[test]
+fn a_line_after_the_ask_is_a_line_about_it_up_to_500_characters_and_words_past_them() {
+    for (length, kept) in [(500, false), (501, true)] {
+        let context = Context::new();
+        let tiers = working(&context);
+        let question = asks(&context, &tiers, "Which grammar?");
+        let line = "a".repeat(length);
+        context.adapter.answer("zeus", &line);
+        context.pass().unwrap();
+        answers(&context, &tiers, &question, "The second.");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        context.adapter.answer("zeus", REPLY);
+        context.pass().unwrap();
+
+        let expected = if kept {
+            with_write_up(&question, &line, REPLY)
+        } else {
+            REPLY.to_owned()
+        };
+        assert_eq!(results(&context, &tiers), [expected], "{length}");
+    }
+}
+
+/// A turn that ran no tool asked nothing: a short line in it is about the question all the same
+/// (a record whose tool outputs a harness did not write, or a test's), not words of a report.
+#[test]
+fn a_short_line_in_a_turn_that_ran_no_tool_is_not_in_front_of_the_result() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let question = context.ask(tiers.project.id, &tiers.assignee(1), "chief", 1, "Which?");
+    context.adapter.answer("zeus", "I still need the format");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    answers(&context, &tiers, &question, "JSON");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", REPLY);
+    context.pass().unwrap();
+
+    assert_eq!(results(&context, &tiers), [REPLY]);
+}
+
+/// The same words at the end of two turns are given once.
+#[test]
+fn the_same_words_ending_two_turns_with_a_question_out_are_given_once() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let first = asks(&context, &tiers, "Which grammar?");
+    works_on(&context);
+    context.adapter.answer("zeus", WRITE_UP);
+    context.pass().unwrap();
+    answers(&context, &tiers, &first, "The second.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+
+    let second = asks(&context, &tiers, "Which folder?");
+    works_on(&context);
+    context.adapter.answer("zeus", WRITE_UP);
+    context.pass().unwrap();
+    answers(&context, &tiers, &second, "The first.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", REPLY);
+    context.pass().unwrap();
+
+    assert_eq!(
+        results(&context, &tiers),
+        [with_write_up(&first, WRITE_UP, REPLY)]
     );
 }
 

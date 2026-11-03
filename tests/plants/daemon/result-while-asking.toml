@@ -1,0 +1,232 @@
+# A worker's result is not lost because a question of its was still out when its turn ended (T-1204,
+# from the field board's T-837 of 2026-10-28; the triage T-1201 found it again as T-846). T-837's worker
+# asked the chief a question that needed no answer (`cf ask`) and went on in the same turn; its task read
+# `waiting`. The turn ended with a 5.8 KB write-up on a task that was not working, which takes no result,
+# the answer went in after it, and the turn it began ended with five lines that became the result.
+#
+# The rule (`crates/cf-engine/src/turn_end/while_asking.rs`), applied where a result is recorded: by the
+# turn's end (`Dispatcher::collect`, `turn_end.rs`) and by Finish (`turn_end/finish.rs`). The turns that
+# ended right before the paste of an answer to one of the worker's own questions on the task, after the
+# latest message of the task's own, come first in the result, each labelled "Written before the answer to
+# its question m-N went in:", and the last words follow "What it said last:". Not kept: a turn cut off, one
+# that wrote no words, one that ended on its question (the last output of a tool is `cf ask`'s own, or it ran
+# none) in at most 500 characters, the question ConsensFlow raised from the words, and a repeat. The text
+# `cf ask` prints is `cf-proto`'s, and the engine reads it.
+#
+# Each plant takes one rule out again. The names begin with `result while asking`, so
+# `cargo xtask plants daemon "result while asking"` runs them.
+
+[run]
+rwa-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "result_while_asking::"]
+rwa-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_workers_write_up_was_lost_when_its_question_was_still_out"]
+rwa-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
+
+[[plant]]
+name = "result while asking: the turn's end records the result without the turns that ended with a question out"
+meant = "a_write_up_that_ended_the_turn_with_the_workers_question_out_is_in_the_result_before_the_reply"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        let words = with_earlier(words, &earlier);
+'''
+replace = '''        let _ = &earlier;
+'''
+
+[[plant]]
+name = "result while asking: the rig's worker that asked and went on has the reply alone for its result"
+meant = "a_write_up_the_turn_ended_with_while_the_question_was_out_is_in_the_result_before_the_reply"
+runs = ["rwa-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        let words = with_earlier(words, &earlier);
+'''
+replace = '''        let _ = &earlier;
+'''
+
+[[plant]]
+name = "result while asking: Finish takes the last words without the turns that ended with a question out"
+meant = "the_chief_finishing_the_held_reply_to_an_answer_gives_the_write_up_too"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '''        let words = with_earlier(
+            with_lost(words_of(&run), &participant.handle, lost),
+            &earlier,
+        );
+'''
+replace = '''        let _ = &earlier;
+        let words = with_lost(words_of(&run), &participant.handle, lost);
+'''
+
+[[plant]]
+name = "result while asking: the words of a round before the latest message of the task are kept too"
+meant = "a_write_up_from_before_the_words_that_resumed_the_task_is_not_in_its_result"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''                        floor = floor.max(Some(at));
+'''
+replace = '''                        let _ = at;
+                        floor = floor.max(Some(0));
+'''
+
+[[plant]]
+name = "result while asking: a turn that was cut off is kept"
+meant = "a_turn_cut_off_before_the_answer_went_in_leaves_no_words_in_the_result"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''                .filter(|turn| turn.last.is_some_and(|item| item.complete))
+'''
+replace = '''                .filter(|turn| turn.last.is_some())
+'''
+
+[[plant]]
+name = "result while asking: a turn that wrote no words is kept"
+meant = "a_turn_that_wrote_no_words_before_the_answer_adds_none_to_the_result"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''            if words == WITHOUT_ANSWER
+'''
+replace = '''            if (false && words == WITHOUT_ANSWER)
+'''
+
+[[plant]]
+name = "result while asking: the words the result is are given twice"
+meant = "a_reply_that_repeats_the_write_up_is_not_given_twice"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''                || words == last
+'''
+replace = '''                || (false && words == last)
+'''
+
+[[plant]]
+name = "result while asking: a line about the question is kept in front of the result"
+meant = "a_line_about_the_question_in_any_words_is_not_in_front_of_the_result"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''                ended_on_asking(&before[began..]) && words.chars().count() <= WRAPPER_CHARS;
+'''
+replace = '''                false && ended_on_asking(&before[began..]) && words.chars().count() <= WRAPPER_CHARS;
+'''
+
+[[plant]]
+name = "result while asking: a long report after a notice that was the last tool is taken for a line about the question"
+meant = "a_long_write_up_after_a_notice_that_was_the_last_tool_is_kept"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''                ended_on_asking(&before[began..]) && words.chars().count() <= WRAPPER_CHARS;
+'''
+replace = '''                ended_on_asking(&before[began..]);
+'''
+
+[[plant]]
+name = "result while asking: the line about the question may be one character longer"
+meant = "a_line_after_the_ask_is_a_line_about_it_up_to_500_characters_and_words_past_them"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''words.chars().count() <= WRAPPER_CHARS;
+'''
+replace = '''words.chars().count() <= WRAPPER_CHARS + 1;
+'''
+
+[[plant]]
+name = "result while asking: a turn that went on after its question ended on it"
+meant = "a_turn_that_went_on_after_asking_keeps_its_words_though_they_are_short"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''        .is_none_or(|last| last.text.contains(ASKED_THEN_END_THE_TURN))
+'''
+replace = '''        .is_none_or(|_| true)
+'''
+
+[[plant]]
+name = "result while asking: a turn that ran no tool did not end on its question"
+meant = "a_short_line_in_a_turn_that_ran_no_tool_is_not_in_front_of_the_result"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''        .is_none_or(|last| last.text.contains(ASKED_THEN_END_THE_TURN))
+'''
+replace = '''        .is_some_and(|last| last.text.contains(ASKED_THEN_END_THE_TURN))
+'''
+
+[[plant]]
+name = "result while asking: the question ConsensFlow raised from a turn's words is not on the board"
+meant = "a_question_raised_from_a_turns_last_words_is_not_given_again_in_the_result"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''                    && message.body == raised
+'''
+replace = '''                    && message.body == "not on the board"
+'''
+
+[[plant]]
+name = "result while asking: the same words of two turns are given twice"
+meant = "the_same_words_ending_two_turns_with_a_question_out_are_given_once"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''                || earlier.iter().any(|kept| kept.words == words)
+'''
+replace = '''                || (false && earlier.iter().any(|kept| kept.words == words))
+'''
+
+[[plant]]
+name = "result while asking: the turns are given newest first"
+meant = "the_write_ups_of_two_turns_that_ended_with_a_question_out_come_in_order"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''            earlier.push(Earlier { question, words });
+'''
+replace = '''            earlier.insert(0, Earlier { question, words });
+'''
+
+[[plant]]
+name = "result while asking: the labels name no question"
+meant = "a_write_up_that_ended_the_turn_with_the_workers_question_out_is_in_the_result_before_the_reply"
+runs = ["rwa-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/while_asking.rs"
+find = '''            "Written before the answer to its question m-{} went in:\n\n{}\n\n",
+            turn.question, turn.words
+'''
+replace = '''            "Written before the answer to its question m-{} went in:\n\n{}\n\n",
+            turn.question + 1, turn.words
+'''
+
+[[plant]]
+name = "result while asking: the text cf ask prints is not the one the engine reads"
+meant = "a_line_about_the_question_in_any_words_is_not_in_front_of_the_result"
+runs = ["rwa-engine", "rwa-cf"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/questions.rs"
+find = '''pub const ASKED_THEN_END_THE_TURN: &str = "The answer arrives as a message; end your turn now.";'''
+replace = '''pub const ASKED_THEN_END_THE_TURN: &str = "The answer arrives as a message; end the turn now.";'''
