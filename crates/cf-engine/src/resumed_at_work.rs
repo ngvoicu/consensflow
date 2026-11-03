@@ -110,17 +110,6 @@ const RESTED_MS: i64 = 10_000;
 /// turn. The words going in end it, as they move the task by themselves.
 const HELD_FOR_MS: i64 = 30_000;
 
-/// Whether the look reads the window's turn over, by its record whole: it is at rest, or
-/// its record says the turn is over, and it did not fail.
-fn at_rest(observed: &Observed) -> bool {
-    matches!(observed.reading.as_deref(), Some(Reading::Known(_)))
-        && (observed.settled || observed.over == Over::Held)
-        && !observed.failed
-        && !observed.unnamed
-        && observed.waiting.is_none()
-        && observed.switched.is_none()
-}
-
 /// Whether an item is the agent's own work: its words or a tool, not what the harness writes
 /// in its place (Claude Code's close of a cut turn) or a compaction's summary.
 fn is_work(item: &Item) -> bool {
@@ -165,16 +154,16 @@ impl Dispatcher {
             part.sent_back = None;
             return Ok(());
         };
-        // Their paste is begun: its arrival moves the task, as it moves any.
-        if record.delivery.borrow().delivering.is_some() {
-            return Ok(());
-        }
         // Shown working for them, and the window has rested without them going in: no
-        // window is at work on it, and it reads queued until they are.
+        // window is at work on it, and it reads queued until they are. The rest is the
+        // pacing's, kept over earlier looks: this look must read the window at rest too, or
+        // a turn it began since (the human sent what they typed) is the work again. Words
+        // being pasted move the task by their arrival, and the ledger refuses both moves
+        // for them.
         if thread.task.state == "working" {
             record.delivery.borrow_mut().resumed = None;
             let rested = self.rested_for(record).is_some_and(|ms| ms >= RESTED_MS);
-            if rested && at_rest(observed) && project.state == "open" {
+            if rested && observed.settled && project.state == "open" {
                 match self.seams.ledger.borrow_mut().rest_while_resumed(
                     project.id,
                     thread.task.number,

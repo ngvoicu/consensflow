@@ -928,17 +928,23 @@ impl Dispatcher {
                     .await?;
             }
         } else {
-            let mut task = self.seams.ledger.borrow().active_task(record.id, false)?;
+            let task = self.seams.ledger.borrow().active_task(record.id, false)?;
             // A task shown working (or waiting) for the words that resumed it, which had not
             // gone in, goes back to queued with them: the claim was its window's, and the
             // words reopen the window. Paused here, the window's exit would undo the chief's
             // resume (T-1153's F1).
-            if let Some(thread) = &task {
-                let numbered = (thread.task.number, thread.task.state.as_str());
-                if self.withdraw_resume_claim(project.id, numbered, "its window closed")? {
-                    task = None;
+            let task = match task {
+                Some(thread)
+                    if self.withdraw_resume_claim(
+                        project.id,
+                        (thread.task.number, thread.task.state.as_str()),
+                        "its window closed",
+                    )? =>
+                {
+                    None
                 }
-            }
+                other => other,
+            };
             // What the host lists is the turn's work, by its own proof, as it was when the
             // window closed.
             let left = shown.left_running();

@@ -495,6 +495,29 @@ fn the_work_a_window_did_before_a_second_resume_is_not_shown_as_work_after_it() 
     assert_eq!(state(&context, project), "working");
 }
 
+#[test]
+fn a_window_that_took_its_turn_back_is_no_work_shown() {
+    not_claimed_while(|context, on| {
+        context.adapter.with("zeus", |agent| agent.took_back = on);
+    });
+}
+
+#[test]
+fn a_turn_the_window_began_since_its_rest_keeps_the_claim() {
+    // The words were held (the human typed in the window and has not sent it), the window
+    // rested, and then it began a turn: the human sent what they typed. It is at work again,
+    // not at rest, and the task is not sent back for a rest the last look read.
+    let context = paced();
+    let (project, _words) = shown_working(&context);
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    context.advance(11_000);
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+}
+
 // ---- the churn --------------------------------------------------------------------------
 
 #[test]
@@ -567,4 +590,51 @@ fn a_task_sent_back_to_queued_reads_working_the_moment_its_words_go_in() {
     }
     assert_eq!(context.message(words.id).state, "delivered");
     assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn the_words_of_a_second_resume_are_not_held_back_for_the_first_s_sending_back() {
+    // Sent back for the first resume's words; before any look saw the task paused, it was
+    // paused and resumed again. The second words are not the first's: the window acting on
+    // them is shown as ever.
+    let context = paced();
+    let (project, first) = shown_working(&context);
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    context.advance(11_000);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    context
+        .ledger
+        .borrow_mut()
+        .pause_task(project, 1, Some("chief"), None)
+        .unwrap();
+    context.resume_task(project, 1, "Go on, the second time");
+    let second = resume_words(&context, project);
+    assert_ne!(first.id, second.id);
+    context.host.set_snapshot(json!({}));
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo build)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn a_waiting_tasks_window_cannot_finish_it_before_it_has_read_the_words_that_resumed_it() {
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    context.ask(project, "zeus", "chief", 1, "Which grammar?");
+    assert_eq!(state(&context, project), "waiting");
+    let refused = context
+        .ledger
+        .borrow_mut()
+        .record_result(project, 1, "All done")
+        .expect_err("refused");
+    assert!(
+        refused.to_string().contains("words on their way"),
+        "{refused}"
+    );
+    assert_eq!(context.message(words.id).state, "queued");
 }
