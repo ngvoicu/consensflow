@@ -501,6 +501,7 @@ fn keeps_a_held_task_paused_its_hold_cleared_when_its_session_was_deleted_before
     context.adapter.answer("zeus", "Parser done");
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "done");
+    context.accept_if_done(tiers.project.id, 1);
     context.create_task(
         tiers.project.id,
         NewTask {

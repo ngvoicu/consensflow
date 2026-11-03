@@ -1,0 +1,453 @@
+# The three board-CLI reports of Gabriel's other board (T-1118): a follow-up of a task whose
+# result is in waits for its acceptance; the copy of a window is in the order its items came, so
+# `cf task get --transcript` shows the newest last even after a record shrank; and a task's title
+# changes with `--title` on `cf task edit`, `reopen` and `resume`, `edit` taking it alone in any
+# state. One plant takes one rule out, and a test of it fails.
+#
+# Every name holds `cli reports 1118`, so `cargo xtask plants daemon "cli reports 1118"` runs them
+# all, and `... "cli reports 1118 follow-up"`, `... "cli reports 1118 copy"` or `... "cli reports
+# 1118 title"` one report's.
+
+[run]
+bcr-ledger-follow-up = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "follow_up_of_a_done_task"]
+bcr-rig-done-task = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_follow_up_waits_for_the_done_task"]
+bcr-ledger-receipt-decided = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "decided::"]
+bcr-ledger-receipt-behind-work = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "behind_work::"]
+bcr-ledger-receipt-sessions = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "sessions::"]
+bcr-daemon-routes-tasks = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::tasks"]
+bcr-engine-follow-ups = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "follow_ups"]
+bcr-ledger-order = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "transcript_order"]
+bcr-engine-transcript-whole = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "transcript_whole"]
+bcr-ledger-retitle = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "retitle"]
+bcr-daemon-verbs = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task::tests::verbs"]
+bcr-cf-lib-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+bcr-cf-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
+bcr-engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles"]
+
+[[plant]]
+name = "cli reports 1118 follow-up: the ledger queues a follow-up of a task with its result in for the window at once"
+meant = "a_follow_up_of_a_task_with_its_result_in_waits_for_it_to_be_accepted_and_goes_to_its_window_then"
+runs = ["bcr-ledger-follow-up"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    for number in undecided_results(store, session.id)? {
+'''
+replace = '''
+    for number in Vec::<i64>::new() {
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: the API queues a follow-up of a task with its result in for the window at once"
+meant = "a_follow_up_of_a_task_with_its_result_in_waits_for_it_and_is_not_queued_for_the_window"
+runs = ["bcr-daemon-routes-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    for number in undecided_results(store, session.id)? {
+'''
+replace = '''
+    for number in Vec::<i64>::new() {
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: the engine opens the window for a follow-up of a task with its result in before the chief decides it"
+meant = "a_follow_up_of_a_task_with_its_result_in_waits_for_its_acceptance_and_goes_to_its_window_then"
+runs = ["bcr-engine-follow-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    for number in undecided_results(store, session.id)? {
+'''
+replace = '''
+    for number in Vec::<i64>::new() {
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: a follow-up of an accepted task goes to a window that is at work on another"
+meant = "a_follow_up_is_refused_while_its_session_is_on_its_work_and_goes_once_it_is_free"
+runs = ["bcr-ledger-receipt-sessions"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    if behind.is_empty() {
+'''
+replace = '''
+    if false {
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: a follow-up put before another does not make the other wait for it"
+meant = "follow_ups_of_a_task_with_its_result_in_go_in_their_order_and_one_the_chief_put_before_another_goes_first"
+runs = ["bcr-ledger-follow-up"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+            store.db.execute(
+                "INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)",
+                params![waits.id, task_id],
+            )?;
+'''
+replace = ""
+
+[[plant]]
+name = "cli reports 1118 follow-up: a task with its result in is reopened and the follow-up that waits makes its window busy"
+meant = "a_task_with_its_result_in_is_reopened_while_a_follow_up_waits_and_the_follow_up_goes_after_it"
+runs = ["bcr-ledger-follow-up"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    for number in undecided_results(store, session.id)? {
+'''
+replace = '''
+    for number in Vec::<i64>::new() {
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: the usage says a follow-up waits only while its task is at work"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["bcr-cf-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = "until T-3 and the window's done tasks are accepted it waits"
+replace = "while T-3 is at work it waits for T-3's acceptance"
+
+[[plant]]
+name = "cli reports 1118 copy: a new item that finds its place held takes it, among the older ones"
+meant = "the_items_of_a_record_that_shrank_come_after_the_ones_the_copy_kept"
+runs = ["bcr-ledger-order"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''
+                _ if holder.exists(params![conversation_id, wanted, id])? => next,
+'''
+replace = '''
+                _ if false => next,
+'''
+
+[[plant]]
+name = "cli reports 1118 copy: a window opened again copies its record among the older items"
+meant = "the_transcript_of_a_task_is_in_the_order_its_window_wrote_through_a_result_and_a_reopen"
+runs = ["bcr-engine-transcript-whole"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''
+                _ if holder.exists(params![conversation_id, wanted, id])? => next,
+'''
+replace = '''
+                _ if false => next,
+'''
+
+[[plant]]
+name = "cli reports 1118 copy: an item the copy has moves to any place the record shows it at, an earlier one too"
+meant = "the_items_of_a_record_that_shrank_come_after_the_ones_the_copy_kept"
+runs = ["bcr-ledger-order"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''
+                Some(held) if wanted <= held => held,
+'''
+replace = '''
+                Some(held) if false => held,
+'''
+
+[[plant]]
+name = "cli reports 1118 copy: the place after the last item does not move on, and two displaced items share one"
+meant = "an_item_the_record_says_again_later_stays_after_the_ones_that_came_between"
+runs = ["bcr-ledger-order"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''
+            next = next.max(place + 1);
+'''
+replace = '''
+            next = next.max(0);
+'''
+
+[[plant]]
+name = "cli reports 1118 title: the ledger keeps the old title and writes no new one"
+meant = "a_task_is_retitled_and_its_old_title_stays_in_the_log"
+runs = ["bcr-ledger-retitle"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        if task.title != title {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "cli reports 1118 title: the ledger logs the same title again"
+meant = "a_task_is_retitled_and_its_old_title_stays_in_the_log"
+runs = ["bcr-ledger-retitle"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        if task.title != title {
+'''
+replace = '''
+        if true {
+'''
+
+[[plant]]
+name = "cli reports 1118 title: the log keeps the new title as the old one"
+meant = "a_task_is_retitled_and_its_old_title_stays_in_the_log"
+runs = ["bcr-ledger-retitle"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = 'json!({ "task": number, "by": by, "from": task.title, "to": title }),'
+replace = 'json!({ "task": number, "by": by, "from": title, "to": title }),'
+
+[[plant]]
+name = "cli reports 1118 title: a task is retitled only in a state where it can be edited"
+meant = "a_task_is_retitled_in_every_state_it_has"
+runs = ["bcr-ledger-retitle"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        store.participant_by_handle(project_id, by)?;
+        let task = store.task_row(project_id, number)?;
+        if task.title != title {
+'''
+replace = '''
+        store.participant_by_handle(project_id, by)?;
+        let task = store.task_row(project_id, number)?;
+        require_task_state(&task, &["open", "queued", "paused"], "retitle")?;
+        if task.title != title {
+'''
+
+[[plant]]
+name = "cli reports 1118 title: a title that says nothing is a title"
+meant = "a_title_is_its_first_line_cut_to_fit_and_must_say_something"
+runs = ["bcr-ledger-retitle"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = '''
+    require_text(title, "title", MAX_BODY)?;
+    Ok(title_of(title))
+'''
+replace = '''
+    Ok(title_of(title))
+'''
+
+[[plant]]
+name = "cli reports 1118 title: a title is not cut to its first line and to fit"
+meant = "a_title_is_its_first_line_cut_to_fit_and_must_say_something"
+runs = ["bcr-ledger-retitle"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = '''
+    require_text(title, "title", MAX_BODY)?;
+    Ok(title_of(title))
+'''
+replace = '''
+    require_text(title, "title", MAX_BODY)?;
+    Ok(title.to_owned())
+'''
+
+[[plant]]
+name = "cli reports 1118 title: the API takes no title without a brief"
+meant = "the_chief_gives_a_task_a_new_title_alone_with_edit_in_any_state_and_the_brief_stays"
+runs = ["bcr-daemon-verbs"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        TaskAction::Edit if title.is_some() && js::trim(words).is_empty() => {"
+replace = "        TaskAction::Edit if false && title.is_some() && js::trim(words).is_empty() => {"
+
+[[plant]]
+name = "cli reports 1118 title: the API gives no title with the words of a reopen or a resume"
+meant = "a_reopen_and_a_resume_take_a_title_and_keep_the_brief"
+runs = ["bcr-daemon-verbs"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        Some(title) if !matches!(action, TaskAction::Edit) || !js::trim(words).is_empty() => {"
+replace = "        Some(title) if false && (!matches!(action, TaskAction::Edit) || !js::trim(words).is_empty()) => {"
+
+[[plant]]
+name = "cli reports 1118 title: the API moves the task on a title that is no text"
+meant = "a_title_that_says_nothing_is_refused_and_moves_nothing"
+runs = ["bcr-daemon-verbs"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        Some(_) => Err(LedgerError::refused(
+            "invalid-text",
+            "title must be text, not empty, at most 1000000 characters",
+        )
+        .into()),
+'''
+replace = '''
+        Some(_) => Ok(None),
+'''
+
+[[plant]]
+name = "cli reports 1118 title: cf does not know the --title flag, and the words take it"
+meant = "edit_reopen_and_resume_send_a_title_with_their_words_wherever_it_stands"
+runs = ["bcr-cf-lib-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    valued: &[brief::FILE, TITLE],"
+replace = "    valued: &[brief::FILE],"
+
+[[plant]]
+name = "cli reports 1118 title: cf sends the words and not the title"
+meant = "edit_reopen_and_resume_send_a_title_with_their_words_wherever_it_stands"
+runs = ["bcr-cf-lib-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '        body.insert("title".into(), title.as_str().into());'
+replace = "        let _ = title;"
+
+[[plant]]
+name = "cli reports 1118 title: cf asks edit for a brief when it is given a title alone"
+meant = "edit_takes_a_title_alone_for_a_task_in_any_state_and_says_the_brief_is_as_it_was"
+runs = ["bcr-cf-lib-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+        && js::trim(&text).is_empty()
+        && !retitling
+    {'''
+replace = '''
+        && js::trim(&text).is_empty()
+    {'''
+
+[[plant]]
+name = "cli reports 1118 title: cf takes a blank title"
+meant = "a_title_that_says_nothing_is_a_command_written_wrong_and_the_board_is_not_asked"
+runs = ["bcr-cf-lib-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "        Some(title) if !js::trim(title).is_empty() => Ok(Some(title.to_owned())),"
+replace = "        Some(title) => Ok(Some(title.to_owned())),"
+
+[[plant]]
+name = "cli reports 1118 title: cf lets a reopen or a resume go with a title and no words"
+meant = "a_reopen_and_a_resume_still_ask_for_their_words_when_they_are_given_a_title"
+runs = ["bcr-cf-lib-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    let retitling = action == "edit" && title.is_some() && js::trim(&text).is_empty();'
+replace = "    let retitling = title.is_some() && js::trim(&text).is_empty();"
+
+[[plant]]
+name = "cli reports 1118 title: the usage names no --title"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["bcr-cf-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = '''
+  cf task edit|reopen|resume T-3 … --title "…"
+                                    a new title, in any state (else the brief's first line); edit takes it alone
+'''
+replace = ""
+
+[[plant]]
+name = "cli reports 1118 title: the chief is not told of --title"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
+runs = ["bcr-engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''
+    cf task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it alone, in any state
+'''
+replace = ""
+
+[[plant]]
+name = "cli reports 1118 follow-up: the engine opens the window for a follow-up of an older accepted task while the window holds a result the chief has not decided"
+meant = "a_follow_up_of_an_older_accepted_task_waits_while_the_window_holds_a_result_the_chief_has_not_decided"
+runs = ["bcr-engine-follow-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    for number in undecided_results(store, session.id)? {
+'''
+replace = '''
+    for number in Vec::<i64>::new() {
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: a follow-up already waiting is released into a window that holds a result the chief has not decided"
+meant = "follow_ups_wait_for_every_task_of_the_window_that_is_done_and_go_in_their_order"
+runs = ["bcr-ledger-follow-up"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+                || !undecided_results(store, assignee.id)?.is_empty())
+'''
+replace = '''
+                || false)
+'''
+
+[[plant]]
+name = "cli reports 1118 follow-up: the chief's rig case sees a follow-up of a done task go into its window"
+meant = "a_follow_up_waits_for_the_done_task_the_chief_decides_and_that_task_is_sent_back_or_cancelled"
+runs = ["bcr-rig-done-task"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    for number in undecided_results(store, session.id)? {
+'''
+replace = '''
+    for number in Vec::<i64>::new() {
+'''
+
+[[plant]]
+name = "cli reports 1118 waited-for: a done task is told to let it finish, though it has finished"
+meant = "a_done_task_other_tasks_wait_for_is_not_cancelled_until_they_are"
+runs = ["bcr-ledger-receipt-decided"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        Ending::Cancelled if task.state == "done" => {
+'''
+replace = '''
+        Ending::Cancelled if false && task.state == "done" => {
+'''
+
+[[plant]]
+name = "cli reports 1118 waited-for: a task still at work is told to accept it"
+meant = "a_task_with_a_follow_up_waiting_is_not_cancelled_until_the_follow_up_is"
+runs = ["bcr-ledger-receipt-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        Ending::Cancelled => format!("cancel {them} first, or let T-{number} finish"),
+'''
+replace = '''
+        Ending::Cancelled => format!("accept T-{number}, or cancel {them} first"),
+'''

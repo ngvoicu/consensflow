@@ -133,7 +133,7 @@ fn commands() -> Vec<Command> {
                 depth += i32::try_from(word.matches('[').count()).expect("a count");
                 depth -= i32::try_from(word.matches(']').count()).expect("a count");
                 if word == "\"…\"" && depth == 0 {
-                    let name = words
+                    let name: Vec<String> = words
                         .iter()
                         .take_while(|part| {
                             part.chars()
@@ -141,6 +141,11 @@ fn commands() -> Vec<Command> {
                         })
                         .cloned()
                         .collect();
+                    // A line that names several verbs at once (`task edit|reopen|resume T-3 …
+                    // --title "…"`) says what each takes, and each has a line of its own.
+                    if name.iter().any(|part| part.contains('|')) {
+                        return None;
+                    }
                     return Some(Command { name, words });
                 }
                 let before = words.last().cloned();
@@ -152,7 +157,8 @@ fn commands() -> Vec<Command> {
 }
 
 /// The words of the table's footer that name the commands taking a file: `(task add, reopen,
-/// resume, edit and tell)`, each by the last of its words.
+/// resume, edit and tell)`, each by the last of its words; or `(every command that takes
+/// words)`, each command of the table that takes a text.
 fn file_commands() -> BTreeSet<String> {
     let usage = usage();
     let line = usage
@@ -164,6 +170,13 @@ fn file_commands() -> BTreeSet<String> {
         .and_then(|(_, rest)| rest.split_once(')'))
         .map(|(named, _)| named)
         .expect("a list in brackets");
+    // Every command of the table that takes a text takes a file too (T-1110).
+    if named == "every command that takes words" {
+        return commands()
+            .iter()
+            .map(|command| command.last().to_owned())
+            .collect();
+    }
     named
         .replace(" and ", ", ")
         .split(", ")

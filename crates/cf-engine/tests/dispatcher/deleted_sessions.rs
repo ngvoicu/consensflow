@@ -147,6 +147,7 @@ fn fails_a_deleted_sessions_follow_up_as_any_launch_fails_when_its_harness_has_l
             Err("no conversation found with that id".to_owned())
         }
     }));
+    context.accept_if_done(tiers.project.id, 1);
     context.create_task(
         tiers.project.id,
         NewTask {

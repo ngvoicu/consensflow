@@ -2,12 +2,16 @@
 //! off by a coordinator, or given up by the daemon; and taken off the board
 //! for good by the human once finished. A result is put to its requester to
 //! decide on, so a decision taken before the requester was given it withdraws
-//! it, in the decision's own transaction: accepting and sending back do
-//! (`withdraw_result`). A failed task is accepted too, on the words of what the
-//! coordinator checked, which are its result (`accept_failed_task`). A cancel
-//! has no such step to take: a task is called off only before it is done, and
-//! `call_off` withdraws every message of it still on its way, a result an older
-//! build left among them. A task is not
+//! it, in the decision's own transaction: accepting, sending back and calling
+//! the task off do (`withdraw_result`). A failed task is accepted too, on the
+//! words of what the coordinator checked, which are its result
+//! (`accept_failed_task`). A task that is done is called off as a decision of its
+//! result (the chief's text names it as one): its result is decided as an
+//! acceptance decides it, and its window, whose turn ended with the result, is
+//! stopped for nothing (it closes by itself when it holds nothing else, as after
+//! an acceptance, and stays while it holds a paused task). A task still at work is
+//! called off with every message of it still on its way withdrawn (`call_off`), a
+//! result an older build left among them. A task is not
 //! called off while an open task waits for it (`require_unawaited`): what
 //! waits for a task is released when it is accepted, so the waiter would be
 //! blocked for good. A member's removal cancels the member's tasks whatever
@@ -35,7 +39,9 @@ use crate::model::{
     MAX_BODY, MEMBER_ROLES,
 };
 use crate::queue::{drop_queued, queue, send, withdraw_gated, withdraw_result, Queued, Sent};
-use crate::staff::{bring_back, can_continue, has_task_in_hand, require_free, Giving};
+use crate::staff::{
+    bring_back, can_continue, has_task_in_hand, require_free, undecided_results, Giving,
+};
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
@@ -304,7 +310,12 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
                 continue;
             }
         }
-        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {
+        // A window takes nothing new while a task of it is in hand, nor while one has its
+        // result in and waits for the chief's decision, which could send it back (T-1118).
+        if assignee.member_id.is_some()
+            && (has_task_in_hand(store, assignee.id)?
+                || !undecided_results(store, assignee.id)?.is_empty())
+        {
             continue;
         }
         let body = delivery_body(&task);
@@ -448,7 +459,9 @@ pub(crate) fn reopen_task(
 /// window that was stopped when a member's had begun on it (the daemon
 /// stops that window on its next look). Whoever told the window words it
 /// never had hears that they went, but the one who called the task off.
-/// Refused, `waited-for`, while an open or paused task waits for it.
+/// Refused, `waited-for`, while an open or paused task waits for it. A task that
+/// is done is called off too, as a decision on its result (`call_off`): its
+/// window is told nothing and stopped for nothing.
 pub(crate) fn cancel_task(
     store: &mut Store,
     project_id: i64,
@@ -507,6 +520,20 @@ pub(crate) struct CalledOff {
 /// an open or paused task waits for it, the human's decline of its brief included:
 /// the waiter is released when the task is accepted, never when it is cancelled.
 /// `ending` is how it ends, which the refusal says in its words.
+///
+/// A task that is done is called off too: the chief's text offers it beside
+/// accepting and sending back, and a result that cannot be cancelled leaves
+/// acceptance as the only decision on work that may never have been done (the
+/// report of 2026-11-02, T-1122). It is the decision it is, so it is taken as an
+/// acceptance is: a result held at the gate is the human's to decide
+/// (`require_result_received`), a result the requester was not given yet is
+/// withdrawn, one being pasted or given stays as it was, and what is still queued
+/// for the window is not delivered. The window's turn ended with the result: none
+/// is stopped, so the requester is not told one was, and the window closes by itself
+/// when it holds nothing else (`close_if_free`), as after an acceptance, and stays
+/// while it holds a paused task, which this leaves as it was. Nothing is released:
+/// the tasks that wait for it are refused above, and a task already in a window keeps
+/// its need on a cancelled task, as one cancelled under it would.
 pub(crate) fn call_off(
     store: &mut Store,
     project_id: i64,
@@ -516,8 +543,17 @@ pub(crate) fn call_off(
 ) -> Result<CalledOff, LedgerError> {
     store.participant_by_handle(project_id, by)?;
     let task = store.task_row(project_id, number)?;
-    let cancellable = [&["open", "queued"], &ACTIVE_TASK_STATES[..], &["paused"]].concat();
+    let cancellable = [
+        &["open", "queued"],
+        &ACTIVE_TASK_STATES[..],
+        &["paused", "done"],
+    ]
+    .concat();
     require_task_state(&task, &cancellable, "cancel")?;
+    let decided = task.state == "done";
+    if decided {
+        require_result_received(store, &task, by)?;
+    }
     require_unawaited(store, &task, ending)?;
     let dropped = Dropped::of(store, &task)?;
     let assignee = task
@@ -534,21 +570,45 @@ pub(crate) fn call_off(
             .exists(params![task.id, assignee.id])?,
         _ => false,
     };
-    // A warning its pause notes say is kept before they go with the rest; one
-    // that says it on its way runs its course, and says it again only if it
-    // does not arrive (`withdrawn_on_its_way`).
-    let warnings = warnings_queued(store, &task)?;
-    let on_their_way = warnings_on_their_way(store, &task)?;
-    store.db.execute(
-        "UPDATE message SET state = 'cancelled', reason = ?
+    let mut warnings = Vec::new();
+    if decided {
+        // The decision on a result, as an acceptance takes it: what asks for the
+        // decision goes, what is on its way to the window is not delivered, and
+        // what the requester was given, or is being given, stays as it was.
+        withdraw_gated(store, task.id, &format!("cancelled by @{by}"))?;
+        withdraw_result(store, &task, "was cancelled")?;
+        if let Some(window) = task.assignee_id {
+            store.db.execute(
+                "UPDATE message SET state = 'cancelled', reason = ?
+               WHERE task_id = ? AND recipient_id = ? AND state = 'queued'",
+                params![
+                    format!(
+                        "T-{} was cancelled before it reached @{}",
+                        task.number,
+                        store.participant_row(window)?.handle
+                    ),
+                    task.id,
+                    window
+                ],
+            )?;
+        }
+    } else {
+        // A warning its pause notes say is kept before they go with the rest; one
+        // that says it on its way runs its course, and says it again only if it
+        // does not arrive (`withdrawn_on_its_way`).
+        warnings = warnings_queued(store, &task)?;
+        let on_their_way = warnings_on_their_way(store, &task)?;
+        store.db.execute(
+            "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')
          AND id NOT IN (SELECT value FROM json_each(?))",
-        params![
-            format!("cancelled by @{by}"),
-            task.id,
-            json!(on_their_way).to_string()
-        ],
-    )?;
+            params![
+                format!("cancelled by @{by}"),
+                task.id,
+                json!(on_their_way).to_string()
+            ],
+        )?;
+    }
     // A note of several that names it, still queued, names it no more.
     leave_pause_notes(store, &task, "cancelled", Afterwards::MovesOn)?;
     say_again(store, &task, "cancelled", warnings)?;
@@ -556,8 +616,9 @@ pub(crate) fn call_off(
     release_ready(store, project_id)?;
     Ok(CalledOff {
         task,
-        // A window that left the board with its member is no window to stop.
-        window: assignee.filter(|window| began && window.left_at.is_none()),
+        // A window that left the board with its member is no window to stop, and
+        // neither is one whose turn ended with the result of a task that is done.
+        window: assignee.filter(|window| began && !decided && window.left_at.is_none()),
         dropped,
     })
 }
@@ -690,8 +751,9 @@ pub(crate) fn waiting_for_it_of(
 /// A task an open task waits for is not called off: the waiter is released
 /// when the task is accepted, so it would read "blocked by" it for good and
 /// nothing would tell anyone. Whoever cancels names the waiters to cancel
-/// first, or lets the task finish; the human who declines its brief, which
-/// never started, passes it on.
+/// first, or lets the task finish, or accepts it where it is done and has no
+/// finishing left; the human who declines its brief, which never started, passes
+/// it on.
 fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<(), LedgerError> {
     let waiting = waiters(store, task)?;
     if waiting.is_empty() {
@@ -702,14 +764,18 @@ fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<()
         _ => ("wait", "them".to_owned()),
     };
     let number = task.number;
-    let otherwise = match ending {
-        Ending::Cancelled => format!("let T-{number} finish"),
-        Ending::Declined => format!("pass T-{number} on"),
+    // What a done task has left to do is to be accepted, not to finish.
+    let says = match ending {
+        Ending::Cancelled if task.state == "done" => {
+            format!("accept T-{number}, or cancel {them} first")
+        }
+        Ending::Cancelled => format!("cancel {them} first, or let T-{number} finish"),
+        Ending::Declined => format!("cancel {them} first, or pass T-{number} on"),
     };
     Err(LedgerError::refused_with(
         "waited-for",
         format!(
-            "T-{number} cannot be cancelled while {names} {verb} for it: cancel {them} first, or {otherwise}",
+            "T-{number} cannot be cancelled while {names} {verb} for it: {says}",
             names = task_numbers(&waiting),
         ),
         409,

@@ -325,7 +325,7 @@ fn says_so_when_the_staff_is_empty() {
 }
 
 #[test]
-fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task(
+fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done(
 ) {
     let text = instructions("chief", &[zeus()]);
     assert!(found(
@@ -333,15 +333,23 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r"A window still at work on T-3\s+takes it too: it waits for T-3 to be accepted and goes in then\.",
+        r"It waits for T-3 and for the\s+window's other done tasks to be accepted, and goes in then\.",
         &text
     ));
+    assert!(
+        !text.contains("A window still at work on T-3"),
+        "a follow-up of a task with its result in waits too"
+    );
     assert!(found(
-        r"A window on\s+another task refuses and tells you to open the task for its tier instead\.",
+        r"A window on\s+another\s+task refuses and tells\s+you to open the task for its tier instead\.",
         &text
     ));
     assert!(found(
         r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task no window has yet \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
+        &text
+    ));
+    assert!(found(
+        r#"cf task edit\|reopen\|resume T-3 … --title "…"\s+a new title; edit takes it alone, in any state"#,
         &text
     ));
     assert!(

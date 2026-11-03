@@ -140,8 +140,8 @@ runs = ["ledger-waited-for"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = 'Ending::Declined => format!("pass T-{number} on"),'
-replace = 'Ending::Declined => format!("let T-{number} finish"),'
+find = 'Ending::Declined => format!("cancel {them} first, or pass T-{number} on"),'
+replace = 'Ending::Declined => format!("cancel {them} first, or let T-{number} finish"),'
 
 [[plant]]
 name = "waited for: a member's removal tells the chief of a waiter right after each cancel, and the second need is never named"

@@ -29,6 +29,8 @@
 mod a_brief_could_not_be_edited_once_added;
 #[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]
 mod a_builds_daemon_held_a_workers_task;
+#[path = "regressions/a_busy_window_was_refused_in_words_that_did_not_say_what_held_it.rs"]
+mod a_busy_window_was_refused_in_words_that_did_not_say_what_held_it;
 #[path = "regressions/a_cancelled_compact_held_the_chief_and_took_its_next_message.rs"]
 mod a_cancelled_compact_held_the_chief_and_took_its_next_message;
 #[path = "regressions/a_cf_a_build_took_away_left_a_window_none.rs"]
@@ -57,6 +59,8 @@ mod a_command_that_never_exits_held_a_workers_result;
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
 #[path = "regressions/a_compaction_written_beside_an_answer_tore_its_line.rs"]
 mod a_compaction_written_beside_an_answer_tore_its_line;
+#[path = "regressions/a_done_task_could_not_be_cancelled_so_the_chief_could_only_accept_it.rs"]
+mod a_done_task_could_not_be_cancelled_so_the_chief_could_only_accept_it;
 #[path = "regressions/a_failure_said_no_reason.rs"]
 mod a_failure_said_no_reason;
 #[path = "regressions/a_final_answer_written_in_a_tells_turn_reached_nobody.rs"]

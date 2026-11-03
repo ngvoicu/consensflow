@@ -32,7 +32,7 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    if !behind {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
+find = "    if behind.is_empty() {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
 replace = "    require_free(store, &session, Giving::Task)?;\n"
 
 [[plant]]
@@ -42,7 +42,7 @@ runs = ["daemon-lib-routes-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    if !behind {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
+find = "    if behind.is_empty() {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
 replace = "    require_free(store, &session, Giving::Task)?;\n"
 
 [[plant]]
@@ -53,7 +53,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    if !behind {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
+find = "    if behind.is_empty() {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
 replace = "    require_free(store, &session, Giving::Task)?;\n"
 
 [[plant]]
@@ -63,8 +63,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = "            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),\n"
-replace = ""
+find = "        let needed = [needed.as_slice(), &behind]\n"
+replace = "        let needed = [needed.as_slice(), &[][..]]\n"
 
 [[plant]]
 name = "behind work: the follow-up does not wait for the task, in the field's shape"
@@ -74,8 +74,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = "            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),\n"
-replace = ""
+find = "        let needed = [needed.as_slice(), &behind]\n"
+replace = "        let needed = [needed.as_slice(), &[][..]]\n"
 
 [[plant]]
 name = "behind work: the task a follow-up follows is a need twice when the chief names it too"
@@ -84,18 +84,18 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = "            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),\n"
-replace = "            Some(after) => [needed.as_slice(), &[after]].concat(),\n"
+find = "                if !all.contains(&number) {\n                    all.push(number);\n                }\n"
+replace = "                all.push(number);\n"
 
 [[plant]]
 name = "behind work: a follow-up of a task paused under an ended session brings the session back"
-meant = "every_departed_trace_is_there_and_still_departs"
-runs = ["ledger-replay"]
+meant = "a_follow_up_of_a_task_paused_under_an_ended_session_brings_the_session_back_and_is_refused_for_the_paused_task"
+runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    let behind = session.left_at.is_none() && (at_work || others_wait);\n"
-replace = "    let behind = at_work || others_wait;\n"
+find = "    let at_work = session.left_at.is_none()\n        && (HELD_TASK_STATES.contains(&previous.state.as_str())\n            || matches!(previous.state.as_str(), \"open\" | \"paused\"));\n"
+replace = "    let at_work = HELD_TASK_STATES.contains(&previous.state.as_str())\n        || matches!(previous.state.as_str(), \"open\" | \"paused\");\n"
 
 [[plant]]
 name = "behind work: two follow-ups of one window go to it together"
@@ -104,20 +104,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {\n"
-replace = "        if assignee.member_id.is_some() && false {\n"
-
-[[plant]]
-name = "behind work: the second of two follow-ups is not given to the window with the result of the first"
-meant = "two_follow_ups_of_one_window_at_work_go_to_it_in_order"
-runs = ["ledger-behind-work"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;\n        release_ready(store, project_id)?;\n"
-replace = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;\n"
-
-# A task that fails, or is cancelled, with a follow-up waiting for it.
+find = "            && (has_task_in_hand(store, assignee.id)?\n                || !undecided_results(store, assignee.id)?.is_empty())\n"
+replace = "            && (false\n                || !undecided_results(store, assignee.id)?.is_empty())\n"
 
 [[plant]]
 name = "behind work: the chief is not told of a follow-up that waits for a task that failed"
@@ -335,7 +323,7 @@ replace = ""
 
 [[plant]]
 name = "brief edit: the chief is not told of `cf task edit`"
-meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
 runs = ["engine-text-roles"]
 
 [[plant.edit]]
@@ -345,12 +333,12 @@ replace = ""
 
 [[plant]]
 name = "behind work: the chief is told that a window at work refuses a follow-up, as 3.0.5 did"
-meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
 runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "conversation, and only the follow-up goes in. A window still at work on T-3\ntakes it too: it waits for T-3 to be accepted and goes in then. A window on\nanother task refuses and tells you to open the task for its tier instead.\n"
+find = "conversation, and only the follow-up goes in. It waits for T-3 and for the\nwindow's other done tasks to be accepted, and goes in then. A window on another\ntask refuses and tells you to open the task for its tier instead.\n"
 replace = "conversation, and only the follow-up goes in. A window still busy refuses\nand tells you to open the task for its tier instead.\n"
 
 [[plant]]
@@ -392,8 +380,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        Ending::Declined => format!(\"pass T-{number} on\"),\n"
-replace = "        Ending::Declined => format!(\"let T-{number} finish\"),\n"
+find = "        Ending::Declined => format!(\"cancel {them} first, or pass T-{number} on\"),\n"
+replace = "        Ending::Declined => format!(\"cancel {them} first, or let T-{number} finish\"),\n"
 
 [[plant]]
 name = "behind work: a follow-up of a task that fails again is told to the chief the first time only"
@@ -458,26 +446,6 @@ find = "            if can_continue(store, &assignee)? {\n"
 replace = "            if false {\n"
 
 [[plant]]
-name = "behind work: a follow-up added with the result in overtakes the ones already waiting"
-meant = "a_follow_up_added_after_the_result_but_before_the_acceptance_lines_up_behind_the_ones_waiting"
-runs = ["ledger-behind-work"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "        previous.state == \"done\" && others_wait_for(store, &previous, session.id, before)?;\n"
-replace = "        false && others_wait_for(store, &previous, session.id, before)?;\n"
-
-[[plant]]
-name = "behind work: a follow-up put before the ones waiting for a task with its result in waits behind them"
-meant = "a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to_the_window_now"
-runs = ["ledger-behind-work"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    Ok(waiting.iter().any(|number| !before.contains(number)))\n"
-replace = "    Ok(!waiting.is_empty())\n"
-
-[[plant]]
 name = "behind work: an edit gives every queued task message the new brief again"
 meant = "a_task_held_for_quota_and_resumed_by_the_daemon_is_edited_in_its_brief_alone"
 runs = ["ledger-edited-brief"]
@@ -529,7 +497,7 @@ replace = "(open, blocked or queued)"
 
 [[plant]]
 name = "brief edit: the chief's role text says a task paused before any window had it is not editable"
-meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
 runs = ["engine-text-roles"]
 
 [[plant.edit]]

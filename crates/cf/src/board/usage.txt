@@ -16,7 +16,7 @@ cf inside a ConsensFlow window: the board's commands.
                                     to use as reference, where to save it
   cf task add --after T-3 "…"       a follow-up for the window that did T-3, which
                                     keeps its context; only when that context matters;
-                                    while T-3 is at work it waits for T-3's acceptance
+                                    until T-3 and the window's done tasks are accepted it waits
   cf task add --self --needs T-3 "…" your own later step: its brief comes back to you when T-3 is accepted
   … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted
   … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task
@@ -35,6 +35,8 @@ cf inside a ConsensFlow window: the board's commands.
   cf task pause T-3                 stop a worker's task: the agent stops and its window waits;
                                     what it left running in the background runs on
   cf task resume T-3 "…"            go on with it: the same window, with your words
+  cf task edit|reopen|resume T-3 … --title "…"
+                                    a new title, in any state (else the brief's first line); edit takes it alone
   cf task finish T-3                take what a working or paused task's worker said last as its
                                     result; what its turn left running is not ended
   cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as

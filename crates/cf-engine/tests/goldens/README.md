@@ -162,3 +162,12 @@ row's (T-1049, above). Changed by hand, in those words alone, on 2026-11-02, and
 from the engine on 2026-11-03 when it was merged (T-1176). The role-change budgets moved
 with it: read whole to 205 rows with specs on and 234 without (208 and 236), and to 40 and
 69 with the most rules for the staff (42 and 71).
+
+The chief's twelve rows say two things more (T-1118 and T-1128, `skill/core/chief.md`): the
+command card has `cf task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it
+alone, in any state`, its `cf` the row's, after the line of `cf task resume`; and a follow-up
+given with `--after` "waits for T-3 and for the window's other done tasks to be accepted, and
+goes in then", where it said a window still at work on T-3 takes it once T-3 is accepted.
+Changed by hand on 2026-11-02, and recorded from the engine on 2026-11-03 when it was merged
+(T-1176). The role-change budgets moved with it: read whole to 202 rows with specs on and 231
+without (205 and 234), and to 37 and 65 with the most rules for the staff (40 and 69).

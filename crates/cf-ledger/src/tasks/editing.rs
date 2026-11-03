@@ -420,6 +420,39 @@ fn replace_brief(
     Ok(())
 }
 
+/// The title of task `number` is `title`, by `by`, in any state: the title is a label
+/// the board shows, apart from the brief a window has, and a reopen or a resume adds
+/// words to a brief and keeps it. It is read as a brief's first line is
+/// ([`model::checked_title`]). The task keeps its state, its brief and everything else;
+/// the old title is in the log (`task.retitled`, as `from`). The same title again changes
+/// and logs nothing.
+pub(crate) fn retitle_task(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    by: &str,
+    title: &str,
+) -> Result<TaskView, LedgerError> {
+    let title = model::checked_title(title)?;
+    store.write(|store| {
+        store.participant_by_handle(project_id, by)?;
+        let task = store.task_row(project_id, number)?;
+        if task.title != title {
+            let at = store.at();
+            store.db.execute(
+                "UPDATE task SET title = ?, updated_at = ? WHERE id = ?",
+                params![title, at, task.id],
+            )?;
+            store.log(
+                project_id,
+                "task.retitled",
+                json!({ "task": number, "by": by, "from": task.title, "to": title }),
+            )?;
+        }
+        task_by_id(store, task.id)
+    })
+}
+
 /// `from` tells open task `number` `words`: no window has it, nor is one bound to take it
 /// (it waits on the board for what it needs, or for a member, whom the daemon picks when
 /// it goes), so there is no one to keep a message for, and a message is addressed to a

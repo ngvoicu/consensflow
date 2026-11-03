@@ -85,7 +85,9 @@ enum Outcome {
 /// for a member moved; and the 4 that name `ANSWERED_AS_IT_WAITED`, which
 /// the settling of a question answered as it waited moved (T-260); and the one
 /// that names `CRITICAL_WORDS`, which the rewording of a critical task's lead
-/// moved (T-1060).
+/// moved (T-1060); and the one that names `BUSY_NAMES_ITS_HOLDER`, which the
+/// naming of the task that holds a window in a `session-busy` refusal moved
+/// (T-1122).
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -96,6 +98,8 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-api-005", 17, ANSWERED_AS_IT_WAITED),
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
+    ("core-dispatcher-028", 90, COPY_AFTER_THE_KEPT),
+    ("core-dispatcher-029", 81, COPY_AFTER_THE_KEPT),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
     ("core-dispatcher-055", 71, TAKEN_BEFORE_GIVEN),
     ("core-dispatcher-056", 103, DECIDED_BEFORE_PASTED),
@@ -103,11 +107,17 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-058", 78, LEFT_THE_PAUSE),
     ("core-dispatcher-060", 236, WAIT_NOTE_TAKEN),
     ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
-    ("core-dispatcher-074", 294, "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued"),
+    ("core-dispatcher-074", 91, "the chief queues a follow-up (`--after T-n`) while T-n's result is in and not accepted: it is taken, open and waiting for T-n to be accepted, where Node queued it for the window at once; the trace's later departure (the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued) is no longer reached"),
+    ("core-dispatcher-080", 225, COPY_AFTER_THE_KEPT),
+    ("core-dispatcher-082", 87, FOLLOW_UP_BEHIND_RESULT),
+    ("core-dispatcher-085", 227, COPY_AFTER_THE_KEPT),
+    ("core-dispatcher-086", 185, COPY_AFTER_THE_KEPT),
     ("core-dispatcher-081", 91, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-089", 95, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-090", 93, DECIDED_BEFORE_PASTED),
+    ("core-dispatcher-091", 87, FOLLOW_UP_BEHIND_RESULT),
     ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
+    ("core-dispatcher-158", 87, FOLLOW_UP_BEHIND_RESULT),
     ("core-page-014", 9, REASON_RELEASE),
     ("core-page-023", 8, WAITED_FOR),
     ("core-page-025", 8, UNREACHED),
@@ -118,10 +128,10 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("home-copies-004", 34, KEPT_IN_BRIEF),
     ("ledger-conversations-008", 20, RESULT_ACCEPTED),
     ("ledger-conversations-013", 22, RESULT_SENT_BACK),
-    ("ledger-conversations-014", 23, RESULT_SENT_BACK),
+    ("ledger-conversations-014", 12, FOLLOW_UP_BEHIND_RESULT),
     ("ledger-conversations-015", 19, WAIT_NOTE_TAKEN),
     ("ledger-conversations-016", 7, "a task whose brief reached no window says so (`reached: false`) beside its empty transcript; Node said nothing of it"),
-    ("ledger-conversations-019", 15, UNREACHED),
+    ("ledger-conversations-019", 12, FOLLOW_UP_BEHIND_RESULT),
     ("ledger-gate-004", 17, RESULT_ACCEPTED),
     ("ledger-gate-006", 25, DOOR_READ),
     ("ledger-gate-007", 15, DOOR_READ),
@@ -162,7 +172,9 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-staff-016", 17, RESULT_ACCEPTED),
     ("ledger-staff-017", 20, RESULT_ACCEPTED),
     ("ledger-staff-018", 17, RESULT_SENT_BACK),
-    ("ledger-staff-019", 18, KEPT_BY_PAUSE),
+    ("ledger-staff-019", 15, BUSY_NAMES_ITS_HOLDER),
+    ("ledger-staff-020", 11, FOLLOW_UP_BEHIND_RESULT),
+    ("ledger-staff-021", 29, FOLLOW_UP_BEHIND_RESULT),
     ("ledger-staff-022", 14, RESULT_ACCEPTED),
     ("ledger-staff-023", 13, "the chief sends T-1 back while its result is still queued for it: the result is withdrawn then, with the reason `T-1 was sent back`, where Node leaves it queued until the task is cancelled, which withdraws it as `cancelled by @chief`"),
     ("ledger-tasks-004", 13, RESULT_ACCEPTED),
@@ -189,10 +201,21 @@ const DEPARTED: &[(&str, usize, &str)] = &[
 /// would be queued, once its needs were accepted, for a window nothing opens).
 const REMOVAL_CANCELS_WAITING: &str =
     "the chief removes a member that a task given to it by name waits on the board for (`removeMember` with an open task bound to its lane): the task is cancelled with the member, where Node left it open; the trace's later departure (the chief accepting the task while its result is still queued for it, `RESULT_ACCEPTED`) is no longer reached";
+/// A window that holds a task keeps every other task out, and the refusal says
+/// which one holds it and what to do about it (T-1122).
+const BUSY_NAMES_ITS_HOLDER: &str =
+    "a door refuses a task for a window that holds one (`createTask` with `after`, here T-1 paused): `session-busy` names the task that holds the window and its state, and how to free it (\"@x's window holds T-1, paused: resume T-1 and wait for its result, or cancel T-1, before giving it another task; or open the task for its tier\"), where Node said \"@x is still on its work: wait for its result, or open the task for its tier\"; the trace's later departure (a pause keeps what is on its way: a question, a task message, a result) is behind it";
 /// A follow-up of a task still on its work is taken, and waits on the board
 /// for that task to be accepted.
 const FOLLOW_UP_BEHIND_WORK: &str =
     "the chief queues a follow-up (`--after T-1`) while T-1's window is still on T-1: it is taken, open and waiting for T-1 to be accepted, where Node refused it `session-busy`; the trace's later departure (the chief accepting the task while its result is still queued for it, `RESULT_ACCEPTED`) is no longer reached";
+/// A follow-up of a task whose result is in waits on the board for the chief to
+/// accept it (T-1118).
+const FOLLOW_UP_BEHIND_RESULT: &str =
+    "the chief queues a follow-up (`--after T-1`) while T-1's result is in and not accepted: it is taken, open and waiting for T-1 to be accepted, and nothing is queued for the window, where Node queued it for the window at once";
+/// The copy of a record that shrank puts its new items after the ones it kept (T-1118).
+const COPY_AFTER_THE_KEPT: &str =
+    "a window's record shrank (a resumed window rewrote it) and is copied from its start: an item it shows at the place of an older one the copy kept is put after every item the copy has (`seq`), where Node's took the older one's place and sorted among them";
 /// A task that open tasks wait for is not cancelled: they are released when it
 /// is accepted, so they would be blocked for good.
 const WAITED_FOR: &str =

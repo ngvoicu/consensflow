@@ -67,6 +67,7 @@ fn session_of(context: &Context, project: &ProjectView) -> String {
 
 /// The chief gives the session that did T-1 a follow-up.
 pub(super) fn follow_up(context: &Context, project: &ProjectView, body: &str) {
+    context.accept_if_done(project.id, 1);
     context.create_task(
         project.id,
         NewTask {

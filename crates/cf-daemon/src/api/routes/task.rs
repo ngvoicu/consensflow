@@ -21,7 +21,7 @@
 mod pages;
 
 use cf_base::js;
-use cf_ledger::{Links, NewQuestion, TaskEdit, TaskThread, TaskView};
+use cf_ledger::{LedgerError, Links, NewQuestion, TaskEdit, TaskThread, TaskView};
 use hyper::Method;
 use serde_json::{json, Map, Value};
 
@@ -111,6 +111,7 @@ pub(super) async fn handle(
     };
     let body = request.json().await?;
     let words = body.get("body").and_then(Value::as_str);
+    let title = asked_title(body.get("title"))?;
     match action {
         TaskAction::Done => done(context, caller, &task, words.unwrap_or_default()),
         _ if !may_move(caller, &task.task.requester) => Err(Failure::refuse(
@@ -125,8 +126,30 @@ pub(super) async fn handle(
         )),
         TaskAction::Tell => tell(context, caller, &task, words),
         TaskAction::Finish => finish(context, caller, &task).await,
-        TaskAction::Edit => edit(context, caller, &task, &body),
-        _ => moved(context, caller, &task, action, words.unwrap_or_default()),
+        TaskAction::Edit => edit(context, caller, &task, &body, title.as_deref()),
+        _ => moved(
+            context,
+            caller,
+            &task,
+            action,
+            words.unwrap_or_default(),
+            title.as_deref(),
+        ),
+    }
+}
+
+/// The title a request gives (`title`, with `edit`, `reopen` or `resume`): the brief's first
+/// line otherwise. None when it gives none; a title that is no text, or says nothing, is
+/// refused before anything is moved, so a refused title leaves the task as it was.
+fn asked_title(given: Option<&Value>) -> Result<Option<String>, Failure> {
+    match given {
+        None => Ok(None),
+        Some(Value::String(title)) => Ok(Some(cf_ledger::model::checked_title(title)?)),
+        Some(_) => Err(LedgerError::refused(
+            "invalid-text",
+            "title must be text, not empty, at most 1000000 characters",
+        )
+        .into()),
     }
 }
 
@@ -379,6 +402,7 @@ fn moved(
     task: &TaskThread,
     action: TaskAction,
     words: &str,
+    title: Option<&str>,
 ) -> Result<Answer, Failure> {
     let (project, number) = (caller.project.id, task.task.number);
     let by = caller.participant.handle.as_str();
@@ -412,6 +436,13 @@ fn moved(
         // only `transcript` is, and only when it is posted.
         _ => ledger.reopen_task(project, number, by, words)?.task,
     };
+    // The title is given once the move is made, and the move is refused before it.
+    let moved = match title {
+        Some(title) if !matches!(action, TaskAction::Edit) || !js::trim(words).is_empty() => {
+            ledger.retitle_task(project, number, by, title)?
+        }
+        _ => moved,
+    };
     drop(ledger);
     (context.kick)();
     let mut answer = Map::new();
@@ -432,6 +463,7 @@ fn edit(
     caller: &Caller,
     task: &TaskThread,
     request: &Map<String, Value>,
+    title: Option<&str>,
 ) -> Result<Answer, Failure> {
     // A brief that is no text is no words: the ledger refuses it as it refuses an empty one.
     let words = match request.get("body") {
@@ -449,15 +481,34 @@ fn edit(
         needs: links(request.get("needs"), "needs")?,
         before: links(request.get("before"), "before")?,
     };
-    let edited = context.ledger.borrow_mut().edit_task_with(
-        caller.project.id,
-        task.task.number,
-        caller.participant.handle.as_str(),
-        &edit,
-    )?;
+    let (project, number) = (caller.project.id, task.task.number);
+    let by = caller.participant.handle.as_str();
+    let mut ledger = context.ledger.borrow_mut();
+    // A title alone changes the title of a task in any state, and nothing else.
+    let no_words = edit
+        .body
+        .as_deref()
+        .is_none_or(|words| js::trim(words).is_empty());
+    if let Some(title) = title.filter(|_| {
+        no_words && edit.tier.is_none() && edit.needs.is_none() && edit.before.is_none()
+    }) {
+        let retitled = ledger.retitle_task(project, number, by, title)?;
+        drop(ledger);
+        (context.kick)();
+        return Ok(Answer::ok(
+            json!({ "task": value(&TaskSummary::from(&retitled))? }),
+        ));
+    }
+    let edited = ledger.edit_task_with(project, number, by, &edit)?;
+    // The title is given once the edit is made, and the edit is refused before it.
+    let now = match title {
+        Some(title) => ledger.retitle_task(project, number, by, title)?,
+        None => edited.task.clone(),
+    };
+    drop(ledger);
     (context.kick)();
     let mut answer = Map::new();
-    answer.insert("task".to_owned(), value(&TaskSummary::from(&edited.task))?);
+    answer.insert("task".to_owned(), value(&TaskSummary::from(&now))?);
     if let Some(asked) = &edited.asked {
         answer.insert("asked".to_owned(), json!(asked));
         answer.insert("heldBy".to_owned(), json!(edited.holders));

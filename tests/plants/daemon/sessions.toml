@@ -10,6 +10,8 @@
 [run]
 # The engine's dispatcher tests about a follow-up that waits for its session.
 engine-follow-ups = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "follow_ups"]
+# The rig's case of a window that holds a paused task (T-1122).
+rig-regression-busy-window = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_busy_window_was_refused_in_words_that_did_not_say_what_held_it::"]
 
 [[plant]]
 name = "session: a follow-up is given to a session that is on its work"
@@ -19,7 +21,7 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-    if !behind {
+    if behind.is_empty() {
         require_free(store, &session, Giving::Task)?;
     }
 '''
@@ -44,8 +46,11 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {"
-replace = "    if on_other_work(store, taker.id, giving)? {"
+find = '''
+    if taker.member_id.is_none() {
+        return Ok(());
+    }'''
+replace = ""
 
 [[plant]]
 name = "session: a window is kept open for a follow-up that waits for what it needs"
@@ -79,17 +84,17 @@ replace = "        &HELD_TASK_STATES[..],"
 
 [[plant]]
 name = "session: a release goes to a session that has a task in hand"
-meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_with_that_tasks_result"
+meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_once_that_tasks_result_is_accepted"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {"
-replace = "        if assignee.member_id.is_some() && false && has_task_in_hand(store, assignee.id)? {"
+find = "            && (has_task_in_hand(store, assignee.id)?\n                || !undecided_results(store, assignee.id)?.is_empty())\n"
+replace = "            && (false\n                || !undecided_results(store, assignee.id)?.is_empty())\n"
 
 [[plant]]
 name = "session: a task waiting for its session is not released when its need is accepted"
-meant = "a_follow_up_put_before_one_that_waits_goes_to_the_window_now_and_the_waiting_one_after_it"
+meant = "a_follow_up_put_before_one_that_waits_goes_to_the_window_first_and_the_waiting_one_after_it"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
@@ -98,18 +103,6 @@ find = '''
     store.move_task(task, "accepted", detail)?;
     release_ready(store, project_id)?;'''
 replace = '    store.move_task(task, "accepted", detail)?;'
-
-[[plant]]
-name = "session: a task waiting for its session is not released with its result"
-meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_with_that_tasks_result"
-runs = ["ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''
-        store.move_task(&task, "done", json!({ "result": message_id }))?;
-        release_ready(store, project_id)?;'''
-replace = '        store.move_task(&task, "done", json!({ "result": message_id }))?;'
 
 [[plant]]
 name = "session: a task waiting for its session is not released when the task is called off"
@@ -168,3 +161,66 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '                           ORDER BY m.id DESC LIMIT 1)",'
 replace = '                           ORDER BY m.id ASC LIMIT 1)",'
+
+# --- the refusal names the task that holds the window (T-1122, the field report of 2026-11-02) ---
+
+[[plant]]
+name = "session busy: the refusal leaves out the state of the task that holds the window"
+meant = "every_door_names_the_paused_task_that_holds_the_window_and_how_to_free_it"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''"@{}'s window holds T-{held}, {state}: {free_it}, before {door}",'''
+replace = '''"@{}'s window holds T-{held}: {free_it}, before {door}",'''
+
+[[plant]]
+name = "session busy: a paused task is told to be waited for, not resumed"
+meant = "every_door_names_the_paused_task_that_holds_the_window_and_how_to_free_it"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''    let free_it = if state == "paused" {'''
+replace = '''    let free_it = if state == "never" {'''
+
+[[plant]]
+name = "session busy: the refusal names the paused task before the one at work"
+meant = "the_refusal_names_the_task_that_is_at_work_before_one_that_waits_for_its_resume"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "ORDER BY state = 'paused', id LIMIT 1"
+replace = "ORDER BY id LIMIT 1"
+
+[[plant]]
+name = "session busy: a follow-up is not told it can be opened for its tier"
+meant = "a_follow_up_is_refused_while_its_session_is_on_its_work_and_goes_once_it_is_free"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''"giving it another task; or open the task for its tier"'''
+replace = '''"giving it another task"'''
+
+[[plant]]
+name = "session busy: a task that is done counts as in hand for its own reopen"
+meant = "a_done_task_goes_back_to_the_window_that_did_it_when_the_window_holds_nothing"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "        Giving::Task | Giving::SentBack(_) => (0, [&HELD_TASK_STATES[..], &[\"paused\"]].concat()),"
+replace = "        Giving::Task | Giving::SentBack(_) => (0, [&HELD_TASK_STATES[..], &[\"paused\", \"done\"]].concat()),"
+
+[[plant]]
+name = "session busy: the rig's chief is told its window is still on its work"
+meant = "a_follow_up_for_a_window_that_holds_a_paused_task_is_refused_in_words_that_name_it_and_say_how_to_free_the_window"
+runs = ["rig-regression-busy-window"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''"@{}'s window holds T-{held}, {state}: {free_it}, before {door}",'''
+replace = '''"@{} is still on its work: wait for its result, or open the task for its tier",'''

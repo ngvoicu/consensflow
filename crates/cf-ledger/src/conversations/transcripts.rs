@@ -35,7 +35,12 @@ const HEADER: &str = "[ConsensFlow m-";
 /// copied; one copied before the mark stays as it was. An item whose role is
 /// another than it was copied with (a record a daemon read as the user's, which a
 /// later one reads as the harness's own: Claude Code's companion, T-296) is
-/// brought to the role it has, as an item whose text changed is. What the history viewer
+/// brought to the role it has, as an item whose text changed is. An item is copied at its
+/// place in the record (`from` + its index) unless an older item of the copy holds that
+/// place, as it does where the record shrank (a resumed window rewrote it): it goes after
+/// every item the copy has then, so the copy is in the order the items came and the last
+/// ones are the newest (T-1118). An item the copy has keeps its place, or moves to a later
+/// one, never an earlier one. What the history viewer
 /// reads of an item besides its text is written with its row ([`write_head`]),
 /// and its text in parts where it is long ([`write_parts`]); an item written
 /// again changed is its next revision. How many rows changed.
@@ -57,6 +62,19 @@ pub(crate) fn copy_transcript(
          WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
             OR transcript.role != excluded.role
        RETURNING rowid, compaction",
+        )?;
+        // The place after every item the copy has: where an item goes that the record
+        // shows at a place an older one holds.
+        let mut next: i64 = store.db.query_row(
+            "SELECT COALESCE(MAX(seq), -1) + 1 FROM transcript WHERE conversation_id = ?",
+            [conversation_id],
+            |row| row.get(0),
+        )?;
+        let mut known = store
+            .db
+            .prepare_cached("SELECT seq FROM transcript WHERE conversation_id = ? AND item_id = ?")?;
+        let mut holder = store.db.prepare_cached(
+            "SELECT 1 FROM transcript WHERE conversation_id = ? AND seq = ? AND item_id != ?",
         )?;
         let mut written = 0;
         for (index, item) in (0_i64..).zip(items) {
@@ -83,12 +101,22 @@ pub(crate) fn copy_transcript(
                 .get("at")
                 .and_then(Value::as_str)
                 .and_then(time::canonical);
+            let wanted = from + index;
+            let place = match known
+                .query_row(params![conversation_id, id], |row| row.get::<_, i64>(0))
+                .optional()?
+            {
+                Some(held) if wanted <= held => held,
+                _ if holder.exists(params![conversation_id, wanted, id])? => next,
+                _ => wanted,
+            };
+            next = next.max(place + 1);
             let changed = upsert
                 .query_row(
                     params![
                         conversation_id,
                         id,
-                        from + index,
+                        place,
                         role,
                         text,
                         i64::from(complete),

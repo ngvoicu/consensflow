@@ -11,7 +11,7 @@ use super::lines::{
     a_pool, message_line, numbers, printed_body, task_head, task_line, tasks, waiting_answers,
 };
 use super::usage::{task_usage, ADD_USAGE};
-use super::words::{quoted, require_text, split, task_number, task_numbers, Shape};
+use super::words::{quoted, require_text, split, task_number, task_numbers, Shape, Split};
 use super::{brief, transcript};
 use super::{help_of, Failure, Said};
 
@@ -29,17 +29,26 @@ const ADD: Shape = Shape {
     leading: 0,
 };
 
-/// The flags of `cf task reopen` and `cf task resume`, which give the window
-/// words of their own.
-const BRIEFED: Shape = Shape {
+/// The flag that gives a task a new title: the brief's first line otherwise.
+const TITLE: &str = "--title";
+
+/// The flags of the other commands that move a task: their words may come from a file.
+const FILED: Shape = Shape {
     valued: &[brief::FILE],
     ..Shape::TEXT
 };
 
-/// The flags of `cf task edit`: a brief as any other, and the tier, the tasks it needs and
-/// the tasks that wait for it, which may stand alone.
+/// The flags of `cf task reopen` and `cf task resume`, which give the window words of their
+/// own, and a new title if they like.
+const BRIEFED: Shape = Shape {
+    valued: &[brief::FILE, TITLE],
+    ..Shape::TEXT
+};
+
+/// The flags of `cf task edit`: a brief and a title as any other, and the tier, the tasks it
+/// needs and the tasks that wait for it, which may stand alone.
 const EDIT: Shape = Shape {
-    valued: &[brief::FILE, "--tier", "--needs", "--before"],
+    valued: &[brief::FILE, TITLE, "--tier", "--needs", "--before"],
     ..Shape::TEXT
 };
 
@@ -109,7 +118,8 @@ fn shape_of(verb: &str) -> Shape {
     match verb {
         "get" => GET,
         "edit" => EDIT,
-        _ => BRIEFED,
+        "reopen" | "resume" => BRIEFED,
+        _ => FILED,
     }
 }
 
@@ -428,10 +438,14 @@ fn moved(
     let needs = links_of("--needs", &words, action)?;
     let before = links_of("--before", &words, action)?;
     let alone = tier.is_some() || needs.is_some() || before.is_some();
+    let title = new_title(&words)?;
     let text = brief::brief_of(&words, given, input)?;
+    // An edit with a title and nothing else changes the title alone.
+    let retitling = action == "edit" && title.is_some() && js::trim(&text).is_empty() && !alone;
     if matches!(action, "done" | "reopen" | "edit" | "resume")
         && js::trim(&text).is_empty()
         && (action != "edit" || !alone)
+        && !retitling
     {
         let what = match action {
             "done" => "your result",
@@ -466,6 +480,9 @@ fn moved(
     if let Some(before) = &before {
         body.insert("before".into(), before.clone());
     }
+    if let Some(title) = &title {
+        body.insert("title".into(), title.as_str().into());
+    }
     let path = format!("/api/tasks/{number}/{action}");
     let mut answer = board.post(&path, &Value::Object(body))?;
     // What a cancel took with it of the words you told the task's window.
@@ -474,16 +491,20 @@ fn moved(
         None => String::new(),
     };
     let task = answer.take("task")?;
+    // A resume's line names no title, so a new one is said.
+    let titled = title.as_ref().map_or_else(String::new, |title| {
+        format!(" Its title is now {}.", quoted(title))
+    });
     let said = match action {
         "pause" => format!(
             "T-{number} is paused: its window stops and its work waits. Resume it with: {} task resume T-{number} \"what to do now\"",
             board.cf()
         ),
         "resume" if task.get("state").and_then(Value::as_str) == Some("open") => format!(
-            "T-{number} is back on the board for {}: the window that had it has ended.",
+            "T-{number} is back on the board for {}: the window that had it has ended.{titled}",
             a_pool(task.get("pool"), task.get("tier"))
         ),
-        "resume" => format!("T-{number} resumes in @{} with your words.", js::text(task.get("assignee"))),
+        "resume" => format!("T-{number} resumes in @{} with your words.{titled}", js::text(task.get("assignee"))),
         "finish" => {
             let count = |field: &str| answer.value().get(field).and_then(Value::as_u64);
             finishing(number, &task, count("jobs"), count("agents"))
@@ -492,6 +513,11 @@ fn moved(
         "done" if task.get("state").and_then(Value::as_str) == Some("accepted") => format!(
             "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on.{}",
             on_its_way(answer.value())
+        ),
+        "edit" if retitling => format!(
+            "T-{number} has the title {}; its brief is as it was, and the ledger keeps the old title. {}",
+            quoted(title.as_deref().unwrap_or_default()),
+            task_line(&task)
         ),
         "edit" => edited(
             number,
@@ -628,6 +654,19 @@ fn edited(number: u64, task: &Value, answered: &Value, changed: Changed) -> Stri
         "."
     };
     format!("T-{number} {lead}{tail} {}", task_line(task))
+}
+
+/// The title `--title` gives, if it is given: it takes a title, and the title says something.
+fn new_title(words: &Split) -> Result<Option<String>, Failure> {
+    if !words.given(TITLE) {
+        return Ok(None);
+    }
+    match words.value(TITLE)? {
+        Some(title) if !js::trim(title).is_empty() => Ok(Some(title.to_owned())),
+        _ => Err(Failure::Usage(format!(
+            "{TITLE} takes the new title: {TITLE} \"…\""
+        ))),
+    }
 }
 
 /// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
@@ -1412,6 +1451,135 @@ and 2 idle sessions (`cf task list --all`)";
                 said.text,
                 format!("T-7 is finished: what @zeus-amber-pine said last is its result, which reaches your inbox. Finishing does not end what its turn left running {words} until its window closes, or past it where the host cannot tell what is the window's."),
                 "{jobs} {agents}"
+            );
+        }
+    }
+
+    /// What `cf task <words…>` posted (its path and its body) and printed, the board
+    /// answering with `answer`; or why `cf` refused it before it asked the board.
+    fn moved_by(
+        words: &[&str],
+        answer: &Value,
+    ) -> Result<(Option<(String, Value)>, String), Failure> {
+        let api = scripted(vec![reply(200, answer.clone())]);
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )?;
+        let posted = api
+            .received()
+            .into_iter()
+            .next()
+            .and_then(|got| got.json().map(|json| (got.path, json)));
+        Ok((posted, said.text))
+    }
+
+    /// What a command written wrong was told.
+    fn wrongly(failure: Failure) -> String {
+        match failure {
+            Failure::Usage(said) => said,
+            other => panic!("not a command written wrong: {other:?}"),
+        }
+    }
+
+    fn retitled(state: &str, title: &str) -> Value {
+        json!({ "task": {
+            "number": 3, "state": state, "assignee": "zeus-pale", "requester": "chief",
+            "title": title, "blockedBy": [], "pool": null, "tier": null,
+        } })
+    }
+
+    #[test]
+    fn edit_takes_a_title_alone_for_a_task_in_any_state_and_says_the_brief_is_as_it_was() {
+        let (posted, said) = moved_by(
+            &["edit", "T-3", "--title", "Parser and lexer"],
+            &retitled("working", "Parser and lexer"),
+        )
+        .unwrap();
+        assert_eq!(
+            posted,
+            Some((
+                "/api/tasks/3/edit".to_owned(),
+                json!({ "title": "Parser and lexer" })
+            ))
+        );
+        assert_eq!(
+            said,
+            "T-3 has the title \"Parser and lexer\"; its brief is as it was, and the ledger keeps the old title. T-3 [working] @zeus-pale ← @chief: Parser and lexer"
+        );
+    }
+
+    #[test]
+    fn edit_reopen_and_resume_send_a_title_with_their_words_wherever_it_stands() {
+        for (verb, state) in [
+            ("edit", "open"),
+            ("reopen", "working"),
+            ("resume", "working"),
+        ] {
+            for words in [
+                [verb, "T-3", "More words", "--title", "New scope"],
+                [verb, "T-3", "--title", "New scope", "More words"],
+            ] {
+                let (posted, said) = moved_by(&words, &retitled(state, "New scope"))
+                    .unwrap_or_else(|refused| panic!("{words:?}: {refused:?}"));
+                assert_eq!(
+                    posted,
+                    Some((
+                        format!("/api/tasks/3/{verb}"),
+                        json!({ "body": "More words", "title": "New scope" })
+                    )),
+                    "{words:?}"
+                );
+                assert!(said.contains("New scope"), "{said}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_title_that_says_nothing_is_a_command_written_wrong_and_the_board_is_not_asked() {
+        for words in [
+            vec!["edit", "T-3", "--title"],
+            vec!["edit", "T-3", "--title", ""],
+            vec!["edit", "T-3", "--title", "  "],
+            vec!["reopen", "T-3", "More", "--title", " "],
+            vec!["resume", "T-3", "More", "--title"],
+        ] {
+            let api = scripted(vec![reply(200, retitled("working", "x"))]);
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let owned: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+            let refused = command(
+                &owned,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut std::io::empty(),
+            )
+            .err()
+            .expect("a refusal");
+            assert_eq!(
+                wrongly(refused),
+                "--title takes the new title: --title \"…\"",
+                "{words:?}"
+            );
+            assert!(api.received().is_empty(), "{words:?}");
+        }
+    }
+
+    #[test]
+    fn a_reopen_and_a_resume_still_ask_for_their_words_when_they_are_given_a_title() {
+        for (verb, asked) in [("reopen", "the follow-up"), ("resume", "what to do now")] {
+            let refused = moved_by(
+                &[verb, "T-3", "--title", "New scope"],
+                &retitled("working", "New scope"),
+            )
+            .unwrap_err();
+            assert_eq!(
+                wrongly(refused),
+                format!("cf task {verb} T-3 \"{asked}\""),
+                "{verb}"
             );
         }
     }
