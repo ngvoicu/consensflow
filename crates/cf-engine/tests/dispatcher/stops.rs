@@ -1078,3 +1078,34 @@ fn a_resume_an_answer_a_follow_up_and_a_reopen_given_a_window_at_work_press_noth
         "one window throughout"
     );
 }
+
+#[test]
+fn a_pause_of_a_window_at_work_whose_member_goes_out_meanwhile_is_pressed_while_its_activity_says_it_is_out(
+) {
+    // A pause asks a stop, a hold none: the chief's pause of a window at work goes on with
+    // its rounds when the member is out meanwhile, whatever its activity says; what its
+    // look finds it doing is what counts.
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs().len(), 1, "the pause's first round");
+    let resets_at = after(&context, 3 * 3_600_000);
+    context
+        .adapter
+        .quota("zeus", Some(exhausted(None, Some(&resets_at))));
+    // The look that reads it out presses nothing; the looks after it, out, go on with the
+    // rounds.
+    for _ in 0..3 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.dispatcher.activity(zeus).state, ActivityState::Out);
+    assert_eq!(
+        context.host.inputs().len(),
+        3,
+        "its rounds go on while its activity says it is out"
+    );
+}

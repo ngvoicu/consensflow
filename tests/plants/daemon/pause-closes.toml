@@ -113,7 +113,7 @@ runs = ["engine-lib-stops"]
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
 find = '        Some("cancelled") => format!(" T-{number} was cancelled;"),'
-replace = '        Some("cancelled") => format!(" `cf task resume T-{number} \\"…\\"` gives the window your words once its turn ends;"),'
+replace = '        Some("cancelled") => format!(" Resume T-{number} to give the window your words;"),'
 
 [[plant]]
 name = "pause closes: a hold asks a stop"
