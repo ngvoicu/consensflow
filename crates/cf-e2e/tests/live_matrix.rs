@@ -108,7 +108,7 @@ fn said(log: &Log, outcome: &Outcome, not_covered: &[&str]) {
 fn a_board_of_real_harnesses_goes_through_its_scenario_as_the_ledger_and_the_records_say() -> Result
 {
     if live::option("plan").is_some() {
-        let log = Log::new("live matrix plan");
+        let log = Log::begin("live matrix plan")?;
         log.block("the plan, nothing run", &seating::plan_text());
         return Ok(());
     }
