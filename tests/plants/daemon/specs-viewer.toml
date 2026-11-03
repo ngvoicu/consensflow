@@ -692,11 +692,11 @@ runs = ["viewer-page"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/viewer.rs"
 find = '''        .clone();
-    let answered = looking.clone().await;
+    let found = looking.clone().await;
 '''
 replace = '''        .clone();
     page.specs.looking.borrow_mut().remove(&key);
-    let answered = looking.clone().await;
+    let found = looking.clone().await;
 '''
 
 [[plant]]
@@ -728,6 +728,38 @@ runs = ["viewer-page"]
 file = "crates/cf-daemon/src/page/viewer.rs"
 find = '''            "readAgainIn".to_owned(),'''
 replace = '''            "remembered".to_owned(),'''
+
+[[plant]]
+name = "specs viewer: whether specs are on is never resolved"
+meant = "whether_specs_are_on_is_said_at_every_ask_and_presence_follows_the_folder_named"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = "    let on = project.specs_setting(&app).is_some();"
+replace = "    let on = false;"
+
+[[plant]]
+name = "specs viewer: an answer from memory says what specs were when the folder was read"
+meant = "whether_specs_are_on_is_said_at_every_ask_and_presence_follows_the_folder_named"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''    if let Some((present, again)) = page.specs.recall(&key) {
+        let mut fields = answered(present, on)?;'''
+replace = '''    if let Some((present, again)) = page.specs.recall(&key) {
+        let mut fields = answered(present, false)?;'''
+
+[[plant]]
+name = "specs viewer: presence is remembered of the project, not of the folder named"
+meant = "whether_specs_are_on_is_said_at_every_ask_and_presence_follows_the_folder_named"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = "    let key = directory.join(&name);"
+replace = "    let key = directory.clone();"
 
 [[plant]]
 name = "specs viewer: reading the folder wakes the dispatcher"
@@ -1155,8 +1187,32 @@ runs = ["viewer-button"]
 
 [[plant.edit]]
 file = "app/ui/core/app.js"
-find = "  const said = await daemon('specs.present', { project }).catch(() => ({ present: false }))"
+find = "  const said = await daemon('specs.present', { project }).catch(() => ({}))"
 replace = "  const said = await daemon('specs.tree', { project }).then(() => ({ present: true }), () => ({ present: false }))"
+
+[[plant]]
+name = "specs viewer: the button follows the folder alone, never the setting"
+meant = "turning specs on shows the button at once, with no folder yet: the viewer says where the chief will write"
+runs = ["viewer-button"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  state.specsPresent = { project, on: said.on === true, present: said.present === true }"
+replace = "  state.specsPresent = { project, on: false, present: said.present === true }"
+
+[[plant]]
+name = "specs viewer: saving what the app says of specs is read of presence at the next state change"
+meant = "the folder named again in Settings, Specs is the one presence reads"
+runs = ["viewer-button"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''    // What the app says of specs may turn them on for the project shown, or name it another
+    // folder: whether Specs shows is read again at once.
+    const project = state.board?.project.id
+    if (project !== undefined) void readPresence(project)
+'''
+replace = ""
 
 [[plant]]
 name = "specs viewer: the button keeps what the first read said"
@@ -1165,8 +1221,8 @@ runs = ["viewer-button"]
 
 [[plant.edit]]
 file = "app/ui/core/app.js"
-find = "  state.specsPresent = { project, present: said.present === true }"
-replace = "  state.specsPresent = { project, present: state.specsPresent?.present || said.present === true }"
+find = "  state.specsPresent = { project, on: said.on === true, present: said.present === true }"
+replace = "  state.specsPresent = { project, on: state.specsPresent?.on || said.on === true, present: state.specsPresent?.present || said.present === true }"
 
 [[plant]]
 name = "specs viewer: the board waits for whether the specs folder holds a file"

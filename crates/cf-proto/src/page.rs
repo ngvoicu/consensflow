@@ -60,7 +60,8 @@ pub enum PageOperation {
     /// One file of a project's specs folder, for the specs viewer, read and
     /// never written.
     SpecsFile,
-    /// Whether a project's specs folder holds a file: the board's Specs button.
+    /// Whether specs are on for a project and whether its specs folder holds a
+    /// file: either shows the board's Specs button.
     SpecsPresent,
     /// An HTML file of a project's specs folder, opened in the browser,
     /// outside ConsensFlow.
