@@ -171,6 +171,62 @@ fn a_follow_up_goes_to_a_new_conversation_after_a_restart_where_the_window_befor
     assert_eq!(told_held(&tiers).len(), 1, "no second hold");
 }
 
+/// The note of the hold tells the chief to rewrite the brief with `cf task edit` and send it
+/// on: the window it is then given has the brief the chief wrote and none of the old, which
+/// counted on the window before ("your T-1 snapshot", the field issue of 2026-10-29).
+#[test]
+fn a_held_follow_up_goes_to_its_window_with_the_brief_the_chief_rewrote() {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    context.host.exits_with_a_survivor(4242);
+    let (tiers, session) = session_at_work(&context);
+    let window = context.host.last(&session).unwrap().pane;
+    context.adapter.answer(&session, "Recorded");
+    passes(&context, 2);
+    assert!(closed(&context, &window), "closed with its result");
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(tiers.project.id, 1, "chief")
+        .unwrap();
+
+    follow_up(&context, &tiers, 1, "Compare it with your T-1 snapshot");
+    passes(&context, 3);
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word"
+    );
+    assert_eq!(told_held(&tiers).len(), 1);
+
+    context
+        .ledger
+        .borrow_mut()
+        .edit_task(
+            tiers.project.id,
+            2,
+            "chief",
+            "Compare it with the snapshot of 42 files below",
+        )
+        .unwrap();
+    send_on(&context, &tiers);
+    passes(&context, 3);
+    assert_eq!(tiers.task(2).task.state, "working");
+    let launch = context.adapter.prepared().last().unwrap().clone();
+    let said = launch["message"].as_str().unwrap_or_default();
+    assert!(
+        said.contains("Compare it with the snapshot of 42 files below"),
+        "{said}"
+    );
+    assert!(!said.contains("your T-1 snapshot"), "{said}");
+    assert_eq!(
+        resumed(&context),
+        serde_json::Value::Null,
+        "in a window of its own, on a new conversation"
+    );
+    assert_eq!(told_held(&tiers).len(), 1, "told once");
+}
+
 /// A window open when the daemon stopped: the app's window quits after the daemon has gone
 /// and tells no one how it ended (`cf_panes::headless::reap_all`), so nothing proves its
 /// program gone. The proof of the window before it on the same conversation holds no more
