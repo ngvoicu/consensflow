@@ -8,7 +8,9 @@ mod channel;
 pub mod computer_use;
 #[cfg(test)]
 mod fakes;
+mod last_used;
 mod launch;
+pub(crate) mod models;
 pub(crate) mod paths;
 mod quota;
 pub mod record;

@@ -138,16 +138,6 @@ find = '''  rank(EFFORT_ORDER, a.effort) - rank(EFFORT_ORDER, b.effort) ||
 replace = ""
 
 [[plant]]
-name = "catalog tiers: the chief's pick list groups by harness again"
-meant = "the chief's pick list groups as the staff's does, by tier, then harness and effort, in New project and Switch chief"
-runs = ["tiers-page-pickers"]
-
-[[plant.edit]]
-file = "app/ui/core/dialogs.js"
-find = '''  const groups = tierGroups(runsHere, (agent) => {'''
-replace = '''  const groups = tierGroups(runsHere.map((agent) => ({ ...agent, profile: { workTier: agent.harness } })), (agent) => {'''
-
-[[plant]]
 name = "catalog tiers: the Agents page grouped by tier orders its rows by model"
 meant = "grouped by work tier, a tier lists its agents as the pickers offer them: by harness, then effort from max down, then name"
 runs = ["tiers-agents-page"]
@@ -181,16 +171,6 @@ find = """            Some(why) => format!("{agent} left the catalog: {why}"),""
 replace = """            Some(_) => format!("{agent} is no longer among your agents"),"""
 
 [[plant]]
-name = "catalog tiers: a chief whose agent left the catalog is told to add it back"
-meant = "a_chief_on_an_agent_the_catalog_dropped_stays_closed_and_the_human_is_told_to_switch_it"
-runs = ["tiers-engine-retired"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/chief_switch.rs"
-find = """                body: match self.seams.roster.retired(agent) {"""
-replace = """                body: match None::<String> {"""
-
-[[plant]]
 name = "catalog tiers: a member whose agent left the catalog is told to define it"
 meant = "a_member_on_an_agent_the_catalog_dropped_takes_no_work_and_the_chief_hears_it_left_and_to_pick_another"
 runs = ["tiers-engine-retired"]
@@ -219,13 +199,3 @@ runs = ["tiers-page-khnum"]
 file = "app/ui/core/board.js"
 find = """    if (lane.agentRetired) {"""
 replace = """    if (lane.agentRetired && false) {"""
-
-[[plant]]
-name = "catalog tiers: Switch chief says nothing of a chief whose agent is gone"
-meant = "keeps the chief's card in the dock while its window is down: its agent gone, it says so, and Switch chief is the way on"
-runs = ["tiers-page-khnum"]
-
-[[plant.edit]]
-file = "app/ui/core/dialogs.js"
-find = """    gone.hidden = gone.textContent === ''"""
-replace = """    gone.hidden = true"""

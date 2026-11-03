@@ -17,7 +17,6 @@ use cf_ledger::{
 };
 use serde_json::Value;
 
-use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::handoff::{handoff_text, history_pages, is_handoff, last_words, Handoff};
 use crate::record::Record;
@@ -25,11 +24,11 @@ use crate::runtime::caught;
 use crate::seams::EngineError;
 use cf_proto::ledger::SwitchedFrom;
 
-/// The chief a switch is to: a saved agent on its harness.
+/// The chief a switch is to: a harness, and the model of it the human picked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchTo {
     pub harness: String,
-    pub agent: String,
+    pub model: String,
 }
 
 /// A switch waiting for the end of the chief's turn: whether the human wanted
@@ -91,7 +90,7 @@ impl Dispatcher {
         let from = switched.as_ref().map_or_else(
             || SwitchedFrom {
                 harness: latest.conversation.harness.clone(),
-                agent: None,
+                model: None,
             },
             |switched| switched.from.clone(),
         );
@@ -126,39 +125,6 @@ impl Dispatcher {
             },
         )?;
         Ok(Some(note))
-    }
-
-    /// A chief whose agent is gone does not open: the human hears why, and
-    /// what it was to receive waits for the chief they switch in, its
-    /// attempt given back.
-    pub(crate) fn chief_without_agent(
-        &self,
-        project: &ProjectView,
-        chief: &ParticipantView,
-        delivering: Option<Delivering>,
-    ) -> Result<(), EngineError> {
-        let agent = chief.agent.as_deref().unwrap_or("null");
-        self.seams.ledger.borrow_mut().note(
-            project.id,
-            &NewNote {
-                from: None,
-                to: "human".to_owned(),
-                task: None,
-                body: match self.seams.roster.retired(agent) {
-                    Some(why) => format!(
-                        "The chief runs on {agent}, which left the catalog: {why}. Switch the chief to another agent."
-                    ),
-                    None => format!(
-                        "The chief runs on {agent}, which is no longer among your agents: add it back under Agents, or switch the chief."
-                    ),
-                },
-            },
-        )?;
-        if let Some(delivering) = delivering {
-            self.give_back(delivering.message, &self.gone_because(agent))?;
-        }
-        self.changed();
-        Ok(())
     }
 
     /// A switch the human asked for after the chief's turn, with a note that
@@ -207,7 +173,7 @@ impl Dispatcher {
         // Opened with the ledger's words, as a meeting with the chief holds no such note.
         let body = format!(
             "{SWITCH_ASKED} {} ({}) once you answer. Write down where things stand, for the chief after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.",
-            to.harness, to.agent
+            to.harness, to.model
         );
         Ok(self.seams.ledger.borrow_mut().note(
             project,
@@ -377,7 +343,7 @@ impl Dispatcher {
             project.id,
             &ChiefSwitch {
                 harness: to.harness,
-                agent: to.agent,
+                model: to.model,
                 cut,
             },
         )?;
@@ -391,6 +357,7 @@ impl Dispatcher {
             let mut window = record.window.borrow_mut();
             window.interrupted = None;
             window.relaunch = None;
+            window.gone = None;
         }
         record.delivery.borrow_mut().held = None;
         self.changed();

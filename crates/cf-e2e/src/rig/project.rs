@@ -22,11 +22,14 @@ impl<'a> Project<'a> {
         Self { rig, id }
     }
 
-    /// Opens a project in the rig's workspace with `agent` as its chief, as the
-    /// New project dialog does. `more` is added to the request (`gate`,
-    /// `staff`). The daemon's answer is a refusal when it says it is not `ok`.
+    /// Opens a project in the rig's workspace with its chief on the harness and the
+    /// model of the saved agent `agent` ([`chief_of`]), as the New project dialog picks
+    /// them. `more` is added to the request (`gate`, `staff`). The daemon's answer is a
+    /// refusal when it says it is not `ok`.
     pub fn open(rig: &'a Rig, agent: &str, more: Value) -> Result<Self> {
-        let mut request = json!({ "directory": rig.workspace(), "agent": agent });
+        let (harness, model) = chief_of(rig, agent)?;
+        let mut request =
+            json!({ "directory": rig.workspace(), "harness": harness, "model": model });
         if let (Some(request), Some(more)) = (request.as_object_mut(), more.as_object()) {
             request.extend(
                 more.iter()
@@ -152,6 +155,36 @@ pub fn write_staff(rig: &Rig) -> Result<()> {
         ],
     });
     files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+}
+
+/// The harness and the model of the saved agent `agent`, as the roster the rig wrote has
+/// it, else the catalog's ready-made one: what a case picks a chief by, as the New project
+/// and Switch chief dialogs pick a harness and a model (CHF-07). A chief runs on no saved
+/// agent; the cases name one to say which harness and model.
+pub fn chief_of(rig: &Rig, agent: &str) -> Result<(String, String)> {
+    let catalog =
+        cf_catalog::Catalog::bundled().map_err(|failed| Error::Daemon(failed.to_string()))?;
+    let roster = cf_catalog::Roster::new(&catalog, rig.home().join("agents.json"));
+    let row = roster
+        .agent_row(agent)
+        .map_err(|failed| Error::Daemon(failed.message))?
+        .ok_or_else(|| Error::Daemon(format!("no agent {agent} in the rig's roster")))?;
+    let harness = row
+        .kind()
+        .ok_or_else(|| Error::Daemon(format!("{agent} names no harness")))?;
+    Ok((harness.to_owned(), row.model().unwrap_or(agent).to_owned()))
+}
+
+/// `more` with a chief's harness and model in it: those of the saved agent `agent`
+/// ([`chief_of`]), as New project and Switch chief send them.
+pub fn chief_body(rig: &Rig, agent: &str, more: Value) -> Result<Value> {
+    let (harness, model) = chief_of(rig, agent)?;
+    let mut body = more;
+    if let Some(fields) = body.as_object_mut() {
+        fields.insert("harness".to_owned(), json!(harness));
+        fields.insert("model".to_owned(), json!(model));
+    }
+    Ok(body)
 }
 
 /// The answer, if it says `ok`, and the refusal it is if it does not.

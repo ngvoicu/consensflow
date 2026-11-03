@@ -38,6 +38,7 @@ pub mod errors;
 pub mod files;
 pub mod host;
 pub mod machine;
+pub mod models;
 pub mod page;
 pub mod pass;
 pub mod roster;

@@ -9,6 +9,8 @@
 [workspace]
 resolver = "2"
 members = ["app/src-tauri", "crates/*", "tools/*"]
+# Probes are scripts that read the harnesses, kept to be run again: no crate.
+exclude = ["tools/probes"]
 
 [workspace.package]
 version = "3.0.7-alpha.2"

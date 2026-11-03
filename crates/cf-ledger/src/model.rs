@@ -287,6 +287,46 @@ pub fn parse_agent_id(value: Option<&Value>, taken: &[&str]) -> Result<String, L
     }
 }
 
+/// A model's id as a harness names it, what its `--model` takes: the model a chief runs
+/// on (CHF-04). Not an agent's id: Pi's holds its provider and may hold a `/` of
+/// OpenRouter's own (`openrouter/anthropic/claude-fable-5`), Claude Code's a context
+/// suffix (`[1m]`), OpenRouter's a `~`. In ASCII, 256 bytes at most, no space or control,
+/// and never begun by a `-`, which a command line would read as a flag.
+pub fn require_model_id(model: &str) -> Result<(), LedgerError> {
+    if is_model_id(model) {
+        return Ok(());
+    }
+    Err(LedgerError::refused(
+        "invalid-model",
+        format!("not a model id: {}", quoted(model)),
+    ))
+}
+
+/// `value` read as a model's id.
+pub fn parse_model_id(value: Option<&Value>) -> Result<String, LedgerError> {
+    match value {
+        Some(Value::String(model)) => require_model_id(model).map(|()| model.clone()),
+        _ => Err(LedgerError::refused(
+            "invalid-model",
+            format!("not a model id: {}", printed(value)),
+        )),
+    }
+}
+
+/// `^[A-Za-z0-9~][A-Za-z0-9._~/:@+\[\]-]{0,255}$`, in ASCII.
+fn is_model_id(model: &str) -> bool {
+    let bytes = model.as_bytes();
+    (1..=256).contains(&bytes.len())
+        && (bytes[0].is_ascii_alphanumeric() || bytes[0] == b'~')
+        && bytes[1..].iter().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'.' | b'_' | b'-' | b'~' | b'/' | b':' | b'@' | b'+' | b'[' | b']'
+                )
+        })
+}
+
 /// `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, in ASCII.
 fn is_agent_id(agent: &str) -> bool {
     let bytes = agent.as_bytes();

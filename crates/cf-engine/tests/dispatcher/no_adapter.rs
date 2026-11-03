@@ -99,7 +99,7 @@ fn opens_no_project_member_or_chief_on_it() {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "pi", "agent": "leto" },
+            "chief": { "harness": "pi", "model": "leto" },
         }))
         .unwrap_err()
         .to_string();
@@ -108,7 +108,7 @@ fn opens_no_project_member_or_chief_on_it() {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "hera", "harness": "pi", "role": "worker", "tier": "standard" }],
         }))
         .unwrap_err()
@@ -121,7 +121,7 @@ fn opens_no_project_member_or_chief_on_it() {
             project.id,
             SwitchTo {
                 harness: "pi".to_owned(),
-                agent: "leto".to_owned(),
+                model: "leto".to_owned(),
             },
             SwitchWhen::Now,
             false,

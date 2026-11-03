@@ -313,7 +313,7 @@ impl Rig {
         let request = NewProject::from_json(&json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": staff,
         }))
         .expect("a project");

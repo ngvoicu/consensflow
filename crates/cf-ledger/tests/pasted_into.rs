@@ -42,7 +42,7 @@ fn begun_at(dir: &std::path::Path, at: Rc<Cell<i64>>) -> (Ledger, i64, i64, i64)
             name: "app".into(),
             chief: NewChief {
                 harness: "devin".into(),
-                agent: Some("apollo".into()),
+                model: Some("apollo".into()),
             },
             staff: vec![NewMember {
                 agent: "zeus".into(),

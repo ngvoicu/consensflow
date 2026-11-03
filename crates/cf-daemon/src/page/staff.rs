@@ -2,15 +2,15 @@
 //! offer, the last staff, the human's Switch chief, and the members added,
 //! given other roles, removed and told they are back.
 
-use cf_catalog::Harness;
 use cf_engine::SwitchWhen;
 use cf_harness::detect::missing_harnesses;
 use cf_ledger::model::parse_roles;
 use cf_ledger::NewMember;
 use serde_json::{json, Value};
 
-use super::agents::{chief_on, last_staff_now, membership, saved};
+use super::agents::{last_staff_now, membership, saved};
 use super::body::{merged, one, Body, Fields, Said};
+use super::chief::chief_asked;
 use super::Page;
 use crate::roster::offerable;
 
@@ -36,9 +36,9 @@ pub(super) async fn last(page: &Page) -> Result<Fields, Said> {
     one("staff", staff)
 }
 
-/// `chief.switch`: the human's Switch chief, a saved agent (its harness, model
-/// and effort) on a harness installed here. `when: 'turn'` lets a chief at work
-/// finish its turn; `note` first asks it where things stand.
+/// `chief.switch`: the human's Switch chief, a harness installed here and a model of it
+/// (`chief_asked`). `when: 'turn'` lets a chief at work finish its turn; `note` first asks
+/// it where things stand.
 pub(super) async fn switch_chief(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let when = match body.get("when") {
         None => SwitchWhen::Now,
@@ -47,12 +47,7 @@ pub(super) async fn switch_chief(page: &Page, body: Body<'_>) -> Result<Fields, 
         Some(_) => return Err(Said::from("when is now or turn")),
     };
     let note = body.get("note") == Some(&Value::Bool(true));
-    let agents = saved(&page.env)?;
-    let target = chief_on(&agents.roster(), body.get("agent"))?;
-    let missing = missing_harnesses(&page.env);
-    if Harness::from_kind(&target.harness).is_some_and(|harness| missing.contains(&harness)) {
-        return Err(Said(format!("{} is not installed here", target.harness)));
-    }
+    let target = chief_asked(page, body, true)?;
     let project = page
         .engine
         .switch_chief(body.whole("project")?, target, when, note)

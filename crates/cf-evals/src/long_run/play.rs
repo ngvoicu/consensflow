@@ -94,8 +94,9 @@ pub trait Watch {
 pub struct With {
     /// How long a paused task or a suspended project is left so.
     pub hold: Duration,
-    /// The agent the chief is switched to.
-    pub switch_to: Option<String>,
+    /// What the chief is switched to: the agent of the staff it is named after, and the
+    /// harness and model that agent runs on, which Switch chief asks for (CHF-07).
+    pub switch_to: Option<(String, Value)>,
     /// How long a disruption waits for its effect, and how often it looks.
     pub within: Duration,
     pub every: Duration,
@@ -218,7 +219,7 @@ pub fn play(
         (Disruption::DevinCut, Target::Window { handle, task }) => {
             restart(&mut hand, Some((handle, *task)))
         }
-        (Disruption::Switch, _) => switch(&mut hand, with.switch_to.as_deref()),
+        (Disruption::Switch, _) => switch(&mut hand, with.switch_to.as_ref()),
         (Disruption::Suspend, _) => suspend(&mut hand, with.hold),
         (disruption, target) => Ok(Outcome::Missed(format!(
             "{} has nothing to do at {target:?}",
@@ -587,17 +588,18 @@ fn resumed(hand: &mut Hand<'_>) -> Result<bool> {
 
 /// The owner switches the chief to the agent `to`, at the end of its turn: played
 /// once the chief's window is a new one, on that agent.
-fn switch(hand: &mut Hand<'_>, to: Option<&str>) -> Result<Outcome> {
-    let Some(agent) = to else {
+fn switch(hand: &mut Hand<'_>, to: Option<&(String, Value)>) -> Result<Outcome> {
+    let Some((agent, chief)) = to else {
         return Ok(Outcome::Missed(
             "no agent to switch the chief to".to_owned(),
         ));
     };
     let before =
         lane_of(&hand.stage.board()?, "chief").map(|lane| lane["pane"]["generation"].clone());
-    let asked = hand
-        .stage
-        .page("chief.switch", json!({ "agent": agent, "when": "turn" }));
+    let asked = hand.stage.page(
+        "chief.switch",
+        json!({ "harness": chief["harness"], "model": chief["model"], "when": "turn" }),
+    );
     let said = format!("the owner switched the chief to {agent}");
     if let Some(why) = refusal(asked)? {
         return Ok(hand.failed(
@@ -612,7 +614,8 @@ fn switch(hand: &mut Hand<'_>, to: Option<&str>) -> Result<Outcome> {
             let generation = &lane["pane"]["generation"];
             !generation.is_null()
                 && Some(generation) != before.as_ref()
-                && lane["participant"]["agent"] == agent
+                && lane["participant"]["harness"] == chief["harness"]
+                && lane["participant"]["model"] == chief["model"]
         }))
     })?;
     if !switched {

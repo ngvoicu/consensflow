@@ -797,7 +797,7 @@ fn the_handoff_a_switched_chief_is_given_is_consensflows_own_word_and_the_gate_d
     let launched = context.codex.prepared().last().cloned().unwrap();
     assert_match(
         launched["message"].as_str().unwrap(),
-        r"You are the chief now\. The human switched this project's chief from Claude Code \(apollo\) to you, Codex \(astraeus\)\.",
+        r"You are the chief now\. The human switched this project's chief from Claude Code \(claude-opus-5\) to you, Codex \(gpt-6-astra\)\.",
     );
 }
 

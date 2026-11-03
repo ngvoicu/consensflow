@@ -220,6 +220,38 @@ impl Installed {
         }
     }
 
+    /// The variables the kit gives its windows (its Claude Code config folder, its home of the
+    /// run's own), for a read of it with no rig and no window: `harness-ask`'s (CHF-03's model
+    /// lists). [`Installed::finish_homes`] is the look at the person's setup after it.
+    pub fn home_vars(&self) -> Result<Vec<(String, String)>> {
+        let mut vars = Vec::new();
+        if let Some(config) = &self.claude_config {
+            let folder = config.folder()?;
+            vars.push((
+                "CLAUDE_CONFIG_DIR".to_owned(),
+                folder.to_string_lossy().into_owned(),
+            ));
+        }
+        if let Some(isolation) = &self.isolation {
+            vars.extend(isolation.vars()?);
+        }
+        Ok(vars)
+    }
+
+    /// What a read on [`Installed::home_vars`] came to: an error that names what it changed
+    /// of the person's setup or login, as a rig's end says it.
+    pub fn finish_homes(&self) -> Result {
+        let config = self
+            .claude_config
+            .as_ref()
+            .map_or(Ok(()), |config| config.finish());
+        let home = self
+            .isolation
+            .as_ref()
+            .map_or(Ok(()), |isolation| isolation.finish());
+        config.and(home)
+    }
+
     /// This harness, whose windows are given no home of the run's own: for a case that is
     /// its own home, whose rig is given a `HOME` with the harness's folder in it, made for the
     /// case, and none of the person's is read or written. The case says why it is its own.

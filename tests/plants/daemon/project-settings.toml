@@ -500,8 +500,8 @@ runs = ["page-new-project"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    if (this.#starting) return\n"
-replace = ""
+find = "    if (this.#starting || !this.#chief.picked()) return\n"
+replace = "    if (!this.#chief.picked()) return\n"
 
 [[plant]]
 name = "project settings: a start refused after the human left the dialog is said nowhere"
@@ -813,8 +813,8 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if project.state != "open" {
             return Ok(());
         }
-        // A chief whose agent is gone stays closed'''
-replace = '''        // A chief whose agent is gone stays closed'''
+        // A chief held for want of a model to start on, as the ledger keeps it, is stepped'''
+replace = '''        // A chief held for want of a model to start on, as the ledger keeps it, is stepped'''
 
 [[plant]]
 name = "project settings: the daemon refuses the approval of a closed project"

@@ -515,6 +515,10 @@ impl Dispatcher {
         } else {
             ledger.confirm_delivery(message.id, Some(receipt))?;
         }
+        // Its window took work: it came up, whatever its record showed before (CHF-06).
+        if let Some(record) = self.record(message.recipient_id) {
+            record.window.borrow_mut().took = true;
+        }
         Ok(())
     }
 

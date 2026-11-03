@@ -17,6 +17,24 @@ pub struct ParticipantView {
     pub role: String,
     pub agent: Option<String>,
     pub harness: Option<String>,
+    /// A chief's: the model picked for it, which it runs on where its record names none
+    /// (CHF-04). Said only where there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// A chief's: the model its last launch asked its harness for, read from its record
+    /// or picked; none where it left it to the harness's default. Not said: the board
+    /// says it of the chief's lane.
+    #[serde(skip_serializing)]
+    pub launched_model: Option<String>,
+    /// A chief's: the model a launch found its harness no longer has, which a reopen never
+    /// asks for again though its record names it (CHF-06). Not said.
+    #[serde(skip_serializing)]
+    pub gone_model: Option<String>,
+    /// A chief's: the model its last launch ran on, where it is not the one picked for it
+    /// (the human switched it in the window, and the reopen kept it): what its card says
+    /// it runs on (O7). Said only then.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ran_on: Option<String>,
     pub designer: bool,
     pub created_at: String,
     pub left_at: Option<String>,
@@ -191,44 +209,11 @@ pub struct ChiefConversation {
     pub items: Vec<HistoryItem>,
 }
 
-/// What ended a participant's conversation, as far as the ledger's log says.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "by", rename_all = "lowercase")]
-pub enum ConversationEnd {
-    /// The human's Switch chief, to the harness and agent the chief runs on after it.
-    Switch {
-        harness: String,
-        agent: Option<String>,
-    },
-    /// The window went to another conversation (`/clear`, `/new`, `/resume`):
-    /// one of the participant's own earlier ones (`resumed`), or one the ledger
-    /// had not seen, which is any of the three.
-    Window { resumed: bool },
-    /// A window opened on a fresh conversation in its place.
-    Fresh,
-}
-
-/// A participant's conversation as the history viewer heads it: the agent it
-/// ran on and what ended it where the ledger knows them, and how many of its
-/// items are tools' outputs, counted so far and no further (`more_tools`: that
-/// many, or more).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParticipantConversation {
-    #[serde(flatten)]
-    pub conversation: ConversationView,
-    pub agent: Option<String>,
-    pub ended_by: Option<ConversationEnd>,
-    pub tools: usize,
-    pub more_tools: bool,
-}
-
-/// Where an entry stands in a participant's history, in the order the viewer
-/// reads it: its conversation, and the row the ledger keeps its item in, which
-/// never changes, so that items stand in the order they were first copied
-/// whatever is copied again; row 0 is the conversation's heading, before its
-/// items. A search that stopped inside a long item says how many of its parts
-/// it went through (`part`, none where it went through the item whole).
+/// Where an item stands in a participant's history, in the order the viewer
+/// reads it: its conversation, and the row the ledger keeps it in, which never
+/// changes, so that items stand in the order they were first copied whatever is
+/// copied again. A search that stopped inside a long item says how many of its
+/// parts it went through (`part`, none where it went through the item whole).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryKey {
     pub conversation: i64,
@@ -272,31 +257,11 @@ pub struct HistoryRow {
     pub cut: Option<TextCut>,
 }
 
-/// What a read of the history takes, in the order it goes: an item, or the
-/// heading of a conversation that shows none (its key's row is 0), which a
-/// page shows in its place.
-#[derive(Debug, Clone, PartialEq)]
-pub enum HistoryEntry {
-    Heading(HistoryKey),
-    Item(HistoryRow),
-}
-
-impl HistoryEntry {
-    /// Where the entry stands.
-    pub fn key(&self) -> HistoryKey {
-        match self {
-            Self::Heading(key) => *key,
-            Self::Item(row) => row.key,
-        }
-    }
-}
-
 /// How much of the history a read went through: the conversations it came
 /// to, the rows it read, the lookups of parts of a long item's text it made
-/// (`parts`), the bytes of text it read of them, the bytes of the
-/// conversations' fields, the items' ids as a page shows them and their times,
-/// and the data of the events the headings read (`fields`), and the steps
-/// SQLite's machine took for it all.
+/// (`parts`), the bytes of text it read of them, the bytes of the items' ids as
+/// a page shows them and their times (`fields`), and the steps SQLite's machine
+/// took for it all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Scanned {
     pub conversations: usize,
@@ -307,17 +272,16 @@ pub struct Scanned {
     pub steps: usize,
 }
 
-/// One read of a participant's history: the conversations it took an entry
-/// of, headed, in the order it went; its entries, in that order; where the
-/// next read that way goes on (none: there is no more that way); whether the
-/// read stopped at the most a read goes through; how much it went through,
-/// and what that was charged of the most it may go through (`charged`, in
-/// bytes), which what a page reads besides is charged against too.
+/// One read of a participant's history: the items it took, across its
+/// conversations, in the order it went; where the next read that way goes on
+/// (none: there is no more that way); whether the read stopped at the most a
+/// read goes through; how much it went through, and what that was charged of
+/// the most it may go through (`charged`, in bytes), which what a page reads
+/// besides is charged against too.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistoryRead {
     pub participant: i64,
-    pub conversations: Vec<ParticipantConversation>,
-    pub entries: Vec<HistoryEntry>,
+    pub entries: Vec<HistoryRow>,
     pub resume: Option<HistoryKey>,
     pub bounded: bool,
     pub scanned: Scanned,
@@ -381,11 +345,12 @@ fn did(happened: &bool) -> bool {
     *happened
 }
 
-/// What the chief ran on before the latest Switch chief.
+/// What the chief ran on before the latest Switch chief: its harness, and the model
+/// picked for it where one was (none for a chief from before a chief had one).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SwitchedFrom {
     pub harness: String,
-    pub agent: Option<String>,
+    pub model: Option<String>,
 }
 
 /// The project's latest Switch chief: what the chief was switched from, and
@@ -708,6 +673,10 @@ mod tests {
             role: "worker".into(),
             agent: Some("zeus".into()),
             harness: Some("pi".into()),
+            model: None,
+            launched_model: None,
+            gone_model: None,
+            ran_on: None,
             designer: false,
             created_at: "2026-09-19T10:00:01.000Z".into(),
             left_at: None,
@@ -722,6 +691,39 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&view).unwrap(),
             r#"{"id":2,"projectId":1,"handle":"zeus-amber-pine","role":"worker","agent":"zeus","harness":"pi","designer":false,"createdAt":"2026-09-19T10:00:01.000Z","leftAt":null,"tier":"standard","roles":["worker"],"outUntil":null,"outSince":null,"memberId":1,"member":"zeus","session":"amber-pine"}"#
+        );
+    }
+
+    /// A chief's model is said after its harness, and only by a chief that has one; the
+    /// model its last launch asked for is not said: a member's view reads as Node's did
+    /// (CHF-04).
+    #[test]
+    fn writes_a_chiefs_model_after_its_harness() {
+        let chief = ParticipantView {
+            id: 2,
+            project_id: 1,
+            handle: "chief".into(),
+            role: "chief".into(),
+            agent: None,
+            harness: Some("pi".into()),
+            model: Some("openrouter/anthropic/claude-fable-5".into()),
+            launched_model: Some("openai/gpt-6-luna".into()),
+            gone_model: None,
+            ran_on: None,
+            designer: false,
+            created_at: "2026-09-19T10:00:01.000Z".into(),
+            left_at: None,
+            tier: None,
+            roles: Vec::new(),
+            out_until: None,
+            out_since: None,
+            member_id: None,
+            member: None,
+            session: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&chief).unwrap(),
+            r#"{"id":2,"projectId":1,"handle":"chief","role":"chief","agent":null,"harness":"pi","model":"openrouter/anthropic/claude-fable-5","designer":false,"createdAt":"2026-09-19T10:00:01.000Z","leftAt":null,"tier":null,"roles":[],"outUntil":null,"outSince":null,"memberId":null,"member":null,"session":null}"#
         );
     }
 
@@ -774,8 +776,7 @@ mod tests {
     }
 
     #[test]
-    fn says_a_compaction_s_summary_only_where_an_item_is_one_and_what_ended_a_conversation_by_its_kind(
-    ) {
+    fn says_a_compaction_s_summary_only_where_an_item_is_one() {
         let item = |compaction| HistoryItem {
             id: "s-1".into(),
             role: "user".into(),
@@ -791,18 +792,6 @@ mod tests {
         assert!(!serde_json::to_string(&item(false))
             .unwrap()
             .contains("compaction"));
-        let ends = [
-            ConversationEnd::Switch {
-                harness: "codex".into(),
-                agent: Some("maia".into()),
-            },
-            ConversationEnd::Window { resumed: true },
-            ConversationEnd::Fresh,
-        ];
-        assert_eq!(
-            serde_json::to_string(&ends).unwrap(),
-            r#"[{"by":"switch","harness":"codex","agent":"maia"},{"by":"window","resumed":true},{"by":"fresh"}]"#
-        );
     }
 
     #[test]

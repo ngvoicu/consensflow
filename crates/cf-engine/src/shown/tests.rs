@@ -562,3 +562,15 @@ fn a_footers_counters_are_folded_and_keep_one_failure_one() {
         "#count tokens and #count left"
     );
 }
+
+/// A code of failure is one the program ended with by itself: not the status Windows gives
+/// the human's Ctrl+C, which is their interrupt as a signal is on the Mac (Calliope's P2c,
+/// T-994); an access violation is the program's own.
+#[test]
+fn the_human_s_ctrl_c_on_windows_is_no_code_of_failure() {
+    assert!(shown(Some(1), None, None).ended_failing());
+    assert!(shown(Some(0xC000_0005), None, None).ended_failing());
+    assert!(!shown(Some(0xC000_013A), None, None).ended_failing());
+    assert!(!shown(Some(0), None, None).ended_failing());
+    assert!(!shown(None, Some("SIGINT"), None).ended_failing());
+}

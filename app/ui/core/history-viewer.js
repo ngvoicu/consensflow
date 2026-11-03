@@ -1,6 +1,5 @@
 import { button, element } from '../dom.js'
-import { itemLabel, laneName } from './board.js'
-import { HARNESS_NAMES } from './dialogs.js'
+import { itemLabel } from './board.js'
 
 /** The most characters a search holds: the daemon refuses more. */
 const FIND_MOST = 1_000
@@ -14,18 +13,18 @@ const READS_OF_A_CHANGING_ITEM = 3
  * session's). It reads through the daemon (`history.get`, `history.part`), a
  * page at a time, and changes nothing.
  *
- * One column, oldest above. Each conversation has a heading: the harness and
- * the agent it ran on, from when until when, and what ended it as far as the
- * ledger knows (a Switch chief; the window going to another conversation, a
- * `/clear`, `/new` or `/resume`; a window that opened on a fresh one); the
- * one going on now says so. Its items are labelled as the task drawer labels
- * them, a compaction's summary as one. A delivery ConsensFlow made to this
+ * One column, oldest above: one timeline of the items of every conversation,
+ * titled History, with no heading, harness, model or name anywhere in it
+ * (chief-harness, CHF-11). Each item says the conversation and row it stands
+ * at, which only the reads use. Its items are labelled as the task drawer
+ * labels them, a compaction's summary as one. A delivery ConsensFlow made to this
  * participant shows as its line, as `cf history` says it, and opens on a click
  * to what went in. The first page is the most recent; Older goes on from the
  * oldest item shown and Newer from the newest, so no page repeats or skips an
- * item, whatever comes or grows meanwhile. A search keeps the items that hold
- * its words in any case, and says where it stopped when it went through as
- * much as one read may; it holds 1,000 characters at most, as the daemon does,
+ * item, whatever comes or grows meanwhile; a read that goes through as much as
+ * one may before it finds anything to show says where it stopped, and Older
+ * goes on from there. A search keeps the items that hold its words in any
+ * case, and says where it stopped the same way; it holds 1,000 characters at most, as the daemon does,
  * and says so of a longer one. Show tool output adds the tools' outputs. A
  * long item shows a part (from its start, or where the search found it), and
  * is read whole on asking, a part at a time by its place, every part of one
@@ -33,8 +32,6 @@ const READS_OF_A_CHANGING_ITEM = 3
  */
 export class HistoryViewer {
   #dialog
-  #title
-  #who
   #find
   #tools
   #newer
@@ -43,8 +40,8 @@ export class HistoryViewer {
   #body
   #page
   /**
-   * What is shown: whose history (the project's id and the participant), and the
-   * places the pages before and after this one go on from.
+   * What is shown: whose history (the project's id and the participant's handle),
+   * and the places the pages before and after this one go on from.
    */
   #shown = null
   /** Each read is numbered: what comes back for a read the human has left since is not shown. */
@@ -54,8 +51,6 @@ export class HistoryViewer {
   constructor(dialog, page) {
     this.#dialog = dialog
     this.#page = page
-    this.#title = dialog.querySelector('.history-title')
-    this.#who = dialog.querySelector('.history-who')
     this.#find = dialog.querySelector('[name="history-find"]')
     this.#tools = dialog.querySelector('[name="history-tools"]')
     this.#newer = dialog.querySelector('[name="history-newer"]')
@@ -83,21 +78,12 @@ export class HistoryViewer {
 
   /** Opens on the most recent page of `participant`'s history. */
   async open(participant) {
-    const name = laneName(participant)
     this.#shown = {
       project: participant.projectId,
       handle: participant.handle,
-      name,
       older: null,
       newer: null,
     }
-    this.#title.textContent = `History of ${name}`
-    this.#who.textContent = [
-      HARNESS_NAMES[participant.harness] ?? participant.harness,
-      participant.agent,
-    ]
-      .filter(Boolean)
-      .join(' · ')
     this.#find.value = ''
     this.#tools.checked = false
     this.#body.replaceChildren(element('p', 'history-note', 'Reading the history…'))
@@ -138,7 +124,7 @@ export class HistoryViewer {
       if (read !== this.#reads) return
       shown.older = history.older
       shown.newer = history.newer
-      this.#drawPaging(history)
+      this.#drawPaging(history, find)
       this.#body.replaceChildren(...this.#draw(history, find))
       this.#body.scrollTop = top ? 0 : this.#body.scrollHeight
     } catch (cause) {
@@ -149,40 +135,41 @@ export class HistoryViewer {
     }
   }
 
-  #drawPaging({ older, newer, partial }) {
+  #drawPaging({ older, newer, partial }, find) {
     const where = newer === null ? 'The most recent' : 'Earlier items'
-    this.#status.textContent = partial
-      ? `${where}; the search stopped here to stay quick: Older searches further back`
-      : where
+    const stopped = find
+      ? 'the search stopped here to stay quick: Older searches further back'
+      : 'the read stopped here to stay quick: Older reads further back'
+    this.#status.textContent = partial ? `${where}; ${stopped}` : where
     this.#newer.disabled = newer === null
     this.#older.disabled = older === null
   }
 
-  /** A page as it shows: each conversation's heading and items, or what there is none of. */
+  /** A page as it shows: its items in one list, or what there is none of. */
   #draw(history, find) {
-    const { name } = this.#shown
-    const shown = history.conversations.some((conversation) => conversation.items.length > 0)
-    if (history.conversations.length === 0 || (find && !shown)) {
-      let none = `Nothing is kept of ${name}'s conversations yet.`
+    if (history.items.length === 0) {
+      let none = history.partial
+        ? 'Nothing to show yet: Older reads further back.'
+        : 'Nothing is kept of this history yet.'
       if (find) {
         none = history.partial
           ? `Nothing found yet that holds "${find}": Older searches further back.`
-          : `Nothing in ${name}'s history holds "${find}".`
+          : `Nothing in this history holds "${find}".`
       }
       return [element('p', 'history-note', none)]
     }
-    return history.conversations.map((conversation) =>
-      drawConversation(conversation, (item) => this.#whole(conversation.id, item)),
-    )
+    const list = element('ol', 'transcript history-items')
+    list.append(...history.items.map((item) => drawItem(item, (shown) => this.#whole(shown))))
+    return [list]
   }
 
   /**
-   * The whole text of item `item` of conversation `conversation`, read a part at a time by
-   * its place, and the copy of it it is (its revision). Every part is of one copy of it: a
-   * part of another (the item was copied again meanwhile) reads it again from its start, so
-   * no text of two copies is shown; after three reads it changed in, the viewer says so.
+   * The whole text of item `item`, read a part at a time by its place (its conversation and
+   * row), and the copy of it it is (its revision). Every part is of one copy of it: a part of
+   * another (the item was copied again meanwhile) reads it again from its start, so no text
+   * of two copies is shown; after three reads it changed in, the viewer says so.
    */
-  async #whole(conversation, item) {
+  async #whole(item) {
     const { project, handle } = this.#shown
     for (let tries = 0; tries < READS_OF_A_CHANGING_ITEM; tries += 1) {
       let text = ''
@@ -192,7 +179,7 @@ export class HistoryViewer {
         const { part } = await this.#page.daemon('history.part', {
           project,
           handle,
-          conversation,
+          conversation: item.conversation,
           row: item.row,
           from,
         })
@@ -205,32 +192,6 @@ export class HistoryViewer {
     }
     throw new Error('It changed each time it was read: show it again to read it as it is now.')
   }
-}
-
-/** A conversation: its heading, then its items on the page; `whole` reads a cut item whole. */
-function drawConversation(conversation, whole) {
-  const section = element('section', 'history-conversation')
-  section.dataset.conversation = String(conversation.id)
-  const runsOn = [HARNESS_NAMES[conversation.harness] ?? conversation.harness, conversation.agent]
-    .filter(Boolean)
-    .join(' · ')
-  const heading = element('h3', 'history-heading', runsOn)
-  section.setAttribute('aria-label', `${runsOn}, ${period(conversation)}`)
-  const about = [period(conversation)]
-  const ended = endedWords(conversation)
-  if (ended) about.push(ended)
-  if (conversation.toolsLeftOut > 0) {
-    // Counted so far and no further: that many, or more.
-    const more = conversation.moreToolsLeftOut === true
-    const outputs = conversation.toolsLeftOut === 1 && !more ? 'output' : 'outputs'
-    const count = more ? `${conversation.toolsLeftOut} or more` : conversation.toolsLeftOut
-    about.push(`${count} tool ${outputs} left out`)
-  }
-  section.append(heading, element('p', 'history-about', about.join(' · ')))
-  const list = element('ol', 'transcript history-items')
-  list.append(...conversation.items.map((item) => drawItem(item, whole)))
-  section.append(list)
-  return section
 }
 
 /**
@@ -293,28 +254,6 @@ function drawItem(item, whole) {
 /** A size as the page says it. */
 const measure = (bytes) =>
   bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
-
-/** From when until when, or since when for the one going on now. */
-const period = ({ startedAt, endedAt }) =>
-  endedAt ? `${clock(startedAt)} to ${clock(endedAt)}` : `since ${clock(startedAt)}, going on now`
-
-/** What ended a conversation, as far as the ledger knows; none for the one going on now. */
-function endedWords({ endedAt, endedBy }) {
-  if (!endedAt) return null
-  if (endedBy === null) return 'ended (the ledger does not say why)'
-  if (endedBy.by === 'switch') {
-    const to = [HARNESS_NAMES[endedBy.harness] ?? endedBy.harness, endedBy.agent]
-      .filter(Boolean)
-      .join(' · ')
-    return `ended by Switch chief, to ${to}`
-  }
-  if (endedBy.by === 'window') {
-    return endedBy.resumed
-      ? 'ended when the window resumed an earlier conversation (/resume)'
-      : 'ended when the window went to another conversation (/clear, /new or /resume)'
-  }
-  return 'ended when a window opened on a fresh conversation'
-}
 
 const two = (number) => String(number).padStart(2, '0')
 

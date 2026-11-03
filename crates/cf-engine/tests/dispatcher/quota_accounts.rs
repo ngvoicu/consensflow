@@ -218,7 +218,7 @@ fn a_chief_stays_out_when_the_member_that_came_back_runs_on_another_harness() {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "codex", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()

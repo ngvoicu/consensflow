@@ -92,12 +92,16 @@ pub enum PageOperation {
     /// compact at, or takes away: every member window of the project is given it
     /// when it next starts.
     ProjectCompaction,
+    /// The models a harness lists and the efforts each takes, as the home keeps them: read
+    /// from the harness at the first ask of the daemon's life, and again at the human's
+    /// Refresh (CHF-03). For the chief's picker and the staff chains' editor.
+    ModelsGet,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 47] = [
+    pub const ALL: [PageOperation; 48] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -145,6 +149,7 @@ impl PageOperation {
         Self::ProjectMeeting,
         Self::ProjectRules,
         Self::ProjectCompaction,
+        Self::ModelsGet,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -197,6 +202,7 @@ impl PageOperation {
             Self::ProjectMeeting => "project.meeting",
             Self::ProjectRules => "project.rules",
             Self::ProjectCompaction => "project.compaction",
+            Self::ModelsGet => "models.get",
         }
     }
 
@@ -231,6 +237,7 @@ impl PageOperation {
                 | Self::HistoryPart
                 | Self::ComputerUseGet
                 | Self::ComputerUseOpen
+                | Self::ModelsGet
         )
     }
 }
@@ -259,7 +266,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 47);
+        assert_eq!(named.len(), 48);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -314,7 +321,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 19] = [
+        const ADDED: [&str; 20] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -334,6 +341,7 @@ mod tests {
             "project.meeting",
             "project.rules",
             "project.compaction",
+            "models.get",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);
@@ -367,6 +375,7 @@ mod tests {
                 "history.part",
                 "computer_use.get",
                 "computer_use.open",
+                "models.get",
             ]
         );
     }

@@ -60,6 +60,9 @@ const BETWEEN: &str = " / ";
 /// The first exit code that is a Windows status (an `NTSTATUS` of a warning or
 /// an error) rather than a number the program returned.
 const STATUS_CODES: u32 = 0x8000_0000;
+/// The status Windows ends a console program with on the human's Ctrl+C
+/// (`STATUS_CONTROL_C_EXIT`): their interrupt, as a signal is on the Mac.
+const CONSOLE_CTRL_C: u32 = 0xC000_013A;
 
 /// What the pane host said of a window: how its program ended where it had,
 /// the last lines its screen showed, and what it left running when the window
@@ -189,6 +192,16 @@ impl Shown {
     /// settles its window before the host's word comes).
     pub(crate) fn gone(&self) -> Option<bool> {
         self.is_known().then_some(self.survivor.is_none())
+    }
+
+    /// Whether the host said the program ended with a code of failure: not 0, and no signal
+    /// (a close's, or the human's Ctrl-C), nor the status Windows gives the human's Ctrl+C
+    /// ([`CONSOLE_CTRL_C`], Calliope's P2c, T-994).
+    pub(crate) fn ended_failing(&self) -> bool {
+        self.signal.is_none()
+            && self
+                .code
+                .is_some_and(|code| code != 0 && code != CONSOLE_CTRL_C)
     }
 
     pub fn is_known(&self) -> bool {

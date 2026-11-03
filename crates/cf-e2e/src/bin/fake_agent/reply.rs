@@ -160,6 +160,9 @@ pub enum Reply {
     Refused,
     /// An Escape stopped the turn before it answered.
     Stopped,
+    /// The model it runs on is one its account does not have (`CF_TEST_GONE_MODEL`): the
+    /// turn fails at once, as Claude Code 2.1.312's does.
+    Gone,
 }
 
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever

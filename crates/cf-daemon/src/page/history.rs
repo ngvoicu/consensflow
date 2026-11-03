@@ -1,12 +1,13 @@
 //! `history.get` and `history.part`: a participant's whole history, for the
-//! viewer its window's History button opens: every conversation, the current
-//! one too, a page at a time from a place that does not move, and a long
-//! item's text a part at a time. They read, and write nothing.
+//! viewer its window's History button opens: the items of every conversation,
+//! the current one too, as one timeline with no heading, a page at a time from
+//! a place that does not move, and a long item's text a part at a time. They
+//! read, and write nothing.
 //!
 //! A read is the ledger's, on the daemon's own thread: the ledger holds its
 //! file alone (`locking_mode = EXCLUSIVE`, one connection), so no other thread
 //! could read it. Each read is bounded instead, whatever the history's size or
-//! one item's: a page, headings and all, and at most [`HISTORY_SCAN_BYTES`]
+//! one item's: a page, and at most [`HISTORY_SCAN_BYTES`]
 //! gone through, each conversation and row it comes to charged, and each
 //! message a delivery's line is said from, as far as its opening; a part is
 //! one part read.

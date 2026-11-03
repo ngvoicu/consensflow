@@ -1,9 +1,9 @@
-//! A participant's whole history, as the history viewer reads it: every
-//! conversation, oldest first and the current one too, with the agent it ran
-//! on, what ended it as far as the log says (a Switch chief, the window going
-//! to another conversation, a window opened fresh), and every item copied,
-//! a compaction's summary marked as one, read a page at a time from a place
-//! that does not move. Reading it writes nothing.
+//! A participant's whole history, as the history viewer reads it: one
+//! timeline of every item copied of every conversation, oldest first and the
+//! current one too, a compaction's summary marked as one, read a page at a time
+//! from a place that does not move, with no heading of any conversation
+//! (chief-harness, CHF-11): an item says the conversation it stands in, and a
+//! conversation with no item is not there. Reading it writes nothing.
 
 #![allow(clippy::expect_used)]
 
@@ -13,8 +13,6 @@ mod bounds;
 mod ceilings;
 #[path = "whole_history/deleting.rs"]
 mod deleting;
-#[path = "whole_history/headings.rs"]
-mod headings;
 #[path = "whole_history/healing.rs"]
 mod healing;
 #[path = "whole_history/load.rs"]
@@ -27,18 +25,17 @@ mod pages;
 mod reads;
 
 use cf_ledger::{
-    open_ledger, ChiefSwitch, HistoryAsk, HistoryEntry, HistoryFrom, HistoryItem, HistoryRead,
-    Ledger, LedgerError, NewChief, NewMember, NewProject, Options, ParticipantConversation,
-    ProjectView, HISTORY_SCAN_BYTES,
+    open_ledger, ChiefSwitch, HistoryAsk, HistoryFrom, HistoryItem, HistoryRead, Ledger,
+    LedgerError, NewChief, NewMember, NewProject, Options, ProjectView, HISTORY_SCAN_BYTES,
 };
 use serde_json::{json, Value};
 
-/// A conversation, headed, and its items.
-type Conversation = (ParticipantConversation, Vec<HistoryItem>);
+/// A conversation's id, and its items.
+type Conversation = (i64, Vec<HistoryItem>);
 
-/// Everything of `handle`'s history, the tools' outputs too, read an entry at
-/// a time from the most recent back (each read's room takes its first entry
-/// alone), and set out by conversation, oldest first.
+/// Everything of `handle`'s history, the tools' outputs too, read an item at
+/// a time from the most recent back (each read's room takes its first item
+/// alone), and set out by the conversation each stands in, oldest first.
 fn everything(
     ledger: &Ledger,
     project: i64,
@@ -56,24 +53,17 @@ fn everything(
     // A history of these tests is a few entries: a read that never ends is a fault.
     for _ in 0..100 {
         let HistoryRead {
-            conversations,
-            entries,
-            resume,
-            ..
+            entries, resume, ..
         } = ledger.read_history(project, handle, &ask)?;
-        for entry in entries {
-            let id = entry.key().conversation;
+        for row in entries {
+            let id = row.key.conversation;
             if shown
                 .last()
-                .is_none_or(|(conversation, _)| conversation.conversation.id != id)
+                .is_none_or(|(conversation, _)| *conversation != id)
             {
-                let heading = conversations
-                    .iter()
-                    .find(|conversation| conversation.conversation.id == id)
-                    .expect("its heading");
-                shown.push((heading.clone(), Vec::new()));
+                shown.push((id, Vec::new()));
             }
-            if let (HistoryEntry::Item(row), Some((_, items))) = (entry, shown.last_mut()) {
+            if let Some((_, items)) = shown.last_mut() {
                 items.push(row.item);
             }
         }
@@ -101,7 +91,7 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             name: "harbour".into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("ares".into()),
+                model: Some("ares".into()),
             },
             staff: Vec::new(),
             gate: false,
@@ -125,11 +115,11 @@ fn item(id: &str, role: &str, text: &str) -> Value {
     json!({ "id": id, "role": role, "text": text, "complete": true })
 }
 
-/// What each conversation is, in a line: its harness, agent and end, and its items.
+/// What each conversation holds, in a line: its items.
 fn lines(history: &[Conversation]) -> Vec<String> {
     history
         .iter()
-        .map(|(conversation, items)| {
+        .map(|(_, items)| {
             let items: Vec<String> = items
                 .iter()
                 .map(|item| {
@@ -137,13 +127,7 @@ fn lines(history: &[Conversation]) -> Vec<String> {
                     format!("{}: {}{mark}", item.role, item.text)
                 })
                 .collect();
-            format!(
-                "{} {} {:?} {:?}",
-                conversation.conversation.harness,
-                conversation.agent.as_deref().unwrap_or("-"),
-                conversation.ended_by,
-                items
-            )
+            format!("{items:?}")
         })
         .collect()
 }
@@ -192,7 +176,7 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
             project.id,
             &ChiefSwitch {
                 harness: "codex".into(),
-                agent: "maia".into(),
+                model: "maia".into(),
                 cut: false,
             },
         )
@@ -209,20 +193,21 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
 
     let logged = ledger.events(project.id, 0, 500).expect("the log").len();
     let history = everything(&ledger, project.id, "chief").expect("the history");
+    // One timeline across the clear, the resume, the compaction and the switch: the
+    // fresh window's conversation, which holds no item yet, is not there.
     assert_eq!(
         lines(&history),
         [
-            r#"claude-code ares Some(Switch { harness: "codex", agent: Some("maia") }) ["user: Ship the parser", "assistant: On it", "tool: ok 12 passed", "user: This session is being continued. (compaction)", "user: Where were we?"]"#,
-            r#"claude-code ares Some(Window { resumed: true }) ["user: A fresh start"]"#,
-            r#"codex maia Some(Fresh) ["assistant: Taken over"]"#,
-            "codex maia None []",
+            r#"["user: Ship the parser", "assistant: On it", "tool: ok 12 passed", "user: This session is being continued. (compaction)", "user: Where were we?"]"#,
+            r#"["user: A fresh start"]"#,
+            r#"["assistant: Taken over"]"#,
         ]
     );
-    let ids: Vec<i64> = history.iter().map(|(c, _)| c.conversation.id).collect();
-    assert_eq!(ids, [first.id, cleared.id, third.id, fourth.id]);
+    let ids: Vec<i64> = history.iter().map(|(id, _)| *id).collect();
+    assert_eq!(ids, [first.id, cleared.id, third.id]);
     assert!(
-        history[3].0.conversation.ended_at.is_none(),
-        "the current one"
+        !ids.contains(&fourth.id),
+        "the current one, with nothing copied"
     );
     assert_eq!(
         ledger.events(project.id, 0, 500).expect("the log").len(),
@@ -233,10 +218,18 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
     let earlier = ledger.chief_history(project.id).expect("the history");
     assert_eq!(earlier.len(), 3);
     assert!(earlier[0].items[3].compaction && earlier[0].items[3].role == "user");
+    // Once the current one holds an item, it is read too, after the rest.
+    ledger
+        .copy_transcript(fourth.id, &[item("n-1", "user", "Now")], 0)
+        .expect("copied");
+    let now = everything(&ledger, project.id, "chief").expect("the history");
+    let ids: Vec<i64> = now.iter().map(|(id, _)| *id).collect();
+    assert_eq!(ids, [first.id, cleared.id, third.id, fourth.id]);
+    assert_eq!(lines(&now[3..]), [r#"["user: Now"]"#]);
 }
 
 #[test]
-fn a_clear_to_a_conversation_the_ledger_never_saw_and_a_member_s_agent_and_an_unknown_handle() {
+fn a_member_s_conversations_with_nothing_copied_show_nothing_and_an_unknown_handle_is_refused() {
     let dir = tempfile::tempdir().expect("a folder");
     let mut ledger = ledger_in(&dir);
     let project = project(&mut ledger);
@@ -265,19 +258,13 @@ fn a_clear_to_a_conversation_the_ledger_never_saw_and_a_member_s_agent_and_an_un
             project.id,
             &ChiefSwitch {
                 harness: "codex".into(),
-                agent: "maia".into(),
+                model: "maia".into(),
                 cut: false,
             },
         )
         .expect("switched");
     let history = everything(&ledger, project.id, "zeus").expect("the history");
-    assert_eq!(
-        lines(&history),
-        [
-            "pi zeus Some(Window { resumed: false }) []",
-            "pi zeus None []",
-        ]
-    );
+    assert_eq!(lines(&history), Vec::<String>::new());
     let refused = everything(&ledger, project.id, "nobody").expect_err("no such participant");
     assert!(refused.to_string().contains("nobody"), "{refused}");
 }

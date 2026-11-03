@@ -166,7 +166,8 @@ pub fn open(
         "project.open",
         json!({
             "directory": workspace,
-            "agent": cast.agent.id,
+            "harness": cast.agent.kind,
+            "model": cast.agent.model,
             "staff": cast.staff.to_value(),
             "specs": { "on": true },
             "wakeUp": { "on": true, "every": options.wake_minutes, "unit": "minutes" },

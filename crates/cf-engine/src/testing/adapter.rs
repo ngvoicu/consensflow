@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use cf_harness::contract::{
     Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
-    Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
+    Readiness, Skill, Trusts, TurnLeft, Used, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -136,6 +136,9 @@ pub struct FakeAgent {
     /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
     /// turn), or the record cannot tell (none).
     pub resumable: Option<bool>,
+    /// What its record says the conversation ran on last (`Adapter::last_used`): none,
+    /// as a harness whose record names no model, unless a test says one.
+    pub used: Option<Used>,
     /// Why its record cannot be read now: each look reads none (`Reading::Unknown`),
     /// as when the reader's read of the transcript fails.
     pub unreadable: Option<String>,
@@ -187,6 +190,17 @@ pub struct FakeAdapter {
     /// How many windows in a row before each of those launches were given up for
     /// not coming up, kept apart for the same reason.
     starts_given_up: RefCell<Vec<u32>>,
+    /// Each `last_used` asked of it, kept apart for the same reason: its session and the
+    /// model the conversation's last launch asked for.
+    asked_used: RefCell<Vec<(String, Option<String>)>>,
+    /// How many times a launch asked the harness's default model.
+    defaults_asked: Cell<usize>,
+    /// The words its harness says a model it does not have in (`Adapter::model_gone`): none,
+    /// as a harness ConsensFlow has not heard say it, unless a test says them.
+    pub gone_words: RefCell<Option<String>>,
+    /// The model its harness starts on where none is named (`Adapter::default_model`):
+    /// left to the harness, unless a test says one, or that there is none.
+    pub default: RefCell<Result<Option<String>, String>>,
     /// The test's items are numbered across its adapters.
     items: Rc<Cell<u64>>,
     /// A `ready` of the test's own; without one a window is ready, and
@@ -351,6 +365,10 @@ impl FakeAdapter {
             first_message_ms: RefCell::new(Vec::new()),
             previous_gone: RefCell::new(Vec::new()),
             starts_given_up: RefCell::new(Vec::new()),
+            asked_used: RefCell::new(Vec::new()),
+            defaults_asked: Cell::new(0),
+            gone_words: RefCell::new(None),
+            default: RefCell::new(Ok(None)),
             items,
             ready: RefCell::new(None),
             box_words: RefCell::new(None),
@@ -804,6 +822,30 @@ impl FakeAdapter {
             .map_or(Some(true), |agent| agent.resumable)
     }
 
+    /// What the record of `session` says it ran on last, as the latest window on it is set
+    /// to say; and the model each ask said the conversation's last launch asked for.
+    pub(super) fn used_of(&self, session: &str, asked: Option<&str>) -> Option<Used> {
+        self.asked_used
+            .borrow_mut()
+            .push((session.to_owned(), asked.map(str::to_owned)));
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .and_then(|agent| agent.used.clone())
+    }
+
+    /// Each `last_used` asked, its session and the model the last launch asked for.
+    pub fn asked_used(&self) -> Vec<(String, Option<String>)> {
+        self.asked_used.borrow().clone()
+    }
+
+    /// How many times the harness's default model was asked for.
+    pub fn defaults_asked(&self) -> usize {
+        self.defaults_asked.get()
+    }
+
     /// The lines the record of `session` lost, as its last window's reading had them.
     fn lost_of(&self, session: &str) -> Vec<usize> {
         let agents = self.agents.borrow();
@@ -1059,6 +1101,7 @@ impl Asked {
             cannot_tell_a_cut: false,
             opening: None,
             resumable: Some(true),
+            used: None,
             unreadable: None,
         };
         if let Some(message) = launch
@@ -1166,6 +1209,34 @@ impl Adapter for Asked {
             wrapped.after().await;
             prepared
         })
+    }
+
+    /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
+    /// in a trace. Its words name the model as Pi's provider would: the id after a provider's slash,
+    /// which is the whole of an id with none.
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        let id = asked.split_once('/').map_or(asked, |(_, id)| id);
+        self.fake
+            .gone_words
+            .borrow()
+            .as_deref()
+            .is_some_and(|gone| words.contains(gone) && words.contains(id))
+    }
+
+    /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
+    /// in a trace.
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        self.fake
+            .defaults_asked
+            .set(self.fake.defaults_asked.get() + 1);
+        let default = self.fake.default.borrow().clone();
+        Box::pin(async move { default })
+    }
+
+    /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
+    /// in a trace.
+    fn last_used<'a>(&'a self, session: &'a str, asked: Option<&'a str>) -> Work<'a, Option<Used>> {
+        Box::pin(async move { self.fake.used_of(session, asked) })
     }
 
     /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter

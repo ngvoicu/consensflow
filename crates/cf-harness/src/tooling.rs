@@ -32,6 +32,7 @@
 //! | `muse_usage` | `env`: what `muse usage --json` says of the account (no model turn), as the daemon reads it | the quota as the engine is told it (`{state, ...}`), or null where it says nothing known |
 //! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
 //! | `codex_agent_types` | nothing: Codex's own agent types, whose sub-agents a Codex window starts from its own file with Codex's words for each (`cf_proto::codex::agent_types`), which the live sub-agent suite holds to the Codex the machine runs | `{codex, types: [{name, description}]}`: the Codex they are of, and each type with its words |
+//! | `models` | `kind`, `env`, `fetch`: the models the harness lists, read as the daemon reads them (no model turn), `fetch` being the human's Refresh | `{models, stale, how, default, warnings}`: each model as the home keeps it, whether the list is stale, how it was read, the model a harness is started on where nothing names one, and the warning of each contributor model by its `--model` |
 //!
 //! The last nine are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
@@ -48,6 +49,7 @@
 //! folder trust holds against the real harnesses' screens.
 
 mod launch;
+mod models;
 mod muse;
 mod readiness;
 mod session;
@@ -97,8 +99,10 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "input_box" => input_box(question),
         "unsent" => unsent(question),
         "codex_agent_types" => Ok(codex_agent_types()),
+        "models" => models::models(question),
+        "last_used" => models::last_used(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent and codex_agent_types"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent, codex_agent_types, models and last_used"
         )),
     }
 }

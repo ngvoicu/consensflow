@@ -21,7 +21,7 @@
 use std::path::Path;
 
 use cf_e2e::files;
-use cf_e2e::rig::{Project, Rig};
+use cf_e2e::rig::{chief_body, Project, Rig};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
@@ -145,13 +145,16 @@ fn an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_mo
             )
         },
     )?;
-    // History reads what was copied while the chief's window lived.
+    // History reads what was copied while the chief's window lived, all of one
+    // conversation, and names no harness (CHF-11).
     let read = history(&rig, &project)?;
-    let conversations = read["conversations"].as_array().ok_or("no conversations")?;
+    let copied = items(&read);
+    let mut conversations: Vec<&Value> = copied.iter().map(|item| &item["conversation"]).collect();
+    conversations.dedup();
     assert_eq!(conversations.len(), 1, "{read}");
-    assert_eq!(conversations[0]["harness"], GONE, "{read}");
+    assert!(!read.to_string().contains(GONE), "{read}");
     assert!(
-        items(&read)
+        copied
             .iter()
             .any(|item| is_said(item, "assistant", "BEFORE_THE_UPGRADE")),
         "{read}"
@@ -198,7 +201,10 @@ fn an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_mo
     }
 
     // Switch chief takes the project off the harness, and the new chief works.
-    let switched = rig.page("chief.switch", json!({ "project": id, "agent": "next" }))?;
+    let switched = rig.page(
+        "chief.switch",
+        chief_body(&rig, "next", json!({ "project": id }))?,
+    )?;
     assert_eq!(switched["ok"], true, "{switched}");
     rig.wait_for("the new chief's window", secs(60), || {
         Ok(!windows_of(&rig, &project).is_empty())

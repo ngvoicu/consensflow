@@ -7,6 +7,8 @@ mod adapter;
 pub mod computer_use;
 pub(crate) mod input_box;
 pub(crate) mod install;
+mod last_used;
+pub(crate) mod models;
 pub(crate) mod paths;
 mod question_hook;
 pub mod record;

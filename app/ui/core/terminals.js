@@ -472,7 +472,7 @@ export class TerminalsView {
           'Switch chief',
           'quiet-button',
           () => this.#onSwitchChief(entry.participant),
-          'Switch the chief to another agent',
+          'Switch the chief to another harness or model',
         ),
         button(
           entry.meeting ? `Stop meeting (${(board.held ?? []).length})` : 'Start meeting',

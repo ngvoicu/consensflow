@@ -104,13 +104,12 @@ impl ProjectRow {
     }
 }
 
-/// A new project's chief: the harness it runs on and, since chiefs are
-/// always saved agents, the agent; one with none is from before then and
-/// runs on its harness's default.
+/// A new project's chief: the harness it runs on and the model of that harness the human
+/// picked (CHF-04); one with none runs on its harness's own default.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewChief {
     pub harness: String,
-    pub agent: Option<String>,
+    pub model: Option<String>,
 }
 
 /// A member a new project starts with.
@@ -149,9 +148,9 @@ impl NewProject {
         let name = parse_name(value.get("name"))?;
         let chief = value.get("chief");
         let harness = model::parse_harness(chief.and_then(|chief| chief.get("harness")))?;
-        let agent = match chief.and_then(|chief| chief.get("agent")) {
+        let chief_model = match chief.and_then(|chief| chief.get("model")) {
             None | Some(Value::Null) => None,
-            agent => Some(model::parse_agent_id(agent, &[])?),
+            given => Some(model::parse_model_id(given)?),
         };
         let gate = match value.get("gate") {
             None => false,
@@ -175,7 +174,7 @@ impl NewProject {
             name,
             chief: NewChief {
                 harness: harness.to_string(),
-                agent,
+                model: chief_model,
             },
             staff,
             gate,
@@ -234,7 +233,7 @@ fn designer_refused() -> LedgerError {
     )
 }
 
-/// A project with its chief, on the saved agent it runs on, and its staff, and
+/// A project with its chief, on the harness and model it runs on, and its staff, and
 /// the calls and specs the human said for it, kept in the same write: the
 /// chief's first launch reads the specs, and the project is never seen without
 /// them. Everything the ledger refuses is refused before the write begins.
@@ -245,8 +244,8 @@ pub(crate) fn create_project(
     model::require_text(&request.directory, "directory", 4096)?;
     require_name(&request.name)?;
     let chief_harness = model::require_harness(&request.chief.harness)?;
-    if let Some(agent) = &request.chief.agent {
-        model::require_agent_id(agent, &[])?;
+    if let Some(chief_model) = &request.chief.model {
+        model::require_model_id(chief_model)?;
     }
     let members = request
         .staff
@@ -272,15 +271,15 @@ pub(crate) fn create_project(
             ],
         )?;
         let id = store.db.last_insert_rowid();
-        add_participant(store, id, NewParticipant::coordinator("human", None, None))?;
-        add_participant(
+        add_participant(store, id, NewParticipant::coordinator("human", None))?;
+        let chief = add_participant(
             store,
             id,
-            NewParticipant::coordinator(
-                "chief",
-                request.chief.agent.as_deref(),
-                Some(chief_harness),
-            ),
+            NewParticipant::coordinator("chief", Some(chief_harness)),
+        )?;
+        store.db.execute(
+            "UPDATE participant SET model = ? WHERE id = ?",
+            params![request.chief.model, chief.id],
         )?;
         for (member, roles) in &members {
             add_participant(

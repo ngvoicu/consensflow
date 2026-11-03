@@ -45,6 +45,7 @@ mod background;
 mod cancelled_task;
 mod canonical_folder;
 mod carriers;
+mod chief_models;
 mod chief_not_up;
 mod chiefs;
 mod close_when_drawn;

@@ -1346,12 +1346,15 @@ impl Dispatcher {
         }
     }
 
-    /// A participant whose saved agent the human has since deleted.
+    /// A member whose saved agent the human has since deleted. Never a chief, which runs on
+    /// a harness and a model, not on a saved agent (CHF-04): one from before that named an
+    /// agent reads its record as every chief does.
     pub(crate) fn agent_gone(&self, participant: &ParticipantView) -> bool {
-        participant
-            .agent
-            .as_deref()
-            .is_some_and(|name| matches!(self.saved_agent(name), Some(None)))
+        participant.role != "chief"
+            && participant
+                .agent
+                .as_deref()
+                .is_some_and(|name| matches!(self.saved_agent(name), Some(None)))
     }
 
     /// A saved agent as the roster has it now: its row, or none when it is

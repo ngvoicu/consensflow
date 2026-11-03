@@ -315,7 +315,7 @@ async fn the_history_says_of_what_a_meeting_holds_the_line_a_thread_does() {
                 scene.project.id,
                 &ChiefSwitch {
                     harness: "claude-code".to_owned(),
-                    agent: "other".to_owned(),
+                    model: "other".to_owned(),
                     cut: false,
                 },
             )

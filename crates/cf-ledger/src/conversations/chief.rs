@@ -12,23 +12,23 @@ use crate::projects::known_project;
 use crate::store::Store;
 use crate::views::{conversation_view, message_view, task_view, MESSAGE_SELECT, TASK_SELECT};
 
-/// The human's Switch chief: the saved agent the chief runs on from now on,
-/// on its harness, and whether the old chief was stopped mid-turn.
+/// The human's Switch chief: the harness the chief runs on from now on and the model of it
+/// the human picked (CHF-04), and whether the old chief was stopped mid-turn.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChiefSwitch {
     pub harness: String,
-    pub agent: String,
+    pub model: String,
     pub cut: bool,
 }
 
 impl ChiefSwitch {
-    /// The switch as JSON gives it, read in the order the Node ledger checked it.
+    /// The switch as JSON gives it: its harness, then its model.
     pub fn from_json(value: &Value) -> Result<Self, LedgerError> {
         let harness = model::parse_harness(value.get("harness"))?;
-        let agent = model::parse_agent_id(value.get("agent"), &[])?;
+        let model = model::parse_model_id(value.get("model"))?;
         Ok(Self {
             harness: harness.to_string(),
-            agent,
+            model,
             cut: value.get("cut") == Some(&Value::Bool(true)),
         })
     }
@@ -114,31 +114,33 @@ pub(crate) fn chief_open_work(
     })
 }
 
-/// The human's Switch chief: the chief runs on the saved agent (its model
-/// and effort) on its harness from now on, never on a harness's own
-/// default. Its conversation ends here: a conversation belongs to one
-/// harness, and every switch starts a fresh one that reads the history.
-/// What it was out of quota for was the old harness's account, so that
-/// clears. The window is the caller's to close before and open after. The
-/// chief keeps what it was switched from, and whether the old chief was
-/// stopped mid-turn, for the handoff to say.
+/// The human's Switch chief: the chief runs on the harness and the model picked from now
+/// on, and on no saved agent: one an older chief named is let go. Its conversation ends
+/// here: a conversation belongs to one harness, and every switch starts a fresh one that
+/// reads the history, whose first launch has asked for no model yet. What it was out of
+/// quota for was the old harness's account, so that clears. The window is the caller's to
+/// close before and open after. The chief keeps what it was switched from (the harness and
+/// the model picked for it, or the saved agent an old chief ran on), and whether the old
+/// chief was stopped mid-turn, for the handoff to say.
 pub(crate) fn switch_chief(
     store: &mut Store,
     project_id: i64,
     switch: &ChiefSwitch,
 ) -> Result<ProjectView, LedgerError> {
     model::require_harness(&switch.harness)?;
-    model::require_agent_id(&switch.agent, &[])?;
+    model::require_model_id(&switch.model)?;
     store.write(|store| {
         let chief = store.participant_by_handle(project_id, "chief")?;
         store.db.execute(
-            "UPDATE participant SET harness = ?, agent = ?, out_until = NULL,
-           switched_from_harness = ?, switched_from_agent = ?, switched_from_cut = ?
+            "UPDATE participant SET harness = ?, model = ?, agent = NULL, launched_model = NULL,
+           gone_model = NULL, out_until = NULL, switched_from_harness = ?, switched_from_model = ?,
+           switched_from_agent = ?, switched_from_cut = ?
          WHERE id = ?",
             params![
                 switch.harness,
-                switch.agent,
+                switch.model,
                 chief.harness,
+                chief.model,
                 chief.agent,
                 i64::from(switch.cut),
                 chief.id
@@ -149,12 +151,18 @@ pub(crate) fn switch_chief(
             "UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL",
             params![at, chief.id],
         )?;
+        // A chief from before a chief was a model ran on a saved agent: its switch keeps it,
+        // as Node's event and handoff named it (Calliope's P3, T-955).
+        let mut from = json!({ "harness": chief.harness, "model": chief.model });
+        if let Some(agent) = &chief.agent {
+            from["agent"] = json!(agent);
+        }
         store.log(
             project_id,
             "chief.switched",
             json!({
-                "from": { "harness": chief.harness, "agent": chief.agent },
-                "to": { "harness": switch.harness, "agent": switch.agent },
+                "from": from,
+                "to": { "harness": switch.harness, "model": switch.model },
                 "cut": switch.cut,
             }),
         )?;
@@ -181,7 +189,8 @@ pub(crate) fn history_read(
 }
 
 /// The project's latest Switch chief: what the chief was switched from (its
-/// harness and agent) and whether its turn was cut; none before any.
+/// harness, and the model picked for it where one was, else the saved agent an old chief
+/// ran on) and whether its turn was cut; none before any.
 pub(crate) fn last_switch(
     store: &Store,
     project_id: i64,
@@ -190,8 +199,52 @@ pub(crate) fn last_switch(
     Ok(chief.switched_from_harness.map(|harness| LastSwitch {
         from: SwitchedFrom {
             harness,
-            agent: chief.switched_from_agent,
+            model: chief.switched_from_model.or(chief.switched_from_agent),
         },
         cut: chief.switched_from_cut == 1,
     }))
+}
+
+/// The chief's launch asked its harness for `model`, none where it left the model to the
+/// harness's own default: what the next reopen compares the record's last model with
+/// (CHF-05).
+pub(crate) fn chief_launched(
+    store: &mut Store,
+    participant_id: i64,
+    model: Option<&str>,
+) -> Result<(), LedgerError> {
+    if let Some(model) = model {
+        model::require_model_id(model)?;
+    }
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE participant SET launched_model = ? WHERE id = ? AND role = 'chief'",
+            params![model, participant_id],
+        )?;
+        Ok(())
+    })
+}
+
+/// The chief's launch found its harness no longer has `gone`: no reopen asks for it again,
+/// and the chief runs on `model` (its harness's default, none where the harness is left
+/// to choose it) where its record names none (CHF-06). Its next launch has asked for
+/// nothing yet.
+pub(crate) fn chief_gone(
+    store: &mut Store,
+    participant_id: i64,
+    gone: &str,
+    model: Option<&str>,
+) -> Result<(), LedgerError> {
+    model::require_model_id(gone)?;
+    if let Some(model) = model {
+        model::require_model_id(model)?;
+    }
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE participant SET model = ?, gone_model = ?, launched_model = NULL
+             WHERE id = ? AND role = 'chief'",
+            params![model, gone, participant_id],
+        )?;
+        Ok(())
+    })
 }

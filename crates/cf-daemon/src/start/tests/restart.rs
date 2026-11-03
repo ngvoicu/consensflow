@@ -47,7 +47,7 @@ fn ledger_before_the_start(root: &Path) -> (Ledger, i64) {
             name: "app".to_owned(),
             chief: NewChief {
                 harness: "claude-code".to_owned(),
-                agent: Some("mybuilder".to_owned()),
+                model: Some("mybuilder".to_owned()),
             },
             staff: Vec::new(),
             gate: false,
@@ -386,7 +386,7 @@ async fn a_devin_chiefs_first_message_behind_bypass_is_received_though_its_windo
                     name: "app".to_owned(),
                     chief: NewChief {
                         harness: "devin".to_owned(),
-                        agent: Some("mydevin".to_owned()),
+                        model: Some("mydevin".to_owned()),
                     },
                     staff: Vec::new(),
                     gate: false,

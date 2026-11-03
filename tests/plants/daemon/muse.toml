@@ -1563,35 +1563,6 @@ replace = '''
 
 # MUS-15: the models Muse lists, never a contributor one by default.
 [[plant]]
-name = "muse: a contributor model can be the default"
-meant = "a_contributor_model_is_never_the_default_though_muse_marks_one"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/models.rs"
-find = '''
-            .filter(|model| !model.contributor)
-            .or(twin)
-'''
-replace = '''
-            .or(twin)
-'''
-
-[[plant]]
-name = "muse: the bundled list is the accounts"
-meant = "a_list_a_host_with_no_login_gives_is_muses_bundled_one_and_is_stale"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/models.rs"
-find = '''
-        stale: result.get("source").and_then(Value::as_str) != Some("providerCatalog"),
-'''
-replace = '''
-        stale: false,
-'''
-
-[[plant]]
 name = "muse: a hidden model is offered"
 meant = "a_hidden_model_a_contributor_by_description_and_a_list_with_no_model_are_read_as_they_say"
 runs = ["muse-lib"]
@@ -1611,7 +1582,7 @@ meant = "the_list_is_asked_of_a_host_after_its_initialize_and_the_host_is_ended"
 runs = ["muse-lib"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/muse/msp.rs"
+file = "crates/cf-harness/src/shared/one_shot.rs"
 find = '''
     let child = processes.spawn(program, Streams::Lines)?;
 '''
@@ -2229,8 +2200,8 @@ runs = ["muse-tooling"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/tooling.rs"
-find = "devin_config, trust, muse_models, muse_usage, input_box, unsent and codex_agent_types"
-replace = "devin_config, trust, input_box, unsent and codex_agent_types"
+find = "devin_config, trust, muse_models, muse_usage, input_box, unsent, codex_agent_types, models and last_used"
+replace = "devin_config, trust, input_box, unsent, codex_agent_types, models and last_used"
 
 
 [[plant]]
@@ -2239,29 +2210,13 @@ meant = "a_host_that_says_nothing_is_given_up_on_at_the_bound_and_ended"
 runs = ["muse-lib"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/muse/msp.rs"
+file = "crates/cf-harness/src/shared/one_shot.rs"
 find = '''
-    let answered = armed.bound(talk(&*child, requests)).await;
+    let answered = armed.bound(talk(&*child)).await;
 '''
 replace = '''
-    let answered = Some(talk(&*child, requests).await);
+    let answered = Some(talk(&*child).await);
     let _ = &armed;
-'''
-
-
-[[plant]]
-name = "muse: a stale list has a default"
-meant = "a_list_a_host_with_no_login_gives_is_muses_bundled_one_and_is_stale"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/models.rs"
-find = '''
-        if self.stale {
-            return None;
-        }
-'''
-replace = '''
 '''
 
 

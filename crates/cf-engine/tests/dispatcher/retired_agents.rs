@@ -1,10 +1,10 @@
 //! A ready-made agent a release took out of the catalog (Khnum, Devin's
 //! SWE-1.6 Slow, 2026-10-25: Devin no longer offers it). A project still
-//! staffed with it, or whose chief runs on it, breaks nothing silently: its
-//! member takes no work and its chief no window, as for any agent that is
-//! gone, and what the human reads says it left the catalog, why, and to pick
-//! another agent: defining it again would run a model its harness no longer
-//! has.
+//! staffed with it breaks nothing silently: its member takes no work, as for any
+//! agent that is gone, and what the human reads says it left the catalog, why,
+//! and to pick another agent: defining it again would run a model its harness no
+//! longer has. A chief runs on no saved agent (CHF-04), and opens whatever the
+//! catalog dropped.
 
 use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
@@ -80,12 +80,13 @@ fn a_task_khnum_held_before_the_release_goes_back_to_the_board_saying_it_left_th
     );
 }
 
+/// A chief runs on a harness and a model, never on a saved agent (CHF-04): an agent the
+/// catalog dropped holds no chief closed, whatever it was named after.
 #[test]
-fn a_chief_on_an_agent_the_catalog_dropped_stays_closed_and_the_human_is_told_to_switch_it() {
+fn a_chief_opens_again_after_a_release_that_dropped_an_agent_and_nobody_is_told_to_switch_it() {
     let context = with_codex();
     let project = context.with_staff(&["zeus"]);
     context.pass().unwrap();
-    // The stand-ins open Codex windows, not Devin's: what is told is the agent's, whatever its harness.
     context
         .switch_chief(project.id, to("codex", "khnum"), SwitchWhen::Now, false)
         .unwrap();
@@ -94,26 +95,11 @@ fn a_chief_on_an_agent_the_catalog_dropped_stays_closed_and_the_human_is_told_to
     let opened = context.host.opened().len();
     context.resume_project(project.id).unwrap();
     context.pass().unwrap();
-    assert_eq!(
-        context.host.opened().len(),
-        opened,
-        "no window on a model its harness no longer has"
-    );
-    let told = to_human(&context, project.id)
-        .into_iter()
-        .find(|body| body.contains("left the catalog"))
-        .unwrap();
-    assert_eq!(
-        told,
-        "The chief runs on khnum, which left the catalog: Devin no longer offers SWE-1.6 Slow. Switch the chief to another agent."
-    );
-    // The human switches it to another agent, and the chief opens on that one.
-    context
-        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)
-        .unwrap();
-    context.pass().unwrap();
     assert!(
         context.host.opened().len() > opened,
         "the chief opens again"
     );
+    assert!(to_human(&context, project.id)
+        .iter()
+        .all(|body| !body.contains("left the catalog")));
 }

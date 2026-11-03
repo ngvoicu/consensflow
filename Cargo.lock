@@ -481,6 +481,7 @@ name = "cf-e2e"
 version = "3.0.7-alpha.2"
 dependencies = [
  "cf-base",
+ "cf-catalog",
  "cf-e2e",
  "cf-panes",
  "cf-process",

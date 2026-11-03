@@ -42,16 +42,12 @@ pub(crate) struct NewParticipant<'a> {
 
 impl<'a> NewParticipant<'a> {
     /// The human, or the chief: a participant whose handle is its role.
-    pub(crate) fn coordinator(
-        role: &'a str,
-        agent: Option<&'a str>,
-        harness: Option<&'a str>,
-    ) -> Self {
+    pub(crate) fn coordinator(role: &'a str, harness: Option<&'a str>) -> Self {
         Self {
             handle: role,
             role: Some(role),
             roles: &[],
-            agent,
+            agent: None,
             harness,
             designer: false,
             tier: None,

@@ -1429,9 +1429,11 @@ impl Dispatcher {
     }
 
     /// The chief's turn that failed: the human is told why, once, on the board.
-    /// Nothing else of the chief's changes.
+    /// Nothing else of the chief's changes, but where the failure is its harness saying it
+    /// no longer has the model the chief's launch asked for: the window closes and the chief
+    /// opens again at once on the harness's default (CHF-06), which its note says.
     pub(crate) async fn tell_chief_failed(
-        &self,
+        self: &Rc<Self>,
         project: &ProjectView,
         participant: &ParticipantView,
         record: &Rc<Record>,
@@ -1442,6 +1444,19 @@ impl Dispatcher {
         };
         let why = self.why_it_failed(participant, record, observed).await?;
         if self.forgotten(record) {
+            return Ok(());
+        }
+        // Its record's own words, never the screen `why` falls back on (Calliope's P1, T-955).
+        let refused = observed.failure().unwrap_or_default();
+        if let Some(gone) = self.gone_model(participant, refused)? {
+            let pane = record.window.borrow().pane.clone();
+            if let Some(pane) = pane {
+                if !self.close_own(record, &pane).await? {
+                    return Ok(());
+                }
+            }
+            self.settle_told(record, given, "human", &why.key);
+            self.reopen_without(record, gone);
             return Ok(());
         }
         if self.same_outage(record, &why.key) {
@@ -1554,21 +1569,7 @@ impl Dispatcher {
                 });
             }
         }
-        let pastes: Vec<Paste> = self
-            .seams
-            .ledger
-            .borrow()
-            .last_pastes(participant.id, PASTES_ON_SCREEN)?
-            .into_iter()
-            .map(|begun| {
-                // As it was pasted: sent again, or naming a note (Calliope's T-987), its
-                // commands started by the window's own `cf` (`cf_for`).
-                Ok(Paste {
-                    id: begun.message.id,
-                    text: self.delivery_text_of(&begun.message, &begun.carried)?,
-                })
-            })
-            .collect::<Result<_, EngineError>>()?;
+        let pastes = self.pastes_on_screen(participant.id)?;
         let pane = record.window.borrow().pane.clone();
         let shown = match pane {
             Some(pane) => self.look_at(&pane).await,
@@ -1587,6 +1588,27 @@ impl Dispatcher {
             said: shown.after(&failed),
             key: shown.outage_key(),
         })
+    }
+
+    /// What ConsensFlow last pasted into participant `participant_id`'s window, as many as
+    /// a screen shows: lines of a screen that are these are no words of the window's own
+    /// ([`Shown::without_pastes`]).
+    pub(crate) fn pastes_on_screen(&self, participant_id: i64) -> Result<Vec<Paste>, EngineError> {
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .last_pastes(participant_id, PASTES_ON_SCREEN)?
+            .into_iter()
+            .map(|begun| {
+                // As it was pasted: sent again, or naming a note (Calliope's T-987), its
+                // commands started by the window's own `cf` (`cf_for`).
+                Ok(Paste {
+                    id: begun.message.id,
+                    text: self.delivery_text_of(&begun.message, &begun.carried)?,
+                })
+            })
+            .collect::<Result<_, EngineError>>()?)
     }
 
     /// What a window was to receive goes back to its queue with its attempt:

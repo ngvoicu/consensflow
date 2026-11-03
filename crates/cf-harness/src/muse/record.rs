@@ -505,7 +505,7 @@ impl Models {
 }
 
 /// The `model_id` of a record that names a model, if it is not empty.
-fn model_id(record: Option<&Value>) -> Option<&str> {
+pub(super) fn model_id(record: Option<&Value>) -> Option<&str> {
     field(record, "model_id")
         .and_then(Value::as_str)
         .filter(|model| !model.is_empty())
@@ -513,7 +513,7 @@ fn model_id(record: Option<&Value>) -> Option<&str> {
 
 /// Whether the human asked for a model: the command they typed is `/model`. Provisional
 /// (MUS-24): never recorded live, the commands seen are `/clear` and `/compact`.
-fn asks_for_a_model(command: Option<&str>) -> bool {
+pub(super) fn asks_for_a_model(command: Option<&str>) -> bool {
     command.is_some_and(|command| {
         let command = command.trim_start();
         command == "/model" || command.starts_with("/model ")

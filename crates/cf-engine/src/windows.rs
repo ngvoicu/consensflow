@@ -260,10 +260,17 @@ pub(crate) struct WindowPart {
     /// Whether its last look said its turn settled.
     pub(crate) settled: bool,
     pub(crate) relaunch: Option<Relaunch>,
+    /// The model a chief's launch asked for, which its harness said it no longer has: the
+    /// next launch starts on the harness's default (CHF-06).
+    pub(crate) gone: Option<String>,
     /// How many of its windows in a row were given up for not coming up in the time
     /// they had: the next is given longer (`Launch::starts_given_up`). One that comes
     /// up starts the count again.
     pub(crate) starts_given_up: u32,
+    /// Its record showed a message it was handed ([`Dispatcher::confirm_delivered`]): the
+    /// window came up and took work. A chief's window that ends before is a launch its
+    /// harness may have refused (CHF-06); the history a resumed record shows is no sign.
+    pub(crate) took: bool,
     /// It printed, then held still: its screen is drawn.
     pub(crate) drawn: bool,
     /// It named its first conversation.
@@ -364,7 +371,9 @@ impl Default for WindowPart {
             hidden: false,
             settled: false,
             relaunch: None,
+            gone: None,
             starts_given_up: 0,
+            took: false,
             drawn: false,
             named: false,
             trust: Trusting::Past,
@@ -908,6 +917,7 @@ impl Dispatcher {
             part.activity = Activity::of(ActivityState::Starting);
             part.drawn = false;
             part.named = false;
+            part.took = false;
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
             part.owner = planned.owner;
             part.conversation = conversation_id;
@@ -1092,9 +1102,33 @@ impl Dispatcher {
         let Some(adapter) = self.seams.adapters.adapter(harness) else {
             return Ok(None);
         };
+        // A chief whose last launch found its model gone starts on its harness's default.
+        let started;
+        let participant = if participant.role == "chief" {
+            match self
+                .start_on_default(record, project, participant, &*adapter, delivering)
+                .await?
+            {
+                Some(chief) => {
+                    started = chief;
+                    &started
+                }
+                None => return Ok(None),
+            }
+        } else {
+            participant
+        };
         // A member runs on its saved agent's model, read now; one the human
         // has deleted from their agents must not fall back to a harness default.
+        // A chief runs on no saved agent: on what its harness's record says it ran
+        // on last, or the model picked for it (CHF-05).
+        let chief = if participant.role == "chief" {
+            Some(self.chief_runs(participant, &*adapter, resume).await)
+        } else {
+            None
+        };
         let saved: Option<SavedAgent> = match participant.agent.as_deref() {
+            _ if chief.is_some() => None,
             None => None,
             Some(name) => match self.seams.roster.agent(name)? {
                 Some(saved) => Some(saved),
@@ -1140,7 +1174,10 @@ impl Dispatcher {
             resume,
             previous_gone,
             message: text.as_deref().filter(|_| !delivered),
-            agent: saved.as_ref().map(SavedAgent::agent),
+            agent: match &chief {
+                Some(chief) => chief.agent(),
+                None => saved.as_ref().map(SavedAgent::agent),
+            },
             instructions: &instructions,
             specs: specs.as_ref().map(ChiefSpecs::launch),
             // The size the project chose for its Claude members' windows to compact at:
@@ -1157,6 +1194,9 @@ impl Dispatcher {
         let prepared = returning(adapter.prepare(&launch))
             .await
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
+        if let Some(chief) = &chief {
+            self.chief_launched(participant, chief)?;
+        }
         Ok(Some(Planned {
             window: prepared.window,
             keys: adapter.interrupt(),
@@ -1219,10 +1259,9 @@ impl Dispatcher {
         Ok(false)
     }
 
-    /// A participant whose saved agent the human has deleted does not open:
-    /// the chief tells the human, a member's work goes back to the board, and
-    /// a session's window the human opened, with nothing to deliver, says
-    /// why it did not come.
+    /// A member whose saved agent the human has deleted does not open: its work
+    /// goes back to the board, and a session's window the human opened, with
+    /// nothing to deliver, says why it did not come.
     fn without_saved_agent(
         &self,
         record: &Rc<Record>,
@@ -1231,9 +1270,6 @@ impl Dispatcher {
         agent: &str,
         delivering: Option<&Delivering>,
     ) -> Result<(), EngineError> {
-        if participant.role == "chief" {
-            return self.chief_without_agent(project, participant, delivering.cloned());
-        }
         self.without_agent(project, participant, delivering.cloned())?;
         if delivering.is_none() {
             self.launch_failed(

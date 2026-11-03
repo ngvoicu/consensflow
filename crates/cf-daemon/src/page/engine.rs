@@ -160,9 +160,9 @@ fn pane_value(pane: &Pane) -> Value {
     json!({ "id": pane.id, "generation": pane.generation })
 }
 
-/// A Switch chief waiting for the turn to end: `{harness, agent}`.
+/// A Switch chief waiting for the turn to end: `{harness, model}`.
 fn switch_value(to: &SwitchTo) -> Value {
-    json!({ "harness": to.harness, "agent": to.agent })
+    json!({ "harness": to.harness, "model": to.model })
 }
 
 /// The dispatcher is the engine the daemon gives: each call is its own.

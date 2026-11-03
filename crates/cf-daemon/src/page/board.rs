@@ -31,9 +31,13 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         let id = participant.id;
         // A member whose agent is gone (a release dropped the entry, or the
         // human removed their own) sits, and the board says why: read from the
-        // file at each lane, as it is now.
+        // file at each lane, as it is now. Never a chief, which runs on a harness
+        // and a model, not on a saved agent (CHF-08): one from before that named an
+        // agent is no agent's.
         let missing = match &participant.agent {
-            Some(agent) if participant.member.is_none() => agent_gone(&roster, agent),
+            Some(agent) if participant.member.is_none() && participant.role != "chief" => {
+                agent_gone(&roster, agent)
+            }
             _ => false,
         };
         fields.insert("agentMissing".to_owned(), json!(missing));

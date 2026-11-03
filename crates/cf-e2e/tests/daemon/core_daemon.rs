@@ -210,7 +210,8 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
         "project.open",
         json!({
             "directory": d.home.workspace(),
-            "agent": "mybuilder",
+            "harness": "claude-code",
+            "model": "fake",
             "staff": [{ "agent": "mybuilder", "roles": ["worker", "reviewer"] }],
         }),
     )?;
@@ -285,7 +286,8 @@ fn tells_the_page_when_the_board_changes_and_when_a_change_to_the_agents_moves_a
         "project.open",
         json!({
             "directory": d.home.workspace(),
-            "agent": "mybuilder",
+            "harness": "claude-code",
+            "model": "fake",
             "staff": [{ "agent": "mybuilder", "roles": ["worker"] }],
         }),
     )?;

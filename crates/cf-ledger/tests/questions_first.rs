@@ -20,7 +20,7 @@ fn ledger() -> (tempfile::TempDir, Ledger, i64, i64) {
             name: "app".to_owned(),
             chief: NewChief {
                 harness: "claude-code".to_owned(),
-                agent: Some("apollo".to_owned()),
+                model: Some("claude-sonnet-5-5".to_owned()),
             },
             staff: vec![NewMember {
                 agent: "zeus".to_owned(),

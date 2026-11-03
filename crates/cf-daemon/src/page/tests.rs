@@ -53,6 +53,7 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
     let opened = Rc::new(RefCell::new(Vec::new()));
     let noted = Rc::clone(&opened);
     let grants_of = crate::computer_use::grants_of(&env);
+    let env_of_models = env.clone();
     let page = Rc::new(Page {
         ledger: Rc::clone(&kit.ledger),
         engine: engine.unwrap_or_else(|| Rc::new(Rc::clone(&kit.dispatcher))),
@@ -67,6 +68,10 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
             }),
             grants_of,
         },
+        models: Rc::new(crate::models::ModelLists::new(
+            Rc::new(crate::models::tests_support::NoAdapters),
+            env_of_models,
+        )),
     });
     Rig {
         home,
@@ -398,6 +403,7 @@ mod gate;
 mod held;
 mod history;
 mod meeting;
+mod models;
 mod opening;
 mod reading;
 mod scripted;

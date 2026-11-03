@@ -31,7 +31,7 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
             name: "app".into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("apollo".into()),
+                model: Some("apollo".into()),
             },
             staff: vec![member("zeus", "critical"), member("diana", "standard")],
             gate: false,

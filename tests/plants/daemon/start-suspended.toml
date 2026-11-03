@@ -211,8 +211,8 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if project.state != "open" {
             return Ok(());
         }
-        // A chief whose agent is gone stays closed'''
-replace = '''        // A chief whose agent is gone stays closed'''
+        // A chief held for want of a model to start on, as the ledger keeps it, is stepped'''
+replace = '''        // A chief held for want of a model to start on, as the ledger keeps it, is stepped'''
 
 # --- the engine: the human's Resume ---
 

@@ -93,7 +93,7 @@ fn costs(ledger: &Ledger, project: i64, conversation: i64, message: i64) -> Cost
         )
         .expect("a page")
         .entries[0]
-        .key()
+        .key
         .row;
     Costs {
         page: counted(&read(None, false)),

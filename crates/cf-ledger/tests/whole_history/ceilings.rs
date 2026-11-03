@@ -1,18 +1,19 @@
 //! An item's id is its identity: the copy keeps it whole, and so does
 //! migration 0020, however long; the history reads only its head (the id as a
 //! page shows it, and its fields), never the id. Every other field the history
-//! reads has a ceiling: a time is kept as a store keeps one, a harness or an
-//! agent is cut to [`FIELD_MAX`] bytes, a native session within
-//! [`NATIVE_SESSION_MAX`], and every event a heading reads within
-//! [`HEADING_EVENT_MAX`] bytes; migration 0020 brings once what an older build
-//! wrote past them within them, measured in bytes, never by SQLite's `length()`,
-//! which stops at a NUL. So a read goes through short fields alone, each
-//! charged as what it is, and loads no long value: these read under a value
-//! limit a long one would fail.
+//! reads has a ceiling: a time is kept as a store keeps one. Migration 0020
+//! brings once what an older build wrote past a ceiling within it, measured in
+//! bytes, never by SQLite's `length()`, which stops at a NUL: an item's time, a
+//! harness or an agent cut to [`FIELD_MAX`] bytes, a native session within
+//! [`NATIVE_SESSION_MAX`], and an event of where a conversation began, was gone
+//! to or ended, or of a Switch chief, within [`EVENT_CUT`] bytes (what the
+//! headings read of the log until 3.0.7 took them out, chief-harness CHF-11).
+//! So a read goes through short fields alone, each charged as what it is, and
+//! loads no long value: these read under a value limit a long one would fail.
 
 use cf_ledger::{
-    open_ledger, ChiefSwitch, HistoryEntry, HistoryFrom, Ledger, NewMember, Options, FIELD_MAX,
-    HEADING_EVENT_MAX, HISTORY_PART, ID_SHOWN, NATIVE_SESSION_MAX,
+    open_ledger, ChiefSwitch, HistoryFrom, Ledger, NewMember, Options, FIELD_MAX, HISTORY_PART,
+    ID_SHOWN, NATIVE_SESSION_MAX,
 };
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
@@ -21,6 +22,10 @@ use sha2::{Digest, Sha256};
 use super::old_logs::{of, version_18, AT};
 use super::reads::{ask, chief, ids, ROOM};
 use super::{everything, id_of, ledger_in, lines, project};
+
+/// The most bytes migration 0020 leaves of an event's data where it cut one an
+/// older build logged longer (its SQL says it as `4096`).
+const EVENT_CUT: usize = 4_096;
 
 /// Each value's longest a read may load whole: a part of an item's text and a
 /// little more. A read that loaded a longer value whole would fail.
@@ -77,13 +82,12 @@ fn items(ledger: &Ledger, project: i64) -> Vec<(String, String, Option<String>)>
         .expect("a page");
     read.entries
         .iter()
-        .filter_map(|entry| match entry {
-            HistoryEntry::Item(row) => Some((
+        .map(|row| {
+            (
                 row.item.id.clone(),
                 row.item.text.clone(),
                 row.item.at.clone(),
-            )),
-            HistoryEntry::Heading(_) => None,
+            )
         })
         .collect()
 }
@@ -261,7 +265,7 @@ fn a_version_18_ledger_keeps_its_ids_whole_its_collision_two_items_and_its_parts
         [shown(&odd_id), cut.clone(), shown(&long), "i-1".to_owned()]
     );
     // Every part of the long one, read by its row.
-    let row = page.entries[2].key().row;
+    let row = page.entries[2].key.row;
     let mut whole = String::new();
     let mut next = Some(0);
     // Four parts: a read that never gets to the end is stopped at ten.
@@ -359,11 +363,9 @@ fn a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_
     assert_eq!(
         history,
         [
-            format!(
-                r#"{cut} - Some(Switch {{ harness: "", agent: Some("maia") }}) ["user: said in 1"]"#
-            ),
-            r#"codex - Some(Switch { harness: "", agent: None }) ["user: said in 2"]"#.to_owned(),
-            format!(r#"codex {cut} None ["user: said in 3"]"#),
+            r#"["user: said in 1"]"#,
+            r#"["user: said in 2"]"#,
+            r#"["user: said in 3"]"#,
         ]
     );
     let page = ledger
@@ -403,12 +405,19 @@ fn a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_
         ),
         (
             "SELECT max(octet_length(data)) FROM event WHERE kind = 'chief.switched'",
-            HEADING_EVENT_MAX,
+            EVENT_CUT,
         ),
     ] {
         let found = usize::try_from(longest(field)).expect("a size");
         assert!(found <= most, "{field}: {found}");
     }
+    let harnesses: Vec<String> = column(&file, "SELECT harness FROM conversation ORDER BY id");
+    assert_eq!(harnesses[0], cut, "cut where the field ends");
+    let agents: Vec<Option<String>> = column(
+        &file,
+        "SELECT agent FROM participant WHERE handle = 'chief'",
+    );
+    assert_eq!(agents, [Some(cut)]);
     let unbounded: Vec<i64> = column(
         &file,
         "SELECT COUNT(*) FROM conversation WHERE native_session IS NOT NULL",
@@ -445,13 +454,13 @@ fn a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_
     assert_eq!(handles, [None]);
     let longest: Vec<i64> = column(&file, "SELECT max(octet_length(data)) FROM event");
     assert!(
-        longest[0] <= i64::try_from(HEADING_EVENT_MAX).expect("small"),
+        longest[0] <= i64::try_from(EVENT_CUT).expect("small"),
         "{longest:?}"
     );
 }
 
 #[test]
-fn the_events_an_older_build_logged_long_are_cut_once_to_what_a_heading_reads_of_them() {
+fn the_events_an_older_build_logged_long_are_cut_once_and_its_history_read_past_them() {
     let dir = tempfile::tempdir().expect("a folder");
     // The reviewers' twenty windows gone to the next conversation, each event
     // of a mebibyte of JSON; the last conversation's end, as long; and a start
@@ -484,16 +493,8 @@ fn the_events_an_older_build_logged_long_are_cut_once_to_what_a_heading_reads_of
     ledger.limit_value_length(VALUE_LIMIT).expect("held");
     let history = lines(&everything(&ledger, 1, "chief").expect("read"));
     assert_eq!(history.len(), 22);
-    assert_eq!(
-        history[0],
-        r#"codex diana Some(Window { resumed: false }) ["user: said in 1"]"#
-    );
-    assert_eq!(
-        history[19],
-        r#"codex diana Some(Window { resumed: false }) ["user: said in 20"]"#
-    );
-    // The twenty-first ended, which says no more.
-    assert_eq!(history[20], r#"codex diana None ["user: said in 21"]"#);
+    assert_eq!(history[0], r#"["user: said in 1"]"#);
+    assert_eq!(history[20], r#"["user: said in 21"]"#);
     drop(ledger);
     let cut: Vec<String> = column(
         &file,
@@ -523,7 +524,7 @@ fn the_events_an_older_build_logged_long_are_cut_once_to_what_a_heading_reads_of
     );
     let longest: Vec<i64> = column(&file, "SELECT max(octet_length(data)) FROM event");
     assert!(
-        longest[0] <= i64::try_from(HEADING_EVENT_MAX).expect("small"),
+        longest[0] <= i64::try_from(EVENT_CUT).expect("small"),
         "{longest:?}"
     );
 }
@@ -553,7 +554,7 @@ fn a_read_of_the_history_reads_of_a_participant_and_its_project_only_what_it_use
     let read = ledger
         .read_history(1, "chief", &ask(HistoryFrom::Newest, None, false, ROOM))
         .expect("a page");
-    let row = read.entries[0].key().row;
+    let row = read.entries[0].key.row;
     assert_eq!(
         ledger
             .read_history_part(1, "chief", 1, row, 0)
@@ -609,22 +610,31 @@ fn a_newest_conversation_an_older_build_bound_to_a_17_mib_session_is_read_and_ol
     drop(db);
     let ledger = open_ledger(&file, Options::default()).expect("migrated and open");
     ledger.limit_value_length(VALUE_LIMIT).expect("held");
-    // An entry a read, back from the newest: both conversations, each headed.
-    let history = everything(&ledger, 1, "chief").expect("read");
-    assert_eq!(history.len(), 2);
-    let (older, newest) = (&history[0].0.conversation, &history[1].0.conversation);
-    assert_eq!(newest.native_session, None);
+    // An item a read, back from the newest: both conversations' items.
+    let history = lines(&everything(&ledger, 1, "chief").expect("read"));
+    assert_eq!(
+        history,
+        [r#"["user: said in 1"]"#, r#"["user: said in 2"]"#]
+    );
+    drop(ledger);
     // As many characters of two bytes as 256 bytes hold with "…".
     let cut = format!("{}…", "é".repeat((FIELD_MAX - 3) / 2));
-    assert_eq!(
-        (
-            older.harness.clone(),
-            older.native_session.clone(),
-            older.started_at.clone(),
-            older.ended_at.clone()
-        ),
-        (cut.clone(), None, cut.clone(), Some(cut))
-    );
+    let fields: Vec<(String, Option<String>, String, Option<String>)> = {
+        let db = Connection::open(&file).expect("the file");
+        let mut rows = db
+            .prepare("SELECT harness, native_session, started_at, ended_at FROM conversation ORDER BY id")
+            .expect("prepared");
+        rows.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .expect("read")
+        .map(|row| row.expect("one"))
+        .collect()
+    };
+    assert_eq!(fields[0], (cut.clone(), None, cut.clone(), Some(cut)));
+    assert_eq!(fields[1].1, None, "the 17 MiB session");
+    let ledger = open_ledger(&file, Options::default()).expect("open");
+    ledger.limit_value_length(VALUE_LIMIT).expect("held");
     // A page of the newest goes on to the conversation before it.
     let first = ledger
         .read_history(1, "chief", &ask(HistoryFrom::Newest, None, false, 1))
@@ -655,7 +665,8 @@ fn the_migration_s_cuts_never_fail_on_what_they_would_make_one() {
     .expect("conversations");
     drop(db);
     let ledger = open_ledger(&file, Options::default()).expect("migrated and open");
-    assert_eq!(everything(&ledger, 1, "chief").expect("read").len(), 5);
+    // The four it added hold no item, so the history is the first's alone.
+    assert_eq!(everything(&ledger, 1, "chief").expect("read").len(), 1);
     drop(ledger);
     let sessions: Vec<Option<String>> = column(
         &file,
@@ -664,66 +675,6 @@ fn the_migration_s_cuts_never_fail_on_what_they_would_make_one() {
     assert_eq!(
         sessions,
         [None, None, None, Some("é".repeat(NATIVE_SESSION_MAX))]
-    );
-}
-
-#[test]
-fn every_event_a_heading_reads_is_logged_within_its_ceiling_however_long_what_it_names() {
-    let dir = tempfile::tempdir().expect("a folder");
-    let mut ledger = ledger_in(&dir);
-    let project = project(&mut ledger);
-    // The longest agent a member's handle can be, and the longest native
-    // session, of characters JSON escapes in six bytes each.
-    let agent = "a".repeat(64);
-    let member = ledger
-        .add_member(
-            project.id,
-            &NewMember {
-                agent: agent.clone(),
-                harness: "claude-code".into(),
-                designer: false,
-                roles: vec!["worker".into()],
-                tier: "standard".into(),
-            },
-        )
-        .expect("a member");
-    let session = "\u{1}".repeat(NATIVE_SESSION_MAX);
-    for participant in [member.id, id_of(&project, "chief")] {
-        ledger
-            .start_conversation(participant, "claude-code")
-            .expect("a conversation");
-        let followed = ledger
-            .follow_conversation(participant, "claude-code", &session)
-            .expect("followed");
-        ledger.end_conversation(followed.id).expect("ended");
-    }
-    ledger
-        .switch_chief(
-            project.id,
-            &ChiefSwitch {
-                harness: "claude-code".into(),
-                agent: "b".repeat(64),
-                cut: true,
-            },
-        )
-        .expect("switched");
-    ledger.close().expect("closed");
-    let longest: Vec<i64> = column(
-        &dir.path().join("consensflow.db"),
-        "SELECT max(octet_length(data)) FROM event WHERE kind IN
-           ('conversation.started', 'conversation.followed', 'conversation.ended', 'chief.switched')
-         GROUP BY kind ORDER BY kind",
-    );
-    assert_eq!(longest.len(), 4);
-    assert!(
-        longest
-            .iter()
-            .all(|bytes| *bytes <= i64::try_from(HEADING_EVENT_MAX).expect("small")),
-        "{longest:?}"
-    );
-    assert!(
-        longest[2] > 3_072,
-        "the session's escapes are in it: {longest:?}"
     );
 }
 
@@ -748,8 +699,9 @@ fn every_field_and_part_a_read_goes_through_is_charged_as_what_it_is() {
             .copy_transcript(conversation, &items, 0)
             .expect("copied");
     };
-    // A conversation bound to its session, ended by a Switch chief; the one
-    // after it, going on now, its newest item of three parts and a 1,024-byte id.
+    // A conversation bound to a session as long as one may be, ended by a
+    // Switch chief; the one after it, going on now, its newest item of three
+    // parts and a 1,024-byte id.
     let first = ledger
         .start_conversation(chief, "claude-code")
         .expect("a conversation");
@@ -762,7 +714,7 @@ fn every_field_and_part_a_read_goes_through_is_charged_as_what_it_is() {
             project.id,
             &ChiefSwitch {
                 harness: "codex".into(),
-                agent: "maia".into(),
+                model: "maia".into(),
                 cut: false,
             },
         )
@@ -790,20 +742,11 @@ fn every_field_and_part_a_read_goes_through_is_charged_as_what_it_is() {
     ledger.close().expect("closed");
     let file = dir.path().join("consensflow.db");
     let sum = |sql: &str| column::<i64>(&file, sql)[0];
-    let conversations = sum(
-        "SELECT sum(octet_length(harness) + ifnull(octet_length(native_session), 0)
-           + octet_length(started_at) + ifnull(octet_length(ended_at), 0)) FROM conversation",
-    );
+    // What a read goes through of a field is each item's id as a page shows it
+    // and its time: nothing of a conversation's fields, nor of the log's data.
     let rows = sum(
         "SELECT sum(octet_length(id_shown) + ifnull(octet_length(at), 0)) FROM transcript_head",
     );
-    // The first conversation's heading reads the switch twice (the agent it
-    // began on, what ended it) and where its window went after (the next's
-    // start); the current one's, nothing of the log's data.
-    let switch = sum("SELECT octet_length(data) FROM event WHERE kind = 'chief.switched'");
-    let next = sum(
-        "SELECT octet_length(data) FROM event WHERE kind = 'conversation.started' ORDER BY id DESC LIMIT 1",
-    );
-    let charged = usize::try_from(conversations + rows + 2 * switch + next).expect("small");
+    let charged = usize::try_from(rows).expect("small");
     assert_eq!(read.scanned.fields, charged, "{:?}", read.scanned);
 }

@@ -10,9 +10,9 @@
 
 use serde_json::{json, Value};
 
-use crate::seams::processes::{Child, Processes, Program, Streams};
-use crate::seams::{arm, Time};
-use crate::shared::child::stop;
+use crate::seams::processes::{Child, Processes, Program};
+use crate::seams::Time;
+use crate::shared::one_shot;
 
 /// How long a conversation has to answer every request: Muse answers `model/list` in a few
 /// seconds on a login (a fetch of its catalog), and past this it is given up on.
@@ -41,17 +41,17 @@ pub(crate) async fn conversation(
     requests: &[(&str, Value)],
     bound_ms: u64,
 ) -> Result<Vec<Value>, String> {
-    let child = processes.spawn(program, Streams::Lines)?;
-    let armed = arm(time, bound_ms);
-    let answered = armed.bound(talk(&*child, requests)).await;
-    // Ended whichever way: a host that will not end is the process's to be given up on.
-    let _ = stop(time, &*child).await;
-    answered.unwrap_or_else(|| {
-        Err(format!(
-            "muse serve did not answer within {} s",
-            bound_ms / 1000
-        ))
-    })
+    // The bounded one-shot every harness's list is read in (`shared::one_shot`), the host
+    // ended whichever way.
+    one_shot::conversation(
+        processes,
+        time,
+        program,
+        "muse serve",
+        bound_ms,
+        async |child| talk(child, requests).await,
+    )
+    .await
 }
 
 async fn talk(child: &dyn Child, requests: &[(&str, Value)]) -> Result<Vec<Value>, String> {

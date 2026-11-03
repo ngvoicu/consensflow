@@ -80,3 +80,13 @@ more: its line reads `cf task list [--all]` and says what the flag adds, in ever
 in `cf-board-028` and `-029`. Changed by hand, in those words alone. The recordings of the
 crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them, and one
 more there: the case `cf task list --json` carries an `idle` key (see that folder's README).
+
+A chief is a harness and a model (T-729): Node's page named the chief by a saved agent.
+`tools/move_chief_model_goldens.py daemon` moved what that changes, and nothing else: a
+`project.open` or `chief.switch` names the `harness` and `model` its agent has in the
+trace's roster (its world's `agents.json`, else the catalog's ready-made agents) in the
+agent's place, and one that named none the roster has, or no agent, is refused for naming
+no model; the chief names no agent and says its model after its harness, in answers,
+replies and rows; the switches and a waiting switch name a model. 37 of 105 moved; run
+again, it moves nothing. New project does not ask whether the chief's harness is
+installed, as Node's never did; Switch chief does, as Node's did.

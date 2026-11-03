@@ -72,6 +72,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::models::ModelListing;
 use cf_proto::panes::{HumanInput, Servers};
 use cf_proto::specs::Variant;
 use serde_json::Value;
@@ -81,10 +82,12 @@ use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
     Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Over, Pane, PaneHost,
-    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
+    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Used, Waiting, Window,
+    Work,
 };
 use crate::detect::executable;
 use crate::records::{Boundary, Options, Reading, Settlement};
+use crate::seams::processes::Processes;
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, InputBox, Unsent};
@@ -102,6 +105,7 @@ pub struct ClaudeAdapter {
     entropy: Rc<dyn Entropy>,
     /// The bundle's `cf` as a window names it: what the launch's hooks run.
     pane_cf: String,
+    processes: Rc<dyn Processes>,
     /// Where Claude keeps its own status of each of its processes, made
     /// whole once, as Node resolved it when it made the adapter; or why
     /// there is none.
@@ -117,12 +121,43 @@ impl ClaudeAdapter {
             time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
             pane_cf: services.bundle.pane_cf.clone(),
+            processes: Rc::clone(&services.processes),
             statuses: status::folder(&services.env),
         }
     }
 }
 
 impl Adapter for ClaudeAdapter {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
+        Box::pin(super::models::listed(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+        ))
+    }
+
+    /// What its record says the conversation ran on last (CHF-05): read from its end,
+    /// within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(&'a self, session: &'a str, asked: Option<&'a str>) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, asked, &self.env) })
+    }
+
+    /// T-445's probe of each harness's own switch (brain `operations/work-in-flight/results/3.0.7/`).
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window and press s to keep it to that conversation: Enter there makes it your Claude Code default.")
+    }
+
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        Box::pin(super::models::default_model(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+        ))
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Claude, &self.env)?;

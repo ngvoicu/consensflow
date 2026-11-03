@@ -1,5 +1,5 @@
 import { button, element, redraw } from '../dom.js'
-import { isMember } from './board.js'
+import { HARNESS_NAMES, isMember } from './board.js'
 import { ClaudeCompaction } from './claude-compaction.js'
 import { ComputerUseSection } from './computer-use.js'
 import { ProjectSections } from './project-sections.js'
@@ -172,45 +172,155 @@ function nobodyRow(text) {
   return row
 }
 
-/** The harnesses a chief runs in, as the human knows them, in the order their agents are offered. */
-export const HARNESS_NAMES = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  pi: 'Pi',
-  devin: 'Devin',
-}
-
-/** The harness an agent names for a chief's kind: Claude Code's agents run on `claude`. */
+/** The name a harness's program goes by, which `models.get` and `missing` say: Claude Code's is `claude`. */
 const harnessOf = (kind) => (kind === 'claude-code' ? 'claude' : kind)
 
 const NO_HARNESS = 'No harness is installed here: install one from Agents, Harnesses.'
 
+/** What `--model` takes for a listed model: Pi's provider and id joined, the id else. */
+const modelOf = (model) => (model.provider ? `${model.provider}/${model.id}` : model.id)
+
 /**
- * Fills a chief's pick list: the saved agents a chief may run on (no image
- * agent) on a harness a chief runs in that is installed here, grouped as the
- * staff's pick list is (`tierGroups`), after an empty choice that asks for one. A chief
- * runs on an agent the human picks, never on a harness's own default; the
- * agent it runs on now (`current`) is no switch. With no harness installed
- * here it refuses, and says where to get one.
+ * A chief's harness and model, as New project and Switch chief pick them (CHF-07): a
+ * harness installed here, then one of the models that harness lists of itself
+ * (`models.get`). Both are required, nothing is picked to start with, and no effort is
+ * asked: a chief runs at its harness's own. A harness whose models cannot be read leaves
+ * the model unpicked, and says why. Below, the harness's own words for switching its
+ * model in the chief's window, which keeps its conversation (`switchHelp`), and the
+ * warning beside a contributor model.
  */
-function fillChiefs(select, agents, missing, current = null) {
-  const installed = Object.entries(HARNESS_NAMES).filter(
-    ([kind]) => !missing.includes(harnessOf(kind)),
-  )
-  if (installed.length === 0) throw new Error(NO_HARNESS)
-  const ask = new Option('Pick an agent', '')
-  ask.disabled = true
-  const harnesses = installed.map(([kind]) => harnessOf(kind))
-  const runsHere = agents.filter(
-    (agent) => !agent.hidden && harnesses.includes(agent.harness) && fits(agent, 'chief'),
-  )
-  const groups = tierGroups(runsHere, (agent) => {
-    const option = new Option(`${agent.name} · ${runsLabel(agent, null)}`, agent.name)
-    option.disabled = agent.name === current
-    return option
-  })
-  select.replaceChildren(ask, ...groups)
-  select.value = ''
+class ChiefPicker {
+  #harness
+  #model
+  #help
+  #daemon
+  /** The listing read for the harness picked now. */
+  #listing = null
+  #words = { switchHelp: null, contributorWarning: null }
+  /** The `{harness, model}` the chief is on: no switch. */
+  #current = null
+  /** Which ask the model select waits for: an answer to an older one is let go. */
+  #asked = 0
+
+  constructor(form, daemon) {
+    this.#harness = form.elements.chiefHarness
+    this.#model = form.elements.chiefModel
+    this.#help = form.querySelector('.chief-help')
+    this.#daemon = daemon
+    this.#harness.addEventListener('change', () => void this.#fillModels())
+    this.#model.addEventListener('change', () => this.#sayHelp())
+  }
+
+  /**
+   * The harnesses installed here, none picked; with none it refuses, and says where to
+   * get one. `current` is the chief's own harness and model, which no switch is to.
+   */
+  fill(missing, current = null) {
+    const installed = Object.entries(HARNESS_NAMES).filter(
+      ([kind]) => !missing.includes(harnessOf(kind)),
+    )
+    if (installed.length === 0) throw new Error(NO_HARNESS)
+    const ask = new Option('Pick a harness', '')
+    ask.disabled = true
+    this.#harness.replaceChildren(ask, ...installed.map(([kind, name]) => new Option(name, kind)))
+    this.#harness.value = ''
+    this.#current = current
+    this.#asked += 1
+    this.#none('Pick a harness first', '')
+  }
+
+  /** The picked harness and model, as the daemon takes a chief. */
+  values() {
+    return { harness: this.#harness.value, model: this.#model.value }
+  }
+
+  /**
+   * Whether a harness and a model are picked; where not, it says what to pick. A model
+   * select a harness left with nothing to pick is disabled, and so is no form's to check.
+   */
+  picked() {
+    if (this.#harness.value !== '' && this.#model.value !== '') return true
+    // A harness whose models could not be read says why already.
+    if (this.#harness.value === '') this.#say('Pick a harness for the chief.')
+    else if (!this.#model.disabled) this.#say("Pick the chief's model.")
+    return false
+  }
+
+  /** No model to pick, and why. */
+  #none(words, why) {
+    const ask = new Option(words, '')
+    ask.disabled = true
+    this.#model.replaceChildren(ask)
+    this.#model.value = ''
+    this.#model.disabled = true
+    this.#listing = null
+    this.#words = { switchHelp: null, contributorWarning: null }
+    this.#say(why)
+  }
+
+  async #fillModels() {
+    const kind = this.#harness.value
+    const name = HARNESS_NAMES[kind]
+    this.#asked += 1
+    const asked = this.#asked
+    this.#none(`Reading ${name}'s models…`, '')
+    let answer
+    try {
+      answer = await this.#daemon('models.get', { harness: harnessOf(kind) })
+    } catch (cause) {
+      if (asked !== this.#asked) return
+      this.#none(
+        'No model to pick',
+        `${name}'s models could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+      return
+    }
+    if (asked !== this.#asked) return
+    const { listing, switchHelp = null, contributorWarning = null } = answer
+    const stale = listing.freshness?.state === 'stale' ? listing.freshness.why : null
+    if (listing.models.length === 0) {
+      this.#none('No model to pick', `${name} lists no model${stale ? `: ${stale}` : ''}.`)
+      return
+    }
+    const ask = new Option('Pick a model', '')
+    ask.disabled = true
+    const current = this.#current
+    const options = listing.models.map((model) => {
+      const id = modelOf(model)
+      const option = new Option(
+        model.contributor ? `${model.label} · Contributor` : model.label,
+        id,
+      )
+      // A model its harness lists and will not run, and the one the chief is on now, are no pick.
+      option.disabled = model.disabled || (current?.harness === kind && current?.model === id)
+      return option
+    })
+    this.#model.replaceChildren(ask, ...options)
+    this.#model.value = ''
+    this.#model.disabled = false
+    this.#listing = { ...listing, stale }
+    this.#words = { switchHelp, contributorWarning }
+    this.#sayHelp()
+  }
+
+  /** The harness's own switch, a stale list's reason, and a contributor model's warning. */
+  #sayHelp() {
+    const picked = this.#listing?.models.find((model) => modelOf(model) === this.#model.value)
+    this.#say(
+      [
+        picked?.contributor ? this.#words.contributorWarning : null,
+        this.#listing?.stale ? `This list may be out of date: ${this.#listing.stale}.` : null,
+        this.#words.switchHelp,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    )
+  }
+
+  #say(words) {
+    this.#help.textContent = words
+    this.#help.hidden = words === ''
+  }
 }
 
 /**
@@ -228,6 +338,7 @@ export class NewProjectDialog {
   #refusal
   #sections
   #page
+  #chief
   /** The agents and roles picked for the new project, the last staff's to start with. */
   #picked = []
   /** Whether a start is on its way: a second ask waits for its answer, as the daemon's. */
@@ -254,6 +365,7 @@ export class NewProjectDialog {
       page.specs,
     )
     this.#page = page
+    this.#chief = new ChiefPicker(this.#form, page.daemon)
     const form = this.#form
     dialog.querySelector('#new-project-add').addEventListener('click', () => {
       const role = form.elements.pickRole.value
@@ -276,7 +388,7 @@ export class NewProjectDialog {
       this.#page.daemon('staff.last'),
       this.#page.readSpecs(),
     ])
-    fillChiefs(this.#form.elements.chief, agents, missing)
+    this.#chief.fill(missing)
     this.#page.onAgents(agents)
     this.#pickLast(staff)
     this.#sections.reset()
@@ -300,13 +412,13 @@ export class NewProjectDialog {
    * what the human chose still in the dialog, and no project is made.
    */
   async #start() {
-    if (this.#starting) return
+    if (this.#starting || !this.#chief.picked()) return
     this.#starting = true
     const form = this.#form
     const { gate, wakeUp, specs } = this.#sections.values()
     const body = {
       directory: form.elements.directory.value,
-      agent: form.elements.chief.value,
+      ...this.#chief.values(),
       gate,
       staff: this.#pickedStaff(),
     }
@@ -411,6 +523,7 @@ export class SwitchChiefDialog {
   #dialog
   #form
   #page
+  #chief
   /** The project whose chief the dialog switches: the one it was opened for. */
   #project = null
 
@@ -423,16 +536,18 @@ export class SwitchChiefDialog {
     this.#dialog = dialog
     this.#form = dialog.querySelector('form')
     this.#page = page
+    this.#chief = new ChiefPicker(this.#form, page.daemon)
     const form = this.#form
     form.addEventListener('submit', (event) => {
       event.preventDefault()
-      const agent = form.elements.chief.value
+      if (!this.#chief.picked()) return
+      const { harness, model } = this.#chief.values()
       const when = form.elements.when.value
       const askFirst = form.elements.note.checked
       const project = this.#project
       dialog.close()
       void page.act(async () => {
-        await page.daemon('chief.switch', { project, agent, when, note: askFirst })
+        await page.daemon('chief.switch', { project, harness, model, when, note: askFirst })
         page.onSwitch()
       })
     })
@@ -440,26 +555,17 @@ export class SwitchChiefDialog {
   }
 
   /**
-   * Opens for `chief`'s project: the saved agents on every harness installed
-   * here, none picked yet. With none installed it refuses, and says where
-   * to get one.
+   * Opens for `chief`'s project: every harness installed here, none picked yet, and the
+   * models of the one picked; the harness and model the chief is on are no switch, and
+   * another model of its harness is a fresh conversation with a handoff. With no harness
+   * installed it refuses, and says where to get one.
    */
   async open(chief) {
-    const { agents, missing } = await this.#page.daemon('agents.list')
+    const { missing } = await this.#page.daemon('agents.list')
     // Asked for in a project the human has left since: it stays shut.
     if (this.#page.selected() !== chief.projectId) return
     const form = this.#form
-    // A chief from before chiefs were agents runs on its harness's default: every agent is a switch.
-    fillChiefs(form.elements.chief, agents, missing, chief.agent)
-    // A chief whose agent is gone says so above the agents it may go on with.
-    const lane = this.#page.board()?.lanes.find((each) => each.participant.id === chief.id)
-    const gone = this.#dialog.querySelector('.chief-gone')
-    gone.textContent = !lane?.agentMissing
-      ? ''
-      : lane.agentRetired
-        ? `The chief runs on ${chief.agent}, which left the catalog: ${lane.agentRetired}. Pick another agent.`
-        : `The chief runs on ${chief.agent}, which is no longer among your agents: pick another agent.`
-    gone.hidden = gone.textContent === ''
+    this.#chief.fill(missing, { harness: chief.harness, model: chief.ranOn ?? chief.model })
     // Each switch starts from the gentle one: the chief finishes its turn, unasked.
     form.elements.when.value = 'turn'
     form.elements.note.checked = false

@@ -6,95 +6,43 @@
 //! `source` says where the list came from. `providerCatalog` is the account's own,
 //! fetched with its login (5 models on 2026-10-27); `bundledCatalog` is what Muse ships,
 //! one stale model (`muse-spark-1.2`), which a host answers where it has no login or no
-//! cached catalog yet: such a list is [`Models::stale`], and is not taken for the
-//! account's.
+//! cached catalog yet: such a listing is stale ([`BUNDLED`]), and is not taken for the
+//! account's: it gives no default.
 //!
-//! **A contributor model is never a default** (Meta may train on what it sees: its own
-//! description says "your content … may be used for product improvement"). Muse marks one
-//! `isDefault` (`muse-spark-1.3-contributor` on a fresh config, which runs at `max`):
-//! [`Models::default_model`] never answers it, and [`warning`] says what a picker shows
+//! The listing is the one every harness answers (`cf_proto::models::ModelListing`,
+//! CHF-03): **a contributor model is never its default** (Meta may train on what it sees:
+//! its own description says "your content … may be used for product improvement"). Muse marks
+//! one `isDefault` (`muse-spark-1.3-contributor` on a fresh config, which runs at `max`):
+//! `ModelListing::default_model` answers its twin, and `warning` is what a picker shows
 //! beside one.
 
 use std::path::PathBuf;
 
 use cf_base::env::Env;
+use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
 use super::msp;
 use crate::seams::processes::{Processes, Program};
 use crate::seams::Time;
 
-/// What a picker says beside a contributor model.
-pub const CONTRIBUTOR_WARNING: &str =
-    "Contributor model: Meta may train on what it sees, including your code.";
+/// How a listing is read, as the human could run it.
+pub const HOW: &str = "muse serve --provider meta --no-session-log: model/list";
 
-/// A model Muse offers.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelChoice {
-    pub id: String,
-    pub label: String,
-    /// The efforts the model takes, from the lowest, as Muse orders them (`variants`).
-    pub efforts: Vec<String>,
-    /// The effort Muse runs it at where none is given.
-    pub default_effort: Option<String>,
-    /// Muse's own mark of the model it starts on: never ConsensFlow's choice where this is a
-    /// contributor model.
-    pub marked_default: bool,
-    /// Meta may train on what it sees.
-    pub contributor: bool,
-}
+/// Why a list a host answered from what Muse ships is stale.
+pub const BUNDLED: &str =
+    "Muse listed the models it ships, not the account's: it has no login here, or has not fetched its catalog yet";
 
-/// What `model/list` answered.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Models {
-    pub models: Vec<ModelChoice>,
-    /// The list is Muse's bundled one, not the account's: it names what Muse ships, and the
-    /// models of the account are not known.
-    pub stale: bool,
-}
-
-/// Whether `id` names a contributor model: `-contributor` ends it.
+/// Whether `id` names a contributor model: `-contributor` ends it, or its description says
+/// what Meta does with what it sees.
 fn contributor(id: &str, description: Option<&str>) -> bool {
-    id.ends_with("-contributor")
+    cf_proto::models::is_contributor(id)
         || description.is_some_and(|said| said.contains("may be used for product improvement"))
 }
 
-impl Models {
-    /// The model a member is given where its agent names none: the one Muse marks, unless it
-    /// is a contributor model, then its twin that is not (`muse-spark-1.3` for
-    /// `muse-spark-1.3-contributor`), else the first that is not one. None where every model
-    /// is: no default is better than one Meta trains on. None too where the list is
-    /// [`Models::stale`], Muse's bundled one: it names what Muse ships, which the account may
-    /// not offer, and a member launched on it would fail at its first turn (T-816).
-    pub fn default_model(&self) -> Option<&ModelChoice> {
-        if self.stale {
-            return None;
-        }
-        let marked = self.models.iter().find(|model| model.marked_default);
-        let twin = marked
-            .filter(|model| model.contributor)
-            .and_then(|model| model.id.strip_suffix("-contributor"))
-            .and_then(|twin| self.models.iter().find(|model| model.id == twin));
-        marked
-            .filter(|model| !model.contributor)
-            .or(twin)
-            .or_else(|| self.models.iter().find(|model| !model.contributor))
-    }
-
-    /// The model `id`, if listed.
-    pub fn model(&self, id: &str) -> Option<&ModelChoice> {
-        self.models.iter().find(|model| model.id == id)
-    }
-}
-
-/// What a picker shows beside `model`: a warning for a contributor model, none else.
-pub fn warning(model: &ModelChoice) -> Option<&'static str> {
-    model.contributor.then_some(CONTRIBUTOR_WARNING)
-}
-
-/// What a `model/list` result says. Fails where it names no model: a host that lists none
-/// has nothing to offer, and says so.
-pub fn parse(result: &Value) -> Result<Models, String> {
+/// What a `model/list` result read at `at` says. Fails where it names no model: a host that
+/// lists none has nothing to offer, and says so.
+pub fn parse(result: &Value, at: i64) -> Result<ModelListing, String> {
     let rows = result
         .get("models")
         .and_then(Value::as_array)
@@ -124,23 +72,26 @@ pub fn parse(result: &Value) -> Result<Models, String> {
                     .collect();
             }
             let description = text(row, "description");
-            Some(ModelChoice {
-                label: text(row, "displayLabel").unwrap_or_else(|| id.clone()),
-                contributor: contributor(&id, description.as_deref()),
-                efforts,
-                default_effort: text(row, "defaultReasoningEffort"),
-                marked_default: row.get("isDefault") == Some(&Value::Bool(true)),
-                id,
-            })
+            let mut choice =
+                ModelChoice::new(id.clone(), text(row, "displayLabel").unwrap_or(id.clone()));
+            choice.contributor = contributor(&id, description.as_deref());
+            choice.efforts = efforts;
+            choice.default_effort = text(row, "defaultReasoningEffort");
+            choice.marked_default = row.get("isDefault") == Some(&Value::Bool(true));
+            Some(choice)
         })
         .collect();
     if models.is_empty() {
         return Err("Muse's model list names no model".to_owned());
     }
-    Ok(Models {
-        models,
-        stale: result.get("source").and_then(Value::as_str) != Some("providerCatalog"),
-    })
+    let listing = ModelListing::read(models, at, HOW);
+    Ok(
+        if result.get("source").and_then(Value::as_str) == Some("providerCatalog") {
+            listing
+        } else {
+            listing.stale(BUNDLED)
+        },
+    )
 }
 
 /// The host a list is read from: `muse serve` at `executable`, with no update check (`muse`
@@ -161,7 +112,8 @@ pub async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,
-) -> Result<Models, String> {
+) -> Result<ModelListing, String> {
+    let at = time.wall_ms();
     let answers = msp::conversation(
         processes,
         time,
@@ -170,7 +122,51 @@ pub async fn read(
         msp::BOUND_MS,
     )
     .await?;
-    parse(&answers[0])
+    parse(&answers[0], at)
+}
+
+/// The models the machine's Muse lists, read as the daemon reads every harness's (CHF-03):
+/// `muse serve`'s `model/list` over its own login, one bounded conversation.
+pub(crate) async fn listed(
+    env: &Env,
+    processes: &dyn Processes,
+    time: &dyn Time,
+) -> Result<ModelListing, String> {
+    let executable = crate::detect::executable(cf_proto::agents::Harness::Muse, env)?;
+    read(processes, time, program(PathBuf::from(executable), env)).await
+}
+
+/// Whether `words` are Muse's provider refusing `asked` as a model the account does not
+/// have: the window opens on any id, and its first turn fails with the provider's 404,
+/// "model `X` does not exist or you lack access" (1.4.14, CHF-02), the whole id named,
+/// which the turn's record keeps as its failure.
+pub(crate) fn gone(words: &str, asked: &str) -> bool {
+    words.contains("does not exist or you lack access") && words.contains(asked)
+}
+
+/// The model Muse starts a chief on where its model is gone: the account's default, never a
+/// contributor model (`ModelListing::default_model`). Never Muse's own choice, as other
+/// harnesses' may be: Muse marks a contributor model its default on a fresh config, so a
+/// list that cannot be read, a stale one (what Muse ships, which the account may not offer)
+/// or one with no other model is an error, and the chief stays held (CHF-06, T-955).
+pub(crate) async fn default_model(
+    env: &Env,
+    processes: &dyn Processes,
+    time: &dyn Time,
+) -> Result<Option<String>, String> {
+    default_of(listed(env, processes, time).await)
+}
+
+/// [`default_model`] of what a read of the list answered.
+fn default_of(listed: Result<ModelListing, String>) -> Result<Option<String>, String> {
+    let listing = listed?;
+    if let cf_proto::models::Freshness::Stale { why } = &listing.freshness {
+        return Err(why.clone());
+    }
+    listing
+        .default_model()
+        .map(|model| Some(model.model()))
+        .ok_or_else(|| "Muse Code offers no model that is not a contributor model".to_owned())
 }
 
 #[cfg(test)]

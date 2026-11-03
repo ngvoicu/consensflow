@@ -40,7 +40,7 @@ fn holds_up_only_itself_the_pass_moves_on_and_other_windows_are_delivered_to_and
         .open_project(json!({
             "directory": "/work/api",
             "name": "api",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
         }))
         .unwrap()
         .unwrap();
@@ -81,7 +81,7 @@ fn answers_new_project_switch_chief_resume_and_a_sessions_open_once_the_ledger_h
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()

@@ -155,6 +155,11 @@ impl Player {
                 }),
                 grants_of: None,
             },
+            // No trace of Node's asks for models: a page with no adapter to read them from.
+            models: Rc::new(cf_daemon::models::ModelLists::new(
+                Rc::new(NoAdapters),
+                self.world.env(),
+            )),
         });
         let (daemon_end, app_end) = duplex(256 * 1024);
         let (daemon_input, daemon_output) = split(daemon_end);
@@ -277,4 +282,13 @@ fn seeded(file: &Path, staff: &[Value]) -> Rig {
     }
     drop(db);
     Rig::open(file)
+}
+
+/// The adapters of a page that reads no model: none.
+struct NoAdapters;
+
+impl cf_engine::seams::Adapters for NoAdapters {
+    fn adapter(&self, _harness: &str) -> Option<Rc<dyn cf_harness::contract::Adapter>> {
+        None
+    }
 }
