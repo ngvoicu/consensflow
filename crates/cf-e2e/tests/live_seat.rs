@@ -59,9 +59,11 @@ const CLOSES: Duration = Duration::from_secs(60);
 /// How often the board is looked at.
 const LOOK: Duration = Duration::from_secs(1);
 
-/// About how long one seat takes at most, which the logins of the run must last, with their
-/// margin, for each seat named ([`Log::lasting`]).
-const PER_SEAT: Duration = Duration::from_secs(6 * 60);
+/// About how long one seat takes, which the logins of the run must last, with their margin, for
+/// each seat named ([`Log::lasting`]): the seats took 7 to 28 s each (zeewin2 and a Mac, T-1136), so
+/// two minutes is generous, and the limits above end a seat that takes longer. (A login that has 29
+/// minutes left cannot be renewed by using it, so a plan of six minutes a seat refused five seats.)
+const PER_SEAT: Duration = Duration::from_secs(2 * 60);
 
 /// The harnesses the words of the command line name, or every one.
 fn seats(named: &[String]) -> Result<Vec<Harness>> {

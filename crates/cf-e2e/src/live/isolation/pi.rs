@@ -95,7 +95,10 @@ pub fn renewable(text: &str, provider: &str, now: i64, left: Duration) -> bool {
     let has_refresh = entry
         .and_then(|entry| entry["refresh"].as_str())
         .is_some_and(|token| !token.is_empty());
-    has_refresh && matches!(fit(entry, now, left), Err(Unfit::Expired | Unfit::Short(_)))
+    let near = expiry(text, provider).is_none_or(|expires| {
+        Duration::from_millis(u64::try_from(expires - now).unwrap_or(0)) <= renew::RENEWS_WITHIN
+    });
+    has_refresh && near && matches!(fit(entry, now, left), Err(Unfit::Expired | Unfit::Short(_)))
 }
 
 /// Whether the entry can be copied for a run that needs it to last `left` from `now`

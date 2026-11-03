@@ -959,20 +959,38 @@ fn a_renewal_that_fails_refuses_the_pi_run_in_words_that_say_so_and_makes_no_hom
 #[test]
 fn a_renewal_that_moves_nothing_refuses_the_pi_run_and_says_when_pi_renews_an_entry() {
     let run = Renewing::new();
-    // An hour left of the hour and a half the run needs: Pi renews an entry once it has ended.
+    // Four minutes left of the run's length and its margin: Pi is run, as it renews an entry with
+    // five minutes left, and the stand-in moves nothing.
     write(
         &run.owner.path(".pi/agent/auth.json"),
-        &auth_ending(at(NOW + 3600), ACCESS),
+        &auth_ending(at(NOW + 4 * 60), ACCESS),
     );
     let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), "", 0);
     let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
-    assert!(said.contains("`openai` expires in 1 h"), "{said}");
+    assert!(said.contains("`openai` expires in 4 min"), "{said}");
     assert!(said.contains("the renewal ran and failed"), "{said}");
     assert!(
-        said.contains("the login still ends 2027-01-15T09:00:00Z (in 1 h): Pi renews a token only once the entry has ended"),
+        said.contains("the login still ends 2027-01-15T08:04:00Z (in 4 min): Pi renews a token only once the entry has ended"),
         "{said}"
     );
     assert!(!said_anywhere(&said), "{said}");
+    assert_eq!(run.owner.made(), 0);
+}
+
+/// Pi renews an entry when five minutes of it are left or it has ended, so running it on an entry
+/// that has more is a call of the model for nothing (T-1136).
+#[test]
+fn an_entry_with_more_than_five_minutes_left_is_not_renewed_by_running_pi() {
+    let run = Renewing::new();
+    write(
+        &run.owner.path(".pi/agent/auth.json"),
+        &auth_ending(at(NOW + 29 * 60), ACCESS),
+    );
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &run.renews(), 0);
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` expires in 29 min"), "{said}");
+    assert!(!said.contains("the renewal ran and failed"), "{said}");
+    assert_eq!(run.started(), None, "Pi was not run");
     assert_eq!(run.owner.made(), 0);
 }
 

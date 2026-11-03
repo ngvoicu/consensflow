@@ -454,7 +454,7 @@ mod tests {
     fn every_harness_has_one_agent_of_its_own_kind_on_its_cheap_model() {
         let rows: Vec<Value> = Harness::ALL
             .into_iter()
-            .map(|harness| row(harness, "standard"))
+            .map(|harness| row_on(parse(None, None).unwrap().of(harness), "standard"))
             .collect();
         let ids: Vec<&str> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
         assert_eq!(
@@ -537,9 +537,25 @@ mod tests {
         assert_eq!(given(Some(""), None), cheap_ones());
         assert_eq!(given(Some(" , ,"), None), cheap_ones());
         // The run that sets no variable has them too, and its agents are on them.
-        assert_eq!(asked().unwrap(), parse(None, None).unwrap());
+        // Where it runs: on this machine, a test machine's Pi may be on the model the kit names
+        // for it ([`Models::on_machine`]), which the gate's own run on zeewin2 is.
+        let here = parse(None, None).unwrap().on_machine(
+            crate::live::renew::TestMachine::detect()
+                .as_ref()
+                .map(crate::live::renew::TestMachine::name),
+            pi_providers().as_deref(),
+        );
+        assert_eq!(asked().unwrap(), here);
         for harness in Harness::ALL {
-            assert_eq!(model(harness), Model::cheap(harness), "{harness:?}");
+            let model = model(harness);
+            if harness == Harness::Pi && here.of(harness) != &Model::cheap(harness) {
+                assert!(
+                    PI_ON.iter().any(|(_, _, named)| *named == model.name),
+                    "{model}"
+                );
+            } else {
+                assert_eq!(model, Model::cheap(harness), "{harness:?}");
+            }
         }
         let mut pi_only = cheap_ones();
         pi_only[1] = on("openai/gpt-6-luna", None);

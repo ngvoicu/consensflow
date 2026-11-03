@@ -296,7 +296,7 @@ mod running {
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "sleep 30", 0);
         let started = Instant::now();
-        let said = one_shot_within(&program, &[], Duration::from_secs(1))
+        let said = one_shot_within(&program, &[], Duration::from_secs(1), &[])
             .unwrap()
             .unwrap();
         assert!(said.contains("it was ended after 1 s"), "{said}");

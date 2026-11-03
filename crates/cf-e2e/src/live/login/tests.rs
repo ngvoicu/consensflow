@@ -940,20 +940,93 @@ fn a_renewal_that_fails_refuses_the_run_in_words_that_say_so_and_makes_no_folder
 #[test]
 fn a_renewal_that_moves_nothing_refuses_the_run_and_says_when_claude_code_renews_a_token() {
     let run = Renewing::new();
-    // An hour left of the two the run needs: Claude Code renews a token with five minutes left,
-    // so running it now leaves this one as it is.
-    let near = login_ending(at(NOW + 3600), ACCESS);
+    // Four minutes left of the two hours the run needs: Claude Code is run, as it renews a token
+    // with five minutes left, and the stand-in moves nothing.
+    let near = login_ending(at(NOW + 4 * 60), ACCESS);
     let login = run.login(&near, Some(zeewin2()), "", 0);
     let said = login.folder_at(at(NOW)).unwrap_err().to_string();
-    assert!(said.contains("expires in 1 h"), "{said}");
+    assert!(said.contains("expires in 4 min"), "{said}");
     assert!(said.contains("the renewal ran and failed"), "{said}");
     assert!(
-        said.contains("the login still ends 2027-01-15T09:00:00Z (in 1 h): Claude Code renews a token only when five minutes of it are left"),
+        said.contains("the login still ends 2027-01-15T08:04:00Z (in 4 min): Claude Code renews a token only when five minutes of it are left"),
         "{said}"
     );
     assert!(!said_anywhere(&said), "{said}");
     assert_eq!(run.started().unwrap().len(), 2, "the stand-in ran once");
     assert_eq!(run.made(), 0);
+}
+
+/// Claude Code renews a token when five minutes of it are left, so running it on a login that has
+/// more is a call of the model for nothing, and its record in the owner's projects besides
+/// (zeewin2, 2026-11-03: 29 minutes left, the kit ran it, it moved nothing and left a project folder
+/// that the kit then took for a change of the owner's setup, T-1136).
+#[test]
+fn a_login_with_more_than_five_minutes_left_is_not_renewed_by_running_claude_code() {
+    let run = Renewing::new();
+    // 29 minutes left of the two hours the run needs.
+    let near = login_ending(at(NOW + 29 * 60), ACCESS);
+    let login = run.login(&near, Some(zeewin2()), &run.renews(), 0);
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("expires in 29 min"), "{said}");
+    assert!(
+        said.contains("only when five minutes of it are left"),
+        "the refusal says when Claude Code renews a token: {said}"
+    );
+    assert!(!said.contains("the renewal ran and failed"), "{said}");
+    assert_eq!(run.started(), None, "Claude Code was not run");
+    assert_eq!(run.made(), 0);
+    // Four minutes left: Claude Code is run, and renews it.
+    let ending = login_ending(at(NOW + 4 * 60), ACCESS);
+    let login = run.login(&ending, Some(zeewin2()), &run.renews(), 0);
+    assert!(login.folder_at(at(NOW)).is_ok());
+    assert_eq!(run.started().unwrap().len(), 2, "the stand-in ran once");
+}
+
+/// What Claude Code keeps of the folder it was started in, in the owner's projects, is the
+/// renewal's own: it is taken away when the renewal is over, and nothing else of the owner's is
+/// (zeewin2: `projects/C--Users-AGV-AppData-Local-Temp-consensflow-integration-renew-…/memory`).
+#[test]
+fn a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other() {
+    let run = Renewing::new();
+    let projects = run.person.home.path().join(".claude/projects");
+    let body = format!(
+        "{}\nown=\"{}/C--tmp-$(basename \"$PWD\")\"\nmkdir -p \"$own\" && echo x > \"$own/memory\"",
+        run.renews(),
+        projects.display()
+    );
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    let login = run.login(&ended, Some(zeewin2()), &body, 0);
+    let folder = login.folder_at(at(NOW)).unwrap();
+    assert!(folder.join(".credentials.json").is_file());
+    let left: Vec<String> = std::fs::read_dir(&projects)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        left.iter().all(|name| !name.contains("renew")),
+        "the renewal's own record is gone: {left:?}"
+    );
+    assert!(
+        left.iter().any(|name| name == "-Users-me-work"),
+        "and nothing else of the owner's: {left:?}"
+    );
+    // A record of another run's folder is not the renewal's, and is the owner's setup changed.
+    let body = format!(
+        "{}\nmkdir -p '{}/C--tmp-consensflow-integration-renew-OTHER'",
+        run.renews(),
+        projects.display()
+    );
+    let login = run.login(&ended, Some(zeewin2()), &body, 0);
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    assert!(
+        said.contains("it changed the owner's setup beside its login"),
+        "{said}"
+    );
+    assert!(said.contains("OTHER"), "{said}");
 }
 
 #[test]

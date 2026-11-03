@@ -249,7 +249,10 @@ fn renewable(text: &str, now: i64, left: Duration) -> bool {
                 .is_some_and(|token| !token.is_empty())
         });
     let remaining = |expires: i64| Duration::from_millis(u64::try_from(expires - now).unwrap_or(0));
-    has_refresh && expires_at(text).is_some_and(|expires| remaining(expires) < left)
+    has_refresh
+        && expires_at(text).is_some_and(|expires| {
+            remaining(expires) < left && remaining(expires) <= renew::RENEWS_WITHIN
+        })
 }
 
 /// A span as hours and minutes: `1 h 12 min`, `45 min`.
@@ -712,7 +715,12 @@ fn claude_renewal(
             let program = program()?;
             let owner = Owner { home: home.clone() };
             let before = owner.look();
-            let ended = renew::one_shot(&program, &renew::claude_words(&model))?;
+            let projects = home.join(".claude").join("projects");
+            let ended = renew::one_shot_in(
+                &program,
+                &renew::claude_words(&model),
+                &[projects.as_path()],
+            )?;
             let changed = owner.changes_since(&before);
             if changed.is_empty() {
                 return Ok(ended);

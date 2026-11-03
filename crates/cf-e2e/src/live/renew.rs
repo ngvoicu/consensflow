@@ -56,6 +56,13 @@ pub const TEST_MACHINE: &str = "CONSENSFLOW_TEST_MACHINE";
 /// harness that is slower is ended, and the renewal has failed.
 pub const LIMIT: Duration = Duration::from_secs(180);
 
+/// How much of an access token a harness leaves before it renews it: Claude Code renews one with
+/// five minutes left (and Pi an entry that has ended or has that much), so running either on a login
+/// that has more is a call of the model for nothing, and the record of it in the owner's setup
+/// besides (zeewin2, T-1136: 29 minutes left, the kit ran Claude Code, it moved nothing). A login
+/// that has more is refused with the time it ends, and the advice to run again once it has.
+pub const RENEWS_WITHIN: Duration = Duration::from_secs(5 * 60);
+
 /// What the harness is asked: nothing it would need a tool for, and one word to answer.
 const PROMPT: &str = "Reply with the single word ok.";
 
@@ -264,11 +271,24 @@ impl Renewal {
 /// what it printed (the renewal is judged by the login it left, [`Renewal::renew`]); an error where
 /// it could not be run at all.
 pub fn one_shot(program: &Path, words: &[String]) -> Result<Option<String>> {
-    one_shot_within(program, words, LIMIT)
+    one_shot_within(program, words, LIMIT, &[])
 }
 
-/// [`one_shot`], ended after `limit`.
-fn one_shot_within(program: &Path, words: &[String], limit: Duration) -> Result<Option<String>> {
+/// [`one_shot`], whose own folder is also taken out of the owner's `records` when it ended: a
+/// harness that keeps something of the folder it was started in there (Claude Code's
+/// `projects/<the folder's path>/memory`, even with no session saved) leaves nothing of the
+/// renewal's behind, so that the owner's setup is compared with what it was ([`FOLDER`] names it).
+pub fn one_shot_in(program: &Path, words: &[String], records: &[&Path]) -> Result<Option<String>> {
+    one_shot_within(program, words, LIMIT, records)
+}
+
+/// [`one_shot`], ended after `limit`, and its record in each of `records` taken away.
+fn one_shot_within(
+    program: &Path,
+    words: &[String],
+    limit: Duration,
+    records: &[&Path],
+) -> Result<Option<String>> {
     let folder = tempfile::Builder::new()
         .prefix(FOLDER)
         .tempdir()
@@ -285,6 +305,7 @@ fn one_shot_within(program: &Path, words: &[String], limit: Duration) -> Result<
         .closed_input()
         .limit(limit)
         .run()?;
+    forget(records, folder.path());
     if ran.timed_out {
         return Ok(Some(format!("it was ended after {} s", limit.as_secs())));
     }
@@ -303,6 +324,33 @@ fn one_shot_within(program: &Path, words: &[String], limit: Duration) -> Result<
             &said
         }
     )))
+}
+
+/// Takes away of each folder in `records` the entries the folder `own` made there, by name: the
+/// ones whose name ends with the name of `own` (a harness spells a folder's path into a name, with
+/// the path's own last part at the end, which is unique: [`FOLDER`] and a random tail). Nothing
+/// else of the owner's is touched, and an entry that cannot be taken away is left (the kit's
+/// watch then names it).
+fn forget(records: &[&Path], own: &Path) {
+    let Some(name) = own.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    for folder in records {
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if !entry.file_name().to_string_lossy().ends_with(name) {
+                continue;
+            }
+            let path = entry.path();
+            let _ = if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+        }
+    }
 }
 
 /// The words Claude Code is started with: the print mode on the model of the run, and nothing

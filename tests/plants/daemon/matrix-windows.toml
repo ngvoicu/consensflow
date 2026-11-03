@@ -12,6 +12,8 @@ homes-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::homes:
 isolation-windows-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::windows::"]
 descent-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::"]
 seat-offline = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_seat"]
+login-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login::"]
+pi-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::tests::"]
 
 # ---------------------------------------------------------------------------- Pi on a test machine
 
@@ -207,3 +209,55 @@ runs = ["seat-offline"]
 file = "crates/cf-e2e/tests/live_seat.rs"
 find = '''const COMMAND: &str = "node -p 40+2";'''
 replace = '''const COMMAND: &str = "node -p '40+2'";'''
+
+# ---------------------------------------------------------------------------- the logins' renewal (item 5)
+
+[[plant]]
+name = "matrix: Claude Code is run on a login that has more than five minutes left"
+meant = "a_login_with_more_than_five_minutes_left_is_not_renewed_by_running_claude_code"
+runs = ["login-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            remaining(expires) < left && remaining(expires) <= renew::RENEWS_WITHIN'''
+replace = '''            remaining(expires) < left'''
+
+[[plant]]
+name = "matrix: Pi is run on an entry that has more than five minutes left"
+meant = "an_entry_with_more_than_five_minutes_left_is_not_renewed_by_running_pi"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''    has_refresh && near && matches!'''
+replace = '''    has_refresh && matches!'''
+
+[[plant]]
+name = "matrix: the renewal leaves Claude Code's record of its own folder in the owner's projects"
+meant = "a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other"
+runs = ["login-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''    forget(records, folder.path());'''
+replace = ''''''
+
+[[plant]]
+name = "matrix: the renewal takes away every record of a run in the owner's projects"
+meant = "a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other"
+runs = ["login-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''            if !entry.file_name().to_string_lossy().ends_with(name) {'''
+replace = '''            if entry.file_name().to_string_lossy().is_empty() {'''
+
+[[plant]]
+name = "matrix: Claude Code's renewal names no record to take away"
+meant = "a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other"
+runs = ["login-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''                &[projects.as_path()],'''
+replace = '''                &[],'''
