@@ -188,8 +188,8 @@ runs = ["e2e-stops-tool"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
-find = "            None => runs_command(line, &self.text),"
-replace = "            None => line.contains(&self.text),"
+find = "        runs_command(line, &self.text)"
+replace = "        line.contains(&self.text)"
 
 [[plant]]
 name = "live windows: the process the stop case saw keeps its number"

@@ -107,8 +107,14 @@ runs = ["qs-panes"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "            let echoed = output.quiet_ms().filter(|quiet| *quiet < since);"
-replace = "            let echoed = output.screen_quiet_ms().filter(|quiet| *quiet < since);"
+find = '''
+            let echoed = output
+                .quiet_ms()
+                .filter(|quiet| *quiet < since && since - quiet >= self.drawn_after_ms);'''
+replace = '''
+            let echoed = output
+                .screen_quiet_ms()
+                .filter(|quiet| *quiet < since && since - quiet >= self.drawn_after_ms);'''
 
 [[plant]]
 name = "quiet by screen: the pacing's fallback reads the output"

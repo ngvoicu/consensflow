@@ -58,8 +58,8 @@ runs = ["mrw-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = "printf '\\033[39m\\033[49m\\033[59m\\033[0m'; sleep \"$nap\"; done ) &"
-replace = ": ; sleep \"$nap\"; done ) &"
+find = "printf '\\033[39m\\033[49m\\033[59m\\033[0m'; /bin/sleep \"$nap\"; done ) &"
+replace = ": ; /bin/sleep \"$nap\"; done ) &"
 
 [[plant]]
 name = "muse rest takes words: the rig's Muse stops repainting after three repaints"

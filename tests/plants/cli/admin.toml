@@ -241,8 +241,8 @@ runs = ["goldens"]
 
 [[plant.edit]]
 file = "crates/cf/tests/cli_goldens/paired.rs"
-find = 'entry["text"] = Value::String(native(text));'
-replace = 'entry["text"] = Value::String(text.to_owned());'
+find = '        let text = native(text);'
+replace = '        let text = text.to_owned();'
 
 [[plant]]
 name = "setup and doctor: paired: a command of another runtime is held to Node’s word of it"

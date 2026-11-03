@@ -93,10 +93,10 @@ fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
         // The contributor model, at its least effort: test code only, never the product, which
         // never defaults a person to a contributor model (`cf_harness::muse::models`). Meta may
         // train on what it is sent, and a live run sends ConsensFlow's own test content alone
-        // (Gabriel, 2026-11-02). Launched as the product launches Muse, contributor mode off,
-        // it drew about half the allowance of `muse-spark-1.3` (T-954: three 3.5k-character
-        // turns with a tool call each, on the same server model: window +2, +0, +2 against
-        // +3, +2, +3; week +1, +0, +0 against +1, +1, +1).
+        // (the owner's decision of 2026-11-02). Launched as the product launches Muse,
+        // contributor mode off, it drew about half the allowance of `muse-spark-1.3` (T-954:
+        // three 3.5k-character turns with a tool call each, on the same server model: window
+        // +2, +0, +2 against +3, +2, +3; week +1, +0, +0 against +1, +1, +1).
         Harness::Muse => ("muse-spark-1.3-contributor", Some("minimal")),
     }
 }
