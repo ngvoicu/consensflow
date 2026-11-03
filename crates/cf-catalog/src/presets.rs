@@ -21,7 +21,7 @@ pub struct Preset {
     pub label: String,
     /// The paragraph the catalog card shows.
     pub description: String,
-    /// The harness, in the payload's vocabulary (`claude-code`, `codex`, `pi`, `opencode`, `devin`).
+    /// The harness, in the payload's vocabulary (`claude-code`, `codex`, `pi`, `devin`).
     pub kind: String,
     pub model: String,
     pub effort: Option<String>,
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn the_bundled_data_reads_with_every_preset_whole() {
         let data = bundled().unwrap();
-        assert_eq!(data.presets.len(), 251);
+        assert_eq!(data.presets.len(), 217);
         assert_eq!(
             data.model_labels.get("gpt-6-astra").map(String::as_str),
             Some("GPT-6 Astra")

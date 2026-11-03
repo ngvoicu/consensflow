@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::fmt::Display;
 
 use cf_base::js;
+use cf_proto::cf_word::CfWord;
 use serde_json::Value;
 
 /// "T-3, T-4": task numbers in a sentence.
@@ -73,6 +74,18 @@ pub fn task_head(task: &Value) -> String {
 
 /// One message: its id and state, its kind and task, who sent it, and its
 /// first line when the API gave one.
+/// The words of `message`, as they are printed in the window of `cf`: a message ConsensFlow
+/// wrote itself (it names no sender: a note of the engine's or the ledger's) has each command it
+/// names started by the window's `cf`, as it was when it was pasted there; what a participant
+/// wrote is as they wrote it.
+pub fn printed_body(message: &Value, cf: &CfWord) -> String {
+    let body = js::text(message.get("body"));
+    match message.get("sender") {
+        None | Some(Value::Null) => cf.in_text(&body).into_owned(),
+        Some(_) => body.into_owned(),
+    }
+}
+
 pub fn message_line(message: &Value) -> String {
     let task = match message.get("task") {
         None | Some(Value::Null) => message.get("taskNumber"),

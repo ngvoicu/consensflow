@@ -30,15 +30,16 @@ pub(super) fn tool_folder(root: &Path) -> PathBuf {
 /// What the daemon, the pane host and so every window is given, and nothing
 /// else of the machine's: a home of its own, a `PATH` that finds the stand-in
 /// `claude` first, the rig's own folder of programs for the system's, and the
-/// stand-in's settings. `config`'s variables come last, but for the ones it
-/// unsets, which are not there at all. The Claude config folder is the rig's own,
-/// in its home, unless the case has one of its own: `claude_config`
-/// ([`Config::claude_config`]).
+/// stand-in's settings. `config`'s variables come next, but for the ones it
+/// unsets, which are not there at all. The variables of the homes the case runs
+/// real harnesses on (`homes`: [`Config::claude_config`], [`Config::isolated`]) come
+/// last and win over all of them: the Claude config folder is the rig's own, in its
+/// home, unless the case has one of its own.
 pub(super) fn environment(
     root: &Path,
     fake_bin: &Path,
     config: &Config,
-    claude_config: Option<&Path>,
+    homes: &[(String, String)],
 ) -> Vec<(String, String)> {
     let text = |path: &Path| path.to_string_lossy().into_owned();
     let home = root.join("home");
@@ -52,10 +53,7 @@ pub(super) fn environment(
             "CONSENSFLOW_BIN_DIR".to_owned(),
             text(&root.join("consensflow").join("bin")),
         ),
-        (
-            "CLAUDE_CONFIG_DIR".to_owned(),
-            text(&claude_config.map_or_else(|| home.join(".claude"), Path::to_path_buf)),
-        ),
+        ("CLAUDE_CONFIG_DIR".to_owned(), text(&home.join(".claude"))),
         ("CODEX_HOME".to_owned(), text(&home.join(".codex"))),
         ("XDG_CONFIG_HOME".to_owned(), text(&home.join(".config"))),
         ("PATH".to_owned(), path(fake_bin, config)),
@@ -81,6 +79,14 @@ pub(super) fn environment(
         // then holds everything its rigs write.
         env.push(("TMPDIR".to_owned(), text(&std::env::temp_dir())));
     }
+    if config.muse.is_some() {
+        // Muse takes a data folder reached through a link for unsafe (`/tmp` on a Mac, where
+        // a plant run makes its rigs: Muse 1.4.14 then writes no `route_facts`, and a fresh
+        // window never learns its session, T-829): the same folder, by its real path.
+        let real = files::real_path(root);
+        let data = real.join("home").join(".local").join("share");
+        env.push(("XDG_DATA_HOME".to_owned(), text(&data)));
+    }
     env.push(("CF_TEST_HARNESS".to_owned(), text(&config.stand_in)));
     if let Some(codex) = &config.codex {
         // The stand-in Codex's own: what it runs, what it writes down, how its
@@ -98,19 +104,14 @@ pub(super) fn environment(
     if let Some(devin) = &config.devin {
         env.push(("CF_TEST_DEVIN".to_owned(), text(devin)));
     }
-    if let Some(opencode) = &config.opencode {
-        // The stand-in's own: what it runs, and where it writes down what it is asked.
-        env.extend([
-            ("CF_TEST_OPENCODE".to_owned(), text(opencode)),
-            (
-                "CF_TEST_OPENCODE_LOG".to_owned(),
-                text(&root.join("opencode.jsonl")),
-            ),
-        ]);
-    }
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
+    // A harness's home of the run's own is where its windows run, whatever else was set.
+    for (name, value) in homes {
+        env.retain(|(held, _)| held != name);
+        env.push((name.clone(), value.clone()));
+    }
     env
 }
 
@@ -140,8 +141,8 @@ fn path(fake_bin: &Path, config: &Config) -> String {
 /// The system's own folders at the end of a rig's `PATH`: where `windows`, the ones every
 /// Windows install puts on it under its `system_root` (`System32`, the root itself,
 /// `Wbem`, and Windows PowerShell's folder, which no package manager adds and which an
-/// agent's shell finds `powershell` in: OpenCode's runs a command by cmd.exe, and a
-/// command that starts anything past cmd's own is "not recognized" without it, T-379);
+/// agent's shell finds `powershell` in: one that runs a command by cmd.exe starts
+/// anything past cmd's own as "not recognized" without it, T-379);
 /// as the Finder starts a program (`finder`) or not elsewhere.
 fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec<String> {
     if windows {
@@ -167,9 +168,9 @@ fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec
 /// stand-in agent writes its conversations in. On Windows it has the shape of an
 /// npm shim ([`stand_in::window_shim`]), which is how a window opens on it: it
 /// names the stand-in as both program and script, and the stand-in knows its own
-/// file when it is given it first. The stand-in `devin` beside it, where the rig
-/// has one, the stand-in `opencode` (of a 1.x, or of an OpenCode 2) likewise, and
-/// the stand-in `codex`. The folder they are in, which the `PATH` names.
+/// file when it is given it first; a stand-in that is a `.cmd` of that shape already
+/// (a live run's wrapper) is the shim itself ([`stand_in::window_command`]). The stand-in `devin` beside it, where the rig
+/// has one likewise, and the stand-in `codex`. The folder they are in, which the `PATH` names.
 /// As the Finder starts it, they are where each harness installs itself instead
 /// (see [`Config::as_the_finder_starts_it`]), and that folder holds none.
 pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf> {
@@ -177,24 +178,54 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     let home = root.join("home");
     let projects = home.join(".claude").join("projects").join("integration");
     files::make_dir(&projects)?;
-    let (own, system) = if config.finder {
+    let own = own_commands(root, config);
+    let system = if config.finder {
         // There, as Homebrew's is on a Mac, for what a case puts in it.
         files::make_dir(&tool_folder(root))?;
-        (home.join(".local").join("bin"), tool_folder(root))
+        tool_folder(root)
     } else {
-        (fake_bin.clone(), fake_bin.clone())
+        fake_bin.clone()
     };
     write_shim(&own, "claude", "CF_TEST_HARNESS", &config.stand_in)?;
     if let Some(devin) = &config.devin {
         write_shim(&own, "devin", "CF_TEST_DEVIN", devin)?;
     }
-    if let Some(opencode) = &config.opencode {
-        write_shim(&own, "opencode", "CF_TEST_OPENCODE", opencode)?;
-    }
     if let Some(codex) = &config.codex {
         write_shim(&system, "codex", "CF_TEST_CODEX", codex)?;
     }
+    match &config.muse {
+        Some((install, crate::muse::Run::Echo { turn_ms })) => {
+            crate::muse::write_stand_in(&own, install, *turn_ms, &root.join("muse-argv.log"))?;
+        }
+        Some((install, crate::muse::Run::Live { real_home })) => {
+            crate::muse::seed_live_home(&home, real_home)?;
+            // Before any window can spend it: a live run never starts on a Muse
+            // allowance that is used up, whatever case seats Muse (T-1076, T-1123).
+            crate::muse::guard_allowance(install, real_home, &home.join(".config"))?;
+            // By its real path, as `environment` gives the rig's Muse data folder.
+            let rig_home = files::real_path(&home);
+            crate::muse::write_live_stand_in(
+                &own,
+                install,
+                real_home,
+                &rig_home,
+                &root.join("muse-argv.log"),
+            )?;
+        }
+        None => {}
+    }
     Ok(fake_bin)
+}
+
+/// The folder of the rig's own commands under `root`: its stand-ins, and the launcher of a
+/// live Muse ([`Config::muse_live`]). The windows find it first on their `PATH`; as the
+/// Finder starts it, it is where each harness installs itself, in the rig's home.
+pub(super) fn own_commands(root: &Path, config: &Config) -> PathBuf {
+    if config.finder {
+        root.join("home").join(".local").join("bin")
+    } else {
+        root.join("fake-bin")
+    }
 }
 
 /// The command `name` in `dir`, which starts `program`: a script that runs the
@@ -202,7 +233,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
 fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
     let shim = dir.join(stand_in::program_name(name));
     if cfg!(windows) {
-        files::write_executable(&shim, stand_in::window_shim(program))
+        files::write_executable(&shim, stand_in::window_command(program)?)
     } else {
         files::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))
     }
@@ -248,7 +279,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned()
         };
-        let env = environment(root, &root.join("fake-bin"), &config(), None);
+        let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let get = |name: &str| var(&env, name);
         assert_eq!(get("HOME"), at(&["home"]));
         assert_eq!(get("CONSENSFLOW_HOME"), at(&["consensflow"]));
@@ -269,12 +300,76 @@ mod tests {
         assert!(!env.iter().any(|(name, _)| name == "CONSENSFLOW_URL"));
     }
 
+    /// T-829: a rig made under `/tmp` (a plant run's folder) reaches it through the link
+    /// `/tmp` is on a Mac, and Muse 1.4.14 takes a data folder reached so for unsafe: it
+    /// writes no `route_facts`, and a fresh window never learns its session. A rig that runs
+    /// Muse gives every program its data folder by its real path, the same folder.
+    #[cfg(unix)]
+    #[test]
+    fn a_rig_that_runs_muse_names_its_data_folder_by_its_real_path() {
+        let folder = tempfile::tempdir().unwrap();
+        let real = folder.path().join("real");
+        std::fs::create_dir_all(real.join("home").join(".local").join("share")).unwrap();
+        let linked = folder.path().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let muse = crate::muse::Installed {
+            binary: PathBuf::from("/bin/muse-bin-1.4.14"),
+            version: "1.4.14".to_owned(),
+        };
+        let with = config().muse(muse, 10);
+        let env = environment(&linked, &linked.join("fake-bin"), &with, &[]);
+        let data = std::fs::canonicalize(real.join("home").join(".local").join("share")).unwrap();
+        assert_eq!(var(&env, "XDG_DATA_HOME"), data.to_string_lossy());
+        // A rig without Muse says nothing of it.
+        let env = environment(&linked, &linked.join("fake-bin"), &config(), &[]);
+        assert_eq!(var(&env, "XDG_DATA_HOME"), "");
+    }
+
+    #[test]
+    fn the_variables_of_a_harness_home_are_the_last_word_over_the_cases_own_and_over_what_it_unsets(
+    ) {
+        // A rig clears the environment and sets its own; a case sets more, and may unset. The
+        // owner's Pi folder, reached by a variable the case set (or by none: Pi reads
+        // `~/.pi/agent` when nothing names its folder), is what a live run rotated (T-696).
+        let root = Path::new("root");
+        let given = config()
+            .var("CODEX_HOME", "/owner/.codex")
+            .var("PI_CODING_AGENT_DIR", "/owner/.pi/agent")
+            .var("XDG_DATA_HOME", "/owner/.local/share")
+            .unset("PI_CODING_AGENT_DIR");
+        let homes = [
+            ("CODEX_HOME".to_owned(), "/run/codex".to_owned()),
+            ("PI_CODING_AGENT_DIR".to_owned(), "/run/pi/agent".to_owned()),
+            ("XDG_DATA_HOME".to_owned(), "/run/data".to_owned()),
+        ];
+        let env = environment(root, &root.join("fake-bin"), &given, &homes);
+        for (name, value) in &homes {
+            assert_eq!(var(&env, name), value, "{name}");
+            // Once, and not the owner's beside it.
+            assert_eq!(
+                env.iter().filter(|(held, _)| held == name).count(),
+                1,
+                "{name}"
+            );
+        }
+        // What no home names is as it was: the rig's own home and the case's variables.
+        assert_eq!(var(&env, "HOME"), root.join("home").to_string_lossy());
+        assert_eq!(var(&env, "CF_TEST_QUOTA_OUT"), "worker");
+        // A rig with no home of a harness's own has the rig's own folders for them.
+        let none = environment(root, &root.join("fake-bin"), &config(), &[]);
+        assert_eq!(
+            var(&none, "CODEX_HOME"),
+            root.join("home").join(".codex").to_string_lossy()
+        );
+        assert_eq!(var(&none, "PI_CODING_AGENT_DIR"), "");
+    }
+
     #[test]
     fn the_programs_of_a_rig_are_told_the_temp_folder_of_the_test_that_runs_it() {
         // Whatever they write there (a socket's folder, a harness's scratch files) is in the
         // folder a plant run gave its test, with the homes and the reports, and goes with it.
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config(), None);
+        let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let temp = std::env::temp_dir().to_string_lossy().into_owned();
         let names: &[&str] = if cfg!(windows) {
             &["TEMP", "TMP"]
@@ -289,7 +384,7 @@ mod tests {
             root,
             &root.join("fake-bin"),
             &config().var(names[0], "/mine"),
-            None,
+            &[],
         );
         assert_eq!(var(&own, names[0]), "/mine");
     }
@@ -302,12 +397,12 @@ mod tests {
         let added = config()
             .also_on_path("/real/codex")
             .also_on_path("/real/node");
-        let env = environment(root, &fake_bin, &added, None);
+        let env = environment(root, &fake_bin, &added, &[]);
         let folders: Vec<&str> = var(&env, "PATH").split(delimiter).collect();
         assert_eq!(folders[0], fake_bin.to_string_lossy());
         assert_eq!(folders[1..3], ["/real/codex", "/real/node"]);
         // What follows is what a rig that adds none ends with.
-        let plain = environment(root, &fake_bin, &config(), None);
+        let plain = environment(root, &fake_bin, &config(), &[]);
         let plain: Vec<&str> = var(&plain, "PATH").split(delimiter).collect();
         assert_eq!(plain.len(), folders.len() - 2);
         assert_eq!(folders[3..], plain[1..]);
@@ -323,7 +418,7 @@ mod tests {
         let added = config()
             .also_on_path("/real/devin")
             .first_on_path("/stand-in/cf");
-        let env = environment(root, &fake_bin, &added, None);
+        let env = environment(root, &fake_bin, &added, &[]);
         let folders: Vec<&str> = var(&env, "PATH").split(delimiter).collect();
         assert_eq!(folders[0], fake_bin.to_string_lossy());
         assert_eq!(folders[1..3], ["/stand-in/cf", "/real/devin"]);
@@ -332,9 +427,9 @@ mod tests {
     #[test]
     fn the_system_folders_of_a_windows_rig_are_those_every_windows_install_has_powershell_among_them(
     ) {
-        // OpenCode 1.19.4 runs a command by `%ComSpec% /c` (cmd.exe), and an agent's command
-        // that starts anything past cmd's own (`powershell -Command Start-Process …`, the
-        // brief of the live suite's second step) is found on the `PATH` or "not recognized"
+        // An agent that runs a command by `%ComSpec% /c` (cmd.exe) has one that starts
+        // anything past cmd's own (`powershell -Command Start-Process …`, the
+        // brief of the live suite's second step) found on the `PATH` or "not recognized"
         // (T-379, zeewin, where the rig's `PATH` ended at `System32`).
         let expected = [
             r"C:\WINDOWS\System32",
@@ -349,14 +444,14 @@ mod tests {
     }
 
     /// The field shape (T-379, zeewin): a command interpreter started in the rig's
-    /// environment, as OpenCode's shell tool starts one, finds `powershell`.
+    /// environment, as an agent's shell tool starts one, finds `powershell`.
     #[cfg(windows)]
     #[test]
     fn a_command_interpreter_in_the_rigs_environment_finds_powershell() {
         use crate::process::Run;
 
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config(), None);
+        let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let comspec = var(&env, "ComSpec");
         assert!(!comspec.is_empty(), "the rig passes ComSpec on Windows");
         let ran = Run::new(comspec)
@@ -381,21 +476,21 @@ mod tests {
     fn a_variable_a_case_names_beats_the_one_the_rig_sets() {
         let root = Path::new("root");
         let config = config().var("TERM", "dumb");
-        let env = environment(root, &root.join("fake-bin"), &config, None);
+        let env = environment(root, &root.join("fake-bin"), &config, &[]);
         assert_eq!(var(&env, "TERM"), "dumb");
     }
 
     #[test]
     fn a_variable_a_case_unsets_is_not_in_the_environment_whoever_set_it() {
         let root = Path::new("root");
-        let plain = environment(root, &root.join("fake-bin"), &config(), None);
+        let plain = environment(root, &root.join("fake-bin"), &config(), &[]);
         assert!(plain.iter().any(|(name, _)| name == "CLAUDE_CONFIG_DIR"));
         // The rig's own, and one the case set: both go, and nothing else with them.
         let config = config()
             .var("CF_TEST_ONE", "1")
             .unset("CLAUDE_CONFIG_DIR")
             .unset("CF_TEST_ONE");
-        let env = environment(root, &root.join("fake-bin"), &config, None);
+        let env = environment(root, &root.join("fake-bin"), &config, &[]);
         assert!(!env
             .iter()
             .any(|(name, _)| name == "CLAUDE_CONFIG_DIR" || name == "CF_TEST_ONE"));
@@ -421,43 +516,11 @@ mod tests {
         }
         // Claude's is still there, and the environment names the one and the other.
         assert!(fake_bin.join(stand_in::program_name("claude")).is_file());
-        let env = environment(root.path(), &fake_bin, &config().devin(devin), None);
+        let env = environment(root.path(), &fake_bin, &config().devin(devin), &[]);
         assert_eq!(var(&env, "CF_TEST_DEVIN"), "/the/stand-in-devin");
         assert_eq!(var(&env, "CF_TEST_HARNESS"), "/the/stand-in");
-        let plain = environment(root.path(), &fake_bin, &config(), None);
+        let plain = environment(root.path(), &fake_bin, &config(), &[]);
         assert!(!plain.iter().any(|(name, _)| name == "CF_TEST_DEVIN"));
-    }
-
-    #[test]
-    fn a_rig_given_an_opencode_2_has_its_stand_in_found_as_opencode_and_named_in_the_environment() {
-        let root = tempfile::tempdir().unwrap();
-        let opencode = Path::new("/the/stand-in-opencode-2");
-        let given = Config::new("/the/stand-in").opencode_2(opencode);
-        let fake_bin = write_fake_install(root.path(), &given).unwrap();
-        let script =
-            files::read_string(&fake_bin.join(stand_in::program_name("opencode"))).unwrap();
-        if cfg!(windows) {
-            assert_eq!(
-                script,
-                "@echo off\r\n\"/the/stand-in-opencode-2\" \"/the/stand-in-opencode-2\" %*\r\n"
-            );
-        } else {
-            assert_eq!(script, "#!/bin/sh\nexec \"$CF_TEST_OPENCODE\" \"$@\"\n");
-        }
-        let env = environment(root.path(), &fake_bin, &given, None);
-        assert_eq!(var(&env, "CF_TEST_OPENCODE"), "/the/stand-in-opencode-2");
-        assert_eq!(
-            var(&env, "CF_TEST_OPENCODE_LOG"),
-            root.path().join("opencode.jsonl").to_string_lossy()
-        );
-        // And none of it where the rig is given none.
-        let bare = tempfile::tempdir().unwrap();
-        let fake_bin = write_fake_install(bare.path(), &config()).unwrap();
-        assert!(!fake_bin.join(stand_in::program_name("opencode")).exists());
-        let plain = environment(bare.path(), &fake_bin, &config(), None);
-        assert!(!plain
-            .iter()
-            .any(|(name, _)| name.starts_with("CF_TEST_OPENCODE")));
     }
 
     #[test]
@@ -500,7 +563,7 @@ mod tests {
     fn a_rig_given_a_stand_in_codex_has_it_on_its_path_and_its_windows_go_as_the_daemons_do() {
         let config = config().codex("/the/fake-codex");
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config, None);
+        let env = environment(root, &root.join("fake-bin"), &config, &[]);
         assert_eq!(var(&env, "CF_TEST_CODEX"), "/the/fake-codex");
         assert_eq!(
             var(&env, "CF_TEST_CODEX_LOG"),
@@ -513,11 +576,11 @@ mod tests {
             root,
             &root.join("fake-bin"),
             &config.var("CF_TEST_CODEX_TUI", "x"),
-            None,
+            &[],
         );
         assert_eq!(var(&env, "CF_TEST_CODEX_TUI"), "x");
         // And none of it where the rig has no stand-in Codex.
-        let plain = environment(root, &root.join("fake-bin"), &self::config(), None);
+        let plain = environment(root, &root.join("fake-bin"), &self::config(), &[]);
         assert!(!plain
             .iter()
             .any(|(name, _)| name.starts_with("CF_TEST_CODEX")));
@@ -546,7 +609,7 @@ mod tests {
     #[test]
     fn the_path_is_the_stand_ins_folder_then_the_systems_own_and_no_package_managers() {
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config(), None);
+        let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         assert_eq!(
             var(&env, "PATH"),
             format!("{}:/usr/bin:/bin", root.join("fake-bin").display())
@@ -557,12 +620,43 @@ mod tests {
     fn every_rig_names_a_folder_of_its_own_for_the_systems_programs() {
         let root = Path::new("root");
         for config in [config(), config().as_the_finder_starts_it()] {
-            let env = environment(root, &root.join("fake-bin"), &config, None);
+            let env = environment(root, &root.join("fake-bin"), &config, &[]);
             assert_eq!(
                 var(&env, "CONSENSFLOW_TOOL_FOLDERS"),
                 root.join("system-bin").to_string_lossy()
             );
         }
+    }
+
+    /// The launcher of a live Muse is in the rig's own commands, where the rig says it is
+    /// ([`own_commands`], which a Muse window opened by a live case starts on, T-1024), and the
+    /// person's own Muse folder is read for its login's metadata and never written.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_muse_s_launcher_is_in_the_rigs_own_commands_and_the_persons_folder_is_only_read() {
+        let person = tempfile::tempdir().unwrap();
+        let theirs = person.path().join(".config").join("muse");
+        files::make_dir(&theirs).unwrap();
+        files::write(&theirs.join("auth.json"), "{\"login\":\"metadata\"}\n").unwrap();
+        // The rig asks a live Muse its allowance as it writes the launcher (T-1076): this
+        // one answers it, at half the week.
+        let bin = tempfile::tempdir().unwrap();
+        let install = muse_in(bin.path(), 50);
+        for given in [
+            config().muse_live(install.clone(), person.path()),
+            config()
+                .muse_live(install.clone(), person.path())
+                .as_the_finder_starts_it(),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            write_fake_install(root.path(), &given).unwrap();
+            let launcher = own_commands(root.path(), &given).join("muse");
+            assert!(launcher.is_file(), "{}", launcher.display());
+        }
+        assert_eq!(
+            files::read_string(&theirs.join("auth.json")).unwrap(),
+            "{\"login\":\"metadata\"}\n"
+        );
     }
 
     #[cfg(unix)]
@@ -575,7 +669,7 @@ mod tests {
             .devin("/the/fake-devin")
             .as_the_finder_starts_it();
         let fake_bin = write_fake_install(root.path(), &given).unwrap();
-        let env = environment(root.path(), &fake_bin, &given, None);
+        let env = environment(root.path(), &fake_bin, &given, &[]);
         assert_eq!(var(&env, "PATH"), "/usr/bin:/bin:/usr/sbin:/sbin");
         let own = root.path().join("home").join(".local").join("bin");
         assert!(own.join("claude").is_file() && own.join("devin").is_file());
@@ -597,11 +691,68 @@ mod tests {
             root.path(),
             &fake_bin,
             &given.also_on_path("/real/node"),
-            None,
+            &[],
         );
         assert_eq!(
             var(&env, "PATH"),
             "/real/node:/usr/bin:/bin:/usr/sbin:/sbin"
         );
+    }
+
+    /// A machine's Muse whose `usage --json` answers that `weekly` percent of the week is
+    /// used: what a live rig asks before it seats Muse.
+    #[cfg(unix)]
+    fn muse_in(bin: &Path, weekly: u64) -> crate::muse::Installed {
+        let binary = bin.join("muse-bin-1.4.14-R7309.1");
+        let answer = format!(
+            r#"{{"schemaVersion":1,"allowance":{{"window":{{"usedPercent":10,"resetsAtMs":1}},"weekly":{{"usedPercent":{weekly},"resetsAtMs":2}}}}}}"#
+        );
+        files::write_executable(
+            &binary,
+            format!("#!/bin/sh\n[ \"$1 $2\" = \"usage --json\" ] || exit 9\necho '{answer}'\n"),
+        )
+        .unwrap();
+        crate::muse::Installed {
+            binary,
+            version: "1.4.14-R7309.1".to_owned(),
+        }
+    }
+
+    /// [`muse_in`], and a person's home in `real` with the metadata of a login: what a live
+    /// rig seats.
+    #[cfg(unix)]
+    fn muse_at(bin: &Path, real: &Path, weekly: u64) -> crate::muse::Installed {
+        files::write(&real.join(".config").join("muse").join("auth.json"), "{}\n").unwrap();
+        muse_in(bin, weekly)
+    }
+
+    /// T-1076, at T-1123's share: every rig that runs the machine's Muse live asks its
+    /// allowance as it writes the launcher, so no case starts on an allowance that is used
+    /// up: on a week at its end the rig is refused and its windows find no Muse to run;
+    /// at 99% the launcher is written.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_rig_that_seats_muse_is_refused_on_an_allowance_used_up_and_runs_under_it() {
+        for (weekly, runs) in [(100, false), (99, true)] {
+            let (bin, real, root) = (
+                tempfile::tempdir().unwrap(),
+                tempfile::tempdir().unwrap(),
+                tempfile::tempdir().unwrap(),
+            );
+            let install = muse_at(bin.path(), real.path(), weekly);
+            let config = Config::new("/the/stand-in").muse_live(install, real.path());
+            let made = write_fake_install(root.path(), &config);
+            let launcher = root.path().join("fake-bin").join("muse");
+            if runs {
+                made.unwrap();
+                assert!(launcher.is_file(), "at {weekly}% the launcher is written");
+            } else {
+                let Err(Error::Daemon(refused)) = made else {
+                    panic!("at {weekly}% the rig is refused: {made:?}");
+                };
+                assert!(refused.contains("100% of its week"), "{refused}");
+                assert!(!launcher.exists(), "and its windows find no Muse to run");
+            }
+        }
     }
 }

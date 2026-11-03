@@ -114,6 +114,8 @@ struct Request {
     role: &'static str,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
+    /// The folder its project keeps its specs in, relative to the project.
+    folder: &'static str,
     /// The folder the window opens in.
     directory: String,
 }
@@ -126,6 +128,7 @@ impl Default for Request {
             instructions: ROLE.to_owned(),
             role: "worker",
             specs: None,
+            folder: ".specs",
             directory: "/work/app".to_owned(),
         }
     }
@@ -135,7 +138,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant).unwrap());
+        .map(|variant| adapter.specmint(variant, request.folder).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -155,7 +158,12 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
         specs: request
             .specs
             .zip(skill.as_ref())
-            .map(|(variant, skill)| Specs { variant, skill }),
+            .map(|(variant, skill)| Specs {
+                variant,
+                folder: request.folder,
+                skill,
+            }),
+        compaction: None,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };
@@ -225,6 +233,12 @@ fn shows(home: &Home, session: &str) {
 /// What the extension does with each record in the inbox: takes it,
 /// acknowledges it as taken, and takes it out. The text of each.
 fn extension_takes(home: &Home) -> Vec<String> {
+    extension_answers(home, &json!({ "admitted": true, "mode": "tui" }))
+}
+
+/// The extension answers each message in its inbox with `verdict`, as its own
+/// acknowledgement writes it, and says what each held.
+fn extension_answers(home: &Home, verdict: &Value) -> Vec<String> {
     let folder = home.launch_folder();
     let (inbox, ack) = (
         path::join(&[&folder, "inbox"]),
@@ -245,7 +259,8 @@ fn extension_takes(home: &Home) -> Vec<String> {
         let record: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         texts.push(record["text"].as_str().unwrap().to_owned());
         fs::create_dir_all(&ack).unwrap();
-        let verdict = json!({ "id": record["id"], "admitted": true, "mode": "tui" });
+        let mut verdict = verdict.clone();
+        verdict["id"] = record["id"].clone();
         fs::write(path::join(&[&ack, &name]), verdict.to_string()).unwrap();
         fs::remove_file(file).unwrap();
     }
@@ -481,6 +496,43 @@ fn delivers_through_the_real_channel_a_claim_then_the_extension_inbox() {
     );
 }
 
+/// The extension sends nothing while Pi is at work (`nativeTuiState`'s `chief busy`):
+/// that refusal is the harness's word that it is busy, which spends no attempt
+/// (3.0.7 chief-meeting, D9). Any other refusal is one.
+#[test]
+fn a_refusal_of_the_extension_s_for_pi_being_at_work_is_busy_and_any_other_a_refusal() {
+    for (reason, admission) in [
+        (
+            "chief busy",
+            Admission::Busy {
+                reason: "Pi is at work: its extension sends nothing until it is idle".to_owned(),
+            },
+        ),
+        (
+            "native TUI unavailable",
+            Admission::Refused {
+                reason: "failed-with-zero-bytes".to_owned(),
+            },
+        ),
+    ] {
+        let home = Home::new();
+        let (adapter, fakes) = adapter(&home);
+        let window = prepare(&adapter, &Request::default()).unwrap().window;
+        let host = Rc::new(AnsweringHost::new(|_| Ok(json!({ "ok": true }))));
+        let pane = Pane {
+            id: "s1-zeus".to_owned(),
+            generation: 2,
+        };
+        let mut driver = Driver::default();
+        driver.begin(0, async move { window.deliver(&*host, &pane, "hi").await });
+        assert!(driver.run().is_empty(), "waits for the extension's verdict");
+        let refused = json!({ "admitted": false, "bytesWritten": 0, "reason": reason });
+        assert_eq!(extension_answers(&home, &refused), ["hi"]);
+        assert!(fakes.time.fire_next(fakes.time.wall_ms() + 10));
+        assert_eq!(driver.run(), [(0, Ok(admission))], "{reason}");
+    }
+}
+
 /// Both reviews of 2026-10-16, round 4: Pi's claim comes after the engine's last
 /// look at the project. Once it is answered, the host is asked whether it still
 /// admits the send: one it does not leaves the inbox as it was, the record's
@@ -533,6 +585,9 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         asking: false,
         failed: false,
         failure: None,
+        took_back: false,
+        model_moved: None,
+        model_drift: None,
         quota,
         settlement,
         pending: Default::default(),
@@ -631,6 +686,7 @@ fn reads_each_turn_s_end_from_the_extension_s_settled_marker() {
     );
 }
 
+mod failed;
 mod install;
 mod resumed;
 mod roles;

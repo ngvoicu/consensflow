@@ -83,11 +83,35 @@ fn answered(name: &str, code: Option<i32>, stdout: &str) -> Result<Value> {
     }
 }
 
+/// The window a text is for: the `cf` of the daemon that opened it and its harness's name,
+/// from which the engine says how a command starts in it, as the daemon does (the `cf` by its
+/// whole path, as the harness's shell takes it).
+#[derive(Debug, Clone, Copy)]
+pub struct For<'a> {
+    pub cf: &'a Path,
+    pub harness: &'a str,
+}
+
+impl<'a> For<'a> {
+    /// The window of `harness` (`devin`) of a daemon whose `cf` is at `cf`.
+    pub fn new(cf: &'a Path, harness: &'a str) -> Self {
+        Self { cf, harness }
+    }
+
+    /// What a question carries of it.
+    fn said(self) -> (String, &'a str) {
+        (self.cf.to_string_lossy().replace('\\', "/"), self.harness)
+    }
+}
+
 /// The note the engine gives a window the human's Resume brings back when its turn
 /// was cut, as the window is given it, the message `message`: a member's about its
 /// `tasks`, the chief's where there are none.
-pub fn cut_note(message: i64, tasks: &[i64]) -> Result<String> {
-    let answer = engine_question(&json!({ "op": "cut_note", "message": message, "tasks": tasks }))?;
+pub fn cut_note(message: i64, tasks: &[i64], window: For<'_>) -> Result<String> {
+    let (cf, harness) = window.said();
+    let answer = engine_question(&json!({
+        "op": "cut_note", "message": message, "tasks": tasks, "cf": cf, "harness": harness,
+    }))?;
     answer
         .as_str()
         .map(str::to_owned)
@@ -98,10 +122,17 @@ pub fn cut_note(message: i64, tasks: &[i64]) -> Result<String> {
 /// gives them) of which those to `recipient`, the window's handle, were pasted into
 /// it: the engine's own rule for what a failed turn's note leaves out (`engine-ask`'s
 /// `ours`).
-pub fn ours(lines: &[String], recipient: &str, messages: &[Value]) -> Result<Vec<bool>> {
-    let answer = engine_question(
-        &json!({ "op": "ours", "lines": lines, "recipient": recipient, "messages": messages }),
-    )?;
+pub fn ours(
+    lines: &[String],
+    recipient: &str,
+    messages: &[Value],
+    window: For<'_>,
+) -> Result<Vec<bool>> {
+    let (cf, harness) = window.said();
+    let answer = engine_question(&json!({
+        "op": "ours", "lines": lines, "recipient": recipient, "messages": messages,
+        "cf": cf, "harness": harness,
+    }))?;
     answer
         .as_array()
         .map(|said| said.iter().map(|one| one == &Value::Bool(true)).collect())
@@ -318,15 +349,16 @@ pub fn clearing(kind: &str) -> Result<Option<Vec<u8>>> {
 /// The settings file of a Claude window's launch (`launch`, a lowercase uuid),
 /// written in the ConsensFlow folder `env` names, and the arguments that load it
 /// (`--settings <file>`). `board_questions` has a member's question tool
-/// answered from the board.
+/// answered from the board, by the hook that `cf` runs (a path: the daemon's own).
 pub fn claude_settings(
     env: &[(String, String)],
     launch: &str,
     board_questions: bool,
+    cf: &Path,
 ) -> Result<Vec<String>> {
     let answer = question(&json!({
         "op": "claude_settings", "env": env_object(env), "launch": launch,
-        "boardQuestions": board_questions,
+        "boardQuestions": board_questions, "cf": cf.to_string_lossy().replace('\\', "/"),
     }))?;
     Ok(answer
         .as_array()
@@ -351,8 +383,8 @@ pub fn program(argv: &[String], env: &[(String, String)]) -> Result<Vec<String>>
         .unwrap_or_default())
 }
 
-/// The newest top-level conversation a harness of the kind `kind` (`opencode`,
-/// `devin`, `codex`: the ones that name theirs only in their own store) opened in
+/// The newest top-level conversation a harness of the kind `kind` (`devin`,
+/// `codex`: the ones that name theirs only in their own store) opened in
 /// `workspace` at or after `since_ms` (milliseconds since the epoch), from its
 /// store in the places `env` names. None while there is none: the folder is the
 /// run's own, and a window of a run with no staff is its chief's, so the newest
@@ -382,10 +414,18 @@ pub struct SpecmintSkill {
 
 /// Where the harness of the kind `kind` has the Specmint variant `variant`
 /// (`core`, `core-html`, `tdd`, `tdd-html`) installed for its user, in the places
-/// `env` names (the machine's own, for a run of real harnesses).
-pub fn specmint(kind: &str, variant: &str, env: &[(String, String)]) -> Result<SpecmintSkill> {
+/// `env` names (the machine's own, for a run of real harnesses), for a project that keeps
+/// its specs in `folder`: an installed copy names `.specs`, so for any other folder the
+/// answer is ConsensFlow's own copy (T-662).
+pub fn specmint(
+    kind: &str,
+    variant: &str,
+    folder: &str,
+    env: &[(String, String)],
+) -> Result<SpecmintSkill> {
     let answer = question(&json!({
-        "op": "specmint", "kind": kind, "variant": variant, "env": env_object(env),
+        "op": "specmint", "kind": kind, "variant": variant, "folder": folder,
+        "env": env_object(env),
     }))?;
     Ok(specmint_of(&answer))
 }

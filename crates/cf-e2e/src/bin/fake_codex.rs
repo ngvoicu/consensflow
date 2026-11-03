@@ -6,9 +6,11 @@
 //! its terminal). Given `resume <thread>` the TUI resumes that thread instead, as
 //! the real one asks (`thread/resume`, in the shape Codex 0.159.2 sent it): the
 //! server goes on in the thread's rollout, which keeps the developer instructions
-//! the thread began with, and the window ends with 1 where the server has no
+//! the thread began with (those its start named, the role the broker gave it), and the window ends with 1 where the server has no
 //! rollout of it, as Codex's does: a thread has one only once it has had a turn.
-//! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`.
+//! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`, and with
+//! `CF_TEST_CODEX_ENV_LOG` set the names of its environment's variables, never a value, to
+//! that file: the daemon's probes run it on the daemon's own environment.
 //! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `die` once a
 //! thread starts, `spawns` starts programs (`children`) for as long as it lives once a
 //! thread starts, `orphans` starts one whose parent has gone, `deaf` takes neither SIGTERM nor
@@ -71,6 +73,9 @@ fn main() -> ExitCode {
     let given: Vec<String> = std::env::args().skip(1).collect();
     let own = std::env::current_exe().ok();
     let args = asked(&given, own.as_deref());
+    if let Some(log) = own_var("CF_TEST_CODEX_ENV_LOG") {
+        write_names(&log, args);
+    }
     match args.first().map(String::as_str) {
         Some(servers::SERVER) => servers::serve(&args[1..]),
         Some(servers::WORKER) => servers::work(&args[1..]),
@@ -84,6 +89,24 @@ fn main() -> ExitCode {
             }
         }
         _ => tui(args),
+    }
+}
+
+/// Writes the names of this run's variables, and what it was asked, to `log`: a JSON line.
+fn write_names(log: &str, args: &[String]) {
+    #[allow(clippy::disallowed_methods)] // A stand-in's own environment, as it was started.
+    let mut names: Vec<String> = std::env::vars_os()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    let line = json!({ "pid": std::process::id(), "args": args, "names": names });
+    let wrote = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(log)
+        .and_then(|mut file| writeln!(file, "{line}"));
+    if let Err(failed) = wrote {
+        fail(&format!("{log}: {failed}"));
     }
 }
 
@@ -128,9 +151,15 @@ fn api_key() -> Value {
     own_var("OPENAI_API_KEY").map_or(Value::Null, Value::from)
 }
 
+/// The file of the window's role, where this run was told of it: the supervisor
+/// reads it, and tells neither of Codex's programs where it is.
+fn role_file() -> Value {
+    own_var("CF_CODEX_ROLE_FILE").map_or(Value::Null, Value::from)
+}
+
 /// Codex's server.
 fn server(args: &[String]) -> ExitCode {
-    record(json!({ "run": "server", "args": args, "apiKey": api_key() }));
+    record(json!({ "run": "server", "args": args, "apiKey": api_key(), "roleFile": role_file() }));
     let how = own_var("CF_TEST_CODEX_BACKEND").unwrap_or_default();
     if how == "fail" {
         let _ = writeln!(std::io::stderr(), "not logged in");
@@ -266,8 +295,33 @@ fn sha256_hex(text: &str) -> String {
 /// that never had a turn has none, and is answered with Codex's refusal, which
 /// names it), and a message handed over (as the start of a turn, or queued behind
 /// one) with what Codex answers, which the agent then takes.
-fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &Arc<Agent>) {
-    while let Ok(message) = socket.read() {
+fn serve<S: Read + Write + Timed>(
+    mut socket: WebSocket<S>,
+    behavior: Behavior,
+    agent: &Arc<Agent>,
+) {
+    // What Codex says unasked of the thread goes to its client between two of its
+    // requests: the read waits a moment at a time for one.
+    let notices = agent.listen();
+    let _ = socket.get_ref().time_out(Some(NOTICE_WAIT));
+    loop {
+        while let Ok(notice) = notices.try_recv() {
+            if socket.send(Message::text(notice.to_string())).is_err() {
+                return;
+            }
+        }
+        let message = match socket.read() {
+            Ok(message) => message,
+            Err(tungstenite::Error::Io(failed))
+                if matches!(
+                    failed.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue
+            }
+            Err(_) => return,
+        };
         let Message::Text(text) = message else {
             continue;
         };
@@ -281,12 +335,16 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
         let start = request["method"] == "thread/start";
         if start {
             record(json!({ "run": "server", "started": request["params"] }));
+            agent.started(&request["params"]);
             if behavior.spawns {
                 children::keep_starting();
             }
             if behavior.orphans {
                 children::lose_a_parent();
             }
+        }
+        if request["method"] == "thread/resume" {
+            record(json!({ "run": "server", "resumed": request["params"] }));
         }
         if request["method"] == "thread/resume" && resume_hangs() {
             record(json!({ "run": "server", "unanswered": request["params"]["threadId"] }));
@@ -302,6 +360,7 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
                 hand_over(agent, &request);
                 result(id, json!({ "turn": { "id": "turn-1" } }))
             }
+            Some("thread/read") => result(id, json!({ "thread": agent.read() })),
             Some("thread/queue/add") => {
                 hand_over(agent, &request);
                 result(id, json!({ "queuedMessage": { "id": "queue-1" } }))
@@ -333,6 +392,27 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
                 return;
             }
         }
+    }
+}
+
+/// How long a connection's read waits before what the agent says unasked is sent.
+const NOTICE_WAIT: Duration = Duration::from_millis(100);
+
+/// A connection whose reads can wait no longer than a while.
+trait Timed {
+    fn time_out(&self, after: Option<Duration>) -> std::io::Result<()>;
+}
+
+impl Timed for std::net::TcpStream {
+    fn time_out(&self, after: Option<Duration>) -> std::io::Result<()> {
+        self.set_read_timeout(after)
+    }
+}
+
+#[cfg(unix)]
+impl Timed for std::os::unix::net::UnixStream {
+    fn time_out(&self, after: Option<Duration>) -> std::io::Result<()> {
+        self.set_read_timeout(after)
     }
 }
 
@@ -394,7 +474,9 @@ fn tui(args: &[String]) -> ExitCode {
         fail("the TUI is given --remote <url> --remote-auth-token-env <name>");
     };
     let token = own_var(token_name);
-    record(json!({ "run": "tui", "args": args, "token": token, "apiKey": api_key() }));
+    record(
+        json!({ "run": "tui", "args": args, "token": token, "apiKey": api_key(), "roleFile": role_file() }),
+    );
     // It draws its screen, as the real one does: a window that printed nothing is
     // still being drawn to the daemon, which delivers nothing to it until it has
     // held still (a chief's, which has no first message to show it by).

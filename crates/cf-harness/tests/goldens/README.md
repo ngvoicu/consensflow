@@ -10,7 +10,7 @@ The recorders ran Node's modules and went with them; they are in the flip releas
 
 | Folder | What Node answered | Read by |
 |---|---|---|
-| `launch/` | `tables.json`: the pure functions of the launch (windows' command lines, admissions, the record states, the console text and the rest). `scenarios.<platform>.json`: each adapter's scenarios played (Claude Code, Codex, Pi, Devin, OpenCode), a set a platform, since a launch names the platform's own paths and programs. `coverage.json` is written by hand: it counts every table and every harness's scenarios, and says which Rust test answers each, or the landing it waits for | `../launch/` |
+| `launch/` | `tables.json`: the pure functions of the launch (windows' command lines, admissions, the record states, the console text and the rest). `scenarios.<platform>.json`: each adapter's scenarios played (Claude Code, Codex, Pi, Devin), a set a platform, since a launch names the platform's own paths and programs. `coverage.json` is written by hand: it counts every table and every harness's scenarios, and says which Rust test answers each, or the landing it waits for | `../launch/` |
 | `records/` | `sequences.json.gz`: the scenarios of the chunked suite, each record written a piece at a time with a look after each. `suite.json.gz`: the cases of the completion and harness-version suites. `sweep.json.gz`: each JSONL fixture with one part of a record changed. `tables.json`: quota's functions and `localeCompare`, as tables. A scenario file holds one scenario a line, gzipped; readings are compared after unzipping, never as bytes (zlib's header names the platform that wrote it). The recorder set `TZ` first, for the resets that name no zone. The fixtures the scenarios read are `tests/engine/fixtures/completion` | `../records/` |
 | `admin/` | `tables.json`: the layouts that are no more than a text, which hold on every system. `scenarios.<platform>.json`: each scenario played, one set a platform, since a CLI is found at the platform's own places under its own names and a path is joined with its own separator; the Windows one was recorded on Windows | `../admin/` |
 | `claude/` | `stale-hooks.json`: what `staleClaudeHooks` reported over settings files given as `text`, as the `hex` of bytes that are no text, or as neither for none: the `events` it named, or what it `throws` | `../host_payloads.rs` |
@@ -73,61 +73,6 @@ once, with the reason here and in the commit.
   `"0"`, `null`) are Node's still. No look was
   added or taken, so the counts in `../records/main.rs` stand.
 
-- **An OpenCode 2, and an OpenCode that updates itself** (2026-10-15, the
-  owner's OpenCode updated itself to 2.0.29, and the live suites `approval`,
-  `specs` and `resume-fresh` waited for ever for the chief's window to read
-  idle, while `finish` never saw the worker's window). OpenCode 2 replaced what
-  a window is launched with (`--port`, `--hostname` and `--model` are gone, and
-  one shared service stands where each window's server was), so a window opened
-  on it never reaches ConsensFlow's plugin; and a 1.x updates itself to the
-  latest release when it starts, which is how the owner met it. Node's adapter
-  never asked OpenCode its version and never told a window not to update. The
-  Rust adapter asks `--version` first, as Devin's does (once as the file is on
-  disk), and refuses an OpenCode whose major version is 2 or more before the
-  plugin, the role, a port or a server is made, in words that say what to do: an
-  OpenCode that cannot be asked, or says no version, goes on as it did. The
-  window's `OPENCODE_CONFIG_CONTENT` ends with `"autoupdate":false`, unless the
-  configuration the human set names an `autoupdate` of its own (null is none).
-  `launch/` moved for both, in both platforms' recordings, in 157 of the 158
-  OpenCode scenarios (the one that did not is the OpenCode that is not
-  installed, which finds no program to ask). Each of the 161 prepares that find
-  one gained a `ran` of `opencode --version`, after its `fetches` and before its
-  `spawned` (the stand-ins answer nothing: the question fails, and the launch
-  goes on), and every `OPENCODE_CONFIG_CONTENT` the records hold gained
-  `"autoupdate":false` at its end: 192 on macOS and 193 on Windows, which are the
-  answers of the prepares (124 and 125) and the environments of the throwaway
-  `serve` each fresh window makes its conversation on (68). Nothing else of them
-  moved: with the `ran` and the `autoupdate` taken out, each of the 157 reads as
-  the recording before the change did, and the other 352 scenarios (the other
-  harnesses', and the OpenCode that is not installed) are as they were, byte for
-  byte. `admin/` carries a `kept` difference in the six OpenCode scenarios (five on
-  Windows) whose stand-in says `5.0.x`, which is an OpenCode of 2 or more: 12
-  steps (10), where the Harnesses screen now says the OpenCode is not supported
-  yet (a `setup` of `not-supported-yet`) and its newer release is `unknown`, not
-  an update `available`. Node's stand-ins said `5.0.x` for every CLI they stood
-  for, whatever its own versions are. An OpenCode of 1.x is likewise offered no
-  update to a release of 2 or more, which npm's `latest` is since 2.0; no
-  recording has one (the feed of the one 1.x scenario is offline), so none moved
-  for it.
-
-- **An OpenCode window keeps the human's skill paths** (2026-10-25, T-540's
-  harness parity). OpenCode reads `OPENCODE_CONFIG_CONTENT` after its global and
-  project files, and a list in it replaces theirs, so a window told only of the
-  role's skills folder lost the `skills.paths` the human's files name, which the
-  same OpenCode opened in a terminal in that folder has. Node's adapter merged the
-  role into the environment's configuration alone. The Rust adapter asks OpenCode
-  its configuration for the window's folder first (`opencode debug config`, run
-  there with the environment's configuration and its updates off), and puts the
-  paths it names before the role's; an OpenCode that cannot be asked, or answers
-  no configuration with a list of texts there, gives none, and the window goes on
-  as it did. `launch/` moved for it in both platforms' recordings, in 155 of the
-  158 OpenCode scenarios: each of their 159 prepares that get past the version
-  gained a `ran` of `opencode debug config`, right after its `opencode --version`,
-  in the folder the window works in (the stand-ins answer nothing: the question
-  fails, and the launch goes on). Nothing else moved: with that `ran` taken out,
-  each record reads as it did, and the other 357 scenarios are as they were, byte
-  for byte.
-
 - **A Devin wire log replaced** (2026-10-16, Astra's and Sol's reviews of the fix of
   the field report B1). Node took a wire log that shrank for one replaced and read it
   from its start, and any other for the one it had read: one as long as the last was
@@ -161,19 +106,6 @@ once, with the reason here and in the commit.
   error`, step 3, which records one `GET /session` more, at the minute; its answer
   is Node's.
 
-- **OpenCode's store is the XDG place on Windows too** (2026-10-21, 3.0.6 item 10).
-  Node looked for it in `opencode` under `%LOCALAPPDATA%` and `%APPDATA%` as well,
-  after the XDG place, "where some versions keep it". OpenCode 1.19.3 keeps it in
-  the XDG place on Windows (zeewin: `.local\share\opencode` in the home, and no
-  `opencode` folder under `AppData`), so the Rust adapter looks nowhere else
-  (`opencode/paths.rs`). `records/` moved for it in one scenario of `suite`:
-  `opencode: its store is found where this OpenCode keeps it` (it ended in "the
-  one holding the session first"). Its two looks that found the session in the
-  store under `%LOCALAPPDATA%` (steps 34 and 40) are taken, and so is the
-  Windows environment of the look that stays beside the other two; the two that
-  stand read as Node's did. `suite` holds 199 looks now, 98 of OpenCode's in all
-  (`../records/main.rs`), and 1510 are played.
-
 - **A Codex record is read by the names Codex writes** (2026-10-21, 3.0.6 item 10).
   Node's reader took other names where the usual one was none: `Text` for a
   content part's `text`, a record's `id` for its `call_id` and for a sub-agent's
@@ -197,13 +129,34 @@ once, with the reason here and in the commit.
   on macOS) and every kill or wait by pattern matches. Claude Code's, Pi's and
   Codex's windows now open with none, and are delivered it once they are up as
   every later message is (`FirstMessage::Delivered`); Devin still reads its own from
-  a file, and OpenCode is still posted its own. Pi's role text goes by its file,
+  a file. Pi's role text goes by its file,
   which `--append-system-prompt` reads where the path names one. `launch/` moved for
   it: in `tables.json`, the 162 windows of Claude Code, Pi and Codex given a seed
   lost it from the end of their arguments; in each platform's scenarios, the 108
   launches of those three given a message lost it from the end of their `argv`, and
   Pi's 59 launches name the role's file after `--append-system-prompt` in place of
   its text (the file `--skill` names). Nothing else of a step moved.
+
+- **A message through Pi's inbox is its owner's alone** (2026-10-26, T-762, the
+  class of Calliope's P2 on T-697: every file the harness writes that holds a
+  prompt is owner-only). Node made the folders of Pi's channel with its default
+  `0o777` and wrote each message's record with `0o666`, so under a usual umask a
+  message's words were anyone's to read beside a launch's own files, which are
+  `0o700` and `0o600`. The Rust channel makes the inbox and the acknowledgements'
+  folder `0o700` and writes the record, and its temporary, `0o600`
+  (`pi/channel/send.rs`). `launch/` moved for it in the macOS recording alone
+  (Windows keeps no modes), in 29 steps of 22 Pi scenarios: 65 modes, the `inbox`
+  and `ack` folders from 493 to 448 (21 each) and the `inbox/m-….json` records and
+  their `.tmp` from 420 to 384 (23). Nothing else moved: with those modes put back,
+  each step reads as Node recorded it.
+
+- **No file URLs** (2026-10-29, T-569, RMOC-20 of a harness's removal). Node turned a path
+  into a file URL (`toFileUrl`) for the one harness that was given its folders as URLs,
+  and the launch player read a root in five forms besides the plain one (JSON text, a URI,
+  a second URI, form-encoded, and a file URL). No harness asks for one now: Rust has
+  no such function, and the player keeps the plain root. `launch/tables.json` lost its
+  `fileUrl` table (295 rows) and `coverage.json` its row; nothing else moved, and each
+  other table has the rows it had. The move is `tools/drop_file_url_goldens.py`.
 
 ## The launch scenarios
 
@@ -246,7 +199,7 @@ file work was in flight, and Rust never does.)
 
 A step's record is the same on every run. Every path under the root is `$ROOT/…`
 (in a file URL, a URL's query and JSON text as well), the bundle's `bin` is
-`$ROOT/bundle/bin`, the hash that names OpenCode's bundle is `$HASH`, Node itself
+`$ROOT/bundle/bin`, the hash that names Pi's bundle is `$HASH`, Node itself
 `$NODE`, the process the run was `$PID`, one long dead `$DEAD`, and a second live
 one a scenario names `$OTHER`. It lists the work that settled (its step, and what
 it answered or threw), the work still waiting, the requests asked of the host and,
@@ -321,3 +274,79 @@ and the hash that names a bundle of an extension is `$HASH`.
   refused for a log that is not there, and for one that cannot be read`, steps 8 and
   10, where Node refused the message as the conversation unavailable and Rust as
   another conversation displayed, the torn line saying nothing.
+
+- **A Codex window's role is on no command line** (2026-10-26, T-698). Node gave a
+  Codex window its role as `-c developer_instructions=<JSON>` on the supervisor's
+  command line, which the supervisor put on the app-server's and the TUI's as well:
+  every user of the machine reads a command line (`ps` is setuid root on macOS), and
+  a pattern that matched a role's words matched the window. The Rust adapter writes
+  the same text (Codex's own instructions, then the role) to
+  `integrations/codex/<launch>/developer-instructions.md`, 0600 in a folder 0700,
+  and names it in the window's environment (`CF_CODEX_ROLE_FILE`); the supervisor
+  reads it and its broker gives it to the TUI's main thread starts as their
+  `developerInstructions`. `launch/` moved for it in 93 steps of the Codex
+  scenarios, in both platforms' recordings: each launch's command line lost the
+  two words of the setting and nothing else, its environment gained the variable
+  after the bridge's, and its step's `tree` gained the launch's folder (and the
+  folders above it the scenario had not made yet) and the file, whose `text` is the
+  setting's JSON string read, where the file is new or its text changed; a step
+  that closes the window lost them again (`removed`), as `forget_launch` removes
+  them. The darwin rows were checked equal to what Rust reads, row for row; the
+  win32 rows were moved the same way, paths written with `/` and no mode, as the
+  recordings write every path. `no_codex_launch_of_either_platform_puts_its_role_on_a_command_line`
+  holds both files to it. The move is `tools/move_codex_role_goldens.py`, which
+  leaves a step already moved as it is: after a merge brings rows of the old shape,
+  run it on each file and let the scenarios test check it, rather than merging these
+  files by hand.
+- **A hook run by the window's own `cf` by its whole path** (2026-11-01, T-1049). A window's
+  shell can find another `cf` first on its PATH (Devin's login zsh on the Mac, Claude Code's
+  login Git Bash on Windows, the Cloud Foundry CLI: T-972's live kit), so the question hooks of
+  Claude Code and Devin, which Node wrote as the word (`cf hook claude`, `cf hook devin`), are run
+  as Devin's session hook always was: by the bundle's `cf`, quoted (`'$ROOT/bundle/bin/cf' hook
+  claude`; `cf.exe` on Windows). `launch/scenarios.darwin.json` and `scenarios.win32.json` moved
+  for it, by hand: the `command` of that hook in the settings file of every Claude member's
+  launch (42 a file) and in the config of every Devin member's (104 on the Mac, 105 on Windows),
+  and nothing else.
+
+- **A sub-agent starts without the window's role** (2026-11-01, T-1053, from T-766's
+  probes of 2026-10-26). A member's sub-agent was given the member's role: a Codex child
+  held it in its developer message on every route, and four of four children that could
+  not answer something asked the board as the member (`cf ask`); a Claude Code
+  `general-purpose` child listed the role's skill and, asked to, loaded it. Node wrote
+  neither file below. `launch/` moved for it in 134 steps of each platform's
+  recordings, and in nothing but these:
+  - 41 steps of 40 Claude Code scenarios: the role's file
+    (`role/.claude/skills/consensflow-<role>/SKILL.md`) opens with
+    `disable-model-invocation: true` in its front matter, in one of its own before a text
+    that has none (every scenario's role is such a text), so no model lists or loads it
+    as a skill (`claude::install::not_for_the_model`); the window has the role in its
+    system prompt as before;
+  - 93 steps of 81 Codex scenarios: beside the role's file is `sub-agents.toml`, with its
+    mode, whose `developer_instructions` are Codex's own and then the sentence that the
+    child is not the window's agent (`codex::role::children`), made and removed with the
+    role's file; and the launch's environment names it in `CF_CODEX_SUBAGENT_FILE`, after
+    the role's variable, and the agent types it is for in `CF_CODEX_SUBAGENT_TYPES` after
+    that: `default,explorer,worker`, Codex's own three, for no recording's configuration
+    defines one of its own (one the owner defines stays theirs). The supervisor names the
+    file to the app-server alone, for each of those types, with Codex 0.166.0's own words
+    for it (`-c agents.<type>.config_file=…`, `-c agents.<type>.description=…`,
+    `cf_proto::codex::agent_types`), which no recording holds.
+  `no_codex_launch_of_either_platform_puts_its_role_on_a_command_line` holds every Codex
+  launch of both files to naming it. The move is `tools/move_subagent_role_goldens.py`,
+  which replays each scenario's files and says each step's `tree` again; a step already
+  moved is moved to itself, so after a merge brings rows of the old shape, run it on each
+  file and let the scenarios test check it.
+
+- **A failed Pi turn is settled by the session file's quiet, as a stopped or an aborted
+  one is** (2026-11-01, T-781). Node's Pi reader settled a turn whose last step stopped
+  or was aborted once the file had been quiet for 120 s, and never one whose last step
+  failed: a failure with no evidence from the extension read `settlement: unknown`, with
+  nothing in flight, for good, and the dispatcher publishes that as Working. Pi writes a
+  new step for each retry (at most 60 s apart), so a failed step with nothing after it
+  for 120 s is the last, as the other two are. `records/` moved for it in three readings
+  of two scenarios, each a quiet 429 that says the quota is exhausted: `sequences`,
+  `pi/provider-429.jsonl, read in pieces (quiet)`, the fourth and fifth readings, and
+  `suite`, `pi: a 429, quiet, is exhausted`. `settlement` is `settled` in each where
+  Node's was `unknown`; `inFlight`, `failed`, `quota` and the items are Node's. The
+  other Pi readings are unmoved (a failure that is not yet quiet is in flight in
+  both, and the extension's evidence settled it already). Moved by hand.

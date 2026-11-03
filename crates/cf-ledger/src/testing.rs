@@ -39,7 +39,10 @@
 //!
 //! And migration 0024's column of the `conversation` table (whether the host proved
 //! the program of the last window on one gone), which Node's conversations never
-//! had: in the rows of that table and in the text of its schema.
+//! had: in the rows of that table and in the text of its schema. And migration
+//! 0025's of the `project` table (when a meeting with the chief began), and
+//! migration 0026's two (the staff's rules and the size Claude members compact
+//! at), held apart as the wake-up columns are.
 //!
 //! What only Node's ledger had is held apart the other way round, on both
 //! sides: the mark that a project comes back by itself after a restart
@@ -50,20 +53,24 @@
 mod compaction;
 mod described;
 mod handed;
+mod meeting;
 mod pasted_into;
 mod paused_with_project;
 mod program_gone;
 mod role_note;
 mod role_text;
 mod specs;
+mod staff_rules;
 
 use serde_json::{Map, Value};
 
 pub use compaction::undo_migration_0020;
 pub use handed::undo_migration_0022;
+pub use meeting::undo_migration_0025;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
+pub use staff_rules::undo_migration_0026;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
@@ -93,13 +100,16 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
     ("message", "door_closed_at"),
 ];
 
-/// The columns migrations 0014 and 0017 added to the `project` table, each as
-/// the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
-/// `description TEXT`, one to a line there): what Node's schema never had.
+/// The columns migrations 0014, 0017, 0025 and 0026 added to the `project` table,
+/// each as the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
+/// `description TEXT`, `meeting_at TEXT`, `staff_rules TEXT`, one to a line there):
+/// what Node's schema never had.
 fn added_columns() -> impl Iterator<Item = &'static str> {
     [
         include_str!("../migrations/0014.sql"),
         include_str!("../migrations/0017.sql"),
+        include_str!("../migrations/0025.sql"),
+        include_str!("../migrations/0026.sql"),
     ]
     .into_iter()
     .flat_map(str::lines)
@@ -115,13 +125,15 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
 /// migration 0017, the one of migration 0018, the one of migration 0020, the one
-/// of migration 0021, the one of migration 0022 and the one of migration 0024
+/// of migration 0021, the one of migration 0022, the one of migration 0024, the
+/// meeting of migration 0025 and the staff's rules and Claude's compaction of 0026
 /// (their name and, in every row, the value at its place), the table migration
-/// 0020 made (a long item's parts), and the stop in the event rows that paused a
-/// task. A dump from before the migrations has none of them, and is left as it
-/// is.
+/// 0020 made (a long item's parts), the stop in the event rows that paused a
+/// task, and the look in the event rows of a delivery's begin, retry or failure.
+/// A dump from before the migrations has none of them, and is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     hold_apart_the_stop_of_logged_pauses(tables);
+    hold_apart_the_look_of_logged_deliveries(tables);
     for (table, column) in NODE_NEVER_WRITES
         .into_iter()
         .chain(specs::COLUMNS)
@@ -173,8 +185,8 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// `tables`), with the schema as Node's ledger had it: no version past the
 /// last Node's ledger had, no tester in the checks of the two tables that
 /// name the roles and the pools, none of the columns of a project's wake-up
-/// calls, of what it says of specs or of its description in the table of the
-/// projects, and not the column of the role text a conversation was last given,
+/// calls, of what it says of specs, of its description or of its staff's rules
+/// in the table of the projects, and not the column of the role text a conversation was last given,
 /// that of the role text a message says, that of the mark of a compaction's
 /// summary in a copy, the table and the indexes migration 0020 made, that of the
 /// mark a project's suspension leaves on the tasks it paused, that of when a
@@ -212,8 +224,8 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the
-                // column's text: the wake-up calls' columns and the description
-                // one by one, and the three of specs, which `specs` holds as the
+                // column's text: the wake-up calls' columns, the description and
+                // the staff's rules one by one, and the three of specs, which `specs` holds as the
                 // one piece they are.
                 for column in added_columns() {
                     *sql = sql.replace(&format!(", {column}"), "");
@@ -249,6 +261,21 @@ fn hold_apart_the_stop_of_logged_pauses(tables: &mut Map<String, Value>) {
             }
         }
     });
+}
+
+/// The events of a delivery that may carry what the engine's look read of the
+/// window (3.0.7 chief-meeting, CMT-08), which Node's never did.
+const LOOKED: [&str; 3] = ["delivery.begun", "delivery.retried", "delivery.failed"];
+
+/// The event rows of [`LOOKED`] without their look, the last key of their data.
+fn hold_apart_the_look_of_logged_deliveries(tables: &mut Map<String, Value>) {
+    for kind in LOOKED {
+        edit_logged_data(tables, &format!("'{kind}'"), |text| {
+            if let Some(at) = text.find(",\"look\":").filter(|_| text.ends_with("}'")) {
+                *text = format!("{}}}'", &text[..at]);
+            }
+        });
+    }
 }
 
 /// The quoted JSON of the `data` of each row of the `event` table whose `kind`
@@ -355,15 +382,22 @@ pub fn hold_apart_the_resume_mark_in_tables(tables: &mut Map<String, Value>) {
 }
 
 /// `events`, as the recorder writes what a ledger logged (`kind` and `data`
-/// among them), without the one thing this ledger adds to an event Node logs
+/// among them), without the two things this ledger adds to events Node logs
 /// too: the stop a pause counted, in the `data` of the event that moved the
-/// task to paused. Nothing else of what it logs is held apart: an event
-/// of a kind Node never logs is a difference.
+/// task to paused, and what the engine's look read of a window, in the `data`
+/// of a delivery's begin, retry or failure. Nothing else of what it logs is
+/// held apart: an event of a kind Node never logs is a difference.
 pub fn hold_apart_what_node_never_logs(events: &mut [Value]) {
     for event in events {
         let paused = event["kind"] == "task.state" && event["data"]["to"] == "paused";
-        if let (true, Some(Value::Object(data))) = (paused, event.get_mut("data")) {
-            data.shift_remove("stop");
+        let looked = LOOKED.iter().any(|kind| event["kind"] == *kind);
+        if let Some(Value::Object(data)) = event.get_mut("data") {
+            if paused {
+                data.shift_remove("stop");
+            }
+            if looked {
+                data.shift_remove("look");
+            }
         }
     }
 }
@@ -388,6 +422,40 @@ mod tests {
                 json!({ "kind": "task.state", "data": { "task": 1, "from": "paused", "to": "queued", "stop": 2 } }),
                 json!({ "kind": "message.read", "data": { "message": 4, "stop": 9 } }),
             ]
+        );
+    }
+
+    #[test]
+    fn takes_the_look_out_of_a_deliverys_events_and_their_rows_and_nothing_else() {
+        let mut events = [
+            json!({ "kind": "delivery.begun", "data": { "message": 4, "attempt": 1, "look": { "restMs": 3000 } } }),
+            json!({ "kind": "delivery.retried", "data": { "message": 4, "reason": "lost", "look": { "lastItem": "u-1" } } }),
+            json!({ "kind": "message.read", "data": { "message": 4, "look": 9 } }),
+        ];
+        hold_apart_what_node_never_logs(&mut events);
+        assert_eq!(
+            events,
+            [
+                json!({ "kind": "delivery.begun", "data": { "message": 4, "attempt": 1 } }),
+                json!({ "kind": "delivery.retried", "data": { "message": 4, "reason": "lost" } }),
+                json!({ "kind": "message.read", "data": { "message": 4, "look": 9 } }),
+            ]
+        );
+        let begun = r#"'{"message":4,"attempt":1,"look":{"status":"idle","lastItem":"u-1","restMs":3000}}'"#;
+        let read = r#"'{"message":4,"look":9}'"#;
+        let mut tables = json!({
+            "event": {
+                "columns": ["id", "kind", "data"],
+                "rows": [["1", "'delivery.begun'", begun], ["2", "'message.read'", read]],
+            },
+        });
+        hold_apart_what_node_never_writes(tables.as_object_mut().unwrap());
+        assert_eq!(
+            tables["event"]["rows"],
+            json!([
+                ["1", "'delivery.begun'", r#"'{"message":4,"attempt":1}'"#],
+                ["2", "'message.read'", read],
+            ])
         );
     }
 

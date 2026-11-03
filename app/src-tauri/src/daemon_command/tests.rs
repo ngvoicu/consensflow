@@ -817,6 +817,24 @@ fn of_a_printed_environment_consensflows_own_the_loaders_and_a_claude_sessions_a
     assert_eq!(names, ["PATH", "CLAUDE_CONFIG_DIR"]);
 }
 
+/// Of what a shell asked inside any harness's session printed, that session's variables are
+/// not taken (T-971), every harness's: what configures a harness is.
+#[test]
+fn of_a_printed_environment_no_harness_sessions_variable_is_taken() {
+    let mut printed = b"PATH=/rc/bin\0CODEX_HOME=/rc/codex\0PI_CODING_AGENT_DIR=/rc/pi\0".to_vec();
+    for harness in cf_proto::agents::Harness::ALL {
+        for name in harness.session_variables() {
+            printed.extend_from_slice(format!("{name}=the-parent's\0").as_bytes());
+        }
+    }
+    let names: Vec<String> = taken(&printed)
+        .expect("taken")
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["PATH", "CODEX_HOME", "PI_CODING_AGENT_DIR"]);
+}
+
 /// The real Windows PowerShell answers what this process has, as a terminal's gives it:
 /// its Path and SystemRoot come back as they are, within the time.
 #[cfg(windows)]
@@ -1051,4 +1069,73 @@ fn ending_a_lookup_ends_both_shells_it_asks_at_once() {
     lookup.finish(one.asked);
     lookup.finish(two.asked);
     assert!(lookup.lock().shells.is_empty(), "a shell is still held");
+}
+
+/// An app started from a terminal inside a window of a board is given that window's variables
+/// (T-868): with its token set the bundled `cf` is that board's command and `cf ui` is none, so
+/// the daemon never started and nothing said why. What the app does as it starts takes them out
+/// of its own environment, which is every program's it starts: the daemon, a terminal's pane (a
+/// command builder starts from the process's environment), the opener, and the app an update
+/// restarts. Only the board's four go: the home a run chose is not a window's. The environment
+/// is the process's, so the test runs in a child, its own binary again.
+#[test]
+fn an_app_started_from_a_window_of_a_board_gives_nothing_of_that_board_to_what_it_starts() {
+    use cf_base::env::WINDOW_VARIABLES;
+
+    const FROM_A_WINDOW: &str = "CONSENSFLOW_TEST_STARTED_FROM_A_WINDOW";
+    const HOME: &str = "/the/chosen/home";
+    let given = |name: &str| std::env::var_os(name).is_some();
+    if std::env::var_os(FROM_A_WINDOW).is_some() {
+        for name in WINDOW_VARIABLES {
+            assert!(given(name), "{name} was not given to the app");
+        }
+        crate::remove_inherited_variables();
+        for name in WINDOW_VARIABLES {
+            assert!(!given(name), "{name} is still the app's");
+            assert!(
+                portable_pty::CommandBuilder::new("sh")
+                    .get_env(name)
+                    .is_none(),
+                "{name} would be a pane's"
+            );
+        }
+        assert_eq!(std::env::var("CONSENSFLOW_HOME").as_deref(), Ok(HOME));
+        #[cfg(unix)]
+        {
+            let folder = tempfile::tempdir().expect("a folder");
+            let cf = login_shell(
+                folder.path(),
+                "echo \"${CONSENSFLOW_URL-unset} ${CONSENSFLOW_TOKEN-unset} \
+                 ${CONSENSFLOW_PARTICIPANT-unset} ${CONSENSFLOW_PROJECT-unset} ${CONSENSFLOW_HOME-unset}\"",
+            );
+            let daemon = command_for(&cf).output().expect("the daemon was started");
+            assert_eq!(
+                String::from_utf8_lossy(&daemon.stdout),
+                format!("unset unset unset unset {HOME}\n")
+            );
+        }
+        return;
+    }
+    let ran = crate::testing::command(std::env::current_exe().expect("the test binary"))
+        .args([
+            "--exact",
+            "daemon_command::tests::an_app_started_from_a_window_of_a_board_gives_nothing_of_that_board_to_what_it_starts",
+            "--nocapture",
+        ])
+        .env(FROM_A_WINDOW, "1")
+        .env("CONSENSFLOW_URL", "http://127.0.0.1:9")
+        .env("CONSENSFLOW_TOKEN", "the-outer-boards-test-token")
+        .env("CONSENSFLOW_PARTICIPANT", "chief")
+        .env("CONSENSFLOW_PROJECT", "1")
+        .env("CONSENSFLOW_HOME", HOME)
+        .stdin(Stdio::null())
+        .output()
+        .expect("run the test in a child");
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert!(ran.status.success(), "{said}");
+    assert!(said.contains("1 passed"), "the test did not run: {said}");
 }

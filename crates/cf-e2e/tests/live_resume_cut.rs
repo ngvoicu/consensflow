@@ -24,13 +24,15 @@
 //!   once the command runs: the record ends in the tool's call
 //! - `early`    the window is killed as soon as its turn is at work and has said
 //!   nothing (Claude's status reads busy, or the record holds the message and no more):
-//!   the record ends in the user's message
+//!   the record ends in the user's message. The count goes to 1000, so that a fast model
+//!   is still at it: Codex on GPT-5.6-Luna counted to 40 in two seconds, and the cut found
+//!   its turn over (2026-10-14, and again 2026-10-31)
 //!
 //! ```text
 //! cargo xtask live resume-cut                              Claude, both cases
 //! cargo xtask live resume-cut --case command
 //! cargo xtask live resume-cut claude pi                    each of them, one after the other
-//! cargo xtask live resume-cut codex devin pi opencode
+//! cargo xtask live resume-cut codex devin pi
 //! cargo xtask live resume-cut --model haiku                another Claude model, over --models claude=…
 //! ```
 //!
@@ -38,12 +40,13 @@
 //! one unless `--models` names another), Claude on the one `--model` names where it
 //! names one. The harnesses other than Claude are plain
 //! windows in a folder of their own: what is read of them is their record and their
-//! screen, which is what the daemon reads of a Codex, Pi or Devin window (OpenCode's
-//! server says more, and Pi's extension). `--transcripts <folder>` copies each case's
+//! screen, which is what the daemon reads of a Codex, Pi or Devin window (Pi's
+//! extension says more). `--transcripts <folder>` copies each case's
 //! Claude transcript there, as the cut left it and as it ended. Claude has no MCP
 //! server and no browser. The run fails only when a case could not be run (a window
 //! that did not open, or a turn that was never at work): what a harness does is the
-//! result, and it is said.
+//! result, and it is said. A cut that found the turn already over (its answer, with the
+//! closing word, in the record) cut nothing, and the case was not run either.
 
 // The parts are in `live_resume_cut/`: cargo looks for the modules of a test's root
 // file beside it, where each would be a suite of its own.
@@ -58,7 +61,7 @@ use std::time::Duration;
 use cf_e2e::live::agents::{self, Models};
 use cf_e2e::live::members::{named, rig_for, Account, LongCommand};
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, ask, installed, window, Harness, Installed, Log};
+use cf_e2e::live::{self, ask, installed, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
@@ -104,10 +107,23 @@ impl Case {
     pub fn message(self) -> String {
         match self {
             Case::Command => format!(
-                "Run this exact command with your shell tool, wait for it to finish, and then reply with exactly one line: FINISHED\n{}",
+                "Run this exact command with your shell tool, wait for it to finish, and then reply with exactly one line: {}\n{}",
+                self.last(),
                 LONG.text()
             ),
-            Case::Early => "Count from 1 to 40, one number to a line, and then reply with exactly one line: COUNTED".to_owned(),
+            Case::Early => format!(
+                "Count from 1 to 1000, one number to a line, and then reply with exactly one line: {}",
+                self.last()
+            ),
+        }
+    }
+
+    /// The word the answer to the message ends in: a record that holds it holds the turn
+    /// ended, which a cut then cannot have cut.
+    pub const fn last(self) -> &'static str {
+        match self {
+            Case::Command => "FINISHED",
+            Case::Early => "COUNTED",
         }
     }
 }
@@ -122,14 +138,11 @@ struct Options {
     transcripts: Option<PathBuf>,
 }
 
-/// The harnesses and cases the words ask for, or Claude and both cases, each
-/// harness on its agent of the run's `models`. The windows here are opened
-/// without the daemon, so an agent such a window cannot run (OpenCode given an
-/// effort) is the error, before anything is spent ([`window::without_the_daemon`]).
+/// The harnesses and cases the words ask for, or Claude and both cases.
 fn options(
     harnesses: &[String],
     cases: &[String],
-    (model, models): (Option<String>, &Models),
+    model: Option<String>,
     transcripts: Option<String>,
 ) -> Result<Options> {
     let harnesses = named(
@@ -139,9 +152,6 @@ fn options(
         "harness",
         &[Harness::Claude],
     )?;
-    for harness in &harnesses {
-        window::without_the_daemon(&agent_of(*harness, model.as_deref(), models))?;
-    }
     Ok(Options {
         harnesses,
         cases: named(cases, &Case::ALL, Case::name, "case", &Case::ALL)?,
@@ -178,7 +188,7 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
     let options = options(
         &live::list("harness"),
         &live::list("case"),
-        (live::option("model"), &models),
+        live::option("model"),
         live::option("transcripts"),
     )?;
     let installs: Vec<Installed> = options
@@ -264,7 +274,7 @@ mod tests {
 
     #[test]
     fn claude_and_both_cases_are_run_unless_others_are_named_on_the_runs_model_of_claude() {
-        let all = options(&[], &[], (None, &cheap()), None).unwrap();
+        let all = options(&[], &[], None, None).unwrap();
         assert_eq!(all.harnesses, [Harness::Claude]);
         assert_eq!(all.cases, [Case::Command, Case::Early]);
         assert_eq!(all.model, None);
@@ -276,7 +286,7 @@ mod tests {
         let some = options(
             &words(&["pi", "codex"]),
             &words(&["early"]),
-            (Some("haiku".to_owned()), &cheap()),
+            Some("haiku".to_owned()),
             Some("/tmp/cut".to_owned()),
         )
         .unwrap();
@@ -290,37 +300,13 @@ mod tests {
     fn a_harness_or_a_case_that_is_none_is_refused_with_its_name() {
         let failed = |result: Result<Options>| result.err().map(|failed| failed.to_string());
         assert_eq!(
-            failed(options(&words(&["kimi"]), &[], (None, &cheap()), None)).as_deref(),
+            failed(options(&words(&["kimi"]), &[], None, None)).as_deref(),
             Some("no such harness: kimi")
         );
         assert_eq!(
-            failed(options(&[], &words(&["late"]), (None, &cheap()), None)).as_deref(),
+            failed(options(&[], &words(&["late"]), None, None)).as_deref(),
             Some("no such case: late")
         );
-    }
-
-    #[test]
-    fn an_opencode_effort_is_refused_before_anything_is_spent_for_its_plain_window_takes_none() {
-        let models = agents::parse(Some("opencode=opencode/muse-spark-1.3:high"), None).unwrap();
-        let refused = options(&words(&["claude", "opencode"]), &[], (None, &models), None)
-            .err()
-            .map(|failed| failed.to_string());
-        assert_eq!(
-            refused.as_deref(),
-            Some(
-                "an OpenCode window opened without the daemon is given no effort: OpenCode takes \
-                 it as the variant of the first message the daemon sends to the window's server, \
-                 which this window has not; run opencode=opencode/muse-spark-1.3 with no :high"
-            )
-        );
-        // A run that leaves OpenCode out, or names it no effort, is not refused.
-        assert!(options(&words(&["claude"]), &[], (None, &models), None).is_ok());
-        let plain = agents::parse(Some("opencode=opencode/muse-spark-1.3"), None).unwrap();
-        assert!(options(&words(&["opencode"]), &[], (None, &plain), None).is_ok());
-        // Every other harness takes its effort on its command line.
-        let others = agents::parse(Some("pi=p:high,codex=c:high,claude=a:max"), None).unwrap();
-        let all = words(&["claude", "pi", "codex", "devin"]);
-        assert!(options(&all, &[], (None, &others), None).is_ok());
     }
 
     #[test]
@@ -340,9 +326,14 @@ mod tests {
         let command = Case::Command.message();
         assert!(command.starts_with("Run this exact command with your shell tool, wait for it to finish, and then reply with exactly one line: FINISHED\n"));
         assert!(command.ends_with("cf-resume-cut-long-command"));
+        // Long enough that a fast model is still at it when the window is cut.
         assert_eq!(
             Case::Early.message(),
-            "Count from 1 to 40, one number to a line, and then reply with exactly one line: COUNTED"
+            "Count from 1 to 1000, one number to a line, and then reply with exactly one line: COUNTED"
+        );
+        assert_eq!(
+            (Case::Command.last(), Case::Early.last()),
+            ("FINISHED", "COUNTED")
         );
         assert_eq!(SECOND, "Reply with exactly one line: AFTER");
     }

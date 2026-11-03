@@ -11,7 +11,7 @@
 //! companions. A resumed window opens on the agent's model and effort with
 //! the flags a start uses: one without them ran on the harness's default.
 
-use cf_proto::agents::Harness;
+use cf_proto::agents::{DevinModel, Harness};
 
 use crate::contract::Agent;
 
@@ -106,6 +106,32 @@ fn window(
                 drop_env: &["ANTHROPIC_API_KEY"],
             }
         }
+        // `muse` opens the TUI at rest and `muse resume <id>` on the conversation; the
+        // first message is pasted once the window is up, as Claude's is. `--yolo` is
+        // the full-permission mode: no approval, no sandbox, the workspace trusted for
+        // the run (not saved). Contributor mode, in which Meta trains on what the
+        // window sees, is off for the run unless the agent's model is a contributor
+        // model, which only the human picks.
+        Harness::Muse => {
+            let mut args = match (resumed, session) {
+                (true, Some(session)) => words(&["resume", session]),
+                _ => Vec::new(),
+            };
+            args.extend(model_and_effort(harness, agent));
+            args.push("--yolo".to_owned());
+            if !given(agent.model).is_some_and(|model| model.ends_with(CONTRIBUTOR)) {
+                args.extend(words(&["--contributor-mode", "off"]));
+            }
+            Invocation {
+                command: "muse",
+                args,
+                prompt: None,
+                // As Claude's key: Muse uses a `META_API_KEY` in its environment before
+                // the human's login (Muse's docs), which would move the window onto that
+                // key's billing.
+                drop_env: &["META_API_KEY"],
+            }
+        }
         // `--session-id` creates the session the first time and resumes it after.
         Harness::Pi => {
             let session = session?;
@@ -155,23 +181,29 @@ fn window(
                 drop_env: &[],
             }
         }
-        // OpenCode keeps the model and its variant with the session, and
-        // they are read back for a resumed one: only a new session is given
-        // them. Its first message goes through its own API once it starts.
-        Harness::Opencode => {
-            let mut args = session.map_or_else(Vec::new, |session| words(&["--session", session]));
-            if !resumed {
-                args.extend(model_and_effort(harness, agent));
-            }
-            args.push("--auto".to_owned());
-            Invocation {
-                command: "opencode",
-                args,
-                prompt: None,
-                drop_env: &[],
-            }
-        }
     })
+}
+
+/// How Muse names a model in its contributor mode, where Meta trains on what the
+/// model sees: `muse-spark-1.3-contributor`.
+const CONTRIBUTOR: &str = "-contributor";
+
+/// The id Devin names `model` by at `effort`: the family, then the level, then the
+/// variant's words, as every id Devin lists is written (`claude-opus-5-5-fast` at
+/// `medium` is `claude-opus-5-5-medium-fast`, where joining the two made an id Devin
+/// has not: T-609). A level the model already names gives way to the effort, which is
+/// said once, as the agent's; a model with no effort is run as it is named (the roster
+/// gives none to a model the catalog runs bare and never at the agent's level).
+fn devin_model(model: &str, effort: Option<&str>) -> String {
+    let Some(effort) = effort else {
+        return model.to_owned();
+    };
+    let parts = DevinModel::of(model);
+    [parts.family, effort, parts.variant]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// The flags that put a window on its agent's model and effort.
@@ -209,18 +241,19 @@ fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
             }
         }
         // Devin writes the level into the id (claude-opus-5-5-max): an agent
-        // names the family and its effort, joined here. No model is Devin's
-        // own setting.
+        // names the family and its effort, put together here. No model is
+        // Devin's own setting.
         Harness::Devin => {
             if let Some(model) = model {
-                let id =
-                    effort.map_or_else(|| model.to_owned(), |effort| format!("{model}-{effort}"));
-                flag("--model", id);
+                flag("--model", devin_model(model, effort));
             }
         }
-        Harness::Opencode => {
+        Harness::Muse => {
             if let Some(model) = model {
                 flag("--model", model.to_owned());
+            }
+            if let Some(effort) = effort {
+                flag("--reasoning-effort", effort.to_owned());
             }
         }
     }

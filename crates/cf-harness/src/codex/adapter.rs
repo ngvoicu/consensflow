@@ -54,7 +54,7 @@ use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::resumable::transcript_kept;
-use crate::shared::{specmint, window_args};
+use crate::shared::{compacting, specmint, window_args};
 
 /// Codex's question tool (`request_user_input`) is behind a feature still
 /// marked under development; the broker answers a member's from the board.
@@ -129,7 +129,7 @@ impl Adapter for CodexAdapter {
             let executable = executable(Harness::Codex, &services.env)?;
             let launched =
                 launch::configuration(services, launch.id, launch.directory, &executable).await?;
-            let role = role::arguments(
+            let texts = role::text(
                 services,
                 launch.role,
                 &executable,
@@ -169,7 +169,12 @@ impl Adapter for CodexAdapter {
                 }
                 None => None,
             };
-            let mut args = role;
+            // The role goes by a file the window's broker reads, never its command line;
+            // what the window's sub-agents start with in its place, by a file the
+            // supervisor names to the app-server.
+            let role = role::write(&services.env, launch.id, &texts.role)?;
+            let children = role::write_children(&services.env, launch.id, &texts)?;
+            let mut args = Vec::new();
             if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
             }
@@ -177,7 +182,12 @@ impl Adapter for CodexAdapter {
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),
-                env: launched.env,
+                env: launched
+                    .env
+                    .into_iter()
+                    .chain([role])
+                    .chain(children)
+                    .collect(),
                 drop_env: invocation
                     .drop_env
                     .iter()
@@ -196,6 +206,7 @@ impl Adapter for CodexAdapter {
                         launch.starts_given_up,
                     ),
                     left_open: RefCell::new(left_open),
+                    at_work: Cell::new(false),
                 }),
             })
         })
@@ -222,8 +233,8 @@ impl Adapter for CodexAdapter {
     }
 
     /// A resumed thread keeps the developer message its first turn began with:
-    /// the role text a launch gives it (`developer_instructions`, see the
-    /// module `role`) is read at a resume and not used. Found live on Codex 0.162.1,
+    /// the role text a launch gives it (the developer instructions of a main
+    /// start, see the module `role`) is not given to a resume, and would not be used. Found live on Codex 0.162.1,
     /// 2026-10-13: a chief's rollout held the one developer message of its start,
     /// with no section of the specs turned on before its Resume. And probed through
     /// `codex app-server` the same day: a thread started with the developer
@@ -244,12 +255,13 @@ impl Adapter for CodexAdapter {
         FirstMessage::Delivered
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
             Harness::Codex,
             env,
             variant,
+            folder,
             paths::global_specmint(env, variant),
         )
     }
@@ -272,6 +284,9 @@ struct CodexWindow {
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
+    /// The broker said, at the last look, that Codex called the thread busy
+    /// (`Window::at_work`).
+    at_work: Cell<bool>,
 }
 
 impl CodexWindow {
@@ -305,6 +320,13 @@ impl Window for CodexWindow {
     /// The thread is named by the broker, never by the window's process.
     fn opened(&self, _pid: Option<u32>) {}
 
+    /// Codex compacts a long thread at the start of a turn, its record an open turn
+    /// and nothing more until it is done, the message that began it written after:
+    /// its status line says it.
+    fn compacting(&self, screen: &[String]) -> bool {
+        compacting::drawn(screen, &compacting::CODEX)
+    }
+
     fn follow(&self, session: &str) {
         *self.thread.borrow_mut() = Some(session.to_owned());
         // The turn the record had open was a thread's the window left.
@@ -316,7 +338,7 @@ impl Window for CodexWindow {
     /// waits for it too: one whose broker never names it reads as starting, and
     /// has nothing delivered, for good (a Codex chief opened again after the app's
     /// restart on zeewin, 2026-10-19, read "starting" for 78 minutes).
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async move {
             if self.named.get() {
                 return Ok(None);
@@ -399,6 +421,23 @@ impl Window for CodexWindow {
         })
     }
 
+    fn at_work(&self) -> bool {
+        self.at_work.get()
+    }
+
+    fn recheck(&self) -> Work<'_, ()> {
+        Box::pin(async move {
+            let shown = self
+                .channel
+                .shown_refreshed(&*self.time, &*self.loopback)
+                .await;
+            // A broker that does not answer leaves the word as it was.
+            if let Some(shown) = shown {
+                self.at_work.set(shown.idle == Some(false));
+            }
+        })
+    }
+
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
             let thread = self.thread.borrow().clone();
@@ -423,6 +462,13 @@ impl Window for CodexWindow {
             // started both at once, and a record its look had read before the
             // broker answered could be older.
             let shown = self.shown().await;
+            // Codex's own word that the thread is at work, which its rollout shows only
+            // once the turn has written something (T-716 §3): kept for the pacing.
+            self.at_work.set(
+                shown
+                    .as_ref()
+                    .is_some_and(|shown| shown.idle == Some(false)),
+            );
             let reading = self
                 .records
                 .look(Harness::Codex, &thread, &Options::default())

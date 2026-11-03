@@ -50,9 +50,14 @@ impl Stage {
             .to_string()
     }
 
-    /// The role arguments of a worker, with the app-server as scripted.
-    fn arguments(&self, content: &str) -> Result<Vec<String>, String> {
-        finished(Box::pin(arguments(
+    /// The role text of a worker, with the app-server as scripted.
+    fn text(&self, content: &str) -> Result<String, String> {
+        self.texts(content).map(|texts| texts.role)
+    }
+
+    /// The texts of a worker and of its sub-agents, with the app-server as scripted.
+    fn texts(&self, content: &str) -> Result<Texts, String> {
+        finished(Box::pin(text(
             &self.services,
             "worker",
             CODEX,
@@ -68,32 +73,49 @@ impl Stage {
 }
 
 #[test]
-fn the_role_follows_what_codex_has_of_its_own_in_one_developer_instructions_argument() {
+fn the_role_follows_what_codex_has_of_its_own_in_one_text() {
     let stage = Stage::new();
     stage.app_server(
         &[INITIALIZED, &Stage::configured("User instructions.")],
         Ends::Asked,
     );
     assert_eq!(
-        stage.arguments("# The role\n\nIts text."),
-        Ok(vec![
-            "-c".to_owned(),
-            "developer_instructions=\"User instructions.\\n\\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\\n\\n# The role\\n\\nIts text.\"".to_owned(),
-        ])
+        stage.text("# The role\n\nIts text."),
+        Ok("User instructions.\n\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n# The role\n\nIts text.".to_owned())
     );
 }
 
 #[test]
-fn a_text_with_what_json_escapes_is_carried_whole_as_json_writes_it() {
+fn a_sub_agent_starts_from_what_codex_has_of_its_own_and_that_it_is_not_the_windows_agent_never_the_role(
+) {
+    let stage = Stage::new();
+    stage.app_server(
+        &[INITIALIZED, &Stage::configured("User instructions.")],
+        Ends::Asked,
+    );
+    let texts = stage.texts("# The role\n\nIts text.").unwrap();
+    assert_eq!(
+        texts.children,
+        "User instructions.\n\nYou are a sub-agent that a ConsensFlow worker started. You are not the worker: you have no board identity, so never run cf; answer your parent in your final message."
+    );
+    assert!(!texts.children.contains("Its text."), "{}", texts.children);
+    assert!(!texts.children.contains("Your ConsensFlow role is"));
+    // A chief's sub-agent is told the same of the chief.
+    assert_eq!(
+        children("chief"),
+        "You are a sub-agent that a ConsensFlow chief started. You are not the chief: you have no board identity, so never run cf; answer your parent in your final message."
+    );
+}
+
+#[test]
+fn a_text_with_what_json_escapes_is_carried_as_it_is() {
     let stage = Stage::new();
     let had = "Back\\slash, \"quoted\", \u{2028} \u{7f} \u{1} \u{8} \u{c} \u{1f600}";
     stage.app_server(&[INITIALIZED, &Stage::configured(had)], Ends::Asked);
-    let given = stage
-        .arguments("Role \u{2029} \"text\" \\ with\ttab\u{0} and \u{e9}")
-        .unwrap();
+    let role = "Role \u{2029} \"text\" \\ with\ttab\u{0} and \u{e9}";
     assert_eq!(
-        given[1],
-        "developer_instructions=\"Back\\\\slash, \\\"quoted\\\", \u{2028} \u{7f} \\u0001 \\b \\f \u{1f600}\\n\\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\\n\\nRole \u{2029} \\\"text\\\" \\\\ with\\ttab\\u0000 and \u{e9}\""
+        stage.text(role).unwrap(),
+        format!("{had}\n\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{role}")
     );
 }
 
@@ -102,7 +124,7 @@ fn a_window_with_no_role_text_is_refused_before_the_app_server_is_started() {
     let stage = Stage::new();
     stage.app_server(&[], Ends::Asked);
     assert_eq!(
-        stage.arguments(""),
+        stage.text(""),
         Err("the worker window needs its role text".to_owned())
     );
     assert!(stage.watching.spawned.borrow().is_empty());
@@ -112,7 +134,7 @@ fn a_window_with_no_role_text_is_refused_before_the_app_server_is_started() {
 fn the_app_server_is_started_in_the_window_s_folder_with_its_environment_and_a_line_at_a_time() {
     let stage = Stage::new();
     stage.app_server(&[INITIALIZED, &Stage::configured("")], Ends::Asked);
-    stage.arguments("x").unwrap();
+    stage.text("x").unwrap();
     let spawned = stage.watching.spawned.borrow();
     let [(program, streams)] = &spawned[..] else {
         panic!("{spawned:?}");
@@ -128,7 +150,7 @@ fn the_app_server_is_started_in_the_window_s_folder_with_its_environment_and_a_l
 fn the_dialogue_is_initialized_then_the_configuration_read_for_the_folder_in_node_s_words() {
     let stage = Stage::new();
     stage.app_server(&[INITIALIZED, &Stage::configured("")], Ends::Asked);
-    stage.arguments("x").unwrap();
+    stage.text("x").unwrap();
     assert_eq!(
         stage.written(),
         [
@@ -160,7 +182,7 @@ fn the_app_server_is_asked_to_end_whatever_came_of_it() {
     ] {
         let stage = Stage::new();
         stage.app_server(&lines, ends);
-        assert_eq!(stage.arguments("x").is_ok(), ok, "{lines:?}");
+        assert_eq!(stage.text("x").is_ok(), ok, "{lines:?}");
         assert_eq!(*stage.watching.ended.borrow(), [Ending::Asked], "{lines:?}");
     }
 }
@@ -169,7 +191,7 @@ fn the_app_server_is_asked_to_end_whatever_came_of_it() {
 fn an_app_server_that_is_not_there_refuses_the_launch_and_has_nothing_to_end() {
     let stage = Stage::new();
     assert_eq!(
-        stage.arguments("x"),
+        stage.text("x"),
         Err("Cannot read native Codex instructions safely".to_owned())
     );
     assert!(stage.watching.ended.borrow().is_empty());
@@ -182,7 +204,7 @@ fn an_app_server_has_ten_seconds_from_its_start_and_is_asked_to_end_when_they_ar
     let mut driver = Driver::default();
     let services = stage.services.clone();
     driver.begin(0, async move {
-        arguments(&services, "worker", CODEX, "/work/app", "x").await
+        text(&services, "worker", CODEX, "/work/app", "x").await
     });
     assert!(driver.run().is_empty());
     assert_eq!(stage.fakes.time.waits(0), [10_000]);
@@ -210,7 +232,7 @@ fn a_line_is_bounded_at_two_mebibytes_and_a_longer_one_refuses_the_launch() {
         let stage = Stage::new();
         let (long, configured) = (padded(size), Stage::configured("x"));
         stage.app_server(&[&long, INITIALIZED, &configured], Ends::Asked);
-        assert_eq!(stage.arguments("x").is_ok(), ok, "{size}");
+        assert_eq!(stage.text("x").is_ok(), ok, "{size}");
     }
 }
 
@@ -235,7 +257,7 @@ fn only_the_answers_to_the_two_requests_are_heard_and_the_rest_is_let_by() {
         ],
         Ends::Asked,
     );
-    assert!(stage.arguments("x").unwrap()[1].contains("heard"));
+    assert!(stage.text("x").unwrap().contains("heard"));
     assert_eq!(stage.written().len(), 3);
 }
 
@@ -251,13 +273,13 @@ fn a_number_is_the_number_it_reads_as_and_an_answer_may_come_twice_or_early() {
         ],
         Ends::Asked,
     );
-    assert!(stage.arguments("x").unwrap()[1].contains("late"));
+    assert!(stage.text("x").unwrap().contains("late"));
     // Two answers to initialize: the configuration asked for twice.
     assert_eq!(stage.written().len(), 5);
 
     let stage = Stage::new();
     stage.app_server(&[&Stage::configured("early")], Ends::Asked);
-    assert!(stage.arguments("x").unwrap()[1].contains("early"));
+    assert!(stage.text("x").unwrap().contains("early"));
     assert_eq!(stage.written().len(), 1, "only initialize was asked");
 }
 
@@ -368,12 +390,9 @@ fn an_error_is_one_by_javascript_s_truth_and_so_is_a_configuration() {
     ] {
         let stage = Stage::new();
         stage.app_server(&[initialized, read], Ends::Asked);
-        let given = stage
-            .arguments("T")
-            .ok()
-            .map(|arguments| arguments[1].clone());
+        let given = stage.text("T").ok();
         let expected = instructions.map(|instructions| {
-            format!("developer_instructions=\"{instructions}\\n\\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\\n\\nT\"")
+            format!("{instructions}\n\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\nT")
         });
         assert_eq!(given, expected, "{initialized} {read}");
     }
@@ -384,7 +403,7 @@ fn a_line_of_null_refuses_the_launch_in_our_words_where_node_threw_out_of_its_ha
     let stage = Stage::new();
     stage.app_server(&["null", INITIALIZED], Ends::Asked);
     assert_eq!(
-        stage.arguments("x"),
+        stage.text("x"),
         Err("Cannot read native Codex instructions safely".to_owned())
     );
     assert_eq!(*stage.watching.ended.borrow(), [Ending::Asked]);
@@ -395,5 +414,141 @@ fn json_nested_past_a_hundred_and_twenty_seven_levels_is_no_json_to_the_dialogue
     let stage = Stage::new();
     let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
     stage.app_server(&[&deep, INITIALIZED, &Stage::configured("x")], Ends::Asked);
-    assert!(stage.arguments("x").is_err());
+    assert!(stage.text("x").is_err());
+}
+
+#[test]
+fn the_text_is_written_in_the_launchs_own_folder_readable_by_its_owner_alone_and_named_by_the_variable_the_supervisor_reads(
+) {
+    let home = tempfile::tempdir().unwrap();
+    let env = Env::from_vars([("CONSENSFLOW_HOME", home.path().to_str().unwrap())]);
+    let launch = LaunchId::new("11111111-1111-4111-8111-111111111111").unwrap();
+    let (name, file) = write(&env, &launch, "the role \u{e9}\n").unwrap();
+    assert_eq!(name, "CF_CODEX_ROLE_FILE");
+    let folder = home
+        .path()
+        .join("integrations")
+        .join("codex")
+        .join(launch.as_str());
+    assert_eq!(
+        std::path::PathBuf::from(&file),
+        folder.join("developer-instructions.md")
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "the role \u{e9}\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(std::path::Path::new(&file)), 0o600);
+        assert_eq!(mode(&folder), 0o700);
+    }
+    // It goes with the window.
+    crate::shared::launch_files::forget_launch(home.path().to_str().unwrap(), &launch).unwrap();
+    assert!(!folder.exists());
+}
+
+#[test]
+fn the_sub_agents_configuration_is_written_beside_the_role_as_private_and_named_by_its_own_variable(
+) {
+    let home = tempfile::tempdir().unwrap();
+    let env = Env::from_vars([("CONSENSFLOW_HOME", home.path().to_str().unwrap())]);
+    let launch = LaunchId::new("11111111-1111-4111-8111-111111111111").unwrap();
+    let texts = Texts {
+        role: "the role".to_owned(),
+        children: "Codex's own.\n\nNot the worker.".to_owned(),
+        kinds: vec!["default", "explorer", "worker"],
+    };
+    let said = write_children(&env, &launch, &texts).unwrap();
+    let [(name, file), (types, kinds)] = &said[..] else {
+        panic!("{said:?}");
+    };
+    assert_eq!(name, "CF_CODEX_SUBAGENT_FILE");
+    assert_eq!(types, "CF_CODEX_SUBAGENT_TYPES");
+    assert_eq!(kinds, "default,explorer,worker");
+    let folder = home
+        .path()
+        .join("integrations")
+        .join("codex")
+        .join(launch.as_str());
+    assert_eq!(
+        std::path::PathBuf::from(file),
+        folder.join("sub-agents.toml")
+    );
+    assert_eq!(
+        std::fs::read_to_string(file).unwrap(),
+        "developer_instructions = \"Codex's own.\\n\\nNot the worker.\"\n"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(std::path::Path::new(file)), 0o600);
+        assert_eq!(mode(&folder), 0o700);
+    }
+    crate::shared::launch_files::forget_launch(home.path().to_str().unwrap(), &launch).unwrap();
+    assert!(!folder.exists());
+}
+
+#[test]
+fn an_agent_type_the_owner_defines_stays_the_owners_and_one_they_do_not_is_ours() {
+    let stage = Stage::new();
+    let owners = json!({ "id": 2, "result": { "config": {
+        "developer_instructions": "User instructions.",
+        "agents": {
+            "max_threads": 4,
+            "worker": { "description": "My own worker.", "config_file": null },
+            "helper": { "description": "A helper." },
+            "explorer": null,
+        },
+    } } })
+    .to_string();
+    stage.app_server(&[INITIALIZED, &owners], Ends::Asked);
+    let texts = stage.texts("# The role").unwrap();
+    // `worker` is the owner's; a setting or a type of their own is no type of Codex's.
+    assert_eq!(texts.kinds, ["default", "explorer"]);
+    // With none of their own, every type of Codex's is ours.
+    let stage = Stage::new();
+    stage.app_server(&[INITIALIZED, &Stage::configured("x")], Ends::Asked);
+    assert_eq!(
+        stage.texts("# The role").unwrap().kinds,
+        ["default", "explorer", "worker"]
+    );
+}
+
+#[test]
+fn where_the_owner_defines_every_type_no_file_is_written_and_nothing_said() {
+    let home = tempfile::tempdir().unwrap();
+    let env = Env::from_vars([("CONSENSFLOW_HOME", home.path().to_str().unwrap())]);
+    let launch = LaunchId::new("11111111-1111-4111-8111-111111111111").unwrap();
+    let texts = Texts {
+        role: "the role".to_owned(),
+        children: "Not the worker.".to_owned(),
+        kinds: Vec::new(),
+    };
+    assert_eq!(write_children(&env, &launch, &texts).unwrap(), []);
+    assert!(
+        !home.path().join("integrations").exists(),
+        "nothing written"
+    );
+}
+
+#[test]
+fn the_sub_agents_instructions_are_one_toml_string_that_reads_back_as_they_were() {
+    for text in [
+        "plain",
+        "Back\\slash, \"quoted\", 'single', \u{2028} \u{7f} \u{1} \u{8} \u{c} \u{1f600}",
+        "lines\r\nand\ttabs\u{0}, \u{e9}, \"\"\" and ''' and \\u0041",
+        "",
+    ] {
+        let written = format!("developer_instructions = {}\n", toml_string(text));
+        let read: toml::Table = toml::from_str(&written).unwrap();
+        assert_eq!(read.len(), 1, "{written}");
+        assert_eq!(
+            read["developer_instructions"].as_str(),
+            Some(text),
+            "{written}"
+        );
+    }
 }

@@ -8,6 +8,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::digest::sha256_hex;
+use crate::sums::{SIGNATURE, SUMS};
 
 /// A folder that is gone when this is dropped.
 pub struct TempDir {
@@ -132,11 +133,13 @@ pub fn with_archive_url(latest: &str, url: &str) -> String {
     format!("{}{url}{}", &latest[..start], &latest[end..])
 }
 
-/// What a built release's folder holds: a path in it mapped to its bytes.
+/// What a built release's folder holds: a path in it mapped to its bytes, with
+/// the SHA256SUMS of its files and the signature the signing job adds
+/// ([`signed`]).
 pub fn built_files(base: &str, version: &str) -> Files {
     let mac = format!("ConsensFlow_{version}_aarch64");
     let text = |what: &str| format!("{what} of {version}\n");
-    Files::default()
+    let files = Files::default()
         .with("notes.txt", format!("ConsensFlow {version}, the notes\n"))
         .with(&format!("{mac}.dmg"), text("dmg"))
         .with(&format!("{mac}.app.tar.gz"), text("archive"))
@@ -149,24 +152,64 @@ pub fn built_files(base: &str, version: &str) -> Files {
         .with(
             &format!("portable/ConsensFlow_{version}_x64-portable.exe"),
             text("portable"),
-        )
+        );
+    signed(files)
+}
+
+/// Whether `path` is one of the release's files, which SHA256SUMS lists: not
+/// the notes, nor SHA256SUMS and its signature.
+fn listed(path: &str) -> bool {
+    !matches!(path, "notes.txt" | SUMS | SIGNATURE)
+}
+
+/// The SHA256SUMS of `files`' release files, by file name, in their order.
+fn sums_of(files: &Files) -> String {
+    files
+        .iter()
+        .filter(|(path, _)| listed(path))
+        .map(|(path, data)| {
+            format!(
+                "{}  {}\n",
+                sha256_hex(data),
+                path.rsplit('/').next().unwrap_or(path)
+            )
+        })
+        .collect()
+}
+
+/// `files` with their SHA256SUMS made again, and its signature by the tests'
+/// key ([`signing`](super::signing)) for the release the files are of, as the
+/// signing job leaves them beside the files: what a test changes in a file
+/// after it was built is signed again by this.
+pub fn signed(files: Files) -> Files {
+    let sums = sums_of(&files);
+    let version = files
+        .names()
+        .iter()
+        .find_map(|name| {
+            name.strip_prefix("ConsensFlow_")
+                .and_then(|rest| rest.strip_suffix("_aarch64.dmg"))
+        })
+        .expect("a release has its DMG")
+        .to_string();
+    let sig = super::signing::sign(
+        sums.as_bytes(),
+        &format!("ConsensFlow_{version}_SHA256SUMS"),
+    );
+    files.with(SUMS, &sums).with(SIGNATURE, sig)
 }
 
 /// A built release's files as the published release holds them, by file name,
-/// with the SHA256SUMS the publisher adds (`<sha256>  <name>`, as sha256sum
-/// writes them): what [`built_files`] made, less the notes.
+/// with their SHA256SUMS (`<sha256>  <name>`, as sha256sum writes them) and its
+/// signature: what [`built_files`] made, less the notes.
 pub fn published_assets(files: &Files) -> Files {
     let mut published = Files::default();
-    for (path, data) in files.iter() {
+    for (path, data) in signed(files.clone()).iter() {
         if path != "notes.txt" {
             published.set(path.rsplit('/').next().unwrap_or(path), data);
         }
     }
-    let sums: String = published
-        .iter()
-        .map(|(name, data)| format!("{}  {name}\n", sha256_hex(data)))
-        .collect();
-    published.with("SHA256SUMS", sums)
+    published
 }
 
 /// The bytes of a ustar archive of the files `names` (paths in it, each

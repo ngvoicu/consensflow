@@ -41,7 +41,7 @@ use crate::contract::Question;
 use crate::shared::trust::{chosen_at, names, offers, shows, DOWN, ENTER, UP};
 
 /// What Claude's prompt shows as ConsensFlow opens it, in full-permission mode.
-const PROMPT: &str = "bypass permissions on";
+pub(crate) const PROMPT: &str = "bypass permissions on";
 
 /// The choice that trusts the folder, and the one that ends the window.
 const YES: &str = "Yes, I trust this folder";

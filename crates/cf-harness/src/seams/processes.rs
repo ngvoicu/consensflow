@@ -85,7 +85,7 @@ impl SystemProcesses {
     }
 
     /// Forces every child still running to end: what this process does on
-    /// its way out, as Node's exit hook did for OpenCode's server. A program
+    /// its way out, as Node's exit hook did for the servers it started. A program
     /// run to its end (`run`, `capture`) goes with the group it leads on Unix
     /// and the tree it started on Windows: an update's installer, and the
     /// children that installer started, are not left changing the
@@ -462,6 +462,68 @@ mod tests {
                 assert!(ended.0.is_err() && ended.1.is_err(), "ended, not answered");
                 assert_eq!(running(&processes), 0);
             });
+    }
+
+    /// The process `/bin/sh` left in the background, whose id it wrote in `file`: killed
+    /// when this is dropped, whatever the test came to.
+    #[cfg(unix)]
+    struct Left<'a> {
+        file: &'a Path,
+    }
+
+    #[cfg(unix)]
+    impl Left<'_> {
+        fn pid(&self) -> Option<nix::unistd::Pid> {
+            let written = std::fs::read_to_string(self.file).ok()?;
+            written.trim().parse().ok().map(nix::unistd::Pid::from_raw)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for Left<'_> {
+        fn drop(&mut self) {
+            if let Some(pid) = self.pid() {
+                let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+            }
+        }
+    }
+
+    /// What a child's stop waits for (`shared::child`): a program that has exited has
+    /// ended, though a program it left holds its error stream open, which nothing here
+    /// reads, for thirty seconds more. Its stream is closed only then.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_has_exited_has_ended_though_a_program_it_left_holds_its_error_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("left");
+        let left = Left { file: &file };
+        let program = Program {
+            executable: "/bin/sh".into(),
+            args: vec![
+                "-c".to_owned(),
+                r#"/bin/sleep 30 </dev/null >/dev/null & echo $! > "$0""#.to_owned(),
+                file.to_string_lossy().into_owned(),
+            ],
+            cwd: None,
+            env: Env::from_vars([("PATH", "/usr/bin:/bin")]),
+        };
+        let processes = SystemProcesses::new(Env::default());
+        let (ended, closed) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let child = processes.spawn(program, Streams::Quiet).unwrap();
+                let ended = tokio::time::timeout(Duration::from_secs(10), child.ended()).await;
+                let closed = tokio::time::timeout(Duration::from_millis(300), child.closed()).await;
+                (ended, closed)
+            });
+        let pid = left.pid();
+        let holding = pid.is_some_and(|pid| nix::sys::signal::kill(pid, None).is_ok());
+        drop(left);
+        assert!(holding, "the program it left holds the stream ({pid:?})");
+        assert!(ended.is_ok(), "it has exited, so it has ended");
+        assert!(closed.is_err(), "its error stream is held open");
     }
 
     #[test]

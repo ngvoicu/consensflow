@@ -2,7 +2,8 @@
 
 use super::Ledger;
 use crate::{
-    projects, specs, DeletedProject, EventView, LedgerError, NewProject, ProjectView, SpecsChange,
+    meeting, projects, specs, DeletedProject, EventView, LedgerError, MessageView, NewProject,
+    ProjectView, SpecsChange,
 };
 
 impl Ledger {
@@ -33,6 +34,18 @@ impl Ledger {
         projects::delete_project(&mut self.store, id)
     }
 
+    /// The human starts (`on`) or stops a meeting with the project's chief: while
+    /// one is on, what is queued for the chief is held (3.0.7 chief-meeting).
+    pub fn set_meeting(&mut self, id: i64, on: bool) -> Result<ProjectView, LedgerError> {
+        meeting::set_meeting(&mut self.store, id, on)
+    }
+
+    /// The messages the project's meeting holds, in the order they will go; none
+    /// while no meeting is on.
+    pub fn held_by_meeting(&self, id: i64) -> Result<Vec<MessageView>, LedgerError> {
+        meeting::held(&self.store, id)
+    }
+
     /// Whether the human approves each message between two agents.
     pub fn set_gate(&mut self, id: i64, gate: bool) -> Result<ProjectView, LedgerError> {
         projects::set_gate(&mut self.store, id, gate)
@@ -52,6 +65,28 @@ impl Ledger {
         description: Option<&str>,
     ) -> Result<ProjectView, LedgerError> {
         projects::describe_project(&mut self.store, id, description)
+    }
+
+    /// Writes the rules the human gives a project's staff (plain text, at most
+    /// 8,000 bytes and 150 lines), or takes them away: none, or blank text. They
+    /// reach each window of the project when it next starts.
+    pub fn set_staff_rules(
+        &mut self,
+        id: i64,
+        rules: Option<&str>,
+    ) -> Result<ProjectView, LedgerError> {
+        projects::set_staff_rules(&mut self.store, id, rules)
+    }
+
+    /// Chooses the size, in tokens, at which the project's Claude member windows
+    /// compact (100,000 to 1,000,000), or takes the choice away: none is Claude's
+    /// own point. It reaches each window when it next starts.
+    pub fn set_claude_compaction(
+        &mut self,
+        id: i64,
+        window: Option<u32>,
+    ) -> Result<ProjectView, LedgerError> {
+        projects::set_claude_compaction(&mut self.store, id, window)
     }
 
     /// What the project says of specs: whether they are on, the folder and the

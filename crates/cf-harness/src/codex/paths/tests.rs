@@ -15,8 +15,6 @@ fn the_specmint_variant_the_human_installed_is_found_in_the_agents_skills_then_c
         &[".agents/skills", ".codex/skills"],
         &[
             ".claude/skills",
-            ".config/opencode/skills",
-            ".config/opencode/skill",
             ".pi/agent/skills",
             ".config/devin/skills",
             ".codex/skill",

@@ -1145,7 +1145,7 @@ fn a_monitor_that_said_its_time_ran_out_waits_while_a_command_runs_and_the_note_
 
 #[test]
 fn where_the_host_cannot_tell_the_windows_commands_the_note_says_it_waits_for_finish() {
-    // Windows: a job object has no groups, and the host answers null.
+    // A host that cannot tell them answers null (Windows did before T-906).
     let context = Context::new();
     let tiers = zeus_at_work(&context);
     context.background.commands_run(None);
@@ -1165,6 +1165,28 @@ fn where_the_host_cannot_tell_the_windows_commands_the_note_says_it_waits_for_fi
     }
     assert_eq!(tiers.notes("chief").len(), 1);
     assert!(context.background.looks() <= 9);
+}
+
+#[test]
+fn where_the_host_cannot_tell_the_windows_commands_the_task_is_held_until_a_look_finds_none() {
+    // T-906: Windows' host answered that it cannot tell, and a working task whose monitor
+    // had ended was held until Finish. The engine never takes it over blind: the answer is
+    // the result once a look finds no command.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(None);
+    ticks_ran_out(&context, "Watching");
+    for _ in 0..8 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working", "held, not taken blind");
+    context.background.commands_run(Some(0));
+    for _ in 0..2 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "done");
 }
 
 #[test]

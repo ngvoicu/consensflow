@@ -109,6 +109,8 @@ struct Request {
     starts_given_up: u32,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
+    /// The folder its project keeps its specs in, relative to the project.
+    folder: &'static str,
 }
 
 impl Default for Request {
@@ -122,6 +124,7 @@ impl Default for Request {
             first_message_ms: FIRST_MESSAGE_MS,
             starts_given_up: 0,
             specs: None,
+            folder: ".specs",
         }
     }
 }
@@ -150,7 +153,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
     let id = LaunchId::new(LAUNCH).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant).unwrap());
+        .map(|variant| adapter.specmint(variant, request.folder).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -165,7 +168,12 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
         specs: request
             .specs
             .zip(skill.as_ref())
-            .map(|(variant, skill)| Specs { variant, skill }),
+            .map(|(variant, skill)| Specs {
+                variant,
+                folder: request.folder,
+                skill,
+            }),
+        compaction: None,
         first_message_ms: request.first_message_ms,
         starts_given_up: request.starts_given_up,
     };
@@ -246,17 +254,27 @@ fn replies(body: &str) -> Served {
     }
 }
 
-/// The launch arguments without the role text, which every window carries as
-/// `-c developer_instructions=…`.
+/// The launch arguments, which hold no role text: a window's goes by the file its
+/// environment names ([`role_file`]).
 fn without_role(argv: &[String]) -> Vec<String> {
-    let at = argv
+    assert!(
+        !argv
+            .iter()
+            .any(|arg| arg.contains("developer_instructions")),
+        "the role is on the command line: {argv:?}"
+    );
+    argv.to_vec()
+}
+
+/// The role text a window was launched with: the file its environment names, as
+/// its supervisor reads it.
+fn role_file(plan: &Prepared) -> String {
+    let file = plan
+        .env
         .iter()
-        .position(|arg| arg.starts_with("developer_instructions="))
-        .expect("the role text rides along");
-    assert_eq!(argv[at - 1], "-c");
-    let mut rest = argv.to_vec();
-    rest.drain(at - 1..=at);
-    rest
+        .find_map(|(name, value)| (name == "CF_CODEX_ROLE_FILE").then_some(value))
+        .expect("the window's environment names its role's file");
+    fs::read_to_string(file).expect("the role's file is there")
 }
 
 fn words(words: &[&str]) -> Vec<String> {
@@ -313,12 +331,49 @@ fn runs_codex_under_its_supervisor_in_full_permission_mode_its_task_on_no_comman
     // (`FirstMessage::Delivered`): every process on the machine reads a command line.
     assert_eq!(without_role(&plan.argv), expected);
     assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
-    let [(name, bridge)] = &plan.env[..] else {
+    let [(name, bridge), (role, file), (children, children_file), (types, kinds)] = &plan.env[..]
+    else {
         panic!("{:?}", plan.env);
     };
     assert_eq!(name, "CF_CODEX_SESSION_BRIDGE");
     let told: Value = serde_json::from_str(bridge).unwrap();
     assert_eq!(told["launchId"], LAUNCH);
+    assert_eq!(role, "CF_CODEX_ROLE_FILE");
+    assert_eq!(
+        *file,
+        path::join(&[
+            &home.root,
+            "consensflow",
+            "integrations",
+            "codex",
+            LAUNCH,
+            "developer-instructions.md"
+        ])
+    );
+    // What its sub-agents start with in place of the role, beside it, for each of Codex's
+    // own agent types (the owner's configuration here defines none).
+    assert_eq!(children, "CF_CODEX_SUBAGENT_FILE");
+    assert_eq!(types, "CF_CODEX_SUBAGENT_TYPES");
+    assert_eq!(kinds, "default,explorer,worker");
+    assert_eq!(
+        *children_file,
+        path::join(&[
+            &home.root,
+            "consensflow",
+            "integrations",
+            "codex",
+            LAUNCH,
+            "sub-agents.toml"
+        ])
+    );
+    let configured: toml::Table =
+        toml::from_str(&fs::read_to_string(children_file).unwrap()).unwrap();
+    let told = configured["developer_instructions"].as_str().unwrap();
+    assert!(
+        told.ends_with("You are a sub-agent that a ConsensFlow worker started. You are not the worker: you have no board identity, so never run cf; answer your parent in your final message."),
+        "{told}"
+    );
+    assert!(!told.contains(ROLE), "a sub-agent is given no role: {told}");
     assert_eq!(plan.drop_env, ["OPENAI_API_KEY"]);
 }
 

@@ -60,15 +60,13 @@ runs = [
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/message.rs"
-find = '        Some(message) => Ok(Answer::ok(json!({ "message": value(&message)? }))),'
+find = '            let mut answer = json!({ "message": value(&message)? });'
 replace = '''
-        Some(message) => {
             if message.kind == "answer" && message.recipient_id == caller.participant.id {
                 let mut ledger = context.ledger.borrow_mut();
                 ledger.receive_read(caller.participant.id, &[message.id], cf_ledger::Read::Inbox)?;
             }
-            Ok(Answer::ok(json!({ "message": value(&message)? })))
-        }'''
+            let mut answer = json!({ "message": value(&message)? });'''
 
 [[plant]]
 name = "read: the board takes the word of anyone for any answer"
@@ -77,8 +75,8 @@ runs = ["daemon-lib-routes-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = 'message.recipient_id == recipient && message.state == "queued"'
-replace = 'message.state == "queued"'
+find = '.filter(|message| message.recipient_id == recipient)'
+replace = '.filter(|_| true)'
 
 [[plant]]
 name = "read: cf says what it wrote before it has written it"
@@ -88,10 +86,14 @@ runs = ["cf-lib-board"]
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
 find = '''
-        Ok(Said { data, text, wrote }) => {
+        Ok(Said {
+            data, text, wrote, ..
+        }) => {
             let printed = if json {'''
 replace = '''
-        Ok(Said { data, text, wrote }) => {
+        Ok(Said {
+            data, text, wrote, ..
+        }) => {
             if let Some(wrote) = &wrote {
                 wrote.acknowledge(board);
             }
@@ -237,18 +239,6 @@ replace = '''
             let (asking, polling, raised) ='''
 
 [[plant]]
-name = "native: OpenCode takes any reply that resolved for received"
-meant = "OpenCode: the answer is received only when the SDK's reply took: an error or a status that is no success comes back as a result, not a throw"
-runs = ["opencode-extension"]
-
-[[plant.edit]]
-file = "hosts/opencode-extension/consensflow-session.mjs"
-find = '''
-    if (result === true) return true
-    return result != null && !result.error && (result.response?.ok === true || result.data === true)'''
-replace = "    return true"
-
-[[plant]]
 name = "claim: a window at its own dialog keeps the claim on its answer"
 meant = "a_claim_whose_door_gave_up_for_the_windows_own_dialog_is_voided_and_the_answer_is_pasted_once_the_dialog_is_gone"
 runs = ["engine-dispatcher"]
@@ -312,16 +302,6 @@ runs = ["board-lib-door"]
 file = "crates/cf-board/src/door.rs"
 find = "            Err(cause) if cause.is_unreachable() && lost < retries.len() => {"
 replace = "            Err(cause) if cause.is_unreachable() && lost < 0 => {"
-
-[[plant]]
-name = "claim: OpenCode's door gives up at the first poll that gets no answer"
-meant = "OpenCode: a poll whose reply was lost is asked again and the answer is handed over once, then acknowledged"
-runs = ["opencode-extension"]
-
-[[plant.edit]]
-file = "hosts/lib/question-door.js"
-find = "      if (cause?.refused || lost >= retries.length) throw cause"
-replace = "      throw cause"
 
 [[plant]]
 name = "gate: the brief is given to a window that did not give the task while it waits at the gate"

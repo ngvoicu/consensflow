@@ -51,6 +51,9 @@ pub struct Target<'a> {
     pub host: &'a dyn PaneHost,
 }
 
+/// The extension's reason for a message it refused while Pi was at work.
+const BUSY: &str = "chief busy";
+
 /// What a send answered (the object `send` returned): what Pi's window did
 /// with the message, as far as the channel can tell.
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +152,19 @@ impl Answer {
             },
             _ => Self::uncertain(Some("invalid-admission".to_owned()), Some(ack)),
         }
+    }
+
+    /// Whether the extension refused the message, before it sent it, because Pi was
+    /// at work: its own word for that (`nativeTuiState`'s `chief busy`, in
+    /// `hosts/pi-extension/consensflow-delivery.mjs`). Nothing reached Pi.
+    pub(crate) fn busy(&self) -> bool {
+        self.admitted == Some(false)
+            && self
+                .ack
+                .as_ref()
+                .and_then(|ack| ack.get("reason"))
+                .and_then(Value::as_str)
+                == Some(BUSY)
     }
 
     /// The answer as an adapter reads a send's (`admission`).
@@ -258,20 +274,23 @@ async fn before(
 }
 
 /// The folders the record and the acknowledgement go in, made if they are
-/// not there, and the record written to its temporary (`publishRaw`).
+/// not there, and the record written to its temporary (`publishRaw`). The record
+/// holds the message's words, as private as a launch's prompt: the folders made
+/// are their owner's alone and the record its owner's to read and write, where
+/// Node's defaults made them anyone's to read (Calliope's P2 on T-697, its class).
 fn write_record(
     target: &Target<'_>,
     record: &Value,
     ack_file: &str,
     temporary: &str,
 ) -> Result<(), FileError> {
-    make_folder(Path::new(target.inbox), 0o777, Mkdir::Promise)?;
+    make_folder(Path::new(target.inbox), 0o700, Mkdir::Promise)?;
     // The folder of the file `join` made of the acknowledgements' folder.
     if let Some(folder) = Path::new(ack_file).parent() {
-        make_folder(folder, 0o777, Mkdir::Promise)?;
+        make_folder(folder, 0o700, Mkdir::Promise)?;
     }
     let text = format!("{}\n", js::stringify(record));
-    write_file(Path::new(temporary), text.as_bytes(), 0o666)
+    write_file(Path::new(temporary), text.as_bytes(), 0o600)
 }
 
 /// The pane a claim can name: a generation is a whole number from 1, and one

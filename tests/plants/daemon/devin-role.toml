@@ -1,0 +1,121 @@
+# Devin's session hook waits for its window's log to name the session (T-1065).
+#
+# Devin runs a session's SessionStart hook as its `session/new` returns, and its window writes the
+# record that names the conversation to the wire log on a path of its own, a few milliseconds before
+# or after. The hook (`devin/session_hook.rs`, `cf hook devin-session`) gave the role text only to the
+# conversation the log names, and looked once: in 2 of 7 full live runs (`cargo xtask live own-cf`)
+# the log held two or three `{}` lines at that moment, the hook said nothing, and the worker started
+# with no role text (it ran the bare `cf`, the run's decoy). The hook now looks every 10 ms, for at
+# most 3 s (Devin gives it 5: `install::SESSION_HOOK_SECONDS`), until the log names the event's
+# session; a log that names another conversation throughout, or none, gets nothing when the wait is
+# over, as before, and an event that is no session's start, or a child agent's, is not waited for.
+#
+# Held by `devin::session_hook`'s tests and by the dispatcher of `cf` (the real `cf hook
+# devin-session`, with the log named 400 ms after the hook's start).
+#
+# Every name holds `devin role`, so `npm run plants:daemon -- "devin role"` runs them all.
+
+[run]
+devin-role-lib-hook = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::session_hook::"]
+devin-role-cf-dispatch = ["cargo", "test", "--offline", "-p", "cf", "--test", "dispatch", "devins_session_hook"]
+
+[[plant]]
+name = "devin role: the hook looks at the log once"
+meant = "a_start_before_the_log_names_its_conversation_is_answered_when_the_log_does"
+runs = ["devin-role-lib-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "    let until = Instant::now() + within;"
+replace = "    let until = Instant::now();"
+
+[[plant]]
+name = "devin role: the hook that looks at the log once is run as cf runs it"
+meant = "devins_session_hook_started_before_the_log_names_its_conversation_waits_for_the_log"
+runs = ["devin-role-cf-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "    let until = Instant::now() + within;"
+replace = "    let until = Instant::now();"
+
+[[plant]]
+name = "devin role: the hook's own wait is nothing"
+meant = "devins_session_hook_started_before_the_log_names_its_conversation_waits_for_the_log"
+runs = ["devin-role-cf-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "context(input, role_file, wire_log, NAMED_WITHIN)"
+replace = "context(input, role_file, wire_log, Duration::ZERO)"
+
+[[plant]]
+name = "devin role: a log that names another conversation ends the wait for a new one's"
+meant = "a_new_conversations_start_waits_for_the_log_to_leave_the_one_the_window_left"
+runs = ["devin-role-lib-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "        if selected_session(wire_log).ok().flatten().as_deref() == Some(session) {"
+replace = "        if selected_session(wire_log).ok().flatten().is_some() {"
+
+[[plant]]
+name = "devin role: a log that names another conversation throughout gives its role text"
+meant = "a_start_the_log_never_names_gets_nothing_once_the_wait_is_over"
+runs = ["devin-role-lib-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "        if selected_session(wire_log).ok().flatten().as_deref() == Some(session) {"
+replace = "        if selected_session(wire_log).ok().flatten().is_some() {"
+
+[[plant]]
+name = "devin role: the wait is longer than Devin gives the hook"
+meant = "the_wait_ends_inside_the_time_devin_gives_the_hook"
+runs = ["devin-role-lib-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "const NAMED_WITHIN: Duration = Duration::from_secs(3);"
+replace = "const NAMED_WITHIN: Duration = Duration::from_secs(6);"
+
+[[plant]]
+name = "devin role: Devin is given less time for the hook than its wait takes"
+meant = "the_wait_ends_inside_the_time_devin_gives_the_hook"
+runs = ["devin-role-lib-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/install.rs"
+find = "pub(super) const SESSION_HOOK_SECONDS: u32 = 5;"
+replace = "pub(super) const SESSION_HOOK_SECONDS: u32 = 2;"
+
+[[plant]]
+name = "devin role: the log is looked at every two seconds"
+meant = "the_wait_ends_inside_the_time_devin_gives_the_hook"
+runs = ["devin-role-lib-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "const NAMED_EVERY: Duration = Duration::from_millis(10);"
+replace = "const NAMED_EVERY: Duration = Duration::from_secs(2);"
+
+[[plant]]
+name = "devin role: the hook sleeps the whole wait after a look that found nothing"
+meant = "a_start_before_the_log_names_its_conversation_is_answered_when_the_log_does"
+runs = ["devin-role-lib-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "        std::thread::sleep(NAMED_EVERY.min(until - now));"
+replace = "        std::thread::sleep(until - now);"
+
+[[plant]]
+name = "devin role: a child agent's start is waited for"
+meant = "what_needs_no_log_does_not_wait_for_it"
+runs = ["devin-role-lib-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = '''        || js::truthy(event.get("agent_id"))
+'''
+replace = ""

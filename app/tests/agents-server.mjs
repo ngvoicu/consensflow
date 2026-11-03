@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { assertBuilt, NATIVE_CF } from '../../tests/choice.mjs'
 import { fakeExecutable, windowsEnv } from '../../tests/helpers.mjs'
 
-const INSTALLED = ['claude', 'codex', 'pi', 'opencode', 'devin']
+const INSTALLED = ['claude', 'codex', 'pi', 'devin']
 
 /** `cf` of this checkout's build (`npm run build:cf`), run with the environment `env` gives. */
 function cf(args, env) {

@@ -8,9 +8,10 @@
 //!
 //! A Claude Code window of a run never runs on the owner's `~/.claude`: it runs on a
 //! config folder of the run's own, with a copy of the Keychain's login (the first
-//! run on a machine asks the owner once to allow the Keychain read), which is removed
-//! when the run is over, `--keep` or not (`--keep` copies the conversations and sessions
-//! it kept into the kept home first, never the login). A run refuses to start when the login's
+//! run on a machine asks the owner once to allow the Keychain read; on Linux and on
+//! Windows, of `~/.claude/.credentials.json`), which is removed when the run is over,
+//! `--keep` or not (`--keep` copies the conversations and sessions it kept into the kept
+//! home first, never the login). A run refuses to start when the login's
 //! access token expires within two hours (Claude Code refreshes it only when five minutes of
 //! it are left: run again after that), and fails if the owner's `settings.json`
 //! changed or `~/.claude.json`, `history.jsonl` or `projects` gained anything of its
@@ -47,6 +48,12 @@
 //! that is the first word after the command's) does not reach it, and a flag of a
 //! test is never called that. Beyond a `--` or a flag of cargo's it is the test
 //! program's, as every word there is.
+//!
+//! `cargo xtask live --set <set>` runs a named set of live runs ([`SETS`]), one after another,
+//! each as `cargo xtask live <its words>` would, and says what each came to: the set fails
+//! when any run did, after all of them ran. `windows` is the regular live run on a Windows
+//! machine (the release's step 2 names it): the checks only a Windows machine holds, the
+//! typed marks of `live parity` among them (T-961, row 32; T-972).
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -59,9 +66,27 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
     about: "Run a live test of cf-e2e (the tests/live_<name>.rs files): it runs real harnesses on the machine's own logins and spends real quota, so it is ignored unless asked for and is no part of check",
-    usage: "<name> [harness ...] [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
+    usage: "<name> [harness ...] | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
     run: Run::Native(live),
 }];
+
+/// The named sets of live runs, each a list of the words of `cargo xtask live` that run one.
+/// `windows`: the typed marks and the interrupt after them in a Codex and a Devin member's box
+/// (`parity`, T-548), the member's shell finding its window's own `cf` (`own-cf`), and a
+/// human's paste into a Codex window sent by its Enter (`paste-enter`). Devin's and Muse's
+/// windows on Windows run on the owner's own folders (the kit knows no home of the run's own
+/// for them there): a run that names them reads and writes the owner's Devin or Muse store.
+pub const SETS: &[(&str, &[&str])] = &[(
+    "windows",
+    &[
+        "parity codex devin",
+        "own-cf claude codex pi",
+        "paste-enter codex",
+    ],
+)];
+
+/// The flag that names a set.
+const SET: &str = "--set";
 
 /// What every variable a live test reads its options by begins with
 /// (`cf_e2e::live::PREFIX`, which a test here holds this to).
@@ -100,8 +125,70 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
         return Ok(0);
     }
     let names = tests(&context.root)?;
+    if args.first().is_some_and(|word| word == SET) {
+        return run_set(context, args, &names, console);
+    }
     let asked = parse(args, &names)?;
     Ok(process::run(&invocation(context, &asked), &context.env)?)
+}
+
+/// The runs of a set, each the line of [`SETS`] it is and what it asks.
+type SetRuns = Vec<(&'static str, Asked)>;
+
+/// The runs of the set `--set <name>` names, each as its words ask, every one of them read
+/// before the first starts: a word of the set that names no test is refused, and nothing runs.
+fn set_runs(args: &[OsString], names: &[String]) -> Result<(String, SetRuns), Failure> {
+    let listed = || {
+        SETS.iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let name = match args {
+        [_, name] => name.to_string_lossy().into_owned(),
+        _ => {
+            return Err(Failure::Usage(format!(
+                "--set takes the name of a set, and nothing after it: {}",
+                listed()
+            )))
+        }
+    };
+    let (_, lines) = SETS
+        .iter()
+        .find(|(set, _)| *set == name)
+        .ok_or_else(|| Failure::Usage(format!("no set is called {name}: {}", listed())))?;
+    let runs = lines
+        .iter()
+        .map(|line| {
+            let words: Vec<OsString> = line.split_whitespace().map(OsString::from).collect();
+            parse(&words, names).map(|asked| (*line, asked))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((name, runs))
+}
+
+/// Runs the set `--set <name>` names, one run after another, and says what each came to: 0
+/// when every run passed.
+fn run_set(
+    context: &Context,
+    args: &[OsString],
+    names: &[String],
+    console: &mut Console,
+) -> Result<i32, Failure> {
+    let (name, runs) = set_runs(args, names)?;
+    let mut came = Vec::new();
+    for (line, asked) in &runs {
+        writeln!(console.out, "== live {line}")?;
+        let status = process::run(&invocation(context, asked), &context.env)?;
+        came.push(format!(
+            "{} live {line}",
+            if status == 0 { "ok    " } else { "FAILED" }
+        ));
+    }
+    writeln!(console.out, "\nthe set {name}:\n{}", came.join("\n"))?;
+    Ok(i32::from(
+        came.iter().any(|line| line.starts_with("FAILED")),
+    ))
 }
 
 /// Whether the words ask for help: `--help` or `-h` among the words that are live's

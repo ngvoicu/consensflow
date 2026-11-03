@@ -3,6 +3,7 @@
 
 use cf_base::js;
 use cf_base::refusal::Refusal;
+use cf_proto::cf_word::CfWord;
 use cf_proto::ledger::{ChiefConversation, HistoryItem};
 
 use super::text::{defuse, delivered, first_line, name_of, typed_before, Shown};
@@ -19,6 +20,7 @@ pub(super) fn entries_of(
     message: Lookup<'_>,
     tools: bool,
     find: Option<&str>,
+    cf: &CfWord,
 ) -> Result<Vec<String>, Refusal> {
     let mut entries = Vec::new();
     let needle = find.map(str::to_lowercase);
@@ -45,7 +47,7 @@ pub(super) fn entries_of(
             entries.push(format!("── The chief on {harness}, {when}{left_out} ──"));
         }
         for item in &conversation.items {
-            let Some(shown) = render(item, &view.harness, message, tools)? else {
+            let Some(shown) = render(item, &view.harness, message, tools, cf)? else {
                 continue;
             };
             match &needle {
@@ -67,6 +69,7 @@ fn render(
     harness: &str,
     message: Lookup<'_>,
     tools: bool,
+    cf: &CfWord,
 ) -> Result<Option<String>, Refusal> {
     let text = &item.text;
     if item.role == "tool" {
@@ -93,7 +96,7 @@ fn render(
     };
     // What the human had typed before a delivery went in with it.
     let before = js::trim(typed_before(text, &header));
-    let outcome = delivery_line(header.id, message)?;
+    let outcome = delivery_line(header.id, message, cf)?;
     Ok(Some(if before.is_empty() {
         outcome
     } else {
@@ -103,14 +106,14 @@ fn render(
 
 /// A delivery as one line: what it was, and what came of it. `digits` are the
 /// id the header names, read as `Number(digits)` was.
-fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String, Refusal> {
+fn delivery_line(digits: &str, message: Lookup<'_>, cf: &CfWord) -> Result<String, Refusal> {
     let (id, ledger_id) = message_id(digits);
     let found = match ledger_id {
         Some(ledger_id) => message(ledger_id)?,
         None => None,
     };
     Ok(match found {
-        Some(m) => outcome_line(&id, &Gist::from(&m)),
+        Some(m) => outcome_line(&id, &Gist::from(&m), cf),
         None => format!("· m-{id}: a message ConsensFlow delivered (no longer on record)"),
     })
 }
@@ -124,8 +127,9 @@ pub(super) fn message_id(digits: &str) -> (String, Option<i64>) {
     (js::number_text(number), ledger_id)
 }
 
-/// A delivered message `m`, named `id`, as one line: what it was, and what came of it.
-pub(super) fn outcome_line(id: &str, m: &Gist<'_>) -> String {
+/// A delivered message `m`, named `id`, as one line: what it was, and what came of it, and the
+/// command that reads it, which `cf` starts: the window's own, where a window is to run it.
+pub(super) fn outcome_line(id: &str, m: &Gist<'_>, cf: &CfWord) -> String {
     let from = m
         .sender
         .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"));
@@ -135,10 +139,10 @@ pub(super) fn outcome_line(id: &str, m: &Gist<'_>) -> String {
     let task = Shown(&m.task_number);
     let gist = || defuse(&first_line(m.body, 160));
     match m.kind {
-        "result" => format!("· m-{id}: {from}'s result{on} (cf task get T-{task})"),
+        "result" => format!("· m-{id}: {from}'s result{on} ({cf} task get T-{task})"),
         "question" => {
             format!(
-                "· m-{id}: {from} asked{on}: \"{}\" (cf inbox read m-{id})",
+                "· m-{id}: {from} asked{on}: \"{}\" ({cf} inbox read m-{id})",
                 gist()
             )
         }
@@ -146,7 +150,7 @@ pub(super) fn outcome_line(id: &str, m: &Gist<'_>) -> String {
         "answer" => format!("· m-{id}: {from} answered{on}: \"{}\"", gist()),
         _ if m.is_handoff() => format!("· m-{id}: the handoff that brought this chief in"),
         _ => format!(
-            "· m-{id}: a note from {from}{on}: \"{}\" (cf inbox read m-{id})",
+            "· m-{id}: a note from {from}{on}: \"{}\" ({cf} inbox read m-{id})",
             gist()
         ),
     }
@@ -163,15 +167,15 @@ mod tests {
         let nothing =
             |_: i64| -> Result<Option<MessageView>, Refusal> { panic!("no id to ask for") };
         for digits in ["99999999999999999999", "9223372036854775808"] {
-            let line = delivery_line(digits, &nothing).unwrap();
+            let line = delivery_line(digits, &nothing, &CfWord::bare()).unwrap();
             assert!(line.ends_with("(no longer on record)"), "{line}");
         }
         assert_eq!(
-            delivery_line("1000000000000000000000", &nothing).unwrap(),
+            delivery_line("1000000000000000000000", &nothing, &CfWord::bare()).unwrap(),
             "· m-1e+21: a message ConsensFlow delivered (no longer on record)"
         );
         assert_eq!(
-            delivery_line(&"9".repeat(400), &nothing).unwrap(),
+            delivery_line(&"9".repeat(400), &nothing, &CfWord::bare()).unwrap(),
             "· m-Infinity: a message ConsensFlow delivered (no longer on record)"
         );
     }

@@ -2,8 +2,8 @@
 //! temp folder, whatever the rig is built for: the real harnesses' too (`live::rig`), whose
 //! windows then open in no git repository. A home under the checkout would put them in
 //! ConsensFlow's own: Claude Code would read the repository's settings and instructions,
-//! Codex would take its root as the project for trust, and OpenCode would name its project
-//! by it, so that every live window shared one. That is another test than the one the live
+//! Codex would take its root as the project for trust, so that every live window shared
+//! one. That is another test than the one the live
 //! suites were made for.
 //!
 //! A run that was killed leaves its rigs' homes, and so does `CONSENSFLOW_LIVE_KEEP`. A

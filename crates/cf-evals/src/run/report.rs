@@ -19,6 +19,8 @@ use crate::plan::{ChiefSetup, Staff};
 use crate::scenarios::Scenario;
 use crate::{Error, Result};
 
+use super::stand_in::Taken;
+
 /// What the owner did, counted: the nudges, the answers and the follow-ups.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Said {
@@ -57,8 +59,14 @@ pub struct Card<'a> {
     pub refused: Vec<Refused>,
     pub approvals: i64,
     pub log: Value,
+    /// The briefs the stand-in worker took, for a run that has one.
+    pub scripted: Option<Vec<Taken>>,
     pub path: PathBuf,
 }
+
+/// What a report says of a worker that is a script: that it is one, and what that means.
+const SCRIPTED_WORK_NOTE: &str = "The worker of this run is a script (Scenario::stand_in_work): it writes the same pages whatever the brief says, and cannot follow one. \
+`answers` are the briefs it took, in order, each with the answer of the script it was given, the files it wrote, and `unheld`: the files the brief told it to make or change that the script holds nothing for.";
 
 /// A run of the bare arm, to be kept.
 pub struct Bare<'a> {
@@ -124,7 +132,7 @@ impl Card<'_> {
             .iter()
             .map(|agent| (agent.id.clone(), json!(agent.model)))
             .collect();
-        json!({
+        let mut value = json!({
             "scenario": self.scenario.id,
             "chief": options.chief,
             "model": self.chief.model,
@@ -150,7 +158,14 @@ impl Card<'_> {
             "gate": options.gate,
             "approvals": self.approvals,
             "log": self.log,
-        })
+        });
+        if let Some(taken) = &self.scripted {
+            value["scriptedWork"] = json!({
+                "note": SCRIPTED_WORK_NOTE,
+                "answers": taken.iter().map(Taken::to_value).collect::<Vec<_>>(),
+            });
+        }
+        value
     }
 
     /// Whether the run held: every expectation and every check of the board.
@@ -179,6 +194,24 @@ impl Card<'_> {
         verdict_lines(floor, &self.checks)?;
         floor.say("  the plumbing:")?;
         verdict_lines(floor, &self.mechanics)?;
+        if let Some(taken) = &self.scripted {
+            floor.say(format!(
+                "  the worker is a script: it took {} briefs and writes the same pages whatever they say",
+                taken.len()
+            ))?;
+            for (at, brief) in taken
+                .iter()
+                .enumerate()
+                .filter(|(_, brief)| !brief.unheld.is_empty())
+            {
+                floor.say(format!(
+                    "  the script was asked for what it holds not (brief {}, answered with its answer {}): {}",
+                    at + 1,
+                    brief.given,
+                    brief.unheld.join(", ")
+                ))?;
+            }
+        }
         if metrics.chief_turns == 0 {
             floor.say("  the chief's screen ended with:")?;
             let tail = self.screen.len().saturating_sub(8);
@@ -234,11 +267,14 @@ impl Card<'_> {
 /// A line to each check: `  PASS the page is fixed`.
 fn verdict_lines(floor: &mut Floor, checks: &[Check]) -> Result {
     for check in checks {
-        floor.say(format!(
-            "  {} {}",
-            if check.ok { "PASS" } else { "FAIL" },
-            check.name
-        ))?;
+        let word = if check.unmet {
+            "UNMET"
+        } else if check.ok {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        floor.say(format!("  {word} {}", check.name))?;
     }
     Ok(())
 }

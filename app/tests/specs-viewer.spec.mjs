@@ -600,6 +600,82 @@ test.describe('the registry', () => {
     await expect(shown(viewer).locator('table th')).toHaveText(['Spec', 'State'])
   })
 
+  // Specmint writes `ID | Title | Status | Priority | Progress | Updated`; another tool that keeps
+  // the same six columns (a kluris registry has Progress before Priority) is read by their names.
+  const SPECS = [
+    ['user-auth', 'User Auth System', 'active', 'high', '5/12', '2026-10-14'],
+    ['api-refactor', 'API Refactoring', 'paused', 'medium', '2/8', '2026-10-09'],
+    ['upload-fix', 'Fix File Upload Bug', 'completed', 'low', '5/5', '2026-09-30'],
+    ['legacy-cleanup', 'Legacy Cleanup', 'archived', 'low', '3/3', '2026-08-21'],
+  ]
+  const COLUMN_NAMES = ['ID', 'Title', 'Status', 'Priority', 'Progress', 'Updated']
+
+  /** The registry of `SPECS` with its columns in `order` (names), each written as `write` says. */
+  const registryWith = (order, write = (name) => name) => {
+    const at = order.map((name) => COLUMN_NAMES.findIndex((own) => own.toLowerCase() === name))
+    const line = (cells) => `| ${at.map((place) => cells[place]).join(' | ')} |`
+    return [
+      '# Spec Registry',
+      '',
+      line(COLUMN_NAMES.map(write)),
+      `|${order.map(() => '---').join('|')}|`,
+      ...SPECS.map(line),
+      '',
+    ].join('\n')
+  }
+
+  for (const [what, order, write] of [
+    [
+      'Progress before Priority, as a kluris registry has it',
+      ['id', 'title', 'status', 'progress', 'priority', 'updated'],
+    ],
+    [
+      'in any order, whatever the case of the names',
+      ['updated', 'priority', 'title', 'progress', 'id', 'status'],
+      (name) => name.toUpperCase(),
+    ],
+  ]) {
+    test(`reads its columns by their names: ${what}`, async ({ page }) => {
+      const data = model()
+      data.specs[1].files['registry.md'] = answerFor(
+        'registry.md',
+        Buffer.from(registryWith(order, write)),
+      )
+      await open(page, data)
+      const viewer = await openViewer(page)
+      const rows = shown(viewer).getByRole('list', { name: 'Specs' }).locator('.registry-row')
+      await expect(rows.locator('.registry-title strong')).toHaveText(SPECS.map((spec) => spec[1]))
+      await expect(rows.locator('.registry-title small')).toHaveText(SPECS.map((spec) => spec[0]))
+      await expect(rows.locator('.status-chip')).toHaveText(SPECS.map((spec) => spec[2]))
+      await expect(rows.locator('.registry-priority')).toHaveText(SPECS.map((spec) => spec[3]))
+      await expect(rows.locator('.progress-words')).toHaveText(SPECS.map((spec) => spec[4]))
+      await expect(rows.locator('.registry-updated')).toHaveText(SPECS.map((spec) => spec[5]))
+      await expect(rows.first().getByRole('progressbar')).toHaveAttribute('aria-valuenow', '5')
+      await rows.nth(1).click()
+      await expect(fileIn(viewer, 'api-refactor/SPEC.md')).toHaveAttribute('aria-current', 'true')
+    })
+  }
+
+  test('with a column missing, one more, or one twice shows as markdown', async ({ page }) => {
+    for (const [header, count] of [
+      ['| ID | Title | Status | Progress | Updated |', 5],
+      ['| ID | Title | Status | Priority | Progress | Updated | Owner |', 7],
+      ['| ID | Title | Status | Status | Progress | Updated |', 6],
+    ]) {
+      const data = model()
+      const rule = `|${Array.from({ length: count }, () => '---').join('|')}|`
+      data.specs[1].files['registry.md'] = answerFor(
+        'registry.md',
+        Buffer.from(`# Our specs\n\n${header}\n${rule}\n`),
+      )
+      await open(page, data)
+      const viewer = await openViewer(page)
+      await expect(shown(viewer).locator('.registry-row')).toHaveCount(0)
+      await expect(shown(viewer).locator('h1')).toHaveText('Our specs')
+      await expect(shown(viewer).locator('table th')).toHaveCount(count)
+    }
+  })
+
   test('of thousands of specs draws its first 500 rows and says how many it lists', async ({
     page,
   }) => {

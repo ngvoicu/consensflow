@@ -2,8 +2,10 @@
 //! and the TUI, and ConsensFlow's own variables set in Codex's shell policy.
 
 use std::ffi::OsString;
+use std::path::Path;
 
 use cf_base::env::Env;
+use cf_proto::codex::agent_types::AgentType;
 
 /// The flag that opens Codex in full-permission mode.
 pub(crate) const BYPASS: &str = "--dangerously-bypass-approvals-and-sandbox";
@@ -75,31 +77,53 @@ fn json_string(text: &str) -> String {
     serde_json::Value::from(text).to_string()
 }
 
-/// ConsensFlow's own variables, set explicitly in Codex's shell policy: a
+/// What the app-server is started with so that a sub-agent of each of `kinds`, Codex's
+/// own agent types, starts from the configuration in `file` (`agents.<type>.config_file`),
+/// which holds its developer instructions alone, in place of the thread that started it.
+/// A type defined in the configuration is the configuration's whole, and one with no
+/// words is dropped, so each is given Codex's own words for it, verbatim
+/// (`agents.<type>.description`, [`AgentType::description`]): the spawn tool lists it as
+/// Codex lists its own.
+pub(crate) fn children(file: &Path, kinds: &[&AgentType]) -> Vec<OsString> {
+    let file = json_string(&file.to_string_lossy());
+    kinds
+        .iter()
+        .flat_map(|kind| {
+            [
+                "-c".to_owned(),
+                format!("agents.{}.config_file={file}", kind.name),
+                "-c".to_owned(),
+                format!(
+                    "agents.{}.description={}",
+                    kind.name,
+                    json_string(kind.description)
+                ),
+            ]
+        })
+        .map(OsString::from)
+        .collect()
+}
+
+/// ConsensFlow's own variables, to be set explicitly in Codex's shell policy: a
 /// user policy of `inherit = "core"` keeps only a handful of names, and a
 /// window whose commands lose `CONSENSFLOW_URL`, `_TOKEN` and `_NODE` has a
 /// `cf` that reaches nothing. Everything else stays as the user's policy says.
-/// Each `CONSENSFLOW_` variable that has a value is one `-c` pair, in name order.
-pub(crate) fn consensflow_shell_environment(env: &Env) -> Vec<OsString> {
-    let mut named: Vec<(&str, String)> = env
+/// Each `CONSENSFLOW_` variable that has a value, with it, in name order. The
+/// broker gives them to each thread in its `config`, never a command line: the
+/// token is a secret, and every user of the machine reads a command line.
+pub(crate) fn consensflow_variables(env: &Env) -> Vec<(String, String)> {
+    let mut named: Vec<(String, String)> = env
         .iter()
-        .filter_map(|(name, value)| Some((name.to_str()?, value.to_string_lossy().into_owned())))
+        .filter_map(|(name, value)| {
+            Some((
+                name.to_str()?.to_owned(),
+                value.to_string_lossy().into_owned(),
+            ))
+        })
         .filter(|(name, _)| is_consensflow_variable(name))
         .collect();
     named.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
     named
-        .into_iter()
-        .flat_map(|(name, value)| {
-            [
-                OsString::from("-c"),
-                format!(
-                    "shell_environment_policy.set.{name}={}",
-                    json_string(&value)
-                )
-                .into(),
-            ]
-        })
-        .collect()
 }
 
 /// `^CONSENSFLOW_[A-Z0-9_]+$`.
@@ -114,6 +138,8 @@ fn is_consensflow_variable(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use cf_proto::codex::agent_types::AGENT_TYPES;
+
     use super::*;
 
     const THREAD: &str = "01a09094-938f-7fd1-a2d3-315cf92b4559";
@@ -122,9 +148,67 @@ mod tests {
         words.iter().map(OsString::from).collect()
     }
 
+    fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect()
+    }
+
     #[test]
-    fn sets_consensflows_own_variables_in_codexs_shell_policy_so_a_user_policy_that_inherits_only_core_ones_keeps_them(
-    ) {
+    fn a_sub_agent_of_each_type_named_starts_from_the_file_named_with_codexs_own_words() {
+        let kinds: Vec<&AgentType> = AGENT_TYPES.iter().collect();
+        let given = children(
+            Path::new("/home/me/.consensflow/integrations/codex/l-1/sub-agents.toml"),
+            &kinds,
+        );
+        let file = "\"/home/me/.consensflow/integrations/codex/l-1/sub-agents.toml\"";
+        let mut expected = Vec::new();
+        for kind in AGENT_TYPES {
+            expected.extend([
+                "-c".to_owned(),
+                format!("agents.{}.config_file={file}", kind.name),
+                "-c".to_owned(),
+                format!(
+                    "agents.{}.description={}",
+                    kind.name,
+                    json_string(kind.description)
+                ),
+            ]);
+        }
+        assert_eq!(
+            given,
+            expected.iter().map(OsString::from).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            given[3],
+            OsString::from("agents.default.description=\"Default agent.\""),
+        );
+        // Codex's words reach it whole: a description read back from its setting is Codex's.
+        for (at, kind) in AGENT_TYPES.iter().enumerate() {
+            let setting = given[at * 4 + 3].to_string_lossy().into_owned();
+            let value = setting.split_once('=').unwrap().1;
+            let read: String = serde_json::from_str(value).unwrap();
+            assert_eq!(read, kind.description, "{}", kind.name);
+        }
+        // Only the types named: one the owner defines is theirs.
+        let worker = children(Path::new("/f.toml"), &[&AGENT_TYPES[2]]);
+        assert_eq!(worker.len(), 4);
+        assert_eq!(
+            worker[1],
+            OsString::from("agents.worker.config_file=\"/f.toml\"")
+        );
+        assert!(children(Path::new("/f.toml"), &[]).is_empty());
+        // A path Windows spells is one TOML string, its backslashes escaped.
+        let windows = children(Path::new("C:\\Users\\me\\sub-agents.toml"), &kinds);
+        assert_eq!(
+            windows[1],
+            OsString::from("agents.default.config_file=\"C:\\\\Users\\\\me\\\\sub-agents.toml\"")
+        );
+    }
+
+    #[test]
+    fn names_consensflows_own_variables_with_their_values_in_name_order_and_nothing_else() {
         let env = Env::from_vars([
             ("CONSENSFLOW_URL", "http://127.0.0.1:4100"),
             ("CONSENSFLOW_TOKEN", "tok\"en"),
@@ -132,17 +216,13 @@ mod tests {
             ("HOME", "/home/user"),
         ]);
         assert_eq!(
-            consensflow_shell_environment(&env),
-            args(&[
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_TOKEN=\"tok\\\"en\"",
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_URL=\"http://127.0.0.1:4100\"",
+            consensflow_variables(&env),
+            pairs(&[
+                ("CONSENSFLOW_TOKEN", "tok\"en"),
+                ("CONSENSFLOW_URL", "http://127.0.0.1:4100"),
             ])
         );
-        assert!(
-            consensflow_shell_environment(&Env::from_vars([("HOME", "/home/user")])).is_empty()
-        );
+        assert!(consensflow_variables(&Env::from_vars([("HOME", "/home/user")])).is_empty());
     }
 
     #[test]
@@ -154,13 +234,8 @@ mod tests {
             ("CONSENSFLOW_EMPTY", ""),
         ]);
         assert_eq!(
-            consensflow_shell_environment(&env),
-            args(&[
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_A1_B=\"kept\"",
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_EMPTY=\"\"",
-            ])
+            consensflow_variables(&env),
+            pairs(&[("CONSENSFLOW_A1_B", "kept"), ("CONSENSFLOW_EMPTY", "")])
         );
     }
 
@@ -169,30 +244,28 @@ mod tests {
     fn a_name_with_lower_case_letters_is_none_of_consensflows_except_where_names_ignore_case() {
         let env = Env::from_vars([("CONSENSFLOW_lower", "mixed case")]);
         assert_eq!(
-            consensflow_shell_environment(&env).len(),
-            if cfg!(windows) { 2 } else { 0 }
+            consensflow_variables(&env).len(),
+            usize::from(cfg!(windows))
         );
     }
 
     #[test]
-    fn writes_a_value_as_the_json_string_javascript_wrote() {
-        let env = Env::from_vars([("CONSENSFLOW_HOME", "C:\\Users\\me\n\u{1}é😀\u{2028}")]);
+    fn a_value_is_carried_as_it_is() {
+        let value = "C:\\Users\\me\n\u{1}\u{e9}\u{1f600}\u{2028}";
+        let env = Env::from_vars([("CONSENSFLOW_HOME", value)]);
         assert_eq!(
-            consensflow_shell_environment(&env),
-            args(&[
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_HOME=\"C:\\\\Users\\\\me\\n\\u0001é😀\u{2028}\"",
-            ])
+            consensflow_variables(&env),
+            pairs(&[("CONSENSFLOW_HOME", value)])
         );
     }
 
     #[test]
-    fn keeps_native_tui_arguments_while_explicitly_forwarding_backend_model_effort_and_full_role_configuration(
+    fn keeps_native_tui_arguments_while_explicitly_forwarding_backend_model_effort_and_configuration(
     ) {
-        let role = "developer_instructions=\"existing instructions\\ncomplete chief role\"";
+        let setting = "check_for_update_on_startup=false";
         let given = args(&[
             "-c",
-            role,
+            setting,
             "--model",
             "native-model",
             "-c",
@@ -205,7 +278,7 @@ mod tests {
             split.backend,
             args(&[
                 "-c",
-                role,
+                setting,
                 "-c",
                 "model=\"native-model\"",
                 "-c",
@@ -225,10 +298,10 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(
-            super::split(&args(&["-c", role, "resume", THREAD])).unwrap(),
+            super::split(&args(&["-c", setting, "resume", THREAD])).unwrap(),
             Split {
-                backend: args(&["-c", role]),
-                tui: args(&["-c", role, "resume", THREAD]),
+                backend: args(&["-c", setting]),
+                tui: args(&["-c", setting, "resume", THREAD]),
             }
         );
     }

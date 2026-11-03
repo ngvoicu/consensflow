@@ -84,8 +84,8 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
     assert_eq!(
         counted,
         [
-            ("sequences", 46, 1131),
-            ("suite", 173, 199),
+            ("sequences", 39, 1059),
+            ("suite", 153, 173),
             ("sweep", 180, 180)
         ]
     );
@@ -95,7 +95,6 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
             ("claude-code".to_owned(), 650),
             ("codex".to_owned(), 262),
             ("devin".to_owned(), 273),
-            ("opencode".to_owned(), 98),
             ("pi".to_owned(), 227),
         ]
     );
@@ -115,7 +114,7 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
             played += 1;
         }
     }
-    assert_eq!((played, answered), (399, 1510));
+    assert_eq!((played, answered), (372, 1412));
     // Node failed these looks at a torn line, which this build passes over
     // (T-223): each reads the records around it. A record of nothing but a
     // torn line reads as one with no records, and fails all the same.

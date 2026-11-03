@@ -448,14 +448,20 @@ fn a_compacted_turn_devin_stamps_is_at_work_by_its_wire_alone_until_its_end_and_
             "_meta": { "cognition.ai/timestamp": 1_792_976_967_738_i64,
                 "cognition.ai/statusEnum": state } } })
     };
+    // Its words are stamped too, as Devin 3000.11 stamps every word of a turn at work: a
+    // word with no stamp is work by the reader before T-660 as well, and held the case
+    // there (Calliope's P3-2 on T-683, T-688).
+    let mut words = chunk(Some(json!("Done.")), "stream-1");
+    words["update"]["_meta"]["cognition.ai/timestamp"] = stamp["cognition.ai/timestamp"].clone();
     let work = vec![
         status("working"),
+        words,
         json!({ "sessionId": SESSION, "update": { "sessionUpdate": "tool_call", "_meta": stamp } }),
         json!({ "sessionId": SESSION, "update": { "sessionUpdate": "tool_call_update", "status": "in_progress" } }),
     ];
     let at_work = reading_after(|staged| {
         compacted_anew(staged, &with_id(tool(), "t-later"));
-        wired(staged, &work);
+        staged.wire("launch-1", &work);
     });
     assert_eq!(said(&at_work), ("in-flight".to_owned(), true, true));
     let ended = reading_after(|staged| {
@@ -463,7 +469,7 @@ fn a_compacted_turn_devin_stamps_is_at_work_by_its_wire_alone_until_its_end_and_
         let mut then = work.clone();
         then.push(status("blocked"));
         then.extend(ended("complete", Some(ANSWERED), Some(ANSWERED)));
-        wired(staged, &then);
+        staged.wire("launch-1", &then);
     });
     assert_eq!(said(&ended), settled());
 }

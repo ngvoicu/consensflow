@@ -5,7 +5,7 @@
 //! the window answers it with `cf answer`, and the answer reaches the chief as a message.
 //! A member that has answered may go straight on, in the same turn, with the work the
 //! pause stopped, and end that turn with its complete answer, or answer in plain text what
-//! it should have sent with `cf answer` (OpenCode did). The task is paused, so
+//! it should have sent with `cf answer` (T-534). The task is paused, so
 //! [`Dispatcher::collect`] takes no result of it, and nothing else carried those words to
 //! anyone: the resume that followed began a turn whose short follow-up (the member said it
 //! had finished) became the result, and the full answer had to be asked for again.

@@ -7,6 +7,9 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+# What a board's window gives its member (`cf_base::env::WINDOW_VARIABLES`), one list with
+# each harness's session in what no program ConsensFlow starts inherits.
+cf-base.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

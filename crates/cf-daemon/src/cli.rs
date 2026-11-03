@@ -16,6 +16,7 @@ use std::time::Duration;
 use cf_base::args::{Opt, Positionals};
 use cf_base::env::Env;
 use cf_process::{execute, on_path, runnable, Limits};
+use cf_proto::agents::is_parent_session_variable;
 use cf_proto::page::HandleLine;
 
 use crate::errors::install_hook;
@@ -37,6 +38,7 @@ struct Flags {
 /// its input and writes its output from other threads, which would wait for a
 /// held lock for good.
 pub fn ui(env: &Env, args: &[OsString]) -> i32 {
+    let env = &outside_parent_sessions(env);
     let words: Vec<String> = args
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
@@ -76,6 +78,15 @@ pub fn ui(env: &Env, args: &[OsString]) -> i32 {
         Ok(()) => 0,
         Err(words) => fail(&words),
     }
+}
+
+/// `env` without a session `cf ui` was started in ([`is_parent_session_variable`]), as the
+/// app takes them out of its own: run in an agent's shell or a terminal's pane, the daemon
+/// would hand that session to every program it starts of its own (a harness's probes, git,
+/// a harness's throwaway server), which would be taken for the session's (T-1024). Its
+/// windows are given none of it by the pane host.
+fn outside_parent_sessions(env: &Env) -> Env {
+    env.clone().without_vars(is_parent_session_variable)
 }
 
 /// What the verb says when it cannot go on, in `cf`'s words.

@@ -11,6 +11,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_harness::contract::LaunchId;
 use cf_ledger::{Ledger, ParticipantView, ProjectView};
+use cf_proto::cf_word::CfWord;
 use cf_proto::specs::AppSpecs;
 use cf_proto::trace::{TraceLine, Traced};
 use serde_json::{json, Value};
@@ -128,9 +129,16 @@ pub struct FakeRoles {
     /// What a test adds to every text to say the roles were rewritten (a release
     /// of ConsensFlow that changed them): nothing, as no trace of Node's has any.
     pub rewritten: RefCell<String>,
+    /// How a command starts in every window: the word `cf`, unless a test gives the
+    /// windows a path.
+    pub cf: RefCell<CfWord>,
 }
 
 impl Roles for FakeRoles {
+    fn cf(&self, _participant: &ParticipantView) -> CfWord {
+        self.cf.borrow().clone()
+    }
+
     /// A chief's text with the section of its project's specs where it is given
     /// them (what the call writes down is what Node's was asked: nothing of
     /// specs, which no trace of Node's has).

@@ -983,6 +983,55 @@ fn a_delivery_that_waits_for_its_window_while_the_project_closes_is_not_pasted_a
     );
 }
 
+/// The same, closed while the fresh look just before the paste waits for the pane host
+/// (3.0.7's pacing: an await the ready window's own check does not cover). A Close that
+/// could not close the window leaves it open, its record not forgotten: the project's
+/// state is what says the message waits (T-842's round, T-794).
+#[test]
+fn a_delivery_whose_project_closes_during_the_look_before_the_paste_is_not_pasted() {
+    let context = Context::made(Made {
+        settle_ms: 3_000,
+        ..Made::default()
+    });
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let waiting = context.note(project, "human", "chief", "Any news?");
+    context.pass().unwrap();
+    context.advance(3_000);
+    let readied = Rc::new(std::cell::Cell::new(false));
+    let marked = readied.clone();
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        marked.set(true);
+        Ok(Readiness::Ready)
+    }));
+    let after = readied.clone();
+    let looking = context.adapter.observe_holds.hold(move |_| after.get());
+    context.pass().unwrap();
+    context.settle();
+    assert!(readied.get(), "the window was read ready");
+    assert_eq!(context.message(waiting.id).state, "queued", "looking");
+    context.host.refuse_kills.set(true);
+    let closing = context.begin_close_project(project);
+    context.settle();
+    looking.open();
+    context.settle();
+    assert!(context.finish(closing).is_err(), "the chief's window stays");
+    context.host.refuse_kills.set(false);
+
+    let waiting = context.message(waiting.id);
+    assert_eq!(
+        (waiting.state.as_str(), waiting.reason.as_deref()),
+        ("queued", None),
+        "never begun"
+    );
+    assert!(
+        given(&context, "chief")
+            .iter()
+            .all(|text| !text.contains("Any news?")),
+        "nothing pasted"
+    );
+}
+
 /// Both reviews of 2026-10-16, round 3: a Switch chief that waits for the chief's
 /// turn to end, in a project closed meanwhile whose Close could not close the chief's
 /// window, waits for the Resume: the note asking for the handoff is not pasted. It is
@@ -2512,7 +2561,7 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(
@@ -2566,7 +2615,7 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(
@@ -2758,9 +2807,16 @@ fn a_resume_whose_window_never_comes_up_pauses_its_task_again_and_the_note_it_ca
             .into_iter()
             .filter(|said| said.contains(&words))
             .collect::<Vec<_>>(),
-        [format!(
-            "T-1 is paused: the words that resumed it, {words}, did not reach @{session}'s window: {why}; the words told its window wait for the resume: {kept_words}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
-        )]
+        [
+            format!(
+                "T-1 is paused: the words that resumed it, {words}, did not reach @{session}'s window: {why}; the words told its window wait for the resume: {kept_words}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+            ),
+            // Whoever resumed it has the words back, as the message said them (T-922).
+            format!(
+                "Your {words} on T-1 did not reach @{session}'s window: {why}.\n\nIts words, {words}, not delivered, so that you can send them again:\n\n{}",
+                resumed.body
+            ),
+        ]
     );
     assert!(
         !tiers

@@ -204,7 +204,6 @@ fn the_specmint_variant_the_human_installed_is_found_in_pis_own_skills_then_the_
         &[
             ".claude/skills",
             ".codex/skills",
-            ".config/opencode/skills",
             ".config/devin/skills",
             ".pi/skills",
             ".pi/agent/sessions",

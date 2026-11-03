@@ -94,7 +94,7 @@ fn a_run_works_in_folders_of_its_own_below_the_users_home() {
     let below = Path::new("/home/u")
         .join(".consensflow-candidate")
         .join("evals");
-    assert_eq!(machine.workspace(), below.join("workspace"));
+    assert_eq!(machine.workspaces(), below.join("workspaces"));
     assert_eq!(machine.bin(), below.join("bin"));
 }
 

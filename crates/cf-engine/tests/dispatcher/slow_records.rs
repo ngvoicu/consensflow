@@ -26,6 +26,7 @@
 //! these is held to a Node trace: Node's dispatcher counted the arrival window
 //! from the hand-over, turns or none.
 
+use cf_proto::cf_word::CfWord;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -59,7 +60,7 @@ fn counting(context: &Context) -> Rc<Cell<usize>> {
 fn shows(context: &Context, handle: &str, message: &MessageView) {
     let item = context
         .adapter
-        .item(Role::User, &delivery_text(message, &[]));
+        .item(Role::User, &delivery_text(message, &[], &CfWord::bare()));
     context.adapter.with(handle, |agent| agent.items.push(item));
 }
 
@@ -776,7 +777,10 @@ fn pastes_a_note_about_a_task_its_recipient_has_no_task_message_for_alone_and_a_
     let items = given(&context, "chief");
     assert_eq!(items.len(), 2, "{items:?}");
     for (text, note) in items.iter().zip([&first, &second]) {
-        assert_eq!(text, &delivery_text(&context.message(note.id), &[]));
+        assert_eq!(
+            text,
+            &delivery_text(&context.message(note.id), &[], &CfWord::bare())
+        );
         assert_eq!(text.matches("[ConsensFlow m-").count(), 1, "{text}");
     }
 }
@@ -857,9 +861,10 @@ fn confirms_a_paste_taken_in_a_conversation_the_human_left_when_its_record_shows
     }
     assert_eq!(pasted.get(), 1, "a record at work is waited for");
     assert_eq!(context.message(note.id).state, "delivering");
-    let item = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let item = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(note.id), &[], &CfWord::bare()),
+    );
     context.adapter.with("chief", |agent| {
         agent.records.entry(left.clone()).or_default().push(item);
     });
@@ -948,9 +953,10 @@ fn gives_back_a_paste_in_a_conversation_left_at_work_once_its_record_has_not_cha
 fn a_window_that_closes_with_a_paste_in_the_conversation_left_settles_it_by_that_record() {
     let context = Context::new();
     let (_, note, pasted, left) = taken_then_switched(&context);
-    let item = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let item = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(note.id), &[], &CfWord::bare()),
+    );
     context.adapter.with("chief", |agent| {
         agent.records_settled.insert(left.clone(), false);
         agent.records.entry(left.clone()).or_default().push(item);
@@ -986,9 +992,10 @@ fn waits_past_half_an_hour_on_a_paste_its_harness_took_in_a_conversation_left_at
     }
     assert_eq!(pasted.get(), 1, "an hour at work: never given back");
     assert_eq!(context.message(note.id).state, "delivering");
-    let item = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let item = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(note.id), &[], &CfWord::bare()),
+    );
     context.adapter.with("chief", |agent| {
         agent.records.entry(left.clone()).or_default().push(item);
     });
@@ -1010,9 +1017,10 @@ fn waits_past_half_an_hour_on_a_paste_its_harness_took_in_a_conversation_left_at
 fn a_restart_settles_a_paste_by_the_conversation_it_went_into_not_the_one_the_window_shows_now() {
     let context = Context::new();
     let (project, note, pasted, left) = taken_then_switched(&context);
-    let item = context
-        .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let item = context.adapter.item(
+        Role::User,
+        &delivery_text(&context.message(note.id), &[], &CfWord::bare()),
+    );
     context.adapter.with("chief", |agent| {
         agent.records.entry(left.clone()).or_default().push(item);
     });
@@ -1044,7 +1052,7 @@ fn a_restart_sends_again_saying_so_a_paste_its_harness_took_that_the_conversatio
 ) {
     let context = Context::new();
     let (project, note, _, left) = taken_then_switched(&context);
-    let text = delivery_text(&context.message(note.id), &[]);
+    let text = delivery_text(&context.message(note.id), &[], &CfWord::bare());
     context.adapter.with("chief", |agent| {
         agent.records_settled.insert(left.clone(), false);
         agent.stored.insert(left.clone(), vec![text]);
@@ -1064,7 +1072,11 @@ fn a_restart_sends_again_saying_so_a_paste_its_harness_took_that_the_conversatio
     }
     assert_eq!(
         given_after_the_restart(&context, note.id),
-        [delivery_text_sent_again(&context.message(note.id), &[])],
+        [delivery_text_sent_again(
+            &context.message(note.id),
+            &[],
+            &CfWord::bare()
+        )],
         "sent again, saying so"
     );
     let delivered = context.message(note.id);
@@ -1115,7 +1127,11 @@ fn a_restart_gives_back_a_paste_its_harness_says_it_never_took_and_it_goes_again
     }
     assert_eq!(
         given_after_the_restart(&context, note.id),
-        [delivery_text(&context.message(note.id), &[])]
+        [delivery_text(
+            &context.message(note.id),
+            &[],
+            &CfWord::bare()
+        )]
     );
     assert_eq!(context.message(note.id).state, "delivered");
 }
@@ -1144,7 +1160,11 @@ fn a_window_opened_with_a_message_a_restart_sent_again_is_given_it_saying_so() {
     context.pass().unwrap();
     assert_eq!(
         given_to(&context, "zeus", brief.id),
-        [delivery_text_sent_again(&context.message(brief.id), &[])]
+        [delivery_text_sent_again(
+            &context.message(brief.id),
+            &[],
+            &CfWord::bare()
+        )]
     );
 }
 
@@ -1156,7 +1176,7 @@ fn a_window_opened_with_a_message_a_restart_sent_again_is_given_it_saying_so() {
 fn a_message_sent_again_after_a_restart_still_says_so_after_another_give_back() {
     let context = Context::new();
     let (project, note, _, left) = taken_then_switched(&context);
-    let text = delivery_text(&context.message(note.id), &[]);
+    let text = delivery_text(&context.message(note.id), &[], &CfWord::bare());
     context.adapter.with("chief", |agent| {
         agent.records_settled.insert(left.clone(), false);
         agent.stored.insert(left.clone(), vec![text]);
@@ -1177,6 +1197,10 @@ fn a_message_sent_again_after_a_restart_still_says_so_after_another_give_back() 
     }
     assert_eq!(
         given_after_the_restart(&context, note.id),
-        [delivery_text_sent_again(&context.message(note.id), &[])]
+        [delivery_text_sent_again(
+            &context.message(note.id),
+            &[],
+            &CfWord::bare()
+        )]
     );
 }

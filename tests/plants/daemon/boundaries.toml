@@ -1,0 +1,46 @@
+# The product writes nothing outside its home and the project's own files (T-971,
+# issues/live-app-writes-into-projects.md in consensflow-sme): the live app once copied every
+# worker's answer into the project as `deliveries/d-N.md`, kept Pi's mailboxes in
+# `<project>/.consensflow/`, and left launchers in `~/.local/bin`. The case runs a full round of
+# a board on the rig (a chief, a worker launched on a task, its result, the chief's accept) with
+# the home, the harnesses' configuration folders and the temp folder pointed at decoys, and names
+# every file changed in them and in the project's folder
+# (`crates/cf-e2e/tests/regressions/the_live_app_wrote_into_projects.rs`). Each plant puts one
+# such write back; the case fails. Both build the native `cf` (`builds`). Every name holds
+# `boundaries`, so `npm run plants:daemon -- boundaries` runs them all.
+
+[run]
+boundaries-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "the_live_app_wrote_into_projects::"], builds = true }
+
+[[plant]]
+name = "boundaries rig: a window's launch writes into its project's folder"
+meant = "a_full_round_writes_nothing_outside_the_home_and_the_projects_own_files"
+runs = ["boundaries-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        let mut env = self.terminal.clone();
+        env.extend(['''
+replace = '''        let _ = std::fs::write(
+            std::path::Path::new(&project.directory).join(format!("d-{}.md", participant.handle)),
+            "a delivery",
+        );
+        let mut env = self.terminal.clone();
+        env.extend(['''
+
+[[plant]]
+name = "boundaries rig: a window's launch writes into the owner's home"
+meant = "a_full_round_writes_nothing_outside_the_home_and_the_projects_own_files"
+runs = ["boundaries-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        let mut env = self.terminal.clone();
+        env.extend(['''
+replace = '''        if let Some(home) = std::env::home_dir() {
+            let _ = std::fs::write(home.join(".consensflow-launched"), &participant.handle);
+        }
+        let mut env = self.terminal.clone();
+        env.extend(['''

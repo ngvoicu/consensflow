@@ -158,7 +158,7 @@ fn the_pids_the_stand_ins_wrote_are_the_files_of_one_each_and_nothing_that_is_no
         ("claude-1.pid", "4242\n"),
         ("pi-2.pid", "77"),
         ("codex-3.pid", ""),
-        ("opencode-4.pid", "not a pid"),
+        ("devin-4.pid", "not a pid"),
         ("zero.pid", "0"),
         ("negative.pid", "-5"),
         ("other.txt", "999"),
@@ -184,12 +184,7 @@ mod on_unix {
     fn a_stand_in_for_each_harness_is_a_program_on_the_machines_path_that_says_its_version() {
         let (_parent, sandbox) = made();
         let env = sandbox.terminal_env(&sandbox.state);
-        for (name, version) in [
-            ("claude", "2.1.305"),
-            ("codex", "0.0.0"),
-            ("pi", "0.0.0"),
-            ("opencode", "0.0.0"),
-        ] {
+        for (name, version) in [("claude", "2.1.305"), ("codex", "0.0.0"), ("pi", "0.0.0")] {
             let file = sandbox.bin.join(name);
             assert_eq!(
                 fs::metadata(&file).unwrap().permissions().mode() & 0o111,

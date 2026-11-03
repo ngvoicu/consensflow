@@ -5,10 +5,13 @@
 //! was, to the byte.
 //!
 //! The section names the one Specmint skill the chief plans with and where its
-//! `SKILL.md` is (the copy the harness has installed, or ConsensFlow's own: a
-//! file every harness can read), the folder the specs are kept in, and what
-//! Specmint's workflow leaves to the board, where the chief's role has it hand
-//! every change and every piece of research to the staff.
+//! `SKILL.md` is (the copy the harness has installed, for a project that keeps its
+//! specs where that copy says, or else ConsensFlow's own, written with the project's
+//! folder in its paths: a file every harness can read), the folder the specs are
+//! kept in, and what Specmint's workflow leaves to the board, where the chief's role
+//! has it hand every change and every piece of research to the staff. It never says
+//! the skill's `.specs` for another folder: a chief that read both followed the skill
+//! (T-662).
 
 use cf_proto::specs::Variant;
 
@@ -41,7 +44,7 @@ impl ProjectSpecs<'_> {
         format!(
             "\n## This project's specs\n\
              \n\
-             Specs are on in this project. Plan work that is big enough for phases as a spec, with the Specmint skill `{name}`: its SKILL.md is at {skill}, and the files it names are beside it; read it before you plan. Where Specmint says `.specs`, it means `{folder}`: your specs and their registry are there.\n\
+             Specs are on in this project. Plan work that is big enough for phases as a spec, with the Specmint skill `{name}`: its SKILL.md is at {skill}, and the files it names are beside it; read it before you plan. Your specs and their registry are in `{folder}`: use this copy of the skill and no other; its paths name it.\n\
              \n\
              Use a spec when the human asks for one, or when an ask is big enough that its work comes in phases. A small ask is no spec: it goes straight on the board as a task.\n\
              \n\

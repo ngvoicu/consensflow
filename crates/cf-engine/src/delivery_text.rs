@@ -4,11 +4,22 @@
 //! that carries others (what its window kept for it) reads as one paste: their
 //! words and its own, in the order of their ids, under the one header, which is
 //! the one marker that proves the paste arrived.
+//!
+//! Every command such a text teaches starts with the `cf` of the window it is for, by its
+//! whole path ([`CfWord`]): a shell that reads the user's profile can find another `cf`
+//! first (T-972), and a member told to run `cf answer` would run it. The footers and the
+//! commands that read what is cut are written with it; what ConsensFlow itself wrote of a
+//! message's words, a note's (`sender` none: the engine's and the ledger's own, whose words
+//! the board shows as they are, bare) has each command it names by the word `cf` started by
+//! it instead ([`CfWord::in_text`]). What a participant wrote is never changed; the words the
+//! human gives the page to resume a task, which the ledger writes with no sender, are read as
+//! ConsensFlow's own, and a command in them is no worse for starting with the window's `cf`.
 
 use std::borrow::Cow;
 
 use cf_base::js;
 use cf_base::text::{utf16_len, window_text};
+use cf_proto::cf_word::CfWord;
 use cf_proto::ledger::MessageView;
 
 /// A body longer than this, counted in UTF-16 code units as JavaScript counted
@@ -27,8 +38,8 @@ const OPENING: usize = 15_000;
 /// A cut that falls inside a surrogate pair leaves half of it in Node, which
 /// `windowText` drops before the text reaches a window. Here the half is
 /// dropped at the cut, so what a window is given is the same.
-pub fn delivery_text(message: &MessageView, carried: &[MessageView]) -> String {
-    text_of(message, carried, "")
+pub fn delivery_text(message: &MessageView, carried: &[MessageView], cf: &CfWord) -> String {
+    text_of(message, carried, cf, "", None)
 }
 
 /// What a header says, after who the message is from, of a message a start gave back
@@ -38,18 +49,48 @@ pub const SENT_AGAIN: &str = " · sent again after a restart, it may be there al
 
 /// [`delivery_text`] of a message sent again after a restart ([`SENT_AGAIN`]): the
 /// word is in its header, after its marker, so its record proves it as any paste's.
-pub fn delivery_text_sent_again(message: &MessageView, carried: &[MessageView]) -> String {
-    text_of(message, carried, SENT_AGAIN)
+pub fn delivery_text_sent_again(
+    message: &MessageView,
+    carried: &[MessageView],
+    cf: &CfWord,
+) -> String {
+    delivery_text_beside(message, carried, cf, true, None)
 }
 
-/// [`delivery_text`], `again` said at the end of its header.
-fn text_of(message: &MessageView, carried: &[MessageView], again: &str) -> String {
+/// [`delivery_text`] of a result whose task's requester was given, or is to be given, the
+/// answer of its window's turn on a tell in the note `told_in` (`cf-ledger`'s
+/// `paused_answers`): its footer says that this result is the one to decide (T-958). Sent
+/// again after a restart where `again`.
+pub fn delivery_text_beside(
+    message: &MessageView,
+    carried: &[MessageView],
+    cf: &CfWord,
+    again: bool,
+    told_in: Option<i64>,
+) -> String {
+    text_of(
+        message,
+        carried,
+        cf,
+        if again { SENT_AGAIN } else { "" },
+        told_in,
+    )
+}
+
+/// [`delivery_text`], `again` said at the end of its header, and `told_in` in its footer.
+fn text_of(
+    message: &MessageView,
+    carried: &[MessageView],
+    cf: &CfWord,
+    again: &str,
+    told_in: Option<i64>,
+) -> String {
     let id = message.id;
     let from = from_of(message);
     let task = message
         .task_number
         .map_or_else(String::new, |number| format!(" · T-{number}"));
-    let (whole, read_all) = words_of(message, carried);
+    let (whole, read_all) = words_of(message, carried, cf);
     let length = utf16_len(&whole);
     let body = if length <= INLINE_LIMIT {
         whole
@@ -62,31 +103,48 @@ fn text_of(message: &MessageView, carried: &[MessageView], again: &str) -> Strin
     format!(
         "[ConsensFlow m-{id}{task} · {} from {from}{again}]\n{body}{}",
         message.kind,
-        footer(message)
+        footer(message, cf, told_in)
     )
 }
 
 /// The words a message has whole, and the command that reads them where they are
 /// cut: its own body, or, where it carries rows, theirs and its own together.
-fn words_of<'a>(message: &'a MessageView, carried: &[MessageView]) -> (Cow<'a, str>, String) {
+fn words_of<'a>(
+    message: &'a MessageView,
+    carried: &[MessageView],
+    cf: &CfWord,
+) -> (Cow<'a, str>, String) {
     let id = message.id;
     match message.task_number.filter(|_| !carried.is_empty()) {
-        None => (
-            Cow::Borrowed(message.body.as_str()),
-            format!("cf inbox read m-{id}"),
-        ),
+        None => (body_of(message, cf), format!("{cf} inbox read m-{id}")),
         Some(number) => (
-            Cow::Owned(composite(message, carried)),
-            format!("cf task get T-{number}"),
+            Cow::Owned(composite(message, carried, cf)),
+            format!("{cf} task get T-{number}"),
         ),
+    }
+}
+
+/// The words of `row`, its commands started by `cf` where ConsensFlow wrote them
+/// (`sender` none), as they are where a participant did.
+fn body_of<'a>(row: &'a MessageView, cf: &CfWord) -> Cow<'a, str> {
+    if row.sender.is_none() {
+        cf.in_text(&row.body)
+    } else {
+        Cow::Borrowed(row.body.as_str())
     }
 }
 
 /// Whether a message goes into its recipient's pane in whole: its words are no
 /// longer than a paste is given, and are not cut to their opening and the command
 /// that reads the rest.
-pub fn goes_whole(message: &MessageView, carried: &[MessageView]) -> bool {
-    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT
+pub fn goes_whole(message: &MessageView, carried: &[MessageView], cf: &CfWord) -> bool {
+    fits_whole(&words_of(message, carried, cf).0)
+}
+
+/// Whether `words`, a message's own, go into a pane whole: no longer than a
+/// paste is given.
+pub fn fits_whole(words: &str) -> bool {
+    utf16_len(words) <= INLINE_LIMIT
 }
 
 /// Who a message is from: its sender's handle, or ConsensFlow itself.
@@ -101,15 +159,15 @@ fn from_of(message: &MessageView) -> String {
 /// order of their ids, a blank line between. The carrier's words are its
 /// own; each row it carries is under a line that says what it is and whose.
 /// None of them holds a header, so only the carrier's marker is in the paste.
-fn composite(carrier: &MessageView, carried: &[MessageView]) -> String {
+fn composite(carrier: &MessageView, carried: &[MessageView], cf: &CfWord) -> String {
     let mut rows: Vec<&MessageView> = carried.iter().chain([carrier]).collect();
     rows.sort_by_key(|row| row.id);
     rows.iter()
         .map(|row| {
             if row.id == carrier.id {
-                row.body.clone()
+                body_of(row, cf).into_owned()
             } else {
-                format!("{}\n{}", label(row), row.body)
+                format!("{}\n{}", label(row), body_of(row, cf))
             }
         })
         .collect::<Vec<_>>()
@@ -142,8 +200,8 @@ pub fn marker_of(message_id: i64) -> String {
 /// What a member's fresh window is given ahead of its first message where that
 /// is not its task's brief (a reopening, an answer): the brief it received, as
 /// its paste said it, and a blank line (`launch_text`).
-pub fn brief_first(brief: &MessageView, carried: &[MessageView]) -> String {
-    format!("{}\n\n", delivery_text(brief, carried))
+pub fn brief_first(brief: &MessageView, carried: &[MessageView], cf: &CfWord) -> String {
+    format!("{}\n\n", delivery_text(brief, carried, cf))
 }
 
 /// The tag Claude Code wraps a paste in, in its record (2.1.296 on 2026-10-16, and
@@ -205,6 +263,38 @@ pub fn is_paste_of(text: &str, message_id: i64, first: Option<&str>) -> bool {
     };
     let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));
     paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker))
+}
+
+/// The shape of `text`, an item that holds message `message_id`'s header where
+/// [`is_paste_of`] takes it for no paste (3.0.7 chief-meeting, CMT-23), for the
+/// issue it is filed in: how many times the header is in it, where the first is (in
+/// characters of the text as the window shows it), what comes before it (`before`:
+/// nothing but space, Claude Code's image placeholders, the opening of its wrapper,
+/// or words), and how long the text is. Nothing of its words is kept.
+pub fn header_shape(text: &str, message_id: i64) -> serde_json::Value {
+    let marker = marker_of(message_id);
+    let shown = window_text(text);
+    let at = shown.find(&marker);
+    let head = at.map_or("", |at| &shown[..at]);
+    let before = if at.is_none() {
+        "none"
+    } else if head.trim().is_empty() {
+        "space"
+    } else if after_placeholders(head.trim_start()).is_some_and(|rest| rest.trim().is_empty()) {
+        "image placeholders"
+    } else if after_wrapper_opening(head.trim_start())
+        .is_some_and(|(_, rest)| rest.trim().is_empty())
+    {
+        "wrapper"
+    } else {
+        "words"
+    };
+    serde_json::json!({
+        "markers": shown.matches(&marker).count(),
+        "offset": head.chars().count(),
+        "before": before,
+        "length": shown.chars().count(),
+    })
 }
 
 /// What follows the image placeholders ([`IMAGE`]) that begin `text`: a run of them, one
@@ -297,7 +387,7 @@ fn opening(body: &str) -> &str {
 /// dispatcher asks the ledger for the head of the queue again and begins the
 /// delivery before it writes this text, awaiting nothing between), and one
 /// already being pasted is in the window, where no check can take it back.
-fn footer(message: &MessageView) -> String {
+fn footer(message: &MessageView, cf: &CfWord, told_in: Option<i64>) -> String {
     let id = message.id;
     match (message.kind.as_str(), message.task_number) {
         ("question", task) => {
@@ -313,18 +403,24 @@ fn footer(message: &MessageView) -> String {
                     ""
                 };
                 format!(
-                    "\n\nRun in your shell: cf answer m-{id} \"…\" (a label or your own words{lines})"
+                    "\n\nRun in your shell: {cf} answer m-{id} \"…\" (a label or your own words{lines})"
                 )
             } else if let (true, Some(task)) = (message.urgent, task) {
                 format!(
-                    "\n\nT-{task} is paused for this. Run in your shell: cf answer m-{id} \"…\"; the chief resumes the task."
+                    "\n\nT-{task} is paused for this. Run in your shell: {cf} answer m-{id} \"…\"; the chief resumes the task."
                 )
             } else {
-                format!("\n\nRun in your shell: cf answer m-{id} \"…\"")
+                format!("\n\nRun in your shell: {cf} answer m-{id} \"…\"")
             }
         }
         ("result", Some(task)) => {
-            format!("\n\nDecide with: cf task accept T-{task} · cf task reopen T-{task} \"…\"")
+            // The answer of the window's turn on a tell, given in a note before (T-958).
+            let beside = told_in.map_or_else(String::new, |note| {
+                format!("The turn on your words while T-{task} was paused ended with a report too, given in m-{note}: this result is the one to decide. ")
+            });
+            format!(
+                "\n\n{beside}Decide with: {cf} task accept T-{task} · {cf} task reopen T-{task} \"…\""
+            )
         }
         _ => String::new(),
     }
@@ -389,10 +485,10 @@ mod tests {
             ("漢".repeat(16_000), true),
         ] {
             let said = message(7, None, body);
-            assert_eq!(goes_whole(&said, &[]), whole);
+            assert_eq!(goes_whole(&said, &[], &CfWord::bare()), whole);
             // What reads as cut in the pane is what `goes_whole` says is cut.
             assert_eq!(
-                delivery_text(&said, &[]).contains("read all of it with"),
+                delivery_text(&said, &[], &CfWord::bare()).contains("read all of it with"),
                 !whole
             );
         }
@@ -403,14 +499,14 @@ mod tests {
     #[test]
     fn a_message_sent_again_after_a_restart_says_so_in_its_header_and_its_record_proves_it() {
         let said = message(12, Some(3), "Look at this".to_owned());
-        let again = delivery_text_sent_again(&said, &[]);
+        let again = delivery_text_sent_again(&said, &[], &CfWord::bare());
         assert_eq!(
             again.lines().next(),
             Some("[ConsensFlow m-12 \u{b7} T-3 \u{b7} note from ConsensFlow \u{b7} sent again after a restart, it may be there already]")
         );
         assert_eq!(
             again.replacen(SENT_AGAIN, "", 1),
-            delivery_text(&said, &[]),
+            delivery_text(&said, &[], &CfWord::bare()),
             "the word, and nothing else"
         );
         assert!(is_paste_of(&again, 12, None));
@@ -420,13 +516,16 @@ mod tests {
     #[test]
     fn an_item_is_the_message_whose_header_comes_first_in_it_and_no_other_it_quotes() {
         let said = message(12, Some(3), "Look at what m-5 said".to_owned());
-        let text = delivery_text(&said, &[]);
+        let text = delivery_text(&said, &[], &CfWord::bare());
         assert_eq!(header_id(&text), Some(12));
         // A window that frames what it was given still shows the header first.
         assert_eq!(header_id(&format!("> {text}")), Some(12));
         // The header another message has, quoted in the words of this one, is not this one's.
         let quoting = message(13, Some(3), format!("As {} said: be brief", marker_of(5)));
-        assert_eq!(header_id(&delivery_text(&quoting, &[])), Some(13));
+        assert_eq!(
+            header_id(&delivery_text(&quoting, &[], &CfWord::bare())),
+            Some(13)
+        );
         // No header, or one cut short of its id: no message.
         assert_eq!(header_id("Understood."), None);
         assert_eq!(header_id("see [ConsensFlow m-x"), None);
@@ -438,7 +537,7 @@ mod tests {
     #[test]
     fn a_paste_is_an_item_its_header_begins_and_no_words_that_quote_it() {
         let said = message(12, Some(3), "Look at what m-5 said".to_owned());
-        let text = delivery_text(&said, &[]);
+        let text = delivery_text(&said, &[], &CfWord::bare());
         assert!(is_paste_of(&text, 12, None));
         assert!(!is_paste_of(&text, 1, None), "m-1 is not m-12");
         // As a window keeps it: lines ended otherwise, or a blank line first.
@@ -455,7 +554,9 @@ mod tests {
         // Nor is one in a message's: m-13 quoting m-12 after a blank line (Astra), a
         // note that says "Investigate this:" and the header after it (Sol), or one on
         // a line of its own.
-        let quoting = |id: i64, body: String| delivery_text(&message(id, Some(3), body), &[]);
+        let quoting = |id: i64, body: String| {
+            delivery_text(&message(id, Some(3), body), &[], &CfWord::bare())
+        };
         let astra = quoting(13, format!("Before it:\n\n{text}"));
         let sol = quoting(43, format!("Investigate this:\n\n{}· T-3]", marker_of(42)));
         let lined = quoting(14, format!("They said:\n{}", marker_of(5)));
@@ -467,7 +568,11 @@ mod tests {
 
     #[test]
     fn a_paste_claude_code_wrapped_in_its_record_is_the_paste_it_wraps() {
-        let text = delivery_text(&message(1, Some(1), "The page is done".to_owned()), &[]);
+        let text = delivery_text(
+            &message(1, Some(1), "The page is done".to_owned()),
+            &[],
+            &CfWord::bare(),
+        );
         // As Claude Code 2.1.296 records it (the live paste suite's records).
         let wrapped =
             format!("\n\n<pasted_content id=\"b118\">\n{text}\n</pasted_content id=\"b118\">\n");
@@ -774,8 +879,12 @@ mod tests {
     #[test]
     fn a_second_header_is_a_paste_only_behind_the_brief_a_fresh_window_was_given_first() {
         let brief = message(5, Some(3), "Write the parser".to_owned());
-        let first = brief_first(&brief, &[]);
-        let answer = delivery_text(&message(12, Some(3), "Use JSON".to_owned()), &[]);
+        let first = brief_first(&brief, &[], &CfWord::bare());
+        let answer = delivery_text(
+            &message(12, Some(3), "Use JSON".to_owned()),
+            &[],
+            &CfWord::bare(),
+        );
         let launched = format!("{first}{answer}");
         assert!(is_paste_of(&launched, 12, Some(&first)));
         assert!(is_paste_of(
@@ -789,15 +898,19 @@ mod tests {
         );
         // Not where nothing says it was given first, nor behind another brief.
         assert!(!is_paste_of(&launched, 12, None));
-        let other = brief_first(&message(6, Some(3), "Write the lexer".to_owned()), &[]);
+        let other = brief_first(
+            &message(6, Some(3), "Write the lexer".to_owned()),
+            &[],
+            &CfWord::bare(),
+        );
         assert!(!is_paste_of(&launched, 12, Some(&other)));
         // Nor in a paragraph of the brief's own words that quotes it.
         let quoting = message(5, Some(3), format!("Write the parser\n\n{answer}"));
-        let only_the_brief = delivery_text(&quoting, &[]);
+        let only_the_brief = delivery_text(&quoting, &[], &CfWord::bare());
         assert!(!is_paste_of(
             &only_the_brief,
             12,
-            Some(&brief_first(&quoting, &[]))
+            Some(&brief_first(&quoting, &[], &CfWord::bare()))
         ));
     }
 
@@ -807,8 +920,8 @@ mod tests {
         let carried = [message(8, Some(1), "y".repeat(8_000))];
         // Its own words are short of the limit; with the row it carries, and the
         // line over the row, they are not.
-        assert!(goes_whole(&carrier, &[]));
-        assert!(!goes_whole(&carrier, &carried));
-        assert!(delivery_text(&carrier, &carried).contains("cf task get T-1"));
+        assert!(goes_whole(&carrier, &[], &CfWord::bare()));
+        assert!(!goes_whole(&carrier, &carried, &CfWord::bare()));
+        assert!(delivery_text(&carrier, &carried, &CfWord::bare()).contains("cf task get T-1"));
     }
 }

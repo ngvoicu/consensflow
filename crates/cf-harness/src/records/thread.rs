@@ -244,8 +244,8 @@ struct Caches {
     claude: Cache,
     codex: Cache,
     pi: Cache,
-    opencode: Cache,
     devin: Cache,
+    muse: Cache,
 }
 
 impl Caches {
@@ -268,8 +268,8 @@ impl Caches {
             claude: cache(),
             codex: cache(),
             pi: cache(),
-            opencode: cache(),
             devin: cache(),
+            muse: cache(),
         }
     }
 
@@ -278,8 +278,8 @@ impl Caches {
             Harness::Claude => &mut self.claude,
             Harness::Codex => &mut self.codex,
             Harness::Pi => &mut self.pi,
-            Harness::Opencode => &mut self.opencode,
             Harness::Devin => &mut self.devin,
+            Harness::Muse => &mut self.muse,
         }
     }
 }

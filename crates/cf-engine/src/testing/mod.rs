@@ -29,7 +29,7 @@ pub use adapter::{
 };
 pub use adapters::{FakeAdapters, FakeRecords};
 pub use background::FakeBackground;
-pub use context::{Closed, Context, Made, START_MS};
+pub use context::{paced_mode, Closed, Context, Made, PACED_VARIABLE, START_MS};
 pub use executor::{Answer, Gate, GateWait};
 pub use holds::Holds;
 pub use host::{window_of, FakeHost, OnRequest};
@@ -40,7 +40,7 @@ pub use seams::{
     FakeRoster, FakeTrace, MODELS,
 };
 pub use time::TestTime;
-pub use window::{TRUST_PROMPT, TRUST_QUESTION, TRUST_QUOTED, TRUST_UNPLACED};
+pub use window::{COMPACTING, TRUST_PROMPT, TRUST_QUESTION, TRUST_QUOTED, TRUST_UNPLACED};
 
 /// What a note that replaces a role says before the role text, which a test
 /// that quotes it to the window of a worker needs word for word.

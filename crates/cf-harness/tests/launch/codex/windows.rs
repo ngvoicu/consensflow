@@ -9,9 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{Held, Readiness, Work};
-use cf_harness::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
+use cf_harness::records::{Item, ModelMoved, Options, Quota, Reading, Record, Role, Settlement};
 use cf_harness::seams::Time;
-use cf_harness::testing::{finished, AnsweringHost, Driver, ScriptedHost, FIRST_MESSAGE_MS};
+use cf_harness::testing::{finished, AnsweringHost, Driver, FIRST_MESSAGE_MS};
 use cf_proto::agents::Harness;
 
 use super::*;
@@ -60,10 +60,7 @@ fn learns_the_thread_from_its_broker() {
     );
     let mut driver = Driver::default();
     let started = Rc::clone(&window);
-    driver.begin(
-        0,
-        async move { started.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { started.started().await });
     assert!(driver.run().is_empty(), "waits to ask again");
     assert_eq!(fakes.time.waits(0), [250]);
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
@@ -72,7 +69,7 @@ fn learns_the_thread_from_its_broker() {
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
     assert_eq!(driver.run(), [(0, Ok(Some(THREAD.to_owned())))]);
     // The thread is now the window's own: it has nothing more to learn.
-    assert_eq!(finished(window.started(&ScriptedHost::default())), Ok(None));
+    assert_eq!(finished(window.started()), Ok(None));
 }
 
 /// How many milliseconds a window opened on `request` waits for its broker to
@@ -82,10 +79,7 @@ fn waits_for_the_thread(request: &Request, said: &str) -> i64 {
     let (adapter, fakes) = adapter(&home);
     let window = prepare(&adapter, request).unwrap().window;
     let mut driver = Driver::default();
-    driver.begin(
-        0,
-        async move { window.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { window.started().await });
     let began = fakes.time.wall_ms();
     let mut settled = driver.run();
     while settled.is_empty() {
@@ -108,10 +102,7 @@ fn started_with(
 ) -> (Result<Option<String>, String>, i64) {
     fakes.loopback.serve("GET /session", served);
     let mut driver = Driver::default();
-    driver.begin(
-        0,
-        async move { window.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { window.started().await });
     let began = fakes.time.wall_ms();
     let mut settled = driver.run();
     while settled.is_empty() {
@@ -225,7 +216,7 @@ fn a_window_whose_start_was_given_up_has_come_up_if_its_broker_names_a_thread_wh
         "on the thread its launch named"
     );
     assert_eq!(
-        finished(window.started(&ScriptedHost::default())),
+        finished(window.started()),
         Ok(None),
         "nothing more to learn"
     );
@@ -289,10 +280,7 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
     );
     let mut driver = Driver::default();
     let started = Rc::clone(&window);
-    driver.begin(
-        0,
-        async move { started.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { started.started().await });
     assert!(driver.run().is_empty(), "the broker names none yet");
     assert_eq!(fakes.time.waits(0), [250]);
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
@@ -302,7 +290,7 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
         "named: the thread is the launch's, nothing new"
     );
     assert_eq!(
-        finished(window.started(&ScriptedHost::default())),
+        finished(window.started()),
         Ok(None),
         "nothing more to learn"
     );
@@ -314,7 +302,7 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
     fakes
         .loopback
         .serve("GET /session", [shows(Some(NEXT), true)]);
-    assert_eq!(finished(other.started(&ScriptedHost::default())), Ok(None));
+    assert_eq!(finished(other.started()), Ok(None));
 
     let resuming = |first_message_ms| {
         waits_for_the_thread(
@@ -357,6 +345,9 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         asking: false,
         failed: false,
         failure: None,
+        took_back: false,
+        model_moved: None,
+        model_drift: None,
         quota,
         settlement,
         pending: Default::default(),
@@ -378,6 +369,84 @@ fn settled_record(thread: &str) -> Arc<Reading> {
         compaction: false,
     };
     reading(vec![item], Settlement::Settled, None)
+}
+
+/// The broker's word that the thread is at work, which Codex says live, before its
+/// rollout says a turn began (3.0.7 chief-meeting, CMT-06): the window is at work by
+/// it, for the pacing, whatever the record says; idle, or no word, and it is not. A
+/// look whose broker did not answer keeps no word of it.
+#[test]
+fn a_window_is_at_work_while_the_broker_says_codex_last_called_its_thread_busy() {
+    let home = Home::new();
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: settled_record("any"),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let says = |idle: Value| {
+        let word =
+            json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
+        fakes
+            .loopback
+            .serve("GET /session", [replies(&word.to_string())]);
+    };
+    assert!(!window.at_work(), "nothing said yet");
+    for (idle, at_work) in [
+        (json!(false), true),
+        (json!(true), false),
+        (json!(false), true),
+        (json!(null), false),
+    ] {
+        says(idle.clone());
+        let observed = finished(window.observe()).unwrap();
+        assert!(observed.settled, "the record's word stands for its lane");
+        assert_eq!(window.at_work(), at_work, "{idle}");
+    }
+}
+
+/// A window the broker last heard at work is asked again when the engine says so
+/// (`Window::recheck`, T-842's P2: a lost `turn/completed`): the broker's refreshed word
+/// is the window's from then on.
+#[test]
+fn a_recheck_takes_the_brokers_refreshed_word_on_whether_codex_is_at_work() {
+    let home = Home::new();
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: settled_record("any"),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let says = |route: &str, idle: bool| {
+        let word =
+            json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
+        fakes
+            .loopback
+            .serve(&format!("GET {route}"), [replies(&word.to_string())]);
+    };
+    says("/session", false);
+    finished(window.observe()).unwrap();
+    assert!(window.at_work());
+    fakes.loopback.take_asked();
+    says("/session", true);
+    finished(window.recheck());
+    let asked: Vec<String> = fakes
+        .loopback
+        .take_asked()
+        .into_iter()
+        .map(|request| request.url)
+        .collect();
+    assert!(
+        asked.len() == 1 && asked[0].ends_with("/session?refresh"),
+        "{asked:?}"
+    );
+    assert!(!window.at_work(), "Codex said idle when asked again");
 }
 
 #[test]
@@ -469,4 +538,41 @@ fn passes_the_harness_s_word_on_its_quota_through() {
         (false, None, false)
     );
     assert_eq!(stand.asked.borrow().len(), 2, "no record was read");
+}
+
+#[test]
+fn says_a_move_the_record_holds_before_a_refusal_it_shows_too() {
+    // Codex's reroute and a refusal in one record (T-853): the window's look says the move, as the
+    // engine holds the member for it, whichever of the two the record names first.
+    let home = Home::new();
+    let moved = Arc::new(ModelMoved {
+        from: "gpt-6-astra".to_owned(),
+        to: "gpt-6-safe".to_owned(),
+        because: "Codex rerouted the turn".to_owned(),
+        at: None,
+    });
+    let refused = Arc::new(Quota::Unavailable {
+        at: None,
+        because: "its billing was refused".to_owned(),
+    });
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: Arc::new(Reading::Known(Record {
+            model_moved: Some(Arc::clone(&moved)),
+            ..match &*reading(Vec::new(), Settlement::Settled, Some(refused)) {
+                Reading::Known(record) => record.clone(),
+                _ => unreachable!(),
+            }
+        })),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    fakes
+        .loopback
+        .serve("GET /session", [shows(Some(THREAD), true)]);
+    let observed = finished(window.observe()).unwrap();
+    assert_eq!(observed.quota.as_deref(), Some(&moved.as_quota()));
 }

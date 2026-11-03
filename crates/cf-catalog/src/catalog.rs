@@ -4,26 +4,53 @@
 //! into the manager's vocabulary (kind to harness, thinking and effort to
 //! effort); a preset whose kind is no harness the build runs is not offered.
 
-use cf_proto::agents::{CatalogEntry, FoundEntry, Harness};
+use cf_proto::agents::{CatalogEntry, DevinModel, FoundEntry, Harness};
 
 use crate::presets::Preset;
 use crate::profile::Settings;
 use crate::Catalog;
 
-/// The effort levels `harness` accepts, quoted from its CLI's own help output.
-pub fn efforts(harness: Harness) -> &'static [&'static str] {
-    match harness {
+/// How a harness takes an agent's effort: the levels it accepts, and where the launch puts
+/// the one an agent names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Efforts {
+    /// The levels, quoted from its CLI's own help output.
+    pub levels: &'static [&'static str],
+    /// Whether the level is written into the model's id (`claude-opus-5-5-max`), where the
+    /// others take it as a flag of its own: an id is then one the harness has only at the
+    /// levels it lists the model at ([`Catalog::launch_effort`]).
+    pub in_the_model_id: bool,
+}
+
+/// How `harness` takes an effort.
+pub fn efforts(harness: Harness) -> Efforts {
+    let (levels, in_the_model_id): (&'static [&'static str], bool) = match harness {
         // claude --help: "Effort level for the current session (low, medium, high, xhigh, max)"
-        Harness::Claude => &["low", "medium", "high", "xhigh", "max"],
+        Harness::Claude => (&["low", "medium", "high", "xhigh", "max"], false),
         // The API enum is none…max; `ultra` is a codex-CLI level above it (verified live).
-        Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+        Harness::Codex => (
+            &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+            false,
+        ),
         // pi --help: "Set thinking level: off, minimal, low, medium, high, xhigh, max"
-        Harness::Pi => &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-        // opencode --help: "provider-specific reasoning effort, e.g., high, max, minimal"
-        Harness::Opencode => &["minimal", "low", "medium", "high", "xhigh", "max"],
+        Harness::Pi => (
+            &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+            false,
+        ),
         // Devin writes the level into its model id (claude-opus-5-5-max): an agent
         // names the family and one of these, and the launch joins them.
-        Harness::Devin => &["low", "medium", "high", "xhigh", "max"],
+        Harness::Devin => (&["low", "medium", "high", "xhigh", "max"], true),
+        // muse --help (1.4.13): "Meta reasoning effort:
+        // none|minimal|low|medium|high|xhigh|max|ultra"; its docs say the Meta provider
+        // refuses `none`. Each model takes its own range of these (`model/list`, MUS-15).
+        Harness::Muse => (
+            &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+            false,
+        ),
+    };
+    Efforts {
+        levels,
+        in_the_model_id,
     }
 }
 
@@ -35,6 +62,38 @@ pub struct Group {
 }
 
 impl Catalog {
+    /// The effort a window of `harness` on `model` runs at, its agent's being `effort`.
+    /// A harness that writes the level into the model's id ([`Efforts::in_the_model_id`],
+    /// Devin) has the model only at the levels it lists it at, so a level its model has not
+    /// makes an id it has not (`claude-opus-4-6` has no level, `glm-5-2` only `max`: T-609).
+    /// Its model whose family the catalog runs bare, and never at `effort`, is run bare:
+    /// none. Every other agent runs at its own, a model the catalog does not know among
+    /// them (it is called by the id it names).
+    pub fn launch_effort<'e>(
+        &self,
+        harness: Harness,
+        model: &str,
+        effort: Option<&'e str>,
+    ) -> Option<&'e str> {
+        let effort = effort?;
+        if !efforts(harness).in_the_model_id {
+            return Some(effort);
+        }
+        let family = DevinModel::of(model).family;
+        let runs = self
+            .presets
+            .iter()
+            .filter(|preset| preset.kind == harness.kind() && preset.model == family);
+        let (mut bare, mut at_effort) = (false, false);
+        for preset in runs {
+            match preset.effort.as_deref() {
+                None | Some("") => bare = true,
+                Some(level) => at_effort |= level == effort,
+            }
+        }
+        (at_effort || !bare).then_some(effort)
+    }
+
     /// `CATALOG`: each harness with its entries, the harnesses in the order
     /// they first appear among the presets, which is not [`Harness::ALL`]'s order.
     pub fn groups(&self) -> &[Group] {
@@ -132,20 +191,31 @@ mod tests {
     }
 
     #[test]
+    fn devin_alone_writes_the_level_into_the_model_id_and_every_other_harness_takes_a_flag() {
+        // T-609: Devin's ids are the family at a level (`claude-opus-5-5-max`); Claude
+        // `--effort`, Codex `model_reasoning_effort`, Pi `--thinking`, Muse
+        // `--reasoning-effort`.
+        let in_the_id: Vec<Harness> = Harness::ALL
+            .into_iter()
+            .filter(|harness| efforts(*harness).in_the_model_id)
+            .collect();
+        assert_eq!(in_the_id, [Harness::Devin]);
+    }
+
+    #[test]
     fn every_harness_accepts_some_efforts_and_the_codex_cli_one_more() {
         for harness in Harness::ALL {
-            assert!(!efforts(harness).is_empty(), "{}", harness.as_str());
+            assert!(!efforts(harness).levels.is_empty(), "{}", harness.as_str());
         }
-        assert!(efforts(Harness::Codex).contains(&"ultra"));
-        for harness in [
-            Harness::Claude,
-            Harness::Pi,
-            Harness::Opencode,
-            Harness::Devin,
-        ] {
-            assert!(!efforts(harness).contains(&"ultra"), "{}", harness.as_str());
+        assert!(efforts(Harness::Codex).levels.contains(&"ultra"));
+        for harness in [Harness::Claude, Harness::Pi, Harness::Devin] {
+            assert!(
+                !efforts(harness).levels.contains(&"ultra"),
+                "{}",
+                harness.as_str()
+            );
         }
-        assert!(efforts(Harness::Pi).contains(&"off"));
+        assert!(efforts(Harness::Pi).levels.contains(&"off"));
     }
 
     #[test]

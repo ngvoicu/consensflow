@@ -13,7 +13,6 @@ pub(super) fn name_of(harness: &str) -> &str {
     match harness {
         "claude-code" => "Claude Code",
         "codex" => "Codex",
-        "opencode" => "OpenCode",
         "pi" => "Pi",
         "devin" => "Devin",
         other => other,
@@ -95,7 +94,7 @@ mod tests {
     #[test]
     fn a_harness_is_named_or_is_its_own_word() {
         assert_eq!(name_of("claude-code"), "Claude Code");
-        assert_eq!(name_of("opencode"), "OpenCode");
+        assert_eq!(name_of("pi"), "Pi");
         assert_eq!(name_of("kimi"), "kimi");
     }
 

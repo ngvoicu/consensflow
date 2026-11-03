@@ -6,9 +6,10 @@
 //! and every other harness's chief was told of them. Codex's never was: it found
 //! the owner's own Specmint skill by itself, used the folder Specmint names and
 //! not the project's, and gave the writing of the spec to a worker as a task, again
-//! and again. ConsensFlow gives a Codex window its role as `-c
-//! developer_instructions=…` at each launch, and a resumed thread keeps the
-//! developer message it began with: the chief's record held the one message of its
+//! and again. ConsensFlow gave a Codex window its role as `-c
+//! developer_instructions=…` at each launch (since T-698, a file the window's broker
+//! gives a thread as it starts), and a resumed thread keeps the developer message it
+//! began with: the chief's record held the one message of its
 //! start with specs off, and none after the Resume. So any change of a role since a
 //! Codex thread began never reached it. The report is the issue
 //! `issues/codex-resume-keeps-first-instructions.md` in consensflow-sme.
@@ -30,7 +31,7 @@
 //! The review of that fix found the note was the launch's first message
 //! (2026-10-14): the role was then on the window's command line twice, which
 //! Windows has no room for with a large staff, and the message the launch would
-//! have begun with lost its place. The window opens with no first message now, and
+//! have begun with lost its place. (Since T-698 the role is on no command line.) The window opens with no first message now, and
 //! the note goes in by paste once it is up, ahead of everything else.
 
 use std::fs;
@@ -163,11 +164,59 @@ impl<'a> Chief<'a> {
             .count())
     }
 
-    /// The user messages of the chief's thread that hold the section of specs.
+    /// The chief's window, `frame`, reads the newest note that told it its role, once
+    /// the daemon has seen it arrive: the role with specs on is longer than one
+    /// message (T-1009), so the note went in cut to its opening and `cf inbox read
+    /// m-N`, which its opening says to run now. The board then has it read, and the
+    /// role is what the conversation was told. What the command printed: the whole of
+    /// the role, as the window reads it.
+    fn reads_its_role(&self, frame: &Value) -> Result<String, Box<dyn std::error::Error>> {
+        let mut delivered = None;
+        self.rig
+            .wait_for("the note of the role to be delivered", secs(60), || {
+                delivered = self
+                    .project
+                    .inbox("chief")?
+                    .into_iter()
+                    .filter(|note| note["body"].to_string().contains(REPLACES))
+                    .max_by_key(|note| note["id"].as_i64())
+                    .filter(|note| note["state"] == "delivered");
+                Ok(delivered.is_some())
+            })?;
+        let note = delivered.ok_or("no note")?["id"].as_i64().ok_or("no id")?;
+        assert!(
+            self.told_of_specs()?
+                .last()
+                .is_some_and(|told| told.contains(&format!("cf inbox read m-{note}"))),
+            "told in part, with the command that prints the rest"
+        );
+        let read = self
+            .rig
+            .cf_in_window(frame, ["inbox", "read", &format!("m-{note}")])?;
+        assert_eq!(read.code, Some(0), "{read}");
+        assert!(
+            read.stdout.contains("## Reviews"),
+            "the rest of the role: {read}"
+        );
+        assert!(read.stdout.contains(SECTION), "the section: {read}");
+        self.rig.wait_for("the note to be read", secs(60), || {
+            Ok(self
+                .project
+                .inbox("chief")?
+                .iter()
+                .any(|said| said["id"] == note && said["state"] == "read"))
+        })?;
+        Ok(read.stdout)
+    }
+
+    /// The user messages of the chief's thread that tell it its role again, for its specs:
+    /// the opening of the note, which says it replaces the instructions it began with. The
+    /// section itself is past that opening once every command names the window's `cf` by
+    /// its whole path (T-1049), and is in what `cf inbox read` prints ([`Self::reads_its_role`]).
     fn told_of_specs(&self) -> Result<Vec<String>, cf_e2e::Error> {
         Ok(rollout::said_by(&self.record()?, "user")
             .into_iter()
-            .filter(|said| said.contains(SECTION))
+            .filter(|said| said.contains(REPLACES))
             .collect())
     }
 }
@@ -182,7 +231,7 @@ fn skill_named_in(message: &str) -> Option<String> {
 
 /// The folder the message says Specmint's `.specs` means.
 fn folder_named_in(message: &str) -> Option<String> {
-    Regex::new(r"Where Specmint says `\.specs`, it means `([^`]+)`")
+    Regex::new(r"Your specs and their registry are in `([^`]+)`:")
         .ok()?
         .captures(message)
         .map(|found| found[1].to_owned())
@@ -204,20 +253,26 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
 
     chief.is_given_specs("tdd")?;
     let resumed = chief.is_resumed(2)?;
-    // The window's command line has the role once, as it always had: the note that
-    // says it again goes in by paste once the window is up (on Windows a command
-    // line has room for the role once, and not for twice a large staff's).
+    // The window's command line has nothing of the role: its role's file holds the
+    // section (and is given to no resumed thread), and the note that says it again
+    // goes in by paste once the window is up.
     let line = resumed["argv"].to_string();
-    assert_eq!(line.matches(SECTION).count(), 1, "{line}");
+    assert_eq!(line.matches(SECTION).count(), 0, "{line}");
     assert!(!line.contains(REPLACES), "no message of a role: {line}");
+    let file = resumed["env"]["CF_CODEX_ROLE_FILE"]
+        .as_str()
+        .ok_or("the window's environment names no role file")?;
+    assert_eq!(fs::read_to_string(file)?.matches(SECTION).count(), 1);
     rig.wait_for(
-        "the chief's own record to hold the section",
+        "the chief's own record to be told its role again",
         secs(60),
         || Ok(!chief.told_of_specs()?.is_empty()),
     )?;
 
     // What it was told, and where: the folder of the project, not Specmint's, and a
-    // skill the chief can read while its window is up.
+    // skill the chief can read while its window is up. The note went in cut to its
+    // opening, so what it says is read where the window reads all of it: what `cf
+    // inbox read` printed, and not the opening, where a longer role has less of it.
     let told = chief.told_of_specs()?;
     assert_eq!(told.len(), 1, "{told:?}");
     assert!(
@@ -225,8 +280,9 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
         "it says it is in place of the instructions it began with: {}",
         told[0]
     );
-    assert_eq!(folder_named_in(&told[0]).as_deref(), Some(FOLDER));
-    let skill = skill_named_in(&told[0]).ok_or("the message names no SKILL.md")?;
+    let whole = chief.reads_its_role(&resumed)?;
+    assert_eq!(folder_named_in(&whole).as_deref(), Some(FOLDER));
+    let skill = skill_named_in(&whole).ok_or("the message names no SKILL.md")?;
     assert!(Path::new(&skill).is_file(), "{skill}");
     assert!(
         Path::new(&skill)
@@ -266,14 +322,14 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
     // The human chooses another variant: that is a change, said again, once, and the
     // role names the copy of that variant, kept beside the first.
     chief.is_given_specs("core")?;
-    chief.is_resumed(4)?;
+    let fourth = chief.is_resumed(4)?;
     rig.wait_for(
         "the chief to be told of the other variant",
         secs(60),
         || Ok(chief.told_of_specs()?.len() == 2),
     )?;
-    let again = chief.told_of_specs()?;
-    let now = skill_named_in(&again[1]).ok_or("the second message names no SKILL.md")?;
+    let again = chief.reads_its_role(&fourth)?;
+    let now = skill_named_in(&again).ok_or("the second message names no SKILL.md")?;
     assert_ne!(now, skill);
     assert!(now.contains("specmint-core"), "{now}");
     assert!(Path::new(&now).is_file(), "{now}");

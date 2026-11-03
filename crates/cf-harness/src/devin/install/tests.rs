@@ -132,14 +132,6 @@ fn a_launch_that_names_no_safe_folder_is_refused_before_anything_is_asked_or_wri
 }
 
 #[test]
-fn a_shell_word_is_quoted_with_each_quote_of_its_own_closed_around() {
-    assert_eq!(quote("/a b/cf"), "'/a b/cf'");
-    assert_eq!(quote("it's"), r"'it'\''s'");
-    assert_eq!(quote("''"), r"''\'''\'''");
-    assert_eq!(quote(""), "''");
-}
-
-#[test]
 fn the_window_launches_on_a_config_of_its_own_with_hooks_that_log_each_turn() {
     let home = Home::new();
     let integration = home.launch(LAUNCH, true).unwrap();
@@ -165,7 +157,7 @@ fn the_window_launches_on_a_config_of_its_own_with_hooks_that_log_each_turn() {
 }
 
 #[test]
-fn a_session_starts_with_its_role_text_from_the_bundles_own_cf_named_in_full_and_quoted() {
+fn every_hook_is_run_by_the_bundles_own_cf_named_in_full_and_quoted() {
     let home = Home::new();
     let mut services = home.services.clone();
     services.bundle = Bundle {
@@ -179,12 +171,23 @@ fn a_session_starts_with_its_role_text_from_the_bundles_own_cf_named_in_full_and
         true,
     )))
     .unwrap();
+    let written = home.written(LAUNCH);
     assert_eq!(
-        home.written(LAUNCH)["hooks"]["SessionStart"],
+        written["hooks"]["SessionStart"],
         json!([{ "matcher": "", "hooks": [{
             "type": "command",
             "command": r"'/a b/it'\''s/bin/cf' hook devin-session",
             "timeout": 5,
+        }] }])
+    );
+    // The member's question hook says the word cf as the session's does, by its whole
+    // path: a login shell's PATH can put another cf first (Devin 3000.11.228, 2026-10-31).
+    assert_eq!(
+        written["hooks"]["PreToolUse"],
+        json!([{ "matcher": "ask_user_question", "hooks": [{
+            "type": "command",
+            "command": r"'/a b/it'\''s/bin/cf' hook devin",
+            "timeout": 3600,
         }] }])
     );
 }
@@ -194,11 +197,12 @@ fn a_members_questions_are_answered_from_the_board_for_an_hour_and_the_chiefs_in
     let home = Home::new();
     home.launch("member", true).unwrap();
     home.launch("chief", false).unwrap();
+    let command = format!("'{}' hook devin", home.services.bundle.pane_cf);
     assert_eq!(
         home.written("member")["hooks"]["PreToolUse"],
         json!([{
             "matcher": "ask_user_question",
-            "hooks": [{ "type": "command", "command": "cf hook devin", "timeout": 3600 }],
+            "hooks": [{ "type": "command", "command": command, "timeout": 3600 }],
         }])
     );
     assert_eq!(home.written("chief")["hooks"]["PreToolUse"], json!([]));

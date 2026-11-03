@@ -75,9 +75,8 @@ pub fn substitute(value: &Value, root: &str) -> Value {
 
 /// The hash that names a bundle of an extension, which depends on the files
 /// of this build.
-static BUNDLE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"([\\/]extensions[\\/](?:pi|opencode)[\\/])[0-9a-f]{64}").unwrap()
-});
+static BUNDLE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([\\/]extensions[\\/]pi[\\/])[0-9a-f]{64}").unwrap());
 
 /// A text as Node's record writes it: the folder as `$ROOT`, a bundle's hash
 /// as `$HASH`.

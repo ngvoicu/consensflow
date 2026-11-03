@@ -3,10 +3,12 @@
 //! suite.
 
 use cf_base::refusal::Refusal;
+use cf_engine::delivery_text::delivery_text;
 use cf_engine::handoff::{
     handoff_text, history_page, history_pages, is_handoff, last_words, Handoff, HistoryPage,
     LastWords, HANDOFF_TITLE,
 };
+use cf_proto::cf_word::{CfWord, Shell};
 use cf_proto::ledger::{ChiefConversation, ChiefOpenWork, MessageView, SwitchedFrom};
 use regex::Regex;
 
@@ -43,9 +45,19 @@ fn messages(id: i64) -> Result<Option<MessageView>, Refusal> {
 
 /// Every page of the history, asked one after another.
 fn all(conversations: &[ChiefConversation]) -> Vec<HistoryPage> {
-    let first = history_page(conversations, &messages, 1.0, None, false).unwrap();
+    let first = history_page(conversations, &messages, 1.0, None, false, &CfWord::bare()).unwrap();
     (1..=first.pages)
-        .map(|page| history_page(conversations, &messages, page as f64, None, false).unwrap())
+        .map(|page| {
+            history_page(
+                conversations,
+                &messages,
+                page as f64,
+                None,
+                false,
+                &CfWord::bare(),
+            )
+            .unwrap()
+        })
         .collect()
 }
 
@@ -110,7 +122,10 @@ fn fits_every_page_within_what_each_harness_shows_newest_page_first_each_in_orde
         .map(|found| found[1].parse().unwrap())
         .collect();
     assert_eq!(answers, (0..400).collect::<Vec<_>>());
-    assert_eq!(history_pages(&history, &messages).unwrap(), pages.len());
+    assert_eq!(
+        history_pages(&history, &messages, &CfWord::bare()).unwrap(),
+        pages.len()
+    );
 }
 
 #[test]
@@ -269,7 +284,7 @@ fn leaves_a_tool_s_output_out_unless_asked_and_searches() {
         conversation(2, "claude-code", [("user", "Ship IT on Friday")]),
     ];
     let page = |find: Option<&str>, tools: bool| {
-        history_page(&conversations, &messages, 1.0, find, tools).unwrap()
+        history_page(&conversations, &messages, 1.0, find, tools, &CfWord::bare()).unwrap()
     };
     let plain = page(None, false).text;
     assert!(matches(
@@ -296,16 +311,19 @@ fn leaves_a_tool_s_output_out_unless_asked_and_searches() {
         page(Some("nowhere"), false).text,
         "Nothing in the chief's history contains \"nowhere\"."
     );
-    let out_of_range = history_page(&conversations, &messages, 9.0, None, false).unwrap_err();
+    let out_of_range =
+        history_page(&conversations, &messages, 9.0, None, false, &CfWord::bare()).unwrap_err();
     assert_eq!(
         (out_of_range.code, out_of_range.status),
         ("no-such-page", 400),
         "the API's RangeError"
     );
-    assert!(history_page(&[], &unknown, 1.0, None, false)
-        .unwrap()
-        .text
-        .contains("you are the first chief of this project"));
+    assert!(
+        history_page(&[], &unknown, 1.0, None, false, &CfWord::bare())
+            .unwrap()
+            .text
+            .contains("you are the first chief of this project")
+    );
 }
 
 #[test]
@@ -400,4 +418,100 @@ fn names_the_switch_the_history_what_waits_and_the_last_word() {
     assert!(calm.contains("cf history (1 page,"));
     assert!(calm.contains("Nothing on the board waits on you."));
     assert!(!calm.contains("cut off") && !calm.contains("human's last message"));
+}
+
+/// The first message of a chief the human switched in teaches the commands of the board
+/// (`cf history` and what waits on it), and is typed into the new chief's window: each
+/// starts with that window's own `cf` (T-1049), by the rule every text ConsensFlow wrote
+/// is delivered by.
+#[test]
+fn the_first_message_of_a_switched_in_chief_starts_each_command_with_the_cf_of_its_window() {
+    let from = SwitchedFrom {
+        harness: "claude-code".to_owned(),
+        agent: None,
+    };
+    let to = seat(Some("codex"), Some("astraeus"));
+    let open = ChiefOpenWork {
+        questions: vec![message(
+            6,
+            "question",
+            Some("zeus"),
+            Some(1),
+            "Which grammar?\nLL or LR",
+        )],
+        results: vec![task(2, "Lexer", Some("diana"), "done")],
+        own: Vec::new(),
+    };
+    let text = handoff_text(&Handoff {
+        from: &from,
+        to: &to,
+        open: &open,
+        last: None,
+        cut: false,
+        pages: 3,
+    });
+    let note = message(1, "note", None, None, &text);
+    let bare = Regex::new(r"(?-u:\b)cf (task|ask|inbox|answer|note|tell|staff|history)").unwrap();
+    for cf in [
+        CfWord::new("/opt/consensflow/bin/cf", Shell::Posix),
+        CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
+    ] {
+        let word = cf.as_str();
+        let said = delivery_text(&note, &[], &cf);
+        assert!(said.contains(&format!("before you act: {word} history (3 pages")));
+        assert!(said.contains(&format!(
+            "{word} history --page 2 for older; {word} history --find"
+        )));
+        assert!(said.contains(&format!("({word} inbox read m-6, then {word} answer m-6")));
+        assert!(said.contains(&format!("({word} task get T-2)")));
+        let left = said.replace(word, "");
+        assert!(!bare.is_match(&left), "{said}");
+    }
+}
+
+/// The commands a page names (the line that reads the older page, a delivery's) start with the
+/// `cf` of the window that reads it (T-1049), and the pages are measured with them: the longer
+/// word makes more pages, and none is past what each harness shows.
+#[test]
+fn a_page_names_its_commands_with_the_cf_of_its_reader_and_still_fits_what_each_harness_shows() {
+    let cf = CfWord::new(
+        "/Users/me/consensflow-dist/Contents/Resources/cli/bin/cf",
+        Shell::Posix,
+    );
+    let word = cf.as_str();
+    let items: Vec<(String, String)> = (0..400)
+        .map(|_| {
+            (
+                "user".to_owned(),
+                "[ConsensFlow m-6 · T-1 · question from @zeus]\nWhich grammar?".to_owned(),
+            )
+        })
+        .collect();
+    let history = [conversation(1, "claude-code", items)];
+    let page = |number: usize, cf: &CfWord| {
+        history_page(&history, &messages, number as f64, None, false, cf).unwrap()
+    };
+    let bare = CfWord::bare();
+    let (pages, bare_pages) = (
+        history_pages(&history, &messages, &cf).unwrap(),
+        history_pages(&history, &messages, &bare).unwrap(),
+    );
+    assert!(
+        pages > bare_pages,
+        "{pages} pages with the path, {bare_pages} without"
+    );
+    for number in 1..=pages {
+        let HistoryPage { text, .. } = page(number, &cf);
+        assert!(text.len() <= PAGE_BYTES, "{} bytes", text.len());
+        assert!(text.split('\n').count() <= PAGE_LINES);
+        assert!(text.contains(&format!("({word} inbox read m-6)")), "{text}");
+        assert!(!text.contains("(cf inbox read"), "{text}");
+        if number < pages {
+            assert!(
+                text.ends_with(&format!("Older: {word} history --page {}", number + 1)),
+                "{text}"
+            );
+        }
+    }
+    assert!(page(1, &bare).text.contains("(cf inbox read m-6)"));
 }

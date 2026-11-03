@@ -167,6 +167,27 @@ fn a_task_held_for_its_members_quota_holds_the_wake_up_back_until_the_hold_ends(
 }
 
 #[test]
+fn a_task_held_for_no_time_is_no_work_on_its_way_and_the_chief_is_woken_for_it() {
+    // T-816 P2-2: a hold at `9999-12-31T23:59:59.99xZ` (an account unavailable, MUS-23, or a
+    // model moved, MUS-24) ends at no time of its own: it waits for the human, and the chief,
+    // who is the one to tell them, is woken meanwhile as it is for any task that waits on it.
+    for sentinel in ["9999-12-31T23:59:59.998Z", "9999-12-31T23:59:59.999Z"] {
+        let (context, project) = woken_once();
+        context.give(project.id, "zeus", "Write the parser");
+        working(&context, &project, 1);
+        context
+            .ledger
+            .borrow_mut()
+            .hold_task(project.id, 1, sentinel, "account unavailable")
+            .unwrap();
+        assert_eq!(state(&context, &project, 1), "paused");
+        context.advance(HOUR);
+        passes(&context);
+        assert_eq!(given(&context), 2, "{sentinel}: the chief is woken");
+    }
+}
+
+#[test]
 fn tasks_working_and_others_open_behind_them_as_in_the_field_hold_the_wake_up_back() {
     let (context, project) = woken_once();
     context.give(project.id, "zeus", "Write the parser");

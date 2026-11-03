@@ -13,6 +13,8 @@
 
 // The cases are in `tests/cli/`: cargo looks for the modules of a test's root
 // file beside it, where each would be a suite of its own.
+#[path = "cli/a_removed_harness_is_named_nowhere.rs"]
+mod a_removed_harness_is_named_nowhere;
 #[path = "cli/catalog.rs"]
 mod catalog;
 #[path = "cli/commands.rs"]
@@ -21,6 +23,8 @@ mod commands;
 mod fixtures_end_with_their_owner;
 #[path = "cli/host_verbs.rs"]
 mod host_verbs;
+#[path = "cli/live_homes.rs"]
+mod live_homes;
 #[path = "cli/nested_cases_name_their_limit.rs"]
 mod nested_cases_name_their_limit;
 #[path = "cli/off_node.rs"]

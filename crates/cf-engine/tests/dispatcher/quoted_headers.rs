@@ -70,6 +70,9 @@ fn a_look_takes_no_header_a_message_quotes_after_a_blank_line_for_the_paste() {
     );
 }
 
+/// A quote only the record holds, read as the window ends, says nothing of when it came: no
+/// copy of it was taken after the hand-over, so it proves nothing, and the message goes
+/// again.
 #[test]
 fn a_window_that_ends_takes_no_header_quoted_in_its_record_for_the_paste() {
     let context = Context::new();
@@ -85,8 +88,12 @@ fn a_window_that_ends_takes_no_header_quoted_in_its_record_for_the_paste() {
     );
 }
 
+/// Since 3.0.7 (chief-meeting, CMT-23, and T-842's P3 for the window's end): an item the
+/// window was given after the hand-over that holds the header, which the copy has, takes
+/// the message for arrived, unproven, as a look past the arrival window does. It is never
+/// pasted again, and the chief is told once that it can read it.
 #[test]
-fn a_window_that_ends_takes_no_header_quoted_in_its_copy_for_the_paste() {
+fn a_window_that_ends_takes_a_header_quoted_in_its_copy_after_the_hand_over_for_arrived_unproven() {
     let context = Context::new();
     let (_, note) = a_note_that_never_shows(&context);
     // A look copies the quote; then the record cannot be read with no window open.
@@ -98,8 +105,8 @@ fn a_window_that_ends_takes_no_header_quoted_in_its_copy_for_the_paste() {
     context.exit("chief");
     let settled = context.message(note);
     assert_eq!(
-        (settled.state.as_str(), settled.reason.as_deref()),
-        ("queued", Some("@chief's window closed")),
-        "it goes again"
+        (settled.state.as_str(), settled.receipt["unproven"].clone()),
+        ("delivered", serde_json::json!(true)),
+        "arrived, unproven: never pasted again"
     );
 }

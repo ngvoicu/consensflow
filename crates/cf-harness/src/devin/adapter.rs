@@ -55,6 +55,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
+use cf_proto::panes::HumanInput;
 use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
@@ -68,7 +69,7 @@ use super::wire::selected_session;
 use super::wire_log::{Said, WireLog};
 use crate::contract::{
     Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, Observed, Over, Pane,
-    PaneHost, Prepared, Readiness, Records, Skill, Window, Work,
+    PaneHost, Prepared, Readiness, Records, Skill, Window, Work, STAFF_RULES_HEADING,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -76,7 +77,7 @@ use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
 use crate::shared::left_open::LeftOpen;
-use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
+use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{pane, specmint, window_args};
 
@@ -229,12 +230,19 @@ const DISCOVER_FOR_MS: i64 = 60_000;
 const WINDOWS_PATHS: &str = "This machine runs Windows and your shell is Git Bash: give file tools Windows paths (C:\\Users\\…) or paths relative to the project folder, never /c/… paths, which they write under C:\\c\\.";
 
 /// The role text a Devin window gets: on Windows, with how to name a file
-/// there. A window given none gets none, and is refused as any is.
+/// there, after the role and before the project's rules for the staff where the text
+/// has them: the rules are the human's words, and this sentence is not. A window given
+/// none gets none, and is refused as any is.
 fn role_text(instructions: &str, env: &Env) -> String {
-    if env.on_windows() && !instructions.is_empty() {
-        format!("{instructions}\n\n{WINDOWS_PATHS}\n")
-    } else {
-        instructions.to_owned()
+    if !env.on_windows() || instructions.is_empty() {
+        return instructions.to_owned();
+    }
+    match instructions.find(&format!("\n{STAFF_RULES_HEADING}\n")) {
+        Some(at) => {
+            let (role, rules) = instructions.split_at(at);
+            format!("{role}\n\n{WINDOWS_PATHS}\n{rules}")
+        }
+        None => format!("{instructions}\n\n{WINDOWS_PATHS}\n"),
     }
 }
 
@@ -385,12 +393,13 @@ impl Adapter for DevinAdapter {
         }
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
             Harness::Devin,
             env,
             variant,
+            folder,
             paths::global_specmint(env, variant),
         )
     }
@@ -422,6 +431,9 @@ struct DevinWindow {
     /// latest readiness read the input box empty on the screen, at this count of
     /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
     read_empty: Cell<Option<u64>>,
+    /// What the pane host said of the human's input at the latest readiness, where it
+    /// read a snapshot of the pane ([`Window::human_input`]).
+    input: RefCell<Option<HumanInput>>,
     /// What its record held when the window was opened again with no message to begin
     /// a turn. Devin resumed waits at its prompt and works on nothing, so no process is
     /// in the turn the record leaves, whatever it says: a final answer its store marks
@@ -454,6 +466,7 @@ impl DevinWindow {
             history: History::default(),
             looked: Cell::default(),
             read_empty: Cell::default(),
+            input: RefCell::default(),
             left_open: RefCell::new(left_open),
         }
     }
@@ -565,6 +578,10 @@ impl DevinWindow {
 impl Window for DevinWindow {
     fn opened(&self, _pid: Option<u32>) {}
 
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Devin, snapshot)
+    }
+
     /// The window is on `session` from now on: a switch to full permission begun for
     /// the conversation it was on is that one's, and another's time runs from the
     /// first look that finds it in the normal mode.
@@ -578,7 +595,7 @@ impl Window for DevinWindow {
         *self.left_open.borrow_mut() = None;
     }
 
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async move {
             if self.session.borrow().is_some() {
                 return Ok(None);
@@ -604,12 +621,17 @@ impl Window for DevinWindow {
         Box::pin(input_box::words_on_screen(host, pane, Harness::Devin))
     }
 
+    fn human_input(&self) -> Option<HumanInput> {
+        self.input.borrow().clone()
+    }
+
     fn ready<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
+            self.input.replace(None);
             let said = self.wire.read(self.time.wall_ms())?;
             if let Some(held) = self.shows_another(&said) {
                 return Ok(Readiness::Held(held));
@@ -617,6 +639,7 @@ impl Window for DevinWindow {
             let snapshot = pane::snapshot(host, pane)
                 .await
                 .map_err(|failed| failed.message)?;
+            self.input.replace(HumanInput::of(&snapshot));
             if snapshot.get("ok") != Some(&Value::Bool(true))
                 || js::truthy(snapshot.get("pasteInFlight"))
             {
@@ -702,6 +725,14 @@ impl Window for DevinWindow {
         self.history().is_some_and(|seen| seen.took)
     }
 
+    fn input_box<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<input_box::InputBox>> {
+        Box::pin(input_box::on_screen(host, pane, Harness::Devin))
+    }
+
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
             let Some(session) = self.session.borrow().clone() else {
@@ -731,9 +762,9 @@ impl Window for DevinWindow {
             .await;
             let wire = wire?;
             self.looked.set(self.history().map(|seen| seen.prompts));
-            let mut observed = record_state(Arc::clone(&reading));
+            // What Devin's wire says of its quota is the live word beside the record's.
+            let mut observed = observed_from(Arc::clone(&reading), wire.quota);
             observed.waiting = dialog_waiting(observed.reading.as_deref());
-            observed.quota = wire.quota;
             // What the record held when the window was opened with no message is the old
             // process's, whatever it says of the turn: no process is in a turn that was
             // cut, and one the record cannot end ended. The window has been given nothing

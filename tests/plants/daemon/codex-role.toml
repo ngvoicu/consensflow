@@ -5,7 +5,7 @@
 # keeps_first_instructions`, Codex alone); the ledger records the text each conversation was
 # last told (migration 0016); the engine compares it with the text a resumed window would be
 # given and, where it differs, opens the window with no first message and, once it is up, gives
-# it a note from ConsensFlow first (by paste, so the role is on the command line once): the new
+# it a note from ConsensFlow first (by paste): the new
 # text in full and said to replace the one the thread began with, then the message the launch
 # would have begun with, then the rest of its queue. The text is recorded in the very write that
 # confirms the note's delivery, so that it is given once; a role told in part (cut at what a paste
@@ -336,9 +336,8 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                KEPT,
-                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
-replace = '''                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
 
 [[plant]]
 name = "codex role: the copy's folder is named by the variant and not by the commit it is vendored at"
@@ -347,8 +346,8 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{}", variant.as_str(), &commit[..0]),'''
+find = '''format!("{}-{commit}", variant.as_str())'''
+replace = '''format!("{}-{}", variant.as_str(), &commit[..0])'''
 
 [[plant]]
 name = "codex role: a copy's file that is what the build ships is written again at every launch"
@@ -377,13 +376,17 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/launch_files.rs"
-find = '''const FOLDERS: [&str; 5] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER];'''
-replace = '''const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "specmint"];'''
+find = '''
+    for harness in FOLDERS {
+        let parent = path::join(&[home, "integrations", harness]);'''
+replace = '''
+    for harness in FOLDERS.into_iter().chain(["specmint"]) {
+        let parent = path::join(&[home, "integrations", harness]);'''
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/launch_files.rs"
-find = '''            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() {'''
-replace = '''            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() || true {'''
+find = '''            if LaunchId::new(&name).is_none() {'''
+replace = '''            if LaunchId::new(&name).is_none() && false {'''
 
 [[plant]]
 name = "codex role: a manifest's commit that is no hexadecimal name of one is made the name of a folder"
@@ -404,16 +407,6 @@ runs = ["harness-launch-specs"]
 file = "crates/cf-harness/src/claude/install.rs"
 find = '''        args.extend(["--add-dir".to_owned(), copy.root]);'''
 replace = '''        let _ = copy;'''
-
-[[plant]]
-name = "codex role: OpenCode is not told the skills folder of the copy"
-meant = "a_chief_given_specs_has_the_skill_kept_for_every_launch_which_opencode_is_told_to_read_besides_the_role_s_and_its_configuration_is_as_it_was"
-runs = ["harness-launch-specs"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/role.rs"
-find = '''    folders.extend(specmint.as_deref());'''
-replace = '''    let _ = specmint;'''
 
 [[plant]]
 name = "codex role: Pi is given the role's skill twice and not the copy"
@@ -622,18 +615,20 @@ replace = '''                self.seams
             }
 '''
 
+# Re-aimed by T-1074 (the critical review T-1014, note 4): the plant that put `|| true` in
+# `tells_a_role` was missed since T-1021, which took the delivery-time "told in part" line
+# out, so a message that says no role taken for one changes nothing anyone can see there.
+# `says_a_role` of the ledger's receipt still decides something: whether `cf inbox read`
+# receives a queued note, or leaves it to be typed in.
 [[plant]]
-name = "codex role: every message that comes into the window is taken for a role told"
-meant = "a_long_message_that_says_no_role_goes_cut_as_any_is_and_is_no_role_told_in_part"
-runs = ["engine-role-change"]
+name = "codex role: every message read in the inbox is taken for one that says a role"
+meant = "a_result_or_a_note_read_in_the_inbox_is_read_and_never_typed_in"
+runs = ["ledger-receipt"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
-find = '''            .role_notes_to(message.recipient_id)?
-            .contains(&message.id);'''
-replace = '''            .role_notes_to(message.recipient_id)?
-            .contains(&message.id)
-            || true;'''
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''        .prepare("SELECT 1 FROM message WHERE id = ? AND role_text IS NOT NULL")?'''
+replace = '''        .prepare("SELECT 1 FROM message WHERE id = ?")?'''
 
 [[plant]]
 name = "codex role: a replacement that waited for a conversation is left to be told to the one a switch begins"
@@ -797,18 +792,18 @@ runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''The instructions below replace the ones you were given then: follow these from now on'''
-replace = '''The instructions below are these: follow them from now on'''
+find = '''The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. This is context'''
+replace = '''The instructions below are these: follow them from now on, and where they differ from what you were told before, these are right. This is context'''
 
 [[plant]]
-name = "codex role: a replacement is longer than a message goes in whole, with the text at its start"
-meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_goes_in_whole_as_a_replacement"
+name = "codex role: a replacement is longer than its window reads whole, with the text at its start"
+meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read"
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''    format!("{OPENING}\n\n{instructions}")'''
-replace = '''    format!("{OPENING}\n\n{instructions}{}", "\n".repeat(2_000))'''
+find = '''    note_of(OPENING, OPENING_IN_PART, instructions)'''
+replace = '''    format!("{}{}", note_of(OPENING, OPENING_IN_PART, instructions), "\n".repeat(2_000))'''
 
 [[plant]]
 name = "codex role: the staff's rows grow, and the command line the docs measured is not the text's"
@@ -859,7 +854,6 @@ replace = '''
                 }
                 // A message to the member'''
 
-
 [[plant]]
 name = "codex role: a member's words after the role are no answer to its task however many messages come after it"
 meant = "the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task"
@@ -875,7 +869,6 @@ replace = '''
                 of_the_role = of_the_role
                     || header_id(&item.text).is_some_and(|message| replacements.contains(&message));
                 // A message to the member'''
-
 
 # A note whose window closed before it was seen: the conversation's own record says whether it
 # was told.
@@ -1061,18 +1054,18 @@ replace = '''            let conversation = current_conversation(store, confirme
             set_conversation_role_text(store, conversation.id, &role)?;'''
 
 [[plant]]
-name = "codex role: a role told in part is recorded as told, and said no more"
-meant = "a_role_too_long_for_one_message_goes_cut_is_not_recorded_as_told_and_the_human_is_told_so_at_every_resume"
+name = "codex role: a role told in part is recorded as told before it is read"
+meant = "a_role_too_long_for_one_message_goes_cut_with_the_word_to_read_the_rest_now_and_is_told_only_once_its_note_is_read"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''        Ok(says_a_role.then(|| goes_whole(message, &[])))'''
-replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[]) || true))'''
+find = '''        Ok(says_a_role.then(|| goes_whole(message, &[], &cf)))'''
+replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[], &cf) || true))'''
 
 [[plant]]
-name = "codex role: the human is not told that a role went in part"
-meant = "a_role_too_long_for_one_message_goes_cut_is_not_recorded_as_told_and_the_human_is_told_so_at_every_resume"
+name = "codex role: the human is not told that a role told in part was not read by the next Resume"
+meant = "a_role_told_in_part_and_not_read_by_the_next_resume_is_said_again_and_the_human_is_told_so"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
@@ -1087,8 +1080,8 @@ runs = ["engine-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = '''    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT'''
-replace = '''    utf16_len(&words_of(message, carried).0) < INLINE_LIMIT'''
+find = '''    utf16_len(words) <= INLINE_LIMIT'''
+replace = '''    utf16_len(words) < INLINE_LIMIT'''
 
 [[plant]]
 name = "codex role: whether a message goes whole is told by its own words and not by the rows it carries with it"
@@ -1097,8 +1090,8 @@ runs = ["engine-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = '''    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT'''
-replace = '''    utf16_len(&words_of(message, &[]).0) <= INLINE_LIMIT'''
+find = '''    fits_whole(&words_of(message, carried, cf).0)'''
+replace = '''    fits_whole(&words_of(message, &[], cf).0)'''
 
 # What the ledger knows a replacement by, and what a record's turn is a replacement's by: the id
 # the ledger has, and never the words.
@@ -1121,7 +1114,6 @@ replace = '''
                 of_the_role = item.text.contains(OPENING);
                 // A message to the member'''
 
-
 [[plant]]
 name = "codex role: a turn of a member's record answers a replacement by any header it quotes"
 meant = "a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words_it_quotes"
@@ -1138,7 +1130,6 @@ replace = '''
                     .iter()
                     .any(|message| item.text.contains(&crate::delivery_text::marker_of(*message)));
                 // A message to the member'''
-
 
 [[plant]]
 name = "codex role: the message an item of a record is, is the one whose header comes last in it"
@@ -1528,6 +1519,20 @@ find = '''                set_conversation_role_text(store, conversation.id, &ro
 replace = '''                let _ = (conversation.id, &role);
 '''
 
+# The chief's role with specs on goes in part (T-1009, and with the window's cf in every
+# command T-1049): it is recorded where `cf inbox read` read it (T-1021), not where it was
+# delivered. Both recordings out: the text said is recorded nowhere (T-1093).
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''        set_conversation_role_text(store, conversation.id, &role)?;
+    }
+    Ok(())
+'''
+replace = '''        let _ = (conversation.id, &role);
+    }
+    Ok(())
+'''
+
 [[plant]]
 name = "codex role rig: the copy of the skill is kept in the harness's folder of launches (the Claude rig)"
 meant = "a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_next_launch_and_a_worker_never_is"
@@ -1536,9 +1541,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                KEPT,
-                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
-replace = '''                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
 
 [[plant]]
 name = "codex role rig: Claude is not given the folder the copy is kept in (the Claude rig)"
@@ -1559,8 +1563,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &format!("{name}{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos()))],'''
 
 [[plant]]
 name = "codex role rig: the copy's place differs at every launch, as it did in a launch's own folder (the regression)"
@@ -1570,13 +1574,27 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''                &format!("{}-{commit}", variant.as_str()),'''
-replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
+find = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &name],'''
+replace = '''            &[KEPT, harness_folder(harness).unwrap_or(CODEX_FOLDER), &format!("{name}{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos()))],'''
 
 [[plant]]
-name = "codex role rig: the stand-in Codex gives a resumed thread the instructions its server has now (the rig)"
+name = "codex role rig: a resumed thread is given its role again, by the broker and a stand-in Codex that takes it (the rig)"
 meant = "a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a_message_and_once_for_its_thread_keeps_what_it_began_with"
 runs = ["rig-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start || main_resume);'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex.rs"
+find = '''            Some("thread/resume") => resumed(id, &request["params"], agent),'''
+replace = '''            Some("thread/resume") => {
+                agent.started(&request["params"]);
+                resumed(id, &request["params"], agent)
+            }'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
@@ -1586,9 +1604,23 @@ replace = '''        self.instructed
             .store(has_developer_message(&text) && false, Ordering::Relaxed);'''
 
 [[plant]]
-name = "codex role rig: the stand-in Codex gives a resumed thread the instructions its server has now (the regression)"
+name = "codex role rig: a resumed thread is given its role again, by the broker and a stand-in Codex that takes it (the regression)"
 meant = "a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_record_and_the_skill_it_names_is_there"
 runs = ["rig-regression-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start || main_resume);'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex.rs"
+find = '''            Some("thread/resume") => resumed(id, &request["params"], agent),'''
+replace = '''            Some("thread/resume") => {
+                agent.started(&request["params"]);
+                resumed(id, &request["params"], agent)
+            }'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
@@ -1629,3 +1661,13 @@ runs = ["live-specs-judge"]
 file = "crates/cf-e2e/tests/live_specs/launched.rs"
 find = '''        Some(said) if said.contains(REPLACES) => Ok('''
 replace = '''        Some(said) if said.contains(REPLACES) || said.contains(SECTION) => Ok('''
+
+[[plant]]
+name = "codex role: the human is told the cut is at exactly 16,000 characters"
+meant = "a_role_told_in_part_and_not_read_by_the_next_resume_is_said_again_and_the_human_is_told_so"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''went in cut at about 16,000 characters with'''
+replace = '''went in cut at 16,000 characters with'''

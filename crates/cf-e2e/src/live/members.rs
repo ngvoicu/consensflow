@@ -33,7 +33,6 @@ mod closing;
 mod command;
 mod descent;
 mod door;
-mod leftovers;
 mod plan;
 #[cfg(test)]
 mod tests;
@@ -54,7 +53,6 @@ use crate::rig::{Config, Project, Rig};
 use crate::{files, Error, Result};
 
 use board::task_number;
-use leftovers::Leftovers;
 
 pub use account::{clock, plural, plus, plus_maybe, squash, Account};
 pub use board::{
@@ -63,8 +61,8 @@ pub use board::{
 };
 pub use command::{quiet_command, runs_command, shown, LongCommand};
 pub use descent::{
-    descending_from, end_chosen, holding, with_cygwin_parents, Ended, Identity, Machine, Running,
-    ThisMachine,
+    descending_from, end_chosen, holding, pause_chosen, with_cygwin_parents, Ended, Identity,
+    Machine, Pause, Running, ThisMachine,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use plan::{
@@ -106,9 +104,6 @@ pub struct Members {
     folder: PathBuf,
     trust: Option<&'static str>,
     tiers: BTreeMap<String, String>,
-    /// What the real harnesses kept of the folder in places of their own: it goes
-    /// when the project does, unless it is to be kept.
-    _leftovers: Leftovers,
     /// Where the shim that starts Claude Code is, which the windows run through.
     _shims: TempDir,
 }
@@ -136,8 +131,28 @@ impl Members {
         let harnesses = plan.harnesses();
         let installs = harnesses
             .iter()
-            .map(|harness| log.found(*harness))
+            .map(|harness| {
+                let found = log.found(*harness)?;
+                match &plan.homes_in {
+                    Some(folder) => found.with_homes_in(folder),
+                    None => Ok(found),
+                }
+            })
             .collect::<Result<Vec<_>>>()?;
+        for file in &plan.home_files {
+            let isolation = installs
+                .iter()
+                .find(|install| install.harness() == file.harness)
+                .and_then(|install| install.isolation())
+                .ok_or_else(|| {
+                    Error::Daemon(format!(
+                        "{}'s windows run on no home of the run's own to put {} in",
+                        file.harness.name(),
+                        file.name
+                    ))
+                })?;
+            isolation.write(file.variable, &file.name, &file.text)?;
+        }
         let shims = tempfile::tempdir().map_err(|source| Error::File {
             action: "make a folder in",
             path: std::env::temp_dir(),
@@ -172,7 +187,6 @@ impl Members {
             None => None,
         };
         let project = Project::open(&rig, &plan.chief, json!({ "directory": folder }))?.id();
-        let leftovers = Leftovers::of(&harnesses, rig.var("HOME"), &folder);
         Ok(Self {
             rig,
             config,
@@ -181,7 +195,6 @@ impl Members {
             folder,
             trust,
             tiers: BTreeMap::new(),
-            _leftovers: leftovers,
             _shims: shims,
         })
     }
@@ -241,6 +254,28 @@ impl Members {
             (None, Some(home)) => Path::new(home).join(".claude"),
             (None, None) => PathBuf::from(".claude"),
         }
+    }
+
+    /// The Codex home the project's Codex windows keep their threads in: the
+    /// `CODEX_HOME` the rig gives them (the kit's home of the run's own,
+    /// [`super::isolation`]), and else `.codex` in its home.
+    pub fn codex_home(&self) -> PathBuf {
+        let var = |name: &str| self.rig.var(name).filter(|value| !value.is_empty());
+        match (var("CODEX_HOME"), var("HOME")) {
+            (Some(home), _) => PathBuf::from(home),
+            (None, Some(home)) => Path::new(home).join(".codex"),
+            (None, None) => PathBuf::from(".codex"),
+        }
+    }
+
+    /// The variable `name` of the environment the rig gives its windows, where it gives it
+    /// something: a harness's folder of the run's own among them ([`super::isolation`],
+    /// Devin's `XDG_DATA_HOME`, where its sessions are).
+    pub fn var(&self, name: &str) -> Option<String> {
+        self.rig
+            .var(name)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
     }
 
     /// The tier the member `agent` was given when it was added.
@@ -373,6 +408,14 @@ impl Members {
             .collect()
     }
 
+    /// What the window whose pane is `pane` (its id) printed, its control sequences
+    /// taken out ([`Rig::screen`]): what was drawn over is still in it, and a word the
+    /// program repaints cell by cell is not in it in one piece. The screen as the pane
+    /// host draws it is [`Rig::snapshot`]'s.
+    pub fn screen(&self, pane: &str) -> String {
+        self.rig.screen(pane)
+    }
+
     /// The end of the screen of the window whose pane is `pane` (its id), as a
     /// line ([`last_lines`]): what a check says of a window to say what it saw.
     pub fn tail(&self, pane: &str) -> String {
@@ -453,7 +496,6 @@ impl Members {
             folder,
             trust,
             tiers,
-            _leftovers,
             _shims,
         } = self;
         rig.kill_daemon();
@@ -473,9 +515,13 @@ impl Members {
             folder,
             trust,
             tiers,
-            _leftovers,
             _shims,
         })
+    }
+
+    /// The daemon's home, where the launches' files are.
+    pub fn home(&self) -> PathBuf {
+        self.rig.home()
     }
 
     /// Ends the rig: the daemon, the pane host and their windows, and the

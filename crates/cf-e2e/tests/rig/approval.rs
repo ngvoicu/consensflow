@@ -360,6 +360,16 @@ fn headed(given: &[String], id: impl std::fmt::Display) -> usize {
         .count()
 }
 
+/// The way to decide on T-1's result, as the chief's window is told it: the footer of the result
+/// starts the command with the window's own `cf` by its whole path (T-1049), which the rig's
+/// daemon names in what it gives its windows.
+fn way_to_decide(rig: &Rig) -> String {
+    format!(
+        "Decide with: {} task accept T-1",
+        rig.cf().to_string_lossy().replace('\\', "/")
+    )
+}
+
 /// How many messages `given` has that say `words`.
 fn saying(given: &[String], words: &str) -> usize {
     given.iter().filter(|text| text.contains(words)).count()
@@ -439,7 +449,7 @@ fn a_result_the_human_passed_on_while_the_chief_was_in_a_turn_is_withdrawn_when_
         0,
         "the chief was given the result it had decided on: {given:?}"
     );
-    assert_eq!(saying(&given, "Decide with: cf task accept T-1"), 0);
+    assert_eq!(saying(&given, &way_to_decide(&rig)), 0);
     assert_eq!(project.task(1)?["state"], "accepted");
     rig.close()?;
     Ok(())
@@ -469,7 +479,7 @@ fn a_result_the_human_passed_on_while_the_chief_was_in_a_turn_reaches_it_once_wh
     let given = chief_was_given(&rig, &chief);
     assert_eq!(headed(&given, id), 1, "once: {given:?}");
     assert_eq!(
-        saying(&given, "Decide with: cf task accept T-1"),
+        saying(&given, &way_to_decide(&rig)),
         1,
         "with the way to decide"
     );
@@ -543,7 +553,7 @@ fn a_chief_that_accepts_a_task_whose_result_waits_at_the_gate_is_refused_and_is_
         Ok(the_result(&project)?["state"] == "delivered")
     })?;
     let given = chief_was_given(&rig, &chief);
-    assert_eq!(saying(&given, "Decide with: cf task accept T-1"), 1);
+    assert_eq!(saying(&given, &way_to_decide(&rig)), 1);
     cf(&rig, &chief, &["task", "accept", "T-1"])?;
     assert_eq!(project.task(1)?["state"], "accepted");
     assert_eq!(

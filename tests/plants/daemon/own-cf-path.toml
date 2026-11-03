@@ -1,0 +1,567 @@
+# Every command a window is taught names the window's own `cf` by its full path (T-1049; T-972's
+# live kit found it on 2026-10-31: Devin 3000.11.228 on the Mac runs its commands through a login
+# zsh whose PATH puts the user's `~/.local/bin` before the window's folder, and Claude Code 2.1.312
+# on Windows through a login Git Bash that puts `~/bin` first; another program is also called `cf`,
+# the Cloud Foundry CLI). No order of a PATH can matter to a full path, so:
+#
+# - the first word of a command is `cf::CfWord` (cf-proto): the window's path as its shell takes it
+#   (`Roles::cf`, by harness and platform): as it is, one single-quoted word in a bash-like shell
+#   where it holds a space or a shell character, `& '…'` in PowerShell (Codex on Windows);
+# - the role texts (`skill/core/chief.md`, `skill/core/staff.md`) write `{{cf}}` where a command
+#   starts, and `role_instructions` puts the word there, where a section at the end asked a window
+#   to run it by its path when its own `cf` answered as another program;
+# - every text typed into a window (`delivery_text`) starts the commands it teaches with the word:
+#   the footers and the commands that read the rest are written with it, and what ConsensFlow
+#   wrote of a message (the engine's and the ledger's own notes, `sender` none, which the board
+#   shows with the word `cf`) has each command it names by the word `cf` started by it
+#   (`CfWord::in_text`); what a participant wrote is never changed;
+# - the hooks a launch writes (`cf hook claude`, `cf hook devin`, `cf hook devin-session`, `cf hook
+#   muse-session`) are run by that path too (`shared::shell::cf_hook`);
+# - every window is told its word (`CONSENSFLOW_CF`, `WindowEnv::with_cf`), and every `cf` it runs
+#   (`Board::cf`) says its own hints and refusals with it: a question's refusal (`door::ask`), a
+#   usage, a board's refusal, the notes of ConsensFlow's own in a thread or the inbox, the list's and
+#   the step's hints, and the history, which the daemon makes with the word its `cf history` says
+#   (`cf=`) and measures its pages with.
+#
+# The texts are held by `crates/cf-engine/tests/text/roles.rs` (every role, with and without specs,
+# for a path, a path with a space and a path with a shell's characters, in each shell: no bare `cf`
+# anywhere), `roles/member.rs`'s tests (the part of a role gets it too), the goldens of the texts,
+# `tests/text/delivery_text.rs` and `handoff.rs` (every footer and note), the dispatcher's
+# `window_cf.rs` and `cf-proto`'s `cf_word`; the hooks by the harness tests of each (`claude`'s
+# launch, `devin::install`, `muse::launch`, `tooling::launch`) and `shared::shell`; the first word
+# of each harness and platform by the daemon's `seams` tests. `cargo xtask live own-cf` shows it on
+# the real harnesses.
+#
+# Not planted: the word of `why_it_failed`'s pastes (`deliveries.rs`), which no test of the
+# dispatcher can tell from the bare word without a failed turn that carries a note of
+# ConsensFlow's, and the word `cf hook` prints (`main.rs`, from the program's own path).
+#
+# Every name holds `own cf path`, so `npm run plants:daemon -- "own cf path"` runs them all.
+
+[run]
+engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::", "--", "--skip", "goldens_roles"]
+engine-text-goldens-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "goldens_roles"]
+engine-text-delivery = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "delivery_text::"]
+engine-text-handoff = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "handoff::"]
+engine-lib-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "roles::"]
+engine-dispatcher-window-cf = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_cf::"]
+proto-lib-cf-word = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "cf_word::"]
+proto-lib-agents = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "agents::"]
+board-lib = ["cargo", "test", "--offline", "-p", "cf-board", "--lib", "tests::"]
+daemon-lib-routes-history = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::history"]
+daemon-lib-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
+harness-lib-shell = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::shell::"]
+harness-lib-devin-install = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::install::"]
+harness-lib-muse-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::launch::"]
+harness-launch-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::launches_a_fresh_worker"]
+harness-lib-tooling-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::launch::"]
+live-own-cf = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_own_cf"]
+
+# The texts of the roles.
+
+[[plant]]
+name = "own cf path: a member's command table says the word cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '    {{cf}} ask "…"                    a question to the chief; then end your turn'
+replace = '    cf ask "…"                    a question to the chief; then end your turn'
+
+[[plant]]
+name = "own cf path: a worker's closing line asks with the word cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''
+complete: what you did, the evidence, and anything left open. If you cannot go
+on without an answer, ask with `{{cf}} ask "…"` and end your turn; the answer'''
+replace = '''
+complete: what you did, the evidence, and anything left open. If you cannot go
+on without an answer, ask with `cf ask "…"` and end your turn; the answer'''
+
+[[plant]]
+name = "own cf path: the chief's command table says the word cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '    {{cf}} task done T-3 "…"          finish your own task with its result'
+replace = '    cf task done T-3 "…"          finish your own task with its result'
+
+[[plant]]
+name = "own cf path: the chief is told to record its own task with the word cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = """Record what you did with
+   `{{cf}} task done`"""
+replace = """Record what you did with
+   `cf task done`"""
+
+[[plant]]
+name = "own cf path: a chief's text is given the word cf in place of the path"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles", "engine-text-goldens-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '.replace("{{cf}}", cf.as_str());'
+replace = '.replace("{{cf}}", "cf");'
+
+[[plant]]
+name = "own cf path: a member's text is given the word cf in place of the path"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-roles", "engine-text-goldens-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = "return member::text(role, cf.as_str());"
+replace = 'return member::text(role, "cf");'
+
+[[plant]]
+name = "own cf path: the parts of a member's text are not given the cf"
+meant = "the_cf_is_put_in_the_shared_text_and_in_each_part_and_a_path_is_no_slot"
+runs = ["engine-lib-roles", "engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/member.rs"
+find = '''own.insert(slot, text.trim_end_matches('\n').replace("{{cf}}", cf));'''
+replace = '''own.insert(slot, text.trim_end_matches('\n').to_owned());'''
+
+# The first word.
+
+[[plant]]
+name = "own cf path: a path with a space is not quoted for bash"
+meant = "a_path_with_a_space_or_a_shell_character_is_one_quoted_word_in_bash_and_after_an_ampersand_in_powershell"
+runs = ["proto-lib-cf-word"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/cf_word.rs"
+find = '''Shell::Posix => format!("'{}'", path.replace('\'', r"'\''")),'''
+replace = "Shell::Posix => path.to_owned(),"
+
+[[plant]]
+name = "own cf path: a path with a space is quoted for PowerShell as it is for bash"
+meant = "a_path_with_a_space_or_a_shell_character_is_one_quoted_word_in_bash_and_after_an_ampersand_in_powershell"
+runs = ["proto-lib-cf-word", "engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/cf_word.rs"
+find = '''Shell::PowerShell => format!("& '{}'", path.replace('\'', "''")),'''
+replace = '''Shell::PowerShell => format!("'{}'", path.replace('\'', "''")),'''
+
+[[plant]]
+name = "own cf path: an empty path is a path"
+meant = "a_path_with_a_space_or_a_shell_character_is_one_quoted_word_in_bash_and_after_an_ampersand_in_powershell"
+runs = ["proto-lib-cf-word", "engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/cf_word.rs"
+find = "        if path.is_empty() {"
+replace = "        if false {"
+
+[[plant]]
+name = "own cf path: a path already written is written again"
+meant = "a_text_names_the_boards_commands_by_the_word_and_by_nothing_else"
+runs = ["proto-lib-cf-word"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/cf_word.rs"
+find = "            if !starts_a_word(text, at) || !names_a_command(&text[at + 3..]) {"
+replace = "            if !names_a_command(&text[at + 3..]) {"
+
+[[plant]]
+name = "own cf path: a command that is not the board's is rewritten"
+meant = "a_text_names_the_boards_commands_by_the_word_and_by_nothing_else"
+runs = ["proto-lib-cf-word"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/cf_word.rs"
+find = "            if !starts_a_word(text, at) || !names_a_command(&text[at + 3..]) {"
+replace = "            if !starts_a_word(text, at) {"
+
+[[plant]]
+name = "own cf path: every shell is taken for a bash-like one"
+meant = "only_codex_on_windows_runs_its_commands_in_powershell"
+runs = ["proto-lib-agents"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = "        if windows && self == Harness::Codex {"
+replace = "        if false {"
+
+[[plant]]
+name = "own cf path: the daemon gives every window the bash-like word"
+meant = "a_windows_first_word_is_the_path_as_its_harness_s_shell_runs_a_program_by_it"
+runs = ["daemon-lib-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = "        .map_or(Shell::Posix, |harness| harness.shell(windows));"
+replace = "        .map_or(Shell::Posix, |_| Shell::Posix);"
+
+# The texts typed into a window.
+
+[[plant]]
+name = "own cf path: a question's footer says the word cf"
+meant = "every_footer_and_every_command_that_reads_the_rest_starts_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '"\n\nRun in your shell: {cf} answer m-{id} \"…\" (a label or your own words{lines})"'
+replace = '"\n\nRun in your shell: cf answer m-{id} \"…\" (a label or your own words{lines})"'
+
+[[plant]]
+name = "own cf path: a result's footer says the word cf"
+meant = "every_footer_and_every_command_that_reads_the_rest_starts_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '"\n\n{beside}Decide with: {cf} task accept T-{task} · {cf} task reopen T-{task} \"…\""'
+replace = '"\n\n{beside}Decide with: cf task accept T-{task} · cf task reopen T-{task} \"…\""'
+
+[[plant]]
+name = "own cf path: the command that reads a cut message says the word cf"
+meant = "every_footer_and_every_command_that_reads_the_rest_starts_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''None => (body_of(message, cf), format!("{cf} inbox read m-{id}")),'''
+replace = '''None => (body_of(message, cf), format!("cf inbox read m-{id}")),'''
+
+[[plant]]
+name = "own cf path: the command that reads a cut composite says the word cf"
+meant = "every_footer_and_every_command_that_reads_the_rest_starts_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''format!("{cf} task get T-{number}"),'''
+replace = '''format!("cf task get T-{number}"),'''
+
+[[plant]]
+name = "own cf path: what ConsensFlow wrote of a note keeps the word cf"
+meant = "what_consensflow_wrote_of_a_note_starts_each_command_with_the_cf_of_the_window"
+runs = ["engine-text-delivery", "engine-dispatcher-window-cf"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        cf.in_text(&row.body)"
+replace = "        Cow::Borrowed(row.body.as_str())"
+
+[[plant]]
+name = "own cf path: what a participant wrote is given the window's word too"
+meant = "what_a_participant_wrote_is_never_changed_whatever_the_window_s_word_is"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    if row.sender.is_none() {"
+replace = "    if true {"
+
+[[plant]]
+name = "own cf path: a row a carrier keeps is given as it was written"
+meant = "what_consensflow_wrote_of_a_note_starts_each_command_with_the_cf_of_the_window"
+runs = ["engine-text-delivery"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''format!("{}\n{}", label(row), body_of(row, cf))'''
+replace = '''format!("{}\n{}", label(row), row.body)'''
+
+[[plant]]
+name = "own cf path: the dispatcher types a window the word cf, not its own"
+meant = "what_consensflow_wrote_of_a_note_reaches_a_window_with_the_commands_started_by_its_own_cf"
+runs = ["engine-dispatcher-window-cf"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''            .map_or_else(CfWord::bare, |participant| {
+                self.seams.roles.cf(&participant)
+            }))'''
+replace = '''            .map_or_else(CfWord::bare, |_| CfWord::bare()))'''
+
+[[plant]]
+name = "own cf path: a switched-in chief's first message says the word cf"
+meant = "the_first_message_of_a_switched_in_chief_starts_each_command_with_the_cf_of_its_window"
+runs = ["engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        cf.in_text(&row.body)"
+replace = "        Cow::Borrowed(row.body.as_str())"
+
+[[plant]]
+name = "own cf path: a refusal of a question says to ask with the word cf"
+meant = "a_refusal_says_to_ask_with_the_cf_the_window_was_given_as_its_shell_takes_it"
+runs = ["board-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/door.rs"
+find = 'Ask with {cf} ask \"…\" instead."'
+replace = 'Ask with cf ask \"…\" instead."'
+
+# The hooks.
+
+[[plant]]
+name = "own cf path: a hook is run by the word cf"
+meant = "a_hook_is_run_by_the_whole_path_of_the_cf_and_each_argument_is_one_word"
+runs = ["harness-lib-shell"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/shell.rs"
+find = 'let mut command = format!("{} hook {hook}", quote(pane_cf));'
+replace = 'let mut command = format!("{} hook {hook}", quote("cf"));'
+
+[[plant]]
+name = "own cf path: Claude's question hook says the word cf"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["harness-launch-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '"command": cf_hook(pane_cf, "claude", &[])'
+replace = '"command": cf_hook("cf", "claude", &[])'
+
+[[plant]]
+name = "own cf path: Claude's adapter is given the word cf for its hooks"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["harness-launch-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "pane_cf: services.bundle.pane_cf.clone(),"
+replace = 'pane_cf: "cf".to_owned(),'
+
+[[plant]]
+name = "own cf path: Devin's question hook says the word cf"
+meant = "every_hook_is_run_by_the_bundles_own_cf_named_in_full_and_quoted"
+runs = ["harness-lib-devin-install", "harness-lib-tooling-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/install.rs"
+find = '"command": cf_hook(pane_cf, "devin", &[])'
+replace = '"command": cf_hook("cf", "devin", &[])'
+
+[[plant]]
+name = "own cf path: Devin's session hook says the word cf"
+meant = "every_hook_is_run_by_the_bundles_own_cf_named_in_full_and_quoted"
+runs = ["harness-lib-devin-install", "harness-lib-tooling-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/install.rs"
+find = '"command": cf_hook(pane_cf, "devin-session", &[]),'
+replace = '"command": cf_hook("cf", "devin-session", &[]),'
+
+[[plant]]
+name = "own cf path: Muse's session hook says the word cf"
+meant = "the_hook_names_its_files_on_its_command_line_quoted_for_the_hook_s_shell"
+runs = ["harness-lib-muse-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '"command": cf_hook(pane_cf, "muse-session", &[role_file, said]),'
+replace = '"command": cf_hook("cf", "muse-session", &[role_file, said]),'
+
+# The live suite.
+
+[[plant]]
+name = "own cf path: the live task tells the worker to run cf whoami"
+meant = "the_task_teaches_no_command_that_starts_with_the_word_cf"
+runs = ["live-own-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_own_cf.rs"
+find = '''1. The `whoami` command of your ConsensFlow cf, started the way your instructions start \
+every cf command.\n\'''
+replace = '''1. `cf whoami`\n\'''
+
+# What every `cf` a window runs says.
+
+[[plant]]
+name = "own cf path: a window's board is not given the word its daemon told it"
+meant = "a_board_of_a_window_carries_the_word_the_daemon_gave_it_for_its_commands"
+runs = ["board-lib"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/lib.rs"
+find = '.with_cf(cf_in(env)))'
+replace = ')'
+
+[[plant]]
+name = "own cf path: a hook's board is not given the word its daemon told it"
+meant = "a_refusal_says_to_ask_with_the_cf_the_window_was_given_as_its_shell_takes_it"
+runs = ["board-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/door.rs"
+find = '.with_cf(crate::cf_in(env))'
+replace = ''
+
+[[plant]]
+name = "own cf path: the word a window was told is not read"
+meant = "a_refusal_says_to_ask_with_the_cf_the_window_was_given_as_its_shell_takes_it"
+runs = ["board-lib-door", "board-lib"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/lib.rs"
+find = "    env.text(ENV)"
+replace = '    env.text("CONSENSFLOW_NOT_CF")'
+
+[[plant]]
+name = "own cf path: a command written wrong says its usage with the word cf"
+meant = "a_usage_starts_the_commands_it_names_with_the_cf_of_the_window"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''            writeln!(err, "cf: {}", board.cf().in_text(&message))?;
+            Ok(2)'''
+replace = '''            writeln!(err, "cf: {message}")?;
+            Ok(2)'''
+
+[[plant]]
+name = "own cf path: a refusal of the board is printed with the word cf"
+meant = "a_refusal_starts_the_commands_it_names_with_the_cf_of_the_window"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''            writeln!(err, "cf: {}", board.cf().in_text(&message))?;
+            Ok(1)'''
+replace = '''            writeln!(err, "cf: {message}")?;
+            Ok(1)'''
+
+[[plant]]
+name = "own cf path: a usage is printed with the word cf"
+meant = "a_usage_starts_the_commands_it_names_with_the_cf_of_the_window"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = "        if self.own {"
+replace = "        if false {"
+
+[[plant]]
+name = "own cf path: the notes of ConsensFlow's own in a thread keep the word cf"
+meant = "the_notes_of_consensflow_a_thread_and_the_inbox_print_start_their_commands_with_the_cf_of_the_window"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/lines.rs"
+find = "        None | Some(Value::Null) => cf.in_text(&body).into_owned(),"
+replace = "        None | Some(Value::Null) => body.into_owned(),"
+
+[[plant]]
+name = "own cf path: what a participant wrote in a thread is given the word"
+meant = "the_notes_of_consensflow_a_thread_and_the_inbox_print_start_their_commands_with_the_cf_of_the_window"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/lines.rs"
+find = "        Some(_) => body.into_owned(),"
+replace = "        Some(_) => cf.in_text(&body).into_owned(),"
+
+[[plant]]
+name = "own cf path: the list's hint of idle sessions says the word cf"
+meant = "the_hints_cf_prints_start_their_commands_with_the_cf_of_the_window"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '"and {} idle session{} (`{} task list --all`)",'
+replace = '"and {} idle session{} (`cf{} task list --all`)",'
+
+[[plant]]
+name = "own cf path: the hint to finish a step of one's own says the word cf"
+meant = "the_hints_cf_prints_start_their_commands_with_the_cf_of_the_window"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '"T-{number} is yours; finish it with: {} task done T-{number} \"what you did\".{waits}",'
+replace = '"T-{number} is yours; finish it with: cf{} task done T-{number} \"what you did\".{waits}",'
+
+[[plant]]
+name = "own cf path: cf history does not say its window's word to the board"
+meant = "cf_history_says_the_cf_of_its_window_to_the_board"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '    if board.cf().as_str() != "cf" {'
+replace = "    if false {"
+
+[[plant]]
+name = "own cf path: the history route does not read the word of its caller"
+meant = "a_page_names_its_commands_with_the_cf_of_the_window_that_reads_it"
+runs = ["daemon-lib-routes-history"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/history.rs"
+find = '        .param("cf")'
+replace = '        .param("not-cf")'
+
+[[plant]]
+name = "own cf path: a page's older-page line says the word cf"
+meant = "a_page_names_its_commands_with_the_cf_of_its_reader_and_still_fits_what_each_harness_shows"
+runs = ["engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff.rs"
+find = 'format!("Older: {cf} history --page {}{flags}", number + 1)'
+replace = 'format!("Older: cf history --page {}{flags}", number + 1)'
+
+[[plant]]
+name = "own cf path: a page's line that reads a question says the word cf"
+meant = "a_page_names_its_commands_with_the_cf_of_its_reader_and_still_fits_what_each_harness_shows"
+runs = ["engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/entries.rs"
+find = '''({cf} inbox read m-{id})",
+                gist()
+            )'''
+replace = '''(cf inbox read m-{id})",
+                gist()
+            )'''
+
+[[plant]]
+name = "own cf path: a window is not told its word"
+meant = "a_window_is_told_how_a_command_starts_in_it_for_its_harness_and_the_platform"
+runs = ["daemon-lib-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = "            env.push((CF_ENV.to_owned(), word.as_str().to_owned()));"
+replace = "            let _ = (CF_ENV, word);"
+
+[[plant]]
+name = "own cf path: a window is told the word of a bash-like shell whatever its harness"
+meant = "a_window_is_told_how_a_command_starts_in_it_for_its_harness_and_the_platform"
+runs = ["daemon-lib-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = "        .map_or(Shell::Posix, |harness| harness.shell(windows));"
+replace = "        .map_or(Shell::Posix, |harness| harness.shell(false));"
+
+[[plant]]
+name = "own cf path: the daemon does not tell its windows their word"
+meant = "the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_expects"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "                .with_cf(&options.bundle.pane_cf, cfg!(windows)),"
+replace = ""

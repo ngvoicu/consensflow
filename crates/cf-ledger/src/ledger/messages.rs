@@ -54,6 +54,12 @@ impl Ledger {
         messages::role_notes_to(&self.store, participant_id)
     }
 
+    /// The role text a note says its recipient ([`Ledger::note_role`]); none
+    /// for a message that says no role, or no message.
+    pub fn role_of_note(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::role_of_note(&self.store, message_id)
+    }
+
     /// ConsensFlow tells `to` that T-`number` is paused and why, when a stall
     /// paused it: a note of the task alone, which the other stalls of the
     /// pass join ([`Ledger::join_pause_note`]).
@@ -64,7 +70,7 @@ impl Ledger {
         number: i64,
         because: &str,
     ) -> Result<MessageView, LedgerError> {
-        messages::note_pause(&mut self.store, project_id, to, number, because)
+        messages::note_pause(&mut self.store, project_id, to, number, because, false)
     }
 
     /// ConsensFlow tells `to` that T-`number` is held with `handle`, out of
@@ -81,6 +87,32 @@ impl Ledger {
         messages::note_hold(&mut self.store, project_id, to, number, handle, until)
     }
 
+    /// ConsensFlow tells `to` that T-`number` is held with `handle` because its
+    /// account is unavailable for `because` (MUS-23): no reset, only the human's word.
+    pub fn note_hold_unavailable(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        number: i64,
+        handle: &str,
+        because: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_hold_unavailable(&mut self.store, project_id, to, number, handle, because)
+    }
+
+    /// ConsensFlow tells `to` that T-`number` is held with `handle` because its harness moved
+    /// its window's model on its own, `because` (MUS-24): no reset, only the human's word.
+    pub fn note_hold_moved(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        number: i64,
+        handle: &str,
+        because: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_hold_moved(&mut self.store, project_id, to, number, handle, because)
+    }
+
     /// A stall of the same pass adds T-`number` to the pause note `note`
     /// instead of a note of its own. None when the note cannot take it: its
     /// reader has it, or it was withdrawn.
@@ -90,7 +122,7 @@ impl Ledger {
         number: i64,
         because: &str,
     ) -> Result<Option<MessageView>, LedgerError> {
-        messages::join_pause_note(&mut self.store, note, number, because)
+        messages::join_pause_note(&mut self.store, note, number, because, false)
     }
 
     /// A question for a coordinator; the asker's task waits for the answer.
@@ -128,16 +160,29 @@ impl Ledger {
         messages::note_paused_answer(&mut self.store, project_id, number, handle, tell, words)
     }
 
+    /// The newest note that gave T-`number`'s requester the answer of its window's turn on a
+    /// tell, or is to give it, its words not taken as the result, since the task's last result
+    /// to that requester before `result`: what `result`'s paste names. None where there is none.
+    pub fn paused_answer_given(
+        &self,
+        project_id: i64,
+        number: i64,
+        result: i64,
+    ) -> Result<Option<i64>, LedgerError> {
+        messages::paused_answer_given(&self.store, project_id, number, result)
+    }
+
     /// Whether the chief's tell to a participant's window about a task is still on its way to
     /// it: what the window said last is not the answer to it until it is in.
     pub fn tell_on_its_way(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
         messages::tell_on_its_way(&self.store, participant_id, task_id)
     }
 
-    /// Whether words told to a participant's window about a task are still on
-    /// their way to it: its answer is not the task's result until they are in.
-    pub fn told_waiting(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
-        messages::told_waiting(&self.store, participant_id, task_id)
+    /// Whether a note to a participant's window about a task, told words or
+    /// ConsensFlow's own, is still on its way to it: its answer is not the task's
+    /// result until each is in.
+    pub fn notes_waiting(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
+        messages::notes_waiting(&self.store, participant_id, task_id)
     }
 
     /// A launch whose first message was `carrier` is over before its window
@@ -236,7 +281,17 @@ impl Ledger {
 
     /// A message's delivery into its window begins: it, and the rows its paste carries.
     pub fn begin_delivery(&mut self, message_id: i64) -> Result<Begun, LedgerError> {
-        messages::begin_delivery(&mut self.store, message_id)
+        messages::begin_delivery(&mut self.store, message_id, None)
+    }
+
+    /// [`Ledger::begin_delivery`], its `delivery.begun` saying what the look that let
+    /// the message go read of the window (`look`: the pacing's evidence).
+    pub fn begin_delivery_looked(
+        &mut self,
+        message_id: i64,
+        look: &Value,
+    ) -> Result<Begun, LedgerError> {
+        messages::begin_delivery(&mut self.store, message_id, Some(look))
     }
 
     /// The newest message pasted into a participant's window about a task and proved.
@@ -368,7 +423,59 @@ impl Ledger {
     ) -> Result<MessageView, LedgerError> {
         #[cfg(feature = "test-support")]
         self.watched("retry_delivery", Some(message_id))?;
-        messages::retry_delivery(&mut self.store, message_id, reason, refund)
+        messages::retry_delivery(&mut self.store, message_id, reason, refund, None, true)
+    }
+
+    /// [`Ledger::retry_delivery`], its `delivery.retried` saying what the engine's look
+    /// read of the window (`look`, CMT-08).
+    pub fn retry_delivery_looked(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+        refund: bool,
+        look: &Value,
+    ) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("retry_delivery", Some(message_id))?;
+        messages::retry_delivery(
+            &mut self.store,
+            message_id,
+            reason,
+            refund,
+            Some(look),
+            true,
+        )
+    }
+
+    /// [`Ledger::retry_delivery`] with its attempt given back and no `delivery.retried`:
+    /// the same refusal said again (a harness that refuses a message while it is at work,
+    /// each time it is asked), which its first refusal logged already.
+    pub fn requeue_unlogged(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::retry_delivery(&mut self.store, message_id, reason, true, None, false)
+    }
+
+    /// When the delivery of message `message_id` on its way began (its last
+    /// `delivery.begun`): none while it is not on its way.
+    pub fn delivery_begun_at(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::delivery_begun_at(&self.store, message_id)
+    }
+
+    /// Message `message_id`, on its way, is taken for arrived though its window's
+    /// record shows it only in an item the proof cannot match (3.0.7 chief-meeting,
+    /// CMT-23): never pasted again, `delivery.unproven` keeps `shape`, and `tell` says
+    /// so once.
+    pub fn confirm_unproven(
+        &mut self,
+        message_id: i64,
+        item: &str,
+        shape: &Value,
+        tell: &[NewNote],
+    ) -> Result<MessageView, LedgerError> {
+        messages::confirm_unproven(&mut self.store, message_id, item, shape, tell)
     }
 
     /// A task message that arrived, and that its window took back out of its
@@ -423,20 +530,35 @@ impl Ledger {
         message_id: i64,
         reason: &str,
     ) -> Result<(MessageView, GivenUp), LedgerError> {
-        messages::give_up_delivery(&mut self.store, message_id, reason)
+        messages::give_up_delivery(&mut self.store, message_id, reason, None)
+    }
+
+    /// [`Ledger::give_up_delivery`], its `delivery.failed` saying what the engine's
+    /// look read of the window (`look`, CMT-08).
+    pub fn give_up_delivery_looked(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+        look: &Value,
+    ) -> Result<(MessageView, GivenUp), LedgerError> {
+        messages::give_up_delivery(&mut self.store, message_id, reason, Some(look))
     }
 
     /// ConsensFlow paused T-`number` as its window went away (`because`): its
     /// requester is told in a note of the pause, `join`'s where that can take it, and
     /// the words told to the window that still wait for it are named in it as waiting
-    /// for the resume, `why` said once, but `except`, which the caller names itself. The
-    /// note, and the words named.
+    /// for the resume, `why` said once, but `except`, which the caller names itself. A
+    /// task whose member's harness this build opens no window on (`harness_gone`) is
+    /// told the way on that is left: no resume, but a cancel and a new task, or its
+    /// finish. The note, and the words named.
+    #[allow(clippy::too_many_arguments)]
     pub fn note_stall(
         &mut self,
         project_id: i64,
         number: i64,
         because: &str,
         why: &str,
+        harness_gone: bool,
         join: Option<i64>,
         except: Option<i64>,
     ) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
@@ -446,6 +568,7 @@ impl Ledger {
             number,
             because,
             why,
+            harness_gone,
             join,
             except,
         )

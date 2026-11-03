@@ -133,6 +133,14 @@ fn play(words: &[&str]) -> Played {
             .any(|line| line.starts_with("  report: ")),
         "the run ended without a verdict: {ran}"
     );
+    // The play worked in a folder of its own, taken away once it was measured: the folder the
+    // workspaces are made in is there, and holds none.
+    let workspaces = home.join(".consensflow-candidate/evals/workspaces");
+    let left: Vec<PathBuf> = std::fs::read_dir(&workspaces)
+        .unwrap_or_else(|error| panic!("{}: {error}\n{ran}", workspaces.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert!(left.is_empty(), "the play's workspace was left: {left:?}");
     // It kept one report, of the shape the summary reads.
     let kept: Vec<PathBuf> = std::fs::read_dir(&reports)
         .unwrap()

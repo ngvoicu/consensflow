@@ -1,0 +1,22 @@
+{
+ "jsonrpc": "2.0",
+ "id": 1,
+ "result": {
+  "serverInfo": {
+   "name": "muse",
+   "version": "1.4.13"
+  },
+  "userAgent": "muse-build/1.4.13 (serve; macos-aarch64; build 39490bd065c800195489caec34473582f7650b54)",
+  "museHome": "<MUSE_HOME>",
+  "platformFamily": "unix",
+  "platformOs": "macos",
+  "schema": {
+   "version": 1,
+   "fingerprint": "sha256:7fddaf646dbc317e5fcac0785e135eb04df14fbb0db1863089dfd6da21730e5b"
+  },
+  "grantedCapabilities": [],
+  "experimentalApi": false,
+  "sessionDurability": "ephemeral",
+  "sandboxAvailability": "available"
+ }
+}

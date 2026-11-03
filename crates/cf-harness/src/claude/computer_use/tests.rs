@@ -241,3 +241,28 @@ fn the_file_is_read_again_only_once_it_changed_size_or_time() {
     fs::remove_file(&file).unwrap();
     assert!(!kept.computer_use(&env, &project).on, "no file is off");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_entry_kept_under_a_folder_spelled_through_a_link_is_the_real_folders() {
+    // T-783: Claude Code keeps its entry under the folder as it took it; a window of a
+    // project reached through a link (a Mac's `/var` or `/tmp`) asks of the real folder.
+    let home = tempfile::tempdir().unwrap();
+    let config = made(home.path(), "config");
+    let real = made(home.path(), "project");
+    let linked = home.path().join("linked");
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+    let linked = linked.to_string_lossy().into_owned();
+    configured(&config, &[&linked]);
+    let env = claude_in(&config);
+    for folder in [&real, &linked] {
+        assert_eq!(
+            computer_use(&env, folder),
+            ComputerUse {
+                folder: real.clone(),
+                on: true
+            },
+            "{folder}"
+        );
+    }
+}

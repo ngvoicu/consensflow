@@ -21,7 +21,7 @@ use super::jobs::Watch;
 use super::patterns::{BARE_COMPACT, CAVEAT, OUTPUT};
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
-use crate::shared::quota::spent_extra_usage;
+use crate::shared::quota::{account_refusal, spent_extra_usage, Refusal};
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -41,6 +41,9 @@ pub(super) enum Projected {
     /// under way (an attachment, `queued_command` of
     /// `"commandMode":"task-notification"`): its text, and the time its record says.
     Notified(String, Option<Arc<str>>),
+    /// A human's message Claude Code took into a turn under way (an attachment,
+    /// `queued_command` of `"commandMode":"prompt"`): the user's item, which begins no turn.
+    Absorbed(Box<Absorbed>),
     /// An operation on Claude Code's queue of messages, with the content it
     /// names where it names one.
     Enqueue(Result<String, String>),
@@ -77,6 +80,14 @@ pub(super) struct Hook {
     pub(super) uuid: Option<Arc<str>>,
 }
 
+/// A human's message taken into a turn under way: its record's time, uuid and the words.
+#[derive(Debug, PartialEq)]
+pub(super) struct Absorbed {
+    pub(super) at: Option<Value>,
+    pub(super) uuid: Arc<str>,
+    pub(super) text: String,
+}
+
 /// An assistant's record.
 #[derive(Debug, PartialEq)]
 pub(super) struct Assistant {
@@ -97,6 +108,16 @@ pub(super) struct Assistant {
     /// A refusal for quota: a status of 429, the error `rate_limit`, or words
     /// that say the account's extra usage is spent.
     pub(super) rate_limited: bool,
+    /// What the account refused for, where it is its billing or its login: no limit that
+    /// resets (MUS-23).
+    pub(super) account: Option<Refusal>,
+    /// The model a message of the main conversation says it was written by, where it names
+    /// one (not Claude Code's own `<synthetic>` messages, nor an API error's).
+    pub(super) model: Option<Arc<str>>,
+    /// Claude Code's own record that it moved the conversation to another model: a
+    /// `fallback` block, `{type, from: {model}, to: {model}}` (seen in the wild, 2.1.205),
+    /// of the main conversation. The only word of its own that it switched (T-816).
+    pub(super) fallback: Option<(Arc<str>, Arc<str>)>,
 }
 
 /// A block of an assistant's content that opens or closes a call.
@@ -167,6 +188,9 @@ pub(super) struct User {
     /// What a TaskStop result of the record says it stopped, of the main conversation:
     /// the call it answers, as the block says it, and the job's id.
     pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
+    /// The record is a `/model` (or `/fast`) the human typed at the prompt, of the main
+    /// conversation.
+    pub(super) model_command: bool,
 }
 
 /// A user's record of a `/compact` typed at Claude's prompt.
@@ -181,7 +205,9 @@ pub(super) enum Compacting {
 /// The record `record` of the session `session`, as replay reads it.
 pub(super) fn project(record: &Value, session: &str) -> Projected {
     match kind(record) {
-        Some("attachment") => notified(record, session).unwrap_or_else(|| hook(record, session)),
+        Some("attachment") => notified(record, session)
+            .or_else(|| absorbed(record, session))
+            .unwrap_or_else(|| hook(record, session)),
         Some("queue-operation") => queue(record),
         Some("assistant") => assistant(record, session),
         Some("user") => user(record, session),
@@ -273,7 +299,7 @@ fn hook(record: &Value, session: &str) -> Projected {
 /// way (2.1.277: the queued notification is taken back, `"reason": "absorbed_mid_turn"`,
 /// and the turn reads it as this), in the main conversation: its text. None for
 /// any other attachment, a human's message brought in so among them
-/// (`"commandMode":"prompt"`).
+/// (`"commandMode":"prompt"`, [`absorbed`]).
 fn notified(record: &Value, session: &str) -> Option<Projected> {
     let attachment = record.get("attachment");
     let says =
@@ -287,6 +313,35 @@ fn notified(record: &Value, session: &str) -> Option<Projected> {
         .and_then(Value::as_str)
         .map(Arc::from);
     ours.then(|| Projected::Notified(text.to_owned(), at))
+}
+
+/// The attachment that brings a human's message into a turn under way, in the main
+/// conversation: the message pasted or typed while the agent worked, which Claude Code
+/// queued and then took into the turn at a tool's result (`"reason": "absorbed_mid_turn"`),
+/// and wrote no user's record of (2.1.268 to 2.1.311; T-716's field case, m-4697). Its
+/// words are its `prompt`'s, text or a list of blocks as a user's message holds them.
+/// None for what the origin says is no human's (`peer`: another agent's message or a
+/// subagent's hand-back; `auto-continuation`: Claude Code's own), and for one with no
+/// words or no id to be an item by.
+fn absorbed(record: &Value, session: &str) -> Option<Projected> {
+    let attachment = record.get("attachment");
+    let says = |value: Option<&Value>, wanted: &str| value.and_then(Value::as_str) == Some(wanted);
+    let human = of_main_conversation(record, session)
+        && says(field(attachment, "type"), "queued_command")
+        && says(field(attachment, "commandMode"), "prompt")
+        && says(field(field(attachment, "origin"), "kind"), "human");
+    if !human {
+        return None;
+    }
+    let text = claude_text(field(attachment, "prompt"));
+    let uuid = text_id(record.get("uuid"))?;
+    (!js::trim(&text).is_empty()).then(|| {
+        Projected::Absorbed(Box::new(Absorbed {
+            at: timestamp(record),
+            uuid,
+            text,
+        }))
+    })
 }
 
 /// An operation on the queue. `String(record.content ?? '')` is what each
@@ -337,11 +392,29 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let closes_a_cut_turn = !refused
         && in_message("model").and_then(Value::as_str) == Some("<synthetic>")
         && text == CUT_TURN_CLOSED;
+    let model = in_message("model")
+        .and_then(Value::as_str)
+        .filter(|model| main && !refused && !model.is_empty() && *model != "<synthetic>")
+        .map(Arc::from);
+    let fallback = self::blocks(content)
+        .iter()
+        .filter(|block| main && !refused && kind(block) == Some("fallback"))
+        .find_map(|block| {
+            let model = |side: &str| {
+                field(block.get(side), "model")
+                    .and_then(Value::as_str)
+                    .filter(|model| !model.is_empty())
+                    .map(Arc::from)
+            };
+            Some((model("from")?, model("to")?))
+        });
+    let rate_limited = status == Some(429.0)
+        || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+        || spent;
     Projected::Assistant(Box::new(Assistant {
         at: timestamp(record),
         message_id: text_id(in_message("id")),
         uuid: text_id(record.get("uuid")),
-        text,
         blocks,
         ended: matches!(
             in_message("stop_reason").and_then(Value::as_str),
@@ -349,9 +422,15 @@ fn assistant(record: &Value, session: &str) -> Projected {
         ),
         closes_a_cut_turn,
         refused,
-        rate_limited: status == Some(429.0)
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
-            || spent,
+        rate_limited,
+        model,
+        fallback,
+        account: if refused && !rate_limited {
+            account_refusal(&text, status)
+        } else {
+            None
+        },
+        text,
     }))
 }
 
@@ -368,6 +447,11 @@ fn user(record: &Value, session: &str) -> Projected {
             uuid: text_id(record.get("uuid")),
         }));
     }
+    // `/model`, and `/fast` (its fast mode runs the turn on another model): the human's own.
+    let model_command = of_main_conversation(record, session)
+        && ["/model", "/fast"]
+            .iter()
+            .any(|command| text.contains(&format!("<command-name>{command}</command-name>")));
     let output_of = record
         .get("parentUuid")
         .and_then(Value::as_str)
@@ -406,6 +490,7 @@ fn user(record: &Value, session: &str) -> Projected {
         stopped: of_main_conversation(record, session)
             .then(|| stopped(record, content))
             .flatten(),
+        model_command,
     }))
 }
 

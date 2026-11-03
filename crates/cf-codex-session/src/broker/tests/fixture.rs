@@ -618,6 +618,8 @@ fn parse(raw: &[u8]) -> Reply {
 /// What a fixture's broker is started with.
 pub(crate) struct Options {
     pub(crate) fresh_bypass: bool,
+    pub(crate) role: Option<String>,
+    pub(crate) shell_env: Vec<(String, String)>,
     pub(crate) board: Option<Arc<Board>>,
     pub(crate) question_wait: Duration,
 }
@@ -626,6 +628,8 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             fresh_bypass: false,
+            role: None,
+            shell_env: Vec::new(),
             board: None,
             question_wait: Duration::from_secs(5),
         }
@@ -671,10 +675,20 @@ impl Fixture {
 
     /// `GET /session`.
     pub(crate) async fn read(&self) -> Value {
+        self.read_at("/session").await
+    }
+
+    /// `GET /session?refresh`: the broker asks Codex again where it last heard the
+    /// shown thread busy.
+    pub(crate) async fn read_refreshed(&self) -> Value {
+        self.read_at("/session?refresh").await
+    }
+
+    async fn read_at(&self, target: &str) -> Value {
         http(
             self.address(),
             "GET",
-            "/session",
+            target,
             &[("authorization", &format!("Bearer {TOKEN}"))],
             b"",
         )
@@ -764,6 +778,8 @@ pub(crate) fn config_for(codex: &FakeCodex, options: Options) -> Config {
             authorization: None,
         },
         fresh_bypass: options.fresh_bypass,
+        role: options.role,
+        shell_env: options.shell_env,
         board: options.board,
         question_wait: options.question_wait,
     }

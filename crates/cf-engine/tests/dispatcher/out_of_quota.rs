@@ -347,9 +347,9 @@ fn takes_a_member_back_at_a_progress_note_of_a_turn_that_got_through() {
 #[test]
 fn takes_a_member_back_at_an_answer_its_record_dates_in_milliseconds_and_not_at_a_reply_never_begun(
 ) {
-    // OpenCode dates its messages in milliseconds, which the check that a window got a
-    // turn through never read: an OpenCode member was back only at its reset. A message
-    // it made before the model's reply is no turn through (T-530).
+    // A record may date its messages in milliseconds, which the check that a window got a
+    // turn through never read: such a member was back only at its reset. A message made
+    // before the model's reply is no turn through (T-530).
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     tiers.open_body("One");

@@ -2,6 +2,7 @@
 //! its windows need, and the rig that gives them to the windows.
 
 use std::fs;
+use std::time::Duration;
 
 use super::*;
 
@@ -91,8 +92,10 @@ fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds
 
 #[test]
 fn the_harnesses_are_named_as_a_command_line_and_the_roster_name_them() {
-    let names: Vec<_> = Harness::ALL.iter().map(|harness| harness.name()).collect();
-    assert_eq!(names, ["claude", "opencode", "pi", "devin", "codex"]);
+    assert_eq!(
+        Harness::ALL.map(Harness::name),
+        ["claude", "pi", "devin", "codex", "muse"]
+    );
     for harness in Harness::ALL {
         assert_eq!(Harness::from_name(harness.name()), Some(harness));
     }
@@ -120,8 +123,8 @@ fn a_home_holds_a_login_when_it_holds_the_place_the_harness_keeps_it() {
     fs::write(home.path().join(".claude.json"), "{}").unwrap();
     assert!(held(Harness::Claude, home.path()));
     assert!(!held(Harness::Pi, home.path()));
-    fs::create_dir_all(home.path().join(".config").join("opencode")).unwrap();
-    assert!(held(Harness::OpenCode, home.path()));
+    fs::create_dir_all(home.path().join(".config").join("devin")).unwrap();
+    assert!(held(Harness::Devin, home.path()));
     // Codex's home is the folder itself: any folder that is there.
     assert!(held(Harness::Codex, home.path()));
     assert!(!held(Harness::Codex, &home.path().join("missing")));
@@ -280,6 +283,71 @@ fn a_rig_given_a_claude_config_of_its_own_keeps_its_claude_windows_there() {
 }
 
 #[test]
+fn every_harness_found_runs_on_a_home_of_the_runs_own_but_for_the_two_that_are_not_ours_to_give() {
+    // The windows of Codex, Pi and Devin (where it is known how) run on a home with a copy
+    // of the login: not a case's to remember to make.
+    let mut isolated = vec![Harness::Codex, Harness::Pi];
+    if cfg!(unix) {
+        isolated.push(Harness::Devin);
+    }
+    for harness in isolated {
+        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
+        assert!(found.isolation().is_some(), "{harness:?}");
+    }
+    // Claude Code's is a config folder ([`Login`]).
+    let found = with_homes(Installed::at(Harness::Claude, "/opt/bin/h", "/home/me")).unwrap();
+    assert!(found.isolation().is_none());
+}
+
+#[test]
+fn an_install_on_a_home_of_the_runs_own_is_given_the_persons_home_and_none_of_the_variables_it_reads_a_login_by(
+) {
+    let codex = Installed::at(Harness::Codex, "/codex/bin/codex", "/home/me/.codex")
+        .with_isolation(Arc::new(Isolation::codex(
+            Path::new("/home/me"),
+            Path::new("/home/me/.codex"),
+        )));
+    let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/home/me").with_isolation(Arc::new(
+        Isolation::pi(
+            Path::new("/home/me"),
+            Path::new("/home/me/.pi/agent"),
+            "openrouter/x",
+            Duration::from_secs(60),
+        ),
+    ));
+    let debug = format!("{:?}", rig(&[codex, pi], "/the/stand-in"));
+    // None of the variables the person's login is read by: not Codex's, the XDG folder or Pi's.
+    for owners in ["CODEX_HOME", "XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR"] {
+        assert!(
+            !debug.contains(&format!("(\"{owners}\"")),
+            "{owners}: {debug}"
+        );
+    }
+    // Their home is the windows' all the same: the folders of the project are below it (Devin's
+    // window, opened below a folder of the rig's own, which macOS spells through the `/var` link
+    // of its temporary folder, showed no answer: 2026-10-27).
+    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
+    // What the rig has instead of the rest: a home for each, asked for its variables when it starts.
+    assert_eq!(debug.matches("Isolation {").count(), 2, "{debug}");
+}
+
+#[test]
+fn a_codex_on_a_home_of_the_runs_own_is_given_the_persons_home_not_its_codex_folder() {
+    let codex = Installed::at(Harness::Codex, "/codex/bin/codex", "/home/me/.codex")
+        .with_isolation(Arc::new(Isolation::codex(
+            Path::new("/home/me"),
+            Path::new("/home/me/.codex"),
+        )));
+    let debug = format!("{:?}", rig(&[codex], "/the/stand-in"));
+    // The project folders are below the windows' home: never in the owner's Codex folder.
+    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
+    assert!(
+        !debug.contains("(\"HOME\", \"/home/me/.codex\")"),
+        "{debug}"
+    );
+}
+
+#[test]
 fn a_rig_for_several_harnesses_has_each_ones_folders_once_and_claude_without_its_config_dir() {
     let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine");
     let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/machine").with_node("/node/bin");
@@ -429,6 +497,9 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
     );
 }
 
+// Windows makes the shim as a `.cmd` and a Node script, by what the product's code says a
+// window of the real program opens on (the wrapper's own tests; the live suites run it).
+#[cfg(unix)]
 #[test]
 fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has_them_write_where_the_real_one_does(
 ) {
@@ -440,11 +511,6 @@ fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has
         folder.path(),
         Path::new("/the/fake-agent"),
     );
-    if cfg!(windows) {
-        // A shim is a shell script: on Windows there is none to start.
-        assert!(made.unwrap_err().to_string().contains("macOS and Linux"));
-        return;
-    }
     let debug = format!("{:?}", made.unwrap());
     let shim = folder.path().join("claude-shimmed");
     assert!(
@@ -521,8 +587,10 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
         serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
             .unwrap();
     let root = home.path().join(".consensflow-candidate").join("live");
+    // As Claude Code keeps a folder: on Windows with `/` for `\`.
     assert_eq!(
-        held["projects"][root.to_string_lossy().as_ref()]["hasTrustDialogAccepted"],
+        held["projects"][claude_project_key(&root.to_string_lossy()).as_str()]
+            ["hasTrustDialogAccepted"],
         true,
         "{held}"
     );
@@ -552,6 +620,44 @@ fn a_config_seeded_in_an_empty_folder_holds_the_trust_alone() {
 }
 
 #[test]
+fn claude_code_keeps_a_folder_on_windows_with_forward_slashes_and_elsewhere_as_it_is() {
+    let folder = r"C:\Users\AGV\.consensflow-candidate\live";
+    assert_eq!(
+        project_key(folder, true),
+        "C:/Users/AGV/.consensflow-candidate/live"
+    );
+    // The verbatim prefix a canonical path has on Windows is not part of the folder.
+    assert_eq!(
+        project_key(r"\\?\C:\Users\AGV\live", true),
+        "C:/Users/AGV/live"
+    );
+    // A backslash is a character of a name on the other systems.
+    assert_eq!(project_key(folder, false), folder);
+    assert_eq!(project_key("/home/me/live", true), "/home/me/live");
+    assert_eq!(claude_project_key("/home/me/live"), "/home/me/live");
+}
+
+#[cfg(windows)]
+#[test]
+fn the_live_root_is_trusted_on_windows_by_the_key_claude_code_looks_it_up_by() {
+    let config = tempfile::tempdir().unwrap();
+    seed_claude_trust(config.path(), Path::new(r"C:\Users\AGV")).unwrap();
+    let held: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
+            .unwrap();
+    let projects = held["projects"].as_object().unwrap();
+    assert_eq!(
+        projects.keys().collect::<Vec<_>>(),
+        ["C:/Users/AGV/.consensflow-candidate/live"],
+        "{held}"
+    );
+    assert_eq!(
+        projects["C:/Users/AGV/.consensflow-candidate/live"]["hasTrustDialogAccepted"],
+        true
+    );
+}
+
+#[test]
 fn the_owners_own_claude_config_is_never_seeded() {
     let home = tempfile::tempdir().unwrap();
     let owners = home.path().join(".claude");
@@ -565,4 +671,89 @@ fn the_owners_own_claude_config_is_never_seeded() {
     }
     assert!(!home.path().join(".claude.json").exists());
     assert!(!owners.join(".claude.json").exists());
+}
+
+/// T-824's P2-3: a harness the machine lacks is left out of every seat and said, and
+/// one asked for by name that it lacks is the error.
+#[test]
+fn a_harness_the_machine_lacks_is_left_out_of_every_seat_with_why_unless_it_was_asked_for() {
+    let no_muse = |harness: Harness| {
+        (harness == Harness::Muse).then(|| "muse is in no folder of the PATH".to_owned())
+    };
+    let (kept, said) = seated(&[], no_muse).unwrap();
+    assert_eq!(
+        kept,
+        [Harness::Claude, Harness::Pi, Harness::Devin, Harness::Codex]
+    );
+    assert_eq!(
+        said,
+        ["muse is left out of every seat: this machine cannot run it (muse is in no folder of the PATH)"]
+    );
+    assert_eq!(
+        seated(&[], |_| None).unwrap(),
+        (Harness::ALL.to_vec(), Vec::new())
+    );
+    let asked = seated(&[Harness::Pi, Harness::Muse], no_muse).unwrap_err();
+    assert_eq!(
+        asked,
+        "muse was asked for, and this machine cannot run it: muse is in no folder of the PATH"
+    );
+}
+
+/// T-931 P2-2: a run with no home to look for a login in cannot run a harness, as
+/// `installed` refuses it; it is not taken for one that can.
+#[test]
+fn a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks() {
+    let why = login_lacks(Harness::Muse, None, None, false).expect("lacking");
+    assert!(why.contains("home"), "{why}");
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".config").join("muse")).unwrap();
+    assert_eq!(
+        login_lacks(Harness::Muse, Some(home.path().to_path_buf()), None, false),
+        None
+    );
+}
+
+/// T-946: the members kit launched the machine's Muse with the owner's home and folders, and
+/// its run wrote the owner's `~/.config/muse`. A rig that seats Muse runs it through the rig's
+/// own live launcher, which gives it the rig's folders (`crate::muse::write_live_stand_in`).
+#[cfg(unix)]
+#[test]
+fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
+    let bin = tempfile::tempdir().unwrap();
+    crate::files::write_executable(&bin.path().join("muse"), "#!/bin/sh\n").unwrap();
+    crate::files::write(&bin.path().join(".muse-version"), "1.4.14-R7309.1\n").unwrap();
+    crate::files::write_executable(&bin.path().join("muse-bin-1.4.14-R7309.1"), "#!/bin/sh\n")
+        .unwrap();
+    let muse = Installed::at(Harness::Muse, bin.path().join("muse"), "/home/me");
+    let config = rig(&[muse], "/the/stand-in");
+    assert_eq!(config.muse_live_home(), Some(Path::new("/home/me")));
+    // A rig that seats no Muse runs none.
+    let codex = Installed::at(Harness::Codex, "/bin/echo", "/home/me");
+    assert_eq!(rig(&[codex], "/the/stand-in").muse_live_home(), None);
+}
+
+/// A program a case starts itself, outside a rig (Codex's app-server), is given the run's own
+/// home, a copy of the login in it, and never the person's (T-1039); a harness with no such
+/// home is refused it.
+#[test]
+fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_persons() {
+    let person = tempfile::tempdir().unwrap();
+    let theirs = person.path().join(".codex");
+    fs::create_dir_all(&theirs).unwrap();
+    fs::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
+    let codex = Installed::at(Harness::Codex, "codex", &theirs).with_isolation(Arc::new(
+        super::super::isolation::Isolation::codex(person.path(), &theirs),
+    ));
+    let vars = codex.home_outside_a_rig().unwrap();
+    let home = vars
+        .iter()
+        .find(|(name, _)| name == "CODEX_HOME")
+        .map(|(_, value)| PathBuf::from(value))
+        .unwrap_or_else(|| panic!("no CODEX_HOME in {vars:?}"));
+    assert_ne!(home, theirs);
+    assert!(!home.starts_with(&theirs), "{}", home.display());
+    assert!(home.join("auth.json").is_file(), "{}", home.display());
+    let bare = Installed::at(Harness::Codex, "codex", &theirs);
+    assert!(bare.home_outside_a_rig().is_err());
 }

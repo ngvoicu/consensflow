@@ -358,7 +358,7 @@ runs = ["engine-slow-records"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = "        let text = self.delivery_text_of(&first.message, &first.carried)?;"
-replace = "        let text = crate::delivery_text::delivery_text(&first.message, &first.carried);"
+replace = "        let text = crate::delivery_text::delivery_text(&first.message, &first.carried, &self.cf_for(&first.message)?);"
 
 [[plant]]
 name = "devin arrival: a paste sent again after a restart into an open window has no word"
@@ -368,7 +368,7 @@ runs = ["engine-slow-records"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = "        let text = self.delivery_text_of(&begun.message, &begun.carried)?;"
-replace = "        let text = crate::delivery_text::delivery_text(&begun.message, &begun.carried);"
+replace = "        let text = crate::delivery_text::delivery_text(&begun.message, &begun.carried, &self.cf_for(&begun.message)?);"
 
 [[plant]]
 name = "devin arrival: a message is worded by its last give-back alone, so a paste turned away after a restart's loses its word"

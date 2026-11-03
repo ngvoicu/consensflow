@@ -43,6 +43,67 @@ impl FileRead {
     }
 }
 
+/// A time a task was sent back to its window: when, and the chief's words.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Reopen {
+    pub at: String,
+    pub body: String,
+}
+
+/// The rounds of one task the chief asked for: when it was asked for and with what
+/// brief, when each result came in, each time the chief sent it back and with what
+/// words, and when it was accepted. The times are the ledger's own, which sort as
+/// text; a scenario that holds the chief to what it did after a result compares them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Rounds {
+    pub number: i64,
+    pub pool: Option<String>,
+    pub state: String,
+    pub created_at: String,
+    /// The brief the chief wrote.
+    pub brief: String,
+    /// When each result that stood came in, in order (one withdrawn is none).
+    pub results: Vec<String>,
+    pub reopens: Vec<Reopen>,
+    /// When the task was accepted last, if it is accepted.
+    pub accepted_at: Option<String>,
+}
+
+impl Rounds {
+    /// Whether the task went to a reviewer.
+    pub fn is_review(&self) -> bool {
+        self.pool.as_deref() == Some("reviewer")
+    }
+
+    /// Whether the task is work for a worker (a task given to a window by name has no
+    /// pool): not a review, advice, a test or an image.
+    pub fn is_work(&self) -> bool {
+        matches!(self.pool.as_deref(), None | Some("worker"))
+    }
+
+    /// When the first result that stood came in.
+    pub fn first_result(&self) -> Option<&str> {
+        self.results.first().map(String::as_str)
+    }
+
+    /// The times the chief sent it back after `time`.
+    pub fn reopens_after(&self, time: &str) -> Vec<&Reopen> {
+        self.reopens
+            .iter()
+            .filter(|reopen| reopen.at.as_str() > time)
+            .collect()
+    }
+}
+
+/// A turn of the chief that ended by asking the owner in its terminal: when, and how many
+/// question sentences. The time is the one the harness gave the message, else the one the
+/// daemon copied it at; it sorts as text with the times of the board.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Asking {
+    pub at: String,
+    pub questions: i64,
+}
+
 /// A note the chief sent the human: the start of its words.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Note {
@@ -151,9 +212,32 @@ pub struct Metrics {
     /// The files the scenario reads whole ([`crate::scenarios::Scenario::reads`]), by
     /// their paths.
     pub files_read: BTreeMap<String, FileRead>,
+    /// The rounds of each task the chief asked for, by number, for a scenario that
+    /// holds the chief to what it did with a result ([`crate::scenarios::Scenario::reads_the_rounds`]);
+    /// none for any other.
+    pub rounds: Option<Vec<Rounds>>,
+    /// When the chief put questions to the owner in its terminal, for the same scenarios as
+    /// `rounds`: a question counts for or against the chief by where it falls among the moments
+    /// of the board ([`Metrics::questions_between`]). A question dialog of the harness (a picker)
+    /// carries no time and is not among them.
+    pub asked_at: Option<Vec<Asking>>,
 }
 
 impl Metrics {
+    /// How many question sentences the chief put to the owner in its terminal after `from` and
+    /// before `until` (none for the start, none for the end of the run): zero where the measure
+    /// did not read them. Both bounds are moments of the board, and a question at one of them
+    /// is outside.
+    pub fn questions_between(&self, from: Option<&str>, until: Option<&str>) -> i64 {
+        self.asked_at
+            .iter()
+            .flatten()
+            .filter(|asking| from.is_none_or(|from| asking.at.as_str() > from))
+            .filter(|asking| until.is_none_or(|until| asking.at.as_str() < until))
+            .map(|asking| asking.questions)
+            .sum()
+    }
+
     /// How many questions the chief put to the owner in its terminal, in words or
     /// in a picker.
     pub fn asked_in_terminal(&self) -> i64 {
@@ -161,7 +245,8 @@ impl Metrics {
     }
 
     /// `value`, a report's numbers, with what JavaScript had none of at its end, for a
-    /// scenario that looks at it only: `filesGone`, then `filesRead`.
+    /// scenario that looks at it only: `filesGone`, then `filesRead`, then `rounds`, then
+    /// `askedAt`.
     pub fn with_files(&self, mut value: Value) -> Value {
         if let Some(gone) = &self.files_gone {
             value["filesGone"] = json!(gone);
@@ -172,6 +257,16 @@ impl Metrics {
                 .iter()
                 .map(|(file, read)| (file.clone(), read.to_value()))
                 .collect::<serde_json::Map<_, _>>()
+                .into();
+        }
+        if let Some(rounds) = &self.rounds {
+            value["rounds"] = rounds.iter().map(rounds_value).collect::<Vec<_>>().into();
+        }
+        if let Some(asked) = &self.asked_at {
+            value["askedAt"] = asked
+                .iter()
+                .map(|asking| json!({ "at": asking.at, "questions": asking.questions }))
+                .collect::<Vec<_>>()
                 .into();
         }
         value
@@ -218,6 +313,21 @@ impl Metrics {
             "filesChanged": self.files_changed,
         }))
     }
+}
+
+fn rounds_value(rounds: &Rounds) -> Value {
+    json!({
+        "number": rounds.number,
+        "pool": rounds.pool,
+        "state": rounds.state,
+        "createdAt": rounds.created_at,
+        "brief": rounds.brief,
+        "results": rounds.results,
+        "reopens": rounds.reopens.iter()
+            .map(|reopen| json!({ "at": reopen.at, "body": reopen.body }))
+            .collect::<Vec<_>>(),
+        "acceptedAt": rounds.accepted_at,
+    })
 }
 
 fn task_value(task: &Task) -> Value {
@@ -272,16 +382,43 @@ fn member_questions_value(asked: &MemberQuestions) -> Value {
 }
 
 /// One expectation or one check of the board's plumbing, and whether it held.
+///
+/// An expectation can also be **unmet**: it reads something the run never made (the second
+/// review of a chief that asked for none), so it judged nothing. An unmet check is not `ok`,
+/// and is no failure of the chief's either; a report says it apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
     pub name: String,
     pub ok: bool,
+    pub unmet: bool,
 }
 
 impl Check {
-    /// A check as a report keeps it.
+    /// A check that held, or did not.
+    pub fn new(name: impl Into<String>, ok: bool) -> Self {
+        Self {
+            name: name.into(),
+            ok,
+            unmet: false,
+        }
+    }
+
+    /// A check that judged nothing, since what it reads was not there.
+    pub fn unmet(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ok: false,
+            unmet: true,
+        }
+    }
+
+    /// A check as a report keeps it: `unmet` is a key only of a check that is.
     pub fn to_value(&self) -> Value {
-        json!({ "name": self.name, "ok": self.ok })
+        if self.unmet {
+            json!({ "name": self.name, "ok": self.ok, "unmet": true })
+        } else {
+            json!({ "name": self.name, "ok": self.ok })
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 //! Ending a project's rig, and what is said when it will not end. The rig's own
 //! close waits five seconds for the daemon and the pane host to end once their input
 //! has, which suits the stand-in agents (they leave when asked). A real harness
-//! takes its time (OpenCode's window needs a little over five seconds to leave once
+//! takes its time (a window may need a little over five seconds to leave once
 //! the host asks it to, after a command of its was stopped), and the host gives a
 //! program that does not leave ten before it kills it. So a project of real
 //! harnesses is given [`EXIT`] to end in, and one that does not end in it says why:
@@ -299,7 +299,7 @@ mod tests {
             listed(10, 1, 10, "cargo test"),
             listed(20, 10, 10, "cf ui --json"),
             listed(21, 10, 10, "consensflow-bridge"),
-            listed(30, 21, 30, "opencode"),
+            listed(30, 21, 30, "devin"),
             listed(31, 30, 30, "sh ./script"),
             listed(32, 31, 30, "sleep 200"),
             // Another's, which no parent of this rig started.

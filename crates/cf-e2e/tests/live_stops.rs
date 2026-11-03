@@ -67,7 +67,7 @@
 //!   running a command.
 //!
 //! ```text
-//! cargo xtask live stops                                  every case, `stuck`, `midturn` and `midtool` on OpenCode
+//! cargo xtask live stops                                  every case, `stuck`, `midturn` and `midtool` on Devin
 //! cargo xtask live stops --case command --case hook
 //! cargo xtask live stops --case stuck codex
 //! cargo xtask live stops --case midturn devin

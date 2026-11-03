@@ -38,7 +38,11 @@ pub(crate) use pausing::{
 /// and the daemon's alike.
 pub const RESUME_WORDS: &str = "Go on where you stopped.";
 
-const CRITICAL_RULE: &str = "No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.";
+/// What a critical task's lead holds it to, in the role texts' own words: it
+/// changes no file — true of every project, where forbidding specifications
+/// presumed one — and its findings go to the chief, whom the role texts name.
+const CRITICAL_RULE: &str =
+    "It changes no file: return analysis, evidence and recommendations to the chief.";
 
 /// How a task reads when it is handed over: critical work leads with its purpose.
 fn delivery_body(task: &TaskRow) -> String {

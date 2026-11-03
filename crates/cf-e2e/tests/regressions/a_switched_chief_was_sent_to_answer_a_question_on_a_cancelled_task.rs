@@ -152,7 +152,7 @@ fn a_question_whose_answer_a_cancel_took_back_is_not_in_the_handoff_of_a_switche
         "the handoff says nothing waits: {handoff}"
     );
     assert!(
-        !handoff.contains(&format!("cf answer m-{question}")),
+        !cf_e2e::rig::names_command(&handoff, &format!("answer m-{question}")),
         "the new chief is not sent to answer m-{question}: {handoff}"
     );
     rig.close()?;
@@ -175,7 +175,7 @@ fn a_question_on_a_task_that_still_waits_is_in_the_handoff_of_a_switched_chief()
         "the question is listed: {handoff}"
     );
     assert!(
-        handoff.contains(&format!("cf answer m-{question}")),
+        cf_e2e::rig::names_command(&handoff, &format!("answer m-{question}")),
         "with the command that answers it: {handoff}"
     );
     rig.close()?;

@@ -8,6 +8,7 @@
 //! quotes the words of one is none.
 
 use cf_proto::ledger::MessageView;
+use rusqlite::OptionalExtension;
 
 use crate::model::LedgerError;
 use crate::queue::{send, Sent};
@@ -46,4 +47,18 @@ pub(crate) fn role_notes_to(store: &Store, participant_id: i64) -> Result<Vec<i6
         )?
         .query_map([participant_id], |row| row.get::<_, i64>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// The role text the note `message_id` says its recipient; none for a message
+/// that says no role, or no message.
+pub(crate) fn role_of_note(store: &Store, message_id: i64) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT role_text FROM message WHERE id = ?",
+            [message_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
 }

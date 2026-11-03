@@ -32,10 +32,15 @@ use serde_json::{json, Map, Value};
 
 use crate::seams::processes::{probe, Unanswered};
 use crate::seams::Services;
+use crate::shared::shell::cf_hook;
 use crate::shared::window_args::Invocation;
 
 /// How long Devin lets the question hook wait for the board's answer.
 const QUESTION_HOOK_SECONDS: u32 = 3600;
+
+/// How long Devin lets the session hook run: the wait it makes for its window's log
+/// (`session_hook`) is inside it.
+pub(super) const SESSION_HOOK_SECONDS: u32 = 5;
 
 /// What Devin's window is given of its launch's own folder.
 pub(super) struct Integration {
@@ -57,11 +62,6 @@ fn valid(launch: &str) -> bool {
         && launch
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-}
-
-/// `value` as one word of a shell's line, as `quote` quotes it.
-fn quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
 }
 
 /// What a failed question of a program says: Node's own words, or the
@@ -114,13 +114,13 @@ pub(crate) fn added_hooks(
         "matcher": "",
         "hooks": [{
             "type": "command",
-            "command": format!("{} hook devin-session", quote(pane_cf)),
-            "timeout": 5,
+            "command": cf_hook(pane_cf, "devin-session", &[]),
+            "timeout": SESSION_HOOK_SECONDS,
         }],
     });
     let question = json!({
         "matcher": "ask_user_question",
-        "hooks": [{ "type": "command", "command": "cf hook devin", "timeout": QUESTION_HOOK_SECONDS }],
+        "hooks": [{ "type": "command", "command": cf_hook(pane_cf, "devin", &[]), "timeout": QUESTION_HOOK_SECONDS }],
     });
     [
         ("SessionStart", Some(session_start)),

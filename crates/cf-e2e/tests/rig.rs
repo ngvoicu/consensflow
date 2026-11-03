@@ -58,7 +58,10 @@
 //! that failed and none of one that passed, and every case here and in the
 //! regressions that starts a rig closes it. So is `smoke_stand_in`: the packaged
 //! smoke's stand-in harness taking its brief and handing back its result on the
-//! checkout's daemon, which the smoke itself proves only in a built app.)
+//! checkout's daemon, which the smoke itself proves only in a built app. So is
+//! `meeting`: the human's meeting with the chief, started through the page's
+//! operation, which holds what the board has for the chief until its Stop or the
+//! app's quit.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -99,12 +102,15 @@ mod devin_bypass_first;
 mod devin_compaction;
 #[path = "rig/devin_stamped.rs"]
 mod devin_stamped;
+#[path = "rig/harness_homes.rs"]
+#[cfg(unix)]
+mod harness_homes;
 #[path = "rig/help.rs"]
 mod help;
 #[path = "rig/homes.rs"]
 mod homes;
-#[cfg(unix)]
 #[path = "rig/kept_config.rs"]
+#[cfg(unix)]
 mod kept_config;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
@@ -116,20 +122,28 @@ mod live_member;
 mod live_members;
 #[path = "rig/live_support.rs"]
 mod live_support;
+#[path = "rig/meeting.rs"]
+mod meeting;
+#[path = "rig/muse_window.rs"]
+mod muse_window;
+#[path = "rig/pacing.rs"]
+mod pacing;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
 #[path = "rig/printed_output.rs"]
 mod printed_output;
 #[path = "rig/reports.rs"]
 mod reports;
+#[path = "rig/scripted_reviewer.rs"]
+mod scripted_reviewer;
 #[path = "rig/specs.rs"]
 mod specs;
 // The packaged smoke's stand-in is a shell script.
-#[cfg(unix)]
 #[path = "rig/smoke_stand_in.rs"]
-mod smoke_stand_in;
 #[cfg(unix)]
+mod smoke_stand_in;
 #[path = "rig/specs_codex.rs"]
+#[cfg(unix)]
 mod specs_codex;
 #[path = "rig/stand_in_codex.rs"]
 mod stand_in_codex;
@@ -157,10 +171,6 @@ type Outcome = cf_e2e::Outcome;
 
 /// The stand-in for a window's harness program, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
-
-/// The stand-in for an OpenCode 1.x, which the daemon launches a window on as it
-/// launches one on OpenCode, built for these tests.
-const FAKE_OPENCODE: &str = env!("CARGO_BIN_EXE_fake-opencode-1");
 
 /// A rig whose windows run the stand-in agent.
 fn rig() -> cf_e2e::Result<Rig> {

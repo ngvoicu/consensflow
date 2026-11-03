@@ -3,7 +3,19 @@
 //! names its project's staff, and a shared file let a chief read another
 //! project's when two of them opened together. Role documents live outside
 //! every folder a harness discovers skills in by itself. Each harness's module
-//! says how its window loads the file; Codex is given the text itself.
+//! says how its window loads the file; Codex's is no skill, and its module writes
+//! it.
+//!
+//! A sub-agent a window's agent starts is no window of ConsensFlow's: it has the
+//! window's board token in its shell, on every harness, and `cf` there runs as the
+//! window (T-766, 2026-10-26). Nothing tells that shell from the window's own (the
+//! harnesses start a child's commands as they start the window's), so no token is
+//! scoped to who holds it. What is kept from a child is the role: Codex's start
+//! from a configuration of their own (`codex::role`), Claude Code's are listed no
+//! role skill (`claude::install`), Devin's and Muse's SessionStart hooks give a
+//! child's session nothing, Pi has none; and a child that keeps the role all the
+//! same (a fork, an agent type the owner defined) is told by the role's own text
+//! that it is not the window's agent (`skill/core`).
 
 use std::path::Path;
 

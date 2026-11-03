@@ -205,7 +205,7 @@ const OUT_WITH_WORK_WAITING: &str = "the chief is out of quota with a task queue
 
 /// What the engine does before a paste its record never showed goes again: the
 /// window is read once more (`arrival`, T-269, 2026-10-22).
-const READ_ONCE_MORE: &str = "before the paste its record never showed goes again, the window is read once more: the pane host is asked what the window does now (`pane.snapshot`) and the record looked at again (`observe`), where Node pasted it again on the look that found it overdue";
+const READ_ONCE_MORE: &str = "before the paste its record never showed goes again, the window is read once more: the pane host is asked what the window does now and shows (`pane.snapshot` with `tail`: a window whose harness compacts is at work, T-901) and the record looked at again (`observe`), where Node pasted it again on the look that found it overdue";
 
 /// What the engine gives as a worker's result: its final answer alone, what it wrote after
 /// its last tool call (the owner's decision of 2026-10-15), where Node's is everything the
@@ -225,6 +225,10 @@ const FINAL_ANSWER: &str = "the member wrote a report, ran a command and ended w
 /// out of quota.
 const DEPARTED: &[(&str, &str)] = &[
     (
+        "gives a member on it no work, says why, and every pass goes on",
+        "the note that T-1 waits for a free worker names the way out for a member on a harness ConsensFlow cannot open (`remove @hera from the staff and add a member on another harness`), where Node's named none (T-569, from Calliope's review of T-566)",
+    ),
+    (
         "reaches the chief again once the human says it is back before its reset",
         OUT_WITH_WORK_WAITING,
     ),
@@ -238,7 +242,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "tells the requester once when nobody of the tier is free, and assigns when one frees up",
-        "the daemon gives T-3 to @zeus while the note that T-3 waits for a free standard worker, which the chief had not been given, is queued: the note is withdrawn (`T-3 was taken by @zeus`), where Node leaves it queued to be pasted after the task was taken",
+        "the daemon gives T-3 to @zeus while the note that T-3 waits for a free standard worker, which the chief had not been given, is queued: the note is withdrawn (`T-3 was taken by @zeus`), where Node leaves it queued to be pasted after the task was taken; and the chief's window, at work through the two hours, holds @diana's result on T-2 (m-4) at the head of its queue, which the human is told of at ten minutes and the chief's lane says (T-958), where Node said nothing",
     ),
     (
         "closes the old window of a task the human reassigned and gives the task to another member",
@@ -382,7 +386,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "lets go of its participant: its next step runs, the failure is written down, and an operation waiting on it ends",
-        TAKEN_AS_IT_WENT,
+        "the window goes with a paste on its way into it that its harness took and its record shows: the record is read (`record`) and the paste confirmed, where Node gave it back to its queue to be pasted again into the conversation that held it; and the Close comes while the session's window holds T-2's brief, read as the window opened and not confirmed yet: the window closed with its project, so its record is read and the brief, which it shows, is confirmed, and T-2 pauses with the Close (T-1076), where Node failed the brief and T-2 and told the chief (`@zeus-amber-pine's window closed`), as the alpha.1 release check saw a Devin worker's task fail at a Close",
     ),
     (
         "gives the new chief its handoff again when its first window closes before showing it",
@@ -429,6 +433,11 @@ const RERECORD: &str = "CF_RERECORD_DEPARTED";
 /// Holds a closed test to the Node trace of the test named `name` in `suites`,
 /// or, if the engine departs from Node's in it, to the trace of its own.
 pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
+    // The paced mode's gate looks and asks the pane host where Node's never did: what such
+    // a case holds is its own assertions (`cf_engine::testing::PACED_VARIABLE`).
+    if cf_engine::testing::paced_mode() {
+        return;
+    }
     let key = (
         suites.iter().map(|suite| (*suite).to_owned()).collect(),
         name.to_owned(),

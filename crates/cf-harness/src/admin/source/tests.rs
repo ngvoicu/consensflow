@@ -48,22 +48,18 @@ fn homebrew_is_told_by_its_cask_or_formula_folder_and_named_by_the_package() {
             )
         )
     );
-    let formula = source(
-        Harness::Opencode,
-        "/opt/homebrew/Cellar/opencode/1/bin/opencode",
-        &env,
-    );
+    let formula = source(Harness::Pi, "/opt/homebrew/Cellar/pi/1/bin/pi", &env);
     assert_eq!(
         said(&formula),
         (
-            "https://formulae.brew.sh/api/formula/opencode.json",
+            "https://formulae.brew.sh/api/formula/pi.json",
             "formula",
             Some("Homebrew"),
             Some(
                 &[
                     joined(&["/opt/homebrew", "bin", "brew"]),
                     "upgrade".to_owned(),
-                    "opencode".to_owned()
+                    "pi".to_owned()
                 ][..]
             )
         )
@@ -278,12 +274,6 @@ fn each_harness_s_own_installer_is_told_by_its_folder_in_either_spelling() {
             &["update"][..],
         ),
         (
-            Harness::Opencode,
-            "/Users/me/.opencode/bin/opencode",
-            "OpenCode's installer",
-            &["upgrade"][..],
-        ),
-        (
             Harness::Pi,
             "/Users/me/.pi/bin/pi",
             "Pi's installer",
@@ -408,10 +398,6 @@ fn a_cli_found_where_nothing_is_recognized_is_the_humans_to_update() {
         (
             Harness::Claude,
             "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
-        ),
-        (
-            Harness::Opencode,
-            "https://registry.npmjs.org/opencode-ai/latest",
         ),
         (
             Harness::Devin,

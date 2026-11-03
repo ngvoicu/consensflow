@@ -4,6 +4,8 @@
 //! stand-in agent's ([`stand_in_chief`], [`stand_in_worker`]), which is no model
 //! and only notes what it is sent.
 
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
 
 use super::super::agents;
@@ -42,12 +44,12 @@ pub fn stand_in_worker() -> Value {
 
 /// The work tier of the member of `harness`: its own, so that a task which names
 /// the tier lands on that harness. The daemon picks a member by tier alone, and a
-/// check that needs one harness's question tool must land on that harness.
+/// check that needs one harness's question tool must land on that harness. There are
+/// four tiers for five harnesses: Devin and Codex share one, and Pi and Muse another.
 const fn tier(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "complex",
-        Harness::OpenCode => "light",
-        Harness::Pi => "standard",
+        Harness::Pi | Harness::Muse => "standard",
         Harness::Devin | Harness::Codex => "critical",
     }
 }
@@ -81,6 +83,19 @@ pub fn member_as(harness: Harness, id: &str) -> Value {
 
 use super::super::agents::harness_of;
 
+/// A file a check puts in the home the run gives a harness's windows, before they open: the
+/// MCP server, skill or instructions it configures the harness by, in the run's own home and
+/// never in the owner's ([`Isolation::write`](super::super::isolation::Isolation::write)).
+#[derive(Debug, Clone)]
+pub struct HomeFile {
+    pub harness: Harness,
+    /// The variable that names the folder the harness reads it in (`CODEX_HOME`).
+    pub variable: &'static str,
+    /// The path below that folder.
+    pub name: String,
+    pub text: String,
+}
+
 /// What a check opens.
 #[derive(Debug, Clone)]
 pub struct Plan {
@@ -101,6 +116,9 @@ pub struct Plan {
     /// The variables the daemon alone is given, as the app gives its daemon what it took
     /// of the human's terminal: the pane host and its windows start without them.
     pub daemon_vars: Vec<(String, String)>,
+    /// Files written in the homes of the run's own that the harnesses' windows run on, before
+    /// anything opens.
+    pub home_files: Vec<HomeFile>,
     /// The agents of the roster.
     pub roster: Vec<Value>,
     /// The id of the agent that is the project's chief.
@@ -109,6 +127,9 @@ pub struct Plan {
     /// harness that asks of one asks in the project's own windows, and ConsensFlow
     /// answers ([`Plan::in_a_new_repository`]).
     pub repository: bool,
+    /// The folder the harnesses' homes of the run's own are made in, as it spells it,
+    /// where not the temporary folder ([`Plan::homes_made_in`]).
+    pub homes_in: Option<PathBuf>,
 }
 
 impl Plan {
@@ -121,9 +142,11 @@ impl Plan {
             files: Vec::new(),
             vars: Vec::new(),
             daemon_vars: Vec::new(),
+            home_files: Vec::new(),
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
             repository: false,
+            homes_in: None,
         }
     }
 
@@ -133,6 +156,15 @@ impl Plan {
     #[must_use]
     pub fn in_a_new_repository(mut self) -> Self {
         self.repository = true;
+        self
+    }
+
+    /// With the harnesses' homes of the run's own (Devin's XDG folders, Codex's and Pi's
+    /// own) made in `folder`, as `folder` spells it: a Mac's temporary folder through its
+    /// link `/var`, or as `/private/var` (`live linked-folder`, T-1038).
+    #[must_use]
+    pub fn homes_made_in(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.homes_in = Some(folder.into());
         self
     }
 
@@ -161,6 +193,25 @@ impl Plan {
     #[must_use]
     pub fn with_var(mut self, name: &str, value: impl Into<String>) -> Self {
         self.vars.push((name.to_owned(), value.into()));
+        self
+    }
+
+    /// With the file `name`, below the folder `variable` names in the home of the run's own
+    /// that `harness`'s windows run on, holding `text`.
+    #[must_use]
+    pub fn with_home_file(
+        mut self,
+        harness: Harness,
+        variable: &'static str,
+        name: &str,
+        text: impl Into<String>,
+    ) -> Self {
+        self.home_files.push(HomeFile {
+            harness,
+            variable,
+            name: name.to_owned(),
+            text: text.into(),
+        });
         self
     }
 
@@ -224,11 +275,12 @@ mod tests {
     }
 
     #[test]
-    fn each_harness_has_a_work_tier_of_its_own_but_devin_and_codex_that_share_the_critical_one() {
+    fn each_harness_has_a_work_tier_of_its_own_but_devin_and_codex_and_pi_and_muse_that_share_one()
+    {
         let tiers: Vec<&str> = Harness::ALL.into_iter().map(tier).collect();
         assert_eq!(
             tiers,
-            ["complex", "light", "standard", "critical", "critical"]
+            ["complex", "standard", "critical", "critical", "standard"]
         );
     }
 
@@ -274,12 +326,12 @@ mod tests {
         assert!(alone.harnesses().is_empty());
         assert_eq!(alone.chief, "chief");
 
-        let bench = Plan::new("bench", member_as(Harness::OpenCode, "bench-chief"))
-            .with(member(Harness::OpenCode))
+        let bench = Plan::new("bench", member_as(Harness::Claude, "bench-chief"))
+            .with(member(Harness::Claude))
             .with(member(Harness::Pi))
             .with(member_as(Harness::Pi, "bench-reviewer"))
             .with(stand_in_worker());
-        assert_eq!(bench.harnesses(), [Harness::OpenCode, Harness::Pi]);
+        assert_eq!(bench.harnesses(), [Harness::Claude, Harness::Pi]);
         assert_eq!(bench.chief, "bench-chief");
         assert_eq!(bench.roster[0]["id"], "bench-chief");
     }
@@ -321,7 +373,6 @@ mod tests {
         assert!(claude.contains("Do not pick one yourself: ask, and wait for the answer."));
         assert!(claude.ends_with("reply with exactly one line: COLOUR=<the answer>"));
         for (harness, tool) in [
-            (Harness::OpenCode, "question tool"),
             (Harness::Codex, "request_user_input tool"),
             (Harness::Devin, "ask_user_question tool"),
         ] {

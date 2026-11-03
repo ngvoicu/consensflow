@@ -73,7 +73,7 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
     let role = "# ConsensFlow worker\nRun cf ask to ask the chief.\n";
     let task = "[ConsensFlow m-1 · T-1 · task from @chief]\nReply with exactly: TASK_DONE";
     // The note is the engine's own, as the live check takes it.
-    let note = &ask::cut_note(2, &[1])?;
+    let note = &ask::cut_note(2, &[1], ask::For::new(rig.cf(), "devin"))?;
     assert_eq!(
         note,
         "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nConsensFlow stopped while you were working on T-1. Go on where you stopped."
@@ -456,7 +456,12 @@ fn a_member_launch_without_the_owners_hooks_keeps_the_ones_consensflow_adds_and_
         Member::new("worker", "# worker\n").without_the_owners_hooks(),
     )?;
     assert_eq!(events(&alone), ["PreToolUse", "SessionStart"]);
-    assert_eq!(commands(&alone, "PreToolUse"), ["cf hook devin"]);
+    // The question hook runs the rig's own `cf` by its whole path, as the session's does.
+    let real_cf = rig.cf().to_string_lossy().replace('\\', "/");
+    assert_eq!(
+        commands(&alone, "PreToolUse"),
+        [format!("'{real_cf}' hook devin")]
+    );
     let started = commands(&alone, "SessionStart");
     assert_eq!(started.len(), 1, "{started:?}");
     assert!(started[0].ends_with(" hook devin-session"), "{started:?}");

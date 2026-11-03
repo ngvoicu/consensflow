@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ConsensFlow",
-  "version": "3.0.6-alpha.3",
+  "version": "3.0.7-alpha.2",
   "identifier": "dev.ngvoicu.consensflow.local",
   "build": {
     "frontendDist": "../ui",
@@ -9,6 +9,9 @@
     "beforeDevCommand": {
       "script": "npm run prepare:app",
       "wait": true
+    },
+    "windows": {
+      "staticVCRuntime": true
     }
   },
   "app": {

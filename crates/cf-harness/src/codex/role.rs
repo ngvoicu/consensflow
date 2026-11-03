@@ -2,31 +2,61 @@
 //! the instructions it would have read anyway: the native resolver is asked for
 //! them, so the profile and project layering is kept, and no version is read.
 //!
-//! It is read once for a thread: the developer message a thread's first turn
-//! wrote is the one it keeps, and a resumed thread is given the arguments below
-//! and does not use them ([`crate::contract::Adapter::keeps_first_instructions`],
-//! which the Codex adapter answers yes to). A role that changed since the thread
-//! began reaches it as a message the engine says.
+//! The text goes in a file of the launch's own, which the launch's environment
+//! names (`CF_CODEX_ROLE_FILE`). On Unix it is 0600 in a folder 0700, readable by
+//! this user alone; Windows takes no mode there (cf-base's `make_folder` and
+//! `write_file`), and the file is as private as the folder it is in, under
+//! ConsensFlow's own in the user's profile (`AppData`), whose inherited permissions give
+//! the user, SYSTEM and administrators alone, as Devin's role file is. The window's supervisor
+//! reads it before Codex starts, and its broker gives it to the TUI's main thread
+//! starts as their developer instructions (`developerInstructions`, which replace
+//! what Codex's configuration says for that thread: probed on Codex 0.164.0, so the
+//! text holds Codex's own as well). It is on no command line, where every user of
+//! the machine could read it (`ps` is setuid root on macOS) and a pattern matching
+//! its words matched the window; a role's length is no command line's limit either.
+//! The file goes with the launch's folder, when its window closes.
 //!
-//! The arguments are on the window's command line whether the thread is new or
-//! resumed, and the role is on it once: where it changed, it goes in by paste once
-//! the window is up, and no first message says it again. Windows' `CreateProcess`
-//! takes 32,767 UTF-16 units of command line, and this word, JSON and quoted as
-//! Windows quotes it, is 15,654 units for a chief with specs on and a staff of 25
-//! (each row two roles), about 50 more for each row; with the rest of the line
-//! (about 400) the most it holds is 354 rows, or 301 with 2,500 units of Codex's
-//! own instructions in it, or 382 without specs. The arithmetic, which a test
-//! holds to the real text, is in the engine's `role_change`. Nothing handles it:
-//! past it the window does not open (`the window did not open: …`).
+//! It is read once for a thread: the developer message a thread's first turn
+//! wrote is the one it keeps, and a resumed thread is not given it again
+//! ([`crate::contract::Adapter::keeps_first_instructions`], which the Codex adapter
+//! answers yes to). A role that changed since the thread began reaches it as a
+//! message the engine says.
+//!
+//! A sub-agent the window's agent starts (Codex's `spawn_agent`) is a thread the
+//! app-server starts itself, and it began with the window's role: it held the
+//! member's role in its developer message, on every route (T-766, Codex 0.164.0),
+//! and one given something it could not answer asked the board as the member, 4
+//! children of 4. So a launch writes a second file beside the role's, the
+//! configuration a child of each of Codex's built-in agent types starts with
+//! (`default`, `worker`, `explorer`; Codex 0.166.0 has no other): Codex's own
+//! instructions, then a sentence that says the child is not the window's agent and
+//! never runs `cf` ([`children`]). The supervisor names it to the app-server alone
+//! (`-c agents.<type>.config_file=…`), which starts each such child from it in
+//! place of the window's role. A child forked with the window's whole history
+//! (`fork_context`) carries the role in that history, and one of an agent type the
+//! owner defined in their own configuration starts from what they wrote: those are
+//! what the role text's own sentence for a sub-agent is for (`skill/core`).
+//!
+//! A child's commands have the window's board token all the same (T-766 found
+//! nothing that tells a child's shell from the window's own, on any harness):
+//! ConsensFlow scopes no token to who holds it, and keeps the role, not the token,
+//! from a child.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use cf_base::env::Env;
+use cf_base::file::{make_folder, write_file, Mkdir};
 use cf_base::js;
 use cf_base::json::from_slice_lossy;
+use cf_base::path;
+use cf_proto::codex::agent_types::AGENT_TYPES;
+use cf_proto::codex::{ROLE_VARIABLE, SUBAGENT_TYPES_VARIABLE, SUBAGENT_VARIABLE};
 use serde_json::{json, Value};
 
+use crate::contract::LaunchId;
 use crate::seams::processes::{Child, Ending, Program, Streams};
 use crate::seams::{arm, Services};
+use crate::shared::launch_files::{launch_folder, CODEX_FOLDER};
 
 /// Why a launch is refused when Codex's own instructions could not be read.
 const UNREAD: &str = "Cannot read native Codex instructions safely";
@@ -37,35 +67,133 @@ const ANSWER_WITHIN_MS: u64 = 10_000;
 /// The most a line of the app-server's may say.
 const LINE_LIMIT: usize = 2 * 1024 * 1024;
 
-/// The arguments that give a window of `role` its role: Codex's own
-/// instructions for a window opened in `cwd`, then the role's `content`, as
-/// the developer's instructions.
-pub(super) async fn arguments(
+/// The name of the role's file in its launch's folder.
+const FILE: &str = "developer-instructions.md";
+
+/// The name of the file of the configuration its sub-agents start with, in its
+/// launch's folder.
+const CHILDREN_FILE: &str = "sub-agents.toml";
+
+/// The developer instructions of a window and of the sub-agents its agent starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Texts {
+    /// The window's own: Codex's instructions, then the role.
+    pub(super) role: String,
+    /// A sub-agent's: Codex's instructions, then that it is not the window's agent.
+    pub(super) children: String,
+    /// Codex's own agent types whose sub-agents start from [`Texts::children`]: those
+    /// the owner's configuration does not define. One it defines is the owner's, as it
+    /// was: a sub-agent of it starts as the owner's configuration says (with the role,
+    /// unless that sets instructions of its own), and the role's own sentence for a
+    /// sub-agent is what it then has.
+    pub(super) kinds: Vec<&'static str>,
+}
+
+/// The texts a window of `role` is given as developer instructions, its own and its
+/// sub-agents': Codex's own instructions for a window opened in `cwd`, then the
+/// role's `content` for the window, and for a sub-agent [`children`]'s sentence.
+pub(super) async fn text(
     services: &Services,
     role: &str,
     executable: &str,
     cwd: &str,
     content: &str,
-) -> Result<Vec<String>, String> {
+) -> Result<Texts, String> {
     if content.is_empty() {
         return Err(format!("the {role} window needs its role text"));
     }
-    let existing = instructions(services, executable, cwd).await?;
-    let text = format!(
-        "{existing}\n\nYour ConsensFlow role is {role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{content}"
-    );
-    Ok(vec![
-        "-c".to_owned(),
-        format!(
-            "developer_instructions={}",
-            js::stringify(&Value::String(text))
+    let (existing, owned) = instructions(services, executable, cwd).await?;
+    Ok(Texts {
+        role: format!(
+            "{existing}\n\nYour ConsensFlow role is {role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{content}"
         ),
+        children: format!("{existing}\n\n{}", children(role)),
+        kinds: AGENT_TYPES
+            .iter()
+            .map(|kind| kind.name)
+            .filter(|name| !owned.contains(name))
+            .collect(),
+    })
+}
+
+/// What a sub-agent of a window of `role` is told in place of the role: the words a
+/// Codex child given them was seen to keep to (T-766: none of three asked the board,
+/// where four of four with the role did).
+pub(super) fn children(role: &str) -> String {
+    format!(
+        "You are a sub-agent that a ConsensFlow {role} started. You are not the {role}: you have no board identity, so never run cf; answer your parent in your final message."
+    )
+}
+
+/// Writes `text` as the role of `launch`'s window, in its own folder made private
+/// to this user (by its modes on Unix; on Windows by where it is, see the module),
+/// and says the variable of the window's environment that names it.
+pub(super) fn write(env: &Env, launch: &LaunchId, text: &str) -> Result<(String, String), String> {
+    let folder = launch_folder(CODEX_FOLDER, env, launch)?;
+    let file = path::join(&[&folder, FILE]);
+    let said = |error: cf_base::file::FileError| error.to_string();
+    make_folder(Path::new(&folder), 0o700, Mkdir::Promise).map_err(said)?;
+    write_file(Path::new(&file), text.as_bytes(), 0o600).map_err(said)?;
+    Ok((ROLE_VARIABLE.to_owned(), file))
+}
+
+/// Writes the configuration the sub-agents of `launch`'s window start with, whose
+/// developer instructions are `texts`' children's, beside its role and as private, and
+/// says the variables of the window's environment that name it and the agent types it is
+/// for. Where the owner defines all of Codex's own types, nothing is written or said.
+pub(super) fn write_children(
+    env: &Env,
+    launch: &LaunchId,
+    texts: &Texts,
+) -> Result<Vec<(String, String)>, String> {
+    if texts.kinds.is_empty() {
+        return Ok(Vec::new());
+    }
+    let folder = launch_folder(CODEX_FOLDER, env, launch)?;
+    let file = path::join(&[&folder, CHILDREN_FILE]);
+    let said = |error: cf_base::file::FileError| error.to_string();
+    make_folder(Path::new(&folder), 0o700, Mkdir::Promise).map_err(said)?;
+    let configuration = format!(
+        "developer_instructions = {}\n",
+        toml_string(&texts.children)
+    );
+    write_file(Path::new(&file), configuration.as_bytes(), 0o600).map_err(said)?;
+    Ok(vec![
+        (SUBAGENT_VARIABLE.to_owned(), file),
+        (SUBAGENT_TYPES_VARIABLE.to_owned(), texts.kinds.join(",")),
     ])
+}
+
+/// `text` as a TOML basic string, quotes included: a backslash, a quote and a line's
+/// end escaped, and every other character TOML takes in no basic string (the controls
+/// but the tab, and DEL) as its `\uXXXX`.
+fn toml_string(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\t' => quoted.push('\t'),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\u{0}'..='\u{1f}' | '\u{7f}' => {
+                quoted.push_str(&format!("\\u{:04X}", u32::from(character)));
+            }
+            other => quoted.push(other),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// The instructions Codex itself would give a window opened in `cwd`, asked of
 /// its app-server, which is then asked to end whatever came of it.
-async fn instructions(services: &Services, executable: &str, cwd: &str) -> Result<String, String> {
+async fn instructions(
+    services: &Services,
+    executable: &str,
+    cwd: &str,
+) -> Result<(String, Vec<&'static str>), String> {
     let program = Program {
         executable: PathBuf::from(executable),
         args: vec!["app-server".to_owned()],
@@ -90,7 +218,7 @@ async fn instructions(services: &Services, executable: &str, cwd: &str) -> Resul
 /// Kept from Node on purpose: a line of `null` fails here, where reading its
 /// `id` threw a `TypeError` out of the stream's handler; and JSON nested past
 /// 127 levels, or holding a number past a double's range, is no JSON here.
-async fn converse(child: &dyn Child, cwd: &str) -> Option<String> {
+async fn converse(child: &dyn Child, cwd: &str) -> Option<(String, Vec<&'static str>)> {
     let send =
         |message: Value| async move { child.write_line(&js::stringify(&message)).await.ok() };
     send(json!({
@@ -120,7 +248,7 @@ async fn converse(child: &dyn Child, cwd: &str) -> Option<String> {
                 });
                 send(read).await?;
             }
-            Some(2.0) => return configured(&message),
+            Some(2.0) => return configured(&message).map(|text| (text, owned(&message))),
             _ => {}
         }
     }
@@ -141,6 +269,17 @@ fn configured(message: &Value) -> Option<String> {
         Some(Value::String(text)) => Some(text.clone()),
         Some(_) => None,
     }
+}
+
+/// Codex's own agent types that the configuration the app-server's answer holds defines
+/// (`agents.<type>`, a table where it is a role: `agents` holds settings beside them).
+fn owned(message: &Value) -> Vec<&'static str> {
+    let agents = &message["result"]["config"]["agents"];
+    AGENT_TYPES
+        .iter()
+        .map(|kind| kind.name)
+        .filter(|name| agents.get(name).is_some_and(Value::is_object))
+        .collect()
 }
 
 #[cfg(test)]

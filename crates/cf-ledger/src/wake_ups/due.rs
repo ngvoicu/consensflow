@@ -3,10 +3,12 @@
 //! pass sends one wake-up, never a burst.
 //!
 //! A wake-up is due once the interval has passed since the latest of the last
-//! wake-up (its delivery, when it was delivered), the last Resume and the last
-//! change of the setting, and only if
+//! wake-up (its delivery, when it was delivered), the last Resume, the last
+//! change of the setting and the end of the last meeting with the chief, and
+//! only if
 //!
-//! - the project is open and its calls are on;
+//! - the project is open, its calls are on, and no meeting with the chief is on
+//!   (the human is talking with it: no skip is logged, as nothing holds it back);
 //! - none is still on its way (a wake-up queued or being delivered is the
 //!   only one: they never stack, whatever the clock says);
 //! - the chief has nothing else on its way (`work_on_its_way`): no task is
@@ -90,8 +92,9 @@ fn on_its_way(store: &Store, last: &Last) -> Result<bool, LedgerError> {
 }
 
 /// What the interval counts from, in milliseconds: the latest of the last
-/// wake-up's queuing and delivery or skip, the last Resume and the last change
-/// of the setting; the project's creation where the log holds none of them.
+/// wake-up's queuing and delivery or skip, the last Resume, the last change of
+/// the setting and the end of the last meeting with the chief; the project's
+/// creation where the log holds none of them.
 fn origin_ms(
     store: &Store,
     project_id: i64,
@@ -101,7 +104,8 @@ fn origin_ms(
     let logged: Option<String> = store.db.query_row(
         "SELECT MAX(at) FROM event WHERE project_id = ?1
            AND (kind IN ('project.wake_up', 'project.wake_up_skipped', 'project.wake_up_setting')
-                OR (kind = 'project.state' AND json_extract(data, '$.to') = 'open'))",
+                OR (kind = 'project.state' AND json_extract(data, '$.to') = 'open')
+                OR (kind = 'project.meeting' AND json_extract(data, '$.on') = 0))",
         [project_id],
         |row| row.get(0),
     )?;
@@ -134,7 +138,9 @@ const WITH_ITS_WINDOW: [&str; 2] = ["queued", "working"];
 /// way to the window, since a task reads `waiting` until the answer is received
 /// and, with no answer given, the question is the chief's to answer; those held
 /// for their member's quota (`paused` with a time it goes on by itself, which
-/// the daemon clears when it cannot); and, down any chain, those open behind a
+/// the daemon clears when it cannot; not one held until a time in the year 9999,
+/// which an account unavailable or a model moved is held until: it waits for the
+/// human, and the chief is woken for it, T-816); and, down any chain, those open behind a
 /// task that is itself on its way (a task open behind one that is done and
 /// undecided, failed or called off waits for the chief, and the recursion ends
 /// where the tasks do: nothing is circular). A task the chief holds itself is
@@ -153,7 +159,8 @@ fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerErr
                                       WHERE q.task_id = t.id AND q.kind = 'question'
                                         AND a.kind = 'answer'
                                         AND a.state IN ('gated', 'queued', 'delivering')))
-                      OR (t.state = 'paused' AND t.held_until IS NOT NULL))
+                      OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))
                  AND NOT EXISTS (SELECT 1 FROM participant c
                                  WHERE c.id = t.assignee_id AND c.role = 'chief')
                UNION
@@ -214,7 +221,9 @@ pub(crate) fn queue_if_due(
 ) -> Result<Option<MessageView>, LedgerError> {
     let project = store.project_row(project_id)?;
     let wake_up = setting(store, project_id)?;
-    if project.state != "open" || !wake_up.on {
+    // The human is talking with the chief: no nudge, and no skip logged, as no work
+    // holds it back (3.0.7 chief-meeting, D3).
+    if project.state != "open" || !wake_up.on || project.meeting_at.is_some() {
         return Ok(None);
     }
     let last = newest(store, project_id)?;

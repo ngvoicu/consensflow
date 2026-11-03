@@ -59,7 +59,10 @@ fn says_so_once_in_the_trace_and_delivers_when_the_window_is_ready() {
             Traced::Window {
                 project,
                 participant,
-                event: WindowEvent::DeliveryHeld { message, reason },
+                event:
+                    WindowEvent::DeliveryHeld {
+                        message, reason, ..
+                    },
             } if *message == waiting => Some((participant.clone(), *project, reason.clone())),
             _ => None,
         })

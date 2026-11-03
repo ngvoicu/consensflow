@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 mod arrival;
+mod at_work;
 mod background;
 mod chief_switch;
 pub mod computer_use;
@@ -25,6 +26,7 @@ pub mod handoff;
 pub mod host;
 mod in_flight;
 mod ownership;
+mod pacing;
 mod record;
 mod resume;
 mod role_change;
@@ -46,6 +48,7 @@ mod wake_ups;
 mod windows;
 
 pub use chief_switch::SwitchTo;
+pub use deliveries::HeldBack;
 pub use dispatcher::{require_chief_agent, require_open, Dispatcher, SwitchWhen};
 pub use stops::Unstopped;
 pub use turn_end::{Finished, Hold};

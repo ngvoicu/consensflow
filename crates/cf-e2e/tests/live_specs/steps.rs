@@ -202,7 +202,8 @@ fn source(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
 }
 
 /// Which copy of the skill the text names, judged ([`launched::which_copy`]); where
-/// it is ConsensFlow's, that the files it names are beside it.
+/// it is ConsensFlow's, that the files it names are beside it and that they name the
+/// project's folder and no other ([`launched::names_the_folder_alone`]).
 fn which_skill(ctx: &Ctx, text: &str) -> std::result::Result<String, String> {
     let named = launched::skill_named_in(text);
     let read = named.as_deref().map(std::fs::read_to_string);
@@ -224,11 +225,17 @@ fn which_skill(ctx: &Ctx, text: &str) -> std::result::Result<String, String> {
         &home,
     )?;
     if let (None, Some(file)) = (&ctx.settings.installed_at, named.as_deref()) {
-        let beside = Path::new(file)
-            .parent()
-            .map(|folder| folder.join("references"));
+        let skill = Path::new(file).parent();
+        let beside = skill.map(|folder| folder.join("references"));
         if !beside.is_some_and(|folder| folder.is_dir()) {
             return Err(format!("{which}, with no references folder beside it"));
+        }
+        // ConsensFlow's copy names the project's folder where the skill's files name
+        // `.specs`: the chief goes by the skill's paths (T-662).
+        if let Some(skill) = skill {
+            let alone = launched::names_the_folder_alone(skill, &ctx.settings.folder)
+                .map_err(|why| format!("{which}, and {why}"))?;
+            return Ok(format!("{which}; {alone}"));
         }
     }
     Ok(which)

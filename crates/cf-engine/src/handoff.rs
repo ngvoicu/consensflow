@@ -24,6 +24,7 @@ mod viewer;
 
 use cf_base::js;
 use cf_base::refusal::Refusal;
+use cf_proto::cf_word::CfWord;
 use cf_proto::ledger::{
     ChiefConversation, ChiefOpenWork, MessageOpening, MessageView, ParticipantView, SwitchedFrom,
 };
@@ -37,13 +38,12 @@ pub use viewer::{
     HISTORY_ROOM, SHOWN_FIELD,
 };
 
-/// How ConsensFlow's handoff to a chief the human switched in begins.
-pub const HANDOFF_TITLE: &str = "You are the chief now";
-
-/// The title a handoff had while the chief was called the lead. A ledger from
-/// before 2026-10-03 holds such handoffs: one may still wait for its window,
-/// and the history names one delivered.
-const LEAD_HANDOFF_TITLE: &str = "You are the lead now";
+/// How ConsensFlow's handoff to a chief the human switched in begins, and the
+/// title it had while the chief was called the lead (a ledger from before
+/// 2026-10-03 holds such handoffs: one may still wait for its window, and the
+/// history names one delivered). The ledger's words, as a meeting with the chief
+/// holds no handoff and knows one by them.
+pub use cf_ledger::{HANDOFF_TITLE, LEAD_HANDOFF_TITLE};
 
 /// A message by its id, in this project only: what a page names a delivery
 /// by. A line may name any number, and only a project's own messages are read
@@ -248,23 +248,27 @@ pub struct HistoryPage {
 pub fn history_pages(
     conversations: &[ChiefConversation],
     message: Lookup<'_>,
+    cf: &CfWord,
 ) -> Result<usize, Refusal> {
-    Ok(paginate(&entries_of(conversations, message, false, None)?).len())
+    Ok(paginate(&entries_of(conversations, message, false, None, cf)?).len())
 }
 
 /// One page of `cf history`. Page 1 holds the most recent turns; `find` keeps
 /// only the entries that contain it, in any case (an empty one is in every
 /// entry: the API takes it for none). `page` is the number the API read from
 /// its request, whatever it was: one that is no page of these is the API's
-/// 400 `no-such-page`.
+/// 400 `no-such-page`. The commands a page names (the line that reads the older
+/// one, a delivery's) start with `cf`, the reader's own, which the pages are
+/// measured with.
 pub fn history_page(
     conversations: &[ChiefConversation],
     message: Lookup<'_>,
     page: f64,
     find: Option<&str>,
     tools: bool,
+    cf: &CfWord,
 ) -> Result<HistoryPage, Refusal> {
-    let pages = paginate(&entries_of(conversations, message, tools, find)?);
+    let pages = paginate(&entries_of(conversations, message, tools, find, cf)?);
     if pages.is_empty() {
         return Ok(HistoryPage {
             page: 0,
@@ -305,7 +309,7 @@ pub fn history_page(
         )
     };
     let closing = if number < count {
-        format!("Older: cf history --page {}{flags}", number + 1)
+        format!("Older: {cf} history --page {}{flags}", number + 1)
     } else {
         "This is the oldest page.".to_owned()
     };

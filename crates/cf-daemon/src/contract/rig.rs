@@ -239,7 +239,10 @@ impl Rig {
             time,
             launch_ids: Rc::new(CountingLaunchIds::default()),
             credentials: Rc::new(Credentials::new()),
-            pane_env: Rc::new(WindowEnv::new(&env, "http://127.0.0.1:1", "/bundle/bin")),
+            pane_env: Rc::new(
+                WindowEnv::new(&env, "http://127.0.0.1:1", "/bundle/bin")
+                    .with_cf("/bundle/bin/cf", cfg!(windows)),
+            ),
             roster: Rc::new(AnyAgent),
             roles: Rc::new(RoleTexts::new(env.clone(), "/bundle/bin/cf".to_owned())),
             trace: Rc::new(Trace::new(home)),

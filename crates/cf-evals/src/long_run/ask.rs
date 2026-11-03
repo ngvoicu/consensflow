@@ -108,6 +108,8 @@ fn real(quiet: Duration) -> Scenario {
         fallback: "Your call: go on with what you think is best.".to_owned(),
         nudge: Some("Go on: plan the phases and put the work on the board."),
         quiet,
+        stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: Vec::new(),
     }
 }
@@ -168,6 +170,8 @@ fn stand_in(quiet: Duration) -> Scenario {
         fallback: stand_in_tasks(),
         nudge: None,
         quiet,
+        stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: Vec::new(),
     }
 }

@@ -7,7 +7,7 @@
 //! given to do so ([`seams`]), which adapter launches which harness
 //! ([`launch::adapter`]), the files a launch leaves ([`forget_launch`],
 //! [`sweep_launches`]), and what opening the app prepares: the terminal
-//! command beside the Pi and OpenCode extensions ([`prepare`], which, like
+//! command beside the Pi extension ([`prepare`], which, like
 //! the adapters' table, sits above the harnesses' modules).
 
 #![forbid(unsafe_code)]
@@ -19,14 +19,15 @@ pub mod contract;
 pub mod detect;
 pub mod devin;
 pub mod launch;
-pub mod opencode;
+pub mod muse;
 pub mod pi;
 pub mod prepare;
 pub mod records;
 pub mod seams;
 mod shared;
 
-pub use shared::launch_files::{forget_launch, sweep_launches};
+pub use devin::forget_kept;
+pub use shared::launch_files::{forget_launch, sweep_launches, NotRemoved};
 pub use shared::specmint::bundled_specmint;
 
 // Fakes other crates' tests compile too: a failure in one is the test's.

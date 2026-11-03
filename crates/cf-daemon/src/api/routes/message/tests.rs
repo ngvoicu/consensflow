@@ -1,6 +1,6 @@
 //! `GET /api/inbox/<id>`: one message, whole, to those it was between; what
 //! still waits for the human is not yet the recipient's to read. A read
-//! changes nothing.
+//! changes nothing. A note that tells its reader a role says so.
 
 use hyper::Method;
 use serde_json::json;
@@ -406,4 +406,42 @@ async fn only_a_get_reads_a_message() {
     let (status, said) = api(&scene, Method::POST, &target, &scene.chief, "").await;
     assert_eq!(status, 404);
     assert_eq!(said["error"], "unknown-route");
+}
+
+#[tokio::test]
+async fn a_note_that_tells_its_reader_a_role_says_so_to_its_reader_alone_and_no_other_message_does()
+{
+    let scene = scene();
+    let role = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .note_role(scene.project.id, "chief", "Read it all.", "the role")
+        .unwrap();
+    let (status, said) = api(
+        &scene,
+        Method::GET,
+        &format!("/api/inbox/{}", role.id),
+        &scene.chief,
+        "",
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(said["role"], true);
+    assert_eq!(said["message"]["body"], "Read it all.");
+    let (status, said) = api(
+        &scene,
+        Method::GET,
+        &format!("/api/inbox/{}", scene.question.id),
+        &scene.chief,
+        "",
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        said.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["message"],
+        "any other message is the message alone"
+    );
+    assert_eq!(scene.kicks.get(), 0);
 }

@@ -87,11 +87,11 @@ impl Planned {
     }
 }
 
-/// The seats of the project of the rotation `at` (from 0): the chief is the
-/// `at`th harness, and the worker, the advisor and the reviewer the next ones
-/// after it, round the list.
-fn seats(at: usize) -> Seats {
-    let harness = |offset: usize| Harness::ALL[(at + offset) % Harness::ALL.len()];
+/// The seats of the project of the rotation `at` (from 0) over `seated`, the
+/// harnesses the machine has (`live::seated`): the chief is the `at`th, and the
+/// worker, the advisor and the reviewer the next ones after it, round the list.
+fn seats(at: usize, seated: &[Harness]) -> Seats {
+    let harness = |offset: usize| seated[(at + offset) % seated.len()];
     Seats {
         chief: harness(0),
         worker: harness(1),
@@ -100,17 +100,20 @@ fn seats(at: usize) -> Seats {
     }
 }
 
-/// The projects of a run: one for each harness the run is limited to as chief,
-/// or one for each harness when it is limited to none, each with the steps
-/// asked for (all of them when none are).
+/// The projects of a run over the harnesses `seated` (those the machine has, in
+/// [`Harness::ALL`]'s order: one it lacks is in no seat, as the designer is Codex
+/// alone): one for each harness the run is limited to as chief, or one for each
+/// when it is limited to none, each with the steps asked for (all of them when none
+/// are). Four seats need four harnesses; the run asks for them (`machine`).
 ///
 /// The image designer is Codex alone, and has the run of one project only: the
 /// first whose chief is not Codex, and in which Codex holds no other seat when
-/// there is such a project, so that its window is the only Codex there.
-pub fn projects(chiefs: &[Harness], steps: &[Step]) -> Vec<Planned> {
+/// there is such a project, so that its window is the only Codex there. A machine
+/// without Codex has no designer.
+pub fn projects(chiefs: &[Harness], steps: &[Step], seated: &[Harness]) -> Vec<Planned> {
     let wanted = |step: Step| steps.is_empty() || steps.contains(&step);
-    let mut projects: Vec<Planned> = (0..Harness::ALL.len())
-        .map(seats)
+    let mut projects: Vec<Planned> = (0..seated.len())
+        .map(|at| seats(at, seated))
         .enumerate()
         .filter(|(_, seats)| chiefs.is_empty() || chiefs.contains(&seats.chief))
         .map(|(at, seats)| Planned {
@@ -129,7 +132,8 @@ pub fn projects(chiefs: &[Harness], steps: &[Step]) -> Vec<Planned> {
             .iter()
             .position(|project| project.seats.chief != Harness::Codex)
     });
-    if let (Some(at), true) = (lodging, wanted(Step::Designer)) {
+    let designer = wanted(Step::Designer) && seated.contains(&Harness::Codex);
+    if let (Some(at), true) = (lodging, designer) {
         projects[at].designer = true;
         projects[at].steps.push(Step::Designer);
     }
@@ -137,10 +141,16 @@ pub fn projects(chiefs: &[Harness], steps: &[Step]) -> Vec<Planned> {
 }
 
 /// The harnesses a list on a command line or in the environment names, split
-/// at commas or blanks; the words that are no harness are the error.
+/// at commas or blanks; the words that are no harness of the rotation are the
+/// error.
 pub fn harnesses_named(list: &str) -> Result<Vec<Harness>, String> {
     words(list)
-        .map(|word| Harness::from_name(word).ok_or_else(|| format!("no harness is called {word}")))
+        .map(|word| {
+            Harness::ALL
+                .into_iter()
+                .find(|harness| harness.name() == word)
+                .ok_or_else(|| format!("no harness is called {word}"))
+        })
         .collect()
 }
 
@@ -167,8 +177,8 @@ mod tests {
 
     #[test]
     fn every_harness_is_the_chief_of_one_project_and_holds_every_other_seat_once() {
-        let all = projects(&[], &[]);
-        assert_eq!(all.len(), 5);
+        let all = projects(&[], &[], &Harness::ALL);
+        assert_eq!(all.len(), Harness::ALL.len());
         for harness in Harness::ALL {
             let seat = |of: fn(&Seats) -> Harness| {
                 all.iter()
@@ -189,34 +199,34 @@ mod tests {
     }
 
     #[test]
-    fn the_first_project_is_a_claude_chief_with_an_opencode_worker() {
-        let first = &projects(&[], &[])[0];
+    fn the_first_project_is_a_claude_chief_with_a_pi_worker() {
+        let first = &projects(&[], &[], &Harness::ALL)[0];
         assert_eq!(first.number, 1);
         assert_eq!(first.seats.chief, Harness::Claude);
-        assert_eq!(first.seats.worker, Harness::OpenCode);
-        assert_eq!(first.seats.advisor, Harness::Pi);
-        assert_eq!(first.seats.reviewer, Harness::Devin);
+        assert_eq!(first.seats.worker, Harness::Pi);
+        assert_eq!(first.seats.advisor, Harness::Devin);
+        assert_eq!(first.seats.reviewer, Harness::Codex);
         assert_eq!(first.name(), "p1 claude");
     }
 
     #[test]
     fn a_harness_named_limits_the_run_to_the_projects_it_is_the_chief_of() {
-        let only = projects(&[Harness::Pi], &[]);
+        let only = projects(&[Harness::Pi], &[], &Harness::ALL);
         assert_eq!(only.len(), 1);
         assert_eq!(only[0].seats.chief, Harness::Pi);
-        assert_eq!(only[0].number, 3);
-        let two = projects(&[Harness::Devin, Harness::Claude], &[]);
+        assert_eq!(only[0].number, 2);
+        let two = projects(&[Harness::Devin, Harness::Claude], &[], &Harness::ALL);
         let chiefs: Vec<_> = two.iter().map(|project| project.seats.chief).collect();
         assert_eq!(chiefs, [Harness::Claude, Harness::Devin]);
     }
 
     #[test]
     fn the_designer_has_the_one_project_whose_chief_is_not_codex_and_that_has_no_codex() {
-        let all = projects(&[], &[]);
+        let all = projects(&[], &[], &Harness::ALL);
         let with: Vec<_> = all.iter().filter(|project| project.designer).collect();
         assert_eq!(with.len(), 1);
-        // The claude project, whose staff is opencode, pi and devin.
-        assert_eq!(with[0].seats.chief, Harness::Claude);
+        // The muse project, whose staff is claude, pi and devin.
+        assert_eq!(with[0].seats.chief, Harness::Muse);
         assert_eq!(with[0].steps.last(), Some(&Step::Designer));
         assert_eq!(with[0].needs().last(), Some(&Harness::Codex));
         // The others have it neither as a step nor as a harness they need.
@@ -228,31 +238,79 @@ mod tests {
 
     #[test]
     fn the_designer_goes_where_codex_is_a_seat_when_no_chosen_project_is_without_one() {
-        // The opencode project's staff is pi, devin and codex.
-        let one = projects(&[Harness::OpenCode], &[]);
+        // The pi project's staff is devin, codex and muse.
+        let one = projects(&[Harness::Pi], &[], &Harness::ALL);
         assert!(one[0].designer);
         assert_eq!(one[0].needs().len(), 4);
+        // The first chosen one whose chief is not Codex.
+        let devin = projects(&[Harness::Codex, Harness::Devin], &[], &Harness::ALL);
+        assert!(devin
+            .iter()
+            .any(|project| project.designer && project.seats.chief == Harness::Devin));
         // Codex is the only chief: no project's chief is not Codex, so no designer.
-        let codex = projects(&[Harness::Codex], &[]);
+        let codex = projects(&[Harness::Codex], &[], &Harness::ALL);
         assert!(!codex[0].designer);
         assert!(!codex[0].steps.contains(&Step::Designer));
     }
 
     #[test]
     fn the_steps_asked_for_are_the_only_steps_run() {
-        let only = projects(&[Harness::Claude], &[Step::Reviewer, Step::Worker]);
+        let only = projects(
+            &[Harness::Claude],
+            &[Step::Reviewer, Step::Worker],
+            &Harness::ALL,
+        );
         assert_eq!(only[0].steps, [Step::Worker, Step::Reviewer]);
         assert!(!only[0].designer);
-        let designer = projects(&[Harness::Claude], &[Step::Designer]);
+        let designer = projects(&[Harness::Claude], &[Step::Designer], &Harness::ALL);
         assert_eq!(designer[0].steps, [Step::Designer]);
         assert!(designer[0].designer);
+    }
+
+    /// T-824's P2-3: the rotation is over the harnesses the machine has. One without Muse
+    /// (the Windows machines today) seats the other four, each in every seat once, and Muse
+    /// in none.
+    #[test]
+    fn a_machine_without_a_harness_seats_every_other_one_in_every_seat_once_and_it_in_none() {
+        let seated: Vec<Harness> = Harness::ALL
+            .into_iter()
+            .filter(|harness| *harness != Harness::Muse)
+            .collect();
+        let all = projects(&[], &[], &seated);
+        assert_eq!(all.len(), 4);
+        for project in &all {
+            assert!(
+                !project.needs().contains(&Harness::Muse),
+                "{}",
+                project.name()
+            );
+        }
+        for harness in &seated {
+            let seat = |of: fn(&Seats) -> Harness| {
+                all.iter()
+                    .filter(|project| of(&project.seats) == *harness)
+                    .count()
+            };
+            assert_eq!(seat(|seats| seats.chief), 1, "{harness:?}");
+            assert_eq!(seat(|seats| seats.worker), 1, "{harness:?}");
+            assert_eq!(seat(|seats| seats.advisor), 1, "{harness:?}");
+            assert_eq!(seat(|seats| seats.reviewer), 1, "{harness:?}");
+        }
+        // Without Codex, the image designer, which is Codex alone, has no project.
+        let no_codex: Vec<Harness> = Harness::ALL
+            .into_iter()
+            .filter(|harness| *harness != Harness::Codex)
+            .collect();
+        assert!(projects(&[], &[], &no_codex)
+            .iter()
+            .all(|project| !project.designer && !project.needs().contains(&Harness::Codex)));
     }
 
     #[test]
     fn a_list_names_harnesses_and_steps_by_commas_or_blanks_and_a_wrong_word_is_the_error() {
         assert_eq!(
-            harnesses_named("claude, pi opencode,,"),
-            Ok(vec![Harness::Claude, Harness::Pi, Harness::OpenCode])
+            harnesses_named("claude, pi codex,,"),
+            Ok(vec![Harness::Claude, Harness::Pi, Harness::Codex])
         );
         assert_eq!(harnesses_named(""), Ok(Vec::new()));
         assert_eq!(

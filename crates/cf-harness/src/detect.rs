@@ -30,8 +30,8 @@ const DETECTION_ORDER: [Harness; 5] = [
     Harness::Devin,
     Harness::Claude,
     Harness::Codex,
-    Harness::Opencode,
     Harness::Pi,
+    Harness::Muse,
 ];
 
 /// A harness whose CLI is installed here, as `detectHarnesses` lists it.
@@ -51,8 +51,10 @@ fn locations(harness: Harness) -> &'static [&'static [&'static str]] {
         // there, but nothing installs there fresh (it installs to `.local/bin`).
         Harness::Claude => &[&[".local", "bin"], &[".claude", "local"]],
         Harness::Codex => &[&[".codex", "bin"], &[".local", "bin"]],
-        Harness::Opencode => &[&[".opencode", "bin"], &[".local", "bin"]],
         Harness::Pi => &[&[".pi", "bin"], &[".local", "bin"]],
+        // Muse's installer (`install.sh`): its launcher and the binaries it runs, in
+        // `.local/bin` on macOS and Linux. On Windows it is elsewhere ([`windows_programs`]).
+        Harness::Muse => &[&[".local", "bin"]],
     }
 }
 
@@ -90,6 +92,22 @@ fn npm_global(env: &Env) -> Option<PathBuf> {
         return None;
     }
     Some(PathBuf::from(set(env, "APPDATA")?).join("npm"))
+}
+
+/// The folder a harness's own installer puts its CLI in on Windows, outside the home,
+/// which only Muse has: `%LOCALAPPDATA%\Programs\muse` (`install.ps1`), holding the
+/// `muse.cmd` that starts its launcher. It comes from the `LOCALAPPDATA` of the
+/// environment given; one that is missing or empty adds nothing, and so does any other
+/// system and any other harness.
+fn windows_programs(harness: Harness, env: &Env) -> Option<PathBuf> {
+    if harness != Harness::Muse || !env.on_windows() {
+        return None;
+    }
+    Some(
+        PathBuf::from(set(env, "LOCALAPPDATA")?)
+            .join("Programs")
+            .join("muse"),
+    )
 }
 
 /// Where Pi's own installers (`install.ps1`, `install.sh`) put the launcher of
@@ -136,7 +154,8 @@ fn managed(harness: Harness, env: &Env) -> Vec<PathBuf> {
 /// The absolute path `harness`'s CLI resolves to here, or none: a pane opens
 /// only on an absolute program. On PATH, else in the harness's own places,
 /// else in the common ones, npm's folder on Windows the last of them, else in
-/// the system's folders of programs, else in the folder of a managed install.
+/// its installer's folder on Windows (Muse's), else in the system's folders of
+/// programs, else in the folder of a managed install.
 /// That one is the last so that a place added to the others never changes which
 /// CLI is found where one was: a Pi in npm's folder is still the Pi found when
 /// a managed one is there too.
@@ -144,6 +163,7 @@ pub fn harness_path(harness: Harness, env: &Env) -> Option<PathBuf> {
     let command = harness.as_str();
     cf_process::on_search_path(command, env).or_else(|| {
         let folders = homed(harness, env).into_iter().chain(npm_global(env));
+        let folders = folders.chain(windows_programs(harness, env));
         let folders = folders.chain(env.tool_folders().iter().cloned());
         let folders = folders.chain(managed(harness, env));
         cf_process::find_in(command, folders, env)

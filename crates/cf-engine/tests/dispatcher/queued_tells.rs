@@ -138,7 +138,7 @@ fn words_that_never_reach_the_window_fail_the_task_and_the_answer_to_the_brief_i
     );
     assert!(
         tiers.notes("chief").contains(&format!(
-            "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, m-{told}, not delivered, so that you can send them again:\n\nUse the v2 grammar"
         )),
         "{:?}",
         tiers.notes("chief")
@@ -435,7 +435,7 @@ fn finish_is_refused_while_told_words_are_on_their_way_and_says_so_to_the_chief(
     assert_eq!(
         refused.to_string(),
         format!(
-            "cannot finish T-1: words told to @{session} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it"
+            "cannot finish T-1: words for @{session} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it"
         )
     );
     assert_eq!(tiers.task(1).task.state, "working");
@@ -597,9 +597,13 @@ fn words_that_never_reach_the_window_are_told_to_whoever_told_them_as_to_the_req
     let said = format!(
         "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\""
     );
+    // The chief told them: its note has them back, word for word.
+    let words = format!(
+        "\n\nIts words, m-{told}, not delivered, so that you can send them again:\n\nUse the v2 grammar"
+    );
     let chief = context.id(project.id, "chief");
     assert!(
-        notes(&context, chief).contains(&said),
+        notes(&context, chief).contains(&format!("{said}{words}")),
         "{:?}",
         notes(&context, chief)
     );
@@ -692,9 +696,13 @@ fn the_teller_of_words_that_never_reach_the_window_hears_which_of_its_own_wait_f
             "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test); the words told its window wait for the reopen: {waiting}. Reopen it with: cf task reopen T-1 \"…\""
         )
     };
+    // The chief told the words that failed: its note has them back, word for word.
+    let words = format!(
+        "\n\nIts words, m-{told}, not delivered, so that you can send them again:\n\nUse the v2 grammar"
+    );
     let chief = context.id(project.id, "chief");
     assert!(
-        notes(&context, chief).contains(&failed(&format!("m-{more}"))),
+        notes(&context, chief).contains(&(failed(&format!("m-{more}")) + &words)),
         "{:?}",
         notes(&context, chief)
     );

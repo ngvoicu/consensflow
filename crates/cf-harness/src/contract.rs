@@ -14,13 +14,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{HumanInput, Servers};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use crate::records::{
     Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
 };
+/// What an input box on the screen holds ([`Window::input_box`]).
+pub use crate::shared::input_box::InputBox;
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -76,14 +78,17 @@ pub trait Adapter {
     /// own ([`Servers::InGroup`]). Codex's supervisor opens its servers with the
     /// window, each in a group of its own, under the harness's own process, which
     /// starts the agent's commands ([`Servers::AtLaunch`]). Windows has no process
-    /// groups to tell by, and OpenCode and Devin have not been probed.
+    /// groups to tell by: Claude Code runs each command of its agent in a shell it
+    /// starts for it and its servers as their programs ([`Servers::ByShell`], T-906);
+    /// Pi's and Codex's trees there were not probed, and say nothing. Devin has not
+    /// been probed.
     fn servers(&self) -> Servers {
         Servers::Unknown
     }
 
     /// Whether a resumed conversation keeps the instructions it began with. Every
     /// launch gives a window its role text ([`Launch::instructions`]), and a
-    /// harness that takes it again at each launch (Claude Code, OpenCode, Pi,
+    /// harness that takes it again at each launch (Claude Code, Pi,
     /// Devin) needs nothing more to read a role that changed since its conversation
     /// began. One that keeps the first instructions of the conversation it resumes
     /// reads the new text and does not use it: a change never reaches it, and
@@ -96,8 +101,8 @@ pub trait Adapter {
     /// that a window whose turn gets through after a refusal for quota says the
     /// quota is back for every other window of it: a login in one is a login in
     /// all, and a spent quota is spent for all. Not, where nobody has looked: Pi
-    /// and OpenCode log into a provider for each model, so two of their windows
-    /// may be on two accounts, and Codex and Devin have not been probed for a
+    /// logs into a provider for each model, so two of its windows may be on two
+    /// accounts, and Codex and Devin have not been probed for a
     /// login changed under a window that is open.
     fn one_account(&self) -> bool {
         false
@@ -114,13 +119,17 @@ pub trait Adapter {
 
     /// Where the window of a chief given specs finds the Specmint skill of
     /// `variant`, asked before the window is prepared, as its role text names
-    /// the file. The copy the human installed where this harness looks for
-    /// skills, if it is the chosen variant: used where it is. Otherwise the
-    /// copy ConsensFlow keeps for this harness, at the place [`Adapter::prepare`]
-    /// will have it written: the same place for every launch, so that the role
-    /// text that names it is the same from one launch to the next. An installed
-    /// copy of any other variant is no copy of this one, and is left alone.
-    fn specmint(&self, variant: Variant) -> Result<Skill, String>;
+    /// the file, for a project that keeps its specs in `folder`. The copy the
+    /// human installed where this harness looks for skills, if it is the chosen
+    /// variant: used where it is, but only for a project whose folder is the one
+    /// Specmint's files name (`.specs`), since such a copy is never edited for one
+    /// project and would send the chief to the wrong folder (T-662). Otherwise the
+    /// copy ConsensFlow keeps for this harness and this folder, with the folder in
+    /// its paths, at the place [`Adapter::prepare`] will have it written: the same
+    /// place for every launch of the project, so that the role text that names it is
+    /// the same from one launch to the next. An installed copy of any other variant
+    /// is no copy of this one, and is left alone.
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String>;
 }
 
 /// Where a window finds the Specmint skill of its chief's variant: the file
@@ -146,11 +155,13 @@ impl Skill {
     }
 }
 
-/// What a chief's launch is given of specs: the variant it plans with, and
-/// where the skill of it is ([`Adapter::specmint`]).
+/// What a chief's launch is given of specs: the variant it plans with, the folder its
+/// project keeps its specs in (relative to the project, in slashes), and where the skill
+/// of it is ([`Adapter::specmint`]).
 #[derive(Debug, Clone, Copy)]
 pub struct Specs<'a> {
     pub variant: Variant,
+    pub folder: &'a str,
     pub skill: &'a Skill,
 }
 
@@ -173,9 +184,6 @@ pub enum FirstMessage {
     /// window opens ([`Launch::message`]), and handed over as the window's pane is
     /// asked for: Devin's `--prompt-file`.
     Opened,
-    /// Posted through the harness's own server once the window is up, which asks
-    /// [`PaneHost::admits`] then ([`Window::started`]): OpenCode's.
-    Started,
     /// Handed over as any later message is, by the window's own
     /// [`Window::deliver`], once the window is past any question of trusting its
     /// folder and has drawn its screen: Claude Code's pasted (its record wraps it
@@ -187,9 +195,9 @@ pub enum FirstMessage {
 /// How a harness's windows take the words they are handed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Input {
-    /// Over a channel of the harness's own (Codex's broker, OpenCode's server,
-    /// Pi's inbox): nothing handed over waits in the window's input box, and no
-    /// key the engine presses sends it.
+    /// Over a channel of the harness's own (Codex's broker, Pi's inbox): nothing
+    /// handed over waits in the window's input box, and no key the engine presses
+    /// sends it.
     #[default]
     Channel,
     /// Pasted into the window's input box, and sent by an Enter (Claude Code,
@@ -218,9 +226,8 @@ pub struct Launch<'a> {
     /// be written to by a process ConsensFlow does not hold.
     pub previous_gone: bool,
     /// The window's first message, as the engine wrote it, where its harness takes
-    /// it as its window opens or once it is up ([`FirstMessage::Opened`],
-    /// [`FirstMessage::Started`]): none for a harness whose windows are delivered
-    /// their first message.
+    /// it as its window opens ([`FirstMessage::Opened`]): none for a harness whose
+    /// windows are delivered their first message.
     pub message: Option<&'a str>,
     /// The agent it runs on: none for a chief from before every chief had one.
     pub agent: Option<Agent<'a>>,
@@ -229,6 +236,11 @@ pub struct Launch<'a> {
     /// The specs a chief plans with, when its project has them on: only a
     /// chief's launch is given any, and with none the launch is as it always was.
     pub specs: Option<Specs<'a>>,
+    /// The size, in tokens, the project chose for its Claude members' windows to
+    /// compact at (Claude Code's `autoCompactWindow`, which fires a little before
+    /// the window fills): only a member's launch is given one, and with none the
+    /// launch is as it always was. Claude's adapter is the only one that reads it.
+    pub compaction: Option<u32>,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
     /// window waits for before that message can show, such as the conversation
@@ -242,8 +254,7 @@ pub struct Launch<'a> {
 
 /// The model a window runs on and the levels its harness reads, as the
 /// launch gives them: `Some("")` is an empty one, which a window's
-/// arguments take for none (`if (model)`), and OpenCode's first message is
-/// refused for (`variant: ''`).
+/// arguments take for none (`if (model)`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Agent<'a> {
     pub model: Option<&'a str>,
@@ -356,13 +367,19 @@ pub trait Window {
     /// The window shows `session` now (a `/clear` or `/resume` in it): later
     /// looks follow it there.
     fn follow(&self, session: &str);
+    /// Whether the session `session`, which the window was switched to, was given the
+    /// window's role text as it began: by a hook of the harness's that greets every
+    /// session (Claude Code's SessionStart, a `/clear` too). No where none did (Muse
+    /// Code's `/clear` runs no hook, 1.4.13 and 1.4.14): the engine says the role
+    /// itself. Yes from a harness that says no more.
+    fn greeted(&self, _session: &str) -> bool {
+        true
+    }
     /// The conversation the window started on, where its harness says it
     /// itself; none where ConsensFlow named it. A window that waits for its
     /// harness to say it gives up by [`Launch::first_message_ms`], if not
-    /// before. A window whose first message goes in once it is up (OpenCode's,
-    /// through its server) hands it over only if `host` admits it then
-    /// ([`PaneHost::admits`]).
-    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>>;
+    /// before.
+    fn started(&self) -> Work<'_, Result<Option<String>, String>>;
     /// Once [`Window::started`] gave up, and right before the engine closes the
     /// window: whether its harness says it came up since, with the conversation it
     /// started on where it says that itself (`Some(None)` where ConsensFlow named
@@ -390,6 +407,15 @@ pub trait Window {
     fn shows_prompt(&self, _screen: &[String]) -> bool {
         false
     }
+    /// Whether `snapshot` (the pane host's of the window: its last lines and its cursor)
+    /// shows the window's input box empty, as its harness's own reader reads it: the box
+    /// holds nothing a key would have to empty, and the key that empties one does harm in
+    /// an empty box (Control-C there arms the quit of Claude Code and Muse Code, which a
+    /// second one ends, and stops a turn at work). False where the harness reads no box,
+    /// or reads it holding anything.
+    fn box_read_empty(&self, _snapshot: &Value) -> bool {
+        false
+    }
     /// The servers its harness's dialog of new servers on `screen` (the window's last
     /// lines) would use, as its lines name them; none where they show none.
     fn trust_servers(&self, _screen: &[String]) -> Vec<String> {
@@ -407,6 +433,20 @@ pub trait Window {
     fn names_trust_choices(&self, _screen: &[String]) -> bool {
         false
     }
+    /// The words of the screen line that [`Window::shows_prompt`] reads the harness's
+    /// prompt by, for the human told of a window whose first message waited for it in
+    /// vain; none where no prompt is read before a first message (the default).
+    fn ready_sign(&self) -> Option<&str> {
+        None
+    }
+    /// Whether `screen` (the window's last lines) shows its harness compacting the
+    /// conversation's context now, the status it draws while it does: the window is at
+    /// work, however long that takes, and what it was handed waits for it (Codex's
+    /// "• Compacting context (2m 57s • esc to interrupt)", T-901). False where it shows
+    /// none, and from a harness that draws no such status (the default).
+    fn compacting(&self, _screen: &[String]) -> bool {
+        false
+    }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
         &'a self,
@@ -422,6 +462,12 @@ pub trait Window {
         _pane: &'a Pane,
     ) -> Work<'a, Option<String>> {
         Box::pin(async { None })
+    }
+    /// What the pane host said of the human's input into the window at its last
+    /// [`Window::ready`], for the trace of a delivery that look held; none where that look
+    /// read no snapshot of the pane, or the harness's reads none.
+    fn human_input(&self) -> Option<HumanInput> {
+        None
     }
     /// Whether the engine asks [`Window::ready`] of the window before it has drawn its
     /// screen too, only for a window that says it never will be fit for work
@@ -468,6 +514,45 @@ pub trait Window {
     /// it; one that writes nothing of a turn it was interrupted in (Claude,
     /// before its first word) reads the looks that follow by it.
     fn interrupted(&self) {}
+    /// Whether the harness has a word of its own that its window is at rest, apart
+    /// from its record (Claude Code's status, Codex's broker, Pi's extension, Devin's
+    /// store and wire log). One that has none is read at rest
+    /// for a delivery only by the fallback: its record's turn ended, its screen quiet
+    /// and no key of the human's, each for the settle (`pacing`), and the board says
+    /// the fallback is in use. Such a harness gives its own sign that its window is up,
+    /// its prompt ([`Window::shows_prompt`]): a quiet screen before it is a harness still
+    /// starting, which takes no keys (Muse 1.4.14, T-946), and its window is not read at
+    /// rest until the prompt shows.
+    fn idle_word(&self) -> bool {
+        true
+    }
+    /// Whether the harness's live word, apart from its record, said at the last look
+    /// that the window is at work (Codex's broker: Codex called the thread busy before
+    /// its rollout shows the turn). Nothing is typed into a window at work (`pacing`);
+    /// the record's word stands for everything else. False from a harness that has no
+    /// such word, or said none.
+    fn at_work(&self) -> bool {
+        false
+    }
+    /// The harness is asked its live word again, where [`Window::at_work`] said the
+    /// window is at work while its record has read the turn over for the settle: a
+    /// notice the harness's word missed leaves it at work for good otherwise (Codex's
+    /// broker and a lost `turn/completed`, T-842's P2). A harness with no such word asks
+    /// nothing.
+    fn recheck(&self) -> Work<'_, ()> {
+        Box::pin(async {})
+    }
+    /// What the window's input box holds on its screen now, where its harness takes a
+    /// message pasted into that box (Claude Code, Devin): a paste whose Enter did not take
+    /// still sits there (3.0.7 chief-meeting, CMT-24). None where the screen shows no box
+    /// its reader knows, or the harness takes its messages through a channel of its own.
+    fn input_box<'a>(
+        &'a self,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        Box::pin(async { None })
+    }
 }
 
 /// A window's pane, by the pane host's id and the generation it opened in.
@@ -486,8 +571,8 @@ pub trait PaneHost {
     /// Whether text may be handed to the window now, asked at the moment of the
     /// hand-over, after every wait before it: a paste as it is asked for (after
     /// Claude's keys that clear its input box), Pi's inbox rename once the pane's
-    /// claim is answered, and a request to a peer on loopback (a Codex or OpenCode
-    /// send, OpenCode's first message) inside the send, once its connection is up
+    /// claim is answered, and a request to a peer on loopback (a Codex send) inside
+    /// the send, once its connection is up
     /// ([`Loopback::hand_over`](crate::seams::loopback::Loopback::hand_over)). The
     /// engine's host for a window says no once the window's project is closed (the
     /// human's Close, or the chief's window ending), and the text goes back to wait
@@ -516,6 +601,12 @@ pub trait PaneHost {
         false
     }
 }
+
+/// The heading the engine gives the project's rules for its staff in a window's role
+/// text (`cf_engine::roles::with_staff_rules`): the human's own words follow it, to the
+/// end of the text. What a harness adds to the role of its own, where it adds any, goes
+/// before it, so that nothing of ConsensFlow's reads as the human's.
+pub const STAFF_RULES_HEADING: &str = "## The project's rules for the staff";
 
 /// What a hand-over the pane host did not admit ([`PaneHost::admits`]) says:
 /// nothing of it reached the window.
@@ -573,6 +664,11 @@ pub enum Held {
     /// A harness that said no more than "not yet" (Devin's `false`).
     Unsaid,
     Because(String),
+    /// Held for what only the human can do in the window, said in these words: the board
+    /// shows them as the window's wait, and readiness is asked again at every look, so the
+    /// hold lifts by itself once the human has done it (Muse's taken-back brief in a box
+    /// whose first line is out of view, T-931 P2-1).
+    ForHuman(String),
 }
 
 impl Held {
@@ -582,7 +678,7 @@ impl Held {
             Held::Unsent => "you have typed in this window and not sent it",
             Held::ShowsAnother => "the window shows another conversation",
             Held::Unsaid => "a paste is on its way",
-            Held::Because(reason) => reason,
+            Held::Because(reason) | Held::ForHuman(reason) => reason,
         }
     }
 }
@@ -597,6 +693,12 @@ pub enum Admission {
         queued: bool,
     },
     Refused {
+        reason: String,
+    },
+    /// Refused because the harness is at work: nothing went in, and the message
+    /// waits for the window's next rest, with no attempt spent (Pi's extension
+    /// sends nothing while Pi is busy; 3.0.7 chief-meeting, D9).
+    Busy {
         reason: String,
     },
     Uncertain {
@@ -694,6 +796,15 @@ impl Observed {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => record.pending,
             Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Pending::default(),
+        }
+    }
+
+    /// The model the conversation's records say changed with none of its harness's own word
+    /// for it ([`Record::model_drift`]): none where it could not be read.
+    pub fn model_drift(&self) -> Option<&Arc<crate::records::ModelMoved>> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.model_drift.as_ref(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => None,
         }
     }
 

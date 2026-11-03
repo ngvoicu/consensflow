@@ -68,9 +68,10 @@ fn cut_before_an_answer() -> Arc<Reading> {
     )
 }
 
-/// The record of a turn that failed (the provider's error ended it): the user's message
-/// and an assistant step with no answer. Pi's reader cannot settle a failed turn, so
-/// the record says nothing of its end.
+/// A record that says nothing of the end of its turn, though it ended: the user's message
+/// and an assistant step with no answer, with nothing in flight and no end named. Pi's
+/// reader reads a failed turn so no more (T-781: in flight while Pi may retry, then
+/// settled), but the window must not rest on it: any harness's record can be so.
 fn failed_before_an_answer() -> Arc<Reading> {
     reading(
         vec![
@@ -157,8 +158,8 @@ fn a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_extension_ha
 #[test]
 fn a_window_opened_again_on_a_turn_its_record_cannot_end_is_at_rest_once_its_extension_has_seen_no_turn_of_it(
 ) {
-    // T-722: a failed turn is no turn in flight, and the record never settles it; the
-    // window read as at work for as long as it was open.
+    // T-722: a record that names no end of its turn is no turn in flight; the window
+    // read as at work for as long as it was open.
     let home = Home::new();
     let (_record, window) = resumed(&home, failed_before_an_answer(), None);
     shows(&home, SESSION);

@@ -69,6 +69,7 @@ mod process;
 pub mod publish;
 pub mod read;
 pub mod rule;
+pub mod sums;
 pub mod version;
 
 // GitHub on this machine, and what the tests build their worlds of: a failure

@@ -14,7 +14,7 @@
 //! Each harness is the one worker of a project on the native daemon, whose chief is
 //! the stand-in; the check, as the chief, gives it a brief of forty numbered lines
 //! that ends asking for a sum, through the real path a message takes to it (pasted
-//! into Claude Code and Devin, put to Codex, Pi and OpenCode through their own
+//! into Claude Code and Devin, put to Codex and Pi through their own
 //! queues). The worker's window is kept open as the human keeps one (`session.open`):
 //! it closes with its task otherwise. Through the turn, twice a second, and once at
 //! rest after it, the check asks the pane host for the window's screen as the
@@ -35,14 +35,16 @@
 //! wait for a throwaway config seeded with the login (T-302, Gabriel's decision of
 //! 2026-10-22): until the kit's rig has it, Claude is run only when asked. Known limit
 //! (Calliope's re-check T-300, P3-R7): the Claude leg of T-298's runs left two lines
-//! in the owner's Claude history, which T-302 keeps from happening again. Codex runs in a home of the
-//! run's own that holds a copy of the machine's `auth.json` and nothing else, so it
-//! has no MCP servers and never writes the machine's `~/.codex`; the run says whether
-//! that copy changed (a token Codex refreshed in it), which would leave the machine's
-//! own login stale, and the home goes with the run.
+//! in the owner's Claude history, which T-302 keeps from happening again. Codex, Pi and
+//! Devin run in a home of the run's own that holds a copy of the machine's login and
+//! nothing else ([`cf_e2e::live::isolation`], which the kit gives every window), so Codex
+//! has no MCP servers and none of them writes the machine's `~/.codex`, `~/.pi` or
+//! `~/.local/share/devin`; the run fails if a login copy changed (a token refreshed in it,
+//! which would leave the machine's own stale) or a file of the machine's did, and the
+//! home goes with the run.
 //!
 //! ```text
-//! cargo xtask live paste-screen                         all five, one after another
+//! cargo xtask live paste-screen                         every harness, one after another
 //! cargo xtask live paste-screen claude devin            those named
 //! cargo xtask live paste-screen pi --keep               leaves the run's home and project
 //! ```
@@ -50,7 +52,7 @@
 //! The run fails where a worker's task was not done, or no look found its window at
 //! rest: what the screen showed is said either way.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::members::{self, find, is_over, Members, Plan};
@@ -124,7 +126,10 @@ impl Shows {
             .iter()
             .any(|line| line.contains("[Pasted text #") || line.contains("[Pasted Content "));
         let lines = (1..=LINES)
-            .filter(|n| tail.iter().any(|line| line.contains(&mark(*n))))
+            .filter(|n| {
+                let numbered = format!("{}:", mark(*n));
+                tail.iter().any(|line| begun(line).starts_with(&numbered))
+            })
             .count();
         Self {
             header,
@@ -193,7 +198,8 @@ fn tail(members: &Members, pane: &Value, lines: usize) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The harnesses the words of the command line name, or all five where they name none.
+/// The harnesses the words of the command line name, or every one where they name
+/// none.
 fn harnesses(named: &[String]) -> Result<Vec<Harness>> {
     if named.is_empty() {
         return Ok(Harness::ALL.to_vec());
@@ -211,94 +217,23 @@ fn harnesses(named: &[String]) -> Result<Vec<Harness>> {
         .collect()
 }
 
-/// A home of the run's own for Codex, holding a copy of the machine's `auth.json`
-/// and nothing else, and where that copy came from.
-struct CodexHome {
-    home: tempfile::TempDir,
-    copied: Vec<u8>,
-}
-
-impl CodexHome {
-    fn make() -> Result<Self> {
-        let machine = live::requested("CODEX_HOME")
-            .map(PathBuf::from)
-            .or_else(|| live::requested("HOME").map(|home| Path::new(&home).join(".codex")))
-            .ok_or_else(|| Error::Daemon("no Codex home to copy a login from".to_owned()))?;
-        let auth = machine.join("auth.json");
-        let copied = std::fs::read(&auth).map_err(|source| Error::File {
-            action: "read",
-            path: auth.clone(),
-            source,
-        })?;
-        let home = tempfile::Builder::new()
-            .prefix("cf-codex-home-")
-            .tempdir()
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: std::env::temp_dir(),
-                source,
-            })?;
-        let into = home.path().join("auth.json");
-        write_private(&into, &copied).map_err(|source| Error::File {
-            action: "write",
-            path: into,
-            source,
-        })?;
-        Ok(Self { home, copied })
-    }
-
-    fn path(&self) -> String {
-        self.home.path().to_string_lossy().into_owned()
-    }
-
-    /// Whether the run's copy of the login is no longer the copy made: Codex
-    /// refreshed its token in the run's home.
-    fn changed(&self) -> bool {
-        std::fs::read(self.home.path().join("auth.json")).map_or(true, |now| now != self.copied)
-    }
-}
-
-/// `bytes` written to `path` readable by its owner alone (mode 600 on Unix): a
-/// copy of a login.
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options.open(path)?.write_all(bytes)
-}
-
 /// One worker's run: the brief given, its window kept open and looked at through
 /// its turn and at rest after it.
 fn run(harness: Harness, log: &Log) -> Result<Check> {
     let name = harness.name();
     let log = log.scoped(name);
-    let codex = (harness == Harness::Codex)
-        .then(CodexHome::make)
-        .transpose()?;
-    let mut plan = Plan::new(&format!("paste-screen-{name}"), members::stand_in_chief())
+    let plan = Plan::new(&format!("paste-screen-{name}"), members::stand_in_chief())
         .with(members::member(harness));
-    if let Some(codex) = &codex {
-        // Where the run's copy of the login is, should a killed run leave it behind.
-        log.say(format!("Codex's home of the run's own: {}", codex.path()));
-        plan = plan.with_var("CODEX_HOME", codex.path());
-    }
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), &log)?;
     let seen = look(&mut members, harness, &log);
+    // The kit's homes are asked what the run came to when the rig ends: a login copy that
+    // changed, or a file of the machine's that did, fails the close.
     let closed = members.close();
-    let changed = codex.as_ref().is_some_and(CodexHome::changed);
-    if changed {
-        log.say("THE RUN'S COPY OF CODEX'S auth.json CHANGED: Codex refreshed its token in the run's home");
-    }
     let (done, seen) = seen?;
     closed?;
     let mut detail = seen.line();
     if let Some(wrong) = &seen.wrong {
         detail.push_str(&format!("; {wrong}"));
-    }
-    if changed {
-        detail.push_str("; Codex's auth.json copy changed in the run");
     }
     Ok(Check::new(
         name,
@@ -360,17 +295,56 @@ fn look(members: &mut Members, harness: Harness, log: &Log) -> Result<(bool, See
             .unwrap_or_default();
         // The thread holds the worker's result to the chief too: the engine reads what
         // went into the window by its recipient.
-        seen.wrong = misread(&lines, &ask::ours(&lines, &handle, &pasted)?);
+        let window = ask::For::new(members.rig().cf(), harness.name());
+        let ours = ask::ours(&lines, &handle, &pasted, window)?;
+        seen.wrong = misread(&lines, &ours);
+        // A screen the rule misread is said whole, each line with the rule's word on it,
+        // so the red case can be read and kept (T-1000, T-784): what it holds is the
+        // check's own brief and the window's frame.
+        if seen.wrong.is_some() {
+            log.say(format!(
+                "the look at rest, as the rule read it:\n{}",
+                read_as(&lines, &ours)
+            ));
+        }
     }
     let state = ended.unwrap_or_else(|| "not over".to_owned());
     log.say(format!("T-{number} is {state}; {}", seen.line()));
     Ok((state == "done", seen))
 }
 
+/// `lines`, each after the rule's word on it: `ours` for ConsensFlow's, `    ` for the
+/// window's, and its place in the look.
+fn read_as(lines: &[String], ours: &[bool]) -> String {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(at, line)| {
+            let said = if ours.get(at).copied().unwrap_or(false) {
+                "ours"
+            } else {
+                "    "
+            };
+            format!("{:>2} {said} |{line}", at + 1)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `line` after the window's frame: what it begins with that is no letter, digit or `[`
+/// (a prompt's `>`, a box's `│`, the indent).
+fn begun(line: &str) -> &str {
+    line.trim_start_matches(|c: char| !(c.is_alphanumeric() || c == '['))
+}
+
 /// Whether the brief's line `line` is: one of its numbered lines, or the sum it
-/// asks for.
+/// asks for, begun after the window's frame. A line that only names the brief's marks
+/// is the window's: Devin 3000.11.228 draws a title of the conversation, made from its
+/// words, in the line above its input (`─── Analyze PSL-01–PSL-40 Brief and Provide… ─`),
+/// which the check took for the brief, and failed 2 runs of 3 (T-1000, T-784).
 fn of_the_brief(line: &str) -> bool {
-    line.contains("PSL-") || line.contains("Reply with only the sum of")
+    let begun = begun(line);
+    begun.starts_with("PSL-") || begun.starts_with("Reply with only the sum of")
 }
 
 /// What the engine's rule (`ours`, a line to each of `lines`) took otherwise than
@@ -499,19 +473,41 @@ mod tests {
         assert_eq!(misread(&lines(&["3470"]), &[false]), None);
     }
 
-    #[cfg(unix)]
     #[test]
-    fn a_copy_of_a_login_is_readable_by_its_owner_alone() {
-        use std::os::unix::fs::PermissionsExt;
-        let folder = tempfile::tempdir().unwrap();
-        let file = folder.path().join("auth.json");
-        write_private(&file, b"{}").unwrap();
-        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
+    fn a_title_devin_draws_from_the_briefs_words_is_the_windows_and_no_line_of_the_brief() {
+        // The screen at rest of a run on Devin 3000.11.228 (2026-10-31), as the engine's
+        // rule read it: the brief's last lines ConsensFlow's, and from the answer down the
+        // window's, its title of the conversation among them.
+        let screen = lines(&[
+            "  PSL-36: line 36 of the brief, nothing to do for it.",
+            "  PSL-37: line 37 of the brief, nothing to do for it.",
+            "  PSL-38: line 38 of the brief, nothing to do for it.",
+            "  PSL-39: line 39 of the brief, nothing to do for it.",
+            "  PSL-40: line 40 of the brief, nothing to do for it.",
+            "  Reply with only the sum of 2357 and 1113, in digits, and run no tools.",
+            " 3470",
+            " ⏺ ~/.consensflow-candidate/live/paste-screen-devin",
+            "───────────────────────────────────── Analyze PSL-01–PSL-40 Brief and Provide… ─",
+            "❭ Ask Devin to build features, fix bugs, or work on your code",
+            "SWE-2 Medium · bypass                            Context: 16k / 262k tokens (6%)",
+            "Update v3000.11.234 available!",
+        ]);
+        let ours = [
+            true, true, true, true, true, true, false, false, false, false, false, false,
+        ];
+        assert_eq!(misread(&screen, &ours), None);
+        assert_eq!(
+            Shows::of(&screen).lines,
+            5,
+            "the title names no line it shows"
+        );
+        // A line of the brief is one still, after any frame.
+        assert!(of_the_brief("│ PSL-02: line 2 of the brief"));
+        assert!(of_the_brief("> Reply with only the sum of 2357 and 1113"));
     }
 
     #[test]
-    fn with_no_harness_named_all_five_run_and_those_named_run_in_their_order() {
+    fn with_no_harness_named_all_run_and_those_named_run_in_their_order() {
         assert_eq!(harnesses(&[]).unwrap(), Harness::ALL.to_vec());
         assert_eq!(
             harnesses(&["pi".to_owned(), "claude".to_owned()]).unwrap(),

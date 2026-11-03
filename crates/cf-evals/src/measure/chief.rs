@@ -20,6 +20,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use super::copy::on_copy;
+use super::metrics::Asking;
 use super::sentences::count_questions;
 use crate::{js, Result};
 
@@ -40,13 +41,15 @@ struct Item {
     role: String,
     text: String,
     complete: bool,
+    /// When the harness wrote it, else when the daemon copied it.
+    at: String,
 }
 
 /// The items of the conversations that `condition` (over `c`, the conversation, and
 /// `p`, its participant) picks, with its parameters, in the order they happened.
 fn items(db: &Connection, condition: &str, params: impl rusqlite::Params) -> Result<Vec<Item>> {
     let mut statement = db.prepare(&format!(
-        "SELECT t.item_id, t.role, t.text, t.complete FROM transcript t
+        "SELECT t.item_id, t.role, t.text, t.complete, COALESCE(t.at, t.copied_at) FROM transcript t
          JOIN conversation c ON c.id = t.conversation_id
          JOIN participant p ON p.id = c.participant_id
          WHERE {condition} ORDER BY t.conversation_id, t.seq"
@@ -58,6 +61,7 @@ fn items(db: &Connection, condition: &str, params: impl rusqlite::Params) -> Res
                 role: row.get(1)?,
                 text: row.get(2)?,
                 complete: row.get::<_, i64>(3)? == 1,
+                at: row.get(4)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -72,6 +76,8 @@ pub(super) struct ChiefWindow {
     pub last_words: String,
     /// The messages that ended its turns: what it left the owner to read.
     pub turn_ends: Vec<String>,
+    /// Those of them that put a question to the owner, with the time of each.
+    pub asking: Vec<Asking>,
     /// What the owner typed into its window, in characters.
     pub owner_messages: Vec<i64>,
     /// A `cf ask` it tried: refused, it is told to ask in its terminal.
@@ -105,6 +111,17 @@ pub(super) fn window(db: &Connection, chief: i64, harness: Option<&str>) -> Resu
             .iter()
             .filter(|item| item.complete)
             .map(|item| item.text.clone())
+            .collect(),
+        asking: assistant
+            .iter()
+            .filter(|item| item.complete)
+            .filter_map(|item| {
+                let questions = count_questions(&item.text);
+                (questions > 0).then(|| Asking {
+                    at: item.at.clone(),
+                    questions,
+                })
+            })
             .collect(),
         owner_messages: items
             .iter()

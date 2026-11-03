@@ -51,6 +51,22 @@ pub struct ProjectView {
     /// only when there is one, so a project that has none reads as it always did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// When the human began a meeting with the chief, while one is on: said only
+    /// then, so a project with none reads as it always did (3.0.7 chief-meeting).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meeting: Option<String>,
+    /// The rules the human wrote for the project's staff, which every member's
+    /// window is given after its role, and the chief's as what every member has:
+    /// said only when there are some, so a project that has none reads as it
+    /// always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staff_rules: Option<String>,
+    /// The size, in tokens, at which the human has the project's Claude member
+    /// windows compact: the window each member's launch gives Claude Code. Said
+    /// only when the human chose one, so a project on Claude's own point reads as
+    /// it always did. The chief's window is never given it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_compaction: Option<u32>,
 }
 
 impl ProjectView {
@@ -606,7 +622,8 @@ pub struct Resume {
 }
 
 /// The board as the page reads it: the project, the tasks no lane has, each
-/// participant's lane, and what waits for the human's approval.
+/// participant's lane, what waits for the human's approval, and what a meeting
+/// with the chief holds.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Board {
     pub project: ProjectView,
@@ -616,6 +633,10 @@ pub struct Board {
     pub open: Vec<TaskCard>,
     pub lanes: Vec<Lane>,
     pub gated: Vec<MessageView>,
+    /// What a meeting with the chief holds, in the order it will go: said only
+    /// while it holds something (3.0.7 chief-meeting).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<MessageView>,
     /// What waits for the human's Resume, said of a suspended project alone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resume: Option<Resume>,

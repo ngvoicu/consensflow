@@ -23,7 +23,7 @@ use cf_base::file::is_missing;
 use cf_base::{js, path};
 use serde_json::Value;
 
-use crate::devin::adapter::BYPASS;
+use crate::devin::kept::{self, behind_bypass, KeptFiles};
 use crate::shared::record::find::entries;
 use crate::shared::record::home;
 use crate::shared::record::jsonl::{read_on, Looked, Seen, Stop};
@@ -52,6 +52,11 @@ pub(super) struct Wires {
     /// How each turn ended, by the model's request it ended in (Devin's own request id),
     /// where the wire names one ([`Active::native`]).
     natives: HashMap<String, Outcome>,
+    /// What was kept of launches whose folders went (`kept`), as read so far.
+    kept_files: KeptFiles,
+    /// The prompts ConsensFlow gave the session's launches whose folders went, behind
+    /// `/bypass`, as they were kept.
+    kept: Vec<String>,
 }
 
 /// One launch's log: where the last look stopped, and what it said so far.
@@ -120,6 +125,13 @@ impl Wires {
         };
         let root = path::join(&[&consensflow, "integrations", "devin"]);
         self.launches = launches(&root)?;
+        // What was kept of launches whose folders went is the launches' own word: what
+        // came or went of it changes what the session reads.
+        self.kept_files
+            .read(&path::join(&[&consensflow, "integrations", kept::FOLDER]));
+        let kept = self.kept_files.for_session(session);
+        let kept_changed = kept != self.kept;
+        self.kept = kept;
         let only = js::stringify(&Value::from(session));
         loop {
             let mut changed = false;
@@ -176,7 +188,7 @@ impl Wires {
                     .keys()
                     .all(|launch| present.contains(launch.as_str()))
             {
-                return Ok(changed);
+                return Ok(changed || kept_changed);
             }
             self.logs.clear();
             self.outcomes.clear();
@@ -216,11 +228,13 @@ impl Wires {
     }
 
     /// What ConsensFlow gave the session's launches as their first messages behind
-    /// `/bypass`, each as it was behind the command.
+    /// `/bypass`, each as it was behind the command: the launches' folders say it, and
+    /// what was kept of those whose folders went.
     pub(super) fn bypassed(&self) -> impl Iterator<Item = &str> {
         self.logs
             .values()
             .filter_map(|log| log.bypassed.as_ref()?.as_deref())
+            .chain(self.kept.iter().map(String::as_str))
     }
 
     /// How the turn of `request` ended, if a log said so.
@@ -288,7 +302,11 @@ impl Said {
         let replayed = meta("cognition.ai/timestamp").is_some()
             && !(kind.is_some_and(|kind| STREAMED.contains(&kind))
                 && meta("cognition.ai/streamingMessageId").is_some());
-        if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed {
+        // What the TUI answers itself, at once, to a command of its own (`/login`, `/mcp`,
+        // the workspace's folders) is said as Devin's words, flagged instant, with no turn
+        // and no end: work it would be for good (Calliope's P3-1 on T-683, T-688).
+        let instant = meta("cognition.ai/instant") == Some(&Value::Bool(true));
+        if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed && !instant {
             self.busy = true;
         }
         if kind == Some("session_info_update") {
@@ -380,18 +398,10 @@ impl Said {
 }
 
 /// What the launch `launch` under `root` was given as its first message behind
-/// `/bypass`, from its prompt file (`install::prepare_prompt`): none where it has none,
-/// or one that is not behind the command.
+/// `/bypass`, from its prompt file (`kept::behind_bypass`).
 fn bypassed(root: &str, launch: &str) -> Result<Option<String>, String> {
     let file = path::join(&[root, launch, "prompt.txt"]);
-    match std::fs::read_to_string(&file) {
-        Ok(prompt) => Ok(prompt
-            .strip_prefix(BYPASS)
-            .and_then(|behind| behind.strip_prefix(' '))
-            .map(str::to_owned)),
-        Err(error) if is_missing(&error) => Ok(None),
-        Err(error) => Err(format!("{file}: {error}")),
-    }
+    behind_bypass(Path::new(&file)).map_err(|error| format!("{file}: {error}"))
 }
 
 /// The launches' folders under `root`, as Node's `readdir` lists them: a

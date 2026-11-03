@@ -90,7 +90,7 @@ use std::time::{Duration, Instant};
 use std::collections::BTreeMap;
 
 use cf_e2e::live::claude::{self, Entry};
-use cf_e2e::live::mcp_server::Server;
+use cf_e2e::live::mcp_server::{Runtime, Server};
 use cf_e2e::live::members::{Machine, ThisMachine};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
@@ -107,21 +107,12 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 /// The folder of the check, below the live folders.
 const FOLDER: &str = "monitor-wait";
 
-/// The variables a Claude Code session gives its children, which a run started from
-/// inside one would hand the window: with them it keeps no transcript.
-const SESSION_IDENTITY: [&str; 11] = [
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_CODE_SESSION_ID",
-    "CLAUDE_CODE_CHILD_SESSION",
-    "CLAUDE_CODE_SESSION_ATTENDED",
-    "CLAUDE_CODE_MESSAGING_SOCKET",
-    "CLAUDE_CODE_MESSAGING_TOKEN",
-    "CLAUDE_CODE_BRIDGE_SESSION_ID",
-    "CLAUDE_CODE_EXECPATH",
-    "CLAUDE_PID",
-    "CLAUDE_EFFORT",
-];
+/// The variables of a session a run started from inside one would hand the window, which
+/// the window is opened without: the one list (`parent_session_variables`), Claude Code's
+/// among them, with which it keeps no transcript.
+fn session_identity() -> impl Iterator<Item = &'static str> {
+    cf_proto::agents::parent_session_variables()
+}
 
 /// The words the agent is asked to answer each wake-up with.
 const ARMED: &str = "WAITING";
@@ -223,6 +214,14 @@ impl Look {
             self.status
         )
     }
+}
+
+/// Whether the server that was to leave the window's process group did: it was started
+/// (`detached` is its process) and is the leader of a group of its own (`group`). A machine
+/// whose servers cannot leave a group (`leaves` false: Windows') has none that was to, so the
+/// check holds to what the others do.
+fn left_the_group(leaves: bool, detached: Option<u32>, group: Option<u32>) -> bool {
+    !leaves || (detached.is_some() && group == detached)
 }
 
 /// The process group the process `pid` is in: none where it is gone, or the platform has
@@ -711,18 +710,18 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ask::prepare()?;
     let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
-    let python = live::working_command("python3", &["--version"])?;
+    let runtime = Runtime::of_machine()?;
     let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-monitor-wait");
     fs::create_dir_all(&made)
         .map_err(|error| Error::Daemon(format!("{}: {error}", made.display())))?;
-    let server = Server::write_leaving_group(&made, &python)?;
+    let server = Server::write_leaving_group(&made, &runtime)?;
     // The first message goes in as the window opens, its first turn under way from the
     // first look (`Open::seed`).
     let mut open = Open::new(&rig, &claude, FOLDER, FOLDER)
         .claude_alone_with_hooks(hooks())
         .mcp_config(server.config())
         .seed(&live::ask::window_text(ARM)?);
-    for name in SESSION_IDENTITY {
+    for name in session_identity() {
         open = open.without(name);
     }
     let window = open.open_telling(&log, "claude")?;
@@ -787,10 +786,14 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ];
     let detached = server.detached_pid();
     let group = detached.and_then(group_of);
-    let left = detached.is_some() && group == detached;
+    // A machine whose servers cannot leave a process group (Windows') has none that did, and the
+    // check holds to what the others do: the host finds no command, and the plain look counts.
+    let left = left_the_group(server.leaves_group(), detached, group);
     log.say(format!(
         "the server that leaves the window's group: {}",
         match detached {
+            _ if !server.leaves_group() =>
+                "none on this machine: a process has no group to leave".to_owned(),
             Some(pid) if left => format!("process {pid}, in a group of its own"),
             Some(pid) => format!("process {pid}, in the group {group:?}"),
             None => "not started".to_owned(),
@@ -1050,6 +1053,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     }
     drop(window);
     rig.close()?;
+    let checks = host_can_answer(checks, cfg!(unix));
     report::conclude(
         &log,
         "what Claude Code wrote, and what the reader counted",
@@ -1057,9 +1061,40 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     )
 }
 
+/// The checks of what the pane host finds in the window that need what only a platform with
+/// process groups gives: a server that leaves the window's group (`first-turn-call`), and the
+/// time each process began, read against its monitor's call (`call-margin`).
+const GROUPS_ONLY: [&str; 2] = ["first-turn-call", "call-margin"];
+
+/// `checks`, as a platform can hold them. The host tells the commands of a window on every
+/// platform (`pane.commands`, in `cf-proto`'s `panes.rs`): by its process groups where it has
+/// them (`groups`), and on Windows by the shells the harness started for its commands, for
+/// Claude says `Servers::ByShell` there (T-906). So `mcp-not-a-command`, `commands-armed` and
+/// `expiries-end` hold on both; the two of `GROUPS_ONLY` are the groups' platforms' alone.
+fn host_can_answer(checks: Vec<Check>, groups: bool) -> Vec<Check> {
+    if groups {
+        return checks;
+    }
+    checks
+        .into_iter()
+        .filter(|check| !GROUPS_ONLY.contains(&check.what.as_str()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window is opened without every variable of Claude Code's session the build
+    /// knows, the one list's: a copy of its own once held eleven, and no `AI_AGENT` or
+    /// `TRACEPARENT` (T-1024).
+    #[test]
+    fn the_window_is_opened_without_every_variable_of_claudes_session_the_build_knows() {
+        let without: Vec<&str> = session_identity().collect();
+        for name in cf_proto::agents::Harness::Claude.session_variables() {
+            assert!(without.contains(name), "{name}");
+        }
+    }
 
     fn look(settled: bool, jobs: u64, last: &str) -> Look {
         Look {
@@ -1184,6 +1219,58 @@ fn the_fixtures_expiry_is_read_from_its_records() {
             delivered_at: written_at(&json!({ "timestamp": "2026-10-20T23:03:10.329Z" })).unwrap(),
         }]
     );
+}
+
+#[test]
+fn a_platform_with_no_groups_keeps_the_checks_of_the_commands_the_host_tells_and_drops_the_groups_own(
+) {
+    let checks = || -> Vec<Check> {
+        [
+            "arming",
+            "first-turn-call",
+            "mcp-not-a-command",
+            "commands-armed",
+            "expiries-end",
+            "call-margin",
+            "stop",
+        ]
+        .iter()
+        .map(|what| Check::new("claude", what, true, "held"))
+        .collect()
+    };
+    let names = |checks: &[Check]| {
+        checks
+            .iter()
+            .map(|check| check.what.clone())
+            .collect::<Vec<_>>()
+    };
+    // Where the host has process groups, nothing changes.
+    assert_eq!(names(&host_can_answer(checks(), true)), names(&checks()));
+    // Where it has none (Windows), it still tells the commands, by their shells: the three checks
+    // of what it finds stay, and only the two that need a group or a start time go.
+    assert_eq!(
+        names(&host_can_answer(checks(), false)),
+        [
+            "arming",
+            "mcp-not-a-command",
+            "commands-armed",
+            "expiries-end",
+            "stop"
+        ]
+    );
+}
+
+#[test]
+fn a_server_left_its_group_when_it_leads_one_of_its_own_and_where_none_can_leave_none_was_to() {
+    assert!(left_the_group(true, Some(40), Some(40)));
+    assert!(
+        !left_the_group(true, Some(40), Some(7)),
+        "in the window's group"
+    );
+    assert!(!left_the_group(true, Some(40), None), "no group to tell");
+    assert!(!left_the_group(true, None, None), "never started");
+    // Windows: no server was written that leaves, and what a process group is has no answer.
+    assert!(left_the_group(false, None, None));
 }
 
 #[test]

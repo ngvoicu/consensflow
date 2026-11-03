@@ -138,8 +138,8 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''                    if later_limit(&until, returned) {'''
-replace = '''                    if later_limit(&until, returned) && returned.is_empty() {'''
+find = '''                    if later_limit(&until, returned) && !never(&until) {'''
+replace = '''                    if later_limit(&until, returned) && !never(&until) && returned.is_empty() {'''
 
 [[plant]]
 name = "quota-accounts: a later reset a member's return left out is brought back by the member's next turn"
@@ -201,8 +201,10 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''        if !self.scheduler.out_noted.borrow_mut().insert(mark) {'''
-replace = '''        if !self.scheduler.out_noted.borrow_mut().insert(mark) && participant.id < 0 {'''
+find = '''        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) {'''
+replace = '''        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) && participant.id < 0 {'''
 
 [[plant]]
 name = "quota-accounts: what waits for a window out of quota is said to the human once ever, not once for each mark"
@@ -339,7 +341,7 @@ find = '''
                 project.id,
                 task.number,
                 until,
-                "out of quota",
+                unwell.map_or("out of quota", Unwell::hold),
             )?;
             if refused_at.is_none() {'''
 replace = '''

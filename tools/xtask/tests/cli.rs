@@ -52,7 +52,10 @@ fn a_help_and_a_refusal_start_nothing() {
     for (args, said) in [
         (vec![], "xtask: a command is required\n"),
         (vec!["deploy"], "xtask: unknown command: deploy\n"),
-        (vec!["app"], "xtask: app takes a command: test, clippy\n"),
+        (
+            vec!["app"],
+            "xtask: app takes a command: test, clippy, fresh\n",
+        ),
     ] {
         let ran = xtask(&checkout(), no_programs.path(), &[], &args);
         assert_eq!(ran.status.code(), Some(2), "{args:?}");
@@ -133,9 +136,11 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "portable inspect",
         "app test",
         "app clippy",
+        "app fresh",
         "clippy-windows",
         "--as-archiver",
         "departures",
+        "unreachable-pub",
         "bench records-memory",
         "check",
         "smoke",
@@ -143,6 +148,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "candidate",
         "release alpha",
         "release promote",
+        "release verify",
     ] {
         let mut words: Vec<&str> = command.split(' ').collect();
         words.push("--help");
@@ -187,6 +193,7 @@ fn check_steps() -> Vec<String> {
     let mut steps = vec![
         "cargo fmt --all --check".to_string(),
         "cargo clippy --workspace --exclude app --all-targets -- -D warnings".to_string(),
+        "cargo xtask unreachable-pub".to_string(),
         "cargo clippy --offline --all-targets -- -D warnings".to_string(),
     ];
     if !cfg!(windows) {
@@ -195,8 +202,10 @@ fn check_steps() -> Vec<String> {
     }
     steps.extend([
         "cargo test --workspace --exclude app --exclude xtask".to_string(),
+        "cargo test --package cf-engine --test dispatcher".to_string(),
         own_tests,
         "cargo test --offline --".to_string(),
+        "cargo xtask app fresh".to_string(),
     ]);
     steps.extend(
         families

@@ -43,7 +43,9 @@
     "history.get",
     "history.part",
     "computer_use.get",
-    "computer_use.open"
+    "computer_use.open",
+    "project.rules",
+    "project.compaction"
   ],
   "ping": "{\"ok\":true}"
 }

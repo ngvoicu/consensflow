@@ -1,14 +1,17 @@
+use cf_proto::cf_word::{CfWord, Shell};
 use std::sync::Arc;
 
 use cf_base::env::Env;
+use cf_base::role_read::role_read_whole;
 use cf_catalog::WorkTier;
+use cf_ledger::{STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use super::*;
 use crate::deliveries::Delivering;
 use crate::delivery_text::{delivery_text, goes_whole};
-use crate::roles::{role_instructions, ProjectSpecs, StaffRow};
+use crate::roles::{role_instructions, with_staff_rules, ProjectSpecs, StaffRow};
 use crate::testing::Context;
 
 /// A note to the chief as the ledger would show it, saying `body`.
@@ -118,6 +121,32 @@ fn a_launch_writes_the_replacement_as_the_note_the_ledger_knows_and_whose_words_
 /// specs on or off: the paths of a Mac, as long as the folder its skill's copy is
 /// kept in makes its path.
 fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
+    a_chiefs_role_with(rows, specs_on, None)
+}
+
+/// The most rules for the staff the ledger takes, in what costs a text that says
+/// them the most: every byte the ledger allows and every line, the lines in
+/// characters of three bytes (a letter of a script outside the Latin ones) and
+/// the rest in one-byte ones, so that the bytes and lines of a note are as many
+/// as any rules can make them.
+fn the_most_rules() -> String {
+    let lines = STAFF_RULES_MAX_LINES;
+    let each = (STAFF_RULES_MAX_BYTES - (lines - 1)) / lines;
+    let line = format!("{}{}", "日".repeat(each / 3), "a".repeat(each % 3));
+    let mut rules = vec![line; lines].join("\n");
+    rules += &"a".repeat(STAFF_RULES_MAX_BYTES - rules.len());
+    assert_eq!(rules.len(), STAFF_RULES_MAX_BYTES);
+    assert_eq!(rules.split('\n').count(), STAFF_RULES_MAX_LINES);
+    assert_eq!(
+        cf_ledger::parse_staff_rules(Some(&Value::from(rules.clone()))).ok(),
+        Some(Some(rules.clone())),
+        "the ledger takes them"
+    );
+    rules
+}
+
+/// [`a_chiefs_role`] with the project's rules for the staff, if it has some.
+fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> String {
     let staff: Vec<StaffRow> = (0..rows)
         .map(|at| StaffRow {
             name: format!("member-{at}"),
@@ -134,155 +163,159 @@ fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
         &Env::default(),
         "chief",
         &staff,
-        Some("/Applications/ConsensFlow.app/Contents/Resources/bin/cf"),
+        &CfWord::new(
+            "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
+            Shell::Posix,
+        ),
         specs_on.then_some(&specs),
     )
+    .map(|text| with_staff_rules(text, "chief", rules))
     .unwrap()
 }
 
+/// What `cf inbox read` prints of `note` once it was delivered: its line and
+/// its words.
+fn printed_by_cf(note: &MessageView) -> String {
+    format!(
+        "m-{} [delivered] note from ConsensFlow\n\n{}\n",
+        note.id, note.body
+    )
+}
+
 /// The real text of a chief with specs on and a staff of twenty-five who each hold
-/// two roles is still under what a message goes in whole at: it is the role itself
-/// the replacement says, not its opening and a command to read the rest of it.
+/// two roles is told: it is longer than a message goes in whole at since the
+/// chief's rules for smaller contexts (T-1009), so its window is given the
+/// opening, which says to read the rest now, and the command that prints it, and
+/// what that command prints is read whole by its window, so the role is told once
+/// it is read.
 #[test]
-fn the_real_text_of_a_chief_with_specs_and_a_large_staff_goes_in_whole_as_a_replacement() {
-    let text = a_chiefs_role(25, true);
+fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
+    let most = the_most_rules();
+    for rules in [None, Some(most.as_str())] {
+        told_whole_or_told_and_read(&a_chiefs_role_with(25, true, rules));
+    }
+}
+
+/// A chief's `text`, said again in a replacement, goes in whole, or in part
+/// with the command that prints the rest, which its window reads whole.
+fn told_whole_or_told_and_read(text: &str) {
+    let text = text.to_owned();
     let replacement = note(None, "note", body_of(&text));
-    assert!(goes_whole(&replacement, &[]));
-    let said = delivery_text(&replacement, &[]);
-    assert!(said.contains(&text), "the role is cut");
+    let said = delivery_text(&replacement, &[], &CfWord::bare());
+    if goes_whole(&replacement, &[], &CfWord::bare()) {
+        assert!(said.contains(&text), "the role is cut");
+        return;
+    }
     assert!(
-        !said.contains("read all of it with"),
-        "a command stands in for its end"
+        said.contains(OPENING_IN_PART),
+        "it says to read the rest now"
+    );
+    assert!(
+        said.ends_with("read all of it with: cf inbox read m-4242)"),
+        "the command that prints the rest: {}",
+        &said[said.len() - 200..]
+    );
+    assert!(replacement.body.ends_with(&text));
+    assert!(
+        role_read_whole(&printed_by_cf(&replacement)),
+        "what cf prints of it is read whole: {} bytes",
+        printed_by_cf(&replacement).len()
     );
 }
 
-/// The staff a role holds whole in a replacement, which the docs of this module
-/// say: more rows are a role told in part.
+/// The staff a role holds whole in a replacement, and the staff it holds told in
+/// part and read whole, which the docs of this module say: more rows are a role
+/// told in part, and past the second, one `cf` does not say it read.
 #[test]
-fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
-    let rows_whole = |specs_on| {
+fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
+    let rows_while = |specs_on, holds: &dyn Fn(&MessageView) -> bool| {
+        (1..)
+            .take_while(|&rows| holds(&note(None, "note", body_of(&a_chiefs_role(rows, specs_on)))))
+            .last()
+            .unwrap_or(0)
+    };
+    let whole = |note: &MessageView| goes_whole(note, &[], &CfWord::bare());
+    let read = |note: &MessageView| role_read_whole(&printed_by_cf(note));
+    assert_eq!(
+        rows_while(true, &whole),
+        0,
+        "docs: never whole with specs on"
+    );
+    assert_eq!(
+        rows_while(false, &whole),
+        0,
+        "docs: never whole without specs either"
+    );
+    assert_eq!(
+        rows_while(true, &read),
+        211,
+        "docs: read to 211 rows with specs on"
+    );
+    assert_eq!(
+        rows_while(false, &read),
+        240,
+        "docs: read to 240 rows without"
+    );
+    // With the most rules for the staff the ledger takes.
+    let most = the_most_rules();
+    let rows_with_the_most = |specs_on| {
         (1..)
             .take_while(|&rows| {
-                goes_whole(
-                    &note(None, "note", body_of(&a_chiefs_role(rows, specs_on))),
-                    &[],
-                )
+                read(&note(
+                    None,
+                    "note",
+                    body_of(&a_chiefs_role_with(rows, specs_on, Some(&most))),
+                ))
             })
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
-    assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
-}
-
-/// How many units of a Windows command line a word takes, as the pane host
-/// (portable-pty) writes it: a word with a blank or a quote in it is wrapped in
-/// quotes, and each `"` in it is backslashed, with the backslashes before it
-/// doubled.
-fn on_the_line(word: &str) -> usize {
-    let units: Vec<u16> = word.encode_utf16().collect();
-    let needs_quotes = units.is_empty()
-        || units
-            .iter()
-            .any(|unit| [0x20, 0x09, 0x0a, 0x0b, 0x22].contains(unit));
-    if !needs_quotes {
-        return units.len();
-    }
-    let mut taken = 2;
-    let mut at = 0;
-    while at < units.len() {
-        let slashes = units[at..].iter().take_while(|unit| **unit == 0x5c).count();
-        at += slashes;
-        match units.get(at) {
-            None => taken += 2 * slashes,
-            Some(0x22) => taken += 2 * slashes + 2,
-            Some(_) => taken += slashes + 1,
-        }
-        at += 1;
-    }
-    taken
-}
-
-/// What the chief's role comes to on a Windows command line with `rows` staff
-/// rows (two roles each), as the developer instructions of its window: the real
-/// text with specs on, or off, the path of a skill's copy, `cf`'s path, and
-/// `framing` units before it, as the harness and Codex's own instructions add.
-fn on_a_windows_line(rows: usize, specs_on: bool, framing: usize) -> usize {
-    let staff: Vec<StaffRow> = (0..rows)
-        .map(|at| StaffRow {
-            name: format!("member-{at}"),
-            roles: vec!["worker".to_owned(), "reviewer".to_owned()],
-            work_tier: Some(WorkTier::Standard),
-        })
-        .collect();
-    let specs = ProjectSpecs {
-        variant: Variant::TddHtml,
-        folder: "docs/specs",
-        skill: "C:/Users/someone/AppData/Roaming/consensflow/integrations/specmint/codex/tdd-html-0123456789abcdef0123456789abcdef01234567/.claude/skills/specmint-tdd-html/SKILL.md",
-    };
-    let text = role_instructions(
-        &Env::default(),
-        "chief",
-        &staff,
-        Some("C:\\Program Files\\ConsensFlow\\cf.exe"),
-        specs_on.then_some(&specs),
-    )
-    .unwrap();
-    let developer = format!(
-        "developer_instructions={}",
-        serde_json::to_string(&format!("{}{text}", "x".repeat(framing))).unwrap()
+    assert_eq!(
+        rows_with_the_most(true),
+        46,
+        "docs: read to 46 rows with specs on and the most rules"
     );
-    on_the_line(&developer)
+    assert_eq!(
+        rows_with_the_most(false),
+        75,
+        "docs: read to 75 rows without specs and the most rules"
+    );
 }
 
-/// What the docs of this module and of `codex/role.rs` say of the command line of
-/// a Windows launch, held to the real text. The role is on it once, as the
-/// developer instructions, a launch that says a changed role included: the note
-/// that says it goes in by paste once the window is up. The arithmetic is theirs;
-/// a role text that grows or shrinks by much moves these sizes, and the docs with
-/// them: it is to be measured again.
+/// The real text of every member with the most rules for the staff the ledger
+/// takes, said again in a replacement or in the note that greets a session that
+/// began without it (a Muse `/clear`), goes into its window whole, in one message:
+/// a member's role is never told in part for its rules.
 #[test]
-fn the_command_line_of_a_windows_launch_is_the_size_the_docs_say() {
-    /// What the rest of the line takes: the two programs' paths, the flags, the
-    /// thread's id and the model.
-    const REST: usize = 400;
-    /// What the harness adds before the role in the developer instructions.
-    const FRAMING: usize = 190;
-    /// What Codex's own instructions are, the human's own included, at most.
-    const CODEX_OWN: usize = 2_500;
-    /// The most a Windows command line takes, its end excluded.
-    const LIMIT: usize = 32_766;
-
-    let word = |rows| on_a_windows_line(rows, true, FRAMING);
-    assert_eq!(word(1), 14_463, "docs: 14,463 units at 1 row");
-    assert_eq!(word(25), 15_654, "docs: 15,654 units at 25 rows");
-    assert_eq!(word(45), 16_654, "docs: 16,654 units at 45 rows");
-    assert_eq!(
-        on_a_windows_line(25, false, FRAMING),
-        14_232,
-        "docs: 1,422 fewer without specs"
-    );
-
-    // The most rows a line holds with the rest of it, and then with Codex's own
-    // instructions (and the 200 units or so that quoting them takes), and without
-    // specs.
-    let rows_held = |specs_on, framing| {
-        (1..)
-            .take_while(|&rows| on_a_windows_line(rows, specs_on, framing) + REST <= LIMIT)
-            .last()
-            .unwrap_or(0)
-    };
-    assert_eq!(rows_held(true, FRAMING), 354, "docs: 354 rows");
-    assert_eq!(
-        rows_held(true, FRAMING + CODEX_OWN + 200),
-        301,
-        "docs: 301 rows with Codex's own instructions"
-    );
-    assert_eq!(
-        rows_held(false, FRAMING),
-        382,
-        "docs: 382 rows without specs"
-    );
+fn a_members_real_text_with_the_most_rules_for_the_staff_goes_in_whole() {
+    // As many units as bytes: the most units any rules can have.
+    let most = "a".repeat(STAFF_RULES_MAX_BYTES);
+    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+        let text = role_instructions(
+            &Env::default(),
+            role,
+            &[],
+            &CfWord::new(
+                "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
+                Shell::Posix,
+            ),
+            None,
+        )
+        .map(|text| with_staff_rules(text, role, Some(&most)))
+        .unwrap();
+        for (whole, in_part) in [
+            (OPENING, OPENING_IN_PART),
+            (BEGAN_WITHOUT, BEGAN_WITHOUT_IN_PART),
+        ] {
+            let said = note_of(whole, in_part, &text);
+            assert!(said.starts_with(whole), "{role}: told whole");
+            assert!(
+                goes_whole(&note(None, "note", said.clone()), &[], &CfWord::bare()),
+                "{role}: {} units",
+                cf_base::text::utf16_len(&said)
+            );
+        }
+    }
 }
 
 /// An item of a conversation's record, from `role`, saying `text`.
@@ -340,7 +373,7 @@ fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
     );
     assert_eq!(answers(&items), ["The parser is sound."]);
     // Nor does one between a replacement of the role and its word end the role's turn.
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     let mut items = vec![assistant("Parser done"), user(&replacement), summary];
     items.push(assistant("Understood."));
     assert_eq!(answers(&items), ["Parser done"]);
@@ -350,13 +383,13 @@ fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
 fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words_it_quotes() {
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     // The opening, and the whole text of the replacement, quoted in a note about
     // the task (m-7), from someone: the worker's word answers the task.
     let mut quoting = note(Some("chief"), "note", format!("Review this: {replacement}"));
     quoting.id = 7;
     quoting.task_number = Some(1);
-    let quoted = delivery_text(&quoting, &[]);
+    let quoted = delivery_text(&quoting, &[], &CfWord::bare());
     assert!(quoted.contains(OPENING), "{quoted}");
     assert_eq!(
         answers(&[user(&quoted), assistant("Parser done")]),
@@ -371,7 +404,7 @@ fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words
 
 #[test]
 fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task() {
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
 
@@ -421,7 +454,7 @@ fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_no
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
     let tool = |text: &str| said_by(Role::Tool, text, true);
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
 
     // Several words after the last tool call are all of it, in order.
     assert_eq!(
@@ -553,6 +586,8 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         session: None,
         owed: None,
         late: false,
+        work: crate::at_work::OnWork::default(),
+        not_ready: None,
     };
     assert!(
         context
@@ -622,4 +657,30 @@ fn a_replacement_whose_recipient_has_no_conversation_any_more_is_confirmed_and_r
         "there was no conversation to have told"
     );
     context.close();
+}
+
+/// T-931 P1-1: the note that greets a session no hook greeted is no launch's prelude: a
+/// chief whose window comes up after it was told has its count of failed starts cleared,
+/// as after any launch that came up.
+#[test]
+fn a_chief_that_comes_up_after_its_greeting_was_told_has_its_failed_starts_cleared() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let record = context.dispatcher.record_of(chief);
+    record.window.borrow_mut().relaunch = Some(crate::windows::Relaunch {
+        failures: 1,
+        at: 0,
+        reopens: false,
+    });
+    context.dispatcher.came_up(&record);
+    assert!(record.window.borrow().relaunch.is_none());
 }

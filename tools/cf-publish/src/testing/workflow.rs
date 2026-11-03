@@ -59,6 +59,25 @@ pub mod release {
     pub const BUILD_PUBLISHER: &str = "Build cf-publish, and say what it hashes to";
     /// Where the publish job runs the publisher from.
     pub const PUBLISHER: &str = "$RUNNER_TEMP/publisher/cf-publish";
+    /// The sign job's step that writes SHA256SUMS and the copy of it that is signed.
+    pub const SUMS: &str = "The sums of the release, and the copy that is signed";
+    /// The sign job's step that holds the update key.
+    pub const SIGN: &str = "Sign the sums";
+    /// The Mac job's step that says what the files it built hash to.
+    pub const MAC_LISTING: &str = "What the Mac's files hash to";
+    /// The Windows build's step that lays out its files and says what they hash to.
+    pub const WINDOWS_LISTING: &str = "The files people download, and what they hash to";
+    /// The sign job's step that holds the files it downloaded to the build jobs' listings.
+    pub const ARTIFACTS: &str = "The files are the ones the Mac and Windows jobs built";
+    /// The publish job's step that holds the files it downloaded to the build jobs' listings.
+    pub const PUBLISH_ARTIFACTS: &str =
+        "The files are the ones the Mac and Windows jobs built, to be published";
+    /// The sign job's step that says what it signed hashes to.
+    pub const SIGNED: &str = "What was signed hashes to";
+    /// The publish job's step that holds SHA256SUMS and its signature to the sign job's outputs.
+    pub const SIGNED_FILES: &str = "The sums and their signature are the sign job's";
+    /// The sign job's step that checks the signature as the installers do.
+    pub const SIGNATURE: &str = "The installers take the signature";
     /// Where GitHub serves a release's files, in the steps' words.
     pub const DOWNLOADS: &str = "https://github.com/$GITHUB_REPOSITORY/releases/download";
 }
@@ -151,17 +170,52 @@ fn block_after(lines: &[&str]) -> String {
     script.join("\n")
 }
 
-/// The text of the job `name`, to the next job.
+/// A line of a workflow's text that is only a comment (or empty), which ends nothing.
+fn is_blank(line: &str) -> bool {
+    line.trim().is_empty() || line.trim_start().starts_with('#')
+}
+
+/// The job a line of a workflow's text opens, if it is a job's own line: two spaces in, a name, a
+/// colon, and nothing after it but a comment.
+pub fn job_header(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("  ")?;
+    if rest.starts_with([' ', '#']) {
+        return None;
+    }
+    let (name, after) = rest.split_once(':')?;
+    let after = after.trim();
+    (after.is_empty() || after.starts_with('#')).then_some(name)
+}
+
+/// The names of the jobs of a workflow's text, in order.
+pub fn job_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut in_jobs = false;
+    for line in text.lines() {
+        if line.trim_end() == "jobs:" {
+            in_jobs = true;
+        } else if is_blank(line) {
+            continue;
+        } else if !line.starts_with(' ') {
+            in_jobs = false;
+        } else if let Some(name) = job_header(line).filter(|_| in_jobs) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// The text of the job `name`, to the next job: a comment or a blank line ends nothing, and the
+/// job's own line may have a comment after its colon.
 pub fn job(text: &str, name: &str) -> String {
     let lines: Vec<&str> = text.split('\n').collect();
-    let header = format!("  {name}:");
     let start = lines
         .iter()
-        .position(|line| *line == header)
+        .position(|line| job_header(line) == Some(name))
         .unwrap_or_else(|| panic!("the workflow has no job {name}"));
     let end = lines[start + 1..]
         .iter()
-        .position(|line| indent_of(line) == 2 && !line.trim().is_empty())
+        .position(|line| !is_blank(line) && indent_of(line) <= 2)
         .map_or(lines.len(), |at| start + 1 + at);
     lines[start..end].join("\n")
 }
@@ -191,6 +245,28 @@ pub fn step(text: &str, name: &str) -> StepText {
             .map(|line| (*line).to_string())
             .collect(),
     }
+}
+
+/// A one-line YAML value as YAML reads it: a quoted one (with a comment after it, or not) without
+/// its quotes and what they escape; any other as it is written.
+fn scalar(value: &str) -> String {
+    let value = value.trim();
+    if let Some(inner) = value.strip_prefix('\'') {
+        if let Some(end) = inner.rfind('\'') {
+            if inner[end + 1..].trim().is_empty() || inner[end + 1..].trim_start().starts_with('#')
+            {
+                return inner[..end].replace("''", "'");
+            }
+        }
+    } else if let Some(inner) = value.strip_prefix('"') {
+        if let Some(end) = inner.rfind('"') {
+            if inner[end + 1..].trim().is_empty() || inner[end + 1..].trim_start().starts_with('#')
+            {
+                return inner[..end].replace("\\\"", "\"").replace("\\\\", "\\");
+            }
+        }
+    }
+    value.to_string()
 }
 
 /// Every step of `text` (a job's text, or the whole workflow's), in order, with the
@@ -239,30 +315,49 @@ impl StepText {
             )
     }
 
+    /// Whether it has a `run:`, as its first line (`      - run: …`) or at its keys' level.
+    pub fn runs(&self) -> bool {
+        self.run_at().is_some()
+    }
+
+    fn run_at(&self) -> Option<(usize, &str)> {
+        self.lines.iter().enumerate().find_map(|(at, line)| {
+            line.strip_prefix("        run: ")
+                .or_else(|| line.strip_prefix("      - run: "))
+                .map(|rest| (at, rest))
+        })
+    }
+
     /// The script of its `run:`, a block (`run: |`) or a line.
     pub fn script(&self) -> String {
-        let lines: Vec<&str> = self.lines.iter().map(String::as_str).collect();
-        let run = lines
-            .iter()
-            .position(|line| line.starts_with("        run: "))
-            .expect("the step has a run");
-        match lines[run].trim_start_matches("        run: ") {
-            "|" => block_after(&lines[run + 1..]),
-            line => line.to_string(),
+        let (run, first) = self.run_at().expect("the step has a run");
+        match first {
+            "|" => {
+                let lines: Vec<&str> = self.lines.iter().map(String::as_str).collect();
+                block_after(&lines[run + 1..])
+            }
+            line => scalar(line),
         }
     }
 
     /// The value of its key `key` (`working-directory`), as written.
     pub fn field(&self, key: &str) -> Option<String> {
         let prefix = format!("        {key}: ");
-        self.lines
-            .iter()
-            .find_map(|line| line.strip_prefix(&prefix).map(str::to_string))
+        let first = format!("      - {key}: ");
+        self.lines.iter().find_map(|line| {
+            line.strip_prefix(&prefix)
+                .or_else(|| line.strip_prefix(&first))
+                .map(str::to_string)
+        })
     }
 
     /// The variables of its `env:`, as written.
     pub fn env(&self) -> Vec<(String, String)> {
-        let Some(at) = self.lines.iter().position(|line| line == "        env:") else {
+        let Some(at) = self
+            .lines
+            .iter()
+            .position(|line| line == "        env:" || line == "      - env:")
+        else {
             return Vec::new();
         };
         self.lines[at + 1..]

@@ -1,0 +1,48 @@
+# The lead ConsensFlow puts before a critical task's brief (`CRITICAL_RULE`,
+# crates/cf-ledger/src/tasks.rs; T-1060): it sent the task's findings to "your
+# coordinator" — a word the member role texts ban — and forbade work on
+# specifications, which a project may not have. The lead now says the work
+# changes no file and answers to the chief, and the member texts' bans
+# (`MEMBER_BANS`, crates/cf-engine/tests/text/support.rs) read every word
+# ConsensFlow sets in and before a task's own, so no banned word comes back in
+# a lead the role tests never read. The one recording of Node's that holds the
+# old words (`ledger-tiered-012`) is named in `DEPARTED`
+# (crates/cf-ledger/tests/replay.rs), its first departing call the `assignTask`
+# that gave the task to a window.
+#
+# Every name holds `critical words`, so `npm run plants:daemon -- "critical
+# words"` runs them all.
+
+[run]
+# The bans the member texts keep, read of the words ConsensFlow adds to a task.
+engine-text-task-words = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "task_words"]
+
+[[plant]]
+name = "critical words: the lead sends a task's findings to a coordinator"
+meant = "the_words_consensflow_adds_to_a_task_hold_the_member_texts_bans"
+runs = ["engine-text-task-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '"It changes no file: return analysis, evidence and recommendations to the chief."'
+replace = '"It changes no file: return analysis, evidence and recommendations to your coordinator."'
+
+[[plant]]
+name = "critical words: a lead past the critical one may call the chief a coordinator"
+meant = "the_words_consensflow_adds_to_a_task_hold_the_member_texts_bans"
+runs = ["engine-text-task-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '"{}\n\nTold by @{from} before a window had it: {words}"'
+replace = '"{}\n\nTold by @{from}, your coordinator, before a window had it: {words}"'
+
+[[plant]]
+name = "critical words: the recording that holds the old words is not named departed"
+meant = "every_ledger_the_node_suite_opened_answers_here_as_it_answered_there"
+runs = ["ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/replay.rs"
+find = "    (\"ledger-tiered-012\", 9, CRITICAL_WORDS),\n"
+replace = ""

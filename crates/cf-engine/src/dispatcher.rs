@@ -40,10 +40,11 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 use crate::background::leaving;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
+use crate::pacing;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::{News, SchedulerState};
+use crate::scheduler::{moved_hold, out_words, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
@@ -152,6 +153,14 @@ impl Dispatcher {
             || Activity::of(ActivityState::Closed),
             |record| record.window.borrow().activity.clone(),
         )
+    }
+
+    /// Why the message at the head of `participant`'s window's queue does not go in now,
+    /// where it is held (by the pacing, the window's readiness, or a box to empty): the
+    /// one place that says it (T-842's P2). None where nothing is held.
+    pub fn held_back(&self, participant: i64) -> Option<crate::deliveries::HeldBack> {
+        self.record(participant)
+            .and_then(|record| record.delivery.borrow().held.clone())
     }
 
     /// Whether a message waits for this participant until the human sends
@@ -754,7 +763,14 @@ impl Dispatcher {
         // What a launch that was to say the role first still owed the window
         // that exited: the role it was never told.
         let owed = self.owed(&record)?;
-        record.delivery.borrow_mut().prelude = None;
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.prelude = None;
+            delivery.for_human = None;
+            // A greeting still to go was the exited window's session's: the next launch
+            // withdraws it with every role note that waits (`withdraw_replacements`).
+            delivery.greeting = None;
+        }
         // The task the window was given, whose requester hears what its close ended.
         let owner = record.window.borrow().owner;
         let said_yes = trust::yes_at_exit(&record, &shown);
@@ -813,19 +829,23 @@ impl Dispatcher {
             None => project,
             Some(delivering) => {
                 let launches = record.window.borrow().launches;
-                // A first message the window was to be handed once up, which its record
-                // does not show (`settle_gone`), owed it still or pasted a moment before,
-                // reached no conversation when the window closed with its project: it
-                // waits for the Resume, as one turned away at its hand-over does
-                // (`hand_first`). One whose window ended by itself in an open project
-                // fails, as a launch that did not come up does.
+                // A window that closed with its project (the human's Close, or the
+                // chief's own exit closing its workers' windows) fails nothing that was
+                // on its way to it: what its record does not show it took (`settle_gone`)
+                // reached no conversation the Resume goes on with, and waits for the
+                // Resume with its attempt given back, as one turned away at its hand-over
+                // does (`hand_first`). So does a launch's first message, however it went
+                // in: owed still, pasted a moment before, or read from the file its
+                // command line named as the window opened (Devin's `--prompt-file`, which
+                // T-523 left out: the alpha.1 release check T-1068 saw its brief and task
+                // fail at a Close, T-1076). One whose window ended by itself in an open
+                // project fails, as a launch that did not come up does.
                 let closed_with_project = project.state != "open";
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
-                self.settle_gone(delivering, move |delivering| {
-                    let once_up = delivering.owed.is_some() || delivering.late;
+                self.settle_gone(delivering, closed_with_project, move |delivering| {
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief || (once_up && closed_with_project) {
+                    if delivering.chief || closed_with_project {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
@@ -1143,14 +1163,18 @@ impl Dispatcher {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
-                    // A look that failed says nothing of what is on its way in (`arrival`).
+                    // A look that failed says nothing of what is on its way in (`arrival`),
+                    // nor of the window's rest (`pacing`).
                     self.unknown(record, "a look at it failed");
+                    self.rest_ends(record);
                     self.set_activity(record, Activity::because(ActivityState::Unknown, reason))?;
                 }
                 return Ok(());
             }
         };
         record.delivery.borrow_mut().lost = observed.lost().len();
+        // Which look this is, for a rest to be read over looks that follow each other.
+        let looked = self.looked(record);
         // Quota belongs to the member: a session that runs out takes its member out.
         let owner = self.member_of(project, participant);
         // A window with nothing in its record may still be drawing its screen.
@@ -1162,8 +1186,11 @@ impl Dispatcher {
         // still: nothing goes into it, as a paste's Enter would answer the question
         // (`trust`).
         let asking = record.window.borrow().trust != Trusting::Past;
+        // A window read at rest by the fallback is asked whether it is drawn whatever its
+        // record holds: its harness's prompt is its only sign that it is up (`drawn`).
         let drawing = asking
-            || ((observed.items().is_empty() || unnamed) && !returning(self.drawn(record)).await);
+            || ((observed.items().is_empty() || unnamed || !self.idle_word(record))
+                && !returning(self.drawn(record)).await);
         if self.forgotten(record) {
             return Ok(());
         }
@@ -1183,6 +1210,16 @@ impl Dispatcher {
                     state: ActivityState::Waiting,
                     reason: waiting.reason.clone(),
                 }
+            } else if let Some(words) = record
+                .delivery
+                .borrow()
+                .for_human
+                .clone()
+                .filter(|_| observed.settled)
+            {
+                // Held for what only the human can do in it: said as the window's wait,
+                // and asked again at every look (`Held::ForHuman`).
+                Activity::because(ActivityState::Waiting, words)
             } else {
                 let state = if observed.settled {
                     ActivityState::Idle
@@ -1198,6 +1235,32 @@ impl Dispatcher {
                             participant.handle
                         ),
                     ),
+                    // A record that cannot be read lets no message in (CMT-05), though the
+                    // look reads the window at rest: its lane says so (T-842's P2).
+                    None if state == ActivityState::Idle
+                        && observed
+                            .reading
+                            .as_deref()
+                            .is_some_and(cf_harness::records::Reading::read_failed) =>
+                    {
+                        Activity::because(state, pacing::unreadable(&observed))
+                    }
+                    // A window whose harness says nothing of its rest is read at rest by
+                    // the pacing's fallback, and its lane says so.
+                    None if state == ActivityState::Idle && !self.idle_word(record) => {
+                        Activity::because(state, pacing::FALLBACK)
+                    }
+                    // A chief read at work while a message has waited ten minutes for it: its
+                    // lane says so, as the human is told (`held_not_at_rest`, T-958).
+                    None if state == ActivityState::Working && participant.role == "chief" => {
+                        match self.held_long(record) {
+                            Some(message) => Activity::because(
+                                state,
+                                format!("m-{message} has waited ten minutes or more for this window, which reads at work: the human is told"),
+                            ),
+                            None => Activity::of(state),
+                        }
+                    }
                     None => Activity::of(state),
                 }
             };
@@ -1217,9 +1280,11 @@ impl Dispatcher {
             }
             part.left_at_work = None;
             drop(part);
-            return self.follow(participant, record, session);
+            self.follow(participant, record, session)?;
+            return self.greet_switched(project, participant, record, session);
         }
         self.record_quota(record, &owner, observed.quota.clone());
+        self.tell_drift(project, participant, record, &observed)?;
         if self.refused_here(record, &owner) {
             return self
                 .out_of_quota(project, participant, record, &owner, &observed)
@@ -1227,12 +1292,24 @@ impl Dispatcher {
         }
         let mut out = self.is_out(&owner);
         let mut returned = None;
-        // A window that got a turn through after its member was marked out says the quota is back.
-        if out && self.answered_since(&owner, &observed) {
+        // A window that got a turn through after its member was marked out says the quota is
+        // back, and so does the harness's own count of an allowance, for an account that
+        // was unavailable with no reset to wait for (MUS-23: Muse's `usage`). Not for a member
+        // held for its model's move, which only the human's word for it brings back, whatever
+        // another of its windows answered (T-816).
+        let answered = out
+            && !owner.out_until.as_deref().is_some_and(moved_hold)
+            && self.answered_since(&owner, &observed);
+        if answered || (out && self.shows_an_allowance(&owner, &observed)) {
+            let because = if answered {
+                format!("@{} answered again", participant.handle)
+            } else {
+                format!("@{} shows an allowance again", participant.handle)
+            };
             self.seams
                 .ledger
                 .borrow_mut()
-                .mark_back(owner.id, &format!("@{} answered again", participant.handle))?;
+                .mark_back(owner.id, &because)?;
             returned.clone_from(&owner.out_until);
             self.changed();
             out = false;
@@ -1275,12 +1352,16 @@ impl Dispatcher {
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
+            // Not over words given since the cut, which begin another turn.
             if self.cut_short(&observed) {
-                self.go_on(project, participant)?;
+                if !self.words_since_the_cut(participant, &observed)? {
+                    self.go_on(project, participant)?;
+                }
             } else {
                 // Its answer is its result, recorded now, unless its harness says the turn
                 // left work running that wakes its agent: then the task goes on. Nothing the
-                // turn left is ended; the window closes below if it is free (`turn_end`).
+                // turn left is ended; the window closes below if it is free (`turn_end`), once
+                // its screen is drawn where its task is done (`still_drawing`).
                 let watching = self.watch_monitors(participant, record, &observed).await;
                 self.collect(project, participant, record, &observed, watching)
                     .await?;
@@ -1315,6 +1396,11 @@ impl Dispatcher {
             && observed.settled
             && observed.waiting.is_none();
         let idle = free && !drawing;
+        self.note_rest(record, &observed, idle, looked);
+        self.recheck_if_due(record, &observed, idle).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
         if record.pending_switch.borrow().is_some() {
             return self
                 .await_switch(project, participant, record, &observed, idle)
@@ -1332,6 +1418,26 @@ impl Dispatcher {
                 self.queue_wake_up_if_due(project, participant)?;
             }
             let next = self.next_in_line(record)?;
+            // A hold is the head's: a message that left the head of its queue (withdrawn,
+            // its task paused or cancelled) is held back no more (Calliope's re-check of
+            // `a0aecd192`, T-854), and the wait its window's readiness said for it is no
+            // more the lane's: the words only the human could act on, or words typed and
+            // not sent (Calliope's P3-1 of T-945). And what a look read of the human's
+            // input is this look's.
+            {
+                let mut part = record.delivery.borrow_mut();
+                part.input = None;
+                let head = next.as_ref().map(|next| next.id);
+                if part
+                    .held
+                    .as_ref()
+                    .is_some_and(|held| Some(held.message) != head)
+                {
+                    part.held = None;
+                    part.for_human = None;
+                    part.unsent = false;
+                }
+            }
             if let Some(next) = next {
                 // Another task's message goes into a window of its own (`ownership`).
                 if let Some(owner) = self.barred(participant, record, &next) {
@@ -1339,20 +1445,37 @@ impl Dispatcher {
                         .keep_apart(project, participant, record, &next, owner)
                         .await;
                 }
+                // Typed in only once the window has rested long enough (`pacing`); a wait
+                // says why, once a reason.
+                match self.paced(record, &next).await? {
+                    pacing::Pace::Go => {}
+                    pacing::Pace::Wait(why) => return self.held_once(record, next.id, &why).await,
+                    pacing::Pace::Gone => return Ok(()),
+                }
+                if self.forgotten(record) {
+                    return Ok(());
+                }
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.deliver(&held, next).await })
                     .await;
             }
-        } else if free && self.ready_while_drawing(record) {
-            // Nothing goes into a window that has not drawn, but one whose readiness
-            // has a bound of its own is asked, and given up where it says it never
-            // will be fit (`give_up_unfit_drawing`).
-            if let Some(next) = self.next_in_line(record)? {
-                let (this, held) = (Rc::clone(self), Rc::clone(record));
-                self.act(record, async move {
-                    this.give_up_unfit_drawing(&held, next).await
-                })
-                .await;
+        } else {
+            // A chief's window not at rest holds its queue: from ten minutes on, the human
+            // is told what waits and why, and its lane says it (`held_not_at_rest`, T-958).
+            if participant.role == "chief" && project.state == "open" {
+                self.held_not_at_rest(record, &observed, drawing).await?;
+            }
+            if free && self.ready_while_drawing(record) {
+                // Nothing goes into a window that has not drawn, but one whose readiness
+                // has a bound of its own is asked, and given up where it says it never
+                // will be fit (`give_up_unfit_drawing`).
+                if let Some(next) = self.next_in_line(record)? {
+                    let (this, held) = (Rc::clone(self), Rc::clone(record));
+                    self.act(record, async move {
+                        this.give_up_unfit_drawing(&held, next).await
+                    })
+                    .await;
+                }
             }
         }
         Ok(())
@@ -1380,15 +1503,17 @@ impl Dispatcher {
             return self.perform_switch(project, participant, record, to).await;
         }
         let until = owner.out_until.clone().unwrap_or_default();
+        let reported = record.quota.borrow().reported.clone();
+        let unwell = Unwell::of(reported.as_deref());
         self.set_activity(
             record,
-            Activity::because(ActivityState::Out, format!("out of quota until {until}")),
+            Activity::because(ActivityState::Out, out_words(&until, unwell)),
         )?;
         // A refusal of its own, dated before its member was marked out, holds the
         // window's work as the first did, with no note of its own.
         if participant.role != "chief" && self.refused_unhandled(record) {
             self.handled(record);
-            self.hold_work(project, participant, owner, &until, None)?;
+            self.hold_work(project, participant, owner, &until, None, unwell)?;
             self.changed();
         }
         self.tell_what_waits(project, participant, record, owner)?;
@@ -1475,23 +1600,41 @@ impl Dispatcher {
         record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
         let reset = self.reset_of(reported.as_deref());
-        let marked = self
-            .seams
-            .ledger
-            .borrow_mut()
-            .mark_out(owner.id, &reset, "out of quota")?;
+        let unwell = Unwell::of(reported.as_deref());
+        let marked = self.seams.ledger.borrow_mut().mark_out(
+            owner.id,
+            &reset,
+            unwell.map_or("out of quota", Unwell::hold),
+        )?;
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,
-            Activity::because(ActivityState::Out, format!("out of quota until {until}")),
+            Activity::because(ActivityState::Out, out_words(&until, unwell)),
         )?;
         self.confirm_arrival(record, observed)?;
         let delivering = record.delivery.borrow_mut().delivering.take();
         if let Some(delivering) = delivering {
-            self.give_back(delivering.message, "the harness ran out of quota")?;
+            self.give_back(
+                delivering.message,
+                match unwell {
+                    Some(Unwell::Account(_)) => "its account is unavailable",
+                    Some(Unwell::Moved(_)) => "its model moved on its own",
+                    None => "the harness ran out of quota",
+                },
+            )?;
         }
         let refused_at = self.refused_at(reported.as_deref());
-        self.hold_work(project, participant, owner, &until, Some(refused_at))?;
+        self.hold_work(
+            project,
+            participant,
+            owner,
+            &until,
+            Some(refused_at),
+            unwell,
+        )?;
+        if let Some(unwell) = unwell {
+            self.tell_unwell(project, participant, &marked, unwell)?;
+        }
         if participant.role != "chief" {
             self.close_if_free(record).await?;
         }

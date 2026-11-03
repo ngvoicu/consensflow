@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::records::{Quota, Reading, Record, Settlement};
-use crate::testing::{finished, Driver, Fakes, ScriptedHost, EPOCH_MS};
+use crate::testing::{finished, Driver, Fakes, EPOCH_MS};
 
 mod bypass;
 
@@ -50,6 +50,7 @@ fn devin_window(
         history: History::default(),
         looked: Cell::default(),
         read_empty: Cell::default(),
+        input: RefCell::default(),
         left_open: RefCell::new(None),
     })
 }
@@ -131,10 +132,7 @@ fn a_window_names_the_conversation_it_opened_after_some_polls() {
     let window = window(&fakes, &wire, None);
     let mut driver = Driver::default();
     let started = Rc::clone(&window);
-    driver.begin(
-        0,
-        async move { started.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { started.started().await });
     assert!(driver.run().is_empty());
     assert_eq!(fakes.time.waits(0), [250]);
     assert!(
@@ -158,10 +156,7 @@ fn a_window_that_never_names_one_is_given_up_on_at_its_deadline_and_not_before()
     let fakes = Fakes::new(&Env::default());
     let window = window(&fakes, &wire, None);
     let mut driver = Driver::default();
-    driver.begin(
-        0,
-        async move { window.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { window.started().await });
     assert!(driver.run().is_empty());
     let mut polls = 0;
     while fakes.time.fire_next(EPOCH_MS + 59_999) {
@@ -190,7 +185,7 @@ fn a_window_that_never_names_one_is_given_up_on_at_its_deadline_and_not_before()
 fn a_window_that_has_its_conversation_polls_nothing() {
     let fakes = Fakes::new(&Env::default());
     let window = window(&fakes, Path::new("/nowhere/wire.jsonl"), Some("mild-coin"));
-    assert_eq!(finished(window.started(&ScriptedHost::default())), Ok(None));
+    assert_eq!(finished(window.started()), Ok(None));
     assert!(fakes.time.waits(0).is_empty());
 }
 
@@ -241,7 +236,11 @@ fn a_window_is_followed_to_the_conversation_the_human_switched_it_to() {
 }
 
 #[test]
-fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_the_record() {
+fn a_look_keeps_the_records_quota_where_the_log_says_none_and_the_rest_from_the_record() {
+    // Devin's reader says no quota of its own (its refusals are the wire log's, until the next
+    // prompt), so a record that carries one is a synthetic one: the look's precedence is the one
+    // place's (`observed_from`: the move, the live word, the record's), and a silent log takes
+    // nothing from it (T-853).
     let dir = tempfile::tempdir().unwrap();
     let wire = dir.path().join("wire.jsonl");
     fs::write(&wire, shows("mild-coin")).unwrap();
@@ -262,7 +261,14 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         true,
     );
     let observed = finished(window.observe()).unwrap();
-    assert_eq!(observed.quota, None, "the log says nothing of the quota");
+    assert_eq!(
+        observed.quota,
+        Some(Arc::new(Quota::Exhausted {
+            at: Some("2026-01-01T00:00:00.000Z".to_owned()),
+            resets_at: None,
+        })),
+        "the log says nothing of the quota: the record's stands"
+    );
     assert!(
         observed.settled && observed.failed,
         "the rest is the record's"
@@ -674,12 +680,7 @@ fn a_start_reads_whether_the_tui_took_a_paste_from_the_store_with_no_window_open
         Some(false),
         "an earlier attempt's row is no word of this one"
     );
-    for harness in [
-        Harness::Claude,
-        Harness::Codex,
-        Harness::Pi,
-        Harness::Opencode,
-    ] {
+    for harness in [Harness::Claude, Harness::Codex, Harness::Pi] {
         assert_eq!(took(harness, "mild-coin", EPOCH_MS), None);
     }
     let missing = Env::from_vars([
@@ -771,4 +772,38 @@ fn a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_w
         true,
     );
     assert!(finished(window.observe()).unwrap().settled);
+}
+
+#[test]
+fn a_windows_devin_is_told_how_to_name_files_before_the_projects_rules_for_the_staff_and_not_under_their_heading(
+) {
+    // What the engine gives a window: the role, then the human's rules under their own heading.
+    let role = "# ConsensFlow worker\n\nRole text.\n";
+    let rules = format!(
+        "\n{STAFF_RULES_HEADING}\n\nEvery member of this project's staff is given these rules after its role, as you are.\n\n- Push to origin only.\n"
+    );
+    let given = format!("{role}{rules}");
+    let windows = role_text(&given, &Env::from_vars([("OS", "Windows_NT")]));
+    // The sentence follows the role and ends before the heading, which and what follows are as given.
+    assert_eq!(windows, format!("{role}\n\n{WINDOWS_PATHS}\n{rules}"));
+    let at = windows.find(WINDOWS_PATHS).expect("the sentence");
+    assert!(at < windows.find(STAFF_RULES_HEADING).expect("the heading"));
+    assert!(
+        windows.ends_with(&rules),
+        "the rules are the human's, as they were"
+    );
+    // Elsewhere, and where the project has no rules, nothing about the rules moves.
+    let elsewhere = role_text(&given, &Env::from_vars([("HOME", "/h")]));
+    assert_eq!(
+        elsewhere,
+        if cfg!(windows) {
+            windows
+        } else {
+            given.clone()
+        }
+    );
+    assert_eq!(
+        role_text(role, &Env::from_vars([("OS", "Windows_NT")])),
+        format!("{role}\n\n{WINDOWS_PATHS}\n")
+    );
 }

@@ -14,6 +14,24 @@ use serde_json::Value;
 /// The environment variable that holds a [`Bridge`] as JSON.
 pub const BRIDGE_VARIABLE: &str = "CF_CODEX_SESSION_BRIDGE";
 
+/// The environment variable that names the file of a window's role: the developer
+/// instructions the broker gives the window's main threads as they start, so that
+/// the text is on no command line. A window whose launch names none is given none.
+pub const ROLE_VARIABLE: &str = "CF_CODEX_ROLE_FILE";
+
+/// The environment variable that names the file of the configuration a window's
+/// sub-agents start with (`agents.<type>.config_file`), which the supervisor names
+/// to the app-server alone. A window whose launch names none starts its sub-agents
+/// as Codex would.
+pub const SUBAGENT_VARIABLE: &str = "CF_CODEX_SUBAGENT_FILE";
+
+/// The environment variable that names, with commas between them, Codex's own agent types
+/// ([`agent_types`]) whose sub-agents start from the file [`SUBAGENT_VARIABLE`] names: those
+/// the owner's configuration does not define, which keep the owner's own definition.
+pub const SUBAGENT_TYPES_VARIABLE: &str = "CF_CODEX_SUBAGENT_TYPES";
+
+pub mod agent_types;
+
 /// The shortest token a broker accepts.
 const MIN_TOKEN: usize = 24;
 
@@ -84,6 +102,10 @@ pub struct Session {
     pub revision: u64,
     pub empty: bool,
     pub available: bool,
+    /// Whether the shown thread is idle, as Codex last said it: the daemon types a
+    /// message in only while it is not at work (`pacing`). None while the window shows
+    /// no thread, or Codex has said nothing of it.
+    pub idle: Option<bool>,
 }
 
 /// What the daemon hands a broker at `POST /deliver`: the text for the
@@ -239,20 +261,22 @@ mod tests {
             revision: 3,
             empty: false,
             available: false,
+            idle: None,
         };
         assert_eq!(
             serde_json::to_string(&session).unwrap(),
-            r#"{"launchId":"launch-1","sessionId":null,"revision":3,"empty":false,"available":false}"#
+            r#"{"launchId":"launch-1","sessionId":null,"revision":3,"empty":false,"available":false,"idle":null}"#
         );
         let shown = Session {
             session_id: Some("01a09094-938f-7fd1-a2d3-315cf92b4559".into()),
             empty: true,
             available: true,
+            idle: Some(false),
             ..session
         };
         assert_eq!(
             serde_json::to_string(&shown).unwrap(),
-            r#"{"launchId":"launch-1","sessionId":"01a09094-938f-7fd1-a2d3-315cf92b4559","revision":3,"empty":true,"available":true}"#
+            r#"{"launchId":"launch-1","sessionId":"01a09094-938f-7fd1-a2d3-315cf92b4559","revision":3,"empty":true,"available":true,"idle":false}"#
         );
     }
 

@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use cf_evals::plan::{
     chief_environment, dialog_answers, harness, last_lines, staff_for, terminal_answer,
-    DialogQuestion, CHIEF_MODEL, CLAUDE_CHIEF_MODEL, HARNESSES,
+    with_stand_in_reviewer, with_stand_in_worker, DialogQuestion, Staff, CHIEF_MODEL,
+    CLAUDE_CHIEF_MODEL, HARNESSES,
 };
 use cf_evals::scenarios::{Answer, Scenario};
 use regex::Regex;
@@ -34,6 +35,8 @@ fn answering(answers: Vec<Answer>, fallback: &str) -> Scenario {
         fallback: fallback.to_owned(),
         nudge: None,
         quiet: Duration::from_secs(1),
+        stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: Vec::new(),
     }
 }
@@ -111,7 +114,7 @@ fn an_effort_reaches_every_member_as_its_harness_names_it_and_devin_has_none() {
     assert_eq!(refused.to_string(), "no such eval harness: kimi");
     assert_eq!(
         HARNESSES.map(|harness| harness.name),
-        ["claude", "codex", "pi", "opencode", "devin"]
+        ["claude", "codex", "pi", "devin"]
     );
     assert_eq!(harness("devin").unwrap().kind, "devin");
 }
@@ -129,16 +132,6 @@ fn sets_the_chiefs_model_through_the_environment_where_the_harness_takes_it_ther
             "claude-opus-5".to_owned()
         )
     );
-    assert_eq!(
-        setup("opencode", Some("opencode/x")),
-        (
-            vec![(
-                "OPENCODE_CONFIG_CONTENT".to_owned(),
-                r#"{"model":"opencode/x"}"#.to_owned()
-            )],
-            "opencode/x".to_owned()
-        )
-    );
     assert_eq!(setup("codex", None), (vec![], "gpt-5.6-luna".to_owned()));
     assert_eq!(setup("codex", Some("gpt-x")), (vec![], "gpt-x".to_owned()));
     assert_eq!(
@@ -148,7 +141,6 @@ fn sets_the_chiefs_model_through_the_environment_where_the_harness_takes_it_ther
     assert_eq!(setup("pi", None).1, CHIEF_MODEL);
     assert_eq!(setup("claude", None).1, CLAUDE_CHIEF_MODEL);
     assert_eq!(setup("claude", None).1, "claude-opus-5");
-    assert_eq!(setup("opencode", None).1, CHIEF_MODEL);
     // A Devin chief runs its staff's model, whatever --model says.
     assert_eq!(
         setup("devin", Some("x")),
@@ -267,4 +259,102 @@ fn a_question_of_the_dialog_is_read_as_devins_store_keeps_it() {
     );
     let bare = DialogQuestion::of(&json!({ "question": "Sure?" }));
     assert_eq!((bare.header, bare.options), (None, 0));
+}
+
+#[test]
+fn a_stand_in_reviewer_takes_the_place_of_every_reviewer_and_nothing_else_of_the_staff_moves() {
+    let staff = staff_for(&["claude", "codex"], &[], Some("medium")).unwrap();
+    let with = with_stand_in_reviewer(staff.clone(), Some("medium")).unwrap();
+    // Every reviewer is gone, and one is there: the stand-in, a Claude Code agent of standard
+    // tier on the model the wrapper reads.
+    let reviewers: Vec<&str> = with
+        .members
+        .iter()
+        .filter(|member| member.role == "reviewer")
+        .map(|member| member.agent.as_str())
+        .collect();
+    assert_eq!(reviewers, ["eval-scripted-reviewer"]);
+    let stand_in = with
+        .agents
+        .iter()
+        .find(|agent| agent.id == "eval-scripted-reviewer")
+        .unwrap();
+    assert_eq!(
+        stand_in.to_value(),
+        json!({
+            "id": "eval-scripted-reviewer",
+            "kind": "claude-code",
+            "model": "scripted-reviewer",
+            "workTier": "standard",
+            "effort": "medium",
+        })
+    );
+    // The others are what they were, in their order: the workers and the advisor of each harness.
+    let others = |staff: &Staff| -> Vec<String> {
+        staff
+            .members
+            .iter()
+            .filter(|member| member.role != "reviewer")
+            .map(|member| format!("{}:{}", member.agent, member.role))
+            .collect()
+    };
+    assert_eq!(others(&with), others(&staff));
+    assert_eq!(with.agents.len(), staff.agents.len() - 2 + 1);
+    assert!(with
+        .agents
+        .iter()
+        .all(|agent| !agent.id.ends_with("-reviewer") || agent.id == "eval-scripted-reviewer"));
+    // A staff with no reviewer gets the stand-in all the same.
+    let none = Staff {
+        agents: Vec::new(),
+        members: Vec::new(),
+    };
+    assert_eq!(with_stand_in_reviewer(none, None).unwrap().members.len(), 1);
+}
+
+#[test]
+fn a_stand_in_worker_takes_the_place_of_every_worker_and_nothing_else_of_the_staff_moves() {
+    let staff = staff_for(&["claude", "codex"], &[], Some("medium")).unwrap();
+    let with = with_stand_in_worker(staff.clone(), Some("medium")).unwrap();
+    // Every worker is gone, and one is there: the stand-in, a Claude Code agent of standard tier on
+    // the model the wrapper reads.
+    let workers: Vec<&str> = with
+        .members
+        .iter()
+        .filter(|member| member.role == "worker")
+        .map(|member| member.agent.as_str())
+        .collect();
+    assert_eq!(workers, ["eval-scripted-worker"]);
+    let stand_in = with
+        .agents
+        .iter()
+        .find(|agent| agent.id == "eval-scripted-worker")
+        .unwrap();
+    assert_eq!(
+        stand_in.to_value(),
+        json!({
+            "id": "eval-scripted-worker",
+            "kind": "claude-code",
+            "model": "scripted-worker",
+            "workTier": "standard",
+            "effort": "medium",
+        })
+    );
+    // The advisors and the reviewers are what they were, in their order.
+    let others = |staff: &Staff| -> Vec<String> {
+        staff
+            .members
+            .iter()
+            .filter(|member| member.role != "worker")
+            .map(|member| format!("{}:{}", member.agent, member.role))
+            .collect()
+    };
+    assert_eq!(others(&with), others(&staff));
+    assert_eq!(with.agents.len(), staff.agents.len() - 4 + 1);
+    // With the reviewer a stand-in too, the staff is the two stand-ins and the advisors.
+    let both = with_stand_in_reviewer(with, Some("medium")).unwrap();
+    let roles: Vec<&str> = both.members.iter().map(|member| member.role).collect();
+    assert_eq!(roles.iter().filter(|role| **role == "worker").count(), 1);
+    assert_eq!(roles.iter().filter(|role| **role == "reviewer").count(), 1);
+    assert_eq!(roles.iter().filter(|role| **role == "advisor").count(), 2);
 }

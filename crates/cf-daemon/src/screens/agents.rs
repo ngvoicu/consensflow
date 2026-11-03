@@ -41,7 +41,7 @@ impl Screens {
             .collect();
         let efforts: serde_json::Map<String, Value> = Harness::ALL
             .into_iter()
-            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))
+            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness).levels)))
             .collect();
         Ok(Answer::ok(json!({
             "agents": agents,

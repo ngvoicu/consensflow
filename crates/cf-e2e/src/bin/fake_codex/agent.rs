@@ -18,23 +18,32 @@
 //! with it read-only, as Codex answered the window a second client opened on a thread
 //! another held ("open in another app", kluris, 2026-10-26: [`Agent::hold`]).
 //!
-//! A thread keeps the instructions it began with. The server is given the role's
-//! text as Codex is (`-c developer_instructions=…`), and the first turn of a thread
-//! it starts writes it into the rollout as the developer's message. A thread it
-//! resumes goes on in the rollout it has, which already holds that message, and is
-//! given no other: what the server is configured with now is read and unused, as the
-//! live Codex 0.162.1 did with a chief resumed after its role changed (2026-10-13).
+//! A thread keeps the instructions it began with. A thread starts with the
+//! developer instructions its start names (`developerInstructions`, which the
+//! window's broker gives the TUI's main start: the role's text), or else those its
+//! server is configured with (`-c developer_instructions=…`), as Codex 0.164.0 does;
+//! the first turn of the thread writes them into the rollout as the developer's
+//! message. A thread it resumes goes on in the rollout it has, which already holds
+//! that message, and is given no other: what the server is configured with now is
+//! read and unused, as the live Codex 0.162.1 did with a chief resumed after its
+//! role changed (2026-10-13).
 //!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
-//! anything else is acknowledged. A message that says `QUOTA-OUT` is refused for
+//! anything else is acknowledged. A message whose line begins `COMPACT <seconds>` has
+//! the thread compacted first, as Codex 0.165 compacts a long thread at the start of a
+//! turn: the turn begins, nothing more is written for that long, then the compaction
+//! and only after it the message (T-901, the field's rollout of 2026-10-28). A message that says `QUOTA-OUT` is refused for
 //! the usage limit, as the stand-in agent's is (`CF_TEST_QUOTA_OUT` names the
 //! member whose sessions are refused, while `CF_TEST_QUOTA_FILE`, when it is set,
 //! is there): the turn works as long as it says and ends as Codex 0.163 ends one
 //! its limit cut, with `usage_limit_exceeded` and no answer. One that says
 //! `MODEL-BUSY` works as long as it says and fails as a real rollout's turn did when
 //! its model was at capacity: `server_overloaded`, with the error's words and no
-//! answer. The thread is the same in every run unless
+//! answer. The server tells every connection a turn's start and its end
+//! (`turn/started`, `turn/completed`), as Codex does, but for the first
+//! `CF_TEST_CODEX_DROP_COMPLETED` ends, which it leaves unsaid, as a notice lost; a read
+//! of the thread (`thread/read`) says whether a turn runs. The thread is the same in every run unless
 //! `CF_TEST_CODEX_THREADS` says `unique`, which a window the daemon opens needs
 //! (two of them in one `CODEX_HOME` would share a rollout). The servers Codex opens
 //! with its window are `CF_TEST_CODEX_SERVERS` of them, and the first starts
@@ -45,6 +54,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -56,6 +66,28 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::servers::Plugins;
+
+/// Says the turn `turn` completed once it is over, however it ends, as Codex does.
+struct Completed<'a> {
+    agent: &'a Agent,
+    turn: &'a str,
+}
+
+impl Drop for Completed<'_> {
+    fn drop(&mut self) {
+        self.agent.running.store(false, Ordering::Relaxed);
+        let unsaid = &self.agent.unsaid;
+        if unsaid
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return;
+        }
+        self.agent.notify("turn/completed", self.turn);
+    }
+}
 
 /// The thread a run has, and the TUI sees, unless it is told to have one of its own.
 pub const THREAD: &str = "01a09094-938f-7fd1-a2d3-315cf92b4559";
@@ -73,8 +105,10 @@ pub struct Agent {
     /// The rollout of its thread, once it has one: its first turn begins it.
     rollout: Mutex<Option<PathBuf>>,
     /// The developer instructions the server is configured with, which a thread it
-    /// starts begins with.
-    developer: Option<String>,
+    /// starts begins with where its start names none.
+    configured: Option<String>,
+    /// The developer instructions the thread it started begins with.
+    developer: Mutex<Option<String>>,
     /// Whether the thread has its developer message in the rollout already: a thread
     /// writes it once, with its first turn, and a resumed one has it from before.
     instructed: AtomicBool,
@@ -85,6 +119,15 @@ pub struct Agent {
     begun: AtomicBool,
     /// The records the rollout holds, to number the next.
     records: AtomicU64,
+    /// The connections that hear what Codex says of its thread unasked: a turn's start
+    /// and its end (`turn/started`, `turn/completed`), which the broker keeps the thread's
+    /// idle by.
+    listeners: Mutex<Vec<Sender<Value>>>,
+    /// How many turn ends are still to go unsaid (`CF_TEST_CODEX_DROP_COMPLETED`): a
+    /// `turn/completed` the broker never hears, as one lost.
+    unsaid: AtomicU64,
+    /// Whether a turn runs now, which a read of the thread says (`thread/read`).
+    running: AtomicBool,
 }
 
 /// What `lock` holds, whether or not a thread that held it panicked.
@@ -93,10 +136,10 @@ fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Agent {
-    /// The agent a run is told to be by its environment, and `developer`, the
+    /// The agent a run is told to be by its environment, and `configured`, the
     /// developer instructions its server was given (none where it was given none).
     /// The servers its Codex opens with the window start now.
-    pub fn start(developer: Option<String>) -> Result<Arc<Self>, String> {
+    pub fn start(configured: Option<String>) -> Result<Arc<Self>, String> {
         let number = |name: &str| {
             own_var(name)
                 .and_then(|text| text.parse::<usize>().ok())
@@ -114,7 +157,7 @@ impl Agent {
         Ok(Arc::new(Self::on(
             thread,
             own_var("CODEX_HOME").map(PathBuf::from),
-            developer,
+            configured,
             plugins,
         )))
     }
@@ -123,25 +166,42 @@ impl Agent {
     fn on(
         thread: String,
         home: Option<PathBuf>,
-        developer: Option<String>,
+        configured: Option<String>,
         plugins: Plugins,
     ) -> Self {
         Self {
             thread: Mutex::new(thread),
             home,
             rollout: Mutex::new(None),
-            developer,
+            developer: Mutex::new(configured.clone()),
+            configured,
             instructed: AtomicBool::new(false),
             plugins,
             turns: Mutex::new(()),
             begun: AtomicBool::new(false),
             records: AtomicU64::new(0),
+            listeners: Mutex::new(Vec::new()),
+            unsaid: AtomicU64::new(
+                own_var("CF_TEST_CODEX_DROP_COMPLETED")
+                    .and_then(|text| text.parse().ok())
+                    .unwrap_or(0),
+            ),
+            running: AtomicBool::new(false),
         }
     }
 
     /// The thread the server is on.
     pub fn thread(&self) -> String {
         held(&self.thread).clone()
+    }
+
+    /// The server starts its thread, as `params` (those of `thread/start`) ask: with
+    /// the developer instructions they name, or those the server is configured with.
+    pub fn started(&self, params: &Value) {
+        *held(&self.developer) = params["developerInstructions"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| self.configured.clone());
     }
 
     /// The server is asked to resume `thread`: it goes on with it where the Codex
@@ -174,6 +234,34 @@ impl Agent {
     pub fn take(self: &Arc<Self>, text: &str) {
         let (agent, text) = (Arc::clone(self), text.to_owned());
         thread::spawn(move || agent.turn(&text));
+    }
+
+    /// A connection hears, from now on, what Codex says of the thread unasked.
+    pub fn listen(&self) -> Receiver<Value> {
+        let (said, heard) = mpsc::channel();
+        held(&self.listeners).push(said);
+        heard
+    }
+
+    /// The thread as a read of it says it (`thread/read`'s `thread`): its id, and
+    /// whether a turn runs.
+    pub fn read(&self) -> Value {
+        let status = if self.running.load(Ordering::Relaxed) {
+            json!({ "type": "active", "activeFlags": [] })
+        } else {
+            json!({ "type": "idle" })
+        };
+        json!({ "id": self.thread(), "status": status, "turns": [] })
+    }
+
+    /// Tells every connection that listens `method` of the thread, as Codex notifies;
+    /// one that has gone is told no more.
+    fn notify(&self, method: &str, turn: &str) {
+        let notice = json!({
+            "method": method,
+            "params": { "threadId": self.thread(), "turn": { "id": turn } },
+        });
+        held(&self.listeners).retain(|listener| listener.send(notice.clone()).is_ok());
     }
 
     /// Whether this server holds its thread, which it takes where no other server that
@@ -235,6 +323,12 @@ impl Agent {
         let thread = self.thread();
         let began = Instant::now();
         let turn = uuid::Uuid::new_v4().to_string();
+        self.running.store(true, Ordering::Relaxed);
+        self.notify("turn/started", &turn);
+        let _completed = Completed {
+            agent: self,
+            turn: &turn,
+        };
         let (message, answer) = (item_id(), item_id());
         self.write(
             "event_msg",
@@ -246,10 +340,17 @@ impl Agent {
                 "collaboration_mode_kind": "default",
             }),
         );
+        if let Some(compacting) = compacts_for(text) {
+            thread::sleep(compacting);
+            self.write(
+                "compacted",
+                json!({ "message": "", "replacement_history": [] }),
+            );
+        }
         // The first turn of a thread writes what the thread begins with: the
         // developer's instructions, which no later turn, and no resume, writes again.
         if !self.instructed.swap(true, Ordering::Relaxed) {
-            if let Some(instructions) = &self.developer {
+            if let Some(instructions) = held(&self.developer).clone() {
                 self.write(
                     "response_item",
                     json!({
@@ -430,11 +531,25 @@ fn rollout_of(home: &Path, thread: &str) -> PathBuf {
         ))
 }
 
+/// How long the thread is compacted for before the message `text` is taken, where it
+/// says: its line `COMPACT <seconds> <words>`.
+fn compacts_for(text: &str) -> Option<Duration> {
+    static COMPACT: OnceLock<Regex> = OnceLock::new();
+    pattern::once(&COMPACT, r"(?m)^COMPACT (\d+) ")
+        .captures(text)
+        .and_then(|compact| compact[1].parse().ok())
+        .map(Duration::from_secs)
+}
+
 /// How long the message `text` has the agent work, and what it says at the end.
 fn what_it_says(text: &str) -> (Duration, String) {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static COMPACT: OnceLock<Regex> = OnceLock::new();
 
+    if let Some(compact) = pattern::once(&COMPACT, r"(?m)^COMPACT \d+ (.+)$").captures(text) {
+        return what_it_says(&compact[1]);
+    }
     if let Some(slow) = pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         let seconds = slow[1].parse().unwrap_or(0);
         let (_, said) = what_it_says(&slow[2]);
@@ -470,6 +585,15 @@ mod tests {
             what_it_says("hello\nsecond"),
             (Duration::ZERO, "noted: hello".to_owned())
         );
+    }
+
+    #[test]
+    fn a_message_that_says_compact_has_the_thread_compacted_that_long_first() {
+        let brief =
+            "[ConsensFlow m-4 · T-1 · task from @chief]\nCOMPACT 30 Reply with exactly: DONE";
+        assert_eq!(compacts_for(brief), Some(Duration::from_secs(30)));
+        assert_eq!(what_it_says(brief), (Duration::ZERO, "DONE".to_owned()));
+        assert_eq!(compacts_for("Reply with exactly: DONE"), None);
     }
 
     #[test]
@@ -533,6 +657,36 @@ mod tests {
         assert_eq!(kinds[0], ("session_meta", "-"));
         assert_eq!(kinds[2], ("response_item", "developer"));
         assert_eq!(kinds[3], ("response_item", "user"));
+    }
+
+    #[test]
+    fn a_thread_whose_start_names_developer_instructions_begins_with_them_in_place_of_its_servers()
+    {
+        let home = tempfile::tempdir().unwrap();
+        let agent = server(
+            home.path(),
+            "thread-1",
+            "what the server is configured with",
+        );
+        agent.started(&json!({ "developerInstructions": "the role its start names" }));
+        agent.turn("first");
+        assert_eq!(
+            developers(&records(home.path(), "thread-1")),
+            ["the role its start names"]
+        );
+        // A start that names none, or names them as null, begins with the server's.
+        let other = tempfile::tempdir().unwrap();
+        let agent = server(
+            other.path(),
+            "thread-2",
+            "what the server is configured with",
+        );
+        agent.started(&json!({ "developerInstructions": null }));
+        agent.turn("first");
+        assert_eq!(
+            developers(&records(other.path(), "thread-2")),
+            ["what the server is configured with"]
+        );
     }
 
     #[test]

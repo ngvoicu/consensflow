@@ -20,8 +20,8 @@ use std::path::{Component, Path, PathBuf};
 
 use cf_base::env::Env;
 use cf_harness::detect::{detect_harnesses, harness_path};
+use cf_harness::pi;
 use cf_harness::prepare::prepare_app;
-use cf_harness::{opencode, pi};
 use cf_proto::agents::Harness;
 use common::{launcher_name, Home};
 
@@ -41,13 +41,13 @@ fn finds_only_the_harnesses_whose_cli_resolves() {
 #[test]
 fn detection_returns_executable_identities_without_unused_global_skill_destinations() {
     let home = Home::new();
-    for name in ["claude", "codex", "opencode", "pi", "devin"] {
+    for name in ["claude", "codex", "pi", "devin"] {
         home.stub_cli(name);
     }
 
     let harnesses = detect_harnesses(&home.env());
 
-    assert_eq!(harnesses.len(), 5);
+    assert_eq!(harnesses.len(), 4);
     for harness in &harnesses {
         let json = serde_json::to_value(harness).unwrap();
         let mut keys: Vec<&String> = json.as_object().unwrap().keys().collect();
@@ -103,13 +103,12 @@ fn resolves_a_relative_path_entry_before_handing_it_to_the_pane_host() {
 #[test]
 fn app_preparation_owns_its_launcher_and_integrations_not_role_documents_or_global_skills() {
     let home = Home::new();
-    for name in ["claude", "codex", "pi", "opencode"] {
+    for name in ["claude", "codex", "pi"] {
         home.stub_cli(name);
     }
     let globals: Vec<PathBuf> = [
         home.user().join(".claude"),
         home.user().join(".codex"),
-        home.user().join(".config").join("opencode"),
         home.user().join(".pi").join("agent"),
     ]
     .map(|root| root.join("skills").join("consensflow").join("SKILL.md"))
@@ -153,9 +152,7 @@ fn app_preparation_owns_its_launcher_and_integrations_not_role_documents_or_glob
 fn app_preparation_says_why_its_launcher_could_not_be_installed_and_prepares_the_integrations_all_the_same(
 ) {
     let home = Home::new();
-    for name in ["pi", "opencode"] {
-        home.stub_cli(name);
-    }
+    home.stub_cli("pi");
     // A file where the launcher's folder goes: nothing can be written into it.
     fs::create_dir_all(home.consensflow()).unwrap();
     let bin = home.consensflow().join("bin");
@@ -186,10 +183,6 @@ fn app_preparation_says_why_its_launcher_could_not_be_installed_and_prepares_the
         prepared.pi_extension,
         pi::Extension::InstalledUnverified { .. }
     ));
-    assert!(matches!(
-        prepared.opencode_extension,
-        opencode::Extension::InstalledUnverified { .. }
-    ));
     assert_eq!(fs::read_to_string(&bin).unwrap(), "not a folder");
 }
 
@@ -201,7 +194,6 @@ fn a_launcher_that_is_made_is_nothing_to_report_and_the_extensions_follow_the_ha
     let none = prepare_app(&home.env(), &cf);
     assert_eq!(none.report, Vec::<String>::new());
     assert_eq!(none.pi_extension, pi::Extension::NotInstalled);
-    assert_eq!(none.opencode_extension, opencode::Extension::NotInstalled);
 
     home.stub_cli("pi");
     let pi_only = prepare_app(&home.env(), &cf);
@@ -209,10 +201,6 @@ fn a_launcher_that_is_made_is_nothing_to_report_and_the_extensions_follow_the_ha
         pi_only.pi_extension,
         pi::Extension::InstalledUnverified { .. }
     ));
-    assert_eq!(
-        pi_only.opencode_extension,
-        opencode::Extension::NotInstalled
-    );
 }
 
 #[test]

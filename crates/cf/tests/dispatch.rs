@@ -9,7 +9,7 @@ mod common;
 use std::ffi::OsString;
 use std::{fs, io};
 
-use cf_base::env::Env;
+use cf_base::env::{Env, WINDOW_VARIABLES};
 use common::cf;
 
 #[test]
@@ -35,6 +35,75 @@ fn devins_session_hook_answers_without_a_token_and_with_no_line_break() {
     assert_eq!(
         String::from_utf8_lossy(&ran.stdout),
         r##"{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"# ConsensFlow worker\n"}}"##
+    );
+}
+
+/// Devin runs a session's hook as `session/new` returns, and its window writes the record that
+/// names the conversation to the wire log a few milliseconds either side of it (T-1065: in 2 of 7
+/// full live runs the hook looked first and found the log holding only its leading `{}` lines,
+/// and the log named the session 11 ms later). The hook waits for the log, so the role text
+/// reaches the session whichever came first.
+#[test]
+fn devins_session_hook_started_before_the_log_names_its_conversation_waits_for_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    let role = dir.path().join("SKILL.md");
+    fs::write(&wire, "{}\n{}\n{}\n").unwrap();
+    fs::write(&role, "# ConsensFlow worker\n").unwrap();
+    // Long beside what a `cf` takes to start on a loaded machine, so the hook looks first.
+    let window = {
+        let wire = wire.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let mut log = fs::OpenOptions::new().append(true).open(wire).unwrap();
+            io::Write::write_all(
+                &mut log,
+                b"{\"sessionId\":\"native-a\",\"update\":{\"sessionUpdate\":\"config_option_update\",\"configOptions\":[{\"id\":\"mode\"}]}}\n",
+            )
+            .unwrap();
+        })
+    };
+    let ran = cf(
+        &["hook", "devin-session"],
+        &[
+            ("CF_DEVIN_ROLE_FILE", role.to_str().unwrap()),
+            ("CHISEL_PURE_ACP_WIRE_LOG", wire.to_str().unwrap()),
+        ],
+        r#"{"hook_event_name":"SessionStart","session_id":"native-a","source":"startup"}"#,
+    );
+    window.join().unwrap();
+    assert_eq!(ran.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stdout),
+        r##"{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"# ConsensFlow worker\n"}}"##
+    );
+}
+
+#[test]
+fn muses_session_hook_reads_its_files_from_its_command_line_and_writes_the_session_down() {
+    // Muse runs a hook with an environment of its own: nothing of the window's reaches it.
+    let dir = tempfile::tempdir().unwrap();
+    let role = dir.path().join("SKILL.md");
+    let said = dir.path().join("sessions.jsonl");
+    fs::write(&role, "# ConsensFlow worker\n").unwrap();
+    let ran = cf(
+        &[
+            "hook",
+            "muse-session",
+            role.to_str().unwrap(),
+            said.to_str().unwrap(),
+        ],
+        &[],
+        r#"{"hook_event_name":"SessionStart","session_id":"01a17bc7-6aab-75a0-bfae-b627eaa5ecd8","source":"resume"}"#,
+    );
+    assert_eq!(ran.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stdout),
+        r##"{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"# ConsensFlow worker\n"}}"##
+    );
+    assert_eq!(
+        fs::read_to_string(&said).unwrap(),
+        "{\"session\":\"01a17bc7-6aab-75a0-bfae-b627eaa5ecd8\",\"source\":\"resume\"}\n"
     );
 }
 
@@ -142,4 +211,69 @@ fn a_ui_that_reaches_the_library_is_an_unknown_command_and_starts_nothing() {
     }
     // Nothing was made in the home: no daemon, no log.
     assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+}
+
+/// What `cf ui` answers in a window: the member's token is set, so `cf` is the board's command
+/// and the daemon's `ui` is none of it. It says so, and what to do, never the token (T-868: an
+/// app started from a window had a `cf ui` that answered "unknown command" and no daemon).
+const UI_IN_A_WINDOW: &str = "cf: `cf ui` starts ConsensFlow's own daemon, and this is a window \
+    of a ConsensFlow board (CONSENSFLOW_TOKEN is set), where cf is that board's command and has \
+    no `ui`. Run it in a terminal outside the window, or unset CONSENSFLOW_URL, \
+    CONSENSFLOW_TOKEN, CONSENSFLOW_PARTICIPANT and CONSENSFLOW_PROJECT first.\n";
+
+#[test]
+fn a_ui_in_a_window_says_why_it_is_not_the_daemon_and_starts_nothing() {
+    assert_eq!(
+        WINDOW_VARIABLES,
+        [
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+            "CONSENSFLOW_PROJECT"
+        ],
+        "the words the refusal says to unset"
+    );
+    let home = tempfile::tempdir().unwrap();
+    let token = "a-members-secret-token";
+    // The whole window's variables, and the token alone: either way the token is set.
+    for window in [
+        vec![
+            ("CONSENSFLOW_URL", "http://127.0.0.1:9"),
+            ("CONSENSFLOW_TOKEN", token),
+            ("CONSENSFLOW_PARTICIPANT", "chief"),
+            ("CONSENSFLOW_PROJECT", "1"),
+        ],
+        vec![("CONSENSFLOW_TOKEN", token)],
+    ] {
+        let mut vars = window.clone();
+        vars.push(("CONSENSFLOW_HOME", home.path().to_str().unwrap()));
+        let env = Env::from_vars(vars);
+        for words in [
+            &["ui"][..],
+            &["ui", "--json", "--no-open"],
+            &["--json", "ui"],
+            &["ui", "--help"],
+        ] {
+            let args: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = cf::run(&env, &args, &mut io::empty(), &mut out, &mut err).unwrap();
+            let said = String::from_utf8(err).unwrap();
+            assert_eq!(said, UI_IN_A_WINDOW, "{window:?} {words:?}");
+            assert_eq!(code, 1, "{words:?}");
+            assert!(out.is_empty(), "{words:?}");
+            assert!(!said.contains(token), "the token is never said");
+        }
+    }
+    // Nothing was made in the home: no daemon, no log.
+    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn only_a_ui_is_refused_in_a_window_with_those_words() {
+    // A word after another is that verb's argument, and `ui` out of a window stays as it was.
+    let env = Env::from_vars([("CONSENSFLOW_TOKEN", "t")]);
+    let args: Vec<OsString> = ["whoami", "ui"].iter().map(OsString::from).collect();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    cf::run(&env, &args, &mut io::empty(), &mut out, &mut err).unwrap();
+    assert_ne!(String::from_utf8(err).unwrap(), UI_IN_A_WINDOW);
 }

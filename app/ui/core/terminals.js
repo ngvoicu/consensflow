@@ -52,6 +52,8 @@ export class TerminalsView {
   #onSwitchChief
   /** The human asking to read everything kept of a participant's conversations, from its card. */
   #onHistory
+  /** The human starting (`on`) or stopping a meeting with the chief, from its card. */
+  #onMeeting
   /** The human trying the chief again before its quota resets, from its card. */
   #onTryAgain
   /** The human hiding a session's terminal, from its card: the page takes the card out and tells the daemon. */
@@ -85,6 +87,7 @@ export class TerminalsView {
       onChange = () => {},
       onSwitchChief = () => {},
       onHistory = () => {},
+      onMeeting = () => {},
       onTryAgain = () => {},
       onHideTerminal = () => {},
     },
@@ -93,6 +96,7 @@ export class TerminalsView {
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
     this.#onHistory = onHistory
+    this.#onMeeting = onMeeting
     this.#onTryAgain = onTryAgain
     this.#onHideTerminal = onHideTerminal
     this.#registry = new EmulatorRegistry({
@@ -440,7 +444,8 @@ export class TerminalsView {
   /**
    * A card's head: whose window it is, its lamp, and what is done with it
    * there. Every card reads its participant's whole history. The chief's says
-   * what the chief is doing and runs on, and switches it. Only a session's
+   * what the chief is doing and runs on, switches it, and meets it: in a
+   * meeting, its Stop counts what the meeting holds. Only a session's
    * terminal hides, as on its board row, and the daemon closes its window once
    * nothing holds it open; deleting the session is its row's alone. Only an
    * open project's cards are drawn: nothing on a closed one acts.
@@ -449,26 +454,37 @@ export class TerminalsView {
     const { participant } = lane
     const name = laneName(participant)
     const now = Date.now()
-    // A button kept across redraws acts on the participant as it is now.
+    // A button kept across redraws acts on the participant, and the meeting, as they are now.
     entry.participant = participant
+    entry.meeting = Boolean(board.project?.meeting)
     const history = button(
       'History',
       'quiet-button',
       () => this.#onHistory(entry.participant),
       `Read everything kept of ${name}'s conversations`,
     )
+    // The chief's buttons wrap together, at the head's end, when the card is narrow.
+    const chiefTools = () => {
+      const group = element('span', 'terminal-tools')
+      group.append(
+        history,
+        button(
+          'Switch chief',
+          'quiet-button',
+          () => this.#onSwitchChief(entry.participant),
+          'Switch the chief to another agent',
+        ),
+        button(
+          entry.meeting ? `Stop meeting (${(board.held ?? []).length})` : 'Start meeting',
+          'quiet-button',
+          () => this.#onMeeting(entry.participant, !entry.meeting),
+        ),
+      )
+      return group
+    }
     const tools =
       participant.role === 'chief'
-        ? [
-            history,
-            button(
-              'Switch chief',
-              'quiet-button',
-              () => this.#onSwitchChief(entry.participant),
-              'Switch the chief to another agent',
-            ),
-            about(lane, board, agent, now, this.#onTryAgain),
-          ]
+        ? [chiefTools(), about(lane, board, agent, now, this.#onTryAgain)]
         : [
             element('span', 'terminal-meta', participant.harness ?? ''),
             history,

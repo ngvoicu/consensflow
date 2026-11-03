@@ -6,11 +6,11 @@
 //! found none, and the task stayed working for good with its window at rest.
 //!
 //! Devin compacts a session once its context passes `agent.compaction_threshold_tokens` of
-//! its config (an integer from 1 up, Devin 3000.11.205). The run gives the daemon and its
-//! windows a config folder of their own (`XDG_CONFIG_HOME`): the machine's Devin config,
-//! read as a launch reads it, with the threshold at [`THRESHOLD`] tokens, and nothing else
-//! of the machine's folder. Devin's login is not kept there, and stays where the machine
-//! keeps it. The task is several calls of the worker's shell, so that the compactor runs in
+//! its config (an integer from 1 up, Devin 3000.11.205). The run writes the machine's Devin
+//! config, read as a launch reads it, with the threshold at [`THRESHOLD`] tokens, into the
+//! config folder (`XDG_CONFIG_HOME`) of the home the kit gives Devin's windows
+//! (`live::isolation`), beside the kit's copy of the login; the machine's own folder is only
+//! read. The task is several calls of the worker's shell, so that the compactor runs in
 //! the middle of the turn: two probes of 2026-10-26 on SWE-2 compacted three times in five
 //! calls, in about 30 s. The run checks what the first step checks (the task done, its
 //! result at the chief with the command's output), and that Devin did compact the turn: a
@@ -30,10 +30,9 @@ use cf_e2e::live::machine::{home, live_folder};
 use cf_e2e::live::members::{self, Plan};
 use cf_e2e::live::{Harness, Log, Who};
 use cf_e2e::process::own_var;
-use cf_e2e::{files, Error, Result};
+use cf_e2e::{Error, Result};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
-use tempfile::TempDir;
 
 use crate::check::{self, Finished};
 use crate::task::Task;
@@ -45,16 +44,20 @@ pub const THRESHOLD: u64 = 1000;
 const CALLS: usize = 5;
 
 /// The project of the run: the stand-in chief and the Devin worker, in a folder of its
-/// own, with Devin's config read from `config`.
-pub fn plan(config: &Path) -> Plan {
+/// own, with `config` as Devin's config in the home of the run's own its windows run on.
+pub fn plan(config: &Value) -> Plan {
     Plan::new("finish-devin-compacted", members::stand_in_chief())
         .with(members::member(Harness::Devin))
-        .with_var("XDG_CONFIG_HOME", config.to_string_lossy())
+        .with_home_file(
+            Harness::Devin,
+            "XDG_CONFIG_HOME",
+            "devin/config.json",
+            format!("{config}\n"),
+        )
 }
 
-/// A config folder for Devin: the machine's config, its compaction threshold at
-/// [`THRESHOLD`].
-fn config() -> Result<TempDir> {
+/// Devin's config for the run: the machine's, its compaction threshold at [`THRESHOLD`].
+fn config() -> Result<Value> {
     let machine = own_var("XDG_CONFIG_HOME")
         .filter(|folder| !folder.is_empty())
         .map_or_else(
@@ -64,10 +67,10 @@ fn config() -> Result<TempDir> {
     config_in(&machine)
 }
 
-/// A config folder for Devin: the config in the config folder `machine`, read as a
+/// Devin's config for the run: the config in the config folder `machine`, read as a
 /// launch reads it (`ask::devin_config`: its comments and trailing commas left out, none
 /// as an empty one), its compaction threshold at [`THRESHOLD`].
-fn config_in(machine: &Path) -> Result<TempDir> {
+fn config_in(machine: &Path) -> Result<Value> {
     // The folder the adapter reads Devin's config in, on each system: `XDG_CONFIG_HOME` on
     // macOS and Linux, Windows' data folder (`APPDATA`) there. Without the second, the case
     // read the Windows machine's own config (integration B round 2, T-800).
@@ -87,19 +90,7 @@ fn config_in(machine: &Path) -> Result<TempDir> {
     };
     let agent = fields.entry("agent").or_insert_with(|| json!({}));
     agent["compaction_threshold_tokens"] = json!(THRESHOLD);
-    let folder = tempfile::Builder::new()
-        .prefix("cf-devin-config-")
-        .tempdir()
-        .map_err(|source| Error::File {
-            action: "make a folder in",
-            path: std::env::temp_dir(),
-            source,
-        })?;
-    files::write(
-        &folder.path().join("devin").join("config.json"),
-        format!("{config}\n"),
-    )?;
-    Ok(folder)
+    Ok(config)
 }
 
 /// Runs the Devin worker on a task its compactor compacts: what it came to, which holds
@@ -110,8 +101,7 @@ pub fn run(stand_in: &Path, log: &Log) -> Result<Finished> {
             "Devin keeps its config in its data folder on Windows, which the run cannot give a threshold of its own".to_owned(),
         ));
     }
-    let config = config()?;
-    let plan = plan(config.path());
+    let plan = plan(&config()?);
     let task = Task::several(CALLS)?;
     let who = Who::Harness(Harness::Devin);
     let mut finished = check::run(who, &plan, &task, stand_in, log)?;
@@ -218,24 +208,31 @@ fn chain_of(db: &Connection, id: &str, head: Option<i64>) -> rusqlite::Result<Se
 
 #[cfg(test)]
 mod tests {
+    use cf_e2e::files;
+
     use super::*;
 
     #[test]
-    fn the_project_of_the_step_has_the_devin_worker_reading_its_config_from_the_runs_folder() {
-        let plan = plan(Path::new("/x/config"));
+    fn the_project_of_the_step_has_the_devin_worker_reading_its_config_from_the_runs_home() {
+        let config = json!({ "agent": { "compaction_threshold_tokens": THRESHOLD } });
+        let plan = plan(&config);
         assert_eq!(plan.folder, "finish-devin-compacted");
         assert_eq!(plan.roster[1]["id"], "live-devin");
+        // No variable of the case's own: Devin reads its config in the kit's home.
+        assert!(plan.vars.is_empty(), "{:?}", plan.vars);
+        let [file] = plan.home_files.as_slice() else {
+            panic!("{:?}", plan.home_files);
+        };
         assert_eq!(
-            plan.vars,
-            [("XDG_CONFIG_HOME".to_owned(), "/x/config".to_owned())]
+            (file.harness, file.variable, file.name.as_str()),
+            (Harness::Devin, "XDG_CONFIG_HOME", "devin/config.json")
         );
+        assert_eq!(serde_json::from_str::<Value>(&file.text).unwrap(), config);
     }
 
     /// The config a run gives Devin, made from the config folder `machine`.
     fn given(machine: &Path) -> Value {
-        let folder = config_in(machine).unwrap();
-        let text = files::read_string(&folder.path().join("devin").join("config.json")).unwrap();
-        serde_json::from_str(&text).unwrap()
+        config_in(machine).unwrap()
     }
 
     #[test]

@@ -23,6 +23,74 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// The kinds of bytes a write of the human's path into a pane can hold, as the host
+/// names them in a snapshot's `humanWrites`: characters typed; a bracketed paste; Enter;
+/// Backspace or Ctrl+U; another control key; an escape sequence (an arrow, a function key,
+/// Alt with a key); a terminal string (OSC, DCS, APC, PM, SOS); a mouse report; a focus
+/// report.
+pub const HUMAN_WRITE_CLASSES: [&str; 9] = [
+    "text", "paste", "enter", "erase", "control", "escape", "string", "mouse", "focus",
+];
+
+/// What the pane host said of the human's input into a window (`pane.snapshot`), for the
+/// trace of a delivery held at that look: how many writes of their keys it took, how long
+/// since the last, whether it counts words typed and not sent, and its last writes as how
+/// long ago, how many bytes and of what kinds (T-839, Calliope's T-844). Read field by
+/// field and nothing else of the snapshot, a kind only by its known name: never a byte of
+/// what was typed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HumanInput {
+    pub typed: Option<u64>,
+    pub typed_quiet_ms: Option<u64>,
+    pub unsent: Option<bool>,
+    pub writes: Vec<HumanWrite>,
+}
+
+/// One of the human's last writes into a pane ([`HumanInput`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HumanWrite {
+    pub ago_ms: u64,
+    pub length: u64,
+    pub classes: Vec<&'static str>,
+}
+
+impl HumanInput {
+    /// What `snapshot`, a host's answer to `pane.snapshot`, says of the human's input;
+    /// none where it did not answer.
+    pub fn of(snapshot: &Value) -> Option<Self> {
+        if snapshot.get("ok") != Some(&Value::Bool(true)) {
+            return None;
+        }
+        let write = |write: &Value| {
+            Some(HumanWrite {
+                ago_ms: write.get("agoMs")?.as_u64()?,
+                length: write.get("length")?.as_u64()?,
+                classes: write
+                    .get("classes")?
+                    .as_array()?
+                    .iter()
+                    .filter_map(|class| {
+                        HUMAN_WRITE_CLASSES
+                            .into_iter()
+                            .find(|known| class.as_str() == Some(known))
+                    })
+                    .collect(),
+            })
+        };
+        Some(Self {
+            typed: snapshot.get("typed").and_then(Value::as_u64),
+            typed_quiet_ms: snapshot.get("typedQuietMs").and_then(Value::as_u64),
+            unsent: snapshot.get("unsent").and_then(Value::as_bool),
+            writes: snapshot
+                .get("humanWrites")
+                .and_then(Value::as_array)
+                .map(|writes| writes.iter().filter_map(write).collect())
+                .unwrap_or_default(),
+        })
+    }
+}
 
 /// The most lines of a screen the host sends as its tail, and so the most a
 /// request for it gets. Empty lines are not counted: they are not sent.
@@ -71,6 +139,14 @@ pub enum Servers {
     /// process, which is in the window's group. What any of them starts later is
     /// the harness's.
     AtLaunch,
+    /// Where the platform has no process groups to keep them in (a Windows job object,
+    /// which holds the window's processes whole): the harness runs every command of its
+    /// agent in a shell it starts for that command (Claude Code's Git Bash `bash.exe`, or
+    /// PowerShell), and starts its servers as the programs they are (`node`, `uvx`, npm's
+    /// `cmd.exe /c npx …`), never in a shell of its own. No process is the harness's by
+    /// where it is; a command is such a shell, and what runs under it while it runs
+    /// (`cf-panes`' `background`). Claude Code on Windows (T-906).
+    ByShell,
     /// Not known: no process is told for the harness's by where it is, so only what
     /// the host can prove the harness's by its program (a program named for it
     /// that is beside its own binary, and what descends from one) is left alone, and
@@ -155,8 +231,11 @@ pub struct Background {
 /// agent so (a Bash call, a Monitor's, a background job's, in the foreground or not, and
 /// what one `exec`s keeps the group), and its hooks and status line, a moment each; its
 /// MCP servers and helpers stay in the window's group. The host tells them only of a
-/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]),
-/// on a platform with groups: nowhere else does a group say what a process is. It is
+/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]), on
+/// a platform with groups, and of one whose harness runs each command in a shell of its
+/// own where there are none ([`Servers::ByShell`], a Windows job object): there a command
+/// is such a shell the harness started after the rest the request names, or the window's
+/// launch, and what runs under it while it runs (T-906). It is
 /// `null` too where a process of the window cannot be read (another user's, as a command
 /// that `exec`s `sudo` becomes), which may be a command: the answer says so then
 /// ([`CommandsAnswer`]). What ran at the rest the request
@@ -443,6 +522,7 @@ mod tests {
         for (word, servers) in [
             ("inGroup", Servers::InGroup),
             ("atLaunch", Servers::AtLaunch),
+            ("byShell", Servers::ByShell),
         ] {
             let body = json!({ "id": "p1-zeus", "generation": 4, "servers": word });
             let said: MarkRequest = serde_json::from_value(body.clone()).unwrap();
@@ -479,6 +559,7 @@ mod tests {
         assert_eq!(said.servers, Servers::Unknown);
         assert!(said.servers.is_unknown());
         assert!(!Servers::InGroup.is_unknown() && !Servers::AtLaunch.is_unknown());
+        assert!(!Servers::ByShell.is_unknown());
     }
 
     #[test]

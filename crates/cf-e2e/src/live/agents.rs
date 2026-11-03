@@ -80,18 +80,19 @@ pub fn id(harness: Harness) -> String {
 
 /// What the human's rules call the cheap model of each harness, as the app's
 /// catalog and the harness's own list of models both have it (checked on
-/// 2026-10-11): Claude Code on Sonnet 5.5, OpenCode and Pi on Muse Spark 1.3
-/// (OpenCode's free one, Pi's through OpenRouter, which is where the catalog
-/// has it: OpenCode Go is out of ConsensFlow), Devin on SWE-2 at medium, Codex
+/// 2026-10-11): Claude Code on Sonnet 5.5, Pi on Muse Spark 1.3 through
+/// OpenRouter, which is where the catalog has it, Devin on SWE-2 at medium, Codex
 /// on GPT-5.6 Luna. The model, and the effort where it has one: what a harness
 /// runs on where the run names no other ([`model`]).
 fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
     match harness {
         Harness::Claude => ("claude-sonnet-5-5", None),
-        Harness::OpenCode => ("opencode/muse-spark-1.3-contributor-free", None),
         Harness::Pi => ("openrouter/meta/muse-spark-1.3", None),
         Harness::Devin => ("swe-2", Some("medium")),
         Harness::Codex => ("gpt-5.6-luna", None),
+        // The owner's testing model of 2026-10-26: not a contributor model, at its least
+        // effort (the contributor model measured no saving, T-718).
+        Harness::Muse => ("muse-spark-1.3", Some("minimal")),
     }
 }
 
@@ -103,8 +104,8 @@ fn efforts(harness: Harness) -> &'static [&'static str] {
         Harness::Claude => &["low", "medium", "high", "xhigh", "max"],
         Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
         Harness::Pi => &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-        Harness::OpenCode => &["minimal", "low", "medium", "high", "xhigh", "max"],
         Harness::Devin => &["low", "medium", "high", "xhigh", "max"],
+        Harness::Muse => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
     }
 }
 
@@ -141,19 +142,28 @@ impl fmt::Display for Model {
 
 /// The model of every harness in a run, in the order of [`Harness::ALL`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Models([Model; 5]);
+pub struct Models {
+    models: [Model; 5],
+    /// The harnesses the flags named, in the order they did.
+    named: Vec<Harness>,
+}
 
 impl Models {
     /// The model `harness` runs on.
     pub fn of(&self, harness: Harness) -> &Model {
-        &self.0[slot(harness)]
+        &self.models[slot(harness)]
+    }
+
+    /// The harnesses `--models` and `--claude-model` named, in the order they were.
+    pub fn named(&self) -> &[Harness] {
+        &self.named
     }
 
     /// What a run says of them in its first lines: what the flags give each
     /// harness, which a suite's own flag may override for its windows (the report
     /// says what each window was launched on: [`super::Log::launched`]).
     pub fn line(&self) -> String {
-        let each: Vec<String> = self.0.iter().map(Model::to_string).collect();
+        let each: Vec<String> = self.models.iter().map(Model::to_string).collect();
         format!(
             "the models --models and the cheap ones give: {}",
             each.join("; ")
@@ -210,8 +220,12 @@ pub fn parse(
     }
     if let Some(model) = claude_model.filter(|_| !named.contains(&Harness::Claude)) {
         chosen[slot(Harness::Claude)] = model_of(Harness::Claude, model, "--claude-model")?;
+        named.push(Harness::Claude);
     }
-    Ok(Models(chosen))
+    Ok(Models {
+        models: chosen,
+        named,
+    })
 }
 
 /// Where `harness` is in [`Harness::ALL`].
@@ -336,9 +350,9 @@ pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
 pub fn question_tool(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("AskUserQuestion tool"),
-        Harness::OpenCode => Some("question tool"),
         Harness::Codex => Some("request_user_input tool"),
         Harness::Devin => Some("ask_user_question tool"),
+        Harness::Muse => Some("request_user_input tool"),
         Harness::Pi => None,
     }
 }
@@ -346,6 +360,21 @@ pub fn question_tool(harness: Harness) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// T-931 P2-2: the harnesses `--models` and `--claude-model` name are asked for: a
+    /// machine that lacks one is the run's error, not a harness left out.
+    #[test]
+    fn the_harnesses_the_model_flags_name_are_the_ones_asked_for() {
+        let models = parse(
+            Some("muse=muse-spark-1.3:minimal, pi=openai/gpt-6-luna"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(models.named(), [Harness::Muse, Harness::Pi]);
+        let claude = parse(None, Some("claude-sonnet-5-5")).unwrap();
+        assert_eq!(claude.named(), [Harness::Claude]);
+        assert!(parse(None, None).unwrap().named().is_empty());
+    }
 
     #[test]
     fn every_harness_has_one_agent_of_its_own_kind_on_its_cheap_model() {
@@ -358,10 +387,10 @@ mod tests {
             ids,
             [
                 "live-claude",
-                "live-opencode",
                 "live-pi",
                 "live-devin",
-                "live-codex"
+                "live-codex",
+                "live-muse"
             ]
         );
         let models: Vec<&str> = rows
@@ -372,15 +401,16 @@ mod tests {
             models,
             [
                 "claude-sonnet-5-5",
-                "opencode/muse-spark-1.3-contributor-free",
                 "openrouter/meta/muse-spark-1.3",
                 "swe-2",
-                "gpt-5.6-luna"
+                "gpt-5.6-luna",
+                "muse-spark-1.3"
             ]
         );
         assert!(rows.iter().all(|row| row["workTier"] == "standard"));
         assert_eq!(rows[0]["kind"], "claude-code");
-        assert_eq!(rows[3]["effort"], "medium");
+        assert_eq!(rows[2]["effort"], "medium");
+        assert_eq!(rows[4]["effort"], "minimal");
         assert!(rows[0].get("effort").is_none());
     }
 
@@ -402,7 +432,7 @@ mod tests {
     fn given(models: Option<&str>, claude: Option<&str>) -> Vec<(String, Option<String>)> {
         parse(models, claude)
             .unwrap()
-            .0
+            .models
             .into_iter()
             .map(|model| (model.name, model.effort))
             .collect()
@@ -438,7 +468,7 @@ mod tests {
             assert_eq!(model(harness), Model::cheap(harness), "{harness:?}");
         }
         let mut pi_only = cheap_ones();
-        pi_only[2] = on("openai/gpt-6-luna", None);
+        pi_only[1] = on("openai/gpt-6-luna", None);
         assert_eq!(given(Some("pi=openai/gpt-6-luna"), None), pi_only);
     }
 
@@ -451,10 +481,10 @@ mod tests {
             ),
             [
                 on("claude-sonnet-5-5", None),
-                on("opencode/muse-spark-1.3-contributor-free", None),
                 on("openai/gpt-6-luna", None),
                 on("swe-2", Some("max")),
                 on("gpt-6.1-sol", Some("high")),
+                on("muse-spark-1.3", Some("minimal")),
             ]
         );
         // Spaces around a piece, a harness, a model or an effort are let be, and so is
@@ -475,7 +505,7 @@ mod tests {
 
     #[test]
     fn what_follows_a_colon_is_the_models_own_unless_it_is_an_effort() {
-        let pi = |given_to_pi: &str| given(Some(&format!("pi={given_to_pi}")), None)[2].clone();
+        let pi = |given_to_pi: &str| given(Some(&format!("pi={given_to_pi}")), None)[1].clone();
         // OpenRouter's free models end in `:free`, which is no effort.
         assert_eq!(
             pi("openrouter/poolside/laguna-s-2.1:free"),
@@ -493,7 +523,7 @@ mod tests {
     fn a_flag_no_window_could_be_asked_for_is_refused_in_words_naming_the_harness_and_the_model() {
         assert_eq!(
             refused("gemini=gemini-3", None),
-            "--models names no harness called gemini (claude, opencode, pi, devin, codex): gemini=gemini-3"
+            "--models names no harness called gemini (claude, pi, devin, codex, muse): gemini=gemini-3"
         );
         assert_eq!(
             refused("=gpt-6", None),
@@ -525,7 +555,7 @@ mod tests {
         );
         // Codex takes one Claude does not.
         assert_eq!(
-            given(Some("codex=gpt-6.1-sol:ultra"), None)[4],
+            given(Some("codex=gpt-6.1-sol:ultra"), None)[3],
             on("gpt-6.1-sol", Some("ultra"))
         );
     }
@@ -544,7 +574,7 @@ mod tests {
         // With --models naming others, each has its own.
         let both = given(Some("pi=openai/gpt-6-luna"), Some("claude-opus-5-5"));
         assert_eq!(both[0], on("claude-opus-5-5", None));
-        assert_eq!(both[2], on("openai/gpt-6-luna", None));
+        assert_eq!(both[1], on("openai/gpt-6-luna", None));
         // Where --models names Claude too, --models wins, and the other is not read.
         assert_eq!(
             given(Some("claude=claude-haiku-5-5"), Some("claude-opus-5-5"))[0],
@@ -589,8 +619,8 @@ mod tests {
         assert_eq!(
             models.line(),
             "the models --models and the cheap ones give: claude claude-sonnet-5-5; \
-             opencode opencode/muse-spark-1.3-contributor-free; pi openai/gpt-6-luna; \
-             devin swe-2, effort medium; codex gpt-6.1-sol, effort high"
+             pi openai/gpt-6-luna; devin swe-2, effort medium; codex gpt-6.1-sol, effort high; \
+             muse muse-spark-1.3, effort minimal"
         );
         // What a window launched on an agent runs on is the agent's: Pi's effort is its
         // thinking, and the stand-in agent's windows run on nothing of a harness.
@@ -620,7 +650,7 @@ mod tests {
     #[test]
     fn an_agents_effort_is_where_its_harness_reads_it_thinking_for_pi_and_effort_for_the_others() {
         let models = parse(
-            Some("pi=openai/gpt-6-luna:high,codex=gpt-6.1-sol:high,opencode=o/m"),
+            Some("pi=openai/gpt-6-luna:high,codex=gpt-6.1-sol:high"),
             None,
         )
         .unwrap();
@@ -633,17 +663,12 @@ mod tests {
             json!({ "kind": "codex", "model": "gpt-6.1-sol", "effort": "high" })
         );
         assert_eq!(
-            agent_on(models.of(Harness::OpenCode)),
-            json!({ "kind": "opencode", "model": "o/m" })
-        );
-        assert_eq!(
             agent_on(models.of(Harness::Devin)),
             json!({ "kind": "devin", "model": "swe-2", "effort": "medium" })
         );
     }
 
-    /// A run can name any agent of the product's catalog by its model and effort:
-    /// Buri, OpenCode Zen's free Nemotron 3.5 Super VL at xhigh, among them.
+    /// A run can name any agent of the product's catalog by its model and effort.
     #[test]
     fn every_agent_of_the_catalog_can_be_named_by_its_model_and_effort() {
         let presets: Value = serde_json::from_str(
@@ -675,37 +700,31 @@ mod tests {
                 "{piece}"
             );
         }
-        let buri = parse(
-            Some("opencode=opencode/nemotron-3.5-super-vl-free:xhigh"),
-            None,
-        )
-        .unwrap();
-        assert_eq!(
-            agent_on(buri.of(Harness::OpenCode)),
-            json!({ "kind": "opencode", "model": "opencode/nemotron-3.5-super-vl-free", "effort": "xhigh" })
-        );
     }
 
     #[test]
     fn the_efforts_a_harness_takes_are_the_ones_the_products_catalog_has() {
-        let catalog =
-            std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/src/catalog.rs"))
-                .unwrap();
+        // The catalog's `efforts()` says each harness's levels with whether its model's id
+        // holds the level (`Harness::Claude => (&[…], false),`, T-1078), in a layout rustfmt
+        // chooses by length: read with the whitespace left out.
+        let squeezed = |text: &str| text.split_whitespace().collect::<String>();
+        let catalog = squeezed(
+            &std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/src/catalog.rs"))
+                .unwrap(),
+        );
         for harness in Harness::ALL {
-            // The catalog's own name of the harness: OpenCode is `Opencode` there.
-            let variant = match harness {
-                Harness::OpenCode => "Opencode".to_owned(),
-                other => {
-                    let name = other.name();
-                    format!("{}{}", name[..1].to_uppercase(), &name[1..])
-                }
-            };
+            // The catalog's own name of the harness.
+            let name = harness.name();
+            let variant = format!("{}{}", name[..1].to_uppercase(), &name[1..]);
             let quoted: Vec<String> = efforts(harness)
                 .iter()
                 .map(|effort| format!("\"{effort}\""))
                 .collect();
-            let line = format!("Harness::{variant} => &[{}],", quoted.join(", "));
-            assert!(catalog.contains(&line), "the catalog has no {line}");
+            let line = format!("Harness::{variant}=>(&[{}],", quoted.join(","));
+            assert!(
+                catalog.contains(&line),
+                "the catalog's efforts() has no {line} (whitespace left out)"
+            );
         }
     }
 

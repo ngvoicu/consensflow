@@ -1,5 +1,5 @@
 # A file dropped on a terminal window (the owner's request of 2026-10-15, ConsensFlow 3.0.5): in a
-# terminal, a file dropped on Claude Code, OpenCode or another harness types its path, and Claude
+# terminal, a file dropped on Claude Code or another harness types its path, and Claude
 # Code attaches an image from it; the dock's windows did nothing, for Tauri catches a drop over the
 # whole window and nothing in the page heard it. Now the page listens for the drag as Tauri says it
 # (`tauri://drag-enter`, `-over` and `-leave`) and for the drop as the app says it (`file-drop`:
@@ -1054,7 +1054,7 @@ runs = ["app-test-file-drop"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
-find = '''        .on_window_event(file_drop::hear)
+find = '''                file_drop::hear(window, event);
 '''
 replace = ""
 
@@ -1076,9 +1076,9 @@ runs = ["app-test-file-drop"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
-find = '''        .on_window_event(file_drop::hear)
+find = '''        })
         .invoke_handler(page_commands())'''
-replace = '''        .on_window_event(file_drop::hear)'''
+replace = '''        })'''
 
 [[plant]]
 name = "file drop: a lookup refused while another runs does not say the app is busy"

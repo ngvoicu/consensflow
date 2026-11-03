@@ -72,7 +72,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{HumanInput, Servers};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -89,10 +89,10 @@ use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, InputBox, Unsent};
 use crate::shared::left_open::LeftOpen;
-use crate::shared::record_state::switched_to;
+use crate::shared::record_state::{observed_from, switched_to};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
-use crate::shared::{pane, specmint, window_args};
+use crate::shared::{compacting, pane, specmint, window_args};
 
 /// Claude Code, as the engine launches its windows.
 pub struct ClaudeAdapter {
@@ -100,6 +100,8 @@ pub struct ClaudeAdapter {
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     entropy: Rc<dyn Entropy>,
+    /// The bundle's `cf` as a window names it: what the launch's hooks run.
+    pane_cf: String,
     /// Where Claude keeps its own status of each of its processes, made
     /// whole once, as Node resolved it when it made the adapter; or why
     /// there is none.
@@ -114,6 +116,7 @@ impl ClaudeAdapter {
             records: Rc::clone(&services.records),
             time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
+            pane_cf: services.bundle.pane_cf.clone(),
             statuses: status::folder(&services.env),
         }
     }
@@ -123,7 +126,13 @@ impl Adapter for ClaudeAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Claude, &self.env)?;
-            let settings = install::settings(&self.env, launch.id, launch.role != "chief")?;
+            let settings = install::settings(
+                &self.env,
+                launch.id,
+                launch.role != "chief",
+                launch.compaction,
+                &self.pane_cf,
+            )?;
             let role = install::role(&self.env, launch)?;
             // Claude keeps a conversation only once something was said in
             // it, and what it kept can be gone since: the engine asks
@@ -167,7 +176,14 @@ impl Adapter for ClaudeAdapter {
             } else {
                 None
             };
-            let options = told(relaunched.as_ref(), &session);
+            let options = told(
+                relaunched.as_ref(),
+                launch
+                    .agent
+                    .and_then(|agent| agent.model)
+                    .filter(|model| !model.is_empty()),
+                &session,
+            );
             // A turn the old process left open, which the window has to be told
             // apart from by what the record holds later: it begins its own only
             // once it is delivered a message.
@@ -212,11 +228,17 @@ impl Adapter for ClaudeAdapter {
                     put_back: Cell::new(false),
                     clear_first: Cell::new(false),
                     read_empty: Cell::new(None),
+                    input: RefCell::new(None),
                     left_open: RefCell::new(left_open),
                     over_since: RefCell::new(None),
                     relaunched,
                     before: RefCell::new(holders.unwrap_or_default()),
                     shared: Cell::new(false),
+                    model: launch
+                        .agent
+                        .and_then(|agent| agent.model)
+                        .filter(|model| !model.is_empty())
+                        .map(str::to_owned),
                     trusts: trust::trusts(launch.directory),
                     directory: launch.directory.to_owned(),
                 }),
@@ -237,9 +259,16 @@ impl Adapter for ClaudeAdapter {
     /// servers as it takes its first message, after the window's turn is marked.
     /// What a server starts is the harness's whatever group it starts it in: the
     /// browser of `@playwright/mcp` and `chrome-devtools-mcp` leaves it.
+    ///
+    /// On Windows a job object has no groups, and Claude Code runs every command of its
+    /// agent in a shell it starts for it (Git Bash's `bash.exe`: T-375's scripts, T-858's
+    /// `exec sleep 611` in a Monitor) and its servers as their programs (npm's are a
+    /// `cmd.exe /c npx …`, which is no shell): [`Servers::ByShell`]. Said `Unknown` before
+    /// T-906, it left the host telling none of its commands, and a Monitor that Claude Code
+    /// had ended held its task until Finish.
     fn servers(&self) -> Servers {
         if self.env.on_windows() {
-            Servers::Unknown
+            Servers::ByShell
         } else {
             Servers::InGroup
         }
@@ -269,11 +298,12 @@ impl Adapter for ClaudeAdapter {
         }
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         specmint::place(
             Harness::Claude,
             &self.env,
             variant,
+            folder,
             paths::global_specmint(&self.env, variant),
         )
     }
@@ -309,6 +339,9 @@ struct ClaudeWindow {
     /// latest readiness read the input box empty on the screen, at this count of
     /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
     read_empty: Cell<Option<u64>>,
+    /// What the pane host said of the human's input at the latest readiness, where it
+    /// read a snapshot of the pane ([`Window::human_input`]).
+    input: RefCell<Option<HumanInput>>,
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
@@ -327,6 +360,9 @@ struct ClaudeWindow {
     /// Another Claude than the window's has shown its conversation since it
     /// opened (`Observed::shared`).
     shared: Cell<bool>,
+    /// The model the launch named, where it named one: an alias such as `opusplan` names the
+    /// models it runs on by itself, which the reader takes for no change of model (T-841).
+    model: Option<String>,
     /// What a yes to Claude Code's question about the window's folder trusts.
     trusts: Trusts,
     /// The window's folder, whose local settings keep what Claude Code was told of the
@@ -336,11 +372,12 @@ struct ClaudeWindow {
 
 /// What a look at `session` is told: where the window's program began writing,
 /// when the window was opened again on that conversation.
-fn told(relaunched: Option<&(String, Boundary)>, session: &str) -> Options {
+fn told(relaunched: Option<&(String, Boundary)>, model: Option<&str>, session: &str) -> Options {
     Options {
         relaunched: relaunched
             .filter(|(on, _)| on == session)
             .map(|(_, boundary)| boundary.clone()),
+        launch_model: model.map(str::to_owned),
         ..Options::default()
     }
 }
@@ -467,7 +504,7 @@ impl Window for ClaudeWindow {
         self.shared.set(false);
     }
 
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async { Ok(None) })
     }
 
@@ -483,8 +520,20 @@ impl Window for ClaudeWindow {
         super::trust::shows_prompt(screen)
     }
 
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Claude, snapshot)
+    }
+
     fn names_trust_choices(&self, screen: &[String]) -> bool {
         super::trust::names_choices(screen)
+    }
+
+    fn ready_sign(&self) -> Option<&str> {
+        Some(super::trust::PROMPT)
+    }
+
+    fn compacting(&self, screen: &[String]) -> bool {
+        compacting::drawn(screen, &compacting::CLAUDE)
     }
 
     fn trust_servers(&self, screen: &[String]) -> Vec<String> {
@@ -504,6 +553,10 @@ impl Window for ClaudeWindow {
         Box::pin(input_box::words_on_screen(host, pane, Harness::Claude))
     }
 
+    fn human_input(&self) -> Option<HumanInput> {
+        self.input.borrow().clone()
+    }
+
     /// A paste waits for the window to be readable, on its conversation,
     /// with no paste going in, and for what the human typed and did not send,
     /// unless the input box reads empty on the screen ([`input_box::unsent`]).
@@ -517,12 +570,14 @@ impl Window for ClaudeWindow {
         pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
+            self.input.replace(None);
             if self.status().is_some_and(|live| self.elsewhere(&live)) {
                 return Ok(Readiness::Held(Held::ShowsAnother));
             }
             let snapshot = pane::snapshot(host, pane)
                 .await
                 .map_err(|failed| failed.message)?;
+            self.input.replace(HumanInput::of(&snapshot));
             if snapshot.get("ok") != Some(&Value::Bool(true)) {
                 // The host's own word for why, as a template writes it.
                 let said = snapshot
@@ -587,6 +642,20 @@ impl Window for ClaudeWindow {
         })
     }
 
+    /// The box as the next paste meets it: one its own hand-over empties first (the
+    /// message an interrupt of ours put back, a `/compact` the human's cancel left, which
+    /// [`ClaudeWindow::ready`] found there) holds nothing the paste would go in behind.
+    fn input_box<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        if self.restored.get() || self.clear_first.get() {
+            return Box::pin(async { Some(InputBox::Empty) });
+        }
+        Box::pin(input_box::on_screen(host, pane, Harness::Claude))
+    }
+
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
             // Claude's status first, then the conversation, which is then
@@ -601,30 +670,26 @@ impl Window for ClaudeWindow {
                 self.shared.set(true);
             }
             let session = self.session.borrow().clone();
-            let options = told(self.relaunched.as_ref(), &session);
+            let options = told(self.relaunched.as_ref(), self.model.as_deref(), &session);
             let reading = self.records.look(Harness::Claude, &session, &options).await;
-            let (empty, settled, failed, quota, agents) = match &*reading {
+            let (empty, settled, agents) = match &*reading {
                 Reading::Known(record) => (
                     record.items.is_empty(),
                     record.settlement == Settlement::Settled,
-                    record.failed,
-                    record.quota.clone(),
                     record.pending.agents > 0,
                 ),
-                Reading::Unknown(_) | Reading::Missing(_) => (true, false, false, None, false),
+                Reading::Unknown(_) | Reading::Missing(_) => (true, false, false),
             };
+            // What the record says of the failure and the quota is the one place's
+            // (`observed_from`); what Claude's own status says of the window is set on it.
             let observed = |settled, over, waiting, took_back, at_prompt| Observed {
-                reading: Some(Arc::clone(&reading)),
                 settled,
                 over,
                 waiting,
-                failed,
-                quota: quota.clone(),
-                switched: None,
-                unnamed: false,
                 took_back,
                 at_prompt,
                 shared: self.shared.get(),
+                ..observed_from(Arc::clone(&reading), None)
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {

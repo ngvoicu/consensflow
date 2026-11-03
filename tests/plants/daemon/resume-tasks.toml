@@ -84,8 +84,9 @@ file = "crates/cf-ledger/src/projects.rs"
 find = '''
             if state == "open" {
                 resume_with_project(store, id)?;
-            }'''
-replace = ""
+            } else {'''
+replace = '''
+            if state != "open" {'''
 
 [[plant]]
 name = "resume tasks: the human's Resume leaves the work the Close paused paused, as 3.0.4 did"
@@ -97,8 +98,9 @@ file = "crates/cf-ledger/src/projects.rs"
 find = '''
             if state == "open" {
                 resume_with_project(store, id)?;
-            }'''
-replace = ""
+            } else {'''
+replace = '''
+            if state != "open" {'''
 
 # --- the mark ---
 
@@ -475,6 +477,53 @@ find = '''
         }'''
 replace = ""
 
+# Since 3.0.7 the fresh look before the paste (the pacing) asks the project again after its
+# own await, so the rule is taken out of both places (T-794).
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if !self.in_open_project(message.project_id)?
+            || self
+                .next_in_line(record)?
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
+replace = '''
+        if self
+            .next_in_line(record)?
+            .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
+
+[[plant]]
+name = "resume tasks: a delivery whose project closes during the look before the paste goes into it"
+meant = "a_delivery_whose_project_closes_during_the_look_before_the_paste_is_not_pasted"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if !self.in_open_project(message.project_id)?
+            || self
+                .next_in_line(record)?
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
+replace = '''
+        if self
+            .next_in_line(record)?
+            .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
+
 # Round 5 hands the check before the paste to the hand-over itself (the host that
 # admits it); main's own deliver hands the adapter a host that admits everything.
 [[plant]]
@@ -522,26 +571,6 @@ find = '''
 replace = '''
         if false {
             if let Some(delivering) = delivering {'''
-
-[[plant]]
-name = "resume tasks: a window that takes its first message once it is up is given it in a closed project"
-meant = "a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume"
-runs = ["engine-closed-given-nothing"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = "        let started = caught(planned.window.started(&admitting)).await;"
-replace = "        let started = caught(planned.window.started(&*self.seams.host)).await;"
-
-[[plant]]
-name = "resume tasks: a first message the closed project kept from its window is a launch that failed"
-meant = "a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume"
-runs = ["engine-closed-given-nothing"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = "        if let Some(failed) = admitting.turned_away() {"
-replace = "        if let Some(failed) = admitting.turned_away().filter(|_| false) {"
 
 [[plant]]
 name = "resume tasks: an adapter that waits before its hand-over hands the text to a closed project's window"
@@ -798,49 +827,6 @@ find = '''
         }'''
 replace = ""
 
-[[plant]]
-name = "resume tasks: OpenCode's plugin is posted the message once its connection is up, whatever the host admits"
-meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted"
-runs = ["harness-admission"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/send.rs"
-find = "        .bound(wires.loopback.hand_over(request, target.host))"
-replace = "        .bound(wires.loopback.send(request))"
-
-[[plant]]
-name = "resume tasks: an OpenCode send the host did not admit once its connection was up is uncertain"
-meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted"
-runs = ["harness-admission"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/send.rs"
-find = '''
-        Some(Err(failed)) if failed == NOT_ADMITTED => {
-            return Ok(claim_refused(&json!({ "cause": failed })));
-        }'''
-replace = ""
-
-[[plant]]
-name = "resume tasks: OpenCode posts the first message once its connection is up, whatever the host admits"
-meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_its_connection_is_made"
-runs = ["harness-admission"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/seed.rs"
-find = "            .bound(self.wires.loopback.hand_over(request, host))"
-replace = "            .bound(self.wires.loopback.send(request))"
-
-[[plant]]
-name = "resume tasks: an OpenCode first message the host did not admit is uncertain"
-meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_the_server_is_asked"
-runs = ["harness-admission"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/channel/seed.rs"
-find = "            Some(Err(failed)) if failed == NOT_ADMITTED => return Err(failed),"
-replace = ""
-
 # --- a question's door ---
 
 [[plant]]
@@ -1008,7 +994,7 @@ runs = ["ledger-suspended"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-        if join_pause_note(store, note, task.number, because)?.is_some() {
+        if join_pause_note(store, note, task.number, because, false)?.is_some() {
             return Ok(());
         }'''
 replace = '''
@@ -1532,21 +1518,6 @@ replace = ""
 # --- the Enter pressed once more, and the words of every state (round 10) ---
 
 [[plant]]
-name = "resume tasks: the Enter pressed once more asks whether the project is open alone, as round 9 left it"
-meant = "an_enter_sends_no_continuation_whose_task_was_paused_or_cancelled_while_the_screen_was_looked_at"
-runs = ["engine-closed-given-nothing"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''
-        let admitting = Admitting::new(self, project)
-            .handing(message, carried)
-            .again();'''
-replace = '''
-        let admitting = Admitting::new(self, project).again();
-        let _ = carried;'''
-
-[[plant]]
 name = "resume tasks: the Enter pressed once more is admitted without the rows its paste was begun with"
 meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
 runs = ["engine-closed-given-nothing"]
@@ -1662,7 +1633,7 @@ replace = ""
 
 [[plant]]
 name = "resume tasks: a launch's first message is not marked handed as its pane is asked for"
-meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
+meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_the_step_delivers_it_once_the_window_is_up"
 runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
@@ -1671,8 +1642,8 @@ find = '''        )? || !self.handed_on_open(delivering.as_ref(), &planned)?'''
 replace = '''        )? || !self.handed_on_open(None, &planned)?'''
 
 [[plant]]
-name = "resume tasks: a first message a window takes once it is up is marked handed as its pane is asked for"
-meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
+name = "resume tasks: a first message a window is delivered once it is up is marked handed as its pane is asked for"
+meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_the_step_delivers_it_once_the_window_is_up"
 runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
@@ -1681,28 +1652,16 @@ find = '''        let Some(first) = delivering.filter(|_| planned.first == First
 replace = '''        let Some(first) = delivering else {'''
 
 [[plant]]
-name = "resume tasks: a first message a window takes once it is up is posted with the project alone asked"
-meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
-runs = ["engine-closed-given-nothing"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = '''            .filter(|_| planned.first == FirstMessage::Started);'''
-replace = '''            .filter(|_| false);'''
-
-[[plant]]
-name = "resume tasks: a delivery's hand-over asks whether the project is open alone"
+name = "resume tasks: a hand-over asks whether the project is open alone, and lets a withdrawn message through"
 meant = "a_continuation_whose_task_is_paused_while_its_adapter_takes_it_is_withdrawn_and_handed_nothing"
 runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        let admitting = Admitting::new(self, message.project_id)
-            .handing(message.id, carried.clone())
-            .cleared(cleared);'''
+        Ok(handed == HandOver::Admitted)'''
 replace = '''
-        let admitting = Admitting::new(self, message.project_id).cleared(cleared);'''
+        Ok(handed != HandOver::Closed)'''
 
 [[plant]]
 name = "resume tasks: a paste that went back for a row withdrawn from it is said to have gone back for the Close"
@@ -1713,22 +1672,6 @@ runs = ["engine-closed-given-nothing"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''        self.withdrawn.set(handed == HandOver::Withdrawn);'''
 replace = '''        self.withdrawn.set(false);'''
-
-[[plant]]
-name = "resume tasks: OpenCode reads its first message as its window opens"
-meant = "devin_reads_its_first_message_as_it_opens_opencode_posts_it_and_the_others_are_delivered_it"
-runs = ["harness-first-message"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/adapter.rs"
-find = '''
-    fn first_message(&self) -> FirstMessage {
-        FirstMessage::Started
-    }'''
-replace = '''
-    fn first_message(&self) -> FirstMessage {
-        FirstMessage::Opened
-    }'''
 
 [[plant]]
 name = "resume tasks: the players keep the handed column in the rows of the message table"
@@ -1835,8 +1778,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/message.rs"
-find = "        Some(message) if Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse("
-replace = "        Some(message) if false && Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse("
+find = "        Some(message) => Waits::now(context, caller)?.until(message),"
+replace = "        Some(message) => Waits::now(context, caller)?.until(message).filter(|_| false),"
 
 [[plant]]
 name = "resume tasks: an inbox lists the text of what no window was handed while the project is closed"
@@ -1855,8 +1798,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "            .retain(|message| message.state != \"gated\" && !waits.holds(message));"
-replace = "            .retain(|message| message.state != \"gated\");"
+find = "            .filter_map(|message| waits.in_thread(message))"
+replace = "            .filter_map(Some)"
 
 [[plant]]
 name = "resume tasks: a brief no window was handed is read while the project is closed"
@@ -1896,10 +1839,10 @@ runs = ["daemon-routes"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/waits.rs"
 find = '''
-        self.closed
+        if self.closed
             && matches!'''
 replace = '''
-        true
+        if true
             && matches!'''
 
 [[plant]]
@@ -1909,9 +1852,8 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/waits.rs"
-find = '''
-            && message.sender.as_deref() != Some(self.reader)'''
-replace = ""
+find = "        if message.sender.as_deref() == Some(self.reader) {"
+replace = "        if message.sender.as_deref() == Some(self.reader) && false {"
 
 # --- round 11: the Enter pressed once more never sends words twice (both reviews of 2026-10-20) ---
 
@@ -1987,11 +1929,9 @@ runs = ["engine-withheld-enter"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """
-            .handing(message.id, carried.clone())
-            .cleared(cleared);"""
+        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(cleared);"""
 replace = """
-            .handing(message.id, carried.clone())
-            .cleared(false && cleared);"""
+        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(false && cleared);"""
 
 [[plant]]
 name = "resume tasks: Claude empties a box the engine just emptied, a second Control-C"
@@ -2037,10 +1977,9 @@ runs = ["engine-withheld-enter"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """
-            .handing(message, carried)
-            .again();"""
+        let admitting = Admitting::handing(self, message, carried).again();"""
 replace = """
-            .handing(message, carried);"""
+        let admitting = Admitting::handing(self, message, carried);"""
 
 [[plant]]
 name = "resume tasks: a paste the window has is given back"
@@ -2157,7 +2096,7 @@ runs = ["engine-stale-box"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """
-        if !matches!(outcome, Admission::Refused { .. }) {
+        if !matches!(outcome, Admission::Refused { .. } | Admission::Busy { .. }) {
             record.delivery.borrow_mut().emptied = None;
         }"""
 replace = """
@@ -2201,8 +2140,8 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = "         AND instr(t.text, ?) > 0 AND t.copied_at >= ?"
-replace = "         AND instr(t.text, ?) > 0 AND (t.copied_at >= ? OR 1)"
+find = "         AND t.compaction = 0 AND instr(t.text, ?) > 0 AND t.copied_at >= ?"
+replace = "         AND t.compaction = 0 AND instr(t.text, ?) > 0 AND (t.copied_at >= ? OR 1)"
 
 [[plant]]
 name = "resume tasks: the mark of a paste the human sent goes before the ledger has it"
@@ -2211,9 +2150,9 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand("
+find = "                self.seams.ledger.borrow_mut().confirm_sent_by_hand("
 replace = """                record.delivery.borrow_mut().uncleared = None;
-                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand("""
+                self.seams.ledger.borrow_mut().confirm_sent_by_hand("""
 
 [[plant]]
 name = "resume tasks: words the human sent are begun in one write and confirmed in another"

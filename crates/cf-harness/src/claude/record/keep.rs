@@ -20,9 +20,13 @@ static INPUT: Keep = Keep::Members(&[
     ("ws", &Keep::Scalar),
 ]);
 
+/// The model a `fallback` block names on either side (`from`, `to`).
+static SIDE: Keep = Keep::Members(&[("model", &Keep::Scalar)]);
+
 /// A block of a message's content: its type, the text it says, the ids that
 /// open and close a call, the tool a call is of and what of its input is read, whether a
-/// result is an error, and what a result holds (all of it: it is the item's text).
+/// result is an error, what a result holds (all of it: it is the item's text), and the
+/// two models of a `fallback` block (T-816).
 static BLOCK: Keep = Keep::Members(&[
     ("type", &Keep::Scalar),
     ("text", &Keep::Scalar),
@@ -32,6 +36,8 @@ static BLOCK: Keep = Keep::Members(&[
     ("tool_use_id", &Keep::Scalar),
     ("is_error", &Keep::Scalar),
     ("content", &Keep::All),
+    ("from", &SIDE),
+    ("to", &SIDE),
 ]);
 
 static MESSAGE: Keep = Keep::Members(&[
@@ -44,13 +50,15 @@ static MESSAGE: Keep = Keep::Members(&[
 
 /// An attachment's type and hook, and the parts of a hook's context, which
 /// are texts; and of a message brought into a turn under way, what it was
-/// (`commandMode`) and its text.
+/// (`commandMode`), whose it is (`origin`) and its text: a text, or blocks as a
+/// message's content (a picture's, whose data is not kept).
 static ATTACHMENT: Keep = Keep::Members(&[
     ("type", &Keep::Scalar),
     ("hookEvent", &Keep::Scalar),
     ("content", &Keep::Items(&Keep::Scalar)),
     ("commandMode", &Keep::Scalar),
-    ("prompt", &Keep::Scalar),
+    ("origin", &ORIGIN),
+    ("prompt", &Keep::Items(&BLOCK)),
 ]);
 
 /// What a tool's result says besides its text: the id of the job a call that ran in
@@ -64,7 +72,8 @@ static TOOL_USE_RESULT: Keep = Keep::Members(&[
     ("task_id", &Keep::Scalar),
 ]);
 
-/// Where a user's record came from, by its kind (`task-notification`).
+/// Where a user's record or a message brought into a turn came from, by its kind
+/// (`task-notification`, `human`).
 static ORIGIN: Keep = Keep::Members(&[("kind", &Keep::Scalar)]);
 
 /// A record.

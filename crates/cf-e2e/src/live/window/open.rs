@@ -21,8 +21,8 @@ use crate::{files, Error, Result};
 /// written over the last.
 const LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
 
-/// The harnesses the app pastes into: Codex, Pi and OpenCode take their
-/// messages through their own queues.
+/// The harnesses the app pastes into: Codex and Pi take their messages through
+/// their own queues.
 const PASTED: [Harness; 2] = [Harness::Claude, Harness::Devin];
 
 /// The harnesses `names` name, which the app pastes into, or why one cannot be
@@ -364,15 +364,13 @@ impl<'a> Open<'a> {
                 }
             ))
         })?;
-        let program = self.install.command().to_string_lossy().into_owned();
+        let program = program_of(harness, self.install.command(), self.rig.muse_launcher())?;
         Ok((start, program))
     }
 
     /// Opens it, and notes in the run's `log` the agent it was launched on
     /// ([`Log::launched`]). A Claude window is opened after Claude has been asked
-    /// to trust its folder, and says what came of that ([`Window::trust`]). An
-    /// agent a window opened here cannot run is the error, before anything opens
-    /// ([`without_the_daemon`]).
+    /// to trust its folder, and says what came of that ([`Window::trust`]).
     pub fn open(self, log: &Log) -> Result<Window<'a>> {
         let harness = self.install.harness();
         let home = self
@@ -382,7 +380,6 @@ impl<'a> Open<'a> {
             .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
         let workspace = live_folder_in(Path::new(home), &self.folder)?;
         let agent = self.agent.clone().unwrap_or_else(|| agents::agent(harness));
-        without_the_daemon(&agent)?;
         let kind = agent["kind"]
             .as_str()
             .unwrap_or_else(|| harness.kind())
@@ -420,7 +417,7 @@ impl<'a> Open<'a> {
         if claude {
             // The settings the app writes for each launch (which skip the full-permission
             // warning), and no MCP server, connector or browser.
-            let settings = ask::claude_settings(&env, LAUNCH, false)?;
+            let settings = ask::claude_settings(&env, LAUNCH, false, self.rig.cf())?;
             match &self.claude_alone {
                 Some(hooks) => argv.extend(with_hooks(&settings, hooks)?),
                 None => argv.extend(settings),
@@ -579,26 +576,28 @@ fn keep_only_consensflows_hooks(args: &[String], cf: &Path) -> Result<()> {
     files::write(path, config.to_string())
 }
 
-/// Why a window opened here, without the daemon, cannot run `agent`: an OpenCode
-/// agent given an effort. OpenCode takes its effort as the `variant` of the first
-/// message, which the daemon posts to the window's own server; a window opened
-/// here has no such server (its messages are typed into it) and its command line
-/// has no word for an effort, so it would run on the model's default while the run
-/// said it ran on the effort.
-pub fn without_the_daemon(agent: &Value) -> Result {
-    let text = |key: &str| agent[key].as_str().filter(|text| !text.is_empty());
-    match (
-        agents::harness_of(agent),
-        text("effort").or(text("thinking")),
-    ) {
-        (Some(Harness::OpenCode), Some(effort)) => Err(Error::Daemon(format!(
-            "an OpenCode window opened without the daemon is given no effort: OpenCode takes \
-             it as the variant of the first message the daemon sends to the window's server, \
-             which this window has not; run opencode={} with no :{effort}",
-            text("model").unwrap_or("<model>")
-        ))),
-        _ => Ok(()),
+/// The program a window of `harness` opened here starts on: the one the kit found (`found`),
+/// but Muse's, which runs through the rig's live launcher (`launcher`, [`Rig::muse_launcher`])
+/// as every Muse window of a rig does. The machine's Muse started on its own reads and writes
+/// the person's `~/.config/muse`: a live run of `session-vars` rewrote their `auth.json` so
+/// (T-1024, 2026-10-31).
+pub(crate) fn program_of(
+    harness: Harness,
+    found: &Path,
+    launcher: Option<&Path>,
+) -> Result<String> {
+    if harness != Harness::Muse {
+        return Ok(found.to_string_lossy().into_owned());
     }
+    launcher
+        .map(|launcher| launcher.to_string_lossy().into_owned())
+        .ok_or_else(|| {
+            Error::Daemon(
+                "a Muse window runs through the rig's live launcher, and this rig seats no live \
+                 Muse (live::rig seats one for every Muse install)"
+                    .to_owned(),
+            )
+        })
 }
 
 /// The environment a harness is asked where its records are with, for a window in

@@ -51,16 +51,16 @@ pub(crate) use delivery::forget_receipt;
 pub use delivery::GivenUp;
 pub(crate) use delivery::{
     admit, begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling,
-    confirm_sent_by_hand, delivery_begun_ms, fail_delivery, first_received, give_up_delivery,
-    given_back_because, handed_over, in_flight, last_given, last_pasted, last_pastes,
-    next_delivery, next_delivery_of, note_since, paste_into, pasted_into, received_of,
-    retry_delivery, with_work,
+    confirm_sent_by_hand, confirm_unproven, delivery_begun_at, delivery_begun_ms, fail_delivery,
+    first_received, give_up_delivery, given_back_because, handed_over, in_flight, last_given,
+    last_pasted, last_pastes, next_delivery, next_delivery_of, note_since, paste_into, pasted_into,
+    received_of, retry_delivery, with_work,
 };
 pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
-pub(crate) use holds::{note_hold, tell_goes_on};
+pub(crate) use holds::{note_hold, note_hold_moved, note_hold_unavailable, tell_goes_on};
 pub(crate) use paused_answers::{
-    note as note_paused_answer, put_back as put_back_paused_answers,
+    given as paused_answer_given, note as note_paused_answer, put_back as put_back_paused_answers,
     queued as queued_paused_answers, tell_on_its_way, withdraw as withdraw_paused_answers,
 };
 pub use pauses::MAY_STILL_RUN;
@@ -73,11 +73,11 @@ pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
     settle_claim,
 };
-pub(crate) use roles::{note_role, role_notes_to};
+pub(crate) use roles::{note_role, role_notes_to, role_of_note};
 pub(crate) use taken_back::take_back;
 pub(crate) use told::{
-    drop_queued_but_told, kept_through_leaving, launch_called_off, tell_queued, told_unreceived,
-    told_waiting, Dropped,
+    drop_queued_but_told, kept_through_leaving, launch_called_off, notes_waiting, tell_queued,
+    told_unreceived, Dropped,
 };
 pub use told::{is_told, waiting_for_the_reopen};
 

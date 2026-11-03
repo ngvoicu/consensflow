@@ -144,6 +144,48 @@ fn a_refusal_names_its_quota_and_only_the_next_assistant_step_clears_it() {
 }
 
 #[test]
+fn pi_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota() {
+    // MUS-23: OpenRouter's spent credit (a 402) and a login Pi could not refresh (a 401) have
+    // no reset, as a 429's has: the account is unavailable until its human fixes it.
+    for (error, said) in [
+        (
+            "402: {\"message\":\"This request requires more credits, or fewer max_tokens.\"}",
+            "its billing was refused: 402:",
+        ),
+        (
+            "OAuth refresh failed for openai-codex: OpenAI Codex token refresh failed (401)",
+            "its login was refused: OAuth refresh failed",
+        ),
+    ] {
+        let mut stage = Stage::with(&[
+            header(),
+            failing("a1", &json!(error), &json!(1_790_000_000_000_i64)),
+        ]);
+        let record = stage.at(0);
+        assert!(record.failed, "{error}");
+        let Some(Quota::Unavailable { at, because }) = record.quota.as_deref() else {
+            panic!("{error}: {:?}", record.quota);
+        };
+        assert_eq!(at.as_deref(), Some("2026-09-21T14:13:20.000Z"), "{error}");
+        assert!(because.starts_with(said), "{because}");
+        assert_eq!(record.quota.as_deref().unwrap().resets_at(), None);
+    }
+    // A 429 is still a limit that resets.
+    let mut stage = Stage::with(&[
+        header(),
+        failing(
+            "a1",
+            &json!("429: slow down"),
+            &json!(1_790_000_000_000_i64),
+        ),
+    ]);
+    assert!(matches!(
+        stage.at(0).quota.as_deref(),
+        Some(Quota::Exhausted { .. })
+    ));
+}
+
+#[test]
 fn a_failure_is_the_text_string_makes_of_it() {
     let quota_of = |error: &Value| {
         let mut stage = Stage::with(&[header(), failing("a1", error, &json!(0))]);
@@ -375,6 +417,34 @@ fn a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them() {
     assert_eq!(record.failure, None);
     stage.write(&[header(), user("u1", "go"), failed(), user("u2", "again")]);
     assert_eq!(stage.at(0).failure, None);
+}
+
+#[test]
+fn a_failed_step_is_a_turn_that_ended_once_nothing_follows_it_for_the_quiet_spell() {
+    // A window the extension left no evidence of (a conversation followed with
+    // `/resume`, a launch folder swept, a write that failed) must not read at work for
+    // good after a failed turn (T-781): Pi writes a new step for each retry.
+    let failed = || failing("a1", &json!("Connection error."), &json!(0));
+    let mut stage = Stage::with(&[header(), user("u1", "go"), failed()]);
+    // Just written: Pi may be about to retry, so it is at work.
+    let record = stage.at(1_000);
+    assert!(record.failed && record.in_flight);
+    assert_eq!(record.settlement, Settlement::InFlight);
+    // Past two retries' worth of quiet it is over, with Pi's words for it kept.
+    let record = stage.at(120_000);
+    assert!(record.failed && !record.in_flight);
+    assert_eq!(record.settlement, Settlement::Settled);
+    assert_eq!(record.failure.as_deref(), Some("Connection error."));
+    // A retry that went through is no failed turn.
+    stage.write(&[
+        header(),
+        user("u1", "go"),
+        failed(),
+        assistant("a2", "stop", "done"),
+    ]);
+    let record = stage.at(120_000);
+    assert!(!record.failed && !record.in_flight);
+    assert_eq!(record.settlement, Settlement::Settled);
 }
 
 #[test]

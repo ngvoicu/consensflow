@@ -343,11 +343,11 @@ mod tests {
     #[test]
     fn a_door_is_named_by_a_harness_or_by_fake_and_nothing_else() {
         assert_eq!(named("fake").unwrap(), Who::StandIn);
-        assert_eq!(named("opencode").unwrap(), Who::Harness(Harness::OpenCode));
+        assert_eq!(named("codex").unwrap(), Who::Harness(Harness::Codex));
         let failed = named("kimi").unwrap_err().to_string();
         assert_eq!(
             failed,
-            "no door is called kimi: fake, claude, opencode, pi, devin, codex"
+            "no door is called kimi: fake, claude, pi, devin, codex, muse"
         );
         assert_eq!(Who::StandIn.name(), "fake");
         assert_eq!(Who::Harness(Harness::Devin).name(), "devin");
@@ -403,15 +403,9 @@ mod tests {
     #[test]
     fn a_member_runs_on_the_model_it_is_given_over_its_cheap_one() {
         let mut models = BTreeMap::new();
-        assert_eq!(
-            row_of(Harness::OpenCode, &models)["model"],
-            "opencode/muse-spark-1.3-contributor-free"
-        );
-        models.insert("opencode".to_owned(), "opencode/other".to_owned());
-        assert_eq!(
-            row_of(Harness::OpenCode, &models)["model"],
-            "opencode/other"
-        );
+        assert_eq!(row_of(Harness::Codex, &models)["model"], "gpt-5.6-luna");
+        models.insert("codex".to_owned(), "gpt-other".to_owned());
+        assert_eq!(row_of(Harness::Codex, &models)["model"], "gpt-other");
         assert_eq!(
             row_of(Harness::Pi, &models)["model"],
             "openrouter/meta/muse-spark-1.3"
@@ -421,15 +415,14 @@ mod tests {
     #[test]
     fn the_report_names_the_model_door_model_gave_a_member_and_not_the_one_models_gives() {
         let log = Log::begin("live door test").unwrap();
-        let models = BTreeMap::from([("opencode".to_owned(), "opencode/other".to_owned())]);
+        let models = BTreeMap::from([("codex".to_owned(), "gpt-other".to_owned())]);
         // What the daemon opens the member's window on is its row, as the roster has it.
         let rig = cf_e2e::rig::Rig::start(cf_e2e::rig::Config::new(crate::FAKE_AGENT)).unwrap();
-        cf_e2e::live::agents::write_roster(&rig, &[row_of(Harness::OpenCode, &models)], &log)
-            .unwrap();
+        cf_e2e::live::agents::write_roster(&rig, &[row_of(Harness::Codex, &models)], &log).unwrap();
         rig.close().unwrap();
         assert_eq!(
             log.ran_on().as_deref(),
-            Some("the windows ran on: opencode opencode/other")
+            Some("the windows ran on: codex gpt-other")
         );
     }
 }
