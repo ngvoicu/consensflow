@@ -11,6 +11,7 @@ friction-answer-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--li
 friction-answer-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "questions::"]
 friction-answer-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers"]
 friction-cancel = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "cancel_failed"]
+friction-last-need = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "edit_last_need"]
 friction-hold-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "hold_for_context"]
 friction-hold-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "exit_proof::"]
 
@@ -107,8 +108,8 @@ runs = ["friction-cancel"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        &["paused", "failed"],'
-replace = '        &["paused"],'
+find = '        &["paused", "done", "failed"],'
+replace = '        &["paused", "done"],'
 
 [[plant]]
 name = "board friction: cancel: a failed task's window is not stopped or told"
@@ -127,8 +128,8 @@ runs = ["friction-cancel"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        (Ending::Cancelled, "failed") => format!("reopen T-{number} and let it finish"),'
-replace = '        (Ending::Cancelled, "failed") => format!("let T-{number} finish"),'
+find = "        (Ending::Cancelled, \"failed\") => format!(\n            \"cancel {them} first, reopen T-{number} and let it finish, or accept it with what you checked\"\n        ),\n"
+replace = ""
 
 [[plant]]
 name = "board friction: cancel: a failed task is cancelled while a task waits for it"
@@ -147,8 +148,18 @@ runs = ["friction-cancel"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '        "queued" | "working" | "waiting" => format!('
-replace = '        "queued" | "working" | "waiting" if false => format!('
+find = '        "working" | "waiting" => format!('
+replace = '        "working" | "waiting" if false => format!('
+
+[[plant]]
+name = "board friction: before: a queued task is refused without a way forward"
+meant = "a_task_in_a_window_cannot_wait_for_a_new_one_and_the_refusal_says_what_to_do_instead"
+runs = ["friction-cancel"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '        "queued" => format!('
+replace = '        "queued" if false => format!('
 
 [[plant]]
 name = "board friction: before: a paused task is refused without a way forward"
@@ -160,7 +171,29 @@ file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '        "paused" => format!('
 replace = '        "paused" if false => format!('
 
-# --- T-798: cf task list and get say what a task given to a window waits for ---
+# --- T-798: the last need taken from a task given to a window releases it; cf task list and get
+# --- say what such a task waits for ---
+
+[[plant]]
+name = "board friction: edit: the last need taken from a task given to a window leaves it open for good"
+meant = "a_stage_holding_several_own_steps_lets_go_of_only_the_one_whose_need_is_taken"
+runs = ["friction-last-need"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "       WHERE t.project_id = ? AND t.state = 'open' AND t.assignee_id IS NOT NULL\n         AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id"
+replace = "       WHERE t.project_id = ? AND t.state = 'open' AND t.assignee_id IS NOT NULL\n         AND EXISTS (SELECT 1 FROM task_need n WHERE n.task_id = t.id)\n         AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id"
+
+[[plant]]
+name = "board friction: edit: a task given to a window is released while it still waits for a need"
+meant = "a_stage_holding_several_own_steps_lets_go_of_only_the_one_whose_need_is_taken"
+runs = ["friction-last-need"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "         AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id\n                         WHERE n.task_id = t.id AND d.state != 'accepted')\n       ORDER BY t.id\","
+replace = "       ORDER BY t.id\","
+
 
 [[plant]]
 name = "board friction: list: a task given to a window says nothing of what it waits for"

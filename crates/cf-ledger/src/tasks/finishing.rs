@@ -333,14 +333,16 @@ fn require_result_received(store: &Store, task: &TaskRow, by: &str) -> Result<()
 /// a door refuses it only while it has a task in hand (`require_free`), and
 /// `--before` orders them by what each needs. A follow-up of a task still on its
 /// work is one of them: that task is among what it needs, and the window is
-/// given the follow-up once the task is accepted.
+/// given the follow-up once the task is accepted. A task needing nothing any more is
+/// one of them: `cf task edit T-n --needs -T-m` takes a need, the last included, from a
+/// task given to a window, which is then released as if the need had been accepted
+/// (T-798: it was found by the need rows it had, and with none was open for good).
 pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
     let waiting = store
         .db
         .prepare(
             "SELECT t.* FROM task t
        WHERE t.project_id = ? AND t.state = 'open' AND t.assignee_id IS NOT NULL
-         AND EXISTS (SELECT 1 FROM task_need n WHERE n.task_id = t.id)
          AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
                          WHERE n.task_id = t.id AND d.state != 'accepted')
        ORDER BY t.id",
