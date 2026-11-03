@@ -11,8 +11,34 @@ use std::time::Duration;
 
 use crate::{Error, Result};
 
+use crate::live::report::Check;
+
 use super::machine::Fact;
 use super::observe::{Bind, Bindings, Snapshot, SMOKE};
+use super::oracle::{self, Judged};
+
+mod phase2;
+
+pub use phase2::{cancel, core, field6};
+
+/// Every scenario the matrix has, by name.
+pub fn all() -> Vec<Scenario> {
+    let mut all = vec![smoke(), cancel(), core()];
+    all.extend(field6());
+    all
+}
+
+/// The checks of the smoke scenario: each task's seat, state and result, and the fixture.
+fn smoke_checks(judged: &Judged) -> Vec<Check> {
+    let mut checks = oracle::tasks(
+        judged.seating,
+        judged.snapshot,
+        judged.bindings,
+        judged.records,
+    );
+    checks.extend(oracle::fixture(judged.folder));
+    checks
+}
 
 /// The fixture's code, before the change: what the checker refuses.
 pub const GREET: &str =
@@ -58,8 +84,9 @@ pub const SMOKE_FACTS: &[Fact] = &[
 #[derive(Debug, Clone, Copy)]
 pub struct Step {
     pub name: &'static str,
-    /// What the human types to a real chief, after the step's marker.
-    pub asks: &'static str,
+    /// What the human types to a real chief, after the step's marker, with the tasks bound so
+    /// far (a step that names a task names the number the board gave it).
+    pub asks: fn(&Bindings) -> String,
     /// What the human types to the stand-in chief, after the marker: its own words for the
     /// same ask, with the tasks bound so far.
     pub stand_in: fn(&Bindings) -> String,
@@ -71,6 +98,8 @@ pub struct Step {
 #[derive(Debug, Clone)]
 pub struct Scenario {
     pub name: &'static str,
+    /// Its version: a replay of a run of another version says so.
+    pub version: u32,
     /// The files of the project, made before anything opens.
     pub fixture: Vec<(&'static str, &'static str)>,
     pub steps: Vec<Step>,
@@ -87,29 +116,49 @@ pub struct Scenario {
     /// Which tasks' briefs may go in only once another is done: each earlier task's name, and
     /// the later ones'.
     pub order: &'static [(&'static str, &'static [&'static str])],
-    /// The refusals the product must answer a window with, by their codes, as the daemon wrote
+    /// The refusals the product must answer the chief with, by their codes, as the daemon wrote
     /// them (`api.answered`): never a model's words of them.
     pub refusals: &'static [Refused],
+    /// The scenario's own checks, of the board at its end.
+    pub checks: fn(&Judged) -> Vec<Check>,
+    /// The checks that fail on today's main by design, each until the work named lands: said
+    /// apart, never passed, and a red of the scenario once one of them holds (its mark is
+    /// then to go).
+    pub known: &'static [Known],
 }
 
-/// A refusal the product must answer: who asked, the method, words of the path, the code.
+/// A refusal the product must answer the chief with: its call of `action` on the task bound to
+/// `task`, refused with `code`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Refused {
-    pub participant: &'static str,
-    pub method: &'static str,
-    pub path: &'static str,
+    pub task: &'static str,
+    pub action: &'static str,
     pub code: &'static str,
+}
+
+/// A check that fails on today's main by design: whose (its `who`), words of its `what`, and
+/// the work whose landing turns it green.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Known {
+    pub who: &'static str,
+    pub what: &'static str,
+    pub until: &'static str,
 }
 
 impl Scenario {
     /// The scenario called `name`.
     pub fn named(name: &str) -> Result<Self> {
-        match name {
-            "smoke" => Ok(smoke()),
-            other => Err(Error::Daemon(format!(
-                "the matrix has the scenario smoke alone so far: no {other}"
-            ))),
-        }
+        let all = all();
+        let names: Vec<&str> = all.iter().map(|scenario| scenario.name).collect();
+        all.iter()
+            .find(|scenario| scenario.name == name)
+            .cloned()
+            .ok_or_else(|| {
+                Error::Daemon(format!(
+                    "no scenario is called {name}: {}",
+                    names.join(", ")
+                ))
+            })
     }
 
     /// The marker of step `index` (from 0) in run `run`: the human's own words at the start of
@@ -151,23 +200,34 @@ fn accept_line(bindings: &Bindings, name: &str) -> String {
 pub fn smoke() -> Scenario {
     Scenario {
         name: "smoke",
+        version: 1,
         fixture: vec![("greet.cjs", GREET), ("check.cjs", CHECK)],
         steps: vec![
             Step {
                 name: "advice",
-                asks: "This project has greet.cjs and check.cjs: `node check.cjs` prints OK once greet(\"Ada\") returns exactly \"Hello, Ada!\", and it does not yet. Before anything changes, get advice: put one advice task on the board for our advisor, with `cf task add --advice --tier standard \"...\"`, asking how greet.cjs should change so that the check passes. Every member of our staff is at tier standard. Change no file yourself, ask me nothing, and tell me in one line when the advice is back.",
-                stand_in: |_| "DISPATCH --advice --tier standard Reply with exactly: ADVICE_OK".to_owned(),
+                asks: |_| {
+                    "This project has greet.cjs and check.cjs: `node check.cjs` prints OK once greet(\"Ada\") returns exactly \"Hello, Ada!\", and it does not yet. Before anything changes, get advice: put one advice task on the board for our advisor, with `cf task add --advice --tier standard \"...\"`, asking how greet.cjs should change so that the check passes. Every member of our staff is at tier standard. Change no file yourself, ask me nothing, and tell me in one line when the advice is back.".to_owned()
+                },
+                stand_in: |_| {
+                    "DISPATCH --advice --tier standard Reply with exactly: ADVICE_OK".to_owned()
+                },
                 reached: |snapshot, bindings| answered(snapshot, bindings, "advice"),
             },
             Step {
                 name: "change",
-                asks: "Now have our worker make that change: put one task on the board with `cf task add --tier standard \"...\"` to change greet.cjs so that `node check.cjs` prints OK, leaving check.cjs as it is. Do not make the change yourself, and tell me in one line when the worker's result is back.",
-                stand_in: |_| format!("DISPATCH --tier standard WRITE greet.cjs :: {STAND_IN_CHANGE}"),
+                asks: |_| {
+                    "Now have our worker make that change: put one task on the board with `cf task add --tier standard \"...\"` to change greet.cjs so that `node check.cjs` prints OK, leaving check.cjs as it is. Do not make the change yourself, and tell me in one line when the worker's result is back.".to_owned()
+                },
+                stand_in: |_| {
+                    format!("DISPATCH --tier standard WRITE greet.cjs :: {STAND_IN_CHANGE}")
+                },
                 reached: |snapshot, bindings| answered(snapshot, bindings, "change"),
             },
             Step {
                 name: "review and test",
-                asks: "Have the change checked: put one review task on the board for our reviewer with `cf task add --review --tier standard \"...\"` to read greet.cjs, and one test task for our tester with `cf task add --test --tier standard \"...\"` to run `node check.cjs` and say what it prints. Tell me in one line when both results are back.",
+                asks: |_| {
+                    "Have the change checked: put one review task on the board for our reviewer with `cf task add --review --tier standard \"...\"` to read greet.cjs, and one test task for our tester with `cf task add --test --tier standard \"...\"` to run `node check.cjs` and say what it prints. Tell me in one line when both results are back.".to_owned()
+                },
                 stand_in: |_| {
                     "DISPATCH --review --tier standard Reply with exactly: REVIEW_OK\nDISPATCH --test --tier standard Reply with exactly: TEST_OK".to_owned()
                 },
@@ -177,7 +237,9 @@ pub fn smoke() -> Scenario {
             },
             Step {
                 name: "accept",
-                asks: "If the review and the test found nothing wrong, accept the four tasks: the advice, the change, the review and the test, each with `cf task accept`. Tell me in one line when they are accepted.",
+                asks: |_| {
+                    "If the review and the test found nothing wrong, accept the four tasks: the advice, the change, the review and the test, each with `cf task accept`. Tell me in one line when they are accepted.".to_owned()
+                },
                 stand_in: |bindings| {
                     ["advice", "change", "review", "test"]
                         .map(|name| accept_line(bindings, name))
@@ -197,6 +259,8 @@ pub fn smoke() -> Scenario {
         binds: &SMOKE,
         order: &[("advice", &["change"]), ("change", &["review", "test"])],
         refusals: &[],
+        checks: smoke_checks,
+        known: &[],
     }
 }
 
@@ -224,23 +288,52 @@ mod tests {
         assert_eq!(steps, ["advice", "change", "review and test", "accept"]);
         assert_eq!(smoke.deadline, Duration::from_secs(900));
         assert_eq!(smoke.turns, 20);
-        assert!(Scenario::named("core")
-            .unwrap_err()
-            .to_string()
-            .contains("smoke alone so far"));
+        let refused = Scenario::named("nothing").unwrap_err().to_string();
+        assert!(
+            refused.contains("no scenario is called nothing: smoke, cancel, core, field6-"),
+            "{refused}"
+        );
         assert_eq!(smoke.marker("r1", 1), "[matrix r1 ask 2/4]");
     }
 
     #[test]
-    fn every_ask_to_a_real_chief_is_one_line_and_names_the_tier_it_is_for() {
+    fn every_ask_to_a_real_chief_is_one_line_and_every_scenario_has_a_name_of_its_own() {
+        let bound = bound(&[
+            ("advice", 1),
+            ("change", 2),
+            ("review", 3),
+            ("test", 4),
+            ("a", 1),
+            ("b", 2),
+            ("d", 1),
+            ("f", 2),
+            ("follow", 2),
+        ]);
+        let all = all();
+        for scenario in &all {
+            for step in &scenario.steps {
+                let asks = (step.asks)(&bound);
+                assert!(
+                    !asks.contains('\n') && !asks.is_empty(),
+                    "{} {}",
+                    scenario.name,
+                    step.name
+                );
+            }
+            assert!(scenario.version >= 1);
+        }
         for step in smoke().steps {
-            assert!(!step.asks.contains('\n'), "{}", step.name);
             assert!(
-                step.asks.contains("--tier standard") || step.name == "accept",
+                (step.asks)(&bound).contains("--tier standard") || step.name == "accept",
                 "{}",
                 step.name
             );
         }
+        let mut names: Vec<&str> = all.iter().map(|scenario| scenario.name).collect();
+        let count = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), count, "{names:?}");
     }
 
     #[test]

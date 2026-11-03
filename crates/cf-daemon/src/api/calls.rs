@@ -3,8 +3,9 @@
 //! test that seats a real chief can tell what the chief's own `cf` asked and how the daemon
 //! answered it, a refusal's code among it, though `cf` says a refusal in words (T-1133's
 //! design, section 2; the live matrix, T-1152). The line names the participant, the method, the
-//! path, the status and the refusal's code: never the token, never the body, never the answer's
-//! words. The app never sets the variable, and a daemon without it writes no such line.
+//! path, the status, and a refusal's code and words (the product's own, which name the task
+//! that holds a window: field report 6): never the token, never the body, never an answer's.
+//! The app never sets the variable, and a daemon without it writes no such line.
 
 use serde_json::{json, Value};
 
@@ -32,10 +33,12 @@ pub fn line(
     path: &str,
     answered: &Result<Answer, Failure>,
 ) -> Value {
-    let (status, error) = match answered {
-        Ok(answer) => (answer.status, Value::Null),
-        Err(Failure::Refused(refusal)) => (refusal.status, json!(refusal.code)),
-        Err(Failure::Internal(_)) => (500, json!("internal")),
+    let (status, error, message) = match answered {
+        Ok(answer) => (answer.status, Value::Null, Value::Null),
+        Err(Failure::Refused(refusal)) => {
+            (refusal.status, json!(refusal.code), json!(refusal.message))
+        }
+        Err(Failure::Internal(_)) => (500, json!("internal"), Value::Null),
     };
     json!({
         "participant": caller.participant.handle,
@@ -44,6 +47,7 @@ pub fn line(
         "path": path,
         "status": status,
         "error": error,
+        "message": message,
     })
 }
 

@@ -136,14 +136,26 @@ pub fn after_done(
     earlier: &str,
     later: &[&str],
 ) -> Vec<Check> {
+    after_state(snapshot, bindings, earlier, "done", later)
+}
+
+/// [`after_done`], for the task bound to `earlier` reaching `state` (a follow-up waits for its
+/// predecessor's acceptance: field report 6).
+pub fn after_state(
+    snapshot: &Snapshot,
+    bindings: &Bindings,
+    earlier: &str,
+    state: &str,
+    later: &[&str],
+) -> Vec<Check> {
     let events = &snapshot.events;
     let done = bindings
         .of_name(earlier)
-        .and_then(|number| Some((number, observe::reached_at(events, number, "done")?)));
+        .and_then(|number| Some((number, observe::reached_at(events, number, state)?)));
     later
         .iter()
         .map(|name| {
-            let what = format!("its brief went in after the {earlier} was done");
+            let what = format!("its brief went in after the {earlier} was {state}");
             let brief = bindings.of_name(name).and_then(|number| {
                 let message = observe::brief_message(events, number)?;
                 Some((number, message, observe::delivered_at(events, message)?))
@@ -154,47 +166,228 @@ pub fn after_done(
                     &what,
                     delivered_ms >= done_ms,
                     format!(
-                        "T-{number}'s brief m-{message} was delivered {} ms after T-{before} was done",
+                        "T-{number}'s brief m-{message} was delivered {} ms after T-{before} was {state}",
                         delivered_ms - done_ms
                     ),
                 ),
-                (None, _) => Check::failed(name, &what, format!("no {earlier} task was done")),
-                (_, None) => Check::failed(name, &what, format!("no brief of the {name} task was delivered")),
+                (None, _) => Check::failed(name, &what, format!("no {earlier} task was {state}")),
+                (_, None) => Check::failed(
+                    name,
+                    &what,
+                    format!("no brief of the {name} task was delivered"),
+                ),
             }
         })
         .collect()
 }
 
-/// The check that `participant` asked `method` of a path that holds `path` and was refused with
-/// `code`: the product's own refusal, as a tooling daemon wrote it, not a model's words of it.
-pub fn refused(calls: &[Call], participant: &str, method: &str, path: &str, code: &str) -> Check {
-    let asked: Vec<&Call> = calls
-        .iter()
-        .filter(|call| {
-            call.participant == participant && call.method == method && call.path.contains(path)
-        })
+/// What a scenario's checks are given: the seats, the board at its end, the tasks bound, the
+/// windows' records and the project's folder.
+pub struct Judged<'a> {
+    pub seating: &'a Seating,
+    pub snapshot: &'a Snapshot,
+    pub bindings: &'a Bindings,
+    pub records: &'a dyn Records,
+    pub folder: &'a Path,
+}
+
+impl Judged<'_> {
+    /// The task bound to `name`, the `nth` (from 0) of those that fit.
+    pub fn nth(&self, name: &str, nth: usize) -> Option<i64> {
+        self.bindings
+            .found
+            .get(name)
+            .and_then(|numbers| numbers.get(nth).copied())
+    }
+}
+
+/// The check that the task bound to `name` (the `nth`) is in one of `states`.
+pub fn state(judged: &Judged, name: &str, nth: usize, states: &[&str]) -> Check {
+    let what = format!("it is {}", states.join(" or "));
+    match judged
+        .nth(name, nth)
+        .and_then(|number| Some((number, judged.snapshot.task(number)?)))
+    {
+        Some((number, task)) => Check::new(
+            name,
+            &what,
+            states.iter().any(|state| task["state"] == *state),
+            format!("T-{number} is {}", task["state"]),
+        ),
+        None => Check::failed(name, &what, format!("no {name} task was bound")),
+    }
+}
+
+/// How many times the brief of the task bound to `name` (the `nth`) was delivered into a
+/// window, as the daemon's events say: none for a task no window was given.
+pub fn briefed(judged: &Judged, name: &str, nth: usize) -> Option<(i64, usize)> {
+    let number = judged.nth(name, nth)?;
+    let events = &judged.snapshot.events;
+    let times = observe::brief_message(events, number).map_or(0, |message| {
+        events
+            .iter()
+            .filter(|event| {
+                event["kind"] == "delivery.confirmed" && event["data"]["message"] == message
+            })
+            .count()
+    });
+    Some((number, times))
+}
+
+/// The check that the task bound to `name` (the `nth`) went into no window: it waits.
+pub fn never_briefed(judged: &Judged, name: &str, nth: usize) -> Check {
+    let what = "no window was given its brief";
+    match briefed(judged, name, nth) {
+        Some((number, times)) => Check::new(
+            name,
+            what,
+            times == 0 && observe::brief_message(&judged.snapshot.events, number).is_none(),
+            format!("T-{number}'s brief went to a window {times} time(s)"),
+        ),
+        None => Check::failed(name, what, format!("no {name} task was bound")),
+    }
+}
+
+/// The check that the task bound to `name` (the `nth`) was delivered into its window once.
+pub fn briefed_once(judged: &Judged, name: &str, nth: usize) -> Check {
+    let what = "its brief was delivered once";
+    match briefed(judged, name, nth) {
+        Some((number, times)) => Check::new(
+            name,
+            what,
+            times == 1,
+            format!("T-{number}'s brief was delivered {times} time(s)"),
+        ),
+        None => Check::failed(name, what, format!("no {name} task was bound")),
+    }
+}
+
+/// What a call of the chief's is to be answered with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answered {
+    /// Done: no refusal.
+    Done,
+    /// Refused with the code, its words holding each of the texts (`T-{n}` of a bound task is
+    /// written as `{name}` and stands for its number).
+    Refused(&'static str, &'static [&'static str]),
+}
+
+/// The check that the chief's `nth` (from 0) call of `action` on the task bound to `name` was
+/// answered as `expected`, as a tooling daemon wrote it: the product's own answer and words,
+/// never a model's.
+pub fn chief_call(
+    judged: &Judged,
+    name: &str,
+    action: &str,
+    nth: usize,
+    expected: Answered,
+) -> Check {
+    let label = match expected {
+        Answered::Done => format!("the chief's {} {action} of it was done", ordinal(nth)),
+        Answered::Refused(code, words) => format!(
+            "the chief's {} {action} of it was refused with {code}{}",
+            ordinal(nth),
+            if words.is_empty() {
+                String::new()
+            } else {
+                format!(", naming {}", words.join(" and "))
+            }
+        ),
+    };
+    let Some(number) = judged.nth(name, 0) else {
+        return Check::failed(name, &label, format!("no {name} task was bound"));
+    };
+    let path = format!("/api/tasks/{number}/{action}");
+    let calls: Vec<Call> = observe::calls(&judged.snapshot.events)
+        .into_iter()
+        .filter(|call| call.participant == "chief" && call.method == "POST" && call.path == path)
         .collect();
+    let Some(call) = calls.get(nth) else {
+        return Check::failed(
+            name,
+            &label,
+            format!("the chief made {} call(s) of POST {path}", calls.len()),
+        );
+    };
+    let said = format!(
+        "POST {path} answered {} {}{}",
+        call.status,
+        call.error.as_deref().unwrap_or("ok"),
+        call.message
+            .as_deref()
+            .map_or_else(String::new, |message| format!(": {message}"))
+    );
+    let held = match expected {
+        Answered::Done => call.error.is_none() && call.status < 400,
+        Answered::Refused(code, words) => {
+            let message = call.message.as_deref().unwrap_or_default();
+            call.error.as_deref() == Some(code)
+                && words
+                    .iter()
+                    .all(|word| message.contains(&named(judged, word)))
+        }
+    };
+    Check::new(name, &label, held, said)
+}
+
+/// `word` with each `{name}` of a bound task written as `T-<its number>`.
+fn named(judged: &Judged, word: &str) -> String {
+    let mut text = word.to_owned();
+    for (name, numbers) in &judged.bindings.found {
+        if let Some(number) = numbers.first() {
+            text = text.replace(&format!("{{{name}}}"), &format!("T-{number}"));
+        }
+    }
+    text
+}
+
+fn ordinal(nth: usize) -> &'static str {
+    ["first", "second", "third"]
+        .get(nth)
+        .copied()
+        .unwrap_or("later")
+}
+
+/// The check that the result of the task bound to `name` is kept: the message its `done`
+/// named is in the chief's inbox, a result of that task, with words.
+pub fn result_kept(judged: &Judged, name: &str) -> Check {
+    let what = "its result is kept";
+    let Some(number) = judged.nth(name, 0) else {
+        return Check::failed(name, what, format!("no {name} task was bound"));
+    };
+    let result = judged.snapshot.events.iter().find_map(|event| {
+        (event["kind"] == "task.state"
+            && event["data"]["task"] == number
+            && event["data"]["to"] == "done")
+            .then(|| event["data"]["result"].as_i64())
+            .flatten()
+    });
+    let Some(id) = result else {
+        return Check::failed(
+            name,
+            what,
+            format!("T-{number} was never done with a result"),
+        );
+    };
+    let kept = judged
+        .snapshot
+        .chief_inbox
+        .iter()
+        .find(|message| message["id"] == id);
     Check::new(
-        participant,
-        &format!("{method} {path} was refused with {code}"),
-        asked.iter().any(|call| call.error.as_deref() == Some(code)),
-        if asked.is_empty() {
-            format!("@{participant} asked no {method} of a path holding {path}")
-        } else {
-            asked
-                .iter()
-                .map(|call| {
-                    format!(
-                        "{} {} answered {} {}",
-                        call.method,
-                        call.path,
-                        call.status,
-                        call.error.as_deref().unwrap_or("ok")
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("; ")
-        },
+        name,
+        what,
+        kept.is_some_and(|message| {
+            message["kind"] == "result"
+                && message["taskNumber"] == number
+                && message["body"]
+                    .as_str()
+                    .is_some_and(|body| !body.is_empty())
+        }),
+        kept.map_or_else(
+            || format!("m-{id}, T-{number}'s result, is not in the chief's inbox"),
+            |message| format!("m-{id} is {} {}", message["kind"], message["state"]),
+        ),
     )
 }
 
@@ -480,33 +673,86 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_is_judged_by_the_code_the_daemon_answered_and_nothing_else() {
-        let call = |path: &str, status: u64, error: Option<&str>| Call {
-            participant: "chief".to_owned(),
-            method: "POST".to_owned(),
-            path: path.to_owned(),
-            status,
-            error: error.map(str::to_owned),
-            at_ms: None,
+    fn a_refusal_is_judged_by_the_code_and_the_words_the_daemon_answered_and_nothing_else() {
+        let (mut snapshot, briefs) = board();
+        let answered = |path: &str, status: u64, error: Option<&str>, message: Option<&str>| {
+            json!({ "kind": "api.answered", "data": {
+                "participant": "chief", "method": "POST", "path": path,
+                "status": status, "error": error, "message": message,
+            } })
         };
-        let calls = [
-            call("/api/tasks/1/accept", 200, None),
-            call("/api/tasks/1/reopen", 409, Some("not-done")),
+        snapshot.events = vec![
+            answered("/api/tasks/1/accept", 200, None, None),
+            answered(
+                "/api/tasks/1/reopen",
+                409,
+                Some("session-busy"),
+                Some("@w is still on its work: T-3 is paused"),
+            ),
+            answered("/api/tasks/2/cancel", 200, None, None),
         ];
-        assert!(refused(&calls, "chief", "POST", "/1/reopen", "not-done").ok);
-        let wrong = refused(&calls, "chief", "POST", "/1/reopen", "session-busy");
-        assert!(!wrong.ok);
+        let bindings = Bindings::of(&snapshot);
+        let seating = Seating::stand_ins();
+        let judged = Judged {
+            seating: &seating,
+            snapshot: &snapshot,
+            bindings: &bindings,
+            records: &briefs,
+            folder: Path::new("."),
+        };
         assert!(
-            wrong.detail.contains("answered 409 not-done"),
+            chief_call(
+                &judged,
+                "advice",
+                "reopen",
+                0,
+                Answered::Refused("session-busy", &[])
+            )
+            .ok
+        );
+        assert!(
+            chief_call(
+                &judged,
+                "advice",
+                "reopen",
+                0,
+                Answered::Refused("session-busy", &["{review}", "paused"])
+            )
+            .ok
+        );
+        let wrong = chief_call(
+            &judged,
+            "advice",
+            "reopen",
+            0,
+            Answered::Refused("waited-for", &[]),
+        );
+        assert!(
+            !wrong.ok
+                && wrong
+                    .detail
+                    .contains("answered 409 session-busy: @w is still"),
             "{}",
             wrong.detail
         );
-        assert!(!refused(&calls, "chief", "POST", "/1/accept", "not-done").ok);
-        let nobody = refused(&calls, "matrix-worker-a", "POST", "/1/reopen", "not-done");
+        // The code right and the words naming another task: no pass.
         assert!(
-            !nobody.ok && nobody.detail.contains("asked no POST"),
+            !chief_call(
+                &judged,
+                "advice",
+                "reopen",
+                0,
+                Answered::Refused("session-busy", &["{change}"])
+            )
+            .ok
+        );
+        assert!(chief_call(&judged, "change", "cancel", 0, Answered::Done).ok);
+        assert!(!chief_call(&judged, "advice", "reopen", 0, Answered::Done).ok);
+        let none = chief_call(&judged, "advice", "reopen", 1, Answered::Done);
+        assert!(
+            !none.ok && none.detail.contains("made 1 call(s)"),
             "{}",
-            nobody.detail
+            none.detail
         );
     }
 

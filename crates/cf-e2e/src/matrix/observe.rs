@@ -130,11 +130,10 @@ impl Snapshot {
                     }
                     was.insert(handle, state);
                 }
-                Some("task.assigned") => {
+                Some("task.assigned" | "task.created") => {
                     let data = &event["data"];
-                    if let (Some(id), Some(assignee)) =
-                        (data["message"].as_i64(), data["assignee"].as_str())
-                    {
+                    let window = data["assignee"].as_str().or_else(|| data["to"].as_str());
+                    if let (Some(id), Some(assignee)) = (data["message"].as_i64(), window) {
                         recipient.insert(id, assignee.to_owned());
                         if let Some(task) = data["task"].as_i64() {
                             assignees.insert(task, assignee.to_owned());
@@ -278,6 +277,13 @@ impl Bindings {
         bound
     }
 
+    /// The task bound to `name`, the `nth` (from 0) of those that fit.
+    pub fn nth(&self, name: &str, nth: usize) -> Option<i64> {
+        self.found
+            .get(name)
+            .and_then(|numbers| numbers.get(nth).copied())
+    }
+
     /// The task bound to `name`: the oldest that fits.
     pub fn of_name(&self, name: &str) -> Option<i64> {
         self.found
@@ -301,6 +307,8 @@ pub struct Call {
     pub status: u64,
     /// The refusal's code; none where it was answered.
     pub error: Option<String>,
+    /// The refusal's words, the product's own; none where it was answered.
+    pub message: Option<String>,
     pub at_ms: Option<i64>,
 }
 
@@ -320,17 +328,21 @@ pub fn calls(events: &[Value]) -> Vec<Call> {
                 path: data["path"].as_str().unwrap_or_default().to_owned(),
                 status: data["status"].as_u64().unwrap_or_default(),
                 error: data["error"].as_str().map(str::to_owned),
+                message: data["message"].as_str().map(str::to_owned),
                 at_ms: super::human::at_ms(event),
             }
         })
         .collect()
 }
 
-/// The message that carried task `number`'s brief (or a reopen's words) into its window, the
-/// first: its id, as the daemon's events say it.
+/// The message that carried task `number`'s brief into its window, the first: its id, as the
+/// daemon's events say it.
 pub fn brief_message(events: &[Value], number: i64) -> Option<i64> {
     events.iter().find_map(|event| {
-        (event["kind"] == "task.assigned" && event["data"]["task"] == number)
+        // A pool's task is given its window by `task.assigned`; a follow-up queued for its
+        // window at once (`--after`, `--to`) by `task.created`.
+        (["task.assigned", "task.created"].contains(&event["kind"].as_str().unwrap_or_default())
+            && event["data"]["task"] == number)
             .then(|| event["data"]["message"].as_i64())
             .flatten()
     })
@@ -578,6 +590,7 @@ mod tests {
                     path: "/api/tasks/1/reopen".to_owned(),
                     status: 409,
                     error: Some("not-done".to_owned()),
+                    message: None,
                     at_ms: Some(1_000)
                 },
                 Call {
@@ -586,6 +599,7 @@ mod tests {
                     path: "/api/staff".to_owned(),
                     status: 200,
                     error: None,
+                    message: None,
                     at_ms: Some(2_000)
                 },
             ]
@@ -603,6 +617,10 @@ mod tests {
         ];
         assert_eq!(brief_message(&events, 2), Some(7));
         assert_eq!(brief_message(&events, 3), None);
+        let created = vec![
+            json!({ "kind": "task.created", "data": { "task": 5, "to": "w-a", "message": 9 } }),
+        ];
+        assert_eq!(brief_message(&created, 5), Some(9));
         assert_eq!(delivered_at(&events, 7), Some(20));
         assert_eq!(reached_at(&events, 2, "done"), Some(30));
         assert_eq!(reached_at(&events, 2, "accepted"), None);

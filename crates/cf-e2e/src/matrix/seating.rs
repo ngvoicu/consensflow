@@ -45,12 +45,12 @@ impl Role {
         Self::Tester,
     ];
 
-    /// Its name, as the evidence says it (and as the ledger names a member's role).
     /// The position called `name`, as [`Role::name`] says it.
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|role| role.name() == name)
     }
 
+    /// Its name, as the evidence says it (and as the ledger names a member's role).
     pub const fn name(self) -> &'static str {
         match self {
             Self::Chief => "chief",
@@ -135,32 +135,248 @@ pub const BOARD_0: [(Role, Harness); 5] = [
     (Role::Tester, Harness::Muse),
 ];
 
+/// The harnesses in the order the Latin square turns them: board `k` seats in position `r`
+/// (in [`Role::ALL`]'s order) the harness `k + r` places on, so each harness sits in each
+/// position on exactly one of the five boards (LMX-03's table; LMX-05).
+pub const ORDER: [Harness; 5] = [
+    Harness::Claude,
+    Harness::Codex,
+    Harness::Pi,
+    Harness::Devin,
+    Harness::Muse,
+];
+
+/// How many boards the Latin square has.
+pub const BOARDS: u8 = 5;
+
+/// The platforms each board runs on.
+pub const PLATFORMS: [&str; 2] = ["macos", "windows"];
+
+/// The harness of each position of board `board` (0 to 4).
+pub fn row_of(board: u8) -> [(Role, Harness); 5] {
+    Role::ALL.map(|role| {
+        let at = Role::ALL
+            .iter()
+            .position(|each| *each == role)
+            .unwrap_or_default();
+        (role, ORDER[(usize::from(board) + at) % ORDER.len()])
+    })
+}
+
+/// One cell of the matrix: a harness in a position, on a platform, and the board that seats it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cell {
+    pub platform: &'static str,
+    pub harness: Harness,
+    pub role: Role,
+    pub board: u8,
+}
+
+/// Every cell the five boards cover on both platforms: 50, each harness in each position once
+/// a platform.
+pub fn cells() -> Vec<Cell> {
+    let mut cells = Vec::new();
+    for platform in PLATFORMS {
+        for board in 0..BOARDS {
+            for (role, harness) in row_of(board) {
+                cells.push(Cell {
+                    platform,
+                    harness,
+                    role,
+                    board,
+                });
+            }
+        }
+    }
+    let place = |harness: Harness| ORDER.iter().position(|each| *each == harness);
+    cells.sort_by_key(|cell| (cell.platform, place(cell.harness), cell.role, cell.board));
+    cells
+}
+
+/// The plan a person reads: the five boards, then every cell with the board that covers it.
+pub fn plan_text() -> String {
+    let mut text = String::from("The Latin square: board, then the harness of each position.\n");
+    text.push_str("board  chief   worker  reviewer advisor tester\n");
+    for board in 0..BOARDS {
+        let row: Vec<String> = row_of(board)
+            .iter()
+            .map(|(_, harness)| format!("{:<8}", harness.name()))
+            .collect();
+        text.push_str(&format!("{board:<6} {}\n", row.join("").trim_end()));
+    }
+    let cells = cells();
+    text.push_str(&format!(
+        "\n{} cells (harness x position x platform), each covered by one board:\n",
+        cells.len()
+    ));
+    for cell in &cells {
+        text.push_str(&format!(
+            "{:<8} {:<7} {:<9} board {}\n",
+            cell.platform,
+            cell.harness.name(),
+            cell.role.name(),
+            cell.board
+        ));
+    }
+    text.push_str("\nThe image designer is a sixth member and Codex alone (`--seats ...,designer=codex`): the catalog refuses `designer: true` for every other harness.\n");
+    text
+}
+
 /// The five positions of a board and who sits in each.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seating {
-    /// The board's number; none for the stand-ins' control.
+    /// The board's number, where the seats are one of the Latin square's rows.
     pub board: Option<u8>,
     pub seats: Vec<Seat>,
+    /// Whether every position is the rig's stand-in's: the control, which covers nothing.
+    pub control: bool,
+    /// The image designer, a sixth member, where the run seats one: Codex alone.
+    pub designer: Option<Harness>,
 }
 
 impl Seating {
-    /// Board `number` of the rotation. Only board 0 is built in this slice (LMX-04's row 1);
-    /// the others are LMX-05's, and are refused rather than guessed.
+    /// Board `number` of the Latin square, 0 to 4 ([`row_of`]).
     pub fn board(number: u8) -> Result<Self> {
-        if number != 0 {
+        if number >= BOARDS {
             return Err(Error::Daemon(format!(
-                "the matrix has board 0 alone so far (chief Claude Code, worker Codex, reviewer Pi, advisor Devin, tester Muse Code): no board {number}"
+                "the Latin square has boards 0 to {}: no board {number}",
+                BOARDS - 1
             )));
         }
-        Ok(Self {
-            board: Some(0),
-            seats: BOARD_0
-                .iter()
+        Ok(Self::real(Some(number), row_of(number).to_vec(), None))
+    }
+
+    /// The seating of `seats`, each a real harness, with the board it is where it is one.
+    fn real(board: Option<u8>, seats: Vec<(Role, Harness)>, designer: Option<Harness>) -> Self {
+        Self {
+            board,
+            seats: seats
+                .into_iter()
                 .map(|(role, harness)| Seat {
-                    role: *role,
-                    harness: Some(*harness),
+                    role,
+                    harness: Some(harness),
                 })
                 .collect(),
+            control: false,
+            designer,
+        }
+    }
+
+    /// The seats `words` name (`--seats chief=claude,worker=codex,…`): every one of the five
+    /// positions once, each a harness, and the image designer besides where it is named.
+    /// Refused in words: a position or a harness that is none, one named twice or not at all,
+    /// and a designer that is not Codex, or that sits on a board with no Codex to run it.
+    pub fn named(words: &str) -> Result<Self> {
+        let refuse = |why: String| Err(Error::Daemon(format!("--seats {words}: {why}")));
+        let mut seats: Vec<(Role, Harness)> = Vec::new();
+        let mut designer = None;
+        for piece in words
+            .split(',')
+            .map(str::trim)
+            .filter(|piece| !piece.is_empty())
+        {
+            let Some((position, harness)) = piece.split_once('=') else {
+                return refuse(format!("{piece} is no position=harness"));
+            };
+            let (position, name) = (position.trim(), harness.trim());
+            let Some(harness) = Harness::from_name(name) else {
+                return refuse(format!(
+                    "no harness is called {name} ({})",
+                    ORDER.map(Harness::name).join(", ")
+                ));
+            };
+            if position == "designer" {
+                if harness != Harness::Codex {
+                    return refuse(format!(
+                        "only Codex can be the image designer (the catalog refuses `designer: true` for {}), and it sits as a sixth member",
+                        harness.name()
+                    ));
+                }
+                designer = Some(harness);
+                continue;
+            }
+            let Some(role) = Role::named(position) else {
+                return refuse(format!(
+                    "no position is called {position} (chief, worker, reviewer, advisor, tester, or designer for the sixth member)"
+                ));
+            };
+            if seats.iter().any(|(seated, _)| *seated == role) {
+                return refuse(format!("{position} is named twice"));
+            }
+            seats.push((role, harness));
+        }
+        let missing: Vec<&str> = Role::ALL
+            .iter()
+            .filter(|role| !seats.iter().any(|(seated, _)| seated == *role))
+            .map(|role| role.name())
+            .collect();
+        if !missing.is_empty() {
+            return refuse(format!(
+                "every position needs a harness, and {} has none",
+                missing.join(", ")
+            ));
+        }
+        if designer.is_some() && !seats.iter().any(|(_, harness)| *harness == Harness::Codex) {
+            return refuse(
+                "the image designer runs on Codex, and no position of the board seats Codex for the rig to find it"
+                    .to_owned(),
+            );
+        }
+        seats.sort_by_key(|(role, _)| *role);
+        let board = (0..BOARDS).find(|board| row_of(*board).as_slice() == seats.as_slice());
+        Ok(Self::real(
+            board.filter(|_| designer.is_none()),
+            seats,
+            designer,
+        ))
+    }
+
+    /// The seating a run's manifest says it had ([`Seating::manifest`]): what a replay seats.
+    pub fn from_manifest(manifest: &Value) -> Result<Self> {
+        let refuse =
+            |why: &str| Error::Daemon(format!("the manifest's seats cannot be read: {why}"));
+        let seats = manifest["seats"]
+            .as_array()
+            .ok_or_else(|| refuse("it has no seats"))?
+            .iter()
+            .map(|seat| {
+                let role = seat["role"]
+                    .as_str()
+                    .and_then(Role::named)
+                    .ok_or_else(|| refuse("a seat has no position"))?;
+                let harness = match seat["harness"].as_str() {
+                    Some("stand-in") => None,
+                    Some(name) => Some(
+                        Harness::from_name(name)
+                            .ok_or_else(|| refuse(&format!("no harness is called {name}")))?,
+                    ),
+                    None => return Err(refuse("a seat has no harness")),
+                };
+                Ok(Seat { role, harness })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if Role::ALL
+            .iter()
+            .any(|role| seats.iter().filter(|seat| seat.role == *role).count() != 1)
+        {
+            return Err(refuse("it does not seat each position once"));
+        }
+        let designer = match manifest["designer"].as_str() {
+            Some("codex") => Some(Harness::Codex),
+            Some(other) => {
+                return Err(refuse(&format!(
+                    "its designer is {other}, and only Codex can be"
+                )))
+            }
+            None => None,
+        };
+        Ok(Self {
+            board: manifest["board"]
+                .as_u64()
+                .and_then(|board| u8::try_from(board).ok()),
+            seats,
+            control: manifest["control"] == true,
+            designer,
         })
     }
 
@@ -168,6 +384,8 @@ impl Seating {
     pub fn stand_ins() -> Self {
         Self {
             board: None,
+            control: true,
+            designer: None,
             seats: Role::ALL
                 .iter()
                 .map(|role| Seat {
@@ -200,7 +418,7 @@ impl Seating {
     /// The positions the stand-in plays where the board seats a real harness: what the run
     /// covers none of.
     pub fn not_covered(&self) -> Vec<Role> {
-        if self.board.is_none() {
+        if self.control {
             return Vec::new();
         }
         self.seats
@@ -260,13 +478,39 @@ impl Seating {
                 Err(failed) => Check::failed("staff", &what, failed.to_string()),
             });
         }
+        if self.designer.is_some() {
+            // The catalog's own image agent, beside the five: it fills no other position.
+            let what = "the image designer codex is staff".to_owned();
+            checks.push(match members.add(agents::DESIGNER, &["designer"]) {
+                Ok(tier) => Check::passed(
+                    "staff",
+                    &what,
+                    format!("member.add gave {} the tier {tier:?}", agents::DESIGNER),
+                ),
+                Err(failed) => Check::failed("staff", &what, failed.to_string()),
+            });
+        }
         checks
     }
 
-    /// The seats, as the evidence's manifest has them.
+    /// What it is, as a run id says it: `board3`, `seats` or `stand-ins`.
+    pub fn label(&self) -> String {
+        match (self.control, self.board) {
+            (true, _) => "stand-ins".to_owned(),
+            (false, Some(board)) => format!("board{board}"),
+            (false, None) => "seats".to_owned(),
+        }
+    }
+
+    /// The seating, as the evidence's manifest has it and a replay reads it back
+    /// ([`Seating::from_manifest`]).
     pub fn manifest(&self) -> Value {
-        Value::Array(
-            self.seats
+        json!({
+            "board": self.board,
+            "control": self.control,
+            "designer": self.designer.map(Harness::name),
+            "seats": self
+                .seats
                 .iter()
                 .map(|seat| {
                     json!({
@@ -276,8 +520,8 @@ impl Seating {
                         "row": seat.row(),
                     })
                 })
-                .collect(),
-        )
+                .collect::<Vec<_>>(),
+        })
     }
 }
 
@@ -303,8 +547,9 @@ mod tests {
                 ("tester", "muse")
             ]
         );
-        let refused = Seating::board(1).unwrap_err().to_string();
-        assert!(refused.contains("board 0 alone so far"), "{refused}");
+        assert_eq!(row_of(0), BOARD_0);
+        let refused = Seating::board(5).unwrap_err().to_string();
+        assert!(refused.contains("boards 0 to 4: no board 5"), "{refused}");
     }
 
     #[test]
@@ -369,6 +614,141 @@ mod tests {
         assert!(refused.contains("not the chief's"), "{refused}");
         assert_eq!(Role::named("tester"), Some(Role::Tester));
         assert_eq!(Role::named("designer"), None);
+    }
+
+    #[test]
+    fn the_five_boards_are_the_designs_table_and_each_harness_sits_in_each_position_once() {
+        let names = |board: u8| row_of(board).map(|(_, harness)| harness.name());
+        assert_eq!(names(0), ["claude", "codex", "pi", "devin", "muse"]);
+        assert_eq!(names(1), ["codex", "pi", "devin", "muse", "claude"]);
+        assert_eq!(names(2), ["pi", "devin", "muse", "claude", "codex"]);
+        assert_eq!(names(3), ["devin", "muse", "claude", "codex", "pi"]);
+        assert_eq!(names(4), ["muse", "claude", "codex", "pi", "devin"]);
+        for board in 0..BOARDS {
+            let seating = Seating::board(board).unwrap();
+            assert_eq!(
+                (seating.board, seating.control, seating.designer),
+                (Some(board), false, None)
+            );
+            assert_eq!(seating.label(), format!("board{board}"));
+        }
+    }
+
+    #[test]
+    fn the_plan_lists_fifty_cells_each_covered_once() {
+        let cells = cells();
+        assert_eq!(cells.len(), 50);
+        for platform in PLATFORMS {
+            for harness in ORDER {
+                for role in Role::ALL {
+                    let covering: Vec<&Cell> = cells
+                        .iter()
+                        .filter(|cell| {
+                            cell.platform == platform
+                                && cell.harness == harness
+                                && cell.role == role
+                        })
+                        .collect();
+                    assert_eq!(
+                        covering.len(),
+                        1,
+                        "{platform} {} {}",
+                        harness.name(),
+                        role.name()
+                    );
+                }
+            }
+        }
+        let text = plan_text();
+        assert!(text.contains("50 cells"), "{text}");
+        assert!(
+            text.contains("windows  muse    chief     board 4"),
+            "{text}"
+        );
+        assert!(
+            text.contains("2      pi      devin   muse    claude  codex"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn seats_named_are_every_position_once_and_a_row_of_the_square_is_its_board() {
+        let seats =
+            Seating::named("tester=claude,chief=codex,worker=pi,reviewer=devin,advisor=muse")
+                .unwrap();
+        assert_eq!(seats.board, Some(1));
+        let mixed =
+            Seating::named("chief=claude,worker=devin,reviewer=codex,advisor=pi,tester=muse")
+                .unwrap();
+        assert_eq!((mixed.board, mixed.label().as_str()), (None, "seats"));
+        assert_eq!(mixed.seat(Role::Worker).who(), "devin");
+        // Two of one harness are two agents of their own.
+        let twice = Seating::named("chief=claude,worker=claude,reviewer=pi,advisor=pi,tester=muse")
+            .unwrap();
+        assert_eq!(twice.seat(Role::Worker).agent(), "matrix-worker");
+        let designer = Seating::named(
+            "chief=claude,worker=codex,reviewer=pi,advisor=devin,tester=muse,designer=codex",
+        )
+        .unwrap();
+        assert_eq!(
+            (designer.designer, designer.board),
+            (Some(Harness::Codex), None)
+        );
+    }
+
+    #[test]
+    fn unsupported_seats_are_refused_in_words() {
+        let refused = |words: &str| Seating::named(words).unwrap_err().to_string();
+        let five = "chief=claude,worker=codex,reviewer=pi,advisor=devin,tester=muse";
+        for designer in ["claude", "pi", "devin", "muse"] {
+            let said = refused(&format!("{five},designer={designer}"));
+            assert!(
+                said.contains("only Codex can be the image designer"),
+                "{said}"
+            );
+            assert!(
+                said.contains(&format!("refuses `designer: true` for {designer}")),
+                "{said}"
+            );
+        }
+        assert!(refused(
+            "chief=claude,worker=claude,reviewer=pi,advisor=devin,tester=muse,designer=codex"
+        )
+        .contains("no position of the board seats Codex"));
+        assert!(refused("chief=claude,worker=codex").contains("reviewer, advisor, tester has none"));
+        assert!(refused(&format!("{five},chief=pi")).contains("chief is named twice"));
+        assert!(refused("chief=kimi").contains("no harness is called kimi"));
+        assert!(refused("boss=claude").contains("no position is called boss"));
+        assert!(refused("claude").contains("claude is no position=harness"));
+    }
+
+    #[test]
+    fn a_seating_is_read_back_from_its_manifest_as_it_was() {
+        for seating in [
+            Seating::board(3).unwrap(),
+            Seating::board(0)
+                .unwrap()
+                .with_stand_ins(&[Role::Reviewer])
+                .unwrap(),
+            Seating::stand_ins(),
+            Seating::named(
+                "chief=claude,worker=codex,reviewer=pi,advisor=devin,tester=muse,designer=codex",
+            )
+            .unwrap(),
+        ] {
+            let manifest = seating.manifest();
+            assert_eq!(
+                Seating::from_manifest(&manifest).unwrap(),
+                seating,
+                "{manifest}"
+            );
+        }
+        let mut broken = Seating::board(0).unwrap().manifest();
+        broken["seats"].as_array_mut().unwrap().pop();
+        assert!(Seating::from_manifest(&broken)
+            .unwrap_err()
+            .to_string()
+            .contains("each position once"));
     }
 
     #[test]

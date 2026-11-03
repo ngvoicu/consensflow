@@ -262,8 +262,8 @@ async fn a_tooling_daemon_writes_each_window_request_it_answered_with_its_refusa
     assert_eq!(
         data,
         [
-            &json!({ "participant": "chief", "role": "chief", "method": "GET", "path": target, "status": 403, "error": "not-your-question" }),
-            &json!({ "participant": "zeus", "role": "worker", "method": "GET", "path": target, "status": 200, "error": null }),
+            &json!({ "participant": "chief", "role": "chief", "method": "GET", "path": target, "status": 403, "error": "not-your-question", "message": format!("m-{} was asked by @zeus", scene.question.id) }),
+            &json!({ "participant": "zeus", "role": "worker", "method": "GET", "path": target, "status": 200, "error": null, "message": null }),
         ]
     );
     for (line, parsed) in &lines {

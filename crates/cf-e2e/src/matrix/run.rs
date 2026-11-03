@@ -16,12 +16,12 @@ use crate::live::report::Check;
 use crate::live::Log;
 use crate::Result;
 
-use super::evidence::{run_id, Evidence, Owner};
+use super::evidence::{self, fixture_hashes, run_id, Evidence, Owner};
 use super::human::{Bounds, Driver, LOOK};
 use super::machine::{Next, Observation, Steps};
 use super::observe::{self, Bindings, Snapshot};
-use super::oracle::{self, Records};
-use super::scenario::Scenario;
+use super::oracle::{self, Answered, Judged, Records};
+use super::scenario::{Known, Scenario};
 use super::seating::{Role, Seating};
 
 /// How many lines of each window's screen the evidence keeps.
@@ -38,7 +38,13 @@ pub struct Matrix<'a> {
     pub reports: PathBuf,
     /// The owner's files, as they were before anything started.
     pub owner: Owner,
+    /// The run this one replays, where it does ([`replay`]).
+    pub replay_of: Option<String>,
 }
+
+/// A stand-in board's deadline, whatever its scenario's: a stand-in answers at once, and a run
+/// that waits longer is a red to say, not to wait out.
+pub const STAND_IN_DEADLINE: Duration = Duration::from_secs(180);
 
 /// What a run came to.
 pub struct Outcome {
@@ -49,6 +55,62 @@ pub struct Outcome {
     /// The turns each seat began, and all of them together.
     pub turns: BTreeMap<&'static str, u32>,
     pub total_turns: u32,
+    /// The scenario's checks that fail on today's main by design, each until the work its
+    /// detail names lands: never among the passes.
+    pub known: Vec<Check>,
+}
+
+impl Outcome {
+    /// The checks that did not hold, the known reds aside.
+    pub fn failed(&self) -> Vec<&Check> {
+        self.checks.iter().filter(|check| !check.ok).collect()
+    }
+}
+
+/// `checks`, with the scenario's `known` reds taken out: each known red that failed is said
+/// apart (its detail names the work that turns it green); one that held is a red of its own,
+/// for its mark is to go; and one that no check made is a red too.
+pub fn sort_known(checks: Vec<Check>, known: &[Known]) -> (Vec<Check>, Vec<Check>) {
+    let mut kept = Vec::new();
+    let mut reds = Vec::new();
+    let mut seen = vec![false; known.len()];
+    for check in checks {
+        let mark = known
+            .iter()
+            .position(|known| check.who == known.who && check.what.contains(known.what));
+        match mark {
+            Some(at) if !check.ok => {
+                seen[at] = true;
+                reds.push(Check::failed(
+                    &check.who,
+                    &check.what,
+                    format!("known red until {}: {}", known[at].until, check.detail),
+                ));
+            }
+            Some(at) => {
+                seen[at] = true;
+                kept.push(Check::failed(
+                    &check.who,
+                    &check.what,
+                    format!(
+                        "a known red now holds ({}): take its mark out; {}",
+                        known[at].until, check.detail
+                    ),
+                ));
+            }
+            None => kept.push(check),
+        }
+    }
+    for (known, seen) in known.iter().zip(seen) {
+        if !seen {
+            kept.push(Check::failed(
+                known.who,
+                known.what,
+                format!("a known red no check made (until {})", known.until),
+            ));
+        }
+    }
+    (kept, reds)
 }
 
 /// The records of the rig's windows, as the daemon reads them.
@@ -72,19 +134,28 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
         stand_in,
         reports,
         owner,
+        replay_of,
     } = matrix;
-    let id = run_id(seating.board, scenario.name);
+    let mut scenario = scenario.clone();
+    if seating.control {
+        scenario.deadline = scenario.deadline.min(STAND_IN_DEADLINE);
+    }
+    let scenario = &scenario;
+    let id = run_id(&seating.label(), scenario.name);
     let evidence = Evidence::under(reports, &id);
     let mut manifest = json!({
         "run": id,
-        "board": seating.board,
-        "seats": seating.manifest(),
+        "replayOf": replay_of,
+        "source": source(),
+        "seating": seating.manifest(),
         "scenario": {
             "name": scenario.name,
+            "version": scenario.version,
             "steps": scenario.steps.iter().map(|step| step.name).collect::<Vec<_>>(),
-            "fixture": scenario.fixture.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            "fixture": fixture_hashes(&scenario.fixture),
             "deadlineSeconds": scenario.deadline.as_secs(),
             "turnCeiling": scenario.turns,
+            "known": scenario.known.iter().map(|known| json!({ "who": known.who, "what": known.what, "until": known.until })).collect::<Vec<_>>(),
         },
         "notCovered": seating.not_covered().into_iter().map(Role::name).collect::<Vec<_>>(),
         "ownerBefore": owner.manifest(),
@@ -152,21 +223,27 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
         events: snapshot.events.clone(),
     };
     checks.extend(oracle::asks(&said, scenario.steps.len()));
-    checks.extend(oracle::tasks(seating, &snapshot, &bindings, &records));
-    let calls = observe::calls(&snapshot.events);
+    let judged = Judged {
+        seating,
+        snapshot: &snapshot,
+        bindings: &bindings,
+        records: &records,
+        folder: members.folder(),
+    };
+    checks.extend((scenario.checks)(&judged));
     for refused in scenario.refusals {
-        checks.push(oracle::refused(
-            &calls,
-            refused.participant,
-            refused.method,
-            refused.path,
-            refused.code,
+        checks.push(oracle::chief_call(
+            &judged,
+            refused.task,
+            refused.action,
+            0,
+            Answered::Refused(refused.code, &[]),
         ));
     }
     for (earlier, later) in scenario.order {
         checks.extend(oracle::after_done(&snapshot, &bindings, earlier, later));
     }
-    checks.extend(oracle::fixture(members.folder()));
+    let (mut checks, known) = sort_known(checks, scenario.known);
     let turns = snapshot.turns_by_seat(seating, asks_in);
     let total_turns = snapshot.total_turns(asks_in);
     checks.push(Check::new(
@@ -199,6 +276,11 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     )?;
     evidence.json("bindings.json", &bindings_of(&snapshot, &bindings))?;
     windows(&members, &evidence)?;
+    records_of(&members, seating, &snapshot, &evidence)?;
+    evidence::ledger_snapshot(
+        &members.home().join("consensflow.db"),
+        &evidence.folder.join("ledger.db"),
+    )?;
     evidence.text(
         "events.jsonl",
         &snapshot
@@ -208,7 +290,8 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
             .collect::<Vec<_>>()
             .join("\n"),
     )?;
-    evidence.checks(&checks)?;
+    checks.push(evidence::holds_none(&evidence.folder, &tokens(&members)));
+    evidence.checks(&checks, &known)?;
 
     // The close drops the harnesses' homes, and the kit's look at the owner's setup is its.
     let folder = members.folder().to_path_buf();
@@ -226,7 +309,7 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
         ),
     });
     checks.push(owner.unchanged(&owner.again()));
-    evidence.checks(&checks)?;
+    evidence.checks(&checks, &known)?;
     if checks.iter().all(|check| check.ok) {
         // A green run's project is no evidence: the folder it made goes (a red one's stays, named in its manifest).
         let _ = std::fs::remove_dir_all(&folder);
@@ -237,7 +320,126 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
         elapsed,
         turns,
         total_turns,
+        known,
     })
+}
+
+/// The commit the run's source is at, as git says it, and whether the tree had changes: what a
+/// replay on other source says it differs from.
+pub fn source() -> Value {
+    let git = |words: &[&str]| {
+        crate::process::Run::new("git")
+            .args(words)
+            .cwd(crate::checkout::root())
+            .inheriting_env()
+            .run()
+            .map(|ran| ran.stdout.trim().to_owned())
+            .unwrap_or_default()
+    };
+    json!({
+        "commit": git(&["rev-parse", "HEAD"]),
+        "changed": !git(&["status", "--porcelain", "--untracked-files=no"]).is_empty(),
+    })
+}
+
+/// The tokens the windows were given (`CONSENSFLOW_TOKEN`, and any variable of a window's
+/// whose name says it holds a key or a secret): what the evidence must not hold.
+fn tokens(members: &Members) -> Vec<String> {
+    members
+        .rig()
+        .open_frames()
+        .iter()
+        .filter_map(|frame| frame["env"].as_object().cloned())
+        .flat_map(|env| env.into_iter())
+        .filter(|(name, _)| {
+            ["TOKEN", "SECRET", "API_KEY"]
+                .iter()
+                .any(|word| name.to_uppercase().contains(word))
+        })
+        .filter_map(|(_, value)| value.as_str().map(str::to_owned))
+        .collect()
+}
+
+/// Each window's own record, as the daemon reads it, a file to each session of the run:
+/// `records/<handle>.json`, its items' roles, words and ends.
+fn records_of(
+    members: &Members,
+    seating: &Seating,
+    snapshot: &Snapshot,
+    evidence: &Evidence,
+) -> Result {
+    let mut handles: Vec<(String, &'static str)> =
+        vec![("chief".to_owned(), seating.seat(Role::Chief).kind())];
+    for event in snapshot
+        .events
+        .iter()
+        .filter(|event| event["kind"] == "session.started")
+    {
+        let handle = event["data"]["handle"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let kind = event["data"]["member"]
+            .as_str()
+            .and_then(|agent| seating.of_agent(agent))
+            .map_or("claude-code", super::seating::Seat::kind);
+        handles.push((handle, kind));
+    }
+    for (handle, kind) in handles {
+        let items = observe::record(members, &snapshot.events, kind, &handle).unwrap_or_default();
+        let rows: Vec<Value> = items
+            .iter()
+            .map(|item| json!({ "id": item.id, "role": item.role, "text": item.text, "complete": item.complete }))
+            .collect();
+        evidence.json(&format!("records/{handle}.json"), &Value::Array(rows))?;
+    }
+    Ok(())
+}
+
+/// Runs again, alone, the scenario of the run whose manifest is `manifest`: in a fresh project,
+/// with the same seats, its tasks bound again by what they are. A scenario of another version
+/// is refused; source that changed since is said, in the log and the new manifest
+/// (`replayOf`, `source`). The red's own folder is left as it was.
+pub fn replay(
+    manifest: &Path,
+    stand_in: &Path,
+    reports: PathBuf,
+    owner: Owner,
+    log: &Log,
+) -> Result<Outcome> {
+    let read: Value =
+        serde_json::from_str(&crate::files::read_string(manifest)?).map_err(|failed| {
+            crate::Error::Daemon(format!("{} is no manifest: {failed}", manifest.display()))
+        })?;
+    let seating = Seating::from_manifest(&read["seating"])?;
+    let name = read["scenario"]["name"].as_str().unwrap_or_default();
+    let scenario = Scenario::named(name)?;
+    let version = read["scenario"]["version"].as_u64().unwrap_or_default();
+    if version != u64::from(scenario.version) {
+        return Err(crate::Error::Daemon(format!(
+            "{} ran {name} version {version}, and this source has version {}: a replay runs the same scenario",
+            manifest.display(),
+            scenario.version
+        )));
+    }
+    let now = source();
+    if read["source"]["commit"] != now["commit"] {
+        log.say(format!(
+            "the replay runs on {}, and the red ran on {}",
+            now["commit"], read["source"]["commit"]
+        ));
+    }
+    run(
+        &Matrix {
+            seating,
+            scenario,
+            stand_in,
+            reports,
+            owner,
+            replay_of: read["run"].as_str().map(str::to_owned),
+        },
+        log,
+    )
 }
 
 /// Asks each step and runs the scenario's machine ([`Steps`]) on the board until the step is
@@ -261,7 +463,7 @@ fn steps(
         let text = if seating.chief_is_stand_in() {
             format!("\n{}", (step.stand_in)(&bindings))
         } else {
-            step.asks.to_owned()
+            (step.asks)(&bindings)
         };
         let marker = scenario.marker(id, index);
         let asked = driver.asks(step.name, &marker, &text)?.clone();

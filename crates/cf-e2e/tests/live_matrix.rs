@@ -1,16 +1,21 @@
-//! The live matrix (spec `live-matrix`, LMX-04): a real harness in every position of a board,
-//! the chief driven by a scripted human through a scenario, and an oracle that reads the
-//! ledger and the windows' records (`cf_e2e::matrix`). It is opt-in: it spends the quota of
-//! every harness it seats, so it is ignored unless asked for and is no part of `check` or CI.
+//! The live matrix (spec `live-matrix`, LMX-04 to LMX-08, LMX-12): a harness in every position of
+//! a board, the chief driven by a scripted human through a scenario, and an oracle that reads
+//! the ledger and the windows' records (`cf_e2e::matrix`). Two layers share the driver and the
+//! oracle (Gabriel, 2026-11-03: real models only before a release):
+//!
+//! - the **real layer**, opt-in (ignored): it spends the quota of every harness it seats, and
+//!   runs in a release's checks;
+//! - the **stand-in layer**, the cases of `mod tests` below: every scenario on the rig's
+//!   stand-in agents, offline, in CI on every push with the other live suites' offline cases.
 //!
 //! ```text
-//! cargo xtask live matrix --board 0 --scenario smoke -- --test-threads 1
+//! cargo xtask live matrix --board 3 --scenario core -- --test-threads 1      one board, 0 to 4
+//! cargo xtask live matrix --seats chief=claude,worker=devin,reviewer=codex,advisor=pi,tester=muse
+//! cargo xtask live matrix --plan                                             the 50 cells, nothing run
+//! cargo xtask live matrix --replay evals/reports/live-matrix/<run>/manifest.json
 //! ```
 //!
-//! Board 0 seats Claude Code as the chief, Codex as the worker, Pi as the reviewer, Devin as
-//! the advisor and Muse Code as the tester, each on the kit's model for it. The evidence of a
-//! run is under `evals/reports/live-matrix/<run-id>/`. The control below runs the same driver
-//! and oracle on the rig's stand-ins, offline.
+//! The evidence of a run is under `evals/reports/live-matrix/<run-id>/`.
 
 use std::path::Path;
 
@@ -18,22 +23,22 @@ use cf_e2e::checkout;
 use cf_e2e::live::report;
 use cf_e2e::live::{self, Log};
 use cf_e2e::matrix::evidence::{Owner, REPORTS};
-use cf_e2e::matrix::run::{run, Matrix};
+use cf_e2e::matrix::run::{replay, run, Matrix, Outcome};
 use cf_e2e::matrix::scenario::Scenario;
-use cf_e2e::matrix::seating::{Role, Seating};
+use cf_e2e::matrix::seating::{self, Role, Seating};
 use cf_e2e::{Error, Result};
 
 /// The stand-in agent's program: the stand-in seats' windows, and the one a rig has where no
 /// window runs it.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
-/// The board and the scenario the words ask for: `--board` (0 where none is said) and
-/// `--scenario` (`smoke`), with `--stand-in` naming the members' positions the rig's stand-in
-/// plays where this machine cannot seat the board's harness today (`--stand-in reviewer`: Pi
-/// with no login of its model's provider), which the run says it covers none of. The harnesses
-/// are the board's; a harness named besides is refused.
+/// The seats and the scenario the words ask for: `--board` (0 to 4, 0 where nothing names the
+/// seats) or `--seats`, never both; `--scenario` (`smoke` where none is named); and `--stand-in`,
+/// the members' positions the rig's stand-in plays where this machine cannot seat the harness
+/// today, which the run says it covers none of. A harness named besides is refused.
 fn asked(
     board: Option<&str>,
+    seats: Option<&str>,
     scenario: Option<&str>,
     stand_in: Option<&str>,
     harnesses: &[String],
@@ -44,10 +49,20 @@ fn asked(
             harnesses.join(" ")
         )));
     }
-    let number = board.unwrap_or("0");
-    let board = number
-        .parse::<u8>()
-        .map_err(|_| Error::Daemon(format!("--board takes a board's number, not {number}")))?;
+    let seating =
+        match (board, seats) {
+            (Some(_), Some(_)) => return Err(Error::Daemon(
+                "--board names a row of the Latin square and --seats names the seats: one of them"
+                    .to_owned(),
+            )),
+            (_, Some(seats)) => Seating::named(seats)?,
+            (board, None) => {
+                let number = board.unwrap_or("0");
+                Seating::board(number.parse::<u8>().map_err(|_| {
+                    Error::Daemon(format!("--board takes a board's number, not {number}"))
+                })?)?
+            }
+        };
     let roles = stand_in
         .unwrap_or_default()
         .split(',')
@@ -61,18 +76,61 @@ fn asked(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok((
-        Seating::board(board)?.with_stand_ins(&roles)?,
+        seating.with_stand_ins(&roles)?,
         Scenario::named(scenario.unwrap_or("smoke"))?,
     ))
+}
+
+/// What a run says when it is over: its time and turns, its known reds, where its evidence is.
+fn said(log: &Log, outcome: &Outcome, not_covered: &[&str]) {
+    log.say(format!(
+        "{} s, {} turns: {:?}; the evidence is in {}{}",
+        outcome.elapsed.as_secs(),
+        outcome.total_turns,
+        outcome.turns,
+        outcome.evidence.folder.display(),
+        if not_covered.is_empty() {
+            String::new()
+        } else {
+            format!("; NOT COVERED (the stand-in): {}", not_covered.join(", "))
+        }
+    ));
+    if !outcome.known.is_empty() {
+        log.report(
+            "KNOWN RED, by design on today's main, each until the work named lands",
+            &report::table(&outcome.known),
+        );
+    }
 }
 
 #[test]
 #[ignore = "opt-in: spends the quota of every harness the board seats; cargo xtask live matrix --board 0 --scenario smoke -- --test-threads 1"]
 fn a_board_of_real_harnesses_goes_through_its_scenario_as_the_ledger_and_the_records_say() -> Result
 {
+    if live::option("plan").is_some() {
+        let log = Log::new("live matrix plan");
+        log.block("the plan, nothing run", &seating::plan_text());
+        return Ok(());
+    }
     let log = Log::begin("live matrix")?;
+    if let Some(manifest) = live::option("replay") {
+        let outcome = replay(
+            Path::new(&manifest),
+            Path::new(FAKE_AGENT),
+            checkout::path(REPORTS),
+            Owner::of_machine()?,
+            &log,
+        )?;
+        said(&log, &outcome, &[]);
+        return report::conclude(
+            &log,
+            "what each check of the replay came to",
+            &outcome.checks,
+        );
+    }
     let (seating, scenario) = asked(
         live::option("board").as_deref(),
+        live::option("seats").as_deref(),
         live::option("scenario").as_deref(),
         live::option("stand-in").as_deref(),
         &live::list("harness"),
@@ -90,20 +148,10 @@ fn a_board_of_real_harnesses_goes_through_its_scenario_as_the_ledger_and_the_rec
         stand_in: Path::new(FAKE_AGENT),
         reports: checkout::path(REPORTS),
         owner: Owner::of_machine()?,
+        replay_of: None,
     };
     let outcome = run(&matrix, &log)?;
-    log.say(format!(
-        "{} s, {} turns: {:?}; the evidence is in {}{}",
-        outcome.elapsed.as_secs(),
-        outcome.total_turns,
-        outcome.turns,
-        outcome.evidence.folder.display(),
-        if not_covered.is_empty() {
-            String::new()
-        } else {
-            format!("; NOT COVERED (the stand-in): {}", not_covered.join(", "))
-        }
-    ));
+    said(&log, &outcome, &not_covered);
     report::conclude(
         &log,
         "what each check of the matrix came to",
@@ -116,90 +164,166 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_words_ask_for_board_0_and_smoke_and_nothing_else_yet() {
-        let (seating, scenario) = asked(None, None, None, &[]).unwrap();
+    fn the_words_ask_for_a_board_or_seats_a_scenario_and_stand_ins_and_refuse_the_rest() {
+        let (seating, scenario) = asked(None, None, None, None, &[]).unwrap();
         assert_eq!((seating.board, scenario.name), (Some(0), "smoke"));
         assert!(seating.not_covered().is_empty());
-        let (seating, _) = asked(Some("0"), None, Some("reviewer"), &[]).unwrap();
-        assert_eq!(seating.not_covered(), [Role::Reviewer]);
-        assert!(asked(None, None, Some("chief"), &[])
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("not the chief's"));
-        assert!(asked(None, None, Some("judge"), &[])
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("not judge"));
-        let refused = |board, scenario, harnesses: &[String]| {
-            asked(board, scenario, None, harnesses)
+        let (seating, scenario) = asked(Some("4"), None, Some("core"), None, &[]).unwrap();
+        assert_eq!((seating.board, scenario.name), (Some(4), "core"));
+        assert_eq!(seating.seat(Role::Chief).who(), "muse");
+        let (seating, _) = asked(
+            None,
+            Some("chief=claude,worker=devin,reviewer=codex,advisor=pi,tester=muse"),
+            Some("field6-cancel-done"),
+            Some("advisor"),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(seating.not_covered(), [Role::Advisor]);
+        let refused = |board, seats, scenario, stand_in, harnesses: &[String]| {
+            asked(board, seats, scenario, stand_in, harnesses)
                 .err()
                 .map(|failed| failed.to_string())
                 .unwrap_or_default()
         };
-        assert!(refused(Some("1"), None, &[]).contains("board 0 alone so far"));
-        assert!(refused(Some("one"), None, &[]).contains("--board takes a board's number, not one"));
-        assert!(refused(None, Some("core"), &[]).contains("smoke alone so far"));
-        assert!(refused(None, None, &["claude".to_owned()]).contains("takes none by name: claude"));
+        assert!(refused(Some("5"), None, None, None, &[]).contains("boards 0 to 4"));
+        assert!(refused(Some("one"), None, None, None, &[]).contains("not one"));
+        assert!(refused(Some("0"), Some("chief=claude"), None, None, &[]).contains("one of them"));
+        assert!(refused(
+            None,
+            Some("chief=claude,worker=codex,reviewer=pi,advisor=devin,tester=muse,designer=pi"),
+            None,
+            None,
+            &[]
+        )
+        .contains("only Codex can be the image designer"));
+        assert!(refused(None, None, Some("nothing"), None, &[])
+            .contains("no scenario is called nothing"));
+        assert!(refused(None, None, None, Some("chief"), &[]).contains("not the chief's"));
+        assert!(refused(None, None, None, Some("judge"), &[]).contains("not judge"));
+        assert!(refused(None, None, None, None, &["claude".to_owned()])
+            .contains("takes none by name: claude"));
     }
 
-    /// The control of the run's end and of the product's refusals (T-1152): the stand-in chief,
-    /// in one turn, puts the advice task on the board, cancels it, and asks to send it back,
-    /// which the product refuses. The run ends at once, as a red that names the cancelled task,
-    /// long before its deadline; the refusal's code is the daemon's, read from what a tooling
-    /// daemon writes of each request (`api.answered`), and no line of it holds a token.
-    #[test]
-    fn a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code() {
-        use cf_e2e::matrix::scenario::Refused;
-        let log = Log::new("live matrix control: an end");
-        let reports = tempfile::tempdir().unwrap();
-        let mut scenario = Scenario::named("smoke").unwrap();
-        scenario.steps.truncate(1);
-        // A run that went on past the cancelled task would end at this deadline, red for
-        // another reason, and soon.
-        scenario.deadline = std::time::Duration::from_secs(90);
-        scenario.steps[0].stand_in = |_| {
-            "CF task add --advice --tier standard :: SLEEP 60 Reply with exactly: ADVICE_OK\nCF task cancel T-1\nCF task reopen T-1 :: Once more."
-                .to_owned()
-        };
-        scenario.refusals = &[Refused {
-            participant: "chief",
-            method: "POST",
-            path: "/api/tasks/1/reopen",
-            code: "invalid-transition",
-        }];
+    /// `scenario` on a board whose five positions the rig's stand-in plays, its evidence in
+    /// `reports`.
+    fn on_stand_ins(scenario: Scenario, reports: &Path) -> Outcome {
+        let log = Log::new(&format!("live matrix on stand-ins: {}", scenario.name));
         let matrix = Matrix {
             seating: Seating::stand_ins(),
             scenario,
             stand_in: Path::new(FAKE_AGENT),
-            reports: reports.path().to_path_buf(),
+            reports: reports.to_path_buf(),
             owner: Owner::look(&[], &[]),
+            replay_of: None,
         };
         let outcome = run(&matrix, &log).unwrap();
+        log.report("what each check came to", &report::table(&outcome.checks));
+        if !outcome.known.is_empty() {
+            log.report("known red", &report::table(&outcome.known));
+        }
+        outcome
+    }
+
+    /// The check of `outcome` whose `who` is `who` and whose `what` holds `what`.
+    fn check(outcome: &Outcome, who: &str, what: &str) -> report::Check {
+        outcome
+            .checks
+            .iter()
+            .chain(&outcome.known)
+            .find(|check| check.who == who && check.what.contains(what))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no check of {who} {what}:\n{}",
+                    report::table(&outcome.checks)
+                )
+            })
+            .clone()
+    }
+
+    /// The control: the smoke on a board whose five positions the rig's stand-in plays. The
+    /// stand-in chief hands out the advice, the change, the review and the test and accepts them;
+    /// the oracle reads the ledger and the records, and every check holds. No harness is covered.
+    #[test]
+    fn the_matrix_passes_its_scenario_on_the_rigs_stand_ins() {
+        let reports = tempfile::tempdir().unwrap();
+        let outcome = on_stand_ins(Scenario::named("smoke").unwrap(), reports.path());
         let table = report::table(&outcome.checks);
-        log.report("what each check of the control came to", &table);
-        let check = |who: &str, what: &str| {
-            outcome
-                .checks
-                .iter()
-                .find(|check| check.who == who && check.what.contains(what))
-                .unwrap_or_else(|| panic!("no check of {who} {what}:\n{table}"))
-                .clone()
-        };
-        let step = check("steps", "step 1 (advice) was reached");
+        assert!(
+            outcome.failed().is_empty() && outcome.known.is_empty(),
+            "{table}"
+        );
+        for who in [
+            "staff",
+            "chief",
+            "steps",
+            "human",
+            "advice (advisor stand-in)",
+            "change (worker stand-in)",
+            "review (reviewer stand-in)",
+            "test (tester stand-in)",
+            "fixture",
+            "bounds",
+            "evidence",
+            "owner",
+        ] {
+            assert!(
+                outcome.checks.iter().any(|check| check.who == who),
+                "no check of {who}:\n{table}"
+            );
+        }
+        assert!(outcome.total_turns <= 20, "{:?}", outcome.turns);
+        let folder = &outcome.evidence.folder;
+        for file in [
+            "manifest.json",
+            "human.json",
+            "bindings.json",
+            "events.jsonl",
+            "checks.json",
+            "verdict.txt",
+            "opens.json",
+            "daemon-tail.log",
+            "ledger.db",
+            "records/chief.json",
+        ] {
+            assert!(
+                folder.join(file).is_file(),
+                "no {file} in {}",
+                folder.display()
+            );
+        }
+        let verdict = std::fs::read_to_string(folder.join("verdict.txt")).unwrap();
+        assert!(verdict.starts_with("GREEN"), "{verdict}");
+    }
+
+    /// The control of the run's end and of the product's refusals, and the planted red the
+    /// replay is proved on: the stand-in chief puts the advice task on the board, cancels it, and
+    /// asks to send it back. The run ends at once, as a red that names the cancelled task, and
+    /// the refusal's code is the daemon's (`api.answered`), in a line that holds no token.
+    #[test]
+    fn a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code() {
+        let reports = tempfile::tempdir().unwrap();
+        let mut scenario = Scenario::named("cancel").unwrap();
+        // A run that went on past the cancelled task would end at this deadline, red for
+        // another reason, and soon.
+        scenario.deadline = std::time::Duration::from_secs(90);
+        let outcome = on_stand_ins(scenario, reports.path());
+        let table = report::table(&outcome.checks);
+        let step = check(&outcome, "steps", "step 1 (advice) was reached");
         assert!(!step.ok, "{table}");
         assert_eq!(step.detail, "T-1, the advice task, is cancelled", "{table}");
         assert!(
-            outcome.elapsed.as_secs() < 120,
+            outcome.elapsed.as_secs() < 60,
             "ended at once: {} s",
             outcome.elapsed.as_secs()
         );
         let refused = check(
-            "chief",
-            "POST /api/tasks/1/reopen was refused with invalid-transition",
+            &outcome,
+            "advice",
+            "the chief's first reopen of it was refused with invalid-transition",
         );
         assert!(refused.ok, "{table}");
+        assert!(check(&outcome, "advice", "it is cancelled").ok, "{table}");
         let events = std::fs::read_to_string(outcome.evidence.folder.join("events.jsonl")).unwrap();
         let answered: Vec<&str> = events
             .lines()
@@ -207,35 +331,104 @@ mod tests {
             .collect();
         assert!(answered.len() >= 3, "{answered:?}");
         assert!(
-            answered
-                .iter()
-                .all(|line| !line.contains("Bearer") && !line.contains("token")),
+            answered.iter().all(|line| !line.contains("Bearer")),
             "{answered:?}"
+        );
+        assert!(
+            check(&outcome, "evidence", "holds a window's token").ok,
+            "{table}"
         );
     }
 
-    /// The control of the chief's question in words (T-1152): the stand-in chief ends its turn
-    /// asking, which the human reads in its own record, answers from the fact sheet (the whole
-    /// sheet, for a question it has no single answer for) through the human's door, and sees go
-    /// in. Nothing reaches the milestone, so the run ends red at its short deadline.
+    /// LMX-07: a red's manifest runs again alone, in a fresh project with the same seats, its
+    /// tasks bound again by what they are; the red's own folder is left as it was.
+    #[test]
+    fn a_red_runs_again_alone_from_its_manifest_with_the_same_seats() {
+        let reports = tempfile::tempdir().unwrap();
+        let mut scenario = Scenario::named("cancel").unwrap();
+        scenario.deadline = std::time::Duration::from_secs(90);
+        let red = on_stand_ins(scenario, reports.path());
+        assert!(!red.failed().is_empty());
+        let manifest = red.evidence.folder.join("manifest.json");
+        let before = folder_text(&red.evidence.folder);
+        let log = Log::new("live matrix replay");
+        let again = replay(
+            &manifest,
+            Path::new(FAKE_AGENT),
+            reports.path().to_path_buf(),
+            Owner::look(&[], &[]),
+            &log,
+        )
+        .unwrap();
+        assert_ne!(again.evidence.folder, red.evidence.folder);
+        assert_eq!(
+            folder_text(&red.evidence.folder),
+            before,
+            "the red's folder is as it was"
+        );
+        let read = |folder: &Path| -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(folder.join("manifest.json")).unwrap())
+                .unwrap()
+        };
+        let (first, second) = (read(&red.evidence.folder), read(&again.evidence.folder));
+        assert_eq!(second["replayOf"], first["run"]);
+        assert_eq!(second["seating"], first["seating"]);
+        assert_eq!(second["scenario"]["name"], "cancel");
+        assert_eq!(second["scenario"]["version"], first["scenario"]["version"]);
+        // The same red, alone: the one scenario, its one step, ended by the same task.
+        assert_eq!(
+            check(&again, "steps", "step 1 (advice)").detail,
+            "T-1, the advice task, is cancelled"
+        );
+        let reds = |outcome: &Outcome| -> Vec<(String, String)> {
+            outcome
+                .failed()
+                .iter()
+                .map(|check| (check.who.clone(), check.what.clone()))
+                .collect()
+        };
+        assert_eq!(reds(&again), reds(&red));
+        // A manifest of another version of the scenario is refused, in words.
+        let mut other = first.clone();
+        other["scenario"]["version"] = serde_json::json!(99);
+        let file = reports.path().join("other.json");
+        std::fs::write(&file, other.to_string()).unwrap();
+        let refused = replay(
+            &file,
+            Path::new(FAKE_AGENT),
+            reports.path().to_path_buf(),
+            Owner::look(&[], &[]),
+            &log,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(refused.contains("ran cancel version 99"), "{refused}");
+    }
+
+    /// Every file of `folder` and what it holds, in order.
+    fn folder_text(folder: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<(String, Vec<u8>)> = checkout::files_below(folder, &[])
+            .unwrap()
+            .into_iter()
+            .map(|file| (file.display().to_string(), std::fs::read(&file).unwrap()))
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// The control of the chief's question in words: the stand-in chief ends its turn asking,
+    /// which the human reads in its own record, answers from the fact sheet through the human's
+    /// door, and sees go in. Nothing reaches the milestone, so the run ends red at its deadline.
     #[test]
     fn a_chiefs_question_in_its_record_is_answered_through_the_humans_door_and_goes_in() {
-        let log = Log::new("live matrix control: a question");
         let reports = tempfile::tempdir().unwrap();
         let mut scenario = Scenario::named("smoke").unwrap();
         scenario.steps.truncate(1);
         scenario.steps[0].stand_in = |_| "Reply with exactly: Which-one?".to_owned();
         scenario.deadline = std::time::Duration::from_secs(60);
-        let matrix = Matrix {
-            seating: Seating::stand_ins(),
-            scenario,
-            stand_in: Path::new(FAKE_AGENT),
-            reports: reports.path().to_path_buf(),
-            owner: Owner::look(&[], &[]),
-        };
-        let outcome = run(&matrix, &log).unwrap();
+        let outcome = on_stand_ins(scenario, reports.path());
         let table = report::table(&outcome.checks);
-        log.report("what each check of the control came to", &table);
         let human: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(outcome.evidence.folder.join("human.json")).unwrap(),
         )
@@ -263,76 +456,86 @@ mod tests {
         )
         .unwrap();
         assert_eq!(manifest["assisted"]["answers"], 1, "{manifest:#}");
-        let step = outcome
-            .checks
-            .iter()
-            .find(|check| check.who == "steps")
-            .unwrap();
+        let step = check(&outcome, "steps", "step 1");
         assert!(
             !step.ok && step.detail.contains("deadline of 60 s"),
             "{table}"
         );
     }
 
-    /// The control: the same driver and oracle, on a board whose five positions the rig's
-    /// stand-in plays. The human asks the stand-in chief in its own words, which hands out the
-    /// advice, the change, the review and the test and accepts them; the oracle reads the
-    /// ledger and the records, and every check holds. No harness is covered by it.
+    /// LMX-08, the core flow, on the stand-ins: every check holds.
     #[test]
-    fn the_matrix_passes_its_scenario_on_the_rigs_stand_ins() {
-        let log = Log::new("live matrix control");
+    fn the_core_flow_holds_on_the_stand_ins() {
         let reports = tempfile::tempdir().unwrap();
-        let owned = reports.path().join("owner.json");
-        std::fs::write(&owned, "{}").unwrap();
-        let matrix = Matrix {
-            seating: Seating::stand_ins(),
-            scenario: Scenario::named("smoke").unwrap(),
-            stand_in: Path::new(FAKE_AGENT),
-            reports: reports.path().to_path_buf(),
-            owner: Owner::look(&[], &[owned]),
-        };
-        let outcome = run(&matrix, &log).unwrap();
+        let outcome = on_stand_ins(Scenario::named("core").unwrap(), reports.path());
         let table = report::table(&outcome.checks);
-        log.report("what each check of the control came to", &table);
-        assert!(outcome.checks.iter().all(|check| check.ok), "{table}");
-        // Every check the oracle has was made: the staff, the asks, the tasks, the fixture,
-        // the bounds and the owner's.
-        for who in [
-            "staff",
-            "chief",
-            "steps",
-            "human",
-            "advice (advisor stand-in)",
-            "change (worker stand-in)",
-            "review (reviewer stand-in)",
-            "test (tester stand-in)",
-            "fixture",
-            "bounds",
-            "owner",
-        ] {
-            assert!(
-                outcome.checks.iter().any(|check| check.who == who),
-                "no check of {who}:\n{table}"
-            );
-        }
-        assert!(outcome.total_turns <= 20, "{:?}", outcome.turns);
-        for file in [
-            "manifest.json",
-            "human.json",
-            "bindings.json",
-            "events.jsonl",
-            "checks.json",
-            "verdict.txt",
-            "opens.json",
-            "daemon-tail.log",
-        ] {
-            assert!(
-                outcome.evidence.folder.join(file).is_file(),
-                "no {file} in {}",
-                outcome.evidence.folder.display()
-            );
-        }
-        let verdict = std::fs::read_to_string(outcome.evidence.folder.join("verdict.txt")).unwrap();
-        assert!(verdict.starts_with("GREEN"), "{verdict}");
+        assert!(
+            outcome.failed().is_empty() && outcome.known.is_empty(),
+            "{table}"
+        );
+        assert!(
+            check(
+                &outcome,
+                "A",
+                "the chief's first reopen of it was refused with invalid-transition"
+            )
+            .ok
+        );
+        assert!(check(&outcome, "B", "it has two results").ok);
+    }
+
+    /// A subcase of field report 6 on the stand-ins: no red but its known ones, and each known
+    /// one still red (none passes unseen: a known red that holds is a red of its own, until its
+    /// mark goes when I-7 lands).
+    fn field6_holds_but_its_known_reds(name: &str) {
+        let reports = tempfile::tempdir().unwrap();
+        let scenario = Scenario::named(name).unwrap();
+        let marks = scenario.known.len();
+        let outcome = on_stand_ins(scenario, reports.path());
+        let table = report::table(&outcome.checks);
+        assert!(
+            outcome.failed().is_empty(),
+            "{name}:\n{table}\nknown:\n{}",
+            report::table(&outcome.known)
+        );
+        assert_eq!(
+            outcome.known.len(),
+            marks,
+            "{name}: each known red is still red"
+        );
+        assert!(outcome
+            .known
+            .iter()
+            .all(|known| !known.ok && known.detail.starts_with("known red until T-11")));
+    }
+
+    #[test]
+    fn field6_done_predecessor() {
+        field6_holds_but_its_known_reds("field6-done-predecessor");
+    }
+
+    #[test]
+    fn field6_acceptance_releases() {
+        field6_holds_but_its_known_reds("field6-acceptance-releases");
+    }
+
+    #[test]
+    fn field6_cancel_done() {
+        field6_holds_but_its_known_reds("field6-cancel-done");
+    }
+
+    #[test]
+    fn field6_cancel_with_waiter() {
+        field6_holds_but_its_known_reds("field6-cancel-with-waiter");
+    }
+
+    #[test]
+    fn field6_accepted_bypass() {
+        field6_holds_but_its_known_reds("field6-accepted-bypass");
+    }
+
+    #[test]
+    fn field6_paused_holder() {
+        field6_holds_but_its_known_reds("field6-paused-holder");
     }
 }
