@@ -506,7 +506,8 @@ fn whoami(rest: &[String], board: &Board) -> Result<Said, Failure> {
 /// The text a command was given, or standard input when it is `-`: a brief
 /// in a quoted heredoc (`cf task add --tier standard - <<'BRIEF'`) reaches
 /// the board as written, where the shell would run the backticks and `$( )`
-/// of a double-quoted one. The final newline is the heredoc's, not the text's.
+/// of a double-quoted one. The final line ending is the heredoc's, not the text's: a `\n`,
+/// or the `\r\n` that PowerShell and `type` end what they pipe with.
 /// The commands that give a window work take a file as well (`brief`).
 fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
     if text != "-" {
@@ -517,7 +518,11 @@ fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
         .read_to_end(&mut bytes)
         .map_err(|cause| Failure::Failed(format!("cannot read standard input ({cause})")))?;
     let text = String::from_utf8_lossy(&bytes);
-    Ok(text.strip_suffix('\n').unwrap_or(&text).to_string())
+    let text = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
+    Ok(text.to_owned())
 }
 
 /// `{ body }`, the request most commands send.

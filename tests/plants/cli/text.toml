@@ -1,0 +1,215 @@
+# The text a board command is given (issue `brief-backticks-run-as-commands`, and the argument cut at
+# a line break of `cmd-cuts-multiline-cf-arguments`): `text_of` reads standard input when the text is
+# `-`, the commands that give a window work read a file too (`--file`), and an argument arrives
+# whole. `crates/cf/tests/text_commands.rs` runs every command of the table `cf help` prints that
+# ends in a text, so a plant at one command's reading fails it, not a test of that command alone.
+# The names begin `text:`, so `npm run plants:cli -- "text:"` runs them. The plants that edit the
+# usage and the sources only take a command out of the table or put a reader in that it has no line
+# for; the one test over the sources (`a_function_that_reads_a_text_is_a_command_of_the_table`) says.
+
+[run]
+cf-text = ["cargo", "test", "--offline", "-p", "cf", "--test", "text_commands"]
+
+# `text_of` itself.
+
+[[plant]]
+name = "text: a dash is the text, standard input is not read"
+meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '    if text != "-" {'
+replace = '    if true {'
+
+[[plant]]
+name = "text: the heredoc's last line break stays in the text"
+meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+    let text = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
+    Ok(text.to_owned())
+'''
+replace = '''
+    Ok(text.to_string())
+'''
+
+[[plant]]
+name = "text: a Windows line ending stays in the text, as PowerShell and type end what they pipe"
+meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
+    Ok(text.to_owned())
+'''
+replace = '''
+        .strip_suffix('\n')
+        .unwrap_or(&text);
+    Ok(text.to_owned())
+'''
+
+# Each place a command reads its text: one forgets the dash, the others go on reading it.
+
+[[plant]]
+name = "text: cf note takes a dash as its text"
+meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '        require_text(text_of(words.text, input)?, "cf note \"what to know\"")?.into(),'
+replace = '        require_text(words.text, "cf note \"what to know\"")?.into(),'
+
+[[plant]]
+name = "text: cf ask takes a dash as its text"
+meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '    let question = require_text(text_of(words.text, input)?, "cf ask \"your question\"")?;'
+replace = '    let question = require_text(words.text, "cf ask \"your question\"")?;'
+
+[[plant]]
+name = "text: cf answer takes a dash as its text"
+meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+        require_text(
+            text_of(words.text, input)?,
+            "cf answer m-<id> \"your answer\"",
+        )?
+'''
+replace = '''
+        require_text(words.text, "cf answer m-<id> \"your answer\"")?
+'''
+
+[[plant]]
+name = "text: cf task done takes a dash as its text"
+meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+    } else {
+        text_of(words.text, input)?
+    };
+'''
+replace = '''
+    } else {
+        words.text
+    };
+'''
+
+[[plant]]
+name = "text: the commands that give a window work take a dash as their text"
+meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "        return text_of(words.text.clone(), input);"
+replace = "        return Ok(words.text.clone());"
+
+# `--file`, for the commands the table's footer names.
+
+[[plant]]
+name = "text: cf tell takes no file"
+meant = "every_command_that_the_table_says_takes_a_file_reads_its_text_from_one"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+const TELL: Shape = Shape {
+    valued: &[brief::FILE],
+'''
+replace = '''
+const TELL: Shape = Shape {
+    valued: &[],
+'''
+
+[[plant]]
+name = "text: cf task add takes no file"
+meant = "every_command_that_the_table_says_takes_a_file_reads_its_text_from_one"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+        "--before",
+        brief::FILE,
+    ],
+'''
+replace = '''
+        "--before",
+    ],
+'''
+
+# An argument whole.
+
+[[plant]]
+name = "text: an argument is cut at its first line break"
+meant = "every_command_that_takes_a_text_takes_it_as_one_argument_whole"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+    let words: Vec<String> = given
+        .iter()
+        .map(|word| word.to_string_lossy().into_owned())
+        .collect();
+    match command(&words, given, board, input) {
+'''
+replace = '''
+    let words: Vec<String> = given
+        .iter()
+        .map(|word| word.to_string_lossy().lines().next().unwrap_or_default().to_owned())
+        .collect();
+    match command(&words, given, board, input) {
+'''
+
+# The table and the sources must agree.
+
+[[plant]]
+name = "text: a command that reads a text has no line in the table"
+meant = "a_function_that_reads_a_text_is_a_command_of_the_table"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = '''
+  cf answer m-12 "…"                answer a question put to you
+'''
+replace = ""
+
+[[plant]]
+name = "text: a command reads a text and the table does not have it"
+meant = "a_function_that_reads_a_text_is_a_command_of_the_table"
+runs = ["cf-text"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
+'''
+replace = '''
+fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
+    let _ = text_of(String::new(), &mut io::empty());
+'''

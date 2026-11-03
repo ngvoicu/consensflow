@@ -1,0 +1,77 @@
+# A text reaches `cf` whole from each shell Windows runs it in (issue `cmd-cuts-multiline-cf-arguments`,
+# `d25a180`): `crates/cf/tests/windows_shells.rs` runs Windows PowerShell 5.1, PowerShell 7, Git Bash
+# and cmd.exe on a text in a file and compares what the scripted board received. The tests exist on
+# Windows alone, so these plants are run there (`platforms`): `cargo xtask plants cli shells` on
+# zeewin2 through `windows-from-tree.sh`. Every name begins `shells:`.
+
+[run]
+windows-shells = ["cargo", "test", "--offline", "-p", "cf", "--test", "windows_shells"]
+
+# The terminal's command `cf setup` writes hands cf.exe the arguments it was given.
+[[plant]]
+name = "shells: cf.cmd hands cf.exe its first argument and no more"
+meant = "cmd_exe_gives_cf_cmd_what_it_pipes_to_a_dash_whole"
+runs = ["windows-shells"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = '{pin}\"{}\" %*\r\n",'
+replace = '{pin}\"{}\" %1\r\n",'
+
+# What the shells pipe ends in a Windows line ending, which is not the text's.
+[[plant]]
+name = "shells: a line ending of Windows stays in what is piped to a dash"
+meant = "powershell_7_gives_cf_exe_what_it_pipes_to_a_dash_whole"
+runs = ["windows-shells"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
+    Ok(text.to_owned())
+'''
+replace = '''
+        .strip_suffix('\n')
+        .unwrap_or(&text);
+    Ok(text.to_owned())
+'''
+
+# A dash is the text.
+[[plant]]
+name = "shells: a dash is the text, standard input is not read"
+meant = "git_bash_gives_cf_exe_what_it_pipes_to_a_dash_whole"
+runs = ["windows-shells"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '    if text != "-" {'
+replace = '    if true {'
+
+# An argument is cut at its first line break, as cmd.exe cut it.
+[[plant]]
+name = "shells: an argument is cut at its first line break"
+meant = "windows_powershell_5_1_gives_cf_exe_a_many_line_argument_whole"
+runs = ["windows-shells"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+    let words: Vec<String> = given
+        .iter()
+        .map(|word| word.to_string_lossy().into_owned())
+        .collect();
+    match command(&words, given, board, input) {
+'''
+replace = '''
+    let words: Vec<String> = given
+        .iter()
+        .map(|word| word.to_string_lossy().lines().next().unwrap_or_default().to_owned())
+        .collect();
+    match command(&words, given, board, input) {
+'''

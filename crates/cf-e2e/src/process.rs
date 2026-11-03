@@ -27,6 +27,11 @@
 // The one place a program starts and the test's environment is read; see above.
 #![allow(clippy::disallowed_methods)]
 
+// The cargo a test starts: one file for every crate that starts one (`crates/cf-process` holds its
+// cases), included by its path because this crate depends on none of ours for it.
+#[allow(dead_code)] // Only the cargo's name and the list of variables are used here.
+#[path = "../../cf-process/src/nested_cargo.rs"]
+mod nested_cargo;
 mod pid;
 mod spawned;
 #[cfg(test)]
@@ -130,6 +135,7 @@ pub struct Run {
     program: OsString,
     args: Vec<Arg>,
     vars: Vec<(OsString, OsString)>,
+    removed: Vec<OsString>,
     inherit: bool,
     finding_programs: bool,
     cwd: Option<PathBuf>,
@@ -158,6 +164,7 @@ impl Run {
             program: program.as_ref().to_os_string(),
             args: Vec::new(),
             vars: Vec::new(),
+            removed: Vec::new(),
             inherit: false,
             finding_programs: false,
             cwd: None,
@@ -221,6 +228,31 @@ impl Run {
             self = self.var(name, value);
         }
         self
+    }
+
+    /// Without the variable `name`, whichever way the program got it: told, or
+    /// the test's own under [`Run::inheriting_env`].
+    #[must_use]
+    pub fn without(mut self, name: impl AsRef<OsStr>) -> Self {
+        self.removed.push(name.as_ref().to_os_string());
+        self
+    }
+
+    /// The cargo a test starts: the test's own environment underneath, but for
+    /// the variables cargo gave the test (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`...),
+    /// as a shell would start it. With them a build script that watches one (`ring`'s
+    /// does) runs again, and the package and all that is over it are built again,
+    /// in the folder the running build uses (`nested_cargo`, which
+    /// says why and is the one place that names the cargo).
+    #[must_use]
+    pub fn cargo() -> Self {
+        let mut run = Self::new(nested_cargo::CARGO).inheriting_env();
+        for (name, _) in std::env::vars_os() {
+            if name.to_str().is_some_and(nested_cargo::given_to_a_test) {
+                run = run.without(name);
+            }
+        }
+        run
     }
 
     /// With the test's own environment underneath its variables, instead of
@@ -320,6 +352,9 @@ impl Run {
                 .envs(required_on_windows(&self.vars, self.finding_programs));
         }
         command.envs(self.vars.iter().map(|(name, value)| (name, value)));
+        for name in &self.removed {
+            command.env_remove(name);
+        }
         for arg in &self.args {
             arg.add_to(&mut command);
         }
