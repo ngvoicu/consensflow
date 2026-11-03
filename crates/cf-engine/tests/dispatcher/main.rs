@@ -69,6 +69,7 @@ mod first_delivered;
 mod fixtures;
 mod follow_ups;
 mod held_at_work;
+mod hold_notes;
 mod interrupts;
 mod lanes;
 mod launch_stops;

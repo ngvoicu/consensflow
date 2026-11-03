@@ -62,11 +62,13 @@ static ATTACHMENT: Keep = Keep::Members(&[
 ]);
 
 /// What a tool's result says besides its text: the id of the job a call that ran in
-/// the background started, the monitor a Monitor call armed and its time (which says it
+/// the background started, the time limit a foreground command passed that moved it there
+/// (`timedOutAfterMs`), the monitor a Monitor call armed and its time (which says it
 /// is one), and the job a TaskStop call stopped. A tool whose result is text, or a list,
 /// says none.
 static TOOL_USE_RESULT: Keep = Keep::Members(&[
     ("backgroundTaskId", &Keep::Scalar),
+    ("timedOutAfterMs", &Keep::Scalar),
     ("taskId", &Keep::Scalar),
     ("timeoutMs", &Keep::Scalar),
     ("task_id", &Keep::Scalar),

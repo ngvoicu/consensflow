@@ -63,7 +63,7 @@ fn a_job_claude_code_says_waits_for_input_still_runs_and_the_report_its_end_wake
     rig.wait_for("the chief to be told it goes on", secs(40), || {
         Ok(told(&project)?.iter().any(|(kind, body)| {
             kind == "note"
-                && body.starts_with("T-1 goes on in the background: @")
+                && body.starts_with("T-1 is still working in the background (1 command")
                 && body.ends_with(GOING)
         }))
     })?;

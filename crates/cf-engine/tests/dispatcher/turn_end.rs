@@ -91,13 +91,11 @@ fn a_turn_that_ends_with_its_job_running_keeps_its_task_working_and_its_progress
     assert_eq!(results_of(&tiers, 1), Vec::<String>::new());
     let told = tiers.notes("chief");
     assert_eq!(told.len(), 1, "{told:?}");
-    assert!(
-        told[0].starts_with(
-            "T-1 goes on in the background: @zeus ended its turn with 1 background job running"
-        ),
-        "{told:?}"
+    assert_eq!(
+        told[0],
+        "T-1 is still working in the background (1 command); its result comes when it ends. `cf task finish T-1` takes what it said last now.\n\nWhat it said:\n\nThe build runs; I will report when it ends",
+        "one note, in plain words (T-1181)"
     );
-    assert!(told[0].contains("which does not end it."), "{told:?}");
 
     // The time that passes, and a window the host finds nothing left in, release nothing.
     context.advance(6 * 3_600_000);
@@ -148,7 +146,7 @@ fn a_task_held_again_in_a_window_opened_again_is_told_again_and_its_lane_says_it
     let told = tiers
         .notes("chief")
         .into_iter()
-        .filter(|note| note.starts_with("T-1 goes on in the background"))
+        .filter(|note| note.starts_with("T-1 is still working in the background"))
         .count();
     assert_eq!(told, 2, "told for each time it is held");
     assert_eq!(
@@ -181,9 +179,9 @@ fn a_human_whose_task_goes_on_in_the_background_is_told_of_the_drawers_finish_an
     context.pass().unwrap();
     let told = tiers.notes("human");
     assert_eq!(told.len(), 1, "{told:?}");
-    assert!(
-        told[0].contains("If its work is done, take what it said last as the result now: Finish in the task's drawer, which does not end it."),
-        "{told:?}"
+    assert_eq!(
+        told[0],
+        "T-1 is still working in the background (1 command); its result comes when it ends. Finish in the task's drawer takes what it said last now.\n\nWhat it said:\n\nWatching the run",
     );
     assert!(!told[0].contains("cf task finish"), "{told:?}");
 }
@@ -847,10 +845,13 @@ fn a_task_held_for_its_monitor_when_the_app_quit_is_held_again_after_the_restart
     let told: Vec<String> = tiers
         .notes("chief")
         .into_iter()
-        .filter(|note| note.starts_with("T-1 goes on in the background"))
+        .filter(|note| note.starts_with("T-1 is still working in the background"))
         .collect();
     assert_eq!(told.len(), 2, "told again after the restart: {told:?}");
-    assert!(told[1].contains("cf task finish T-1"), "{told:?}");
+    assert!(
+        told[1].contains("`cf task finish T-1` takes what it said last"),
+        "{told:?}"
+    );
 
     let finished = after
         .finish_task(tiers.project.id, 1, "chief")
@@ -1124,9 +1125,9 @@ fn a_monitor_that_said_its_time_ran_out_waits_while_a_command_runs_and_the_note_
     context.pass().unwrap();
     assert_eq!(context.background.looks(), 2);
     let told = told_last(&tiers);
-    assert!(
-        told.starts_with("T-1 goes on in the background: @zeus ended its turn with 1 monitor that said it ended. Its monitors: \u{201c}ticks\u{201d} said its time ran out at 23:03:10 UTC. A monitor of a command that said it ended is over once no command of @zeus's harness runs in its window, and 2 still run there."),
-        "{told}"
+    assert_eq!(
+        told,
+        "T-1 is still working in the background (1 monitor that said it ended); its result comes when it ends. `cf task finish T-1` takes what it said last now.\n\nWhat it said:\n\nWatching",
     );
     context.advance(2_000);
     context.pass().unwrap();
@@ -1155,9 +1156,10 @@ fn where_the_host_cannot_tell_the_windows_commands_the_note_says_it_waits_for_fi
     assert_eq!(tiers.task(1).task.state, "working");
     let told = tiers.notes("chief");
     assert_eq!(told.len(), 1, "{told:?}");
-    assert!(
-        told[0].contains("is over once no command of @zeus's harness runs in its window, which ConsensFlow cannot see on this machine: it waits for Finish."),
-        "{told:?}"
+    assert_eq!(
+        told[0],
+        "T-1 is still working in the background (1 monitor that said it ended); ConsensFlow cannot tell when it ends, so its result will not come by itself. `cf task finish T-1` takes what it said last.\n\nWhat it said:\n\nWatching",
+        "the host cannot see the window's commands: only Finish ends it, and the one note says so"
     );
     // Looked at again, it says the same, and nothing more is told; the looks back off.
     for _ in 0..8 {
@@ -1191,7 +1193,8 @@ fn where_the_host_cannot_tell_the_windows_commands_the_task_is_held_until_a_look
 }
 
 #[test]
-fn where_the_host_did_not_answer_the_note_says_so_and_a_later_answer_is_told_again() {
+fn where_the_host_did_not_answer_the_note_is_the_plain_one_and_a_later_answer_that_it_cannot_tell_is_told_once_more(
+) {
     let context = Context::new();
     let tiers = zeus_at_work(&context);
     context.background.commands_unanswered();
@@ -1199,15 +1202,20 @@ fn where_the_host_did_not_answer_the_note_says_so_and_a_later_answer_is_told_aga
     passes(&context, 2);
     let told = told_last(&tiers);
     assert!(
-        told.contains("and the pane host did not answer when ConsensFlow looked: it looks again."),
-        "{told}"
+        told.contains("its result comes when it ends."),
+        "it looks again, and says nothing of it: {told}"
     );
-    // The host answers that it cannot tell: what holds changed, and it is told again.
+    // The host answers that it cannot tell: the hold is now one nothing but Finish ends, the
+    // one change that is told after the first note.
     context.background.commands_run(None);
     context.advance(1_000);
     context.pass().unwrap();
     assert_eq!(tiers.notes("chief").len(), 2);
-    assert!(told_last(&tiers).contains("cannot see on this machine: it waits for Finish."));
+    assert!(
+        told_last(&tiers).contains("its result will not come by itself"),
+        "{}",
+        told_last(&tiers)
+    );
 }
 
 #[test]
@@ -1229,29 +1237,17 @@ fn a_monitor_that_said_its_time_ran_out_is_not_looked_at_while_another_job_or_an
     assert_eq!(tiers.task(1).task.state, "working");
     assert_eq!(context.background.looks(), 0);
     let told = told_last(&tiers);
-    assert!(
-        told.contains("ended its turn with 1 background job running, which its harness wakes it for as each ends, and 1 monitor that said it ended. Its monitors: \u{201c}ticks\u{201d} said its time ran out at 23:03:10 UTC; \u{201c}build\u{201d} watches still. A monitor of a command that said it ended is over once no command of @zeus's harness runs in its window, once nothing else of it is pending."),
-        "{told}"
-    );
-    assert!(
-        told.contains("to wait for it, do nothing. If its work is done, take what it said last as the result now: cf task finish T-1, which does not end them."),
-        "{told}"
+    assert_eq!(
+        told,
+        "T-1 is still working in the background (2 monitors, 1 of them said it ended); its result comes when they end. `cf task finish T-1` takes what it said last now.\n\nWhat it said:\n\nWatching the build",
     );
 }
 
 #[test]
 fn a_monitor_of_a_socket_or_of_no_source_read_that_said_it_ended_waits_for_finish() {
-    for (source, end, said) in [
-        (
-            Source::Socket,
-            End::Closed,
-            "said its socket closed at 23:03:10 UTC. A monitor of a socket that said it ended has no command in the window to look for: it ends by Finish alone.",
-        ),
-        (
-            Source::Server,
-            End::Stopped,
-            "said it was stopped at 23:03:10 UTC. A monitor that said it ended and whose call named no command or socket ConsensFlow reads has nothing in the window to look for: it ends by Finish alone.",
-        ),
+    for (source, end) in [
+        (Source::Socket, End::Closed),
+        (Source::Server, End::Stopped),
     ] {
         let context = Context::new();
         let tiers = zeus_at_work(&context);
@@ -1265,16 +1261,16 @@ fn a_monitor_of_a_socket_or_of_no_source_read_that_said_it_ended_waits_for_finis
         passes(&context, 4);
         assert_eq!(tiers.task(1).task.state, "working");
         assert_eq!(context.background.looks(), 0);
-        let told = told_last(&tiers);
-        assert!(
-            told.contains(&format!("\u{201c}feed\u{201d} {said}")),
-            "{told}"
+        assert_eq!(
+            tiers.notes("chief"),
+            ["T-1 is still working in the background (1 monitor that said it ended); ConsensFlow cannot tell when it ends, so its result will not come by itself. `cf task finish T-1` takes what it said last.\n\nWhat it said:\n\nWatching the feed"],
+            "{source:?}: nothing in the window is the monitor's, and only Finish ends it"
         );
     }
 }
 
 #[test]
-fn a_held_task_whose_monitor_says_it_ended_later_is_told_again_with_what_the_window_runs() {
+fn a_held_task_whose_monitor_says_it_ended_later_is_not_told_again() {
     let context = Context::new();
     let tiers = zeus_at_work(&context);
     context.background.commands_run(Some(2));
@@ -1286,7 +1282,7 @@ fn a_held_task_whose_monitor_says_it_ended_later_is_told_again_with_what_the_win
     );
     context.pass().unwrap();
     assert_eq!(tiers.notes("chief").len(), 1);
-    assert!(told_last(&tiers).contains("Its monitors: \u{201c}ticks\u{201d} watches still."));
+    assert!(told_last(&tiers).contains("(1 monitor); its result comes when it ends."));
     // It says it was stopped for too much output; its command, which a look finds, runs on.
     context.adapter.wake("zeus", "<task-notification>");
     context.pass().unwrap();
@@ -1300,12 +1296,10 @@ fn a_held_task_whose_monitor_says_it_ended_later_is_told_again_with_what_the_win
     context.advance(1_000);
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working");
-    let told = told_last(&tiers);
-    assert_eq!(tiers.notes("chief").len(), 2, "told again: {told}");
-    assert!(
-        told.contains("\u{201c}ticks\u{201d} said it was stopped at 23:03:10 UTC. A monitor of a command that said it ended is over once no command of @zeus's harness runs in its window, and 2 still run there."),
-        "{told}"
-    );
+    // Its notice, and what a look finds, are told no more (T-1181): the first note said the
+    // result comes when it ends, and it does.
+    let told = tiers.notes("chief");
+    assert_eq!(told.len(), 1, "told once: {told:?}");
 }
 
 #[test]
@@ -1372,9 +1366,10 @@ fn finish_of_a_task_held_for_a_monitor_that_said_it_ended_says_so_apart_from_wha
 }
 
 #[test]
-fn a_held_task_is_told_again_when_fewer_commands_still_run() {
-    // Astraeus on 136a7158: "2 still run there" stayed the requester's word after one
-    // ended.
+fn a_held_task_is_not_told_again_when_fewer_commands_still_run() {
+    // Astraeus on 136a7158 had the requester told again as the count of commands that run in
+    // the window fell, so "2 still run there" did not outstay its word. The note is told once
+    // and names no such count (T-1181): the result is told when it comes.
     let context = Context::new();
     let tiers = zeus_at_work(&context);
     context.background.commands_run(Some(2));
@@ -1383,26 +1378,26 @@ fn a_held_task_is_told_again_when_fewer_commands_still_run() {
     context.advance(1_000);
     context.pass().unwrap();
     assert!(
-        told_last(&tiers).contains("and 2 still run there."),
+        !told_last(&tiers).contains("still run"),
         "{}",
         told_last(&tiers)
     );
     let told = tiers.notes("chief").len();
+    assert_eq!(told, 1);
     context.background.commands_run(Some(1));
     context.advance(2_000);
     context.pass().unwrap();
-    assert_eq!(tiers.notes("chief").len(), told + 1, "told again");
-    assert!(
-        told_last(&tiers).contains("and 1 still runs there."),
-        "{}",
-        told_last(&tiers)
-    );
+    context.background.commands_run(Some(3));
+    context.advance(4_000);
+    context.pass().unwrap();
+    assert_eq!(tiers.notes("chief").len(), told, "not told again");
 }
 
 #[test]
-fn a_held_task_whose_monitor_was_replaced_with_the_same_counts_is_told_again() {
-    // Astraeus on 136a7158: A ended and B took its place between two looks at rest, the
-    // counts the same: the requester was left with A's name and notice.
+fn a_held_task_whose_monitor_was_replaced_with_the_same_counts_is_not_told_again() {
+    // Astraeus on 136a7158 had A end and B take its place between two looks at rest, the
+    // counts the same, and the requester left with A's name and notice, so it was told
+    // again. The note names no monitor now (T-1181): there is nothing stale to correct.
     let context = Context::new();
     let tiers = zeus_at_work(&context);
     context.background.commands_run(Some(0));
@@ -1414,7 +1409,12 @@ fn a_held_task_whose_monitor_was_replaced_with_the_same_counts_is_told_again() {
     );
     context.pass().unwrap();
     let told = tiers.notes("chief").len();
-    assert!(told_last(&tiers).contains("\u{201c}watch-a\u{201d} watches still"));
+    assert_eq!(told, 1);
+    assert!(
+        !told_last(&tiers).contains("watch-a"),
+        "{}",
+        told_last(&tiers)
+    );
     context.adapter.wake("zeus", "<task-notification>");
     context.pass().unwrap();
     context.adapter.answer_leaving_monitors(
@@ -1424,8 +1424,7 @@ fn a_held_task_whose_monitor_was_replaced_with_the_same_counts_is_told_again() {
         vec![monitor("watch-b", Source::Command, None)],
     );
     context.pass().unwrap();
-    assert_eq!(tiers.notes("chief").len(), told + 1, "told again");
-    assert!(told_last(&tiers).contains("\u{201c}watch-b\u{201d} watches still"));
+    assert_eq!(tiers.notes("chief").len(), told, "not told again");
 }
 
 #[test]
@@ -1513,10 +1512,10 @@ fn where_a_process_of_the_window_cannot_be_read_the_note_says_so_and_it_looks_ag
     passes(&context, 2);
     let told = told_last(&tiers);
     assert!(
-        told.contains("is over once no command of @zeus's harness runs in its window, and a process of its window runs that ConsensFlow cannot read (another user's): it looks again."),
-        "{told}"
+        told.contains("its result comes when it ends."),
+        "it looks again, and says nothing of it: {told}"
     );
-    assert!(!told.contains("cannot see on this machine"), "{told}");
+    assert!(!told.contains("will not come by itself"), "{told}");
     // The process ends; the next look reads them all, and finds no command.
     context.background.commands_run(Some(0));
     context.advance(1_000);
@@ -1672,8 +1671,8 @@ fn where_the_windows_processes_kept_changing_the_note_names_no_other_users_proce
     passes(&context, 2);
     let told = told_last(&tiers);
     assert!(
-        told.contains("is over once no command of @zeus's harness runs in its window, and its window's processes kept changing while ConsensFlow read them: it looks again."),
-        "{told}"
+        told.contains("its result comes when it ends."),
+        "it looks again, and says nothing of it: {told}"
     );
     assert!(!told.contains("another user"), "{told}");
     context.background.commands_run(Some(0));

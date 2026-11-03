@@ -439,6 +439,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             settlement: Settlement::Unknown,
             pending: agent.pending,
             monitors: agent.monitors.clone(),
+            commands: agent.commands.clone(),
             lines: Box::new(Lines {
                 lost: agent.lost.clone(),
                 places,

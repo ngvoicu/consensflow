@@ -132,13 +132,21 @@
 //! nothing says the processes they ran are gone (a job its shell detached can outlive the
 //! window), and the reading says how many were retired so (`Pending::retired`).
 //!
+//! **A command is told by when it began and what moved it.** The reading says each command
+//! that runs ([`Command`]) as it says each monitor: when its record says it was started
+//! and, where a foreground command passed the time limit its call was given and Claude Code
+//! moved it into the background (`toolUseResult.timedOutAfterMs` beside `backgroundTaskId`;
+//! 2464 of the 10369 background commands in this Mac's records, 2.1.3xx), that limit: the
+//! command began that long before the record. Its worker is not told the command goes on
+//! beyond the result's words, and the field board's T-299 had one run 100 minutes (T-1181).
+//!
 //! The background agents and workflows Claude Code also wakes its agent for are no part
 //! of this: it counts them itself, on the `turn_duration` that ends a turn.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::shared::record::reading::{End, Monitor, Notice, Source};
+use crate::shared::record::reading::{Command, End, Monitor, Notice, Source};
 
 /// The marker of 2.1.301's summary of the shells a previous process left (see above),
 /// before the kind of task it is of, and the marker of one it found still running,
@@ -196,6 +204,14 @@ struct Job {
     watch: Option<Watch>,
     /// The first notice of its end a monitor's notifications said, with no status.
     notice: Option<Notice>,
+    /// When a command began to run, by the clock of the record that says it runs in the
+    /// background (milliseconds since the epoch), less the time limit it passed where one
+    /// moved it there: the call of a foreground command that passes its limit returns at the
+    /// limit, so it began that long before. None where the record says no time.
+    since: Option<i64>,
+    /// The time limit a foreground command passed that moved it into the background
+    /// (`toolUseResult.timedOutAfterMs`), in milliseconds.
+    limit_ms: Option<i64>,
 }
 
 /// A monitor as the call that armed it says it: what its agent called it, what it
@@ -214,20 +230,32 @@ pub(super) struct Jobs {
 }
 
 impl Jobs {
-    /// The record of a tool result says the job `id` runs in the background: a monitor
-    /// that `watch` says, where it is one.
-    pub(super) fn started(&mut self, id: Arc<str>, watch: Option<Watch>) {
+    /// The record of a tool result, written at `at` (milliseconds since the epoch, where it
+    /// says a time), says the job `id` runs in the background: a monitor that `watch` says,
+    /// where it is one; a command that passed the time limit `limit_ms`, where that moved it.
+    pub(super) fn started(
+        &mut self,
+        id: Arc<str>,
+        watch: Option<Watch>,
+        at: Option<i64>,
+        limit_ms: Option<i64>,
+    ) {
+        let since = at.map(|at| at.saturating_sub(limit_ms.unwrap_or(0)));
         match self.started.iter_mut().find(|job| job.id == id) {
             Some(job) => {
                 job.state = State::Running;
                 job.watch = watch;
                 job.notice = None;
+                job.since = since;
+                job.limit_ms = limit_ms;
             }
             None => self.started.push(Job {
                 id,
                 state: State::Running,
                 watch,
                 notice: None,
+                since,
+                limit_ms,
             }),
         }
     }
@@ -308,6 +336,19 @@ impl Jobs {
                     called: watch.called,
                     notice: job.notice.clone(),
                 })
+            })
+            .collect()
+    }
+
+    /// The commands that run (the jobs that are no monitors), in the order they started.
+    pub(super) fn commands(&self) -> Vec<Command> {
+        self.started
+            .iter()
+            .filter(|job| job.state == State::Running && job.watch.is_none())
+            .map(|job| Command {
+                id: Arc::clone(&job.id),
+                since: job.since,
+                limit_ms: job.limit_ms,
             })
             .collect()
     }

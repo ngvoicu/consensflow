@@ -836,6 +836,16 @@ impl Observed {
         }
     }
 
+    /// The commands among what the conversation's turn left running, as its record says
+    /// them (when each began, and whether a time limit moved it into the background):
+    /// none where the harness's reader does not say, or the record could not be read.
+    pub fn commands(&self) -> Vec<crate::records::Command> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.commands.clone(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Vec::new(),
+        }
+    }
+
     /// Whether the conversation's turn ended and left background agents or
     /// workflows running.
     pub fn agents_pending(&self) -> bool {

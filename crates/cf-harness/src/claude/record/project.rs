@@ -188,7 +188,7 @@ pub(super) struct User {
     /// The job a tool result of the record says it started (see [`job`]), where the record
     /// is of the main conversation (a subagent's jobs are its own, and its end wakes it):
     /// the call the record's first result answers, as the block says it, and the job.
-    pub(super) job: Option<(Option<Value>, Arc<str>)>,
+    pub(super) job: Option<(Option<Value>, Started)>,
     /// What a TaskStop result of the record says it stopped, of the main conversation:
     /// the call it answers, as the block says it, and the job's id.
     pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
@@ -523,16 +523,33 @@ fn is_notification(record: &Value) -> bool {
             || says(field(record.get("origin"), "kind"), "task-notification"))
 }
 
+/// A job a tool's result says it started: its id, and the time limit it passed where that
+/// moved it into the background.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Started {
+    pub(super) id: Arc<str>,
+    /// A foreground command that passed its time limit is moved to the background by Claude
+    /// Code and goes on running, and its result says the limit it passed
+    /// (`toolUseResult.timedOutAfterMs`, milliseconds, with `backgroundTaskId`: 2.1.3xx,
+    /// about a third of the background commands in a field board's records, T-1181). None for a
+    /// command the agent asked to run in the background, and for a monitor.
+    pub(super) limit_ms: Option<i64>,
+}
+
 /// The job a tool's result says it started, by its id: a command run in the background
 /// (`backgroundTaskId`), or a monitor, whose start says its task and its time (2.1.305:
 /// `taskId`, and `timeoutMs`, a number: 0 for one that is `persistent`).
-fn job(record: &Value) -> Option<Arc<str>> {
+fn job(record: &Value) -> Option<Started> {
     let result = record.get("toolUseResult");
     if let Some(id) = text_id(field(result, "backgroundTaskId")) {
-        return Some(id);
+        let limit_ms = field(result, "timedOutAfterMs")
+            .and_then(Value::as_i64)
+            .filter(|limit| *limit > 0);
+        return Some(Started { id, limit_ms });
     }
     field(result, "timeoutMs").and_then(Value::as_i64)?;
-    text_id(field(result, "taskId"))
+    let id = text_id(field(result, "taskId"))?;
+    Some(Started { id, limit_ms: None })
 }
 
 /// The call the first tool result of a user's `content` answers, as its block says it.

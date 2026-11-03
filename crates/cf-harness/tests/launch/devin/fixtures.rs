@@ -373,6 +373,7 @@ pub(super) fn settled(session: &str) -> Record {
         settlement: Settlement::Settled,
         pending: Default::default(),
         monitors: Vec::new(),
+        commands: Vec::new(),
         lines: Box::default(),
     }
 }

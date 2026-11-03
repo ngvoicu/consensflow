@@ -2359,7 +2359,7 @@ fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_h
         tiers
             .notes("chief")
             .into_iter()
-            .filter(|note| note.starts_with("T-1 goes on in the background: @zeus-amber-pine ended its turn with 1 background job running"))
+            .filter(|note| note.starts_with("T-1 is still working in the background (1 command)"))
             .count()
     };
     assert_eq!(held(&tiers), 1, "told of the hold before the Close");

@@ -35,16 +35,6 @@ find = "    wait_until(pane, &asked, Instant::now() + grace);"
 replace = "    wait_until(pane, &asked, Instant::now() + grace / 100);"
 
 [[plant]]
-name = "turn end finish: the note says finishing does not end the job of what is an agent"
-meant = "a_turn_that_ends_with_its_job_running_keeps_its_task_working_and_its_progress_is_no_result"
-runs = ["tep-engine-turn-end"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_end.rs"
-find = "        1 => \"it\","
-replace = "        1 => \"the job\","
-
-[[plant]]
 name = "turn end finish: cf has no finish among the verbs that move a task"
 meant = "finish_asks_the_board_to_finish_the_task_with_no_words_and_says_what_follows"
 runs = ["tep-turn-end-finish-cf-verb"]
