@@ -379,6 +379,15 @@ impl Dispatcher {
         Ok(self.seams.records.turn_cut(harness, &session).await)
     }
 
+    /// The last tool call a participant's current conversation shows, as a line
+    /// (`Record::last_call`), read with no window open: what its window was doing when it
+    /// closed under its task, for the note of the close (T-823). None where the record shows
+    /// no call, cannot be read, or the participant has no conversation to read.
+    pub(crate) async fn last_call_of(&self, participant: i64) -> Option<String> {
+        let (harness, session) = self.readable(participant).ok()??;
+        self.seams.records.last_call(harness, &session).await
+    }
+
     /// The harness and the session a participant's current conversation is on,
     /// where its record can be read with no window open: none when it has no
     /// conversation, no session yet, or a harness no adapter opens.

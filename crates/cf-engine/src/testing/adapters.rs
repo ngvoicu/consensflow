@@ -79,6 +79,8 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             asking: false,
             failed: false,
             failure: None,
+            failure_kind: None,
+            last_call: None,
             took_back: false,
             model_moved: None,
             model_drift: None,
@@ -137,6 +139,17 @@ impl Records for FakeRecords {
             .fake(harness.kind())
             .is_some_and(|fake| !matches!(record_of(fake, session), Reading::Unknown(_)));
         Box::pin(async move { Ok(known) })
+    }
+
+    /// The last tool call the fake's record of `session` shows (`FakeAgent::last_call`).
+    /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter in a
+    /// trace.
+    fn last_call<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<String>> {
+        let call = self
+            .adapters
+            .fake(harness.kind())
+            .and_then(|fake| fake.last_call_of(session));
+        Box::pin(async move { call })
     }
 
     /// Whether the agent of `session` was never answered, and none where the

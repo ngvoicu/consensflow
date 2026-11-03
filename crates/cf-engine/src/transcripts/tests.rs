@@ -70,6 +70,8 @@ fn look(items: Vec<Item>) -> Observed {
             asking: false,
             failed: false,
             failure: None,
+            failure_kind: None,
+            last_call: None,
             took_back: false,
             model_moved: None,
             model_drift: None,

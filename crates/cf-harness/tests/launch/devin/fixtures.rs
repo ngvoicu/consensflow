@@ -366,6 +366,8 @@ pub(super) fn settled(session: &str) -> Record {
         asking: false,
         failed: false,
         failure: None,
+        failure_kind: None,
+        last_call: None,
         took_back: false,
         model_moved: None,
         model_drift: None,

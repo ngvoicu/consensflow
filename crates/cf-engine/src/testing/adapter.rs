@@ -73,6 +73,10 @@ pub struct FakeAgent {
     pub failed: bool,
     /// Why the turn failed, in the harness's words, where its record says.
     pub failure: Option<String>,
+    /// What kind of failure it was, in the harness's plain words, where its record names one.
+    pub failure_kind: Option<String>,
+    /// The last tool call the record shows, as a command line.
+    pub last_call: Option<String>,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
     /// The conversations the window was switched to that no hook of its harness greeted
@@ -842,6 +846,16 @@ impl FakeAdapter {
             .map(|agent| (agent.failed, agent.failure.clone(), agent.quota.clone()))
     }
 
+    /// The last tool call the record of `session` shows, as the latest window on it set it.
+    pub(super) fn last_call_of(&self, session: &str) -> Option<String> {
+        self.agents
+            .borrow()
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .and_then(|agent| agent.last_call.clone())
+    }
+
     /// What the record of `session` holds (`adapter.record`): the latest
     /// window's on it, none where no window had it, and whether the turn it
     /// ends in is over (an agent that was never answered is in one still, as a
@@ -899,6 +913,7 @@ impl FakeAdapter {
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
                 agent.failure = None;
+                agent.failure_kind = None;
                 agent.took_back = false;
                 agent.at_prompt = false;
             }
@@ -1053,6 +1068,8 @@ impl Asked {
             held: false,
             failed,
             failure,
+            failure_kind: None,
+            last_call: None,
             shows: None,
             ungreeted: Vec::new(),
             records: HashMap::new(),

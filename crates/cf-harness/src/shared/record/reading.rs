@@ -82,6 +82,22 @@ pub struct Record {
     /// reading Node wrote has it.
     #[serde(skip)]
     pub failure: Option<String>,
+    /// What kind of failure the harness's record names, in plain words, where it names one it
+    /// has a plain name for (Codex's `codex_error_info`: `cyber_policy` is its safety filter
+    /// refusing the turn). The words of [`Record::failure`] are the harness's; these are
+    /// ConsensFlow's, so the note says them apart. None where the record names no kind, or one
+    /// with no plain name. No reading Node wrote has it.
+    #[serde(skip)]
+    pub failure_kind: Option<String>,
+    /// The last tool call the record shows, as a command line: a shell command as it was
+    /// run, any other tool's name and its main argument (a path, a pattern, a URL). It is
+    /// what a window was doing when it closed under its task, which no screen of it says
+    /// (T-823: a Claude Code worker closed with exit 143 three seconds after its
+    /// `cargo test --workspace` was killed). Whole as the record has it: the note that tells
+    /// it masks it and cuts it short. None where the record shows no call, or the reader
+    /// cannot say. No reading Node wrote has it.
+    #[serde(skip)]
+    pub last_call: Option<String>,
     /// The turn was stopped before a word of it, and its harness put its message back in
     /// the input box, out of the conversation it answers from, though the items still
     /// hold it, as the record says (Muse's `run_retracted`). A reader whose record
@@ -299,6 +315,8 @@ impl Record {
             asking: false,
             failed: false,
             failure: None,
+            failure_kind: None,
+            last_call: None,
             took_back: false,
             model_moved: None,
             model_drift: None,

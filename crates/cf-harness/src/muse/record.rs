@@ -646,6 +646,7 @@ impl Answer for Log {
         record.lines.places = Some(self.items.iter().map(|kept| kept.began).collect());
         record.in_flight = in_flight;
         record.asking = latest.is_some_and(|(run, _)| self.held.asking(run));
+        record.last_call = self.held.last_call().map(str::to_owned);
         if let Some(End::Failed { reason }) = end {
             record.failed = true;
             record.failure.clone_from(reason);

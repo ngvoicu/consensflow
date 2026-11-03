@@ -783,6 +783,15 @@ impl Observed {
         }
     }
 
+    /// What kind of failure the look's turn was, in plain words, where its harness's
+    /// record names one ([`Record::failure_kind`]): none where the turn did not fail.
+    pub fn failure_kind(&self) -> Option<&str> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) if self.failed => record.failure_kind.as_deref(),
+            _ => None,
+        }
+    }
+
     /// The conversation's last word ([`last_word`]): none where its record says
     /// nothing, or could not be read.
     pub fn last_word(&self) -> Option<&Item> {
@@ -914,6 +923,19 @@ pub trait Records {
         session: &'a str,
         options: &'a Options,
     ) -> Work<'a, Arc<Reading>>;
+    /// The last tool call `harness`'s record of `session` shows, as a line
+    /// ([`Record::last_call`]): what the window was doing when it closed under its task
+    /// (T-823). None where the record shows none or cannot be read. Asked where Node's
+    /// dispatcher asked nothing, so a seam that records its calls need not record this one.
+    fn last_call<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<String>> {
+        Box::pin(async move {
+            match &*self.look(harness, session, &Options::default()).await {
+                Reading::Known(record) => record.last_call.clone(),
+                Reading::Unknown(_) | Reading::Missing(_) => None,
+            }
+        })
+    }
+
     /// Whether `harness` kept a transcript of `session` at all
     /// (`hasTranscript`), or why that cannot be told.
     fn has_transcript<'a>(

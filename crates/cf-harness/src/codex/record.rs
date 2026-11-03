@@ -26,6 +26,7 @@ mod directives;
 mod fields;
 mod images;
 mod inputs;
+mod kinds;
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -43,6 +44,7 @@ use super::paths::transcript;
 use super::quota::codex_quota;
 use crate::shared::quota::{busy_refusal, Level, Quota};
 use crate::shared::record::cache::Look;
+use crate::shared::record::calls::describe;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -149,6 +151,8 @@ struct Rollout {
     quota: Option<Arc<Quota>>,
     /// The latest model Codex rerouted a turn to on its own (MUS-24).
     rerouted: Option<Arc<ModelMoved>>,
+    /// The last tool call the rollout shows, as a line (`calls::describe`).
+    last_call: Option<String>,
     records: usize,
     /// The place among the records of the one being read.
     reading: usize,
@@ -195,6 +199,8 @@ enum End {
     Failed {
         refusal: Option<Arc<Quota>>,
         said: Option<String>,
+        /// The kind of the error, in plain words (`kinds::plain`).
+        kind: Option<String>,
     },
     /// `turn_aborted`.
     Cancelled,
@@ -213,6 +219,7 @@ impl Rollout {
             latest_turn: Key::Null,
             quota: None,
             rerouted: None,
+            last_call: None,
             records: 0,
             reading: 0,
             keys: Keys::default(),
@@ -275,6 +282,12 @@ impl Rollout {
             }
             (Some("function_call" | "custom_tool_call"), _) => {
                 let call = self.keys.of(field(payload, "call_id"));
+                // The arguments of a function call are JSON text, a custom tool's input is text.
+                let called = field(payload, "arguments").or_else(|| field(payload, "input"));
+                let name = field(payload, "name").and_then(Value::as_str);
+                if let Some(line) = describe(name, called) {
+                    self.last_call = Some(line);
+                }
                 if call.truthy() && turn.truthy() {
                     if let Some(open) = self.turn(&turn) {
                         open.tools.insert(call.clone());
@@ -339,6 +352,7 @@ impl Rollout {
                     End::Failed {
                         refusal: self.refusal(error, &at),
                         said: Self::error_words(error),
+                        kind: kinds::plain(error),
                     }
                 } else {
                     End::Complete(field(payload, "last_agent_message").cloned())
@@ -709,8 +723,9 @@ impl Answer for Rollout {
         record.lines.places = Some(self.items.iter().map(|kept| kept.began).collect());
         record.in_flight = in_flight;
         record.failed = matches!(end, Some((_, End::Failed { .. })));
-        if let Some((_, End::Failed { said, .. })) = end {
+        if let Some((_, End::Failed { said, kind, .. })) = end {
             record.failure.clone_from(said);
+            record.failure_kind.clone_from(kind);
         }
         record.quota = match end {
             Some((
@@ -723,6 +738,7 @@ impl Answer for Rollout {
             _ => self.quota.clone(),
         };
         record.model_moved.clone_from(&self.rerouted);
+        record.last_call.clone_from(&self.last_call);
         record.settlement = match end {
             _ if in_flight => Settlement::InFlight,
             // A task_complete whose final answer cannot be matched proves nothing.

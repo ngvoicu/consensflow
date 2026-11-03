@@ -88,7 +88,8 @@ fn unread() -> Value {
 }
 
 /// `record` with something nothing reads in every place a record says things:
-/// the record, its message, each block of its content, its attachment.
+/// the record, its message, each block of its content, its attachment. A `tool_use`'s name and
+/// input are read, for the last call the transcript shows (T-823).
 fn noisy(mut record: Value) -> Value {
     let add = |fields: &mut Map<String, Value>, names: &[&str]| {
         for name in names {
@@ -127,17 +128,7 @@ fn noisy(mut record: Value) -> Value {
         if let Some(Value::Array(blocks)) = message.get_mut("content") {
             for block in blocks {
                 if let Value::Object(block) = block {
-                    add(
-                        block,
-                        &[
-                            "input",
-                            "caller",
-                            "name",
-                            "signature",
-                            "thinking",
-                            "is_error",
-                        ],
-                    );
+                    add(block, &["caller", "signature", "thinking", "is_error"]);
                 }
             }
         }

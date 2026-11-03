@@ -56,6 +56,32 @@ fn a_failed_turn_says_what_its_harness_said_of_it() {
 }
 
 #[test]
+fn a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_before_its_words() {
+    // T-823: Codex's safety filter refused the turn (kluris T-158 and T-163), and the board
+    // said only that the harness reported a failure.
+    let context = Context::new();
+    let tiers = working(&context);
+    context.adapter.with("zeus", |agent| {
+        agent.failure_kind = Some(
+            "Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness"
+                .to_owned(),
+        );
+    });
+    fails(
+        &context,
+        Some("This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request."),
+    );
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure: Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness; it said: \"This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request.\""
+        )]
+    );
+}
+
+#[test]
 fn a_failed_turn_whose_record_says_nothing_says_what_its_window_shows_last() {
     let context = Context::new();
     let tiers = working(&context);

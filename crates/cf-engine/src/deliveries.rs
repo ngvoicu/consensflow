@@ -1542,7 +1542,9 @@ impl Dispatcher {
     /// words where its record has them, and otherwise in the last lines its
     /// window shows, which is where a harness that says nothing in its record
     /// says why (a crash, a model it does not know), or that it could not be read.
-    /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]). The
+    /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]), and both follow
+    /// the kind of failure the harness's record names in plain words, where it has a name for
+    /// it (`Observed::failure_kind`). The
     /// lines ConsensFlow typed into the window itself, its last pastes as the
     /// screen shows them ([`Shown::without_pastes`]), are no reason of its own,
     /// and are neither quoted nor compared.
@@ -1552,7 +1554,13 @@ impl Dispatcher {
         record: &Record,
         observed: &Observed,
     ) -> Result<Why, EngineError> {
-        let failed = format!("@{}'s harness reported a failure", participant.handle);
+        let mut failed = format!("@{}'s harness reported a failure", participant.handle);
+        // The kind its record names, where the harness has a plain name for it: ConsensFlow's
+        // words, said before the harness's own so that a reader tells them apart (a safety
+        // filter's refusal is not a crash, T-823).
+        if let Some(kind) = observed.failure_kind() {
+            failed.push_str(&format!(": {kind}"));
+        }
         // Words with nothing of a word in them ("…") say nothing: the screen may.
         if let Some(words) = observed.failure() {
             if let Some(said) = after_words(&failed, words) {

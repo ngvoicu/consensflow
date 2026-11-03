@@ -13,11 +13,19 @@
 use cf_base::json::Keep;
 
 /// What a call's input says that is read: a Monitor's, what it is called and what it
-/// watches, a command or a socket (an object, kept as an empty one: that it is one).
+/// watches, a command or a socket (an object, kept as an empty one: that it is one); and
+/// what any call works on, which the last call of the transcript is told by
+/// (`crate::shared::record::calls`).
 static INPUT: Keep = Keep::Members(&[
     ("command", &Keep::Scalar),
     ("description", &Keep::Scalar),
     ("ws", &Keep::Scalar),
+    ("file_path", &Keep::Scalar),
+    ("pattern", &Keep::Scalar),
+    ("url", &Keep::Scalar),
+    ("query", &Keep::Scalar),
+    ("path", &Keep::Scalar),
+    ("prompt", &Keep::Scalar),
 ]);
 
 /// The model a `fallback` block names on either side (`from`, `to`).

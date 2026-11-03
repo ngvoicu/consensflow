@@ -4,6 +4,7 @@
 
 mod cells;
 mod compaction;
+mod last_call;
 mod logs;
 mod messages;
 mod rows;

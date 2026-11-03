@@ -213,3 +213,31 @@ fn a_look_at_a_record_that_is_not_there_reads_no_items_nothing_left_running_and_
     assert_eq!(observed.pending(), Pending::default());
     assert_eq!(observed.monitors(), Vec::new());
 }
+
+#[tokio::test]
+async fn the_last_call_of_a_record_is_the_one_it_shows_on_every_harness_and_none_where_it_cannot_be_read(
+) {
+    // T-823: what a window was doing when it closed under its task.
+    for harness in HARNESSES {
+        let said = changed(settling(Settlement::Settled), |record| {
+            record.last_call = Some("cargo test --workspace".to_owned());
+        });
+        assert_eq!(
+            said.last_call(harness, "a-session").await.as_deref(),
+            Some("cargo test --workspace"),
+            "{harness:?}"
+        );
+        assert_eq!(
+            settling(Settlement::Settled)
+                .last_call(harness, "a-session")
+                .await,
+            None
+        );
+        assert_eq!(
+            Says(Reading::Unknown("unreadable".to_owned()))
+                .last_call(harness, "a-session")
+                .await,
+            None
+        );
+    }
+}
