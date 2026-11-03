@@ -224,6 +224,14 @@ fn a_task_a_window_had_opens_afresh_where_its_harness_holds_nothing_of_the_conve
     let launches = context.codex.prepared();
     assert_eq!(launches.len(), 3);
     assert_eq!(launches[2]["resume"], Value::Null, "afresh");
+    assert!(
+        context
+            .task(project.id, 1)
+            .messages
+            .iter()
+            .all(|message| message.kind != "note" || !message.body.contains("new conversation")),
+        "a conversation the harness lost is told nothing of, as it never was"
+    );
     context.close();
 }
 

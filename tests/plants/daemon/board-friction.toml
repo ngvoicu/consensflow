@@ -15,6 +15,15 @@ friction-last-need = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test",
 friction-hold-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "hold_for_context"]
 friction-hold-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "exit_proof::"]
 friction-hold-given = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::"]
+friction-fresh = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::fresh::"]
+friction-pauses-unit = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses::"]
+friction-advice = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "before_advice"]
+friction-waiting = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "turn_end::"]
+friction-leg-close = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "close_when_drawn::"]
+friction-leg-decided = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "decided_results::"]
+friction-leg-follow = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "follow_ups::"]
+friction-leg-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stops::"]
+friction-leg-closes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_closes::"]
 
 # --- T-689: the last line of a reply names its task ---
 
@@ -149,8 +158,8 @@ runs = ["friction-cancel"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '        "working" | "waiting" => format!('
-replace = '        "working" | "waiting" if false => format!('
+find = 'pause T-{number} now (cf task pause T-{number}), and send it on with cf task resume T-{number} \"…\" once the new task is accepted; or {again}'
+replace = 'wait for it; or {again}'
 
 [[plant]]
 name = "board friction: before: a queued task is refused without a way forward"
@@ -159,8 +168,8 @@ runs = ["friction-cancel"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '        "queued" => format!('
-replace = '        "queued" if false => format!('
+find = 'then put T-{number} behind it with cf task edit T-{number} --needs +T-<the new task>; or {again}'
+replace = 'then wait; or {again}'
 
 [[plant]]
 name = "board friction: before: a paused task is refused without a way forward"
@@ -169,8 +178,8 @@ runs = ["friction-cancel"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '        "paused" => format!('
-replace = '        "paused" if false => format!('
+find = 'and send T-{number} on with cf task resume T-{number} \"…\" once the new task is accepted; or {again}'
+replace = 'and wait; or {again}'
 
 # --- T-798: the last need taken from a task given to a window releases it; cf task list and get
 # --- say what such a task waits for ---
@@ -278,3 +287,227 @@ runs = ["cf-lib-board"]
 file = "crates/cf/src/board/task.rs"
 find = " If that window cannot go on in its conversation when T-{number} starts, T-{number} waits paused for your word (cf task edit T-{number}, then cf task resume T-{number}).\","
 replace = "\","
+
+# --- Round 2 (the review T-1212): a lost conversation is held too; the hold is a pause note; the advice
+# --- fits the task; the waiting note promises less; the legs where the exit proves nothing ---
+
+[[plant]]
+name = "board friction: hold: a follow-up whose conversation the harness lost goes to a fresh window unasked"
+meant = "a_member_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_its_brief_and_is_told_no_role"
+runs = ["friction-fresh"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '''        let (earlier, handle) = (before.task.number, &participant.handle);
+'''
+replace = '''        let (earlier, handle) = (before.task.number, &participant.handle);
+        if found.is_none() {
+            return Ok(Kept::On(None));
+        }
+'''
+
+[[plant]]
+name = "board friction: hold: a task a window had is held where its conversation is lost"
+meant = "a_task_a_window_had_opens_afresh_where_its_harness_holds_nothing_of_the_conversation_and_is_not_held"
+runs = ["friction-fresh"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '        if waiting.task.state == "queued" && never_in_a_window {'
+replace = '        if waiting.task.state == "queued" {'
+
+[[plant]]
+name = "board friction: hold: a lost conversation is told as one whose program was not proved gone"
+meant = "a_task_a_window_had_opens_afresh_where_its_harness_holds_nothing_of_the_conversation_and_is_not_held"
+runs = ["friction-fresh"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '        if found.is_some() {'
+replace = '        if true {'
+
+[[plant]]
+name = "board friction: hold: the note of a hold is not read as a pause note"
+meant = "a_hold_note_on_its_way_when_the_task_is_resumed_is_not_sent_again_after_a_refusal"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''    [Way::Resume, Way::Gone, Way::Held]
+        .into_iter()'''
+replace = '''    [Way::Resume, Way::Gone]
+        .into_iter()'''
+
+[[plant]]
+name = "board friction: hold: the warning of the window before is lost when the hold note goes"
+meant = "a_hold_note_still_queued_goes_at_the_resume_and_the_warning_stays_in_a_note_of_its_own"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '    because.contains(MAY_STILL_RUN) || because.contains(NOT_PROVEN_GONE)'
+replace = '    because.contains(MAY_STILL_RUN)'
+
+[[plant]]
+name = "board friction: hold: a lost conversation leaves a warning when the hold note goes"
+meant = "a_hold_for_a_conversation_the_harness_lost_leaves_no_warning_when_its_note_goes"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '    because.contains(MAY_STILL_RUN) || because.contains(NOT_PROVEN_GONE)'
+replace = '    true || because.contains(MAY_STILL_RUN)'
+
+[[plant]]
+name = "board friction: hold: the pause of a hold writes no note"
+meant = "the_hold_is_told_in_a_pause_note_that_says_why_and_the_way_on"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''        note_held_for_context(store, project_id, &requester, number, because)?;
+'''
+replace = '''        let _ = &requester;
+'''
+
+[[plant]]
+name = "board friction: hold: the way on of a hold does not say to rewrite the brief"
+meant = "the_hold_is_told_in_a_pause_note_that_says_why_and_the_way_on"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        Way::Held => format!(
+            "It does not go on in that conversation, and a window of its own would not remember it: if its brief counts on that, rewrite it with cf task edit T-{number} \"…\" first, then send it to a window of its own'''
+replace = '''        Way::Held => format!(
+            "It does not go on in that conversation, and a window of its own would not remember it: if its brief counts on that, send it to a window of its own'''
+
+[[plant]]
+name = "board friction: hold: a held task is told that its window comes back on its own conversation"
+meant = "a_task_held_for_the_chiefs_word_is_told_the_way_on_that_rewrites_its_brief_and_no_window_comes_back"
+runs = ["friction-pauses-unit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '        [one] if one.way == Way::Resume => format!("{}{ONE_TAIL}", clause(one)),'
+replace = '        [one] if one.way != Way::Gone => format!("{}{ONE_TAIL}", clause(one)),'
+
+[[plant]]
+name = "board friction: before: the chief's own step is told to pause"
+meant = "the_chiefs_own_step_is_told_to_finish_it_later_or_add_it_again_and_both_work"
+runs = ["friction-advice"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '    } else if super::own_steps::is_own_step(store, waits)? {'
+replace = '    } else if false {'
+
+[[plant]]
+name = "board friction: before: a follow-up is told to edit its needs"
+meant = "a_follow_up_is_not_told_to_edit_its_needs_which_it_cannot_but_to_pause_and_resume_it"
+runs = ["friction-advice"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = 'waits.state == "queued" && waits.pool.is_some() && !brief_begun(store, waits)?'
+replace = 'waits.state == "queued" && !brief_begun(store, waits)?'
+
+[[plant]]
+name = "board friction: before: a task whose brief is being pasted is told to edit its needs"
+meant = "a_task_for_a_tier_whose_brief_is_being_pasted_is_told_to_pause_it_not_to_edit_it"
+runs = ["friction-advice"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = 'waits.state == "queued" && waits.pool.is_some() && !brief_begun(store, waits)?'
+replace = 'waits.state == "queued" && waits.pool.is_some()'
+
+[[plant]]
+name = "board friction: hold: the waiting note promises the window will open"
+meant = "a_window_the_human_keeps_open_keeps_the_next_task_waiting_and_what_wakes_in_it_is_no_ones_result"
+runs = ["friction-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'goes in once it has closed, or, if it closes with no proof that its program ended, is paused for your word.'
+replace = 'goes in once it has closed.'
+
+[[plant]]
+name = "board friction: legs: close_when_drawn: the screen rests with no proof goes to a window unasked"
+meant = "the_next_task_of_the_session_waits_for_the_same_screen_and_a_close_with_no_proof_holds_it_for_the_chiefs_word"
+runs = ["friction-leg-close"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'if waiting.task.state == "queued" && never_in_a_window {'
+replace = 'if false {'
+
+[[plant]]
+name = "board friction: legs: close_when_drawn: the bound with no proof goes to a window unasked"
+meant = "the_next_task_of_the_session_waits_no_longer_than_the_bound_and_a_close_with_no_proof_holds_it_for_the_chiefs_word"
+runs = ["friction-leg-close"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'if waiting.task.state == "queued" && never_in_a_window {'
+replace = 'if false {'
+
+[[plant]]
+name = "board friction: legs: close_when_drawn: a window opened since with no proof goes to a window unasked"
+meant = "a_window_opened_since_waits_its_own_time_and_a_first_close_with_no_proof_holds_the_task_for_the_chiefs_word"
+runs = ["friction-leg-close"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'if waiting.task.state == "queued" && never_in_a_window {'
+replace = 'if false {'
+
+[[plant]]
+name = "board friction: legs: decided_results: the chief accepted with no proof goes to a window unasked"
+meant = "pastes_no_result_into_a_chief_that_accepted_its_task_and_holds_the_next_task_the_window_closed_with_no_proof_on"
+runs = ["friction-leg-decided"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'if waiting.task.state == "queued" && never_in_a_window {'
+replace = 'if false {'
+
+[[plant]]
+name = "board friction: legs: follow_ups: the cancel of the session's task with no proof goes to a window unasked"
+meant = "a_follow_up_of_a_window_that_closed_with_no_proof_is_held_and_the_one_behind_it_waits"
+runs = ["friction-leg-follow"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'if waiting.task.state == "queued" && never_in_a_window {'
+replace = 'if false {'
+
+[[plant]]
+name = "board friction: legs: stops: the stop paid for one task with no proof goes to a window unasked"
+meant = "a_stop_paid_for_one_task_never_hides_the_stop_of_the_task_the_chief_sends_on_after_a_hold"
+runs = ["friction-leg-stops"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'if waiting.task.state == "queued" && never_in_a_window {'
+replace = 'if false {'
+
+[[plant]]
+name = "board friction: legs: stops: words for a task paused before with no proof goes to a window unasked"
+meant = "the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_are_held_for_the_chiefs_word_when_the_window_before_closed_with_no_proof"
+runs = ["friction-leg-stops"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'if waiting.task.state == "queued" && never_in_a_window {'
+replace = 'if false {'
+
+[[plant]]
+name = "board friction: legs: window_closes: the exit is late with no proof goes to a window unasked"
+meant = "closed_with_its_task_done_and_an_exit_late_that_proves_nothing_holds_the_follow_up_for_the_chiefs_word"
+runs = ["friction-leg-closes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = 'if waiting.task.state == "queued" && never_in_a_window {'
+replace = 'if false {'
