@@ -206,7 +206,15 @@ fn reads_its_identity_first(text: &str) -> bool {
 /// release's on a machine someone uses, and the lines that start what they start: held to
 /// those, so a start added to such a file is read again.
 #[allow(clippy::type_complexity)]
-const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 8] = [
+const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 9] = [
+    (
+        "crates/cf/tests/windows_shells.rs",
+        "the consensflow.exe of a test home's bin, which cf's setup makes as a copy of cf-shim beside cf.exe (T-997); it runs that cf through PowerShell",
+        &[
+            r#"let script = read_then("$q | & $env:BIN_UNDER_TEST ask -");"#,
+            r#"let script = read_then("$q | & $env:BIN_UNDER_TEST ask -");"#,
+        ],
+    ),
     (
         "tools/xtask/src/release/tests/fake.rs",
         "the Windows installer's name among a fake release's files; it runs git on its fake remotes",

@@ -36,8 +36,14 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     ignore_control_c();
+    let args = stand_in.args(&words);
+    // A program the rig is given, held to the apps a test may start, as the rig's Run is.
+    if let Err(refused) = cf_base::bundle::command_startable_by_a_test(&stand_in.binary, &args) {
+        let _ = writeln!(io::stderr(), "the rig's Muse: {refused}");
+        return ExitCode::FAILURE;
+    }
     let mut muse = Command::new(&stand_in.binary);
-    muse.args(stand_in.args(&words));
+    muse.args(args);
     for (name, value) in stand_in.env() {
         muse.env(name, value);
     }

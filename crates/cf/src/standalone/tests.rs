@@ -215,6 +215,10 @@ fn setup_reads_its_words_before_it_makes_anything() {
     }
 }
 
+// The command of Windows is a program and the file it reads; the program is copied from the shim
+// beside the `cf`, and a test binary has none beside it: the process tests (`tests/standalone.rs`)
+// run the `cf` itself, and make it there.
+#[cfg(unix)]
 #[test]
 fn setup_makes_the_command_in_the_home_and_says_what_it_found() {
     let dir = tempfile::tempdir().unwrap();
@@ -227,15 +231,40 @@ fn setup_makes_the_command_in_the_home_and_says_what_it_found() {
             && agents.ends_with(" saved — manage them with cf ui or cf agent\n"),
         "{agents:?}"
     );
-    let extension = if cfg!(windows) { ".cmd" } else { "" };
     for name in ["cf", "consensflow"] {
-        let command = dir
-            .path()
-            .join("consensflow/bin")
-            .join(format!("{name}{extension}"));
+        let command = dir.path().join("consensflow/bin").join(name);
         let text = fs::read_to_string(&command).unwrap();
         assert!(text.contains("Installed by ConsensFlow"), "{name}: {text}");
     }
+}
+
+#[test]
+fn setup_for_windows_with_no_shim_beside_its_cf_says_so_makes_nothing_and_goes_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut vars = homed(dir.path());
+    vars.push(("OS", "Windows_NT".to_owned()));
+    let vars: Vec<(&str, &str)> = vars
+        .iter()
+        .map(|(name, text)| (*name, text.as_str()))
+        .collect();
+
+    let (code, said, wrong) = ran(&vars, &["setup"]);
+
+    assert_eq!((code, wrong.as_str()), (0, ""));
+    let (first, rest) = said.split_once('\n').unwrap();
+    assert!(
+        first.starts_with(
+            "The cf launcher could not be installed: the program for the terminal's cf is missing beside "
+        ),
+        "{first}"
+    );
+    assert!(
+        rest.starts_with("harnesses: none found on PATH\n"),
+        "{rest}"
+    );
+    // A launcher without its program is no command: not even its file is made.
+    let bin = dir.path().join("consensflow/bin");
+    assert_eq!(fs::read_dir(bin).map_or(0, Iterator::count), 0);
 }
 
 #[test]
@@ -243,7 +272,7 @@ fn doctor_says_what_stops_it_after_the_lines_it_has_said() {
     let dir = tempfile::tempdir().unwrap();
     // The command is there and cannot be read: a folder where it goes.
     let first = if cfg!(windows) {
-        "consensflow.cmd"
+        "consensflow.launch"
     } else {
         "consensflow"
     };

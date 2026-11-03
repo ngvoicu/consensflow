@@ -13,11 +13,13 @@
 
 mod common;
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use cf_launcher::{install, repair, runtime, Places, Repair};
 use common::{
-    at, called, expected, files, forms, join, old_launcher, outcomes, read, write, Bundle, Home,
+    at, called, expected, files, forms, join, old_launcher, outcomes, read, with_shim, write,
+    Bundle, Home,
 };
 
 #[test]
@@ -74,37 +76,32 @@ fn a_rewritten_command_is_a_program_the_system_runs() {
 fn a_cf_named_in_the_verbatim_spelling_is_written_and_known_in_the_plain_one() {
     // Tauri may answer its folders as `\\?\C:\…`, which cmd.exe starts no
     // program through: the command names the plain spelling, and the same
-    // `cf` asked for in either is the command's.
+    // `cf` asked for in either is the command's. The bundle is found, shim and
+    // all, by the plain one.
     let home = Home::new();
     let env = home.env(true);
     let [file, _] = files(&home, true);
-    for (verbatim, plain) in [
-        (r"\\?\C:\App\cli\bin\cf.exe", r"C:\App\cli\bin\cf.exe"),
-        (
-            r"\\?\UNC\server\share\cli\bin\cf.exe",
-            r"\\server\share\cli\bin\cf.exe",
-        ),
-    ] {
-        let cf = Path::new(verbatim);
-        install(&env, cf, &at(&home)).unwrap();
-        assert_eq!(
-            read(&file),
-            expected(true, Path::new(plain), home.consensflow().to_str())
-        );
-        assert!(runtime(&env, cf, &at(&home)).unwrap().unwrap().mine);
-        let repaired = repair(&env, cf, &at(&home));
-        assert_eq!(outcomes(&repaired), [Repair::Current, Repair::Current]);
-        // A command that named the verbatim one, as an app that did not strip it wrote.
-        let old = old_launcher(
-            true,
-            Path::new(r"C:\n.exe"),
-            Path::new(r"C:\x\cf.mjs"),
-            None,
-        );
-        write(&file, &old);
-        repair(&home.plain_env(true), cf, &at(&home));
-        assert_eq!(read(&file), expected(true, Path::new(plain), None));
-    }
+    let bundle = Bundle::new(home.root(), "Verbatim");
+    let verbatim = PathBuf::from(format!(r"\\?\{}", bundle.cf.display()));
+    let cf = verbatim.as_path();
+    install(&env, cf, &at(&home)).unwrap();
+    assert_eq!(
+        read(&file),
+        expected(true, &bundle.cf, home.consensflow().to_str())
+    );
+    assert!(runtime(&env, cf, &at(&home)).unwrap().unwrap().mine);
+    let repaired = repair(&env, cf, &at(&home));
+    assert_eq!(outcomes(&repaired), [Repair::Current, Repair::Current]);
+    // A command that named the verbatim one, as an app that did not strip it wrote.
+    let old = old_launcher(
+        true,
+        Path::new(r"C:\n.exe"),
+        Path::new(r"C:\x\cf.mjs"),
+        None,
+    );
+    write(&file, &old);
+    repair(&home.plain_env(true), cf, &at(&home));
+    assert_eq!(read(&file), expected(true, &bundle.cf, None));
 }
 
 #[test]
@@ -200,8 +197,12 @@ fn a_command_that_runs_another_bundles_cf_is_rewritten_to_this_one() {
             .join("cf");
         let env = home.env(windows);
         let [file, _] = files(&home, windows);
-        for named in [other.cf.as_path(), gone.as_path()] {
+        for named in [other.cf.as_path(), with_shim(&gone)] {
             install(&env, named, &at(&home)).unwrap();
+            // The runtime it named was removed after the command was made.
+            if named == gone {
+                fs::remove_dir_all(home.root().join("runtime-0.78")).unwrap();
+            }
             let repaired = repair(&env, &this.cf, &at(&home));
             assert_eq!(outcomes(&repaired), [Repair::Rewritten, Repair::Rewritten]);
             assert_eq!(

@@ -105,14 +105,37 @@ pub fn forms() -> Vec<bool> {
     }
 }
 
-/// How a launcher is called: `cf` in the form of `sh`, `cf.cmd` in the form
-/// of cmd.exe.
+/// How a launcher is called: `cf` in the form of `sh`, `cf.launch` in the form
+/// of Windows, whose program is the shim `cf.exe` beside it
+/// ([`shim_of`]) and whose `.cmd` of a build before the shim is
+/// [`script_of`].
 pub fn called(name: &str, windows: bool) -> String {
     if windows {
-        format!("{name}.cmd")
+        format!("{name}.launch")
     } else {
         name.to_owned()
     }
+}
+
+/// The program of the Windows launcher at `launch`: `cf.exe` for `cf.launch`.
+pub fn program_of(launch: &Path) -> PathBuf {
+    launch.with_extension("exe")
+}
+
+/// The `.cmd` a build before the shim wrote for the launcher at `launch`.
+pub fn script_of(launch: &Path) -> PathBuf {
+    launch.with_extension("cmd")
+}
+
+/// What the shim of a bundle holds in these tests, and what a stale one does.
+pub const SHIM: &str = "the shim of this bundle";
+
+/// The shim a bundle carries beside the `cf` at `cf`, for a test that names a `cf`
+/// of its own and not a [`Bundle`]'s: a launcher is made for a `cf` with a
+/// shim beside it. The `cf` it was given.
+pub fn with_shim(cf: &Path) -> &Path {
+    write(&cf.with_file_name("cf-shim.exe"), SHIM);
+    cf
 }
 
 /// A file with `text` in it, its folders made.
@@ -128,6 +151,8 @@ pub struct Bundle {
     pub cf: PathBuf,
     pub cf_mjs: PathBuf,
     pub node: PathBuf,
+    /// The program Windows' launcher is, beside the `cf` ([`SHIM`]).
+    pub shim: PathBuf,
 }
 
 impl Bundle {
@@ -139,10 +164,12 @@ impl Bundle {
             cf: name(if cfg!(windows) { "cf.exe" } else { "cf" }),
             cf_mjs: name("cf.mjs"),
             node: contents.join("MacOS").join("node"),
+            shim: name("cf-shim.exe"),
         };
         for file in [&bundle.cf, &bundle.cf_mjs, &bundle.node] {
             write(file, "");
         }
+        write(&bundle.shim, SHIM);
         bundle
     }
 }

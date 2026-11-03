@@ -1,6 +1,7 @@
 //! `cargo xtask build-cf [--offline]`: the native `cf` (crates/cf) built and put
 //! in `bin/`: the checkout's, the integration suite's, and through `stage` the
-//! app bundle's. The copy there is replaced, never rewritten in place: macOS can
+//! app bundle's. On Windows the program the terminal's command is (`cf-shim`) is
+//! built and put beside it, which `cf setup` copies from there. The copy there is replaced, never rewritten in place: macOS can
 //! kill the next run of a Mach-O changed in place, and Windows refuses to delete
 //! a `cf.exe` that a question hook still runs, though it lets one be renamed
 //! aside. On macOS the copy is signed ad hoc, as the bundle around it is.
@@ -53,19 +54,22 @@ fn say(
     Ok(())
 }
 
-/// Builds `cf` and puts it in `bin/`: the path it is at.
+/// Builds `cf` and puts it in `bin/`: the path it is at. Where the terminal's
+/// command is a program, the shim is built with it and put beside it.
 pub(super) fn build(
     context: &Context,
     offline: bool,
     system: &mut dyn System,
 ) -> Result<PathBuf, Error> {
-    ran(system, &cargo_build(context, offline))?;
     let platform = system.platform();
+    ran(system, &cargo_build(context, offline, platform))?;
     // The workspace's one build folder (.cargo/config.toml) holds every crate's output.
-    let built = context
-        .path("app/src-tauri/target/release")
-        .join(platform.cf());
-    let placed = place(&built, &context.path("bin"), platform.cf(), system)?;
+    let release = context.path("app/src-tauri/target/release");
+    let bin = context.path("bin");
+    let placed = place(&release.join(platform.cf()), &bin, platform.cf(), system)?;
+    if let Some(shim) = platform.shim() {
+        place(&release.join(shim), &bin, shim, system)?;
+    }
     if platform == Platform::MacOs {
         ran(system, &sign(context, &placed))?;
     }
@@ -74,11 +78,18 @@ pub(super) fn build(
 
 /// The build, from the checkout's root. The lockfile is held to, so that a
 /// build never mends it behind anyone's back.
-fn cargo_build(context: &Context, offline: bool) -> Invocation {
+fn cargo_build(context: &Context, offline: bool, platform: Platform) -> Invocation {
     Invocation::new("cargo", &context.root)
         .args(["build", "--release", "--locked"])
         .args(offline.then_some("--offline"))
         .args(["-p", "cf", "--bin", "cf"])
+        .args(
+            platform
+                .shim()
+                .map(|_| ["--bin", "cf-shim"])
+                .into_iter()
+                .flatten(),
+        )
 }
 
 /// The ad hoc signature (`-` is no identity), forced over any the copy has.

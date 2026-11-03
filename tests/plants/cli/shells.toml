@@ -1,23 +1,66 @@
 # A text reaches `cf` whole from each shell Windows runs it in (issue `cmd-cuts-multiline-cf-arguments`,
 # `d25a180`): `crates/cf/tests/windows_shells.rs` runs Windows PowerShell 5.1, PowerShell 7, Git Bash
-# and cmd.exe on a text in a file and compares what the scripted board received. The tests exist on
-# Windows alone, so these plants are run there (`platforms`): `cargo xtask plants cli shells` on
-# zeewin2 through `windows-from-tree.sh`. Every name begins `shells:`.
+# and cmd.exe on a text in a file and compares what the scripted board received, through `cf.exe` by its
+# path and through the command `cf setup` makes, by its name on the PATH, as a human's shell finds it.
+# That command was a `.cmd` and is the shim now (T-997), so the plants of it are here: the shim, and
+# what setup makes of it. The tests exist on Windows alone, so these plants are run there
+# (`platforms`): `cargo xtask plants cli shells` on zeewin2 through `windows-from-tree.sh`. Every name
+# begins `shells:`. The plants of the shim and its launch file that a Mac runs are
+# `tests/plants/daemon/launcher.toml`'s.
 
 [run]
 windows-shells = ["cargo", "test", "--offline", "-p", "cf", "--test", "windows_shells"]
 
-# The terminal's command `cf setup` writes hands cf.exe the arguments it was given.
+# The terminal's command `cf setup` makes hands cf the arguments it was given.
 [[plant]]
-name = "shells: cf.cmd hands cf.exe its first argument and no more"
-meant = "cmd_exe_gives_cf_cmd_what_it_pipes_to_a_dash_whole"
+name = "shells: the shim hands cf its first argument and no more"
+meant = "cmd_exe_gives_the_cf_setup_made_what_it_pipes_to_a_dash_whole"
 runs = ["windows-shells"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "crates/cf-launcher/src/text.rs"
-find = '{pin}\"{}\" %*\r\n",'
-replace = '{pin}\"{}\" %1\r\n",'
+file = "crates/cf-launcher/src/shim.rs"
+find = "command.args(args);"
+replace = "command.args(args.iter().take(1));"
+
+# An argument is cut at its first line break by the command a human types, as cmd.exe cut it.
+[[plant]]
+name = "shells: the shim cuts an argument at its first line break"
+meant = "windows_powershell_5_1_gives_the_cf_setup_made_a_many_line_argument_whole"
+runs = ["windows-shells"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/shim.rs"
+find = "command.args(args);"
+replace = '''command.args(
+        args.iter()
+            .map(|each| each.to_string_lossy().lines().next().unwrap_or_default().to_owned()),
+    );'''
+
+# Setup makes no program: nothing is called `cf` in the folder, and every shell is told so.
+[[plant]]
+name = "shells: setup makes no program for the shells to find"
+meant = "every_shell_finds_the_cf_setup_made_as_a_program_and_none_as_a_cmd"
+runs = ["windows-shells"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = "program::place(&program_of(&file), shim).map_err(|failed| failed.to_string())?;"
+replace = "let _ = (shim, program_of(&file));"
+
+# Setup makes a script for cmd.exe beside the program, as it did: the one a shell may run in its place.
+[[plant]]
+name = "shells: setup makes a cmd beside the program"
+meant = "every_shell_finds_the_cf_setup_made_as_a_program_and_none_as_a_cmd"
+runs = ["windows-shells"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = "let _ = std::fs::remove_file(script_of(&file));"
+replace = '''let _ = std::fs::write(script_of(&file), "@echo off\r\n");'''
 
 # What the shells pipe ends in a Windows line ending, which is not the text's.
 [[plant]]

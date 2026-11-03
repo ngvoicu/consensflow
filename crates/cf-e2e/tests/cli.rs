@@ -49,10 +49,11 @@ use serde_json::Value;
 /// does not hold is a panic, which is the case's failure.
 type Outcome = Result<(), Box<dyn std::error::Error>>;
 
-/// The terminal's command `cf setup` makes: `cf`, or `cf.cmd` on Windows.
+/// The terminal's command `cf setup` makes: `cf`, or on Windows `cf.launch`, the file the program
+/// beside it (`cf.exe`) reads.
 fn launcher() -> &'static str {
     if cfg!(windows) {
-        "cf.cmd"
+        "cf.launch"
     } else {
         "cf"
     }

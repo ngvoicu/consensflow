@@ -32,6 +32,9 @@ pub struct Names {
     mjs: String,
     /// A program that is there, for `$NODE`.
     runtime: String,
+    /// The bytes of the shim beside the `cf`, which `setup` copies on Windows: the
+    /// recording names them `$SHIM` ([`Names::is_shim`]).
+    shim: Vec<u8>,
 }
 
 impl Names {
@@ -43,7 +46,18 @@ impl Names {
         );
         let mjs = plain(&Path::new(&cf).with_file_name("cf.mjs").to_string_lossy());
         let runtime = plain(&std::env::current_exe().unwrap().to_string_lossy());
-        Self { cf, mjs, runtime }
+        let shim = fs::read(env!("CARGO_BIN_EXE_cf-shim")).unwrap();
+        Self {
+            cf,
+            mjs,
+            runtime,
+            shim,
+        }
+    }
+
+    /// Whether `bytes` are the shim a bundle carries beside its `cf`.
+    pub fn is_shim(&self, bytes: &[u8]) -> bool {
+        bytes == self.shim
     }
 
     /// A text of a case's folder as it is made here: the names put as this

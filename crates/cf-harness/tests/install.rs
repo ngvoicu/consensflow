@@ -23,7 +23,7 @@ use cf_harness::detect::{detect_harnesses, harness_path};
 use cf_harness::pi;
 use cf_harness::prepare::prepare_app;
 use cf_proto::agents::Harness;
-use common::{launcher_name, Home};
+use common::{bundle_cf, launcher_name, Home};
 
 #[test]
 fn finds_only_the_harnesses_whose_cli_resolves() {
@@ -125,7 +125,7 @@ fn app_preparation_owns_its_launcher_and_integrations_not_role_documents_or_glob
         r#"{"agents":[{"name":"mine","kind":"claude-code","model":"example"}]}"#,
     )
     .unwrap();
-    let cf = home.root().join("bundle").join("cf");
+    let cf = bundle_cf(&home);
 
     let env = home.env();
     for _ in 0..2 {
@@ -157,7 +157,7 @@ fn app_preparation_says_why_its_launcher_could_not_be_installed_and_prepares_the
     fs::create_dir_all(home.consensflow()).unwrap();
     let bin = home.consensflow().join("bin");
     fs::write(&bin, "not a folder").unwrap();
-    let cf = home.root().join("bundle").join("cf");
+    let cf = bundle_cf(&home);
 
     let prepared = prepare_app(&home.env(), &cf);
 
@@ -189,7 +189,7 @@ fn app_preparation_says_why_its_launcher_could_not_be_installed_and_prepares_the
 #[test]
 fn a_launcher_that_is_made_is_nothing_to_report_and_the_extensions_follow_the_harnesses() {
     let home = Home::new();
-    let cf = home.root().join("bundle").join("cf");
+    let cf = bundle_cf(&home);
 
     let none = prepare_app(&home.env(), &cf);
     assert_eq!(none.report, Vec::<String>::new());

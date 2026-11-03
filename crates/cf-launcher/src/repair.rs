@@ -14,6 +14,11 @@
 //! - a command of ours (it holds the mark) that serves this app's home and
 //!   does not name this bundle's `cf` is rewritten in the new shape, in
 //!   place, with the home it pinned and with no other;
+//! - on Windows a command is a launch file and the shim beside it
+//!   ([`crate::program`]), and one that is not whole is made whole: the `.cmd`
+//!   of a build before the shim, which cmd.exe cuts a many-line argument of,
+//!   becomes a launch file and a shim and is taken away, and a shim that is not
+//!   the bundle's is replaced;
 //! - a command serves the home it pins, or, where it pins none, the default
 //!   one (`~/.consensflow`): one that serves another home is left as it is,
 //!   for the app of that home to repair. A Candidate and the app that is
@@ -43,7 +48,8 @@ use cf_base::home::{config_root, default_root};
 use cf_base::path;
 
 use crate::install::{read_text, write_launcher};
-use crate::places::{names, Places};
+use crate::places::{names, program_of, script_of, Places};
+use crate::program;
 use crate::text::{is_ours, launcher, pinned_home, runs, spelled, Runs};
 
 /// What the repair did with one command.
@@ -93,11 +99,13 @@ pub fn repair(env: &Env, cf: &Path, places: &Places) -> Vec<Repaired> {
     };
     let windows = env.on_windows();
     let cf = spelled(cf, windows);
+    // The program of a Windows launcher, read once for every name in every folder.
+    let shim = windows.then(|| program::read_bundled(Path::new(&cf)));
     let mut looked_at = Vec::new();
     for dir in &folders {
         for name in names(windows) {
             let file = PathBuf::from(path::join(&[&dir.to_string_lossy(), name]));
-            let outcome = repaired(&file, windows, &cf, env);
+            let outcome = repaired(&file, windows, &cf, shim.as_ref(), env);
             looked_at.push(Repaired {
                 path: file,
                 outcome,
@@ -133,12 +141,24 @@ fn serves(text: &str, windows: bool, env: &Env) -> bool {
     }
 }
 
-/// What becomes of the command at `file`.
-fn repaired(file: &Path, windows: bool, cf: &str, env: &Env) -> Repair {
-    if !file.exists() {
+/// What becomes of the command at `file`: on Windows its launch file, whose
+/// `.cmd` of a build before the shim is the command until it is repaired.
+fn repaired(
+    file: &Path,
+    windows: bool,
+    cf: &str,
+    shim: Option<&Result<Vec<u8>, String>>,
+    env: &Env,
+) -> Repair {
+    let script = script_of(file);
+    let held = if file.exists() {
+        file
+    } else if windows && script.exists() {
+        &script
+    } else {
         return Repair::Absent;
-    }
-    let text = match read_text(file) {
+    };
+    let text = match read_text(held) {
         Ok(text) => text,
         Err(failed) => return Repair::Failed(failed),
     };
@@ -148,15 +168,61 @@ fn repaired(file: &Path, windows: bool, cf: &str, env: &Env) -> Repair {
     if !serves(&text, windows, env) {
         return Repair::Elsewhere;
     }
-    if matches!(runs(&text, windows), Some(Runs::Native { cf: named }) if named == cf) {
+    if matches!(runs(&text, windows), Some(Runs::Native { cf: named }) if named == cf)
+        && shim.is_none_or(|shim| is_whole(file, held, shim))
+    {
         return Repair::Current;
     }
     if is_translocated(cf) {
         return Repair::Transient;
     }
-    let script = launcher(windows, cf, pinned_home(&text, windows).as_deref());
-    match write_launcher(file, &script, windows) {
-        Ok(()) => Repair::Rewritten,
-        Err(failed) => Repair::Failed(failed.to_string()),
+    // Before anything is written: a `.cmd` that runs is not given up for a launch
+    // file with no program to read it.
+    if let Some(Err(why)) = shim {
+        if !program_of(file).is_file() {
+            return Repair::Failed(why.clone());
+        }
     }
+    let script_text = launcher(windows, cf, pinned_home(&text, windows).as_deref());
+    if let Err(failed) = write_launcher(file, &script_text, windows) {
+        return Repair::Failed(failed.to_string());
+    }
+    match shim.map(|shim| made_whole(file, shim)) {
+        Some(Err(failed)) => Repair::Failed(failed),
+        Some(Ok(())) | None => Repair::Rewritten,
+    }
+}
+
+/// Whether the Windows launcher at the launch file `file` is whole, `held`
+/// being the file its text was read from: the launch file itself, not the
+/// `.cmd` of a build before the shim; the program the shim of the bundle (or,
+/// where the bundle has none to compare, one that is there); and no `.cmd` of
+/// ours left beside them for cmd.exe to run.
+fn is_whole(file: &Path, held: &Path, shim: &Result<Vec<u8>, String>) -> bool {
+    let program = program_of(file);
+    held == file
+        && match shim {
+            Ok(bytes) => program::is_current(&program, bytes),
+            Err(_) => program.is_file(),
+        }
+        && !is_leftover(&script_of(file))
+}
+
+/// Whether the `.cmd` at `script` is one of ours, which the shim replaces.
+fn is_leftover(script: &Path) -> bool {
+    script.exists() && read_text(script).is_ok_and(|text| is_ours(&text))
+}
+
+/// Makes the program of the Windows launcher at `file` the shim, where the
+/// bundle has one, and takes away the `.cmd` of ours that it replaces.
+fn made_whole(file: &Path, shim: &Result<Vec<u8>, String>) -> Result<(), String> {
+    if let Ok(bytes) = shim {
+        program::place(&program_of(file), bytes).map_err(|failed| failed.to_string())?;
+    }
+    let script = script_of(file);
+    if is_leftover(&script) {
+        std::fs::remove_file(&script)
+            .map_err(|failed| format!("{}: {failed}", script.display()))?;
+    }
+    Ok(())
 }

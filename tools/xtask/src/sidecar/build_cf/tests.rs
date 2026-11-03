@@ -275,6 +275,68 @@ fn the_cf_cargo_built_is_put_in_bin_named_for_the_system() {
     }
 }
 
+/// Where the terminal's command is a program, which is Windows: the shim is built with the
+/// `cf` and put beside it, for `cf setup` to copy from there.
+mod the_shim {
+    use super::*;
+
+    #[test]
+    fn is_built_with_the_cf_and_put_beside_it_on_windows_alone() {
+        for (platform, line, left) in [
+            (
+                Platform::Windows,
+                "cargo build --release --locked -p cf --bin cf --bin cf-shim",
+                vec!["cf-shim.exe", "cf.exe"],
+            ),
+            (
+                Platform::MacOs,
+                "cargo build --release --locked -p cf --bin cf",
+                vec!["cf"],
+            ),
+            (
+                Platform::Other,
+                "cargo build --release --locked -p cf --bin cf",
+                vec!["cf"],
+            ),
+        ] {
+            let (_dir, context) = checkout();
+            let mut system = Fake::on(platform);
+
+            build(&context, false, &mut system).unwrap();
+
+            assert_eq!(system.lines()[0], line, "{platform:?}");
+            assert_eq!(files_under(&context.path("bin")), left, "{platform:?}");
+        }
+    }
+
+    #[test]
+    fn put_in_bin_is_the_one_the_build_made() {
+        let (_dir, context) = checkout();
+        let mut windows = Fake::on(Platform::Windows);
+
+        build(&context, false, &mut windows).unwrap();
+
+        assert_eq!(read(&context.path("bin/cf-shim.exe")), "the new shim");
+    }
+
+    #[test]
+    fn replaces_the_one_there_and_is_set_aside_when_it_runs() {
+        // A `cf` a terminal runs is the shim, which Windows refuses to delete.
+        let (_dir, context) = checkout();
+        write(&context.path("bin/cf-shim.exe"), "the shim that runs");
+        let mut windows = Fake::on(Platform::Windows);
+        windows.undeletable = vec![context.path("bin/cf-shim.exe")];
+
+        build(&context, false, &mut windows).unwrap();
+
+        assert_eq!(read(&context.path("bin/cf-shim.exe")), "the new shim");
+        assert_eq!(
+            read(&context.path("bin/cf-shim.exe.old-1760000000000")),
+            "the shim that runs"
+        );
+    }
+}
+
 #[test]
 fn only_on_macos_is_the_copy_signed_ad_hoc_once_it_is_in_place() {
     let (_dir, context) = checkout();
