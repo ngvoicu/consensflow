@@ -162,8 +162,8 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "    needs: [checks, platform-free, workspace, daemons]\n    if: always()\n"
-replace = "    needs: [checks, platform-free, workspace, daemons]\n"
+find = "    needs: [checks, platform-free, workspace, daemons, live-matrix]\n    if: always()\n"
+replace = "    needs: [checks, platform-free, workspace, daemons, live-matrix]\n"
 
 [[plant]]
 name = "wiring: the gate's check does not wait for the daemons"
@@ -172,8 +172,8 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "needs: [checks, platform-free, workspace, daemons]"
-replace = "needs: [checks, platform-free, workspace]"
+find = "needs: [checks, platform-free, workspace, daemons, live-matrix]"
+replace = "needs: [checks, platform-free, workspace, live-matrix]"
 
 # A shard of a suite (tools/xtask/src/suites/shard.rs): the shards between them run each
 # case once, each by its whole name, and a run is the shard its variable names.
@@ -336,7 +336,7 @@ replace = "sed -n 's/^"
 
 [[plant]]
 name = "wiring: CI's live matrix step runs its cases in one process, one at a time"
-meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+meant = "ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side"
 runs = ["xtask-suites"]
 
 [[plant.edit]]
@@ -346,7 +346,7 @@ replace = "run: cargo test -p cf-e2e --test live_matrix --no-fail-fast"
 
 [[plant]]
 name = "wiring: CI's live matrix step runs a case at a time"
-meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+meant = "ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side"
 runs = ["xtask-suites"]
 
 [[plant.edit]]
@@ -356,7 +356,7 @@ replace = "--test live_matrix --no-fail-fast --test-threads 1"
 
 [[plant]]
 name = "wiring: CI's live matrix step runs its live case on the real harnesses"
-meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+meant = "ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side"
 runs = ["xtask-suites"]
 
 [[plant.edit]]
@@ -366,20 +366,53 @@ replace = "--test live_matrix --no-fail-fast --run-ignored all --test-threads 4"
 
 [[plant]]
 name = "wiring: CI's checks job runs the live matrix without installing nextest"
-meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+meant = "ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side"
 runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "      - run: cargo install cargo-nextest --version 0.9.148 --locked\n      # The live matrix on the rig's stand-ins"
-replace = "      # The live matrix on the rig's stand-ins"
+find = "      - run: cargo install cargo-nextest --version 0.9.148 --locked\n      - name: The live matrix on the stand-ins"
+replace = "      - name: The live matrix on the stand-ins"
 
 [[plant]]
 name = "wiring: CI's live matrix step has no limit of its own"
-meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+meant = "ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side"
 runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "--test live_matrix --no-fail-fast --test-threads 4\n        timeout-minutes: 20\n"
-replace = "--test live_matrix --no-fail-fast --test-threads 4\n"
+find = "--partition count:${{ matrix.part }}\n        timeout-minutes: 20\n"
+replace = "--partition count:${{ matrix.part }}\n"
+
+# The live matrix runs in a job of its own, in two halves, and the gate waits for it (T-1195).
+
+[[plant]]
+name = "wiring: CI's live matrix job runs one half of its cases on each platform"
+meant = "ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "        part: ['1/2', '2/2']"
+replace = "        part: ['1/2']"
+
+[[plant]]
+name = "wiring: each of CI's live matrix jobs runs the whole of its cases"
+meant = "ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = " --partition count:${{ matrix.part }}"
+replace = ""
+
+[[plant]]
+name = "wiring: CI's gate passes without the live matrix"
+meant = "ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "    needs: [checks, platform-free, workspace, daemons, live-matrix]"
+replace = "    needs: [checks, platform-free, workspace, daemons]"
+

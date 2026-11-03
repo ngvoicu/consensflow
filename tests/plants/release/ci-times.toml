@@ -102,5 +102,5 @@ runs = ["ci-times"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "--test live_matrix --no-fail-fast --test-threads 4\n        timeout-minutes: 20\n"
-replace = "--test live_matrix --no-fail-fast --test-threads 4\n        timeout-minutes: 30\n"
+find = "--partition count:${{ matrix.part }}\n        timeout-minutes: 20\n"
+replace = "--partition count:${{ matrix.part }}\n        timeout-minutes: 30\n"
